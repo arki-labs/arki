@@ -33,8 +33,8 @@ export class FailureError extends Error {
   /** What to do about it, in one sentence. */
   readonly remediation: string;
 
-  constructor(code: FailureErrorCode, message: string, remediation: string) {
-    super(`${code}: ${message}`);
+  constructor(code: FailureErrorCode, message: string, remediation: string, options?: ErrorOptions) {
+    super(`${code}: ${message}`, options);
     this.name = 'FailureError';
     this.code = code;
     this.remediation = remediation;

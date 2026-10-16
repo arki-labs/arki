@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { Failure, FailureOf, SuccessOf } from './failure.js';
+import type { DataOf, Failure, FailureOf, SuccessOf } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
 import { defineFailure, isFailure, orThrow, UnexpectedFailure } from './failure.js';
 
@@ -106,6 +106,17 @@ describe('defineFailure', () => {
       Unauthorized({ id: 'x' });
     };
     expectTypeOf(mustNotCompile).toBeFunction();
+  });
+
+  it('types data as the schema output: a failure carries the live value, not the wire form', () => {
+    const Expired = defineFailure('token.expired', {
+      status: 401,
+      data: z.object({ at: z.union([z.string(), z.date()]).transform(value => new Date(value)) }),
+    });
+    expectTypeOf<DataOf<typeof Expired.dataSchema>>().toEqualTypeOf<{ at: Date }>();
+    expectTypeOf(Expired).parameter(0).toEqualTypeOf<{ at: Date }>();
+    const at = new Date('2026-10-16T00:00:00Z');
+    expect(Expired({ at }).data.at).toBe(at);
   });
 });
 

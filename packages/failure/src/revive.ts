@@ -4,7 +4,9 @@
  * rebuilds it from the definitions you expect, and checks its data with their
  * schemas, because data from the wire is not trusted.
  */
-import type { StandardSchemaV1 } from './standard-schema.js';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { parse, SCHEMA_ERROR_CODES, SchemaError, SchemaRunError } from '@arki/schema';
+
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 
 /** The parts of a definition `revive` needs. */
@@ -43,29 +45,31 @@ export function revive(value: unknown, definitions: readonly LooseRevivable[]): 
   return definition(validate(definition.code, definition.dataSchema, data));
 }
 
+/**
+ * The schema's output for `data`. Bad data becomes `ARKI_FAILURE_E006` and an
+ * async schema `ARKI_FAILURE_E007`, each with the schema error as `cause`. A
+ * validator that throws is a bug, not bad data: its `SchemaRunError` passes through.
+ */
 function validate(code: string, schema: StandardSchemaV1, data: unknown): unknown {
-  const result = schema['~standard'].validate(data);
-  if (result instanceof Promise) {
-    throw new FailureError(
-      FAILURE_ERROR_CODES.asyncSchema,
-      `revive() got an asynchronous schema for "${code}"`,
-      'Give failure data a synchronous schema; revive() runs where awaiting is not possible.',
-    );
+  try {
+    return parse(schema, data);
+  } catch (error) {
+    if (error instanceof SchemaError) {
+      throw new FailureError(
+        FAILURE_ERROR_CODES.invalidData,
+        `revive() got data for "${code}" that does not match its schema: ${error.message}`,
+        'Check the producer and the consumer use the same definition, or migrate the stored data.',
+        { cause: error },
+      );
+    }
+    if (error instanceof SchemaRunError && error.code === SCHEMA_ERROR_CODES.asyncResult) {
+      throw new FailureError(
+        FAILURE_ERROR_CODES.asyncSchema,
+        `revive() got an asynchronous schema for "${code}"`,
+        'Give failure data a synchronous schema; revive() runs where awaiting is not possible.',
+        { cause: error },
+      );
+    }
+    throw error;
   }
-  if (typeof result === 'object' && result !== null && 'issues' in result && Array.isArray(result.issues)) {
-    throw new FailureError(
-      FAILURE_ERROR_CODES.invalidData,
-      `revive() got data for "${code}" that does not match its schema: ${describeIssues(result.issues)}`,
-      'Check the producer and the consumer use the same definition, or migrate the stored data.',
-    );
-  }
-  return typeof result === 'object' && result !== null && 'value' in result ? result.value : data;
-}
-
-function describeIssues(issues: readonly unknown[]): string {
-  return issues
-    .map(issue =>
-      typeof issue === 'object' && issue !== null && 'message' in issue ? String(issue.message) : 'invalid',
-    )
-    .join('; ');
 }

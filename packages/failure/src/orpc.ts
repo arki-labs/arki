@@ -20,8 +20,9 @@
  */
 import { ORPCError } from '@orpc/server';
 
+import type { StandardSchemaV1 } from '@arki/schema';
+
 import type { Failure } from './failure.js';
-import type { StandardSchemaV1 } from './standard-schema.js';
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 import { isFailure, isThenable } from './failure.js';
 import { revive } from './revive.js';

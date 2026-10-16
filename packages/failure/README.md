@@ -23,7 +23,7 @@ post.title; // ✓ narrowed to Post
 - **No wrapper on success.** A function returns the post itself, or a failure. There is no `ok(…)` to add and no `.value` to unwrap, and existing code gains failures one `return` at a time.
 - **Errors in the type, inferred.** A function's return type lists every failure it can produce, including the ones it passes on with `if (isFailure(x)) return x`. Nobody writes the union down.
 - **Written once.** Code, status, data schema, message template and remediation live in `defineFailure`. Failure values, `match` and `recover` handlers, oRPC error maps and `revive` all take their types from it.
-- **Any schema.** The data schema is any [Standard Schema](https://standardschema.dev): Zod 4, Valibot, ArkType. The core has no dependencies.
+- **Any schema.** The data schema is any [Standard Schema](https://standardschema.dev): Zod 4, Valibot, ArkType. The core depends only on `@arki/schema`.
 - **Caught when ignored.** The `must-use` lint rule reports a call whose failure is thrown away.
 - **Bugs still throw.** A failure is something the caller should handle ("not found", "email taken", "card declined"). A bug is not; keep throwing those.
 - **Every runtime.** Node, Bun, Deno, browsers and React Native (Hermes), checked by `test:runtimes`.
@@ -123,7 +123,7 @@ const page = await attempt(
 
 ### `revive(value, definitions)`
 
-A failure that went through JSON (a queue, a journal row, a worker message) is a plain object again. `revive` returns the live failure for one of the definitions you expect, matched by code, and checks its data with that definition's schema. It returns `undefined` for anything else. Data that does not match throws `ARKI_FAILURE_E006`.
+A failure that went through JSON (a queue, a journal row, a worker message) is a plain object again. `revive` returns the live failure for one of the definitions you expect, matched by code, and checks its data with that definition's schema. It returns `undefined` for anything else. Data that does not match throws `ARKI_FAILURE_E006`, and an asynchronous schema throws `ARKI_FAILURE_E007`; each keeps the `@arki/schema` error as its `cause`. A validator that throws is a bug, not bad data: its `SchemaRunError` (`ARKI_SCHEMA_E002`) passes through unwrapped.
 
 ```ts
 const failure = revive(JSON.parse(message), [PostNotFound, EmailTaken]);
@@ -152,7 +152,8 @@ const pair = collect([await find(a), await findAuthor(b)]); // [Post, Author] | 
 - `Failure<Code, Data>`: a failure value.
 - `FailureOf<typeof fn>` and `SuccessOf<typeof fn>`: the failures and the success value a function returns, sync or async.
 - `Result<Value, Failures>`: `Value | Failures`, for a return type written by hand (a port or an interface).
-- `FailureDefinition<Code, Schema>`, `DataOf<Schema>`, `MatchHandlers<Value>`, `RecoverHandlers<Value>`.
+- `FailureDefinition<Code, Schema>`, `MatchHandlers<Value>`, `RecoverHandlers<Value>`.
+- `DataOf<Schema>`: the data a failure carries, the schema's **output** type (the live value), or `undefined` without a schema.
 
 ## Lint: `@arki/failure/eslint`
 
@@ -206,21 +207,22 @@ const post = await client.posts.byId({ id }).catch((error: unknown) => {
 
 Mistakes in how the package is used are thrown as `FailureError` with a stable `code` and a one-sentence `remediation`. Match on the code, never on the message.
 
-| Code                | When                                                                    |
-| ------------------- | ----------------------------------------------------------------------- |
-| `ARKI_FAILURE_E001` | `defineFailure` got an empty code, or the reserved code `ok`.           |
-| `ARKI_FAILURE_E002` | `defineFailure` got a status that is not an integer from 400 to 599.    |
-| `ARKI_FAILURE_E003` | `match` met a failure code it has no handler for (types were bypassed). |
-| `ARKI_FAILURE_E004` | `assertNever` was reached.                                              |
-| `ARKI_FAILURE_E005` | `errorMap` got two definitions with the same code.                      |
-| `ARKI_FAILURE_E006` | `revive` got data that does not match the definition's schema.          |
-| `ARKI_FAILURE_E007` | `revive` got a schema that validates asynchronously.                    |
+| Code                | When                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `ARKI_FAILURE_E001` | `defineFailure` got an empty code, or the reserved code `ok`.                                    |
+| `ARKI_FAILURE_E002` | `defineFailure` got a status that is not an integer from 400 to 599.                             |
+| `ARKI_FAILURE_E003` | `match` met a failure code it has no handler for (types were bypassed).                          |
+| `ARKI_FAILURE_E004` | `assertNever` was reached.                                                                       |
+| `ARKI_FAILURE_E005` | `errorMap` got two definitions with the same code.                                               |
+| `ARKI_FAILURE_E006` | `revive` got data that does not match the definition's schema. The `cause` is the `SchemaError`. |
+| `ARKI_FAILURE_E007` | `revive` got a schema that validates asynchronously. The `cause` is the `SchemaRunError`.        |
 
 ## Pitfalls
 
 - **A discarded call drops its failure.** Turn on the `must-use` rule.
 - **`unknown`, `any` and `object` swallow failures.** A function whose return type widens to one of them loses its failures from the type. Parse with a schema instead of casting to `unknown`, and assert `FailureOf<typeof fn>` in a test when it matters.
 - **Truthiness does not narrow.** A failure is an object, so `if (post)` and `post ?? fallback` do not remove it. Use `isFailure`.
+- **A data schema must accept its own output.** `revive` validates the JSON of the live value, so a schema such as `z.string().transform(Number)` makes `revive` throw `ARKI_FAILURE_E006` on its own failures.
 - **Data that is itself a failure is ambiguous.** Do not return stored failures as success data; wrap them (`{ failure }`).
 
 ## Why no wrapper?

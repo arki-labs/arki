@@ -96,6 +96,7 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@hono/node-server": "catalog:",
     "hono": "catalog:backend",

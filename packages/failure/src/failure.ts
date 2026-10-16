@@ -9,7 +9,8 @@
  *
  * Bugs are not failures. A bug still throws.
  */
-import type { SchemaInput, StandardSchemaV1 } from './standard-schema.js';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 
 /**
@@ -37,8 +38,11 @@ export type Failure<Code extends string = string, Data = unknown> = {
   readonly [BRAND]: true;
 };
 
-/** The data a definition's failures carry: the schema's input type, or `undefined` without a schema. */
-export type DataOf<Schema> = Schema extends StandardSchemaV1 ? SchemaInput<Schema> : undefined;
+/**
+ * The data a definition's failures carry: the schema's output type, the live
+ * value the failure carries; `undefined` without a schema.
+ */
+export type DataOf<Schema> = Schema extends StandardSchemaV1 ? SchemaOutput<Schema> : undefined;
 
 /** What making one failure may take besides its data. */
 export type MakeOptions = {

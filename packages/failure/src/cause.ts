@@ -2,8 +2,9 @@
  * Cause chains, like Go's `errors.As`: a failure (or error) may carry a
  * `cause`, which may carry its own. `findCause` walks the chain.
  */
+import type { StandardSchemaV1 } from '@arki/schema';
+
 import type { DataOf, Failure, FailureDefinition } from './failure.js';
-import type { StandardSchemaV1 } from './standard-schema.js';
 
 /** Longest chain `findCause` walks; deeper chains are almost certainly cycles. */
 const MAX_DEPTH = 64;

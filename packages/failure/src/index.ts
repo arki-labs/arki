@@ -19,4 +19,3 @@ export type {
 export { assertNever, match, recover } from './handle.js';
 export type { MatchHandlers, RecoverHandlers } from './handle.js';
 export { revive } from './revive.js';
-export type { SchemaInput, StandardSchemaV1 } from './standard-schema.js';

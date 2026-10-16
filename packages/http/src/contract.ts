@@ -13,7 +13,8 @@
 
 import type { z } from 'zod';
 
-import type { Failure, StandardSchemaV1 } from '@arki/failure';
+import type { Failure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import type { RouteMeta } from './openapi.js';
