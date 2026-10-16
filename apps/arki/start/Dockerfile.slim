@@ -85,6 +85,7 @@ COPY --parents \
   ./patches \
   ./
 ENV CI=true
+ENV SKIP_ENV_VALIDATION=1
 RUN --mount=type=cache,id=bun-store,target=/root/.bun/install/cache \
   bun install --frozen-lockfile
 

@@ -1,5 +1,7 @@
 # @arki/env
 
+> Historical design doc. The shipped default: validate everywhere; the only opt-out is `SKIP_ENV_VALIDATION=1` (or `options.skipValidation`). `CI`, `lint` and `NODE_ENV` never skip. Older snippets below that read `CI` show the pre-change pain points. See the package README.
+
 A user-friendly wrapper around `@t3-oss/env-core` and `@t3-oss/env-nextjs` that provides type-safe environment variable management with reduced boilerplate and better developer experience.
 
 ## Current State & Pain Points
@@ -463,7 +465,7 @@ type EnvConfig = {
 
 export function defineEnv(config: EnvConfig) {
   const skipValidation =
-    config.options?.skipValidation ?? (!!process.env.CI || process.env.npm_lifecycle_event === 'lint');
+    config.options?.skipValidation ?? process.env.SKIP_ENV_VALIDATION === '1';
 
   return createEnv({
     server: config.server,
@@ -509,7 +511,7 @@ type CoreEnvConfig = {
 };
 
 export function defineEnv(config: CoreEnvConfig) {
-  const skipValidation = config.options?.skipValidation ?? (!!process.env.CI || process.env.NODE_ENV !== 'development');
+  const skipValidation = config.options?.skipValidation ?? process.env.SKIP_ENV_VALIDATION === '1';
 
   // Auto-generate runtimeEnv (no Next.js bundler constraints)
   const runtimeEnv: Record<string, string | undefined> = {};

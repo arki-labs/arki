@@ -1,10 +1,11 @@
 /**
  * DOT adapter for `@arki/env`.
  *
- * Wraps `defineEnv()` as a DOT plugin so a DOT app can validate its
- * environment alongside any other services. The plugin is sync (env
- * validation is sync), so its `env` factory returns the validated env
- * object synchronously; `envPlugin.provides.env` is the typed handle.
+ * Wraps `defineEnv()` as a DOT plugin so a DOT app validates its
+ * environment at boot. The `env` factory builds the env and forces
+ * validation right there, so a bad config stops `boot()` with
+ * `ARKI_ENV_PLUGIN_E001` instead of failing on the first request.
+ * `configure` only registers metadata, so `dot explain` needs no secrets.
  *
  * @example
  * ```ts
@@ -37,9 +38,14 @@
 import type { ZodType } from 'zod';
 
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
-import { plugin } from '@arki/dot/plugin';
+import { DotPluginError, plugin } from '@arki/dot/plugin';
 
-import { defineEnv } from './core/define-env.js';
+import { defineEnv, formatIssues } from './core/define-env.js';
+
+export const ENV_PLUGIN_ERROR_CODES = {
+  /** The env failed its schema at boot. The message lists every bad key. */
+  invalidEnv: 'ARKI_ENV_PLUGIN_E001',
+} as const;
 
 /**
  * Options for the env DOT adapter.
@@ -52,15 +58,15 @@ export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
   readonly schema: TSchema;
   /**
    * Forwarded to `defineEnv`. If `true`, the validator is skipped
-   * entirely. By default, validation is skipped when `CI` is set or
-   * `NODE_ENV !== 'development'`.
+   * entirely. By default the env is validated at boot, in every
+   * environment, unless the process sets `SKIP_ENV_VALIDATION=1`.
    */
   readonly skipValidation?: boolean;
 };
 
 /** The shape of services published by the env adapter. */
 export type EnvServices<TSchema extends Record<string, ZodType>> = {
-  readonly env: { readonly [K in keyof TSchema]: TSchema[K] extends ZodType<infer U> ? U : never };
+  readonly env: ReturnType<typeof defineEnv<TSchema>>;
 };
 
 /**
@@ -82,13 +88,23 @@ export function env<TSchema extends Record<string, ZodType>>(
       env: () => {
         const validated = defineEnv({
           server: options.schema,
-          options: options.skipValidation === undefined ? undefined : { skipValidation: options.skipValidation },
+          options: {
+            ...(options.skipValidation === undefined ? {} : { skipValidation: options.skipValidation }),
+            onValidationError: (issues): never => {
+              throw new DotPluginError({
+                code: ENV_PLUGIN_ERROR_CODES.invalidEnv,
+                message: formatIssues(undefined, issues),
+                remediation: 'Set the variables listed above (or fix their values) before booting the app.',
+                docsUrl: 'https://arki.dev/dot/errors/arki-env-plugin-e001',
+              });
+            },
+          },
         });
-        // `defineEnv` returns a Proxy from `@t3-oss/env-core`; we narrow it
-        // to the schema-derived shape so downstream typing flows through.
-        // The runtime guarantee comes from Zod-side validation inside
-        // `defineEnv`. No `any` involved — the cast is type-only.
-        return validated as unknown as EnvServices<TSchema>['env'];
+        // Boot is where config must be proven. The first operation on a `defineEnv` env builds and
+        // validates it, so this call moves the failure from the first request to boot. `configure`
+        // never runs this factory, which keeps `dot explain` free of secrets.
+        Reflect.ownKeys(validated);
+        return validated;
       },
     },
   });

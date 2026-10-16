@@ -10,7 +10,7 @@ type ValidationIssues = Parameters<NonNullable<Parameters<typeof createEnv>[0]['
  * logs `issues` as a raw object, which platforms like Coolify collapse to `[Object]` — so the var
  * that actually failed never reaches the logs. A flat `  path: message` list survives transport.
  */
-function formatIssues(name: string | undefined, issues: ValidationIssues): string {
+export function formatIssues(name: string | undefined, issues: ValidationIssues): string {
   const label = name ? `[${name}] ` : '';
   const lines = issues.map(issue => {
     const path = (issue.path ?? [])
@@ -24,8 +24,8 @@ function formatIssues(name: string | undefined, issues: ValidationIssues): strin
 /**
  * Thin, type-preserving wrapper over `@t3-oss/env-core`'s `createEnv`. Generic over the server,
  * client, shared and composed schemas so the parsed env keeps its exact inferred types — the wrapper
- * adds the ARKI defaults (auto `runtimeEnv`, prod-safe `skipValidation`, a legible labelled error
- * handler) without widening any value to `unknown`.
+ * adds the ARKI defaults (auto `runtimeEnv`, validation on in every environment, a legible labelled
+ * error handler) without widening any value to `unknown`.
  *
  * `TPrefix` is kept as a string-literal generic on purpose: `createEnv` uses it to enforce that
  * client keys (and only client keys) carry the prefix. Widening it to `string` would make every
@@ -64,6 +64,12 @@ export function defineEnv<
    */
   runtimeEnv?: Record<string, string | boolean | number | undefined>;
   options?: {
+    /**
+     * `true` skips schema validation: values pass through raw. Default: validate on the first read,
+     * in every environment, unless the process sets `SKIP_ENV_VALIDATION=1` (exactly `1`). That
+     * variable is the only implicit opt-out, meant for Docker build stages that prerender without
+     * secrets. `CI`, lint and `NODE_ENV` never skip.
+     */
     skipValidation?: boolean;
     /**
      * Treat empty-string env values as `undefined` so defaults apply (e.g. `PORT=` in `.env`, or a
@@ -84,11 +90,11 @@ export function defineEnv<
   // consumed (boot, a request, a job). This is the same import/observe split
   // drizzle tables have: define everywhere, observe only at use.
   const build = (): Built<Result> => {
-    // Validate everywhere the app runs, production included. Skip only where values are
-    // legitimately absent: CI build stages (Dockerfiles set CI=true there, never in the runner)
-    // and lint runs. Skipping by NODE_ENV would boot production on an unchecked config.
-    const skipValidation =
-      config.options?.skipValidation ?? (!!process.env.CI || process.env.npm_lifecycle_event === 'lint');
+    // Validate everywhere the app runs, production included. The only implicit opt-out is the
+    // purpose-named SKIP_ENV_VALIDATION=1 (Docker build stages without secrets). Ambient variables
+    // like CI or the npm script name must never turn validation off: that would boot production on
+    // an unchecked config.
+    const skipValidation = config.options?.skipValidation ?? process.env.SKIP_ENV_VALIDATION === '1';
 
     // Use the caller's explicit runtimeEnv when supplied (Vite client vars via import.meta.env, or
     // fallback aliases). Otherwise auto-build from every declared key (server + client + shared);

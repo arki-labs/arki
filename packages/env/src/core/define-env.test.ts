@@ -5,10 +5,10 @@
  * stays live.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { defineEnv } from './define-env.js';
+import { defineEnv, formatIssues } from './define-env.js';
 
 const server = { PORT: z.coerce.number(), NAME: z.string().default('app') };
 
@@ -121,5 +121,93 @@ describe('defineEnv()', () => {
       // eslint-disable-next-line turbo/no-undeclared-env-vars -- test-only variable, set and removed by this test
       delete process.env['DEFINE_ENV_TEST_PORT'];
     }
+  });
+});
+
+describe('defineEnv() validation default', () => {
+  // The key is never set, so any read that validates must fail on it.
+  const required = { DEFINE_ENV_DEFAULT_REQUIRED: z.string() };
+
+  beforeEach(() => {
+    vi.stubEnv('SKIP_ENV_VALIDATION', '');
+    vi.spyOn(console, 'error').mockImplementation(vi.fn());
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('validates even when CI is set and the script is lint', () => {
+    // WHY: an ambient variable must never turn validation off, or production boots unchecked.
+    vi.stubEnv('CI', 'true');
+    vi.stubEnv('npm_lifecycle_event', 'lint');
+    const env = defineEnv({ server: required });
+    expect(() => Reflect.ownKeys(env)).toThrow('DEFINE_ENV_DEFAULT_REQUIRED');
+  });
+
+  it('skips when SKIP_ENV_VALIDATION is exactly 1', () => {
+    // WHY: Docker build stages that prerender without secrets need one purpose-named opt-out.
+    vi.stubEnv('SKIP_ENV_VALIDATION', '1');
+    const env = defineEnv({ server: required });
+    expect(() => Reflect.ownKeys(env)).not.toThrow();
+  });
+
+  it.each(['0', 'false', 'true'])('still validates when SKIP_ENV_VALIDATION is %s', value => {
+    // WHY: only the exact string 1 opts out, so a stray "0" or "false" cannot disable checks.
+    vi.stubEnv('SKIP_ENV_VALIDATION', value);
+    const env = defineEnv({ server: required });
+    expect(() => Reflect.ownKeys(env)).toThrow('DEFINE_ENV_DEFAULT_REQUIRED');
+  });
+
+  it('explicit skipValidation: true bypasses parsing and defaults', () => {
+    // WHY: the explicit option wins; skipped values pass through raw, so defaults do not apply.
+    const env = defineEnv({
+      server: { PORT: z.coerce.number().default(3000) },
+      runtimeEnv: { PORT: '8080' },
+      options: { skipValidation: true },
+    });
+    expect(env.PORT).toBe('8080');
+    const empty = defineEnv({
+      server: { PORT: z.coerce.number().default(3000) },
+      runtimeEnv: {},
+      options: { skipValidation: true },
+    });
+    expect(empty.PORT).toBeUndefined();
+  });
+
+  it('explicit skipValidation: false beats SKIP_ENV_VALIDATION=1', () => {
+    // WHY: code that insists on validation must not be silenced by the environment.
+    vi.stubEnv('SKIP_ENV_VALIDATION', '1');
+    const env = defineEnv({ server: required, options: { skipValidation: false } });
+    expect(() => Reflect.ownKeys(env)).toThrow('DEFINE_ENV_DEFAULT_REQUIRED');
+  });
+
+  it('names every invalid key and the env label in the error', () => {
+    // WHY: a failed deploy log must point at the exact variables.
+    const env = defineEnv({
+      name: '@x/backend',
+      server: { DEFINE_ENV_A: z.string(), DEFINE_ENV_B: z.string() },
+    });
+    let message = '';
+    try {
+      Reflect.ownKeys(env);
+    } catch (error) {
+      message = error instanceof Error ? error.message : '';
+    }
+    expect(message).toContain('[@x/backend]');
+    expect(message).toContain('DEFINE_ENV_A');
+    expect(message).toContain('DEFINE_ENV_B');
+  });
+
+  it('does not throw at declaration, only on the first read', () => {
+    // WHY: laziness keeps imports, `dot explain` and docs tooling free of secrets.
+    expect(() => defineEnv({ server: required })).not.toThrow();
+  });
+
+  it('formatIssues flattens paths into one line per issue', () => {
+    const text = formatIssues('x', [{ message: 'bad', path: ['A'] }, { message: 'worse' }]);
+    expect(text).toContain('[x]');
+    expect(text).toContain('  A: bad');
+    expect(text).toContain('  (root): worse');
   });
 });

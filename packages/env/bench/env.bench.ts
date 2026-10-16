@@ -112,7 +112,7 @@ export default defineSuite({
     'Defining and validating a 15-variable server environment with `defineEnv()`, against `@t3-oss/env-core` (which it wraps), envalid, and a plain zod object parse.',
   notes: [
     '`defineEnv()` is lazy: it builds and validates the environment on the first property read, so "define + validate + read" is the fair row for it. The "define only" group shows what declaring an env costs before anything reads it.',
-    'Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, because `defineEnv()` skips validation by default when `CI` is set.',
+    'Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, so the numbers do not depend on `SKIP_ENV_VALIDATION`.',
     '`defineEnv()` and `createEnv` share the same zod schemas, so the gap between them is the wrapper alone: copying the declared keys, a labelled error handler, and the lazy object. envalid uses its own validators, and the plain zod parse does no env-specific work (no empty-string handling, no frozen result).',
     'Every case gets the same 15-key object (`runtimeEnv`) instead of `process.env`. Without that, `defineEnv()` copies only the keys it declares from `process.env`, while `createEnv`, envalid and a zod parse are shown reading the whole `process.env`, so their cost would also grow with the size of the process environment. That difference is not measured here.',
     'Only valid environments are measured. What happens on invalid input (error text, throw versus exit, collecting every issue) differs between the libraries and is not compared. Inputs avoid values where coercion rules differ (hex numbers, empty strings).',

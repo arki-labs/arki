@@ -32,6 +32,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/bun.lock ./bun.lock
 
 ENV CI=true
+ENV SKIP_ENV_VALIDATION=1
 RUN bun install
 
 # Builder stage

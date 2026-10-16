@@ -566,6 +566,71 @@ describe('generated app boots', () => {
   }, 30_000);
 });
 
+describe('generated stack app explain', () => {
+  it('`dot explain` succeeds without a required env key', async () => {
+    // WHY: explain only configures, so it must never need secrets. The stack template's own key has
+    // a default, so a required key is added here; the test fails if validation moves to configure.
+    const workspaceRoot = resolve(__dirname, '..', '..', '..', '..');
+    const cacheRoot = join(workspaceRoot, 'packages', 'dot', '.cache', `explain-${Date.now()}`);
+    const { mkdir: mkdirCache } = await import('node:fs/promises');
+    await mkdirCache(cacheRoot, { recursive: true });
+    try {
+      await runNew({
+        name: 'fixture',
+        cwd: cacheRoot,
+        templateRoot: resolve(__dirname, '..', '..', 'templates', 'app-stack'),
+        json: true,
+        out: captureSink().out,
+        now: FROZEN_NOW,
+      });
+      const appDir = join(cacheRoot, 'fixture');
+      const envPath = join(appDir, 'src', 'env.ts');
+      const envSource = await readFile(envPath, 'utf-8');
+      const withRequired = envSource.replace(
+        'export const envSchema = {',
+        'export const envSchema = {\n  EXPLAIN_TEST_REQUIRED_KEY: z.string().min(1),',
+      );
+      expect(withRequired).not.toBe(envSource);
+      await writeFile(envPath, withRequired, 'utf-8');
+
+      const { spawn } = await import('node:child_process');
+      const cliPath = join(workspaceRoot, 'packages', 'dot', 'src', 'cli', 'index.ts');
+      const child = spawn(
+        'bun',
+        ['--no-env-file', cliPath, 'explain', '--json', '--cwd', appDir, '--app', 'src/app.ts'],
+        { cwd: appDir, env: { PATH: process.env['PATH'] ?? '' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (b: Buffer) => {
+        stdout += b.toString();
+      });
+      child.stderr.on('data', (b: Buffer) => {
+        stderr += b.toString();
+      });
+      const code: number = await new Promise((resolveDone, reject) => {
+        child.on('error', reject);
+        child.on('close', c => resolveDone(c ?? 0));
+      });
+      expect(code, `explain exited ${code}; stderr=${stderr}`).toBe(0);
+      const envelope = JSON.parse(stdout) as {
+        status: string;
+        command: string;
+        errors: unknown[];
+        data: { services: { name: string }[] };
+      };
+      expect(envelope.status).toBe('success');
+      expect(envelope.command).toBe('explain');
+      expect(envelope.errors).toEqual([]);
+      expect(envelope.data.services.map(service => service.name)).toEqual(
+        expect.arrayContaining(['env', 'db', 'journal']),
+      );
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
 // ---------------------------------------------------------------------------
 // Templates: `stack` (default) and `minimal`.
 // ---------------------------------------------------------------------------
