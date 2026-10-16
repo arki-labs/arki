@@ -48,6 +48,11 @@
       "import": "./dist/instance.js",
       "default": "./dist/instance.js"
     },
+    "./redis/idempotency": {
+      "types": "./dist/redis/idempotency.d.ts",
+      "import": "./dist/redis/idempotency.js",
+      "default": "./dist/redis/idempotency.js"
+    },
     "./dot": {
       "types": "./dist/dot.d.ts",
       "import": "./dist/dot.js",
@@ -91,10 +96,14 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "@arki/dot": "workspace:*"
+    "@arki/dot": "workspace:*",
+    "@arki/http": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
+      "optional": true
+    },
+    "@arki/http": {
       "optional": true
     }
   },
@@ -102,9 +111,11 @@
     "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/http": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@testcontainers/redis": "catalog:testing",
     "@types/node": "catalog:node",
     "typescript": "catalog:",
     "unstorage": "^1.17.5",

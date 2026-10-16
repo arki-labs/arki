@@ -6,6 +6,9 @@
  * - `actorRun(select)` is the middleware that puts `context.run`, bound to the request's
  *   actor, on a procedure's context.
  *
+ * - `idempotent(options)` is the middleware that reads the `Idempotency-Key` header and hands the
+ *   key to `actorRun`, so each command the procedure runs is a receipt under that key.
+ *
  * `@orpc/server` is an optional peer. Import this module only in an app that
  * serves oRPC. May import `errors` only; this is the one file that may import
  * `@orpc/server`.
@@ -13,6 +16,7 @@
 import type { IntersectPick } from '@orpc/server';
 import { ORPCError, os } from '@orpc/server';
 
+import type { RunOptions } from './api.js';
 import { CommandError, isJournalError } from './errors.js';
 
 /**
@@ -66,7 +70,7 @@ export function commandErrors() {
  * runner whose writes carry `meta`. Written structurally so any journal fits, whatever its
  * meta schema, transaction and database types.
  */
-type Door = { bind(source: never, meta: never): unknown };
+type Door = { bind(source: never, meta: never, opts?: RunOptions): unknown };
 
 type DoorSource<J extends Door> = Parameters<J['bind']>[0];
 type DoorMeta<J extends Door> = Parameters<J['bind']>[1];
@@ -78,6 +82,8 @@ export type RunContext<TContext extends { readonly journal: Door }> = { readonly
 /** What `actorRun` needs on the context besides what `select` reads: the database the journal opens transactions on. */
 export type ActorRunContext<TContext extends { readonly journal: Door }> = TContext & {
   readonly db: DoorSource<TContext['journal']>;
+  /** Set by `idempotent()`, placed before `actorRun`. When present, the bound runner runs each command under it. */
+  readonly idempotencyKey?: string | undefined;
 };
 
 /**
@@ -110,13 +116,69 @@ export function actorRun<TContext extends { readonly journal: Door }>(
       bind(
         source: DoorSource<TContext['journal']>,
         meta: DoorMeta<TContext['journal']>,
+        opts?: RunOptions,
       ): DoorRunner<TContext['journal']>;
     };
-    const run = door.bind(context.db, select(context));
+    const key = context.idempotencyKey;
+    const run = door.bind(
+      context.db,
+      select(context),
+      key === undefined ? undefined : { idempotencyKey: key, keyPerCommand: true },
+    );
     // Erasure seam: oRPC asks that a new context key agree with the current context
     // (`IntersectPick`); `run` is new, but TypeScript cannot see that through a generic `TContext`.
     return next({
       context: { run } as RunContext<TContext> & IntersectPick<ActorRunContext<TContext>, RunContext<TContext>>,
     });
+  });
+}
+
+export type IdempotentOptions<TContext> = {
+  /**
+   * Who is asking: the signed-in actor or tenant. The key becomes `${scope}:${header value}`, so two
+   * callers never share a key. Return `undefined` for an anonymous request: it runs with no key.
+   */
+  readonly scope: (context: TContext) => string | undefined;
+  /** The request header that carries the key. Default `Idempotency-Key`. */
+  readonly header?: string;
+  /** Refuse (`BAD_REQUEST`) a request that has no key. Default false: no header, no idempotency. */
+  readonly required?: boolean;
+};
+
+const MAX_KEY_LENGTH = 200;
+
+/**
+ * Middleware that reads the idempotency header from `context.headers` and puts the scoped key on
+ * the context as `idempotencyKey`. Place it BEFORE `actorRun`: `actorRun` then binds the runner so
+ * that each command a procedure runs is a receipt under `${key}:${commandName}`. A repeat of the
+ * request replays every command's stored result instead of writing again. A command's input must
+ * match the first run, or the repeat is `CONFLICT`.
+ *
+ * ```ts
+ * os.use(idempotent({ scope: ctx => ctx.session?.user.id })).use(asActor)
+ * ```
+ *
+ * This is the oRPC form. A plain HTTP route uses `idempotent` from `@arki/http/idempotency`,
+ * which caches the whole response. A procedure can use both: the HTTP cache answers a repeat
+ * without running anything, and the receipts still protect a repeat that reached the handler.
+ * `context.headers` is a fetch `Headers`, as the oRPC fetch adapter provides it.
+ */
+export function idempotent<TContext extends { readonly headers: Headers }>(options: IdempotentOptions<TContext>) {
+  const header = options.header ?? 'Idempotency-Key';
+  type Added = { readonly idempotencyKey: string | undefined };
+  // Erasure seam, as in `actorRun`: oRPC asks that a new context key agree with the current context
+  // (`IntersectPick`), and TypeScript cannot see that through a generic `TContext`.
+  const added = (idempotencyKey?: string) => ({ idempotencyKey }) as Added & IntersectPick<TContext, Added>;
+  return os.$context<TContext>().middleware(({ context, next }) => {
+    const supplied = context.headers.get(header)?.trim();
+    if (supplied === undefined || supplied === '') {
+      if (options.required === true)
+        throw new ORPCError('BAD_REQUEST', { message: `${header} is required for this operation` });
+      return next({ context: added() });
+    }
+    if (supplied.length > MAX_KEY_LENGTH)
+      throw new ORPCError('BAD_REQUEST', { message: `${header} must be at most ${MAX_KEY_LENGTH} characters` });
+    const scope = options.scope(context);
+    return next({ context: added(scope === undefined ? undefined : `${scope}:${supplied}`) });
   });
 }

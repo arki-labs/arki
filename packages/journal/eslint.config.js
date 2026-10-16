@@ -29,7 +29,7 @@ export default [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...portableImportPatterns, orpcOnlyInAdapter, noFeaturePackage] },
+        { patterns: [...portableImportPatterns, orpcOnlyInAdapter] },
       ],
     },
   },
@@ -37,7 +37,7 @@ export default [
     // The oRPC adapter is the one file that may import `@orpc/server`.
     files: ['src/orpc.ts'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [...portableImportPatterns, dotOnlyInBridge, noFeaturePackage] }],
+      'no-restricted-imports': ['error', { patterns: [...portableImportPatterns, dotOnlyInBridge] }],
     },
   },
 ];

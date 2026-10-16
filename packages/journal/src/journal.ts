@@ -215,8 +215,15 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     write: (tx, entity, id, input) => write(tx, entity, id, input),
     adopt: (tx, entity, id, input) => adopt(tx, entity, id, input),
     run: (source, command, input, meta, opts) => run(source, command, input, meta, opts),
-    bind: (source, meta, opts) => (command, input, call) =>
-      journal.run(source, command, input, meta, { ...opts, ...call }),
+    bind: (source, meta, opts) => (command, input, call) => {
+      const { keyPerCommand, ...bound } = opts ?? {};
+      const key = bound.idempotencyKey;
+      return journal.run(source, command, input, meta, {
+        ...bound,
+        ...(keyPerCommand === true && key !== undefined ? { idempotencyKey: `${key}:${command.name}` } : {}),
+        ...call,
+      });
+    },
     replay: (db, entity, id, opts) => history.replay(db, entity, id, opts),
     verify: (db, entity, id) => history.verify(db, entity, id),
     repair: (db, entity, id) => history.repair(db, entity, id),

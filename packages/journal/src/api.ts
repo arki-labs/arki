@@ -125,6 +125,13 @@ export type CallOptions = {
 /** Options of `journal.run` and `journal.bind`. */
 export type RunOptions = CallOptions & {
   /**
+   * With `idempotencyKey` on `journal.bind`: each command the bound runner runs uses
+   * `${idempotencyKey}:${command.name}` as its key. One request key then covers a procedure
+   * that runs several commands, and each command has its own receipt. A key given per call
+   * (`run(command, input, { idempotencyKey })`) is used as it stands.
+   */
+  readonly keyPerCommand?: boolean;
+  /**
    * Seeds the chain's correlation id, for example with the request id. Without it, a run
    * from an effect continues the cause event's chain, and any other run starts a new one.
    */

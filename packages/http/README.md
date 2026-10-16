@@ -253,6 +253,35 @@ Middleware wraps the whole engine and is untyped by design; anything that
 produces a per-request *value* belongs in a deriver instead. Standalone
 users compose the same way with `composeMiddleware(engine.fetch, [...])`.
 
+## Idempotency keys
+
+`idempotent(...)` from `@arki/http/idempotency` is an `HttpMiddleware`. It runs each listed request once per `Idempotency-Key` and answers a repeat with the stored response. It is portable (Web Crypto only). The store is a `ResponseCache`: `@arki/journal/http` (Postgres) or `@arki/kv/redis/idempotency` (Redis).
+
+```ts
+import { idempotent } from '@arki/http/idempotency';
+import { responseCache } from '@arki/journal/http';
+
+http({
+  middleware: [
+    authenticate, // runs first: the principal in `scope` must already be trusted
+    idempotent({
+      cache: responseCache(db, tables),
+      scope: req => principalOf(req)?.id, // undefined = unauthenticated: never cached, never replayed
+      routes: ['POST /orders', 'POST /orders/:id/pay'], // include any mount prefix
+      ttl: 24 * 60 * 60 * 1000, // milliseconds, counted from the first request
+      replayHeaders: ['content-type', 'location'], // a replay carries only these
+    }),
+  ],
+});
+```
+
+- The fingerprint is method + path + sorted query + a SHA-256 of the body. The cache key is the scope plus the header value.
+- No header on a listed route: 400 (`ARKI_HTTP_E410`). Same key, different request: 422 (`E411`). Same key while the first is running: 409 with `Retry-After` (`E412`). A replay has the stored status and body, the allowlisted headers, and `Idempotent-Replayed: true`.
+- **What is stored.** Every 2xx, 3xx and 4xx answer, except 409 and 429. A 5xx, a 409, a 429, a handler that throws, and an event stream free the key (`abandon`), so a retry runs the handler again. A 4xx is stored because the same request would fail the same way.
+- **Size.** A response body over `maxBodyBytes` (default 1 MiB) is not stored: the key is freed. A request body over it cannot be fingerprinted cheaply, so that request runs with no idempotency at all. Raise the limit for routes that take big uploads, or keep them off `routes`.
+- A failing cache fails the request. Running unprotected could do the work twice.
+- This caches responses for HTTP replay. It is not the journal's command receipt, which commits with the business write. Use both for a payment: the cache answers a repeat cheaply, the receipt keeps a repeat that reaches the handler from writing twice.
+
 ## Streaming
 
 **Typed SSE.** `route.sse` declares a `text/event-stream` contract; the
@@ -370,6 +399,7 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |
+| `ARKI_HTTP_E410` / `E411` / `E412` | idempotency: key missing (400), key reused for another request (422), request with this key still running (409) |
 | `ARKI_HTTP_E500` | handler crash or output-schema violation |
 | `ARKI_HTTP_E510` | a `Response` without `output: raw()`, or a plain value from a `raw()` route (answers 500) |
 | `ARKI_HTTP_E511` | a result that does not fit the contract: undeclared `reply` status, or a value on a no-output route (answers 500) |

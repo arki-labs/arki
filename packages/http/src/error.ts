@@ -42,6 +42,12 @@ export const HTTP_ERROR_CODES = {
   invalidContract: 'ARKI_HTTP_E011',
   /** Request validation failed (params/headers/query/body) or the body is not valid JSON. */
   badRequest: 'ARKI_HTTP_E400',
+  /** A route that needs an idempotency key got none, or an unusable one. Answers 400. */
+  idempotencyKeyMissing: 'ARKI_HTTP_E410',
+  /** An idempotency key was reused with a different method, path, query or body. Answers 422. */
+  idempotencyKeyReused: 'ARKI_HTTP_E411',
+  /** A request with this idempotency key is still running. Answers 409 with `retry-after`. */
+  idempotencyInProgress: 'ARKI_HTTP_E412',
   /** A deriver rejected the request's credentials. */
   unauthorized: 'ARKI_HTTP_E401',
   /** A deriver rejected the request's permissions. */

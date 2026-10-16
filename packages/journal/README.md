@@ -156,6 +156,21 @@ A replay does not run the handler, so a permission check inside the handler does
 
 Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
 
+### Idempotent HTTP requests
+
+Command receipts protect a command. A retried HTTP request also wants its whole response back, and that response is not part of the business transaction. For that, `@arki/journal/http` gives a `ResponseCache` on `journal_receipts` for the `idempotent()` middleware of `@arki/http/idempotency`:
+
+```ts
+import { idempotent } from '@arki/http/idempotency';
+import { responseCache } from '@arki/journal/http';
+
+idempotent({ cache: responseCache(db, tables), scope, routes: ['POST /orders'], ttl: 86_400_000 });
+```
+
+Give it the root database, not a command's transaction. The two uses of the table stay apart: a cache row has a key that starts with `http:`, `command = 'http.response'`, and an `expires_at`; a command receipt never expires. `begin` is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE expires_at <= now()`, so two concurrent first requests meet on the row lock, and an expired key is taken in the same statement. `finish` and `abandon` match the request's `owner`, so a slow request whose key expired and was given away cannot overwrite the new entry. Expiry uses the database clock. `pruneReceipts` removes old cache rows too.
+
+For oRPC, `idempotent({ scope })` from `@arki/journal/orpc` reads `Idempotency-Key` from `context.headers`. Place it before `actorRun`: `os.use(idempotent({ scope: ctx => ctx.session?.user.id })).use(asActor)`. Each command the procedure runs then uses `${scope}:${key}:${commandName}` as its receipt key, so a procedure with two commands replays both. The same effect without oRPC: `journal.bind(db, meta, { idempotencyKey, keyPerCommand: true })`.
+
 ### Where commands run from
 
 The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the same call with `db` and `meta` fixed. Checking who the caller is stays application code; business rules live in the command.
@@ -608,6 +623,9 @@ journal_receipts
   result        jsonb                     -- { value } when finished; {} for no value; null while running
   command_id    varchar not null
   recorded_at   timestamptz not null default now()
+  owner         varchar(64)               -- response cache rows only (@arki/journal/http); null on a command receipt
+  expires_at    timestamptz               -- response cache rows only
+  response      jsonb                     -- response cache rows only; null while the request runs
 
 journal_cursors
   name          varchar(128) primary key  -- the async projection

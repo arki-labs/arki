@@ -109,6 +109,15 @@ export function journalTables(schema?: PgSchema) {
     result: jsonb('result').$type<{ readonly value?: unknown }>(),
     commandId: varchar('command_id').notNull(),
     recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    /**
+     * HTTP response cache rows only (`@arki/journal/http`); null on a command receipt. The token of the
+     * request that holds the key. Only that request can finish or abandon it.
+     */
+    owner: varchar('owner', { length: 64 }),
+    /** Response cache rows only. After this time the key can be taken again. A command receipt never expires. */
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+    /** Response cache rows only. The stored response once the request finished; null while it runs. */
+    response: jsonb('response'),
   });
 
   const cursors = table('journal_cursors', {

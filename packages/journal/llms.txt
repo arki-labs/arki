@@ -6,7 +6,8 @@
 - `@arki/journal`: the core. `initJournal`, `need`, `jobId`, `CommandError`, `isCommandError`, `JournalError`, `isJournalError` and the types, including `JobRunner` and `ScheduledJob` (the port that runs queue rows).
 - `@arki/journal/pg`: `journalTables()`, the two tables (`journal_events`, `journal_jobs`) for the app's schema.
 - `@arki/journal/dot`: optional. The `@arki/dot` adapters `journal(...)` (driven, for `.use()`) and `journalWorker(...)` (driving, for `.serve()`, with an optional `jobs` source), and the feature slice `journalHandlers(...)`.
-- `@arki/journal/orpc`: optional. The oRPC middleware `commandErrors()` and the function `toORPCError(error)`.
+- `@arki/journal/orpc`: optional. The oRPC middleware `commandErrors()`, `actorRun(select)`, `idempotent({ scope })` and the function `toORPCError(error)`.
+- `@arki/journal/http`: optional. `responseCache(db, tables)`, the Postgres `ResponseCache` for `idempotent()` from `@arki/http/idempotency` (HTTP replay on `journal_receipts`; not the command receipt).
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): the model, the three objects, the task map, the rules, the error table. Read it first.

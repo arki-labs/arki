@@ -61,6 +61,19 @@ try {
 
 When the rate-limiter Redis client is not ready, the limiter transparently falls back to an in-memory implementation — your code keeps working, persistence is briefly lost.
 
+## Idempotency response cache (Redis)
+
+`@arki/kv/redis/idempotency` stores replayable HTTP responses for the `idempotent()` middleware of `@arki/http/idempotency`. It uses the `ioredis` client you already have.
+
+```ts
+import { idempotent } from '@arki/http/idempotency';
+import { redisResponseCache } from '@arki/kv/redis/idempotency';
+
+idempotent({ cache: redisResponseCache(redis), scope, routes: ['POST /orders'], ttl: 86_400_000 });
+```
+
+`begin` is `SET key value NX PX ttl`, so only one first request starts. `finish` and `abandon` are Lua scripts that check the request's owner token and write in one step: a slow request whose key expired and was taken by another cannot touch the new entry. The TTL counts from `begin`; `finish` keeps the remaining time (`KEEPTTL`, Redis 6 or newer). Keys use the prefix `idem:` unless you pass `{ prefix }`. `@arki/http` is an optional peer.
+
 ## API
 
 - `@arki/kv`
