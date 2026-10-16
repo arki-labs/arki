@@ -481,26 +481,6 @@
       "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
     },
     {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodObject, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodObject, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./http\" exposes Zod types: ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./orpc\" exposes Zod types: ZodObject, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
       "package": "@arki/kv",
       "error": "DOC_E002 no llms.txt",
       "reason": "lesson 13 wave A|B: docs backlog"
