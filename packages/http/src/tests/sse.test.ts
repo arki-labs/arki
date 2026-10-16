@@ -37,6 +37,24 @@ describe('sse bindings', () => {
     expect(await readAll(res)).toBe('data: {"step":1}\n\ndata: {"step":2}\n\n');
   });
 
+  it('encodes each event, so a codec frames a Date as its ISO string', async () => {
+    // With `parse` the Date would fail the codec's string input and the
+    // stream would end in an error frame instead of the event.
+    const isoDate = z.codec(z.iso.datetime(), z.date(), {
+      decode: text => new Date(text),
+      encode: date => date.toISOString(),
+    });
+    const ticks = route.sse('/ticks', { id: 'ticks', event: z.object({ at: isoDate }) });
+    const engine = buildEngine([
+      routes().bind(ticks, async function* () {
+        yield { at: new Date(0) };
+      }),
+    ]);
+
+    const res = await engine.fetch(new Request(`${BASE}/ticks`));
+    expect(await readAll(res)).toBe('data: {"at":"1970-01-01T00:00:00.000Z"}\n\n');
+  });
+
   it('validates query and delivers params to the generator', async () => {
     const watch = route.sse('/orders/:id/watch', {
       id: 'orders.watch',

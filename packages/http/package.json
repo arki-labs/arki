@@ -43,6 +43,11 @@
       "import": "./dist/projection.js",
       "default": "./dist/projection.js"
     },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
     "./context": {
       "types": "./dist/context.d.ts",
       "import": "./dist/context.js",
@@ -75,6 +80,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -98,6 +104,7 @@
     "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",

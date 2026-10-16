@@ -66,7 +66,7 @@ export function sseResponse(iterable: AsyncIterable<unknown>, contract: Contract
           controller.close();
           return;
         }
-        const value = contract.event === undefined ? next.value : contract.event.parse(next.value);
+        const value = contract.event === undefined ? next.value : contract.event.encode(next.value);
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
       } catch (error) {
         if (finished) return;

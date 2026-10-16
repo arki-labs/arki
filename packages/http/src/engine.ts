@@ -17,6 +17,7 @@ import { runWithRequestContext } from './context.js';
 import {
   describeInternalError,
   errorResponse,
+  formatIssues,
   HTTP_ERROR_CODES,
   HttpConfigError,
   HttpError,
@@ -294,9 +295,7 @@ function parseWith(schema: { parse(input: unknown): unknown }, value: unknown, w
 }
 
 function zodMessage(error: unknown): string {
-  if (error instanceof z.ZodError) {
-    return error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
-  }
+  if (error instanceof z.ZodError) return formatIssues(error);
   return describeInternalError(error);
 }
 
@@ -311,7 +310,9 @@ function serializeOutput(contract: ContractLike, result: unknown): Response {
   }
   let validated: unknown;
   try {
-    validated = contract.output.parse(result);
+    // Encode, not parse: output leaves the server, so a codec runs in its
+    // wire direction (a `Date` goes out as an ISO string).
+    validated = contract.output.encode(result);
   } catch (error) {
     throw new HttpError(
       500,

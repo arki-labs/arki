@@ -39,7 +39,10 @@ export const createOrder = route.post('/orders', {
 ```
 
 Input validation (query/body) happens before your handler runs; output is
-validated against the contract on the way out. Failures serialize as a
+validated against the contract on the way out. Input is decoded and output
+(and every SSE event) is encoded, so a zod codec works both ways: with
+`z.codec(z.iso.datetime(), z.date(), …)` your handler gets and returns a
+`Date`, and the wire carries the ISO string. Failures serialize as a
 coded envelope: `{ "error": { "code", "message", "remediation?", "docsUrl?" } }`.
 
 ## Inside a DOT app
@@ -231,6 +234,31 @@ Deterministic — same contracts, byte-identical output. Inside a DOT app,
 contract actions put the JSON Schemas into the manifest, so
 `dot explain --as openapi` renders the document from the static manifest
 without booting anything.
+
+## Typed client
+
+`createClient` builds a fetch client from the same contracts the server binds.
+Pass one contract for one call, or an object of contracts for one call per key:
+
+```ts
+import { createClient } from '@arki/http/client';
+
+const orders = createClient({ listOrders, getOrder }, { baseUrl: 'https://api.example.com' });
+
+const open = await orders.listOrders({ query: { status: 'open' } });
+const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { authorization } });
+```
+
+- Input (`params`, `query`, `body`) and output are typed from the contract.
+  A wrong input does not compile.
+- Query and body are encoded with their schemas and the output is decoded,
+  exactly mirroring the server, so codecs round-trip.
+- A non-2xx answer throws `HttpError` with the server's `code`. An answer
+  without the envelope gets a code by status (`E400`, `E401`, `E403`, `E404`,
+  else `E500`). A body that breaks the output schema throws `E500`.
+- A contract with no output schema resolves to the raw `Response`.
+- It only needs `fetch`, so it runs in browsers, React Native, Deno, Bun and
+  Node. Pass `fetch` to add auth or retries. SSE contracts are not supported.
 
 ## Without DOT
 

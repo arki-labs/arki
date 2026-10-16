@@ -33,13 +33,17 @@ export type PathParams<TPath extends string> = TPath extends `${string}:${infer 
 export type ParamsOf<TPath extends string> = Readonly<Record<PathParams<TPath>, string>>;
 
 /**
- * The minimal schema surface the engine needs (`parse` only). Every zod
- * schema satisfies it structurally, which lets mixed-generic contracts
- * live in one array without variance fights. Values MUST be zod schemas —
- * `toOpenApi` converts them via `z.toJSONSchema`.
+ * The minimal schema surface the engine needs: `parse` decodes what comes
+ * in (query, body), `encode` turns what goes out (output, SSE events) into
+ * its wire form — so a zod codec (say ISO string <-> `Date`) works in both
+ * directions. Every zod schema satisfies it structurally, which lets
+ * mixed-generic contracts live in one array without variance fights.
+ * Values MUST be zod schemas — `toOpenApi` converts them via
+ * `z.toJSONSchema`.
  */
 export type SchemaLike = {
   parse(input: unknown): unknown;
+  encode(value: unknown): unknown;
 };
 
 /**

@@ -133,6 +133,37 @@ describe('buildEngine', () => {
     expect(error.message).toContain('output schema');
   });
 
+  it('encodes output with a codec and decodes input with it', async () => {
+    // A codec maps the wire form (ISO string) to the handler's form (Date).
+    // Input must decode (string -> Date) and output must encode (Date ->
+    // string). Parsing the output would reject the handler's Date with a 500.
+    const isoDate = z.codec(z.iso.datetime(), z.date(), {
+      decode: text => new Date(text),
+      encode: date => date.toISOString(),
+    });
+    const shift = route.post('/shift', {
+      id: 'shift',
+      body: z.object({ at: isoDate }),
+      output: z.object({ at: isoDate }),
+    });
+    const engine = buildEngine([
+      routes().bind(shift, ({ body }) => {
+        expect(body.at).toBeInstanceOf(Date);
+        return { at: new Date(body.at.getTime() + 1000) };
+      }),
+    ]);
+
+    const res = await engine.fetch(
+      new Request(`${BASE}/shift`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ at: '1970-01-01T00:00:00.000Z' }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ at: '1970-01-01T00:00:01.000Z' });
+  });
+
   it('mounts foreign fetch handlers under a stripped prefix', async () => {
     const engine = buildEngine([
       routes().mount('/rpc', req => new Response(new URL(req.url).pathname), { id: 'rpc', transport: 'orpc' }),

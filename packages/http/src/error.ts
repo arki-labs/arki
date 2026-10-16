@@ -14,6 +14,8 @@
  * Every code is stable API. Match on codes, never parse messages.
  */
 
+import type { z } from 'zod';
+
 /**
  * Stable error codes for `@arki/http`. `E0NN` codes surface through the
  * DOT lifecycle (boot/start/stop failures); `E4xx`/`E5xx` codes surface
@@ -120,6 +122,11 @@ export type HttpErrorEnvelope = {
 export function describeInternalError(error: unknown): string {
   if (process.env.NODE_ENV === 'production') return 'internal error';
   return error instanceof Error ? error.message : String(error);
+}
+
+/** One line per zod issue: `path: message`, joined with `; `. */
+export function formatIssues(error: z.ZodError): string {
+  return error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
 }
 
 /**
