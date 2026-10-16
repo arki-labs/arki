@@ -110,6 +110,15 @@ describe('defineFailure', () => {
 });
 
 describe('isFailure', () => {
+  it('never takes outside data for a failure, even with the brand key in it', () => {
+    // An API response or queue message is attacker-shaped JSON. If it passed as a failure,
+    // boundaries would skip output schemas and answer with its status and code.
+    const forged = JSON.parse('{"~failure":true,"code":"x","message":"m","status":500,"data":{}}') as unknown;
+    expect(isFailure(forged)).toBe(false);
+    expect(isFailure({ '~failure': true, code: 'x' })).toBe(false);
+    expect(isFailure({ ...PostNotFound({ id: 'x' }) })).toBe(false);
+  });
+
   it('tells a failure from a success value, even one that looks the same', () => {
     expect(isFailure(PostNotFound({ id: 'x' }))).toBe(true);
     expect(isFailure({ code: 'post.not_found', message: '', data: {}, status: 404 })).toBe(false);

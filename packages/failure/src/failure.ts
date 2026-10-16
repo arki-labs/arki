@@ -221,7 +221,18 @@ export type FailureIn<Value> = unknown extends Value ? Value & Failure : Extract
  */
 export function isFailure<Value>(value: Value, ...awaitFirst: AwaitFirst<Value>): value is FailureIn<Value>;
 export function isFailure(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && BRAND in value;
+  if (typeof value !== 'object' || value === null) return false;
+  // The brand lives only on the failure prototype. JSON.parse and object literals can set
+  // it as an own property but never on a prototype, so outside data (an API response, a
+  // queue message, a tool result) can never pass as a failure. Checked by shape, not
+  // instanceof, so two copies of this package still recognise each other's failures.
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return (
+    typeof prototype === 'object' &&
+    prototype !== null &&
+    Object.hasOwn(prototype, BRAND) &&
+    !Object.hasOwn(value, BRAND)
+  );
 }
 
 /** A value that may be a failure: the success value, or one of the failures it can return. */

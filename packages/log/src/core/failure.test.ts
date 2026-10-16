@@ -8,7 +8,7 @@ import { logfmt, pretty } from './formatters.js';
 import { jsonValue } from './json.js';
 import { createLogging } from './logging.js';
 import { redact } from './processors.js';
-import { MAX_CAUSE_LINKS, serializeFailure } from './serialize.js';
+import { isFailureLike, MAX_CAUSE_LINKS, serializeFailure } from './serialize.js';
 import { lineSink } from './sinks.js';
 
 const PostNotFound = defineFailure('post.not_found', {
@@ -34,6 +34,12 @@ function logLine(format: 'json' | 'pretty' | 'logfmt', fields: Readonly<Record<s
 }
 
 describe('a failure logged as a field', () => {
+  it('prints outside data with a ~failure key as plain data, not as a failure', () => {
+    // Logged request bodies are attacker-shaped; they must not be reshaped as failures.
+    const forged = JSON.parse('{"~failure":true,"code":"x"}') as unknown;
+    expect(isFailureLike(forged)).toBe(false);
+  });
+
   it('prints code, message, status, data and remediation in json()', () => {
     // WHY: a failure is the expected outcome a log reader must act on. Its code and data are
     // what they search by, and the remediation says what to do.

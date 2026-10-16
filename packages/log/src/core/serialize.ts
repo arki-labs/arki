@@ -54,7 +54,15 @@ function errorFields(error: Error, depth: number, seen: Set<object>): Record<str
  * The same check as `isFailure`.
  */
 export function isFailureLike(value: unknown): value is FailureLike {
-  return typeof value === 'object' && value !== null && '~failure' in value;
+  if (typeof value !== 'object' || value === null) return false;
+  // The brand lives only on the failure prototype; an own `~failure` key (JSON, a literal) is data, not a failure.
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return (
+    typeof prototype === 'object' &&
+    prototype !== null &&
+    Object.hasOwn(prototype, '~failure') &&
+    !Object.hasOwn(value, '~failure')
+  );
 }
 
 /**
