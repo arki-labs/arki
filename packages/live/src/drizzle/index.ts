@@ -1,0 +1,8 @@
+/**
+ * `@arki/live/drizzle` (peer `drizzle-orm`): `live()` meta from Drizzle tables,
+ * `tableTag`, and `snapshot()` — one read-only snapshot per live query.
+ */
+export { live, tableTag } from './tables.js';
+export type { SnapshotRunner } from '../runner.js';
+export type { SnapshotDatabase } from './snapshot.js';
+export { snapshot } from './snapshot.js';

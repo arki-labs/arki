@@ -1,0 +1,26 @@
+# @arki/live
+
+> Live queries on your own Postgres: procedures declare the tables they read in oRPC contract meta, a statement trigger publishes a hint at commit, and a hub feeds one stream per tab so clients refetch what a commit touched. Only table names travel.
+
+## Import paths
+- `@arki/live`: the portable core. `createLiveHub`, `live` (meta from tags), `affectedPaths`, the schemas `tableTagSchema`, `liveMetaSchema`, `liveManifestSchema`, `liveCursorSchema`, `liveEventSchema`, `LIVE_ERROR_CODES` and the types.
+- `@arki/live/drizzle`: `live` (meta from Drizzle tables), `tableTag`, `snapshot` (one read-only repeatable-read transaction per call).
+- `@arki/live/orpc`: `liveRead`, the middleware that runs a live procedure inside one snapshot.
+- `@arki/live/testing`: `fakeSource`, a source a test drives.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the guarantees and the examples.
+
+## By task
+- [Declare what a procedure reads](docs/agent-guide.md#declare-what-a-procedure-reads)
+- [Give a procedure one snapshot](docs/agent-guide.md#give-a-procedure-one-snapshot)
+- [Drive the hub in a test](docs/agent-guide.md#drive-the-hub-in-a-test)
+
+## Rules that bite
+- Declare every table a live procedure reads. An undeclared table never refetches.
+- Inside a `liveRead` handler read only through `context.liveRead`. The root `db` is a second snapshot.
+- `snapshot()` takes the root database, never a `tx`: a nested transaction is a savepoint.
+- Type the `liveRead` select with the handler context (`{ db, repos }`), not `Deps`: an `entrypointOnly` db is not in `Deps`.
+- Never declare `live()` on a per-request table (sessions, counters): it refetches constantly.

@@ -1,0 +1,20 @@
+import type { PgTable } from 'drizzle-orm/pg-core';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+
+import type { LiveMeta, TableTag } from '../schema.js';
+import { live as liveFromTags } from '../manifest.js';
+
+/**
+ * The tag of a Drizzle table. `table._` exists in the types only, so the name
+ * and schema are read with `getTableConfig`; `pgTable` has no schema, which
+ * Postgres calls `public`.
+ */
+export function tableTag(table: PgTable): TableTag {
+  const { name, schema } = getTableConfig(table);
+  return { schema: schema ?? 'public', table: name };
+}
+
+/** Contract meta from the Drizzle tables a procedure reads: plain JSON, deduplicated. */
+export function live(options: { readonly reads: readonly PgTable[] }): Required<LiveMeta> {
+  return liveFromTags({ reads: options.reads.map(table => tableTag(table)) });
+}

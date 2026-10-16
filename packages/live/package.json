@@ -1,0 +1,130 @@
+{
+  "name": "@arki/live",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Live queries for oRPC and TanStack Query on your own Postgres: procedures declare the tables they read, a statement trigger publishes a hint at commit, and one SSE stream per tab refetches the queries that read those tables.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "live-queries",
+    "realtime",
+    "postgres",
+    "listen-notify",
+    "orpc",
+    "tanstack-query",
+    "drizzle"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/live"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./drizzle": {
+      "types": "./dist/drizzle/index.d.ts",
+      "import": "./dist/drizzle/index.js",
+      "default": "./dist/drizzle/index.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc/index.d.ts",
+      "import": "./dist/orpc/index.js",
+      "default": "./dist/orpc/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/tests/**",
+    "README.md",
+    "llms.txt",
+    "docs/agent-guide.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/log": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/db": "workspace:*",
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@orpc/client": "catalog:backend",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "@orpc/shared": "catalog:backend",
+    "@orpc/tanstack-query": "catalog:backend",
+    "@tanstack/react-query": "catalog:tanstack/react-query",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "@types/react": "catalog:react",
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle",
+    "react": "catalog:react",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "@tanstack/react-query": "catalog:tanstack/react-query",
+    "drizzle-orm": "catalog:drizzle",
+    "react": "catalog:react"
+  },
+  "peerDependenciesMeta": {
+    "@orpc/contract": {
+      "optional": true
+    },
+    "@orpc/server": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
