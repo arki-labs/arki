@@ -3,6 +3,7 @@
 // It exercises each policy once with real timers; the unit tests cover the details.
 
 import { MockClock } from '@arki/clock';
+import { defineFailure } from '@arki/failure';
 
 import {
   backoff,
@@ -86,7 +87,14 @@ const abortKept = await errorName(
   withFallback(wrap(createTimeoutPolicy()), () => 'hidden').execute(pending, notHidden.signal),
 );
 
+const ExportUnavailable = defineFailure('export.unavailable', { status: 503 });
+const ExportUnauthorized = defineFailure('export.unauthorized', { status: 422 });
+const namedRetry = backoff.constant(1).while(ExportUnavailable);
+
 const checks = [
+  ['while(definition) retries its failure', namedRetry.delay(1, ExportUnavailable()), 1],
+  ['while(definition) skips other failures', namedRetry.delay(1, ExportUnauthorized()), undefined],
+  ['while(definition) retries thrown errors', namedRetry.delay(1, new Error('down')), 1],
   ['preset breaker is its own', presetA, 'CircuitOpenError'],
   ['other preset unaffected', presetB, 'fine'],
   ['fallback on open breaker', fellBack, 'cached'],

@@ -92,8 +92,10 @@ await policy.execute(({ signal, attempt }: PolicyContext) => fetchPage(signal), 
 A `Backoff` says how long to wait before each retry, and when to stop. The same value drives `createRetryPolicy`, `createResiliencePolicy`, `@arki/queue` job retries and `@arki/journal` effect retries.
 
 ```ts
-import { isFailure } from '@arki/failure';
+import { defineFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
+
+const DbTimeout = defineFailure('db.timeout', { status: 503 });
 
 backoff
   .exponential({ base: 1_000, max: 30_000, jitter: 0.25 }) // 1 s, 2 s, 4 s ... capped at 30 s, each varied by up to 25%
@@ -102,16 +104,14 @@ backoff
 
 backoff.constant(60_000).upTo(1); // one retry, a minute later
 
-backoff
-  .constant(100)
-  .upTo(3)
-  .while(reason => isFailure(reason) && reason.code === 'db.timeout'); // retry one returned failure
+backoff.constant(100).upTo(3).while(DbTimeout); // retry thrown errors and this one returned failure
 ```
 
 - `backoff.exponential({ base, max?, jitter?, random? })` waits `base * 2^(attempt - 1)`, capped at `max` (default and upper bound: `MAX_TIMER_MS` from `@arki/clock`, about 24.8 days). `jitter` (0 to 1, default 0) picks each wait at random within ±`jitter` of the exact value. `random` (default `Math.random`) is the randomness source; pass a fixed function to make jittered waits deterministic in tests.
 - `backoff.constant(ms)` waits `ms` before every retry.
 - `.upTo(retries)` limits the retries; `upTo(0)` never retries. Without it a backoff retries forever.
 - `.while(predicate)` retries only the reasons for which `predicate(reason)` is true. A reason is a thrown error or a returned failure (see below).
+- `.while(...definitions)` takes one or more `@arki/failure` definitions. Thrown errors keep retrying as without `while`, returned failures of those definitions retry too, and other returned failures do not. Name them all in one call: a second `while` narrows the first.
 - `.delay(attempt, reason)` is the one question a backoff answers: the wait in ms before retry `attempt` (1 for the first retry), or `undefined` for stop. `.maxRetries` is the `upTo` limit, or `Infinity`.
 
 Backoffs are immutable: `upTo` and `while` return a new one, and each only narrows. A bad option throws `InvalidBackoffError` (`ARKI_RESILIENCE_E006`) where the backoff is built.
@@ -121,7 +121,7 @@ Backoffs are immutable: `upTo` and `while` return a new one, and each only narro
 A function may return a failure from [`@arki/failure`](../failure) instead of throwing, for an expected outcome such as "card declined". Retrying it would only repeat it, so retry does not: after one try the failure goes back to the caller as the result.
 
 - A backoff without `while` retries every thrown error and no returned failure.
-- A returned failure is retried only when a `while` predicate accepts it. The first `while` decides alone for failures, so a negative predicate such as `reason => !(reason instanceof BadInput)` accepts failures too; name the failures you want instead.
+- A returned failure is retried only when a `while` accepts it. The first `while` decides alone for failures, so a negative predicate such as `reason => !(reason instanceof BadInput)` accepts failures too; name the failures you want instead, as in `.while(DbTimeout)`.
 - When the retries run out on a returned failure, the caller gets the last failure as a value. Nothing is thrown, and the result type is still the function's own, so the caller still checks `isFailure`.
 - `onFailure` and `onRetry` report a returned failure as `{ value }`. `onGiveUp` fires only for a failure that was retried at least once.
 - Circuit breakers and bulkheads see a returned failure as a normal result: it never opens a breaker.

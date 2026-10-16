@@ -1,10 +1,20 @@
 // One retry schedule for every package that retries: the resilience policies, `@arki/queue`
 // jobs and `@arki/journal` effects all take the same `Backoff` value.
 
+import type { FailureDefinition } from '@arki/failure';
 import { MAX_TIMER_MS } from '@arki/clock';
 import { isFailure } from '@arki/failure';
 
 import { InvalidBackoffError } from './errors.js';
+
+/** Says whether a thrown error or a returned failure is worth another try. */
+type RetryPredicate = (reason: unknown) => boolean;
+
+/** The parts of a `FailureDefinition` that `while` needs to recognise its failures. */
+type RetryableFailure = Pick<FailureDefinition, 'code' | 'is'>;
+
+/** One or more failure definitions, for `while(...definitions)`. */
+type RetryableFailures = readonly [RetryableFailure, ...RetryableFailure[]];
 
 /**
  * How long to wait before each retry, and when to stop. Immutable: `upTo` and `while`
@@ -28,14 +38,23 @@ export type Backoff = {
   /** The same backoff, stopping after at most `retries` retries. `upTo(0)` never retries. */
   upTo(retries: number): Backoff;
   /**
+   * The same backoff, also retrying returned failures of these `@arki/failure`
+   * definitions. Thrown errors keep retrying as without `while`; other returned
+   * failures are not retried. Short for
+   * `while(reason => !isFailure(reason) || definitions.some(d => d.is(reason)))`.
+   *
+   * @example backoff.exponential({ base: 100 }).while(DbTimeout, ExportUnavailable)
+   */
+  while(...definitions: RetryableFailures): Backoff;
+  /**
    * The same backoff, retrying only the reasons for which `predicate` returns true. A
    * reason is a thrown error or a returned failure, so the predicate sees both: a
    * returned failure is retried only when a predicate says yes to it. A negative
    * predicate such as `reason => !(reason instanceof BadInput)` says yes to failures too.
    *
-   * @example backoff.exponential({ base: 100 }).while(reason => isFailure(reason) && reason.code === 'db.timeout')
+   * @example backoff.exponential({ base: 100 }).while(reason => reason instanceof NetworkError)
    */
-  while(predicate: (reason: unknown) => boolean): Backoff;
+  while(predicate: RetryPredicate): Backoff;
 };
 
 /** Options of {@link backoff.exponential}. */
@@ -98,7 +117,8 @@ function create(
       }
       return create(wait, Math.min(maxRetries, retries), retryable);
     },
-    while(predicate) {
+    while(...args: readonly [RetryPredicate] | RetryableFailures) {
+      const predicate = toPredicate(args);
       return create(
         wait,
         maxRetries,
@@ -106,6 +126,15 @@ function create(
       );
     },
   };
+}
+
+/** The predicate a `while` call stands for: the one it got, or one built from definitions. */
+function toPredicate(args: readonly [RetryPredicate] | RetryableFailures): RetryPredicate {
+  if (args.length === 0) throw invalid('backoff: while() needs a predicate or at least one failure definition');
+  const [first, ...rest] = args;
+  if (!('code' in first)) return first;
+  const definitions = [first, ...rest];
+  return reason => !isFailure(reason) || definitions.some(definition => definition.is(reason));
 }
 
 /** Builders of a {@link Backoff}. Every builder retries forever until `upTo` limits it. */

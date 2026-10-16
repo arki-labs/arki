@@ -11,7 +11,7 @@ import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure } from '@arki/failure';
 
 import type { Backoff, FailureReason } from './index.js';
-import { backoff, createResiliencePolicy, createRetryPolicy, withRetry } from './index.js';
+import { backoff, createResiliencePolicy, createRetryPolicy, InvalidBackoffError, withRetry } from './index.js';
 
 const CardDeclined = defineFailure('card.declined', { status: 402 });
 const DbTimeout = defineFailure('db.timeout', { status: 503 });
@@ -39,6 +39,59 @@ describe('backoff and returned failures', () => {
   it('a second while() still narrows what the first accepted', () => {
     const never = timeouts.while(reason => reason instanceof Error);
     expect(never.delay(1, DbTimeout())).toBeUndefined();
+  });
+});
+
+// An export to an upstream service: "unavailable" may pass on a later try, "unauthorized"
+// (the service refused the token) never will. `.while(ExportUnavailable)` names the one
+// worth retrying, and thrown errors (a dropped connection) keep retrying as by default.
+const ExportUnavailable = defineFailure('export.unavailable', { status: 503 });
+const ExportUnauthorized = defineFailure('export.unauthorized', { status: 422 });
+
+describe('while(...definitions)', () => {
+  const exportRetry = backoff.exponential({ base: 1 }).while(ExportUnavailable);
+
+  /** Runs `attempt` under `exportRetry` on a MockClock and counts the calls. */
+  async function run<T>(attempt: (call: number) => T) {
+    const clock = new MockClock();
+    let calls = 0;
+    const result = withRetry(() => attempt(++calls), { backoff: exportRetry, clock });
+    await clock.advanceAsync(100);
+    return { result: await result, calls };
+  }
+
+  it('retries a thrown network error, as a backoff without while() does', async () => {
+    const outcome = await run(call => {
+      if (call < 3) throw new TypeError('fetch failed');
+      return 'exported';
+    });
+    expect(outcome).toEqual({ result: 'exported', calls: 3 });
+  });
+
+  it('retries a returned failure of a listed definition, so a busy service gets another try', async () => {
+    const outcome = await run(call => (call < 3 ? ExportUnavailable() : 'exported'));
+    expect(outcome).toEqual({ result: 'exported', calls: 3 });
+  });
+
+  it('does not retry a failure it was not given, so a refused token is not sent again', async () => {
+    const refused = ExportUnauthorized();
+    const outcome = await run(() => refused);
+    expect(outcome).toEqual({ result: refused, calls: 1 });
+  });
+
+  it('takes several definitions, and a later while() still narrows', () => {
+    const both = backoff.constant(10).while(ExportUnavailable, DbTimeout);
+    expect(both.delay(1, ExportUnavailable())).toBe(10);
+    expect(both.delay(1, DbTimeout())).toBe(10);
+    expect(both.delay(1, CardDeclined())).toBeUndefined();
+    const errorsOnly = both.while(reason => !isFailure(reason));
+    expect(errorsOnly.delay(1, new Error('connection reset'))).toBe(10);
+    expect(errorsOnly.delay(1, DbTimeout())).toBeUndefined();
+  });
+
+  it('needs at least one definition, so an empty while() cannot silently mean "retry nothing"', () => {
+    // @ts-expect-error -- while() takes a predicate or one or more definitions
+    expect(() => backoff.constant(10).while()).toThrow(InvalidBackoffError);
   });
 });
 
