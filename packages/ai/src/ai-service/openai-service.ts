@@ -8,11 +8,13 @@ import type { ModelMessage } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { generateText, Output, streamText } from 'ai';
 
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 
 import type { SanitizerConfig } from '../safety/types';
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { modelSchema } from './model-schema';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import { rateLimiters } from '../utils/rate-limiter';
 import { aiServiceConfigSchema, validateInput } from '../validation';
@@ -90,7 +92,11 @@ export class OpenAIService {
   /**
    * Generate structured data from a prompt.
    */
-  async generateStructuredData<T>(prompt: string, schema: z.ZodSchema<T>, options: GenerationOptions = {}): Promise<T> {
+  async generateStructuredData<S extends StandardSchemaV1>(
+    prompt: string,
+    schema: S,
+    options: GenerationOptions = {},
+  ): Promise<SchemaOutput<S>> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -98,11 +104,11 @@ export class OpenAIService {
    * Generate structured data using explicit message payloads.
    * Supports multimodal content (e.g., including images).
    */
-  async generateStructuredDataFromMessages<T>(
+  async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: ChatMessage[],
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: GenerationOptions = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
     debugService.debug('[OpenAI] Generating structured data (messages: {messages}, temperature: {temperature})', {
@@ -118,7 +124,7 @@ export class OpenAIService {
           model: openai(this.model),
           instructions: options.systemPrompt,
           messages: sanitizedMessages,
-          output: Output.object({ schema: schema as z.ZodSchema }),
+          output: Output.object({ schema: modelSchema(schema, 'OpenAI structured generation') }),
           maxRetries: options.maxRetries || this.defaultMaxRetries,
           temperature: options.temperature || this.defaultTemperature,
           abortSignal: options.signal,
@@ -126,7 +132,7 @@ export class OpenAIService {
 
         debugService.debug('[OpenAI] Structured data generated successfully');
 
-        return result.output as T;
+        return result.output;
       } catch (error) {
         debugService.debug('[OpenAI] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
 
@@ -297,11 +303,11 @@ export class OpenAIService {
   /**
    * Batch process multiple prompts.
    */
-  async batchGenerate<T>(
+  async batchGenerate<S extends StandardSchemaV1>(
     prompts: string[],
-    schema?: z.ZodSchema<T>,
+    schema?: S,
     options: GenerationOptions = {},
-  ): Promise<(T | string)[]> {
+  ): Promise<(SchemaOutput<S> | string)[]> {
     debugService.debug('[OpenAI] Batch generating {promptsLength} prompts (structured: {structured})', {
       promptsLength: prompts.length,
       structured: !!schema,

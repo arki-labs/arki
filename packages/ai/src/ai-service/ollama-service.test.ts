@@ -17,6 +17,7 @@ vi.mock('ai-sdk-ollama', () => ({
 }));
 
 vi.mock('ai', () => ({
+  jsonSchema: vi.fn((json: unknown) => ({ __jsonSchema: json })),
   Output: { object: vi.fn((opts: unknown) => ({ __outputObject: opts })) },
 }));
 

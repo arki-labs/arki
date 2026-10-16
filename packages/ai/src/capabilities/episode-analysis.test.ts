@@ -1,4 +1,5 @@
-import type { z } from 'zod';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { parseAsync } from '@arki/schema';
 import { expect, test } from 'vitest';
 
 import type { StructuredLLMProvider } from '../ai-service/types';
@@ -21,8 +22,8 @@ const output = {
   speakers: [],
 };
 const provider: StructuredLLMProvider = {
-  async generateStructuredData<T>(_prompt: string, schema: z.ZodSchema<T>) {
-    return schema.parse(output);
+  async generateStructuredData<S extends StandardSchemaV1>(_prompt: string, schema: S) {
+    return parseAsync(schema, output);
   },
   async generateStructuredDataFromMessages() {
     throw new Error('Unexpected call');

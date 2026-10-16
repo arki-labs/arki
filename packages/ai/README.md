@@ -211,6 +211,7 @@ for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather
 
 - **Cancel with `signal`.** After it aborts, the run starts no new model call or tool call. The
   model call in flight and every tool see the abort. The loop rejects with the signal's reason.
+- **`inputSchema` is any Standard Schema that can emit JSON Schema** (wrap one that cannot with `withJsonSchema` from `@arki/schema`).
 - **`output` is checked.** The runtime checks each result against `output` (Zod or any Standard
   Schema) before the model sees it. The model gets the parsed value. A mismatch fails that tool
   call with a `ToolOutputError` (code `TOOL_OUTPUT_ERROR`), which arrives as a `tool:error` event.
@@ -318,7 +319,7 @@ OpenAI integration using Vercel AI SDK.
 
 **Methods:**
 
-- `generateStructuredData(prompt, schema)`: Generate structured data
+- `generateStructuredData(prompt, schema)`: Generate structured data. `schema` is any Standard Schema (zod, valibot, arktype). The model is shown its input JSON Schema; you get its output type back (transforms have run). A schema that cannot emit JSON Schema throws a `ConfigurationError` that names `withJsonSchema`.
 - `generateText(prompt)`: Generate text
 - `streamText(prompt)`: Stream text generation
 - `generateConversation(messages)`: Generate conversation response

@@ -23,6 +23,7 @@ vi.mock('@ai-sdk/openai', () => ({
 vi.mock('ai', () => ({
   generateText: vi.fn(),
   streamText: vi.fn(),
+  jsonSchema: vi.fn((json: unknown) => ({ __jsonSchema: json })),
   Output: {
     object: vi.fn((opts: unknown) => ({ __outputObject: opts })),
   },

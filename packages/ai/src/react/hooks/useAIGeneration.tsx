@@ -6,11 +6,14 @@
 
 import { useCallback, useState } from 'react';
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
+
+import { inputJsonSchema } from '../../input-json-schema';
 
 export type GenerationOptions = {
   type?: 'text' | 'structured' | 'stream';
-  schema?: z.ZodType<unknown>; // Zod schema for structured generation
+  /** Any Standard Schema for structured generation. The request carries its input JSON Schema as `jsonSchema`. */
+  schema?: StandardSchemaV1;
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
@@ -63,6 +66,9 @@ export function useAIGeneration(options: UseAIGenerationOptions = {}): UseAIGene
       };
 
       try {
+        // A schema object does not survive JSON.stringify: send its input JSON Schema instead.
+        const { schema, ...plainOptions } = finalOptions;
+        const wireOptions = schema ? { ...plainOptions, jsonSchema: inputJsonSchema(schema, 'useAIGeneration') } : plainOptions;
         const response = await fetch(apiEndpoint, {
           method: 'POST',
           headers: {
@@ -70,7 +76,7 @@ export function useAIGeneration(options: UseAIGenerationOptions = {}): UseAIGene
           },
           body: JSON.stringify({
             prompt,
-            ...finalOptions,
+            ...wireOptions,
           }),
         });
 

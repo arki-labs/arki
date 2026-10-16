@@ -34,10 +34,11 @@ import type { ModelMessage } from 'ai';
 import { Output } from 'ai';
 import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
 
-import { z } from '@arki/contracts';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
+import { modelSchema } from './model-schema';
 
 type ChatMessage = ModelMessage;
 
@@ -182,11 +183,11 @@ export class OllamaService {
    * Single-prompt structured generation. Convenience wrapper around
    * {@link generateStructuredDataFromMessages}.
    */
-  async generateStructuredData<T>(
+  async generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: OllamaGenerationOptions = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -197,14 +198,14 @@ export class OllamaService {
    * JSON repair is auto-applied by `ai-sdk-ollama`'s enhanced
    * functions (`enableTextRepair: true` by default).
    */
-  async generateStructuredDataFromMessages<T>(
+  async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: ChatMessage[],
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: OllamaGenerationOptions = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     const temperature = options.temperature ?? this.defaultTemperature;
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
-    const output = Output.object({ schema: schema as z.ZodSchema });
+    const output = Output.object({ schema: modelSchema(schema, 'Ollama structured generation') });
 
     debugService.debug(
       '[Ollama] generateText (model={model}, messages={messages}, temperature={temperature}, stream={stream})',
@@ -231,7 +232,7 @@ export class OllamaService {
 
         const obj = await result.output;
         debugService.debug('[Ollama] Structured data generated successfully (streamed)');
-        return obj as T;
+        return obj;
       }
 
       // Non-streaming path — single round-trip, full structured output
@@ -247,7 +248,7 @@ export class OllamaService {
       });
 
       debugService.debug('[Ollama] Structured data generated successfully');
-      return result.output as T;
+      return result.output;
     } catch (error) {
       debugService.debug('[Ollama] Structured generation failed (model={model}): {value2}', {
         model: this.model,

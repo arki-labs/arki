@@ -5,6 +5,8 @@
  * (OpenAI, Anthropic, Groq, Google, Mistral, OpenRouter) through the Vercel AI SDK.
  */
 
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+
 /**
  * Message format for conversation-based interactions
  */
@@ -183,23 +185,26 @@ export type LLMProviderFactory = (config?: {
 export type StructuredLLMProvider = {
   /**
    * Generate a structured object from a single prompt.
-   * Output is validated against the supplied Zod schema.
+   * Any Standard Schema works (zod, valibot, arktype, ...). The model is shown the schema's input
+   * JSON Schema and writes raw JSON; the result is that JSON run through the schema, so it has
+   * the schema's OUTPUT type (a transform has already run). Invalid output throws a
+   * `GenerationError` whose cause chain ends in a `SchemaError` carrying `issues`.
    */
-  generateStructuredData<T>(
+  generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
-    schema: import('zod').ZodSchema<T>,
+    schema: S,
     options?: GenerateOptions,
-  ): Promise<T>;
+  ): Promise<SchemaOutput<S>>;
 
   /**
    * Generate a structured object from a conversation history.
    * Useful for multi-turn interactions where context matters.
    */
-  generateStructuredDataFromMessages<T>(
+  generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: Message[],
-    schema: import('zod').ZodSchema<T>,
+    schema: S,
     options?: GenerateOptions,
-  ): Promise<T>;
+  ): Promise<SchemaOutput<S>>;
 
   /**
    * Generate plain text from a single prompt.

@@ -26,11 +26,12 @@ import { createOpenAI, openai } from '@ai-sdk/openai';
 import { generateText, Output, streamText } from 'ai';
 import { createOllama } from 'ai-sdk-ollama';
 
-import type { z } from '@arki/contracts';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { GenerateOptions, Message, StreamOptions, StructuredLLMProvider } from './types';
 import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env';
 import { GenerationError, getErrorMessage } from '../errors';
+import { modelSchema } from './model-schema';
 import { aiTelemetry } from './telemetry';
 
 // ── Per-provider model defaults ───────────────────────────────
@@ -152,13 +153,17 @@ class LanguageModelAdapter implements StructuredLLMProvider {
     private readonly defaultMaxRetries: number,
   ) {}
 
-  async generateStructuredData<T>(prompt: string, schema: z.ZodSchema<T>, options: GenerateOptions = {}): Promise<T> {
+  async generateStructuredData<S extends StandardSchemaV1>(
+    prompt: string,
+    schema: S,
+    options: GenerateOptions = {},
+  ): Promise<SchemaOutput<S>> {
     try {
       const result = await generateText({
         model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         prompt,
-        output: Output.object({ schema }),
+        output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
@@ -175,17 +180,17 @@ class LanguageModelAdapter implements StructuredLLMProvider {
     }
   }
 
-  async generateStructuredDataFromMessages<T>(
+  async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: Message[],
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: GenerateOptions = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     try {
       const result = await generateText({
         model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        output: Output.object({ schema }),
+        output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,

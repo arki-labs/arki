@@ -2,10 +2,13 @@ import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
+import * as v from 'valibot';
 import { z } from 'zod';
 
 import { defineFailure } from '@arki/failure';
+import { withJsonSchema } from '@arki/schema';
 
+import { ConfigurationError } from './errors';
 import type { RuntimeEvent } from './runtime/types';
 import { createMastraRuntime, toMastraTools } from './mastra';
 import { defineAgentTool } from './runtime/tool';
@@ -70,6 +73,23 @@ describe('toMastraTools', () => {
     expect(Object.keys(tools)).toEqual(['analyze_distinctiveness']);
     expect(tools.analyze_distinctiveness?.id).toBe('analyze_distinctiveness');
     expect(tools.analyze_distinctiveness?.description).toBe('Competitor-relative distinctiveness.');
+  });
+
+  it('rejects at definition a tool whose schema cannot emit the draft-07 JSON Schema Mastra asks for', () => {
+    // withJsonSchema answers only draft-2020-12; handing Mastra that dialect as draft-07 would
+    // silently change what tuples and `items` mean, so the tool must fail loudly instead.
+    const lookup = {
+      name: 'lookup',
+      description: 'Look something up.',
+      inputSchema: withJsonSchema(v.object({ q: v.string() }), {
+        type: 'object',
+        properties: { q: { type: 'string' } },
+        required: ['q'],
+      }),
+      execute: () => ({ ok: true }),
+    };
+    expect(() => toMastraTools([lookup])).toThrow(ConfigurationError);
+    expect(() => toMastraTools([lookup])).toThrow(/tool "lookup".*draft-07/);
   });
 
   it('returns an empty record for a missing tool list', () => {

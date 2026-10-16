@@ -3,6 +3,7 @@
  * Helper functions for common structured generation tasks
  */
 
+import type { StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 import type { StructuredLLMProvider } from './types';
 
@@ -304,9 +305,9 @@ Each question should have 4 options with one correct answer.`;
   /**
    * Generate custom structured data
    */
-  async generateCustom<T>(
+  async generateCustom<S extends StandardSchemaV1>(
     prompt: string,
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: StructuredGenerationOptions = {}
   ) {
     return this.provider.generateStructuredData(

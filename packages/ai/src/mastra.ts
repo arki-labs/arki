@@ -4,6 +4,7 @@ import { createTool } from '@mastra/core/tools';
 
 import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types';
 import { debugRuntime } from './debug';
+import { requireJsonSchema } from './input-json-schema';
 import { abortReason, runAgentTool } from './runtime/tool';
 
 /**
@@ -49,7 +50,8 @@ function toMastraTool(
   return createTool({
     id: agentTool.name,
     description: agentTool.description,
-    inputSchema: agentTool.inputSchema,
+    // Mastra converts a tool's Standard Schema with target draft-07, so check that target now.
+    inputSchema: requireJsonSchema(agentTool.inputSchema, `tool "${agentTool.name}"`, 'draft-07'),
     // Mastra 1.x createTool: execute is (inputData, context); inputData is the parsed schema.
     execute: async (inputData, context) =>
       runAgentTool(agentTool, inputData, context.abortSignal, failure => {

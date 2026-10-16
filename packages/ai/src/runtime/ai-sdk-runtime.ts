@@ -2,6 +2,7 @@ import type { LanguageModel, ToolSet } from 'ai';
 import { isStepCount, streamText, tool } from 'ai';
 
 import type { AgentRuntime, AgentTool, RuntimeEvent, ToolFailure, ToolLoopInput } from './types';
+import { modelSchema } from '../ai-service/model-schema';
 import { aiTelemetry } from '../ai-service/telemetry';
 import { debugRuntime } from '../debug';
 import { abortReason, runAgentTool } from './tool';
@@ -37,7 +38,7 @@ function errorMessage(error: unknown): string {
 function toAiSdkTool(agentTool: AgentTool, onFailure?: (toolCallId: string, failure: ToolFailure) => void) {
   return tool({
     description: agentTool.description,
-    inputSchema: agentTool.inputSchema,
+    inputSchema: modelSchema(agentTool.inputSchema, `tool "${agentTool.name}"`),
     execute: (input: unknown, { abortSignal, toolCallId }) =>
       runAgentTool(agentTool, input, abortSignal, failure => onFailure?.(toolCallId, failure)),
   });

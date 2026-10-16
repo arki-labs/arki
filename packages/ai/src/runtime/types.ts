@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from '@arki/schema';
-import type { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
 
@@ -61,8 +60,8 @@ export type AgentToolExecuteOptions = {
 
 /**
  * A framework-neutral tool. Each adapter converts this to its own tool type (AI SDK `tool()`,
- * Mastra `createTool`, LangChain `tool`, TanStack `toolDefinition`). Zod is the neutral schema
- * because every target framework accepts it via Standard Schema.
+ * Mastra `createTool`, LangChain `tool`, TanStack `toolDefinition`). Standard Schema is the neutral schema
+ * (zod, valibot, arktype, ...) and must be able to emit JSON Schema (a withJsonSchema wrapper works).
  *
  * Build one with `defineAgentTool` to get `input` typed from `inputSchema` and the `execute` return
  * typed from `output`.
@@ -70,7 +69,8 @@ export type AgentToolExecuteOptions = {
 export interface AgentTool<TInput = unknown, TOutput = unknown> {
   name: string;
   description: string;
-  inputSchema: z.ZodType<TInput>;
+  /** Any Standard Schema. The model is shown its input JSON Schema; `execute` gets its parsed output. */
+  inputSchema: StandardSchemaV1<unknown, TInput>;
   /**
    * Optional schema (Zod or any Standard Schema) for the tool's result. The runtime checks the
    * result against it before the model sees it; a mismatch fails the tool call with a

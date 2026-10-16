@@ -7,10 +7,11 @@ import type { ModelMessage, SystemModelMessage } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText, Output, streamText } from 'ai';
 
-import type { z } from '@arki/contracts';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { modelSchema } from './model-schema';
 import { rateLimiters } from '../utils/rate-limiter';
 import { aiServiceConfigSchema, validateInput } from '../validation';
 import { DEFAULT_ANTHROPIC_MODEL } from './factory';
@@ -78,32 +79,32 @@ export class AnthropicService {
    * both services are interchangeable for callers that only need
    * single-prompt structured generation.
    */
-  async generateStructuredData<T>(
+  async generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: {
       temperature?: number;
       maxRetries?: number;
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
   /**
    * Generate structured data from message payloads (supports multimodal content)
    */
-  async generateStructuredDataFromMessages<T>(
+  async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: ChatMessage[],
-    schema: z.ZodSchema<T>,
+    schema: S,
     options: {
       temperature?: number;
       maxRetries?: number;
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<T> {
+  ): Promise<SchemaOutput<S>> {
     debugService.debug('[Anthropic] Generating structured data (messages: {messages}, temperature: {temperature})', {
       messages: messages.length,
       temperature: options.temperature ?? this.defaultTemperature,
@@ -119,7 +120,7 @@ export class AnthropicService {
           model: anthropic(this.model),
           instructions: system,
           messages,
-          output: Output.object({ schema: schema as z.ZodSchema }),
+          output: Output.object({ schema: modelSchema(schema, 'Anthropic structured generation') }),
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
           abortSignal: options.signal,
@@ -136,7 +137,7 @@ export class AnthropicService {
           },
         );
 
-        return response.output as T;
+        return response.output;
       } catch (error) {
         debugService.debug('[Anthropic] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
 
