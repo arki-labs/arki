@@ -12,10 +12,13 @@
  *    well-formed cursor the hub cannot open (another hub's, changed, expired)
  *    is not an error: the stream starts with a reset.
  *
- * Then `hello`, the replay or reset, and live `change` frames. A frame keeps
- * only the tables the grant allows, and only the txids of transactions that
- * wrote one of those tables. A frame with none of them is skipped whole: a
- * client must not learn how often a table it cannot read is written. After `maxAgeMs` the stream sends `bye` and ends,
+ * Then `hello`, the replay or reset, and live `change` frames. The grant goes
+ * into the hub with the stream, and the hub applies it to every hint before
+ * the stream's batch window, queue and frame split (`hub.ts`): a frame holds
+ * only granted tables and the receipts of transactions that wrote one of
+ * them, and a hidden write changes nothing the stream shows, not even its
+ * timing or when it gets `bye`. A client must not learn how often a table it
+ * cannot read is written. After `maxAgeMs` the stream sends `bye` and ends,
  * so the client reconnects and is authorized again.
  */
 import { z } from 'zod';
@@ -23,7 +26,7 @@ import { z } from 'zod';
 import type { RouteBundle, SseContract } from '@arki/http';
 import { buildEngine, HttpError, optional, route, routes } from '@arki/http';
 
-import type { LiveFeed, LiveHub } from './hub.js';
+import type { LiveFeed, LiveGrant, LiveHub } from './hub.js';
 import type { LiveEvent, LiveManifest, TableTag } from './types.js';
 import { debugHttp } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
@@ -31,7 +34,7 @@ import { tagKey } from './manifest.js';
 import { liveCursorSchema, liveEventSchema } from './schema.js';
 
 /** What `authorize` grants a client. `tables` omitted: every table of the manifest. */
-export type LiveGrant = { readonly tables?: readonly TableTag[] };
+export type { LiveGrant } from './hub.js';
 
 /** The stream's contract: one optional cursor in, `LiveEvent` frames out, a heartbeat every 15 s (under Cloudflare's 100 s idle cap). */
 const liveRoute = route.sse('/api/live', {
@@ -57,10 +60,13 @@ const optionsSchema = z.object({
 });
 
 /** What one client may see: its part of the manifest and the tables whose hints reach it. */
-type View = { readonly manifest: LiveManifest; readonly allowed: ReadonlySet<string> };
+type View = { readonly manifest: LiveManifest; readonly tables: readonly TableTag[] };
 
-function viewOf(manifest: LiveManifest, tables: ReadonlySet<string>): View {
-  return { manifest: manifest.filter(entry => entry.reads.every(read => tables.has(tagKey(read)))), allowed: tables };
+function viewOf(manifest: LiveManifest, tables: ReadonlyMap<string, TableTag>): View {
+  return {
+    manifest: manifest.filter(entry => entry.reads.every(read => tables.has(tagKey(read)))),
+    tables: [...tables.values()],
+  };
 }
 
 /** The cursor of a request: none, or exactly one that parses. Anything else is a 400 before the stream opens. */
@@ -99,15 +105,8 @@ async function* framesFor(
           break;
         }
         case 'change': {
-          // Keep the granted tags and only the txids of transactions that wrote one of them.
-          const tags: TableTag[] = [];
-          const txids = new Set<string>();
-          for (const [index, tag] of item.tags.entries()) {
-            if (!view.allowed.has(tagKey(tag))) continue;
-            tags.push(tag);
-            for (const txid of item.txidsByTag[index] ?? []) txids.add(txid);
-          }
-          if (tags.length > 0) yield { kind: 'change', cursor: item.cursor, tags, txids: [...txids] };
+          // Already through the grant: the hub sends only what this view shows.
+          yield item;
           break;
         }
         default: {
@@ -144,12 +143,16 @@ export function liveEndpoint(options: {
   }
   const { maxAgeMs } = parsed.data;
   const { hub, manifest } = options;
-  const manifestTables = new Set(manifest.flatMap(entry => entry.reads.map(read => tagKey(read))));
+  const manifestTables = new Map(manifest.flatMap(entry => entry.reads.map(read => [tagKey(read), read] as const)));
   const everything = viewOf(manifest, manifestTables);
 
   function viewFor(grant: LiveGrant): View {
     if (grant.tables === undefined) return everything;
-    const granted = new Set(grant.tables.map(tag => tagKey(tag)).filter(key => manifestTables.has(key)));
+    const granted = new Map<string, TableTag>();
+    for (const tag of grant.tables) {
+      const known = manifestTables.get(tagKey(tag));
+      if (known !== undefined) granted.set(tagKey(tag), known);
+    }
     return viewOf(manifest, granted);
   }
 
@@ -171,14 +174,18 @@ export function liveEndpoint(options: {
     if (request.aborted) end();
     let feed: AsyncIterable<LiveFeed>;
     try {
-      feed = await hub.open({ ...(cursor === undefined ? {} : { cursor }), signal: detach.signal });
+      feed = await hub.open({
+        ...(cursor === undefined ? {} : { cursor }),
+        grant: { tables: view.tables },
+        signal: detach.signal,
+      });
     } catch (error) {
       end();
       throw toHttpError(error);
     }
     debugHttp.debug('stream opened: {procedures} procedures, {tables} tables visible', {
       procedures: view.manifest.length,
-      tables: view.allowed.size,
+      tables: view.tables.length,
     });
     return framesFor(feed, view, () => expired, end);
   }

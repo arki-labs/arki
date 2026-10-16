@@ -29,7 +29,7 @@ export const appContract = {
     list: procedure.meta(live({ reads: [POSTS_TABLE] })).output(z.array(postSchema)),
     create: procedure
       .input(z.object({ title: z.string().min(1) }))
-      .output(z.object({ id: z.string(), txid: z.string() })),
+      .output(z.object({ id: z.string(), receipt: z.string() })),
   },
 };
 

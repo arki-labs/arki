@@ -33,6 +33,7 @@ import { live, tableTag } from './drizzle/index.js';
 import { LIVE_ERROR_CODES, liveTables } from './index.js';
 import { liveManifest } from './orpc/index.js';
 import { liveMigration } from './pg/index.js';
+import { RECEIPTS } from './tests/fixtures.js';
 import { sseReader } from './tests/sse-reader.js';
 
 const posts = pgTable('posts', { id: text('id').primaryKey(), title: text('title').notNull() });
@@ -123,6 +124,7 @@ function blogApp(options: { readonly triggers: boolean; readonly failStart?: boo
     contract: appContract,
     authorize: () => Promise.resolve({}),
     limits: { batchMs: 1 },
+    receipts: RECEIPTS,
   });
   const broken = plugin({
     name: 'broken',
@@ -172,7 +174,8 @@ describe('liveQueries', () => {
       expect(await client.next()).toMatchObject({
         kind: 'change',
         tags: [tableTag(posts)],
-        txids: [expect.stringMatching(/^\d+$/)],
+        // A receipt, never the decimal transaction id.
+        txids: [expect.stringMatching(/^[\w-]{22}$/)],
       });
       expect(started.services.live.connections()).toBe(1);
       await client.cancel();

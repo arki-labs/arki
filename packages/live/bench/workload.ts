@@ -31,7 +31,7 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { environmentManager, QueryClient, QueryObserver, timeoutManager } from '@tanstack/react-query';
 
 import type { LiveManifest, TableTag } from '@arki/live';
-import { affectedPaths, createLiveHub } from '@arki/live';
+import { affectedPaths, createLiveHub, liveReceipts } from '@arki/live';
 import { fakeSource } from '@arki/live/testing';
 
 export type Strategy = 'live' | 'collection' | 'invalidate-all' | 'poll-1s' | 'poll-5s';
@@ -234,7 +234,9 @@ const frameLogs = new Map<string, Promise<readonly Frame[]>>();
 /** Each window: the commits from its first one until `BATCH_MS` later, emitted together, and the hub's frame for them. */
 async function framesOf(workload: Workload, commits: readonly Commit[]): Promise<readonly Frame[]> {
   const source = fakeSource();
-  const hub = createLiveHub({ source, limits: { batchMs: 1 } });
+  // With receipts, as in production: each frame names its window's transactions.
+  const receipts = liveReceipts({ app: 'bench', secret: 'bench-only-secret-of-32-characters-01' });
+  const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts });
   await hub.start();
   source.emit({ kind: 'ready' });
   const detach = new AbortController();

@@ -36,6 +36,7 @@ import { liveQueries } from '../dot.js';
 import { liveEndpoint } from '../http.js';
 import { createLiveHub, live, LIVE_ERROR_CODES } from '../index.js';
 import { liveMigration, pgSource, touch, verifyLiveTriggers } from '../pg/index.js';
+import { RECEIPTS } from './fixtures.js';
 import { scriptedClient } from './scripted-client.js';
 import { sseReader } from './sse-reader.js';
 
@@ -91,7 +92,7 @@ async function join(each: ScriptedClient, target?: LiveHub): Promise<boolean> {
   return ok;
 }
 const converged = (each: ScriptedClient) => expect.poll(() => each.stalePaths(), { timeout: 10_000 }).toEqual([]);
-const hasTxId = (txid: string) => (frame: LiveFeed) => frame.kind === 'change' && frame.txids.includes(txid);
+const hasTxId = (receipt: string) => (frame: LiveFeed) => frame.kind === 'change' && frame.txids.includes(receipt);
 
 describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
   let container: StartedPostgreSqlContainer;
@@ -141,6 +142,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     const hub = createLiveHub({
       source: pgSource({ pool, app: 'blog', retryMs: 20 }),
       limits: { batchMs: 5, ...limits },
+      receipts: RECEIPTS,
     });
     cleanups.push(() => hub.stop());
     await hub.start();
@@ -151,13 +153,14 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
   const kill = (name: string) =>
     writer.query('select pg_terminate_backend(pid) from pg_stat_activity where application_name = $1', [name]);
 
+  /** Inserts a post; resolves with its transaction's receipt, as a mutation would return it. */
   const insertPost = async (title: string): Promise<string> => {
     serial += 1;
     const result = await writer.query<{ txid: string }>(
       'insert into posts values ($1, $2) returning pg_current_xact_id()::text as txid',
       [`p${serial}`, title],
     );
-    return result.rows[0]?.txid ?? '';
+    return RECEIPTS.of(result.rows[0]?.txid ?? '');
   };
   const insertUser = async (name: string): Promise<void> => {
     serial += 1;
@@ -214,7 +217,11 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     // Before LISTEN: the listener's only pool client is taken, so the hub is not ready yet.
     const pool = listenPool('around_listener');
     const held = await pool.connect();
-    const hub = createLiveHub({ source: pgSource({ pool, app: 'blog', retryMs: 20 }), limits: { batchMs: 5 } });
+    const hub = createLiveHub({
+      source: pgSource({ pool, app: 'blog', retryMs: 20 }),
+      limits: { batchMs: 5 },
+      receipts: RECEIPTS,
+    });
     cleanups.push(() => hub.stop());
     // `start()` settles once the first LISTEN ran, which needs the held client.
     const starting = hub.start();
@@ -293,8 +300,8 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       const late = await second.query<{ txid: string }>(
         `insert into posts values ('rev2', 'started second') returning pg_current_xact_id()::text as txid`,
       );
-      const earlyTxId = early.rows[0]?.txid ?? '';
-      const lateTxId = late.rows[0]?.txid ?? '';
+      const earlyTxId = await RECEIPTS.of(early.rows[0]?.txid ?? '');
+      const lateTxId = await RECEIPTS.of(late.rows[0]?.txid ?? '');
       await second.query('commit');
       await watch.until(hasTxId(lateTxId));
       // The client refetched and sees the later transaction's row, not the earlier one's.
@@ -507,21 +514,22 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     const watch = await watcher(hub);
     cleanups.push(() => Promise.resolve(watch.stop()));
     const connection = await writer.connect();
-    let txid = '';
+    let txid: string | undefined;
     try {
       await connection.query('begin');
       const inserted = await connection.query<{ txid: string }>(
         `insert into posts values ('touched', 'through a view') returning pg_current_xact_id()::text as txid`,
       );
-      txid = inserted.rows[0]?.txid ?? '';
+      txid = inserted.rows[0]?.txid;
       await touch(drizzle({ client: connection }), 'blog', POST_TITLES);
       await connection.query('commit');
     } finally {
       connection.release();
     }
     await watch.until(hasTag(POST_TITLES));
+    const own = await RECEIPTS.of(txid ?? '');
     const tables = watch.frames.flatMap(frame =>
-      frame.kind === 'change' ? frame.tags.filter((_, index) => frame.txidsByTag[index]?.includes(txid)) : [],
+      frame.kind === 'change' && frame.txids.includes(own) ? frame.tags : [],
     );
     expect(tables.map(each => each.table).toSorted()).toEqual(['post_titles', 'posts']);
   });

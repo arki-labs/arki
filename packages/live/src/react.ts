@@ -40,7 +40,7 @@ import { createContext, createElement, useContext, useEffect, useRef, useState, 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { LiveStatus } from './client.js';
-import type { LiveCursor, LiveEvent, LiveManifest } from './types.js';
+import type { LiveCursor, LiveEvent, LiveManifest, LiveReceipt } from './types.js';
 import { createLiveClient } from './client.js';
 import { debugReact } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
@@ -49,7 +49,7 @@ import { parseLiveCursor } from './parse.js';
 
 /** The query key that carries a server-rendered page's cursor to the client. */
 const CURSOR_KEY = ['@arki/live', 'cursor'] as const;
-/** Txids remembered after their frame, so a write whose reply comes after its hint still resolves at once. */
+/** Receipts remembered after their frame, so a write whose reply comes after its hint still resolves at once. */
 const RECENT_TXIDS = 1024;
 const DEFAULT_TXID_TIMEOUT_MS = 10_000;
 
@@ -68,7 +68,7 @@ type LiveSession = {
   register(pathKey: string): () => void;
   /** Watches the query cache for the first-fetch race and for 401/403; returns the unsubscribe. */
   watch(): () => void;
-  awaitTxId(txid: string, timeoutMs: number): Promise<void>;
+  awaitTxId(receipt: LiveReceipt, timeoutMs: number): Promise<void>;
 };
 
 /** The live session of each `QueryClient` with a mounted provider. */
@@ -234,8 +234,8 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
           reject(
             liveError(
               LIVE_ERROR_CODES.limit,
-              `awaitTxId(${txid}): no change frame named it within ${timeoutMs} ms`,
-              'Check that the mutation returns pg_current_xact_id() of its own transaction and that the stream is live; or refetch instead.',
+              `awaitTxId(${txid}): no change frame named this receipt within ${timeoutMs} ms`,
+              'Check that the mutation returns receipts.of(pg_current_xact_id()::text) of its own transaction, that the hub has the same receipts (app and secret), and that the stream is live; or refetch instead.',
             ),
           );
         }, timeoutMs);
@@ -368,14 +368,16 @@ export function setLiveCursor(queryClient: QueryClient, cursor: LiveCursor | und
 }
 
 /**
- * Resolves once a `change` frame names `txid` (or a reset refetched every live
- * query), so the caller knows its own write is on its way into the cache.
+ * Resolves once a `change` frame names `receipt` (or a reset refetched every
+ * live query), so the caller knows its own write is on its way into the cache.
+ * `receipt` is what the mutation returned: `receipts.of(txid)` of its own
+ * transaction, never the raw id.
  * Rejects with E006 after `timeoutMs` (default 10 000), and with E001 when no
  * `LiveProvider` is mounted for `queryClient`.
  */
 export function awaitTxId(
   queryClient: QueryClient,
-  txid: string,
+  receipt: LiveReceipt,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<void> {
   const session = sessions.get(queryClient);
@@ -388,5 +390,5 @@ export function awaitTxId(
       ),
     );
   }
-  return session.awaitTxId(txid, options.timeoutMs ?? DEFAULT_TXID_TIMEOUT_MS);
+  return session.awaitTxId(receipt, options.timeoutMs ?? DEFAULT_TXID_TIMEOUT_MS);
 }

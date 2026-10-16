@@ -38,7 +38,8 @@ const PLAIN_BYTES = EPOCH_BYTES + 16;
 const SEALED_BYTES = IV_BYTES + PLAIN_BYTES + 16;
 const TWO_TO_32 = 2 ** 32;
 
-function toBase64Url(bytes: Uint8Array): string {
+/** @internal Bytes as unpadded base64url: cursors and receipts. */
+export function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCodePoint(byte);
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');

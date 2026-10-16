@@ -19,9 +19,12 @@
 // second, so the ring holds at most 10 000 frames, under the default cap. Hitting it would end the
 // streams with `gap`, and the call would throw instead of returning a wrong count.
 import type { LiveCursor, LiveEvent, LiveFeed, LiveManifest, LiveSourceEvent, TableTag } from '@arki/live';
-import { createLiveClient, createLiveHub } from '@arki/live';
+import { createLiveClient, createLiveHub, liveReceipts } from '@arki/live';
 import { liveEndpoint } from '@arki/live/http';
 import { fakeSource } from '@arki/live/testing';
+
+/** Receipts as in production: a frame names each transaction by its receipt, made once per transaction. */
+const RECEIPTS = liveReceipts({ app: 'bench', secret: 'bench-only-secret-of-32-characters-01' });
 
 /** One commit hint: the table it wrote and its transaction id. */
 export type Commit = { readonly table: string; readonly txid: string };
@@ -58,9 +61,14 @@ export const commits: readonly Commit[] = [
   { table: 'users', txid: '103' },
 ];
 
+/** The receipt of each commit's transaction, as its mutation would return it. */
+const receiptOf = new Map(
+  await Promise.all(commits.map(async commit => [commit.txid, await RECEIPTS.of(commit.txid)] as const)),
+);
+
 /** The frame every stream must get for `commit`. */
 export function expectedFrame(commit: Commit): Delivered {
-  return { kind: 'change', tags: [tag(commit.table)], txids: [commit.txid], cursor: true };
+  return { kind: 'change', tags: [tag(commit.table)], txids: [receiptOf.get(commit.txid) ?? ''], cursor: true };
 }
 
 function delivered(frame: LiveFeed | LiveEvent | undefined): Delivered {
@@ -95,7 +103,7 @@ function eventQueue(): { push(event: LiveEvent): void; next(): Promise<LiveEvent
 
 async function readyHub(limits: { readonly batchMs: number; readonly replayMs: number }) {
   const source = fakeSource();
-  const hub = createLiveHub({ source, limits });
+  const hub = createLiveHub({ source, limits, receipts: RECEIPTS });
   await hub.start();
   source.emit({ kind: 'ready' });
   return { source, hub };

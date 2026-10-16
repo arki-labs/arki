@@ -45,6 +45,9 @@ export const liveManifestSchema = z
  */
 export const txIdSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 
+/** A receipt: 22 base64url characters, an HMAC of a transaction id (`receipts.ts`). */
+export const liveReceiptSchema = z.string().regex(/^[\w-]{22}$/);
+
 /** An opaque base64url token of 16 to 256 characters (the hub's are 75): a sealed stream position. Grants nothing. */
 export const liveCursorSchema = z.string().regex(/^[\w-]{16,256}$/);
 
@@ -59,13 +62,13 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
       manifest: liveManifestSchema,
     })
     .strict(),
-  /** Tables changed by commits, and the ids of exactly the commits that wrote them. */
+  /** Tables changed by commits, and the receipts of exactly the commits that wrote them. */
   z
     .object({
       kind: z.literal('change'),
       cursor: liveCursorSchema,
       tags: z.array(tableTagSchema).min(1).max(256),
-      txids: z.array(txIdSchema).max(256),
+      txids: z.array(liveReceiptSchema).max(256),
     })
     .strict(),
   /** The server lost its Postgres listener: reconnect (the next `hello` is a reset). */

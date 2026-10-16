@@ -4,10 +4,14 @@
  * parser of `pgSource`.
  */
 import type { TableTag } from '../index.js';
+import { liveReceipts } from '../index.js';
 import { liveChannel, liveMigration } from '../pg/index.js';
 import { parseHint } from '../pg/source.js';
 
 export const CHANNEL = liveChannel('blog');
+
+/** Receipts for app `blog` under a fixed test secret: a test turns a txid into what a frame carries. */
+export const RECEIPTS = liveReceipts({ app: 'blog', secret: 'arki-live-test-secret-not-for-production' });
 
 export const POSTS: TableTag = { schema: 'public', table: 'posts' };
 export const USERS: TableTag = { schema: 'public', table: 'users' };

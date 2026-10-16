@@ -16,7 +16,7 @@ import type { LiveQuery, ScriptedClient } from './scripted-client.js';
 import { debugHub } from '../debug.js';
 import { createLiveHub, LIVE_ERROR_CODES } from '../index.js';
 import { fakeSource } from '../testing.js';
-import { CHANNEL, parsePayload, TABLES_SQL, TRIGGERS_SQL } from './fixtures.js';
+import { CHANNEL, parsePayload, RECEIPTS, TABLES_SQL, TRIGGERS_SQL } from './fixtures.js';
 import { scriptedClient } from './scripted-client.js';
 
 const BATCH_MS = 20;
@@ -103,7 +103,7 @@ function modelDatabase(source: ReturnType<typeof fakeSource>) {
 
 function rig(limits: LiveLimits = {}) {
   const source = fakeSource();
-  const hub = createLiveHub({ source, limits: { batchMs: BATCH_MS, ...limits } });
+  const hub = createLiveHub({ source, limits: { batchMs: BATCH_MS, ...limits }, receipts: RECEIPTS });
   const db = modelDatabase(source);
   const client = (): ScriptedClient => scriptedClient(hub, manifest, db.queries);
   return { source, hub, db, client };
@@ -556,7 +556,7 @@ describe('bounds and lifecycle', () => {
     expect(first).toMatchObject({
       kind: 'change',
       tags: [tag('posts'), tag('users')],
-      txids: ['9007199254740993', '12'],
+      txids: [await RECEIPTS.of('9007199254740993'), await RECEIPTS.of('12')],
     });
 
     // 300 tables in one transaction: two frames, each naming it (it wrote tables of both).
@@ -566,10 +566,10 @@ describe('bounds and lifecycle', () => {
     await flush();
     const { value: head } = await feed.next();
     const { value: tail } = await feed.next();
-    expect([txidsOf(head), txidsOf(tail)]).toEqual([['13'], ['13']]);
-    if (head?.kind !== 'change') throw new Error('expected change');
-    expect(head.txidsByTag).toHaveLength(256);
-    expect(head.txidsByTag[0]).toEqual(['13']);
+    const thirteen = await RECEIPTS.of('13');
+    expect([txidsOf(head), txidsOf(tail)]).toEqual([[thirteen], [thirteen]]);
+    if (head?.kind !== 'change' || tail?.kind !== 'change') throw new Error('expected change');
+    expect([head.tags.length, tail.tags.length]).toEqual([256, 44]);
 
     // 256 distinct transactions in one window: flushed without waiting for the timer.
     for (let index = 0; index < 256; index += 1) {

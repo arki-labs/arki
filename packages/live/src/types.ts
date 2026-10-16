@@ -21,14 +21,21 @@ export type LiveManifest = { path: string[]; reads: TableTag[] }[];
  */
 export type LiveCursor = string;
 
+/**
+ * A transaction as a client sees it: 22 base64url characters, an HMAC of the Postgres
+ * transaction id under the app's secret (`liveReceipts`). One transaction has one receipt on every
+ * stream and every hub that shares the secret. It shows no order and no count: compare it, nothing else.
+ */
+export type LiveReceipt = string;
+
 /** The frames of the SSE stream. */
 export type LiveEvent =
   | { kind: 'hello'; v: 1; mode: 'resume' | 'reset'; cursor: LiveCursor; manifest: LiveManifest }
   /**
-   * Tables changed by commits. `txids` are the transaction ids (`pg_current_xact_id()`, decimal
-   * strings) of exactly the commits that wrote one of this frame's `tags`.
+   * Tables changed by commits. `txids` are the receipts of exactly the commits that wrote one of
+   * this frame's `tags`: never the raw transaction ids.
    */
-  | { kind: 'change'; cursor: LiveCursor; tags: TableTag[]; txids: string[] }
+  | { kind: 'change'; cursor: LiveCursor; tags: TableTag[]; txids: LiveReceipt[] }
   /** The server lost its Postgres listener: reconnect (the next `hello` is a reset). */
   | { kind: 'gap' }
   /** The server closes on purpose (max age, stop, slow client): reconnect with the cursor. */

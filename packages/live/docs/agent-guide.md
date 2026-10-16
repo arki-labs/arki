@@ -5,9 +5,9 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 ## The model
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
-2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. A `change` frame carries the `txids` of exactly the commits that wrote its own tables.
-3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame inside an epoch, keeps `replayMs` of frames in a ring, and feeds every open stream. The cursor a client sees is that position (epoch, frame number, time taken) sealed with AES-GCM under a key per hub start: opaque, 75 characters, so a client cannot count the frames its grant hides. A `change` frame is sealed once and shared by every stream.
-4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the cursor is at most `replayMs` old (the missed frames follow), else `reset` (refetch every live query). The decision never depends on how many frames passed. A listener gap ends every stream with `gap` and the next `ready` starts a new epoch; so does an overload (the ring reached `replayFrames`), which resets every client at once.
+2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. The txid stays in the hub: a `change` frame carries in `txids` the **receipts** of exactly the commits that wrote its own tables (`liveReceipts({ app, secret })`: an HMAC of the txid, 22 characters), never the raw id, which would reveal the database-wide transaction counter.
+3. The hub (`createLiveHub`) numbers each source change (a hint) inside an epoch, keeps `replayMs` of hints in a ring, and feeds every open stream through its grant (`hub.open({ grant })`). The grant applies before the stream's own `batchMs` window, queue and frame split: a hint with no granted table never reaches the stream (no window, no queue slot, no early flush, no `bye`). The cursor a client sees is a position (epoch, hint number, time taken) sealed with AES-GCM under a key per hub start: opaque, 75 characters, so a client cannot count the hints its grant hides. Streams whose windows close at one position share one sealed cursor.
+4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the cursor is at most `replayMs` old (the missed hints follow, through the stream's grant and windows, as it would have got them live), else `reset` (refetch every live query). The decision never depends on how many hints passed. A listener gap ends every stream with `gap` and the next `ready` starts a new epoch; so does an overload (the ring reached `replayFrames`), which resets every client at once.
 5. On the client, `LiveProvider` reads the stream (`createLiveClient`) and calls `invalidateQueries` by oRPC path: every live path on a reset, the affected paths on a change.
 6. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
 
@@ -53,8 +53,8 @@ export { both };
 
 ### Drive the hub in a test
 
-1. `const source = fakeSource(); const hub = createLiveHub({ source }); await hub.start(); source.emit({ kind: 'ready' })`.
-2. `await hub.open({ cursor, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. `begin` cursors are freshly sealed and a `change` frame's cursor is shared by every stream, so compare modes and tags, never cursor strings.
+1. `const source = fakeSource(); const hub = createLiveHub({ source, receipts }); await hub.start(); source.emit({ kind: 'ready' })`. Without `receipts` frames carry `txids: []`; with them, compare `txids` to `await receipts.of(txid)`.
+2. `await hub.open({ cursor, grant, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. `grant: { tables }` limits what the stream sees (omitted: every table). `begin` cursors are freshly sealed and `change` cursors are shared by streams whose windows close together, so compare modes and tags, never cursor strings.
 3. `source.emit({ kind: 'change', tags })` then wait `batchMs`; `source.emit({ kind: 'gap' })` to simulate a lost listener.
 4. Age and the overload cap: `limits: { replayMs, replayFrames }`. With fake timers, `expect.poll` moves the fake clock while it waits: note `Date.now()` before the connect whose cursor's age you test.
 5. Real Postgres: `src/tests/failure.pg.test.ts` has the barrier helpers (a held pool client, a role without LOGIN, a gated read, an open transaction).
@@ -77,7 +77,7 @@ export { both };
 
 1. Mount `<LiveProvider url="/api/live">` inside `QueryClientProvider`, once per `QueryClient`. Pass `keyPrefix` when the oRPC utils were built with a `path`.
 2. `useLiveQuery(orpc.posts.list.queryOptions({ input }))`. Guard rendering with `isPending`. No `initialData`.
-3. A mutation that returns `pg_current_xact_id()::text` of its own transaction can `await awaitTxId(queryClient, txid)` in `onSuccess`.
+3. A mutation that returns `await receipts.of(txid)`, with `txid` = `pg_current_xact_id()::text` of its own transaction and `receipts` the hub's, can `await awaitTxId(queryClient, receipt)` in `onSuccess`. Never return the raw txid.
 4. Server rendering: `setLiveCursor(queryClient, await hub.cursor())` first, then load the page's data, then `dehydrate`. Keep `staleTime` above 0 so hydrated data is not refetched on mount.
 5. TanStack DB: `createCollection(queryCollectionOptions({ ...orpc.x.queryOptions({ input }), queryClient, getKey }))` from `@tanstack/query-db-collection`; the provider's invalidation refreshes it.
 6. Sign-out or account switch: `queryClient.resetQueries()` and remount the provider with `key={userId}`, so the old account's data, fetches in flight and stream grant are gone (`src/tests/session.pg.test.ts`).
@@ -91,11 +91,12 @@ export { both };
 - A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with the handler context.
 - Never reuse an epoch: a custom `epoch()` must return a new 12-character `[a-z0-9]` value each call (E001 otherwise).
 - A stream that falls `subscriberFrames` behind gets `bye`; reconnect with the cursor.
-- Never evict replay frames by count or make resume depend on what happened since a cursor: hidden-table frames would leak. Resume or reset depends on the cursor's age only; the `replayFrames` cap starts a new epoch for everyone.
+- Never evict replay hints by count or make resume depend on what happened since a cursor: hidden-table hints would leak. Never filter by grant after a stream's window or queue: a hidden write would then change its timing or cause its `bye`. Resume or reset depends on the cursor's age only; the `replayFrames` cap starts a new epoch for everyone.
 - Never declare `live()` on a per-request table (sessions, counters): it refetches on every request. Do declare auth tables the answer depends on (memberships, roles).
 - Shortcuts that break the guarantee: the root `db` inside a `liveRead` handler, DDL at boot, reads on a replica.
 - Never parse or build a cursor: it is sealed. A cursor the hub cannot open resets; a malformed one is a 400.
-- The hub needs `crypto.subtle`: `start()` rejects with E001 without it (bare Hermes, a browser page that is not a secure context).
+- The hub needs `crypto.subtle`: `start()` rejects with E001 without it (bare Hermes, a browser page that is not a secure context). So does `liveReceipts()`, which throws E001 at once, also for a secret under 32 characters.
+- The receipts secret comes from the app config, the same on every instance (`openssl rand -base64 32`). Never put a raw txid on the wire or in a mutation's response.
 - `useLiveQuery` on a procedure that is not in the manifest never refreshes; the provider logs E001 once. Mutations get query utils from oRPC too, so the types cannot catch it.
 - Pass a `headers` function; a new one only matters after a 401/403 (the provider then tries again).
 - Hints say only which table changed. Every refetch is authorized by its own procedure.

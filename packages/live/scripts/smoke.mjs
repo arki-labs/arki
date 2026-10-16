@@ -13,6 +13,7 @@ import {
   createLiveHub,
   live,
   LIVE_ERROR_CODES,
+  liveReceipts,
   liveTables,
   parseLiveCursor,
   parseLiveEvent,
@@ -59,12 +60,20 @@ if (globalThis.crypto?.subtle) {
     ['gap ends the stream', gap.kind, 'gap'],
     ['stopped', hub.status(), 'stopped'],
   );
+  const receipts = liveReceipts({ app: 'smoke', secret: 'smoke-test-secret-of-32-characters-0' });
+  const receipt = await receipts.of('9007199254740993');
+  hubChecks.push(
+    ['a receipt is 22 base64url characters', /^[\w-]{22}$/.test(receipt), true],
+    ['one secret, one receipt', (await receipts.of('9007199254740993')) === receipt, true],
+  );
 } else {
   const refused = await hub.start().then(
     () => 'started',
     error => error.code,
   );
   hubChecks.push(['a hub without WebCrypto fails loud at start', refused, LIVE_ERROR_CODES.config]);
+  const receiptsRefused = refuses(() => liveReceipts({ app: 'smoke', secret: 'smoke-test-secret-of-32-characters-0' }));
+  hubChecks.push(['receipts without WebCrypto fail loud at once', receiptsRefused, true]);
 }
 
 // The stream client, where the engine has streaming fetch primitives (bare Hermes has none).

@@ -24,6 +24,7 @@ import { plugin } from '@arki/dot/plugin';
 
 import type { LiveGrant } from './http.js';
 import type { LiveHub, LiveLimits } from './hub.js';
+import type { LiveReceipts } from './receipts.js';
 import { debugDot } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
 import { liveEndpoint } from './http.js';
@@ -46,6 +47,12 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys>(options: 
   readonly authorize: (request: Request) => Promise<LiveGrant | null>;
   readonly limits?: LiveLimits;
   readonly maxAgeMs?: number;
+  /**
+   * Frames name the receipts of their transactions, for `awaitTxId`: `liveReceipts({ app, secret })`
+   * with the secret from the app config. Mutations return `receipts.of(txid)` from the same object.
+   * Omitted: frames name none.
+   */
+  readonly receipts?: LiveReceipts;
 }) {
   const manifest = liveManifest(options.contract);
   const tables = liveTables(manifest);
@@ -60,6 +67,7 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys>(options: 
         booted = createLiveHub({
           source: pgSource({ pool: options.pool(ctx), app: options.app }),
           ...(options.limits === undefined ? {} : { limits: options.limits }),
+          ...(options.receipts === undefined ? {} : { receipts: options.receipts }),
         });
         return booted;
       },

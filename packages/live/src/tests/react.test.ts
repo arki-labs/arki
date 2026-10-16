@@ -25,6 +25,7 @@ import { createLiveHub, live, LIVE_ERROR_CODES } from '../index.js';
 import { liveManifest } from '../orpc/index.js';
 import { awaitTxId, LiveProvider, setLiveCursor, useLiveQuery, useLiveStatus } from '../react.js';
 import { fakeSource, waitForInvalidation } from '../testing.js';
+import { RECEIPTS } from './fixtures.js';
 
 const POSTS: TableTag = { schema: 'public', table: 'posts' };
 const USERS: TableTag = { schema: 'public', table: 'users' };
@@ -95,7 +96,7 @@ async function app() {
   const orpc = createTanstackQueryUtils(createRouterClient(router));
 
   const source = fakeSource();
-  const hub = createLiveHub({ source, limits: { batchMs: 1 } });
+  const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
   await hub.start();
   source.emit({ kind: 'ready' });
   let grant: LiveGrant | null = {};
@@ -212,7 +213,7 @@ describe('the first-fetch race (round 8, synthesis § 4 rows 1-3)', () => {
     await waitFor(() => expect(statuses).toContain('live'));
     expect(db.calls.posts).toBe(1); // the first fetch read v0 and is still running
     commit('posts', 'v1', '5');
-    await awaitTxId(queryClient, '5');
+    await awaitTxId(queryClient, await RECEIPTS.of('5'));
     db.gate = Promise.resolve();
     gate.resolve();
     await waitFor(() => expect(queryClient.getQueryData(postsKey)).toEqual(['v1']));
@@ -329,17 +330,18 @@ describe('server rendering with the hub cursor (D4)', () => {
 });
 
 describe('awaitTxId', () => {
-  it('resolves when a change frame names the txid, at once when one already did, and on a reset', async () => {
+  it('resolves when a change frame names the receipt, at once when one already did, and on a reset', async () => {
     const { mount, commit, statuses, Posts, restartListener } = await app();
     const queryClient = client();
     mount(queryClient, [Posts]);
     await waitFor(() => expect(statuses).toContain('live'));
-    const pending = awaitTxId(queryClient, '41', { timeoutMs: 2000 });
+    const own = await RECEIPTS.of('41');
+    const pending = awaitTxId(queryClient, own, { timeoutMs: 2000 });
     commit('posts', 'v1', '41');
     await expect(pending).resolves.toBeUndefined();
-    await expect(awaitTxId(queryClient, '41', { timeoutMs: 1 })).resolves.toBeUndefined();
+    await expect(awaitTxId(queryClient, own, { timeoutMs: 1 })).resolves.toBeUndefined();
 
-    const covered = awaitTxId(queryClient, '99', { timeoutMs: 3000 });
+    const covered = awaitTxId(queryClient, await RECEIPTS.of('99'), { timeoutMs: 3000 });
     restartListener();
     await expect(covered).resolves.toBeUndefined();
   });
@@ -347,10 +349,12 @@ describe('awaitTxId', () => {
   it('rejects with E006 on timeout and with E001 without a provider', async () => {
     const { mount, statuses, Posts } = await app();
     const queryClient = client();
-    await expect(awaitTxId(queryClient, '1')).rejects.toMatchObject({ code: LIVE_ERROR_CODES.config });
+    await expect(awaitTxId(queryClient, await RECEIPTS.of('1'))).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.config,
+    });
     mount(queryClient, [Posts]);
     await waitFor(() => expect(statuses).toContain('live'));
-    await expect(awaitTxId(queryClient, '7', { timeoutMs: 20 })).rejects.toMatchObject({
+    await expect(awaitTxId(queryClient, await RECEIPTS.of('7'), { timeoutMs: 20 })).rejects.toMatchObject({
       code: LIVE_ERROR_CODES.limit,
     });
   });

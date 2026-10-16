@@ -55,7 +55,7 @@ function fanoutGroup(streams: number) {
     title: `One commit to ${streams.toLocaleString('en-US')} open stream${streams === 1 ? '' : 's'}`,
     contract: {
       id: 'fanout/v1',
-      description: `each of the ${streams} streams gets exactly one change frame naming the committed table and its txid, with a cursor`,
+      description: `each of the ${streams} streams gets exactly one change frame naming the committed table and its receipt, with a cursor`,
     },
     inputs: commits,
     expected: commit => Array.from({ length: streams }, () => expectedFrame(commit)),

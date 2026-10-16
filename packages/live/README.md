@@ -6,14 +6,14 @@ This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas,
 
 ## The guarantees
 
-| Name                      | Promise                                                                                                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Committed-write hint      | A tracked statement publishes only if its transaction commits. False positives are allowed.                                                                                        |
-| Live updates              | While connected, authorized and with complete declarations, every active live query refetches after a commit to a table it declares.                                               |
-| One snapshot per query    | All reads through one `liveRead()` call's readers run in one `REPEATABLE READ READ ONLY` transaction.                                                                              |
-| Safe reconnect            | After any reconnect the client has replayed every missed hint, or it resets (refetches every live query).                                                                          |
-| Hidden writes stay hidden | Writes to tables a client may not see change none of its frames, txids or cursors, nor whether it resumes or resets. One exception: an overloaded hub resets every client at once. |
-| Bounded memory            | The replay ring keeps `replayMs` of frames under a hard cap; every stream queue is bounded. Overload becomes a reconnect, never unbounded buffering.                               |
+| Name                      | Promise                                                                                                                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Committed-write hint      | A tracked statement publishes only if its transaction commits. False positives are allowed.                                                                                                                                                         |
+| Live updates              | While connected, authorized and with complete declarations, every active live query refetches after a commit to a table it declares.                                                                                                                |
+| One snapshot per query    | All reads through one `liveRead()` call's readers run in one `REPEATABLE READ READ ONLY` transaction.                                                                                                                                               |
+| Safe reconnect            | After any reconnect the client has replayed every missed hint, or it resets (refetches every live query).                                                                                                                                           |
+| Hidden writes stay hidden | Writes to tables a client may not see change nothing it can observe: its frames, their size and timing, its receipts, cursors and queue, its `bye`, and whether it resumes or resets. One exception: an overloaded hub resets every client at once. |
+| Bounded memory            | The replay ring keeps `replayMs` of hints under a hard cap; every stream queue is bounded. Overload becomes a reconnect, never unbounded buffering.                                                                                                 |
 
 Not promised: two queries agreeing with each other, ordering between tables inside one batch, exactly-once hints.
 
@@ -84,13 +84,15 @@ if (change.value?.kind !== 'change' || change.value.tags[0]?.table !== 'posts')
 await hub.stop();
 ```
 
-Each `change` frame also carries `txids`: the Postgres transaction ids (`pg_current_xact_id()`) of the commits behind it, as decimal strings, because an `xid8` can pass `Number.MAX_SAFE_INTEGER`. A frame names exactly the commits that wrote one of its own tables, each once; a transaction that wrote tables on two frames of a split batch is on both. A client waits for its own write with `awaitTxId` (below). Hints from a source without txids carry `txids: []`.
+Each `change` frame also carries `txids`: the **receipts** of the commits behind it, never their Postgres transaction ids. A raw `pg_current_xact_id()` is one counter for the whole database, so the gap between two ids would tell a client how many transactions ran in between, on tables it may not read. A receipt is `base64url(HMAC-SHA256(secret, "arki-live/v1|" + app + "|" + xid8))` cut to 22 characters: one length, no order, nothing to subtract. Give the hub `receipts: liveReceipts({ app, secret })`. The secret comes from the app config, has at least 32 characters, and is the same on every instance of the app, like a session secret (make one with `openssl rand -base64 32`). `liveReceipts` throws E001 for a shorter secret or without WebCrypto. A hub without `receipts`, or a source without txids, sends `txids: []`. A frame names exactly the commits that wrote one of its own tables, each once; a transaction that wrote tables on two frames of a split window is on both. A client waits for its own write with `awaitTxId` (below).
 
-Cursors are opaque. Inside the hub a position is its epoch, its frame number and the time it was taken; on the wire it is sealed with AES-GCM under a key the hub makes at `start()`, with a random IV. Every cursor is 75 base64url characters and none can be read. A `change` frame is sealed once and every stream that gets it gets that cursor (one AES-GCM call per frame, not per client); `begin` cursors and `hub.cursor()` are sealed fresh each time. Keep it as a string.
+Cursors are opaque. Inside the hub a position is its epoch, its hint number and the time it was taken; on the wire it is sealed with AES-GCM under a key the hub makes at `start()`, with a random IV. Every cursor is 75 base64url characters and none can be read. Streams whose windows close at the same position share one sealed cursor (one AES-GCM call, not one per client); `begin` cursors and `hub.cursor()` are sealed fresh each time. Keep it as a string.
 
-Reset rules: a cursor this hub sealed, of the current epoch and at most `replayMs` old, resumes and replays the missed frames. The ring evicts by that same age, so every frame a young cursor needs is still there. No cursor, a cursor the hub cannot open (another hub's or replica's, changed, from before a restart), another epoch (a listener gap) or an older cursor resets. The decision depends on the cursor's age alone, never on how many frames passed: frames of tables a client cannot see count too, so a count would tell it they happened.
+Every source change is one hint in the ring. Each stream sees the hints through its grant and batches the visible ones in its own window: the first visible hint opens a `batchMs` window, and when it closes (or holds 256 transactions) the stream gets the window's tables unioned, 256 per frame. A frame's cursor is the hub's position when its window closed.
 
-Two things end every stream with `gap`: a listener gap, and an overload. `replayFrames` is a hard cap on the ring, not an eviction: a ring that reaches it starts a new epoch, so every client resets together. That reveals only "the hub was overloaded", the same to everyone. It is logged at warn (`arki:live:hub`, with the cap, the frames held and the streams). Size the cap above the peak frame rate times `replayMs`: at most 1000 / `batchMs` frames per second, plus one per 256 commits, times one per 256 tables in a window. The default, 65 536, covers about 500 frames per second for 120 s.
+Reset rules: a cursor this hub sealed, of the current epoch and at most `replayMs` old, resumes and replays the missed hints through the stream's grant and windows, timed by when each hint arrived: the stream gets the frames it would have got had it stayed connected. The ring evicts by that same age, and every hint after a cursor arrived after the cursor was taken, so every hint a young cursor needs is still there. No cursor, a cursor the hub cannot open (another hub's or replica's, changed, from before a restart), another epoch (a listener gap) or an older cursor resets. The decision depends on the cursor's age alone, never on how many hints passed: hints of tables a client cannot see count too, so a count would tell it they happened.
+
+Two things end every stream with `gap`: a listener gap, and an overload. `replayFrames` is a hard cap on the ring (in hints: one per table per commit), not an eviction: a ring that reaches it starts a new epoch, so every client resets together. That reveals only "the hub was overloaded", the same to everyone. It is logged at warn (`arki:live:hub`, with the cap, the hints held and the streams). Size the cap above the peak hint rate times `replayMs`. The default, 262 144, covers about 2 000 hints per second for 120 s; a hotter app shortens `replayMs` or raises the cap.
 
 `hub.cursor()` gives the current position as a new cursor (or `undefined` while the hub is not ready). It reads the position when called, so a server that calls it before reading a page's data can hand it to the client, and the client replays every commit since (see Server rendering).
 
@@ -129,7 +131,7 @@ await listen(endpoint.fetch, { port: 3000 });
 
 In a TanStack Start route: `GET: ({ request }) => endpoint.fetch(request)` in `routes/api/live.ts`. In a Dot app, `liveQueries` from `@arki/live/dot` does all of this: it checks the triggers at boot (E002), listens at start, sends `bye` and gives the client back at stop, and publishes the bundle as `liveRoutes` for `http({ bundles: [liveQ.provides.liveRoutes] })`. Declare it after `dbMigrations` and before `http()`.
 
-What the endpoint does, in order, before any stream header: a malformed or repeated `cursor` answers 400 E004 (a well-formed cursor the hub cannot open is not an error: the stream starts with a reset); `authorize` returning `null` answers 401 E005; a hub without its listener answers 503 E003 with `retry-after`. Then `hello` with the part of the manifest the grant allows (the procedures whose every table is granted), and `change` frames cut down to the granted tables. A frame keeps only the `txids` of transactions that wrote a granted table, and **a frame with no granted table is skipped whole**. Because cursors are opaque, a client cannot count the frames it was not sent either. What it can still see is the timing of the frames it does get: a hidden write that lands in the same batch window as a visible one is merged into that frame without a trace, but the stream as a whole shows only when visible tables changed. After `maxAgeMs` (default 5 minutes) the stream sends `bye` and ends, and the client reconnects and is authorized again.
+What the endpoint does, in order, before any stream header: a malformed or repeated `cursor` answers 400 E004 (a well-formed cursor the hub cannot open is not an error: the stream starts with a reset); `authorize` returning `null` answers 401 E005; a hub without its listener answers 503 E003 with `retry-after`. Then `hello` with the part of the manifest the grant allows (the procedures whose every table is granted), and `change` frames of the granted tables only. The endpoint passes the grant into `hub.open({ grant })`, and the hub applies it to every hint **before** the stream's own batch window, queue and frame split. A hint with no granted table never reaches the stream: it opens no window, takes no queue slot, and counts toward neither the 256-transaction flush nor `subscriberFrames`. A frame names only the receipts of transactions that wrote a granted table. Because cursors are opaque, a client cannot count the hints it was not sent either. So hidden writes change nothing a stream shows: not its frames, not their timing, not its `bye`. After `maxAgeMs` (default 5 minutes) the stream sends `bye` and ends, and the client reconnects and is authorized again.
 
 Try it by hand (the demo test `src/tests/demo.pg.test.ts` does the same against Postgres 16 and 18):
 
@@ -138,7 +140,7 @@ curl -N -H 'authorization: Bearer demo' http://localhost:3000/api/live
 # data: {"kind":"hello","v":1,"mode":"reset","cursor":"q8Zt…(75 characters)","manifest":[…]}
 
 psql "$DB_URL" -c "insert into posts values ('p1', 'Hello')"
-# data: {"kind":"change","cursor":"Vb3K…(75 characters)","tags":[{"schema":"public","table":"posts"}],"txids":["748"]}
+# data: {"kind":"change","cursor":"Vb3K…(75 characters)","tags":[{"schema":"public","table":"posts"}],"txids":["Qm3x…(22 characters)"]}
 
 psql "$DB_URL" -c "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'blog_listener'"
 # data: {"kind":"gap"}   then the stream ends; the next connect is a reset (new epoch)
@@ -170,7 +172,7 @@ const appContract = {
       .meta(live({ reads: [posts] }))
       .input(z.object({ page: z.int() }))
       .output(z.array(Post)),
-    create: contract.input(z.object({ title: z.string() })).output(z.object({ id: z.string(), txid: z.string() })),
+    create: contract.input(z.object({ title: z.string() })).output(z.object({ id: z.string(), receipt: z.string() })),
   },
 };
 const client: ContractRouterClient<typeof appContract> = createORPCClient(
@@ -217,7 +219,7 @@ If the utils were built with a `path` prefix, pass it as `keyPrefix`. One provid
 
 ### Wait for your own write
 
-A mutation that returns its transaction's id (`select pg_current_xact_id()::text`, inside the same transaction) can wait until the hint for it arrived, so the cache is refetching by the time the mutation settles:
+A mutation that returns the receipt of its own transaction can wait until the hint for it arrived, so the cache is refetching by the time the mutation settles. On the server, read `select pg_current_xact_id()::text` inside the writing transaction and return `{ id, receipt: await receipts.of(txid) }`, with the same `receipts` the hub has. Never return the raw id: it is the database-wide counter.
 
 ```tsx continue
 import { useMutation } from '@tanstack/react-query';
@@ -227,7 +229,7 @@ import { awaitTxId } from '@arki/live/react';
 export function NewPost() {
   const create = useMutation({
     ...orpc.posts.create.mutationOptions(),
-    onSuccess: ({ txid }) => awaitTxId(queryClient, txid, { timeoutMs: 5000 }),
+    onSuccess: ({ receipt }) => awaitTxId(queryClient, receipt, { timeoutMs: 5000 }),
   });
   return (
     <button disabled={create.isPending} onClick={() => create.mutate({ title: 'Hello' })}>
@@ -237,7 +239,7 @@ export function NewPost() {
 }
 ```
 
-`awaitTxId` resolves when a `change` frame names the txid (also when one already did, among the last 1024) or a reset refetched every live query; it rejects with E006 after `timeoutMs` (default 10 000) and with E001 when no provider is mounted for that client.
+`awaitTxId` resolves when a `change` frame names the receipt (also when one already did, among the last 1024) or a reset refetched every live query; it rejects with E006 after `timeoutMs` (default 10 000) and with E001 when no provider is mounted for that client.
 
 ### TanStack DB
 
@@ -322,7 +324,8 @@ Every write that commits through Postgres publishes: a journal command, a reposi
 
 - The stream needs `authorize`. It decides which tables a client gets hints for; every refetch is still authorized by its procedure, so a hint never carries data.
 - A hint tells its receiver that a table changed, and when. On a table shared by tenants, any client granted it sees the activity of every tenant on it. Grant only what the client's procedures read.
-- Hidden writes stay hidden (the guarantee above): frames, txids, cursors and resume-or-reset do not depend on them; only a global overload reset does.
+- Hidden writes stay hidden (the guarantee above). The grant applies before each stream's batch window, queue and frame split, so a stream's frames, their size and timing, its `bye`, its receipts, its cursors and its resume-or-reset do not depend on them; only a global overload reset does. What remains is machine-level: hidden load slows the same hub and database.
+- Frames and mutations carry receipts, not transaction ids: an HMAC under the app's secret, so a client cannot read the database-wide transaction counter or count the transactions between two it saw. Keep the secret like a session secret, the same on every instance; a new secret only makes `awaitTxId` calls in flight time out. Two clients who compare their receipts can tell that one transaction wrote tables both of them see.
 - Revocation: data stops at the next refetch (a 401/403 resets the query once); the stream itself is refused at its next reconnect, at most `maxAgeMs` (5 min) later. On sign-out or an account switch, follow the recipe above.
 
 ## Operations
@@ -348,7 +351,7 @@ Every write that commits through Postgres publishes: a journal command, a reposi
 
 ## Limits
 
-`batchMs` 20, `replayMs` 120 000 (the age up to which a cursor resumes), `replayFrames` 65 536 (the overload cap), `subscriberFrames` 256, 256 tags and 256 txids per frame (a window that reaches 256 transactions flushes at once), identifiers of at most 63 bytes. A stream that receives no byte for 35 s is dropped by the client.
+`batchMs` 20, `replayMs` 120 000 (the age up to which a cursor resumes), `replayFrames` 262 144 (the overload cap, in hints), `subscriberFrames` 256, 256 tags and 256 txids per frame (a window that reaches 256 transactions flushes at once), identifiers of at most 63 bytes. A stream that receives no byte for 35 s is dropped by the client.
 
 ## Tests
 

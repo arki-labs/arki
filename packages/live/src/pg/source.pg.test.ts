@@ -28,6 +28,7 @@ import type { LiveHub, LiveManifest, TableTag } from '../index.js';
 import type { LiveQuery, ScriptedClient } from '../tests/scripted-client.js';
 import { tableTag } from '../drizzle/index.js';
 import { createLiveHub, LIVE_ERROR_CODES } from '../index.js';
+import { RECEIPTS } from '../tests/fixtures.js';
 import { scriptedClient } from '../tests/scripted-client.js';
 import { liveChannel, liveMigration, pgSource, verifyLiveTriggers } from './index.js';
 
@@ -133,7 +134,11 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
 
   async function startHub(listenerName: string): Promise<{ hub: LiveHub; pool: pg.Pool }> {
     const pool = newPool(listenerName);
-    const hub = createLiveHub({ source: pgSource({ pool, app: 'blog', retryMs: 50 }), limits: { batchMs: 5 } });
+    const hub = createLiveHub({
+      source: pgSource({ pool, app: 'blog', retryMs: 50 }),
+      limits: { batchMs: 5 },
+      receipts: RECEIPTS,
+    });
     await hub.start();
     return { hub, pool };
   }
@@ -198,8 +203,8 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     expect(pool.totalCount, 'the listen client is closed on stop').toBe(0);
   });
 
-  it('a change frame carries the txid of the committing transaction, as a decimal string', async () => {
-    // Why: a client awaits its own write by this id (awaitTxId, M3); it must be the commit's own.
+  it('a change frame carries the receipt of the committing transaction, never its decimal id', async () => {
+    // Why: a client awaits its own write by this receipt (awaitTxId, M3); it must be the commit's own.
     const { hub } = await startHub('listener_txid');
     const raw = await watch(hub);
     try {
@@ -211,8 +216,8 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       });
       expect(committed).toMatch(/^[1-9]\d*$/);
       await expect.poll(() => raw.tags).toEqual([POSTS, COUNTS]);
-      // Two tables, one transaction: one txid.
-      expect(raw.txids).toEqual([committed]);
+      // Two tables, one transaction: one receipt.
+      expect(raw.txids).toEqual([await RECEIPTS.of(committed ?? '')]);
     } finally {
       raw.stop();
       await hub.stop();

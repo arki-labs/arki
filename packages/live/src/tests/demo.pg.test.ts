@@ -4,7 +4,7 @@
  *
  *   1. `GET /api/live` answers `hello` (a reset: no cursor yet).
  *   2. A commit from another connection arrives as `change`, with the
- *      transaction's id in `txids`.
+ *      receipt of its transaction in `txids`.
  *   3. Killing the listen backend ends the stream with `gap`.
  *   4. Once the listener is back, the old cursor resets: a new epoch.
  *
@@ -28,6 +28,7 @@ import { liveEndpoint } from '../http.js';
 import { createLiveHub, live, liveTables } from '../index.js';
 import { liveManifest } from '../orpc/index.js';
 import { liveMigration, pgSource } from '../pg/index.js';
+import { RECEIPTS } from './fixtures.js';
 import { sseReader } from './sse-reader.js';
 
 const POSTS: TableTag = { schema: 'public', table: 'posts' };
@@ -54,7 +55,11 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('demo on %s', image 
     await writer.query('create table posts (id text primary key, title text not null)');
     await writer.query(liveMigration({ app: 'blog', tables: liveTables(manifest) }).up);
 
-    hub = createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog', retryMs: 50 }), limits: { batchMs: 5 } });
+    hub = createLiveHub({
+      source: pgSource({ pool: listenPool, app: 'blog', retryMs: 50 }),
+      limits: { batchMs: 5 },
+      receipts: RECEIPTS,
+    });
     await hub.start();
     const endpoint = liveEndpoint({
       hub,
@@ -88,12 +93,12 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('demo on %s', image 
     const inserted = await writer.query<{ txid: string }>(
       `with row as (insert into posts values ('p1', 'Hello') returning 1) select pg_current_xact_id()::text as txid from row`,
     );
-    const txid = inserted.rows[0]?.txid;
+    const txid = inserted.rows[0]?.txid ?? '';
     expect(await stream.next()).toEqual({
       kind: 'change',
       cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
-      txids: [txid],
+      txids: [await RECEIPTS.of(txid)],
     });
 
     await writer.query('select pg_terminate_backend(pid) from pg_stat_activity where application_name = $1', [

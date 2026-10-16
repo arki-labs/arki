@@ -21,7 +21,7 @@ const change = (cursor = CURSOR_B): LiveEvent => ({
   kind: 'change',
   cursor,
   tags: [{ schema: 'public', table: 'posts' }],
-  txids: ['7'],
+  txids: ['r7r7r7r7r7r7r7r7r7r7r7'],
 });
 const frame = (event: LiveEvent): string => `data: ${JSON.stringify(event)}\n\n`;
 

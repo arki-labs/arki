@@ -9,7 +9,7 @@ import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import pg from 'pg';
 
-import { createLiveHub } from '@arki/live';
+import { createLiveHub, liveReceipts } from '@arki/live';
 import { liveEndpoint } from '@arki/live/http';
 import { pgSource } from '@arki/live/pg';
 
@@ -32,9 +32,12 @@ async function startServerApp() {
   // `error` event must not crash the process.
   listenPool.on('error', () => null);
 
+  // A real app reads the secret from its config; the fixture's is fixed and test-only.
+  const receipts = liveReceipts({ app: LIVE_APP_NAME, secret: 'e2e-fixture-secret-not-for-production' });
   const hub = createLiveHub({
     source: pgSource({ pool: listenPool, app: LIVE_APP_NAME, retryMs: 100 }),
     limits: { batchMs: 5 },
+    receipts,
   });
   await hub.start();
   const endpoint = liveEndpoint({ hub, manifest: liveAppManifest, authorize: () => Promise.resolve({}) });
@@ -56,7 +59,8 @@ async function startServerApp() {
         );
         const row = result.rows[0];
         if (row === undefined) throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'the insert returned no row' });
-        return row;
+        // The client gets the receipt of its write, never the raw transaction id.
+        return { id: row.id, receipt: await receipts.of(row.txid) };
       }),
     },
   });

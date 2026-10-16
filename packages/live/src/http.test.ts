@@ -20,6 +20,7 @@ import { liveEndpoint } from './http.js';
 import { createLiveHub, LIVE_ERROR_CODES } from './index.js';
 import { tableTagSchema } from './schema.js';
 import { fakeSource } from './testing.js';
+import { RECEIPTS } from './tests/fixtures.js';
 import { sseReader } from './tests/sse-reader.js';
 
 const tag = (table: string): TableTag => ({ schema: 'public', table });
@@ -35,6 +36,9 @@ const manifest: LiveManifest = [
   { path: ['secrets', 'list'], reads: [SECRETS] },
 ];
 
+/** What a frame carries for transaction `txid`. */
+const receipt = (txid: string): Promise<string> => RECEIPTS.of(txid);
+
 const grantSchema = z.object({ tables: z.array(tableTagSchema).optional() });
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -45,7 +49,7 @@ afterEach(async () => {
 /** A ready hub, its source and an endpoint whose grant comes from the `x-grant` header (JSON), `null` without it. */
 async function rig(options: { readonly maxAgeMs?: number } = {}) {
   const source = fakeSource();
-  const hub: LiveHub = createLiveHub({ source, limits: { batchMs: 1 } });
+  const hub: LiveHub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
   await hub.start();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
@@ -154,7 +158,7 @@ describe('the grant filter', () => {
     await commit([AUDIT], '4');
     await commit([AUDIT, SECRETS], '5');
     const change = await client.next();
-    expect(change).toMatchObject({ kind: 'change', tags: [SECRETS], txids: ['5'] });
+    expect(change).toMatchObject({ kind: 'change', tags: [SECRETS], txids: [await receipt('5')] });
   });
 
   it('keeps only granted tables, and skips a frame with none of them, txids included', async () => {
@@ -172,7 +176,7 @@ describe('the grant filter', () => {
       kind: 'change',
       cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
-      txids: ['43'],
+      txids: [await receipt('43')],
     });
   });
 
@@ -208,7 +212,11 @@ describe('the grant filter', () => {
     source.emit({ kind: 'change', tags: [SECRETS], txid: '41' });
     source.emit({ kind: 'change', tags: [POSTS], txid: '42' });
     source.emit({ kind: 'change', tags: [SECRETS, POSTS], txid: '43' });
-    expect(await client.next()).toMatchObject({ kind: 'change', tags: [POSTS], txids: ['42', '43'] });
+    expect(await client.next()).toMatchObject({
+      kind: 'change',
+      tags: [POSTS],
+      txids: [await receipt('42'), await receipt('43')],
+    });
   });
 
   it('a batch over 256 tables whose last frame is hidden still gives the visible frame the txids of its own tables', async () => {
@@ -222,7 +230,7 @@ describe('the grant filter', () => {
       kind: 'change',
       cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
-      txids: ['7'],
+      txids: [await receipt('7')],
     });
   });
 
@@ -251,7 +259,11 @@ describe('the grant filter', () => {
     expect(await narrow.next()).toMatchObject({ kind: 'hello', mode: 'resume' });
     expect(await wide.next()).toMatchObject({ kind: 'hello', mode: 'resume' });
     // The wide grant sees the hidden table's frames; the narrow one none of them.
-    expect(await wide.next()).toMatchObject({ kind: 'change', tags: [SECRETS], txids: ['1'] });
+    const replayed = await wide.next();
+    expect(replayed).toMatchObject({ kind: 'change', tags: [SECRETS] });
+    // Its first receipt is the first hidden transaction's. (Only the timers were fake, so the replay
+    // windows, timed by when each hint arrived, may group several transactions.)
+    expect(replayed?.kind === 'change' ? replayed.txids[0] : undefined).toBe(await receipt('1'));
   });
 
   it('past the age both grants reset, whether hidden frames happened or not', async () => {
@@ -294,7 +306,7 @@ describe('the grant filter', () => {
     const frames: (LiveEvent | undefined)[] = [await again.next(), await again.next()];
     expect(frames).toEqual([
       expect.objectContaining({ kind: 'hello', mode: 'resume' }),
-      expect.objectContaining({ kind: 'change', tags: [POSTS], txids: ['2'] }),
+      expect.objectContaining({ kind: 'change', tags: [POSTS], txids: [await receipt('2')] }),
     ]);
     // Freshly sealed: the same position never looks the same twice.
     expect(frames[0]?.kind === 'hello' && frames[0].cursor !== hello.cursor).toBe(true);
