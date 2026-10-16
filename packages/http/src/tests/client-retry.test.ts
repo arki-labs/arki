@@ -17,12 +17,12 @@ import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 
 const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
-  params: z.object({ id: z.string() }),
+  params: { id: z.string() },
   output: z.object({ id: z.string() }),
 });
 const payOrder = route.post('/orders/:id/pay', {
   id: 'orders.pay',
-  params: z.object({ id: z.string() }),
+  params: { id: z.string() },
   body: z.object({ amount: z.int() }),
   output: z.object({ paid: z.boolean() }),
 });

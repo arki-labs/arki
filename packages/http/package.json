@@ -1,7 +1,7 @@
 {
   "name": "@arki/http",
   "version": "0.2.1",
-  "description": "Typed HTTP for ARKI — route contracts as data, zod-validated handlers, request-scope derivers, SSE streaming, OpenAPI generation, and the DOT http() plugin.",
+  "description": "Typed HTTP for ARKI — route contracts as data, schema-validated handlers (any Standard Schema), request-scope derivers, SSE streaming, OpenAPI generation, and the DOT http() plugin.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -123,8 +123,10 @@
     "@arki/vitest-config": "workspace:*",
     "@hono/zod-validator": "^0.9.1",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "itty-router": "^5.0.24",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "prettier": "@arki/prettier-config"

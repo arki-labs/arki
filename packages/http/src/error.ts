@@ -16,8 +16,6 @@
  * Every code is stable API. Match on codes, never parse messages.
  */
 
-import type { z } from 'zod';
-
 /**
  * Stable error codes for `@arki/http`. `E0NN` codes surface through the
  * DOT lifecycle (boot/start/stop failures); `E4xx`/`E5xx` codes surface
@@ -42,6 +40,8 @@ export const HTTP_ERROR_CODES = {
   invalidContract: 'ARKI_HTTP_E011',
   /** A webhook scheme has no secrets, an empty secret, or a secret it cannot decode. Thrown when the scheme is created. */
   invalidWebhookScheme: 'ARKI_HTTP_E012',
+  /** A contract schema cannot describe itself as JSON Schema (OpenAPI, manifest). Thrown by `contractMeta`/`toOpenApi`. */
+  noJsonSchema: 'ARKI_HTTP_E013',
   /** Request validation failed (params/headers/query/body) or the body is not valid JSON. */
   badRequest: 'ARKI_HTTP_E400',
   /** A route that needs an idempotency key got none, or an unusable one. Answers 400. */
@@ -123,8 +123,14 @@ export class HttpConfigError extends Error {
   readonly remediation: string;
   readonly docsUrl: string;
 
-  constructor(fields: { readonly code: string; readonly message: string; readonly remediation: string; readonly docsUrl?: string }) {
-    super(fields.message);
+  constructor(fields: {
+    readonly code: string;
+    readonly message: string;
+    readonly remediation: string;
+    readonly docsUrl?: string;
+    readonly cause?: unknown;
+  }) {
+    super(fields.message, fields.cause === undefined ? {} : { cause: fields.cause });
     this.name = 'HttpConfigError';
     this.code = fields.code;
     this.remediation = fields.remediation;
@@ -152,11 +158,6 @@ export type HttpErrorEnvelope = {
 export function describeInternalError(error: unknown): string {
   if (process.env.NODE_ENV === 'production') return 'internal error';
   return error instanceof Error ? error.message : String(error);
-}
-
-/** One line per zod issue: `path: message`, joined with `; `. */
-export function formatIssues(error: z.ZodError): string {
-  return error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
 }
 
 /**

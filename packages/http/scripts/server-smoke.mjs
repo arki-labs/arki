@@ -15,8 +15,8 @@ const check = (name, ok) => {
 
 const getItem = route.get('/items/:id', {
   id: 'items.get',
-  params: z.object({ id: z.string().regex(/^\d+$/) }),
-  headers: z.strictObject({ 'x-tenant': z.string() }),
+  params: { id: z.string().regex(/^\d+$/) },
+  headers: { 'x-tenant': z.string() },
   output: z.object({ tenant: z.string(), id: z.string() }),
   responses: { 410: z.object({ reason: z.string() }) },
 });

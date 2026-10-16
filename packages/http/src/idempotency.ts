@@ -9,17 +9,21 @@
  */
 import { z } from 'zod';
 
+import type { StandardSchemaV1 } from '@arki/schema';
+
 import type { HttpMiddleware } from './engine.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
 import { HTTP_ERROR_CODES, HttpError } from './error.js';
 
 /** A response as the cache keeps it: the status, the allowlisted headers, and the body as base64. */
-export const storedResponse = z.object({
+export type StoredResponse = { status: number; headers: Record<string, string>; body: string };
+
+/** Checks a {@link StoredResponse} read back from a cache: `parse(storedResponse, value)` from `@arki/schema`. */
+export const storedResponse: StandardSchemaV1<unknown, StoredResponse> = z.object({
   status: z.int().min(200).max(599),
   headers: z.record(z.string(), z.string()),
   body: z.string(),
 });
-export type StoredResponse = z.infer<typeof storedResponse>;
 
 /** What `begin` found for a key. */
 export type BeginResult =

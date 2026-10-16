@@ -14,6 +14,7 @@ import { route } from '../contract.js';
 import { buildEngine, composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 import { raw } from '../raw.js';
+import { codec, optional } from '../wire.js';
 
 const BASE = 'http://test.local';
 
@@ -26,7 +27,7 @@ describe('buildEngine', () => {
   it('serves a bound contract: params, query, and output serialization', async () => {
     const getOrder = route.get('/orders/:id', {
       id: 'orders.get',
-      query: z.object({ expand: z.string().optional() }),
+      query: { expand: optional(z.string()) },
       output: z.object({ id: z.string(), expand: z.string().optional() }),
     });
     const engine = buildEngine([
@@ -45,7 +46,7 @@ describe('buildEngine', () => {
   it('rejects invalid query with a 400 envelope', async () => {
     const list = route.get('/orders', {
       id: 'orders.list',
-      query: z.object({ status: z.enum(['open', 'shipped']) }),
+      query: { status: z.enum(['open', 'shipped']) },
       output: z.array(z.string()),
     });
     const engine = buildEngine([routes().bind(list, () => [])]);
@@ -138,15 +139,12 @@ describe('buildEngine', () => {
     // A codec maps the wire form (ISO string) to the handler's form (Date).
     // Input must decode (string -> Date) and output must encode (Date ->
     // string). Parsing the output would reject the handler's Date with a 500.
-    const isoDate = z.codec(z.iso.datetime(), z.date(), {
-      decode: text => new Date(text),
-      encode: date => date.toISOString(),
-    });
-    const shift = route.post('/shift', {
-      id: 'shift',
-      body: z.object({ at: isoDate }),
-      output: z.object({ at: isoDate }),
-    });
+    const isoDate = codec(
+      z.iso.datetime().transform(text => new Date(text)),
+      z.date().transform(date => date.toISOString()),
+    );
+    const at = codec(z.object({ at: isoDate.decode }), z.object({ at: isoDate.encode }));
+    const shift = route.post('/shift', { id: 'shift', body: at, output: at });
     const engine = buildEngine([
       routes().bind(shift, ({ body }) => {
         expect(body.at).toBeInstanceOf(Date);

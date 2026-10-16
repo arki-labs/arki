@@ -11,6 +11,7 @@ import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../engine.js';
 import { HTTP_ERROR_CODES } from '../error.js';
+import { codec } from '../wire.js';
 
 const BASE = 'http://test.local';
 
@@ -38,13 +39,15 @@ describe('sse bindings', () => {
   });
 
   it('encodes each event, so a codec frames a Date as its ISO string', async () => {
-    // With `parse` the Date would fail the codec's string input and the
-    // stream would end in an error frame instead of the event.
-    const isoDate = z.codec(z.iso.datetime(), z.date(), {
-      decode: text => new Date(text),
-      encode: date => date.toISOString(),
+    // Decoding the Date would fail the string input and the stream would
+    // end in an error frame instead of the event.
+    const ticks = route.sse('/ticks', {
+      id: 'ticks',
+      event: codec(
+        z.object({ at: z.iso.datetime().transform(text => new Date(text)) }),
+        z.object({ at: z.date().transform(date => date.toISOString()) }),
+      ),
     });
-    const ticks = route.sse('/ticks', { id: 'ticks', event: z.object({ at: isoDate }) });
     const engine = buildEngine([
       routes().bind(ticks, async function* () {
         yield { at: new Date(0) };
@@ -58,7 +61,7 @@ describe('sse bindings', () => {
   it('validates query and delivers params to the generator', async () => {
     const watch = route.sse('/orders/:id/watch', {
       id: 'orders.watch',
-      query: z.object({ from: z.coerce.number() }),
+      query: { from: z.coerce.number() },
       event: z.object({ id: z.string(), from: z.number() }),
     });
     const engine = buildEngine([

@@ -10,9 +10,15 @@ import { defineFailure, isFailure } from '@arki/failure';
 
 import { createClient } from '../dist/client.js';
 
-const isoDate = z.codec(z.iso.datetime(), z.date(), {
-  decode: text => new Date(text),
-  encode: date => date.toISOString(),
+// What `codec()` and `optional()` from the root entry return, written out:
+// this script loads only the client entry.
+const isoDate = {
+  decode: z.iso.datetime().transform(text => new Date(text)),
+  encode: z.date().transform(date => date.toISOString()),
+};
+const atOf = extra => ({
+  decode: z.object({ ...extra, at: isoDate.decode }),
+  encode: z.object({ ...extra, at: isoDate.encode }),
 });
 
 // Contracts are plain data; the client reads kind, id, method, path and schemas.
@@ -21,9 +27,9 @@ const moveEvent = {
   id: 'events.move',
   method: 'POST',
   path: '/events/:id/move',
-  query: z.object({ since: isoDate.optional() }),
-  body: z.object({ at: isoDate }),
-  output: z.object({ id: z.string(), at: isoDate }),
+  query: { since: { schema: isoDate, optional: true } },
+  body: atOf({}),
+  output: atOf({ id: z.string() }),
 };
 const lockEvent = { kind: 'http', id: 'events.lock', method: 'DELETE', path: '/events/:id' };
 const EventNotFound = defineFailure('event.not_found', {

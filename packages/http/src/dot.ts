@@ -375,7 +375,7 @@ function bindHttp(
 /**
  * Deprecated shim for registering contracts from a feature plugin's `configure`
  * hook. Prefer declaring contracts directly in `actions: [...]` on the plugin.
- * Converts zod schemas to JSON Schema once, at configure time, so
+ * Converts contract schemas to JSON Schema once, at configure time, so
  * `dot explain --as openapi` renders without booting:
  *
  * ```ts

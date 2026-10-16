@@ -9,11 +9,12 @@ import { z } from 'zod';
 import { route } from '../contract.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 import { contractMeta, toOpenApi, toOpenApiFromManifest } from '../openapi.js';
+import { optional } from '../wire.js';
 
 const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
   summary: 'Fetch one order',
-  query: z.object({ expand: z.enum(['items', 'none']).optional() }),
+  query: { expand: optional(z.enum(['items', 'none'])) },
   output: z.object({ id: z.string() }),
 });
 

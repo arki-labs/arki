@@ -15,6 +15,7 @@ import { buildEngine } from '../engine.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 import { contractMeta, toOpenApi, toOpenApiFromManifest } from '../openapi.js';
 import { raw } from '../raw.js';
+import { codec, optional } from '../wire.js';
 
 const BASE = 'http://test.local';
 
@@ -35,15 +36,15 @@ const Gone = z.object({ reason: z.string() });
 
 const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
-  params: z.object({ id: OrderId }),
-  headers: z.strictObject({ 'x-tenant': z.string() }),
+  params: { id: OrderId },
+  headers: { 'x-tenant': z.string() },
   output: Order,
   responses: { 410: Gone },
 });
 
 const listOrders = route.get('/lists/:kind?', {
   id: 'lists.get',
-  params: z.object({ kind: z.string().optional() }),
+  params: { kind: optional(z.string()) },
   output: z.object({ kind: z.string() }),
 });
 
@@ -69,20 +70,23 @@ describe('declaration checks (E011)', () => {
   };
 
   it('rejects params that do not match the path placeholders, in both directions', () => {
-    invalid(() => route.get('/a/:id', { id: 'x', params: z.object({ other: z.string() }) as never }));
-    invalid(() => route.get('/a/:id', { id: 'x', params: z.object({ id: z.string(), extra: z.string() }) }));
-    invalid(() => route.get('/a/:id', { id: 'x', params: z.string() as never }));
+    // @ts-expect-error -- params has no key for ":id"
+    invalid(() => route.get('/a/:id', { id: 'x', params: { other: z.string() } }));
+    invalid(() => route.get('/a/:id', { id: 'x', params: { id: z.string(), extra: z.string() } }));
+    // @ts-expect-error -- params is a record of fields, not one schema
+    invalid(() => route.get('/a/:id', { id: 'x', params: z.object({ id: z.string() }) }));
   });
 
-  it('allows one optional placeholder, as the last segment, whose schema accepts a missing value', () => {
+  it('allows one optional placeholder, as the last segment, and pairs it with an optional(...) field', () => {
     invalid(() => route.get('/a/:x?/b', { id: 'x' }));
     invalid(() => route.get('/a/:x?/:y?', { id: 'x' }));
-    invalid(() => route.get('/a/:x?', { id: 'x', params: z.object({ x: z.string() }) }));
-    expect(route.get('/a/:x?', { id: 'x', params: z.object({ x: z.string().optional() }) }).path).toBe('/a/:x?');
+    invalid(() => route.get('/a/:x?', { id: 'x', params: { x: z.string() } }));
+    invalid(() => route.get('/a/:x', { id: 'x', params: { x: optional(z.string()) } }));
+    expect(route.get('/a/:x?', { id: 'x', params: { x: optional(z.string()) } }).path).toBe('/a/:x?');
   });
 
   it('requires lower-case header names', () => {
-    invalid(() => route.get('/a', { id: 'x', headers: z.object({ 'X-Tenant': z.string() }) }));
+    invalid(() => route.get('/a', { id: 'x', headers: { 'X-Tenant': z.string() } }));
   });
 
   it('rejects statuses that cannot carry a declared body, and a 200 next to output', () => {
@@ -95,14 +99,14 @@ describe('declaration checks (E011)', () => {
   });
 
   it('applies to SSE contracts too', () => {
-    invalid(() => route.sse('/a/:id', { id: 'x', event: z.number(), params: z.object({ id: z.string(), extra: z.string() }) }));
+    invalid(() => route.sse('/a/:id', { id: 'x', event: z.number(), params: { id: z.string(), extra: z.string() } }));
   });
 
   it('types ParamsOf with optional placeholders', () => {
     expectTypeOf<ParamsOf<'/a/:id/b/:x?'>>().toEqualTypeOf<{ readonly id: string; readonly x?: string }>();
     invalid(() => {
-      // @ts-expect-error -- the schema has no key for the placeholder ":id"
-      return route.get('/a/:id', { id: 'x', params: z.object({}) });
+      // @ts-expect-error -- params has no key for the placeholder ":id"
+      return route.get('/a/:id', { id: 'x', params: {} });
     });
   });
 });
@@ -118,12 +122,12 @@ describe('params and headers', () => {
     const badParam = await engine.fetch(new Request(`${BASE}/orders/nope`, { headers: { 'x-tenant': 't1' } }));
     expect(badParam.status).toBe(400);
     expect(await badParam.json()).toMatchObject({
-      error: { code: HTTP_ERROR_CODES.badRequest, message: expect.stringContaining('params validation failed') as string },
+      error: { code: HTTP_ERROR_CODES.badRequest, message: expect.stringContaining('params.id:') as string },
     });
     const noHeader = await engine.fetch(new Request(`${BASE}/orders/o1`));
     expect(noHeader.status).toBe(400);
     expect(await noHeader.json()).toMatchObject({
-      error: { message: expect.stringContaining('headers validation failed') as string },
+      error: { message: expect.stringContaining('headers.x-tenant:') as string },
     });
     expect(calls).not.toHaveBeenCalled();
   });
@@ -271,8 +275,8 @@ describe('sse params and headers', () => {
   it('validates them before the stream opens', async () => {
     const ticks = route.sse('/ticks/:room', {
       id: 'ticks',
-      params: z.object({ room: z.enum(['a', 'b']) }),
-      headers: z.object({ 'x-tenant': z.string() }),
+      params: { room: z.enum(['a', 'b']) },
+      headers: { 'x-tenant': z.string() },
       event: z.number(),
     });
     const handler = vi.fn(async function* () {
@@ -290,7 +294,7 @@ describe('sse params and headers', () => {
 describe('OpenAPI', () => {
   const download = route.get('/files/:name', {
     id: 'files.get',
-    params: z.object({ name: z.string().meta({ id: 'FileName' }) }),
+    params: { name: z.string().meta({ id: 'FileName' }) },
     output: raw({ contentType: 'application/pdf' }),
     responses: { 200: z.string() },
   });
@@ -325,14 +329,19 @@ describe('OpenAPI', () => {
     expect(paths['/things']!['delete']!['responses']).toEqual({ '204': { description: 'no content' } });
   });
 
-  it('keeps references resolvable when it lifts a parameter out of its schema', () => {
+  it('keeps $defs as components, so a lifted parameter still resolves', () => {
     const parameters = paths['/files/{name}']!['get']!['parameters'] as { schema: unknown }[];
-    expect(JSON.stringify(parameters)).not.toContain('$ref');
+    expect(parameters[0]?.schema).toEqual({ $ref: '#/components/schemas/FileName' });
+    expect(toOpenApi(contracts, info)['components']).toEqual({ schemas: { FileName: { type: 'string' } } });
   });
 
   it('describes codecs by their wire form', () => {
-    const isoDate = z.codec(z.iso.datetime(), z.date(), { decode: text => new Date(text), encode: date => date.toISOString() });
-    const when = route.get('/when', { id: 'when', query: z.object({ at: isoDate }), output: z.object({ at: isoDate }) });
+    const isoDate = codec(
+      z.iso.datetime().transform(text => new Date(text)),
+      z.date().transform(date => date.toISOString()),
+    );
+    const at = codec(z.object({ at: isoDate.decode }), z.object({ at: isoDate.encode }));
+    const when = route.get('/when', { id: 'when', query: { at: isoDate }, output: at });
     const op = pathsOf(toOpenApi([when], info))['/when']!['get']!;
     expect(JSON.stringify(op)).toContain('"format":"date-time"');
   });

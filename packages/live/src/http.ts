@@ -21,7 +21,7 @@
 import { z } from 'zod';
 
 import type { RouteBundle, SseContract } from '@arki/http';
-import { buildEngine, HttpError, route, routes } from '@arki/http';
+import { buildEngine, HttpError, optional, route, routes } from '@arki/http';
 
 import type { LiveFeed, LiveHub } from './hub.js';
 import type { LiveEvent, LiveManifest, TableTag } from './types.js';
@@ -37,7 +37,7 @@ export type LiveGrant = { readonly tables?: readonly TableTag[] };
 const liveRoute = route.sse('/api/live', {
   id: 'live.stream',
   summary: 'Live query hints: which tables changed, as server-sent events',
-  query: z.object({ cursor: liveCursorSchema.optional() }),
+  query: { cursor: optional(liveCursorSchema) },
   event: liveEventSchema,
   heartbeatMs: 15_000,
 });

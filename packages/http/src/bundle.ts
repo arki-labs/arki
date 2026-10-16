@@ -26,15 +26,13 @@
  * typed. Same accumulation idiom as `defineApp().use()`.
  */
 
-import type { z } from 'zod';
-
 import type {
   ContractLike,
-  ParamsOf,
   ResponseSchemas,
   RouteContract,
   RouteDef,
   RouteFailure,
+  RouteInput,
   SseContract,
   SseDef,
 } from './contract.js';
@@ -43,6 +41,7 @@ import { BASE_CTX_KEYS } from './derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { HTTP_ACTION_META_SCHEMA } from './openapi.js';
 import type { RawOutput } from './raw.js';
+import type { Wire, WireValue } from './wire.js';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -73,35 +72,22 @@ export function isReply(value: unknown): value is Reply<number, unknown> {
   return typeof value === 'object' && value !== null && REPLY in value;
 }
 
-/** The decoded value of one schema field of a def, or `Fallback` when the def leaves it out. */
-export type Decoded<TDef, K extends string, Fallback> = TDef extends Readonly<Record<K, infer S extends z.ZodType>>
-  ? z.output<S>
-  : Fallback;
-
-/** The validated inputs a bound handler receives. */
-export type RouteInput<TPath extends string, TDef> = {
-  readonly params: Decoded<TDef, 'params', ParamsOf<TPath>>;
-  readonly query: Decoded<TDef, 'query', undefined>;
-  readonly headers: Decoded<TDef, 'headers', undefined>;
-  readonly body: Decoded<TDef, 'body', undefined>;
-};
-
 type PlainResult<TDef> = TDef extends { readonly output: infer TOutput }
   ? TOutput extends RawOutput
     ? Response
-    : TOutput extends z.ZodType
-      ? z.output<TOutput>
+    : TOutput extends Wire
+      ? WireValue<TOutput>
       : never
   : void;
 
 type ReplyResult<TDef> = TDef extends { readonly responses: infer TResponses extends ResponseSchemas }
-  ? { [S in keyof TResponses & number]: Reply<S, z.output<TResponses[S]>> }[keyof TResponses & number]
+  ? { [S in keyof TResponses & number]: Reply<S, WireValue<TResponses[S]>> }[keyof TResponses & number]
   : never;
 
 /**
  * What a JSON handler may return, read from the contract:
  *
- *  - `output` schema: its output type, sent as 200 JSON;
+ *  - `output` schema: its value form, encoded and sent as 200 JSON;
  *  - `output: raw()`: a `Response`, passed through untouched;
  *  - no `output`: nothing, answered 204;
  *  - `reply(status, body)` for any status in `responses`;
@@ -120,14 +106,14 @@ export type RouteHandler<TPath extends string, TDef, TCtx extends BaseRequestCtx
 /**
  * Handler signature inferred from an {@link SseContract}: an async
  * iterable (usually an async generator) of events. Each yielded value is
- * validated against the contract's event schema and framed as an SSE
+ * encoded with the contract's event schema and framed as an SSE
  * `data:` message. Client disconnect aborts `ctx.signal` and terminates
  * the iterator.
  */
 export type SseHandler<TPath extends string, TDef extends SseDef<TPath>, TCtx extends BaseRequestCtx> = (
   input: RouteInput<TPath, TDef>,
   ctx: TCtx,
-) => AsyncIterable<z.output<TDef['event']>>;
+) => AsyncIterable<WireValue<TDef['event']>>;
 
 /** Non-HTTP transports a {@link RouteBundleBuilder.mount} can declare. */
 export type MountTransport = 'orpc' | 'trpc' | 'rpc' | 'custom';

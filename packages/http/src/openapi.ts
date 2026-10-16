@@ -1,19 +1,22 @@
 /**
  * OpenAPI generation — falls out of the contracts, doesn't bolt on.
  *
- * Contracts are static data carrying zod schemas, so the document is
+ * Contracts are static data carrying Standard Schemas, so the document is
  * produced without booting anything, deterministically: same contracts in
  * the same order → byte-identical output (DOT principle 3). No decorator
  * reconstruction, no annotations — the schema IS the validation IS the
  * documentation.
  */
 
-import { z } from 'zod';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { hasJsonSchema, isStandardSchema } from '@arki/schema';
 
-import type { ContractLike, SchemaLike } from './contract.js';
+import type { ContractLike } from './contract.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { openApiPaths, pathPlaceholders } from './path.js';
 import { isRawOutput } from './raw.js';
+import type { Fields, Wire } from './wire.js';
+import { decoderOf, fieldParts } from './wire.js';
 
 export type OpenApiInfo = {
   readonly title: string;
@@ -26,20 +29,144 @@ export type JsonObject = { [key: string]: JsonValue };
 
 export const HTTP_ACTION_META_SCHEMA = '@arki/http/action-meta@1';
 
+const JSON_SCHEMA_REMEDIATION =
+  'Wrap the schema with withJsonSchema(schema, jsonSchema) from @arki/schema, or use a validator that converts itself (zod, arktype).';
+
 /**
- * Convert a contract schema to JSON Schema. Schema erasure seam:
- * {@link ContractLike} types schemas as `parse`/`encode` only, but contracts
- * built via `route.*` always hold zod schemas (see `SchemaLike` docs) — the
- * cast re-attaches what the erased view dropped.
- *
- * `io: 'input'` describes the wire form: every schema here either decodes
- * what arrives or encodes what leaves, and a codec's wire side is its input.
+ * A schema's JSON Schema, read from its own `~standard.jsonSchema` converter
+ * (`draft-2020-12`, the dialect OpenAPI 3.1 uses), without the `$schema`
+ * header. A schema with no converter, or one whose conversion throws, fails
+ * loudly naming the route and where the schema sits: never a silent `{}`.
  */
-function toJsonSchema(schema: SchemaLike): JsonObject {
-  const json = z.toJSONSchema(schema as z.ZodType, { io: 'input' }) as Record<string, unknown>;
-  // The dialect header is noise when embedding into OpenAPI 3.1.
+function jsonSchemaOf(id: string, where: string, schema: StandardSchemaV1, io: 'input' | 'output'): JsonObject {
+  if (!hasJsonSchema(schema)) {
+    throw new HttpConfigError({
+      code: HTTP_ERROR_CODES.noJsonSchema,
+      message: `[http] route "${id}": ${where} cannot describe itself as JSON Schema (its "${schema['~standard'].vendor}" schema has no ~standard.jsonSchema).`,
+      remediation: JSON_SCHEMA_REMEDIATION,
+    });
+  }
+  let json: Record<string, unknown>;
+  try {
+    json = schema['~standard'].jsonSchema[io]({ target: 'draft-2020-12' });
+  } catch (error) {
+    throw new HttpConfigError({
+      code: HTTP_ERROR_CODES.noJsonSchema,
+      message: `[http] route "${id}": ${where} failed to convert to JSON Schema: ${error instanceof Error ? error.message : String(error)}`,
+      remediation: JSON_SCHEMA_REMEDIATION,
+      cause: error,
+    });
+  }
   const { $schema: _dialect, ...rest } = json;
   return toJsonObject(rest);
+}
+
+/**
+ * The JSON Schema of what travels on the wire. A codec's wire side is its
+ * `decode` input (the same text its `encode` writes, and the side a
+ * converter can describe: `encode` usually ends in a transform). A bare
+ * schema describes its input when the server receives it and its output
+ * when the server sends it.
+ */
+function wireJson(id: string, where: string, wire: Wire, direction: 'received' | 'sent'): JsonObject {
+  if (!isStandardSchema(wire)) return jsonSchemaOf(id, where, wire.decode, 'input');
+  return jsonSchemaOf(id, where, wire, direction === 'sent' ? 'output' : 'input');
+}
+
+/**
+ * A field record as one object schema: a property per field, `required`
+ * for every field not marked `optional(...)`. Each field's `$defs` move to
+ * the object's `$defs`.
+ */
+function fieldsJson(id: string, where: 'params' | 'query' | 'headers', fields: Fields): JsonObject {
+  const defs: JsonObject = {};
+  const properties: JsonObject = {};
+  const required: JsonValue[] = [];
+  for (const [key, field] of Object.entries(fields)) {
+    const { wire, optional } = fieldParts(field);
+    properties[key] = hoistDefs(jsonSchemaOf(id, `${where}.${key}`, decoderOf(wire), 'input'), defs, DEFS_PREFIX);
+    if (!optional) required.push(key);
+  }
+  return {
+    type: 'object',
+    properties,
+    ...(required.length === 0 ? {} : { required }),
+    ...(Object.keys(defs).length === 0 ? {} : { $defs: defs }),
+  };
+}
+
+const DEFS_PREFIX = '#/$defs/';
+const COMPONENTS_PREFIX = '#/components/schemas/';
+
+/** `value` with every `#/$defs/<name>` reference pointing at `prefix` + its (renamed) name. */
+function rewriteRefs(value: JsonValue, renames: ReadonlyMap<string, string>, prefix: string): JsonValue {
+  if (Array.isArray(value)) return value.map(item => rewriteRefs(item, renames, prefix));
+  if (typeof value !== 'object' || value === null) return value;
+  return rewriteObject(value, renames, prefix);
+}
+
+function rewriteObject(value: JsonObject, renames: ReadonlyMap<string, string>, prefix: string): JsonObject {
+  const rewritten: JsonObject = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === '$ref' && typeof item === 'string' && item.startsWith(DEFS_PREFIX)) {
+      // The def name is the one JSON Pointer segment after the prefix (`~1` is `/`, `~0` is `~`);
+      // a suffix such as `/properties/v` stays.
+      const rest = item.slice(DEFS_PREFIX.length);
+      const slash = rest.indexOf('/');
+      const segment = slash === -1 ? rest : rest.slice(0, slash);
+      const renamed = renames.get(unescapePointer(segment));
+      rewritten[key] =
+        prefix + (renamed === undefined ? segment : escapePointer(renamed)) + (slash === -1 ? '' : rest.slice(slash));
+    } else {
+      rewritten[key] = rewriteRefs(item, renames, prefix);
+    }
+  }
+  return rewritten;
+}
+
+/** One JSON Pointer segment as a plain name (RFC 6901: `~1` is `/`, then `~0` is `~`). */
+function unescapePointer(segment: string): string {
+  return segment.replaceAll('~1', '/').replaceAll('~0', '~');
+}
+
+/** A plain name as one JSON Pointer segment. */
+function escapePointer(name: string): string {
+  return name.replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+/**
+ * Move `json.$defs` into `pool` and point the references at `prefix`. A
+ * definition the pool already holds with the same content is shared; when
+ * any name clashes with different content, each clashing name gets a free
+ * `_2`, `_3`… suffix, so every reference still resolves to what its schema
+ * meant. Deterministic: same schemas in the same order, same names.
+ */
+function hoistDefs(json: JsonObject, pool: JsonObject, prefix: string): JsonObject {
+  const { $defs: rawDefs, ...rest } = json;
+  if (!isJsonObject(rawDefs)) return rewriteObject(rest, new Map(), prefix);
+  const defs = Object.entries(rawDefs);
+  const same = new Map<string, string>();
+  const fits = defs.every(([name, def]) => {
+    const held = pool[name];
+    return held === undefined || jsonDeepEqual(held, rewriteRefs(def, same, prefix));
+  });
+  const renames = new Map<string, string>();
+  if (!fits) {
+    const taken = new Set([...Object.keys(pool), ...defs.map(([name]) => name)]);
+    for (const [name] of defs) {
+      if (pool[name] === undefined) continue;
+      let suffix = 2;
+      while (taken.has(`${name}_${suffix}`)) suffix += 1;
+      const fresh = `${name}_${suffix}`;
+      taken.add(fresh);
+      renames.set(name, fresh);
+    }
+  }
+  for (const [name, def] of defs) {
+    const target = renames.get(name) ?? name;
+    pool[target] ??= rewriteRefs(def, renames, prefix);
+  }
+  return rewriteObject(rest, renames, prefix);
 }
 
 function toJsonObject(value: unknown): JsonObject {
@@ -94,34 +221,13 @@ function jsonDeepEqual(left: unknown, right: unknown): boolean {
   return true;
 }
 
-/** Replace `#/$defs/X` references with the definitions they name; a reference to itself becomes `{}`. */
-function inlineRefs(value: JsonValue, defs: JsonObject, seen: readonly string[]): JsonValue {
-  if (Array.isArray(value)) return value.map(item => inlineRefs(item, defs, seen));
-  if (typeof value !== 'object' || value === null) return value;
-  const ref = value['$ref'];
-  if (typeof ref === 'string' && ref.startsWith('#/$defs/')) {
-    const name = ref.slice('#/$defs/'.length);
-    const target = defs[name];
-    if (target === undefined || seen.includes(name)) return {};
-    return inlineRefs(target, defs, [...seen, name]);
-  }
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, inlineRefs(item, defs, seen)]));
-}
-
-/**
- * The properties of an object schema, ready to stand alone as parameters.
- * A property that points into the root's `$defs` would dangle once lifted
- * out of it, so those references are inlined.
- */
+/** The properties of an object schema (already hoisted: its references point at components). */
 function propertiesOf(json: JsonObject): { readonly properties: JsonObject; readonly required: ReadonlySet<string> } {
-  const defs = isJsonObject(json['$defs']) ? json['$defs'] : {};
   const properties = isJsonObject(json['properties']) ? json['properties'] : {};
   const required = Array.isArray(json['required'])
     ? new Set(json['required'].filter((value): value is string => typeof value === 'string'))
     : new Set<string>();
-  const lifted: JsonObject = {};
-  for (const [name, schema] of Object.entries(properties)) lifted[name] = inlineRefs(schema, defs, []);
-  return { properties: lifted, required };
+  return { properties, required };
 }
 
 function parametersFromSchemaObject(location: 'query' | 'header', json: JsonObject): JsonObject[] {
@@ -194,13 +300,43 @@ function buildOperation(action: HttpActionForProjection, omitted: string | undef
   return operation;
 }
 
+/** The action with every schema's `$defs` moved into `pool` (the document's `components.schemas`). */
+function hoistAction(action: HttpActionForProjection, pool: JsonObject): HttpActionForProjection {
+  const lift = (json: JsonObject): JsonObject => hoistDefs(json, pool, COMPONENTS_PREFIX);
+  const { input, output, responses } = action;
+  return {
+    ...action,
+    ...(input === undefined
+      ? {}
+      : {
+          input: {
+            ...(input.params === undefined ? {} : { params: lift(input.params) }),
+            ...(input.query === undefined ? {} : { query: lift(input.query) }),
+            ...(input.headers === undefined ? {} : { headers: lift(input.headers) }),
+            ...(input.body === undefined ? {} : { body: lift(input.body) }),
+          },
+        }),
+    ...(output === undefined ? {} : { output: lift(output) }),
+    ...(responses === undefined
+      ? {}
+      : { responses: Object.fromEntries(Object.entries(responses).map(([status, json]) => [status, lift(json)])) }),
+  };
+}
+
 /**
- * Paths and operations in action order. Duplicate method+path pairs fail
+ * The document: paths and operations in action order, every schema's
+ * `$defs` kept as `components.schemas`. Duplicate method+path pairs fail
  * loudly with `ARKI_HTTP_E002`, optional-placeholder variants included.
  */
-function renderPaths(actions: Iterable<HttpActionForProjection>, collidesWith: 'contract' | 'action'): Record<string, JsonObject> {
+function renderDocument(
+  actions: Iterable<HttpActionForProjection>,
+  info: JsonObject,
+  collidesWith: 'contract' | 'action',
+): JsonObject {
   const paths: Record<string, JsonObject> = {};
-  for (const action of actions) {
+  const schemas: JsonObject = {};
+  for (const declared of actions) {
+    const action = hoistAction(declared, schemas);
     const method = action.method.toLowerCase();
     for (const { path, omitted } of openApiPaths(action.path)) {
       const entry = (paths[path] ??= {});
@@ -214,7 +350,12 @@ function renderPaths(actions: Iterable<HttpActionForProjection>, collidesWith: '
       entry[method] = buildOperation(action, omitted);
     }
   }
-  return paths;
+  return {
+    openapi: '3.1.0',
+    info,
+    paths,
+    ...(Object.keys(schemas).length === 0 ? {} : { components: { schemas } }),
+  };
 }
 
 /**
@@ -227,15 +368,15 @@ export function toOpenApi(contracts: readonly ContractLike[], info: OpenApiInfo)
     const { id, summary, meta } = contractMeta(contract);
     return httpActionFromMeta({ id, plugin: undefined, summary, meta });
   });
-  return {
-    openapi: '3.1.0',
-    info: {
+  return renderDocument(
+    actions,
+    {
       title: info.title,
       version: info.version,
       ...(info.description === undefined ? {} : { description: info.description }),
     },
-    paths: renderPaths(actions, 'contract'),
-  };
+    'contract',
+  );
 }
 
 type DotActionLike = {
@@ -293,10 +434,11 @@ export type RouteMeta = {
  */
 export function contractMeta(contract: ContractLike): RouteMeta {
   const input: JsonObject = {};
-  if (contract.params !== undefined) input['params'] = toJsonSchema(contract.params);
-  if (contract.query !== undefined) input['query'] = toJsonSchema(contract.query);
-  if (contract.headers !== undefined) input['headers'] = toJsonSchema(contract.headers);
-  if (contract.body !== undefined) input['body'] = toJsonSchema(contract.body);
+  const { id } = contract;
+  if (contract.params !== undefined) input['params'] = fieldsJson(id, 'params', contract.params);
+  if (contract.query !== undefined) input['query'] = fieldsJson(id, 'query', contract.query);
+  if (contract.headers !== undefined) input['headers'] = fieldsJson(id, 'headers', contract.headers);
+  if (contract.body !== undefined) input['body'] = wireJson(id, 'body', contract.body, 'received');
 
   const meta: JsonObject = {
     method: contract.method,
@@ -304,16 +446,18 @@ export function contractMeta(contract: ContractLike): RouteMeta {
   };
   if (Object.keys(input).length > 0) meta['input'] = input;
   if (contract.kind === 'sse') {
-    if (contract.event !== undefined) meta['output'] = toJsonSchema(contract.event);
+    if (contract.event !== undefined) meta['output'] = wireJson(id, 'event', contract.event, 'sent');
     meta['streaming'] = true;
   } else if (isRawOutput(contract.output)) {
     meta['raw'] = contract.output.contentType === undefined ? {} : { contentType: contract.output.contentType };
   } else if (contract.output !== undefined) {
-    meta['output'] = toJsonSchema(contract.output);
+    meta['output'] = wireJson(id, 'output', contract.output, 'sent');
   }
   if (contract.responses !== undefined && Object.keys(contract.responses).length > 0) {
     const responses: JsonObject = {};
-    for (const [status, schema] of Object.entries(contract.responses)) responses[status] = toJsonSchema(schema);
+    for (const [status, wire] of Object.entries(contract.responses)) {
+      responses[status] = wireJson(id, `responses.${status}`, wire, 'sent');
+    }
     meta['responses'] = responses;
   }
 
@@ -404,12 +548,5 @@ export function toOpenApiFromManifest(manifest: DotManifestLike): JsonObject {
   const actions = manifest.actions
     .map(action => httpActionFromManifestAction(action))
     .filter((action): action is HttpActionForProjection => action !== null);
-  return {
-    openapi: '3.1.0',
-    info: {
-      title: manifest.app.name,
-      version: manifest.app.version ?? '0.0.0',
-    },
-    paths: renderPaths(actions, 'action'),
-  };
+  return renderDocument(actions, { title: manifest.app.name, version: manifest.app.version ?? '0.0.0' }, 'action');
 }

@@ -10,9 +10,10 @@
  * ```
  *
  * Inputs are typed from the contract and encoded the way the server decodes
- * them: params, headers, query and body run through their schema in the
- * encode direction (so a codec turns a `Date` into its ISO string), and path
- * params are URL-escaped. A missing optional path segment is dropped.
+ * them: each param, header and query field and the body run through their
+ * schema in the encode direction (a `codec()` turns a `Date` into its ISO
+ * string; a bare schema is its own encoder), and path params are
+ * URL-escaped. A missing `optional(...)` field is left out.
  *
  * The result follows the contract: a status listed in `responses` decodes
  * with that schema, a success decodes with `output`, a route without `output`
@@ -30,12 +31,14 @@
 import { z } from 'zod';
 
 import { revive } from '@arki/failure';
+import { formatIssues, parseAsync, SchemaError } from '@arki/schema';
 
-import type { Decoded } from './bundle.js';
-import type { ParamsOf, PathParams, ResponseSchemas, RouteContract, RouteDef, RouteFailure } from './contract.js';
-import { formatIssues, HTTP_ERROR_CODES, HttpError } from './error.js';
+import type { PathParams, ResponseSchemas, RouteContract, RouteDef, RouteFailure, RouteInput } from './contract.js';
+import { HTTP_ERROR_CODES, HttpError } from './error.js';
 import type { RawOutput } from './raw.js';
 import { isRawOutput } from './raw.js';
+import type { Fields, Job, Ran, Where, Wire, WireValue } from './wire.js';
+import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs } from './wire.js';
 
 /** Any JSON route contract — what {@link createClient} accepts. */
 type AnyRoute = RouteContract<string, RouteDef<string>>;
@@ -61,14 +64,15 @@ type BodyInput<TBody> = [TBody] extends [undefined] ? NoInput : { readonly body:
 /**
  * What one client call takes: `params` when the path has parameters, and
  * `query`, `headers` and `body` when the contract declares them. Each is the
- * schema's output type — the same values the server handler receives.
+ * value form — the same values the server handler receives; a field marked
+ * `optional(...)` may be left out.
  */
 export type ClientInput<TRoute> = TRoute extends { readonly path: infer TPath extends string }
   ? Flatten<
-      ParamsInput<TPath, Decoded<TRoute, 'params', ParamsOf<TPath>>> &
-        OptionalWhenEmpty<'query', Decoded<TRoute, 'query', undefined>> &
-        OptionalWhenEmpty<'headers', Decoded<TRoute, 'headers', undefined>> &
-        BodyInput<Decoded<TRoute, 'body', undefined>>
+      ParamsInput<TPath, RouteInput<TPath, TRoute>['params']> &
+        OptionalWhenEmpty<'query', RouteInput<TPath, TRoute>['query']> &
+        OptionalWhenEmpty<'headers', RouteInput<TPath, TRoute>['headers']> &
+        BodyInput<RouteInput<TPath, TRoute>['body']>
     >
   : never;
 
@@ -76,17 +80,17 @@ export type ClientInput<TRoute> = TRoute extends { readonly path: infer TPath ex
 type Flatten<T> = { [K in keyof T]: T[K] };
 
 type SuccessOf<TRoute> = TRoute extends { readonly output: infer TOutput }
-  ? TOutput extends z.ZodType
-    ? z.output<TOutput>
+  ? TOutput extends Wire
+    ? WireValue<TOutput>
     : never
   : undefined;
 
 type StatusBodies<TRoute> = TRoute extends { readonly responses: infer TResponses extends ResponseSchemas }
-  ? { [S in keyof TResponses & number]: z.output<TResponses[S]> }[keyof TResponses & number]
+  ? { [S in keyof TResponses & number]: WireValue<TResponses[S]> }[keyof TResponses & number]
   : never;
 
 /**
- * What one client call resolves to: the output schema's output type
+ * What one client call resolves to: the output's value form
  * (`undefined` when the contract has no output, `Response` for `raw()`),
  * the body of a status listed in `responses`, or one of the failures the
  * contract lists.
@@ -193,9 +197,9 @@ export function createClient(
 }
 
 type ErasedInput = {
-  readonly params?: unknown;
-  readonly query?: unknown;
-  readonly headers?: unknown;
+  readonly params?: Readonly<Record<string, unknown>>;
+  readonly query?: Readonly<Record<string, unknown>>;
+  readonly headers?: Readonly<Record<string, unknown>>;
   readonly body?: unknown;
 };
 
@@ -219,23 +223,21 @@ function buildCall(contract: AnyRoute, transport: Transport): ErasedCall {
 }
 
 async function call(contract: AnyRoute, transport: Transport, input: ErasedInput, init: CallInit): Promise<unknown> {
-  // The input may leave out `params` and `headers` when every field is optional.
-  const params =
-    contract.params === undefined ? input.params : encodeWith(contract.params, input.params ?? {}, 'params');
-  let url = transport.baseUrl + fillPath(contract.path, toStrings('params', params));
-  if (contract.query !== undefined && input.query !== undefined) {
-    const search = toSearch(encodeWith(contract.query, input.query, 'query'));
-    if (search !== '') url += `?${search}`;
-  }
+  // Sync schemas encode without an await, so `fetch` starts in the caller's tick.
+  const pending = encodeInput(contract, input);
+  const encoded = pending instanceof Promise ? await pending : pending;
+  let url = transport.baseUrl + fillPath(contract.path, encoded.params);
+  const search = Object.entries(encoded.query)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+  if (search !== '') url += `?${search}`;
 
   // A plain record, not `Headers`: Hermes has no `Headers` unless a polyfill adds it.
-  const declared =
-    contract.headers === undefined ? {} : toStrings('headers', encodeWith(contract.headers, input.headers ?? {}, 'headers'));
-  const headers: Record<string, string> = { ...declared, ...init.headers };
+  const headers: Record<string, string> = { ...encoded.headers, ...init.headers };
   const request: RequestInit = { method: contract.method, headers };
   if (contract.body !== undefined) {
     if (!hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';
-    request.body = JSON.stringify(encodeWith(contract.body, input.body, 'body'));
+    request.body = JSON.stringify(encoded.body);
   }
 
   const repeatable = REPEATABLE_METHODS.has(contract.method) || hasHeader(headers, 'idempotency-key');
@@ -248,6 +250,66 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
   if (isRawOutput(contract.output)) return response;
   if (contract.output === undefined || response.status === 204) return undefined;
   return decodeBody(contract, contract.output, response);
+}
+
+/** The request parts, encoded: one string per param, query key and header, and the body's wire value. */
+type EncodedInput = {
+  readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: unknown;
+};
+
+/** One encode job per field the caller gave (or a required one it left out, which then fails). */
+function fieldJobs(where: Exclude<Where, 'body'>, fields: Fields, values: Readonly<Record<string, unknown>> | undefined): Job[] {
+  const jobs: Job[] = [];
+  for (const [key, field] of Object.entries(fields)) {
+    const { wire, optional } = fieldParts(field);
+    const value = values?.[key];
+    if (value === undefined && optional) continue;
+    // The `optional(...)` marker decides presence, even for a schema that accepts `undefined`.
+    jobs.push({ at: [where, key], schema: value === undefined ? missingField : encoderOf(wire), value });
+  }
+  return jobs;
+}
+
+/**
+ * Run every declared field and the body through its encoder. Issues throw
+ * the 400 the server would answer, before anything is sent; a schema that
+ * throws propagates.
+ */
+function encodeInput(contract: AnyRoute, input: ErasedInput): EncodedInput | Promise<EncodedInput> {
+  const jobs: Job[] = [];
+  if (contract.params !== undefined) jobs.push(...fieldJobs('params', contract.params, input.params));
+  if (contract.query !== undefined) jobs.push(...fieldJobs('query', contract.query, input.query));
+  if (contract.headers !== undefined) jobs.push(...fieldJobs('headers', contract.headers, input.headers));
+  if (contract.body !== undefined) jobs.push({ at: ['body'], schema: encoderOf(contract.body), value: input.body });
+  const ran = runJobs(jobs);
+  return ran instanceof Promise ? ran.then(runs => collect(contract, input, runs)) : collect(contract, input, ran);
+}
+
+function collect(contract: AnyRoute, input: ErasedInput, runs: readonly Ran[]): EncodedInput {
+  const issues = issuesOf(runs);
+  if (issues.length > 0) {
+    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `request validation failed: ${formatIssues(issues)}`, {
+      cause: new SchemaError(issues),
+    });
+  }
+  const strings: Record<Exclude<Where, 'body'>, Record<string, string>> = { params: {}, query: {}, headers: {} };
+  // Undeclared path params pass through as the strings the caller gave.
+  if (contract.params === undefined) {
+    for (const [key, value] of Object.entries(input.params ?? {})) {
+      if (value !== undefined) strings.params[key] = scalarString('params', key, value);
+    }
+  }
+  let body: unknown;
+  for (const { job, result } of runs) {
+    const [where, key] = job.at;
+    if (result.issues !== undefined) continue;
+    if (where === 'body') body = result.value;
+    else if (key !== undefined && result.value !== undefined) strings[where][key] = scalarString(where, key, result.value);
+  }
+  return { ...strings, body };
 }
 
 /** A response `retryOn` accepted, thrown so the policy retries. Unwrapped when the policy gives up. */
@@ -371,40 +433,10 @@ function fillSegment(segment: string, params: Readonly<Record<string, string>>):
   return encodeURIComponent(value);
 }
 
-/** Run a schema in the encode direction; a failure is the 400 the server would answer. */
-function encodeWith(schema: z.ZodType, value: unknown, where: 'params' | 'headers' | 'query' | 'body'): unknown {
-  try {
-    return schema.encode(value);
-  } catch (error) {
-    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `${where} validation failed: ${messageOf(error)}`, {
-      cause: error,
-    });
-  }
-}
-
 /**
  * The server reads each param, header and query key as one string, so every
- * encoded field must be a string, number, boolean or bigint. `undefined`
- * fields are left out.
+ * encoded field must be a string, number, boolean or bigint.
  */
-function toStrings(where: 'params' | 'headers' | 'query', encoded: unknown): Record<string, string> {
-  if (encoded === undefined) return {};
-  if (typeof encoded !== 'object' || encoded === null) {
-    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `${where} validation failed: it must encode to an object`);
-  }
-  const strings: Record<string, string> = {};
-  for (const [key, value] of Object.entries(encoded)) {
-    if (value !== undefined) strings[key] = scalarString(where, key, value);
-  }
-  return strings;
-}
-
-function toSearch(encoded: unknown): string {
-  return Object.entries(toStrings('query', encoded))
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
-    .join('&');
-}
-
 function scalarString(where: string, key: string, value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
@@ -416,7 +448,7 @@ function scalarString(where: string, key: string, value: unknown): string {
   );
 }
 
-async function decodeBody(contract: AnyRoute, output: z.ZodType, response: Response): Promise<unknown> {
+async function decodeBody(contract: AnyRoute, output: Wire, response: Response): Promise<unknown> {
   let body: unknown;
   try {
     body = await response.json();
@@ -426,8 +458,9 @@ async function decodeBody(contract: AnyRoute, output: z.ZodType, response: Respo
     });
   }
   try {
-    return output.parse(body);
+    return await parseAsync(decoderOf(output), body);
   } catch (error) {
+    if (!(error instanceof SchemaError)) throw error;
     throw new HttpError(
       500,
       HTTP_ERROR_CODES.internal,
@@ -508,6 +541,6 @@ function codeForStatus(status: number): string {
 }
 
 function messageOf(error: unknown): string {
-  if (error instanceof z.ZodError) return formatIssues(error);
+  if (error instanceof SchemaError) return formatIssues(error.issues);
   return error instanceof Error ? error.message : String(error);
 }

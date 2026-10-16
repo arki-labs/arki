@@ -1,15 +1,18 @@
 /**
  * Server-sent-events serialization for {@link SseContract} bindings.
  *
- * The bound handler is an async iterable; every yielded value is validated
- * against the contract's event schema and framed as `data: <json>\n\n`.
+ * The bound handler is an async iterable; every yielded value is encoded
+ * with the contract's event schema and framed as `data: <json>\n\n`.
  * Client disconnect terminates the iterator (its `finally` blocks run);
  * a yielded value that violates the schema — or a generator crash — emits
  * a terminal `event: error` frame with the coded envelope, then closes.
  */
 
+import { parseAsync } from '@arki/schema';
+
 import type { ContractLike } from './contract.js';
 import { describeInternalError, HTTP_ERROR_CODES } from './error.js';
+import { encoderOf } from './wire.js';
 
 const SSE_HEADERS = {
   'content-type': 'text/event-stream; charset=utf-8',
@@ -76,7 +79,8 @@ export function sseResponse(iterable: AsyncIterable<unknown>, contract: Contract
           controller.close();
           return;
         }
-        const value = contract.event === undefined ? next.value : contract.event.encode(next.value);
+        const value =
+          contract.event === undefined ? next.value : await parseAsync(encoderOf(contract.event), next.value);
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
       } catch (error) {
         if (finished) return;

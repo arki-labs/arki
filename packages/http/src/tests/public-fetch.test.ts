@@ -168,7 +168,7 @@ describe('request method and body', () => {
 describe('publicFetch: the guard as a fetch, for the typed client', () => {
   const getOrder = route.get('/orders/:id', {
     id: 'orders.get',
-    params: z.object({ id: z.string() }),
+    params: { id: z.string() },
     output: z.object({ id: z.string() }),
   });
 

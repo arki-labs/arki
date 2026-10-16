@@ -11,19 +11,23 @@ import type { ClientInput } from '../client.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { raw } from '../raw.js';
+import { codec, optional } from '../wire.js';
 
-const isoDate = z.codec(z.iso.datetime(), z.date(), {
-  decode: text => new Date(text),
-  encode: date => date.toISOString(),
-});
+const isoDate = codec(
+  z.iso.datetime().transform(text => new Date(text)),
+  z.date().transform(date => date.toISOString()),
+);
 
-const Order = z.object({ id: z.string(), placedAt: isoDate, total: z.number() });
+const Order = codec(
+  z.object({ id: z.string(), placedAt: isoDate.decode, total: z.number() }),
+  z.object({ id: z.string(), placedAt: isoDate.encode, total: z.number() }),
+);
 
 const getOrder = route.get('/orders/:id', { id: 'orders.get', output: Order });
 const listOrders = route.get('/orders', {
   id: 'orders.list',
-  query: z.object({ status: z.enum(['open', 'shipped']).optional() }),
-  output: z.array(Order),
+  query: { status: optional(z.enum(['open', 'shipped'])) },
+  output: codec(z.array(Order.decode), z.array(Order.encode)),
 });
 const placeOrder = route.post('/orders', { id: 'orders.place', body: z.object({ total: z.number() }), output: Order });
 const download = route.get('/orders/:id/pdf', { id: 'orders.pdf', output: raw() });
@@ -51,8 +55,8 @@ const typeOnly = (): void => {
 
 describe('createClient types', () => {
   it('resolves to the output schema output type', () => {
-    expectTypeOf(orders.getOrder).returns.resolves.toEqualTypeOf<z.output<typeof Order>>();
-    expectTypeOf(orders.listOrders).returns.resolves.toEqualTypeOf<z.output<typeof Order>[]>();
+    expectTypeOf(orders.getOrder).returns.resolves.toEqualTypeOf<z.output<typeof Order.decode>>();
+    expectTypeOf(orders.listOrders).returns.resolves.toEqualTypeOf<z.output<typeof Order.decode>[]>();
     // The codec's decoded side, not its wire string.
     expectTypeOf(orders.getOrder).returns.resolves.toHaveProperty('placedAt').toEqualTypeOf<Date>();
     // No output schema: the raw Response.

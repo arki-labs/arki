@@ -13,24 +13,28 @@ import { route } from '../contract.js';
 import { buildEngine } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 import { raw } from '../raw.js';
+import { codec, optional } from '../wire.js';
 
 const BASE = 'http://test.local';
 
-const isoDate = z.codec(z.iso.datetime(), z.date(), {
-  decode: text => new Date(text),
-  encode: date => date.toISOString(),
-});
+const isoDate = codec(
+  z.iso.datetime().transform(text => new Date(text)),
+  z.date().transform(date => date.toISOString()),
+);
 
 const getEvent = route.get('/events/:id', {
   id: 'events.get',
-  query: z.object({ since: isoDate.optional() }),
-  output: z.object({ id: z.string(), at: isoDate, since: isoDate.nullable() }),
+  query: { since: optional(isoDate) },
+  output: codec(
+    z.object({ id: z.string(), at: isoDate.decode, since: isoDate.decode.nullable() }),
+    z.object({ id: z.string(), at: isoDate.encode, since: isoDate.encode.nullable() }),
+  ),
 });
 
 const moveEvent = route.post('/events/:id/move', {
   id: 'events.move',
-  body: z.object({ at: isoDate }),
-  output: z.object({ id: z.string(), at: isoDate }),
+  body: codec(z.object({ at: isoDate.decode }), z.object({ at: isoDate.encode })),
+  output: codec(z.object({ id: z.string(), at: isoDate.decode }), z.object({ id: z.string(), at: isoDate.encode })),
 });
 
 const lockedEvent = route.delete('/events/:id', { id: 'events.delete', output: z.object({ ok: z.boolean() }) });

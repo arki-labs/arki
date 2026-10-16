@@ -15,6 +15,7 @@ import type { Redis } from 'ioredis';
 
 import type { BeginResult, ResponseCache } from '@arki/http/idempotency';
 import { storedResponse } from '@arki/http/idempotency';
+import { parse } from '@arki/schema';
 
 export type RedisResponseCacheOptions = {
   /** Prefix for every key. Default `idem:`. */
@@ -72,7 +73,7 @@ export function redisResponseCache(redis: Redis, options: RedisResponseCacheOpti
           throw new Error(`kv: idempotency key ${JSON.stringify(key)} holds a value this cache did not write`);
         if (held.fingerprint !== fingerprint) return 'conflict';
         if (held.response === '') return 'in-progress';
-        return { replay: storedResponse.parse(JSON.parse(held.response)) };
+        return { replay: parse(storedResponse, JSON.parse(held.response)) };
       }
       throw new Error(`kv: idempotency key ${JSON.stringify(key)} kept changing while it was being claimed`);
     },

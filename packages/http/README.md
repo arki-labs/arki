@@ -1,6 +1,7 @@
 # @arki/http
 
-Typed HTTP for ARKI — route contracts as data, zod-validated handlers,
+Typed HTTP for ARKI — route contracts as data, handlers validated by any
+Standard Schema (zod, valibot, arktype, your own),
 request-scope derivers, SSE streaming, and deterministic OpenAPI
 generation. Ships a DOT adapter (`@arki/http/dot`) whose `http()` driver
 turns a composed app into a running server with correct drain-on-shutdown
@@ -13,7 +14,7 @@ are plain values; wiring is checked at compile time.
 
 A route is split in two:
 
-- **Contract** — pure data at module scope: method + path + zod schemas +
+- **Contract** — pure data at module scope: method + path + Standard Schemas +
   a stable id. Registerable in the DOT manifest (sync `configure`),
   renderable as OpenAPI without booting, and the source of the handler's
   inferred signature.
@@ -22,12 +23,12 @@ A route is split in two:
   services; no service locator exists.
 
 ```ts
-import { route, routes } from '@arki/http';
+import { optional, route, routes } from '@arki/http';
 import { z } from 'zod';
 
 export const listOrders = route.get('/orders', {
   id: 'orders.list',
-  query: z.object({ status: z.enum(['open', 'shipped']).optional() }),
+  query: { status: optional(z.enum(['open', 'shipped'])) },
   output: z.array(Order),
 });
 
@@ -39,23 +40,49 @@ export const createOrder = route.post('/orders', {
 ```
 
 Input validation (params/headers/query/body) happens before your handler runs;
-output is validated against the contract on the way out. Input is decoded and output
-(and every SSE event) is encoded, so a zod codec works both ways: with
-`z.codec(z.iso.datetime(), z.date(), …)` your handler gets and returns a
-`Date`, and the wire carries the ISO string. Failures serialize as a
-coded envelope: `{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }`.
+output is validated against the contract on the way out. Any schema that
+implements [Standard Schema](https://standardschema.dev) works; an async one
+too. Failures serialize as a coded envelope:
+`{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }`.
+
+### Wire forms: a bare schema, or `codec(decode, encode)`
+
+A bare schema means the wire form is the value form: the server decodes what
+arrives with it and encodes what leaves with it. When the forms differ, pair
+two schemas with `codec`. `decode` reads the wire, `encode` writes it, and the
+pair must reverse each other's types or the call does not compile:
+
+```ts
+import { codec } from '@arki/http';
+
+const isoDate = codec(
+  z.iso.datetime().transform(text => new Date(text)), // wire -> value
+  z.date().transform(date => date.toISOString()), // value -> wire
+);
+const Shift = codec(z.object({ at: isoDate.decode }), z.object({ at: isoDate.encode }));
+
+export const shift = route.post('/shift', { id: 'shift', query: { at: isoDate }, body: Shift, output: Shift });
+// handler: query.at and body.at are Dates; the wire carries ISO strings both ways.
+```
+
+Request fields and the body run `decode`; `output`, `responses`, SSE events
+and the typed client's inputs run `encode`. A zod `z.codec` inside a bare
+schema only decodes (Standard Schema has no encode direction), so give a
+two-way field a `codec()`.
 
 ### Params, headers and responses
 
-The contract describes the whole request and response. Path `params` and
-`headers` are zod objects, and `responses` lists the other statuses a handler
+The contract describes the whole request and response. `params`, `headers`
+and `query` are records with one field per key: a schema, a `codec()`, or
+`optional(...)` around either. `responses` lists the other statuses a handler
 may answer with.
 
 ```ts
 export const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
-  params: z.object({ id: OrderId }), // keys must match the :placeholders
-  headers: z.object({ 'x-tenant': z.string() }), // lower-case names
+  params: { id: OrderId }, // keys must match the :placeholders
+  headers: { 'x-tenant': z.string() }, // lower-case names
+  query: { expand: optional(z.enum(['items'])) }, // may be left out
   output: Order,
   responses: { 409: Conflict },
 });
@@ -66,17 +93,35 @@ routes().bind(getOrder, async ({ params, headers }) => {
 });
 ```
 
+- Each field schema gets one string, or `undefined` when the key is missing.
+  A field marked `optional(...)` may be missing: the handler sees `undefined`,
+  the key is typed `?:`, and its schema does not run. Any other missing field
+  runs its schema with `undefined`, which usually fails. Multi-valued query keys
+  give their last value. (`z.coerce.number()` turns an empty value into `0`;
+  write the schema to refuse that.)
 - `params` must have exactly one key per placeholder. Without `params` you get
   `Record<name, string>`. One optional placeholder is allowed, as the last
-  segment (`/orders/:id?`): its schema must accept a missing value, the route
-  serves both `/orders` and `/orders/x`, and OpenAPI lists both paths.
+  segment (`/orders/:id?`): its field must be `optional(...)` (and an
+  `optional(...)` param needs a `?` placeholder), the route serves both
+  `/orders` and `/orders/x`, and OpenAPI lists both paths.
 - `headers` names are lower-case. Only the declared names are read from the
-  request, so a strict schema works next to `host` and `accept`. A missing
-  header is left out of the object. (`z.coerce.number()` turns a missing or
-  empty value into `0`; write the schema to refuse that.)
-- `params`, `headers`, `query` and `body` are decoded, in that order; the first
-  failure answers `400` and the handler does not run. SSE routes take `params`
-  and `headers` too.
+  request, so transport headers (`host`, `accept`) never reach a schema.
+- Every field, then the body, is decoded; all their issues answer one `400`
+  (`request validation failed: query.page: …`) and the handler does not run.
+  A schema that throws instead of returning issues answers `500`: that is a
+  server bug, not a bad request. SSE routes take `params`, `headers` and `query`
+  too.
+- `check` runs after every field and the body decoded, with the same typed
+  input the handler gets. Return issues to answer `400`; give each a path such
+  as `['query', 'to']` and the message reads `query.to: …`:
+
+  ```ts
+  route.get('/range', {
+    id: 'range',
+    query: { from: z.coerce.number(), to: z.coerce.number() },
+    check: ({ query }) => (query.to < query.from ? [{ message: 'must not be before from', path: ['query', 'to'] }] : undefined),
+  });
+  ```
 - `reply(status, body, { headers? })` answers with a status listed in
   `responses`. The body is encoded with that status's schema. `responses` keys
   are integers from 200 to 599, never 204 or 304, and never 200 next to a schema
@@ -309,7 +354,7 @@ const partnerEvents = routes()
 ## Streaming
 
 **Typed SSE.** `route.sse` declares a `text/event-stream` contract; the
-binding is an async generator. Every yield is validated against the event
+binding is an async generator. Every yield is encoded with the event
 schema and framed as a `data:` message; client disconnect aborts
 `ctx.signal` and runs the generator's `finally`:
 
@@ -351,11 +396,19 @@ const document = toOpenApi([listOrders, createOrder, progress], {
 });
 ```
 
-Deterministic — same contracts, byte-identical output. Path and header
-parameters are typed from `params` and `headers`, every status in `responses`
-is listed, a no-output route documents `204`, and a `raw()` route is marked
-`x-arki-raw: true`. Schemas describe the wire form (`io: 'input'`), so a codec
-shows its string side. Inside a DOT app,
+Deterministic — same contracts, byte-identical output. Each `params`,
+`headers` and `query` field is one parameter (`required` unless it is
+`optional(...)`), every status in `responses` is listed, a no-output route
+documents `204`, and a `raw()` route is marked `x-arki-raw: true`.
+
+Each schema describes itself through its own `~standard.jsonSchema`
+converter (zod and arktype have one), asked for `draft-2020-12`. What the
+server receives is described by the schema's input side, what it sends by
+the output side, and a `codec()` by its `decode` input, the wire string.
+`$defs` become `components.schemas`, so references still resolve. A schema
+with no converter (valibot, a hand-written one) or a failed conversion throws
+`ARKI_HTTP_E013` naming the route and the field; give it one with
+`withJsonSchema(schema, jsonSchema)` from `@arki/schema`. Inside a DOT app,
 contract actions put the JSON Schemas into the manifest, so
 `dot explain --as openapi` renders the document from the static manifest
 without booting anything.
@@ -376,9 +429,11 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
 
 - Input (`params`, `query`, `headers`, `body`) and output are typed from the
   contract. A wrong input does not compile.
-- Params, headers, query and body are encoded with their schemas and the output
-  is decoded, exactly mirroring the server, so codecs round-trip. A missing
-  optional path segment is dropped from the URL.
+- Params, headers, query and body are encoded with their schemas (`encode` of a
+  `codec()`) and the output is decoded, exactly mirroring the server, so
+  codecs round-trip. A field that fails answers `E400` before anything is sent.
+  A missing `optional(...)` field, and a missing optional path segment, are
+  left out of the URL.
 - A status listed in `responses` resolves to that schema's decoded body.
 - A non-2xx answer whose code is one of the contract's `failures` resolves to
   that failure, revived with `revive` from `@arki/failure`, so the call's type
@@ -457,6 +512,7 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E008` | a bundle token's service was missing at boot (erased composition only) |
 | `ARKI_HTTP_E011` | a route contract is inconsistent (params vs path, headers, responses). Thrown by `route.*()` |
 | `ARKI_HTTP_E012` | a webhook scheme has no secret, an empty one, or one it cannot decode. Thrown when the scheme is created |
+| `ARKI_HTTP_E013` | a contract schema cannot describe itself as JSON Schema (no `~standard.jsonSchema`, or the conversion threw). Thrown by `toOpenApi` / `contractMeta`; fix with `withJsonSchema` |
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |

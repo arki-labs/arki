@@ -1,7 +1,7 @@
 /**
  * `@arki/http` — typed HTTP for ARKI.
  *
- * Route contracts as data ({@link route}), zod-validated handlers bound in
+ * Route contracts as data ({@link route}), Standard-Schema-validated handlers bound in
  * a typed bundle builder ({@link routes}), request-scope derivers
  * ({@link derive}), SSE streaming, and deterministic OpenAPI generation
  * ({@link toOpenApi}).
@@ -14,21 +14,24 @@
 
 export { route } from './contract.js';
 export type {
+  CheckResult,
   ContractLike,
+  ErasedInput,
   FailureDefinitionLike,
-  HeaderSchema,
   HttpMethod,
-  ParamSchema,
   ParamsOf,
   PathParams,
   ResponseSchemas,
   RouteContract,
   RouteDef,
   RouteFailure,
-  SchemaLike,
+  RouteInput,
   SseContract,
   SseDef,
 } from './contract.js';
+
+export { codec, optional } from './wire.js';
+export type { Codec, Field, Fields, FieldsOf, Optional, Reversible, ValueOf, Wire, WireValue } from './wire.js';
 
 export { raw } from './raw.js';
 export type { RawOutput } from './raw.js';
@@ -46,7 +49,6 @@ export type {
   RouteBundle,
   RouteBundleBuilder,
   RouteHandler,
-  RouteInput,
   RpcActionMeta,
   RpcBinding,
   RpcMountContract,

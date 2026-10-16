@@ -8,20 +8,18 @@
  */
 
 import { Hono } from 'hono';
-import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { formatIssues, SchemaError } from '@arki/schema';
 
 import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
 import { isReply } from './bundle.js';
-import type { ContractLike, SchemaLike } from './contract.js';
-import { shapeOf } from './contract.js';
+import type { ContractLike, ErasedInput } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
 import { runWithRequestContext } from './context.js';
 import {
-  describeInternalError,
   errorResponse,
-  formatIssues,
   HTTP_ERROR_CODES,
   HttpConfigError,
   HttpError,
@@ -30,6 +28,15 @@ import {
 import { openApiPaths } from './path.js';
 import { isRawOutput } from './raw.js';
 import { sseResponse } from './sse.js';
+import type { Field, Job, Ran, Where, Wire } from './wire.js';
+import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs, runSchema } from './wire.js';
+
+type MaybePromise<T> = T | Promise<T>;
+
+/** `next(value)`, after `value` settles when it is a promise. Sync in, sync out. */
+function andThen<T, U>(value: MaybePromise<T>, next: (value: T) => MaybePromise<U>): MaybePromise<U> {
+  return value instanceof Promise ? value.then(next) : next(value);
+}
 
 /** A built engine: the composed fetch handler plus its route inventory. */
 export type Engine = {
@@ -166,10 +173,11 @@ function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteB
 
 /**
  * Run one bound route. A route with no derivers and no body has nothing to
- * await before its handler, so it runs synchronously and returns the Response
- * itself when the handler does — no promise, no extra microtask. Anything
- * that needs an await goes through `executeBindingAsync`. Both paths give the
- * same responses and the same error envelopes.
+ * await before its handler, so when its schemas answer synchronously it runs
+ * synchronously and returns the Response itself when the handler does — no
+ * promise, no extra microtask. Anything that needs an await goes through
+ * `executeBindingAsync`. Both paths give the same responses and the same
+ * error envelopes.
  */
 function executeBinding(
   bundle: RouteBundle,
@@ -183,7 +191,10 @@ function executeBinding(
   }
   return runWithRequestContext(base, () => {
     try {
-      return respond(binding, validateInputSync(binding.contract, params, base), base);
+      const response = andThen(decodeInput(binding.contract, params, base), input =>
+        respond(binding, input, base),
+      );
+      return response instanceof Promise ? response.catch(toErrorResponse) : response;
     } catch (error) {
       return toErrorResponse(error);
     }
@@ -207,10 +218,8 @@ async function executeBindingAsync(
       ctx = { ...ctx, [deriver.key]: value };
     }
 
-    const input =
-      binding.contract.body === undefined
-        ? validateInputSync(binding.contract, params, base)
-        : await validateInput(binding.contract, params, base, req);
+    const body = binding.contract.body === undefined ? undefined : await readJson(req);
+    const input = await decodeInput(binding.contract, params, base, body);
     return await respond(binding, input, ctx);
   } catch (error) {
     return toErrorResponse(error);
@@ -218,7 +227,7 @@ async function executeBindingAsync(
 }
 
 /** Call the handler and turn what it returns into a Response. Throws on a bad output. */
-function respond(binding: RouteBinding, input: ValidatedInput, ctx: BaseRequestCtx): Response | Promise<Response> {
+function respond(binding: RouteBinding, input: ErasedInput, ctx: BaseRequestCtx): Response | Promise<Response> {
   if (binding.contract.kind === 'sse') {
     // Erasure boundary, same as above — input/ctx match the handler's
     // composition-time types.
@@ -236,13 +245,13 @@ function respond(binding: RouteBinding, input: ValidatedInput, ctx: BaseRequestC
 
 async function settle(contract: ContractLike, pending: PromiseLike<unknown>): Promise<Response> {
   try {
-    return toResponse(contract, await pending);
+    return await toResponse(contract, await pending);
   } catch (error) {
     return toErrorResponse(error);
   }
 }
 
-function toResponse(contract: ContractLike, result: unknown): Response {
+function toResponse(contract: ContractLike, result: unknown): Response | Promise<Response> {
   // A returned failure is an expected outcome, not output: it answers with
   // its own status in the error envelope, and the output schema never sees it.
   if (isFailure(result)) {
@@ -281,13 +290,13 @@ function toResponse(contract: ContractLike, result: unknown): Response {
       { remediation: 'Declare an output schema on the contract, or return nothing to answer 204.' },
     );
   }
-  return serializeOutput(contract, contract.output, result);
+  return andThen(encodeOutput(contract, contract.output, result), encoded => jsonResponse(encoded));
 }
 
 function serializeReply(
   contract: ContractLike,
   result: { readonly status: number; readonly body: unknown; readonly headers?: Readonly<Record<string, string>> },
-): Response {
+): Response | Promise<Response> {
   const schema = contract.responses?.[result.status];
   if (schema === undefined) {
     throw new HttpError(
@@ -297,112 +306,103 @@ function serializeReply(
       { remediation: 'Add the status to "responses" on the contract, or reply with a declared status.' },
     );
   }
-  return jsonResponse(encodeOutput(contract, schema, result.body), result.status, result.headers);
+  return andThen(encodeOutput(contract, schema, result.body), encoded =>
+    jsonResponse(encoded, result.status, result.headers),
+  );
 }
 
-type ValidatedInput = {
-  readonly params: unknown;
-  readonly query: unknown;
-  readonly headers: unknown;
-  readonly body: unknown;
-};
-
-function parseQuery(contract: ContractLike, base: BaseRequestCtx): unknown {
-  if (contract.query === undefined) return undefined;
-  // Multi-valued query params collapse to their last value here; declare
-  // arrays via a transform on the contract schema if you need them.
-  return parseWith(contract.query, Object.fromEntries(base.url.searchParams), 'query');
-}
-
-/**
- * Only the declared header names go to the schema, so a strict schema
- * coexists with transport headers (`host`, `accept`). A missing header is
- * left out of the object, not passed as `undefined`.
- */
-function parseHeaders(contract: ContractLike, base: BaseRequestCtx): unknown {
-  if (contract.headers === undefined) return undefined;
-  const picked: Record<string, string> = {};
-  for (const name of Object.keys(shapeOf(contract.headers) ?? {})) {
-    const value = base.req.headers.get(name);
-    if (value !== null) picked[name] = value;
-  }
-  return parseWith(contract.headers, picked, 'headers');
-}
-
-/** Params, headers and query: everything but the body, which needs an await. */
-function validateInputSync(
-  contract: ContractLike,
-  params: Record<string, string>,
-  base: BaseRequestCtx,
-): ValidatedInput {
-  return {
-    params: contract.params === undefined ? params : parseWith(contract.params, params, 'params'),
-    headers: parseHeaders(contract, base),
-    query: parseQuery(contract, base),
-    body: undefined,
-  };
-}
-
-async function validateInput(
-  contract: ContractLike,
-  params: Record<string, string>,
-  base: BaseRequestCtx,
-  req: Request,
-): Promise<ValidatedInput> {
-  const input = validateInputSync(contract, params, base);
-
-  let body: unknown;
-  if (contract.body !== undefined) {
-    let raw: unknown;
-    try {
-      raw = await req.json();
-    } catch {
-      throw new HttpError(400, HTTP_ERROR_CODES.badRequest, 'request body is not valid JSON', {
-        remediation: 'Send a JSON body with content-type: application/json.',
-      });
-    }
-    body = parseWith(contract.body, raw, 'body');
-  }
-
-  return { ...input, body };
-}
-
-function parseWith(
-  schema: { parse(input: unknown): unknown },
-  value: unknown,
-  where: 'params' | 'headers' | 'query' | 'body',
-): unknown {
+/** The body as JSON; a body that is not JSON answers 400. */
+async function readJson(req: Request): Promise<unknown> {
   try {
-    return schema.parse(value);
-  } catch (error) {
-    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `${where} validation failed: ${zodMessage(error)}`, {
-      cause: error,
+    return await req.json();
+  } catch {
+    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, 'request body is not valid JSON', {
+      remediation: 'Send a JSON body with content-type: application/json.',
     });
   }
 }
 
-function zodMessage(error: unknown): string {
-  if (error instanceof z.ZodError) return formatIssues(error);
-  return describeInternalError(error);
+/** One decode job per declared field. A missing optional field gets no job: it stays `undefined`. */
+function fieldJobs(where: Where, fields: Readonly<Record<string, Field>>, read: (key: string) => string | undefined): Job[] {
+  const jobs: Job[] = [];
+  for (const [key, field] of Object.entries(fields)) {
+    const { wire, optional } = fieldParts(field);
+    const value = read(key);
+    if (value === undefined && optional) continue;
+    // The `optional(...)` marker decides presence, even for a schema that accepts `undefined`.
+    jobs.push({ at: [where, key], schema: value === undefined ? missingField : decoderOf(wire), value });
+  }
+  return jobs;
 }
 
-function serializeOutput(contract: ContractLike, output: SchemaLike, result: unknown): Response {
-  return jsonResponse(encodeOutput(contract, output, result));
+/** Multi-valued query keys collapse to their last value. */
+function lastQueryValue(base: BaseRequestCtx, key: string): string | undefined {
+  return base.url.searchParams.getAll(key).at(-1);
 }
 
-function encodeOutput(contract: ContractLike, schema: SchemaLike, result: unknown): unknown {
-  try {
-    // Encode, not parse: output leaves the server, so a codec runs in its
-    // wire direction (a `Date` goes out as an ISO string).
-    return schema.encode(result);
-  } catch (error) {
+/**
+ * Decode the request: each declared field from its one string (or
+ * `undefined`), then the body, then the contract's `check`. Every field and
+ * body issue answers one 400; a schema that throws answers 500.
+ */
+function decodeInput(
+  contract: ContractLike,
+  params: Record<string, string>,
+  base: BaseRequestCtx,
+  body?: unknown,
+): MaybePromise<ErasedInput> {
+  const jobs: Job[] = [];
+  if (contract.params !== undefined) jobs.push(...fieldJobs('params', contract.params, key => params[key]));
+  if (contract.headers !== undefined) {
+    jobs.push(...fieldJobs('headers', contract.headers, key => base.req.headers.get(key) ?? undefined));
+  }
+  if (contract.query !== undefined) jobs.push(...fieldJobs('query', contract.query, key => lastQueryValue(base, key)));
+  if (contract.body !== undefined) jobs.push({ at: ['body'], schema: decoderOf(contract.body), value: body });
+  return andThen(runJobs(jobs), runs => assemble(contract, params, runs));
+}
+
+function assemble(contract: ContractLike, params: Record<string, string>, runs: readonly Ran[]): ErasedInput {
+  rejectIssues(issuesOf(runs));
+  const decoded: Record<Exclude<Where, 'body'>, Record<string, unknown>> = { params: {}, headers: {}, query: {} };
+  let body: unknown;
+  for (const { job, result } of runs) {
+    const [where, key] = job.at;
+    if (result.issues !== undefined) continue;
+    if (where === 'body') body = result.value;
+    else if (key !== undefined) decoded[where][key] = result.value;
+  }
+  const input: ErasedInput = {
+    params: contract.params === undefined ? params : decoded.params,
+    headers: contract.headers === undefined ? undefined : decoded.headers,
+    query: contract.query === undefined ? undefined : decoded.query,
+    body,
+  };
+  if (contract.check !== undefined) rejectIssues(contract.check(input) ?? []);
+  return input;
+}
+
+/** Throw the 400 for any issue: `request validation failed: query.page: …`. */
+function rejectIssues(issues: readonly StandardSchemaV1.Issue[]): void {
+  if (issues.length === 0) return;
+  throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `request validation failed: ${formatIssues(issues)}`, {
+    cause: new SchemaError(issues),
+  });
+}
+
+/**
+ * Encode, not decode: output leaves the server, so a codec runs its
+ * `encode` side (a `Date` goes out as an ISO string). Issues answer 500.
+ */
+function encodeOutput(contract: ContractLike, wire: Wire, result: unknown): MaybePromise<unknown> {
+  return andThen(runSchema(encoderOf(wire), result), outcome => {
+    if (outcome.issues === undefined) return outcome.value;
     throw new HttpError(
       500,
       HTTP_ERROR_CODES.internal,
-      `handler output for "${contract.id}" violates the contract's output schema: ${zodMessage(error)}`,
-      { cause: error },
+      `handler output for "${contract.id}" violates the contract's output schema: ${formatIssues(outcome.issues)}`,
+      { cause: new SchemaError(outcome.issues) },
     );
-  }
+  });
 }
 
 /**
