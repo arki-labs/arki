@@ -74,7 +74,11 @@
     "@orpc/contract": "catalog:backend",
     "@orpc/openapi": "catalog:backend",
     "@orpc/server": "catalog:backend",
+    "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
