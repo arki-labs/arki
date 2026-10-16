@@ -20,6 +20,8 @@
 import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 
 import type { Journal, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+
 import { z } from '@arki/contracts';
 import { isJournalError } from '@arki/journal';
 
@@ -45,7 +47,7 @@ export function foremanReceiptTables(name = 'foreman_receipts') {
 export type ForemanReceiptTables = ReturnType<typeof foremanReceiptTables>;
 
 export type JournalReceiptStoreOptions<
-  Meta extends z.ZodObject,
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 > = {
@@ -57,11 +59,11 @@ export type JournalReceiptStoreOptions<
   db: TransactionSource<Tx>;
   tables: ForemanReceiptTables;
   /** The metadata every receipt event records, e.g. `{ actorId: 'foreman' }`. */
-  meta: z.input<Meta>;
+  meta: SchemaInput<Meta>;
 };
 
 /** A receipt store on `@arki/journal`. Call it once at boot: it defines the `foreman_receipt` entity. */
-export function journalReceiptStore<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
+export function journalReceiptStore<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
   options: JournalReceiptStoreOptions<Meta, Tx, AppDb>,
 ): ReceiptStore {
   const { j, journal, db, tables, meta } = options;

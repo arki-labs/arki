@@ -101,6 +101,7 @@
     "@arki/clock": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -114,9 +115,11 @@
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {

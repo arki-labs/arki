@@ -2,7 +2,7 @@
  * @arki/admin/module — the isomorphic Foreman module contract.
  *
  * A package or feature describes what an operator may see and do as one
- * versioned module: Zod-typed **reads** (queries), **actions** (mutations
+ * versioned module: Standard-Schema-typed **reads** (queries), **actions** (mutations
  * with a revision-carrying preview and a permit-guarded execute) and
  * **signals** (evidence it emits). One definition serves every surface —
  * Foreman UI forms, the app's HTTP dispatcher, agent tools and MCP tools —
@@ -40,7 +40,10 @@
  * }
  * ```
  */
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+
 import { z } from '@arki/contracts';
+import { formatIssues, hasJsonSchema, parseAsync, SchemaError } from '@arki/schema';
 
 import type { JsonObject } from './json';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
@@ -119,7 +122,7 @@ export type ForemanDotAction = {
 // ---------------------------------------------------------------------------
 
 /** What a module author writes for a read. */
-export type ReadDef<TIn extends z.ZodType, TOut extends z.ZodType, TCtx> = {
+export type ReadDef<TIn extends StandardSchemaV1, TOut extends StandardSchemaV1, TCtx> = {
   /** Globally unique, e.g. `queue.failedJobs`. */
   readonly id: string;
   readonly summary: string;
@@ -127,7 +130,7 @@ export type ReadDef<TIn extends z.ZodType, TOut extends z.ZodType, TCtx> = {
   readonly input: TIn;
   /** Parsed on the way out: unknown keys of plain objects are stripped. */
   readonly output: TOut;
-  readonly load: (input: z.output<TIn>, ctx: TCtx) => Promise<z.input<TOut>>;
+  readonly load: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TOut>>;
 };
 
 type ReadBase = {
@@ -142,18 +145,18 @@ type ReadBase = {
 };
 
 /** A read built by {@link defineRead}. */
-export type Read<TIn extends z.ZodType, TOut extends z.ZodType, TCtx> = ReadBase & {
+export type Read<TIn extends StandardSchemaV1, TOut extends StandardSchemaV1, TCtx> = ReadBase & {
   readonly input: TIn;
   readonly output: TOut;
-  readonly load: (input: z.output<TIn>, ctx: TCtx) => Promise<z.input<TOut>>;
+  readonly load: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TOut>>;
   /** Validate raw input, load, validate output. What a dispatcher calls. */
-  readonly run: (input: unknown, ctx: TCtx) => Promise<z.output<TOut>>;
+  readonly run: (input: unknown, ctx: TCtx) => Promise<SchemaOutput<TOut>>;
 };
 
 /** Any read whose context accepts `TCtx` — what a module stores. */
 export type AnyRead<TCtx> = ReadBase & {
-  readonly input: z.ZodType;
-  readonly output: z.ZodType;
+  readonly input: StandardSchemaV1;
+  readonly output: StandardSchemaV1;
   readonly run: (input: unknown, ctx: TCtx) => Promise<unknown>;
 };
 
@@ -162,7 +165,7 @@ export type AnyRead<TCtx> = ReadBase & {
 // ---------------------------------------------------------------------------
 
 /** What a module author writes for an action. */
-export type ActionDef<TIn extends z.ZodType, TPreview extends z.ZodType<Revisioned>, TOut extends z.ZodType, TCtx> = {
+export type ActionDef<TIn extends StandardSchemaV1, TPreview extends StandardSchemaV1<unknown, Revisioned>, TOut extends StandardSchemaV1, TCtx> = {
   /** Globally unique, e.g. `queue.retryJob`. */
   readonly id: string;
   readonly summary: string;
@@ -174,9 +177,9 @@ export type ActionDef<TIn extends z.ZodType, TPreview extends z.ZodType<Revision
   /** Must carry the app-computed `revision` the execute step is conditional on. */
   readonly previewOutput: TPreview;
   readonly output: TOut;
-  readonly preview: (input: z.output<TIn>, ctx: TCtx) => Promise<z.input<TPreview>>;
+  readonly preview: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TPreview>>;
   /** Write only if the resource still has `permit.expectedRevision`. */
-  readonly execute: (input: z.output<TIn>, ctx: TCtx, permit: Permit) => Promise<z.input<TOut>>;
+  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<SchemaInput<TOut>>;
 };
 
 type ActionBase = {
@@ -197,27 +200,27 @@ type ActionBase = {
 
 /** An action built by {@link defineAction}. */
 export type Action<
-  TIn extends z.ZodType,
-  TPreview extends z.ZodType<Revisioned>,
-  TOut extends z.ZodType,
+  TIn extends StandardSchemaV1,
+  TPreview extends StandardSchemaV1<unknown, Revisioned>,
+  TOut extends StandardSchemaV1,
   TCtx,
 > = ActionBase & {
   readonly input: TIn;
   readonly previewOutput: TPreview;
   readonly output: TOut;
-  readonly preview: (input: z.output<TIn>, ctx: TCtx) => Promise<z.input<TPreview>>;
-  readonly execute: (input: z.output<TIn>, ctx: TCtx, permit: Permit) => Promise<z.input<TOut>>;
+  readonly preview: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TPreview>>;
+  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<SchemaInput<TOut>>;
   /** Validate raw input, preview, validate the preview. */
-  readonly runPreview: (input: unknown, ctx: TCtx) => Promise<z.output<TPreview>>;
+  readonly runPreview: (input: unknown, ctx: TCtx) => Promise<SchemaOutput<TPreview>>;
   /** Validate raw input, execute under the permit, validate the result. */
-  readonly runExecute: (input: unknown, ctx: TCtx, permit: Permit) => Promise<z.output<TOut>>;
+  readonly runExecute: (input: unknown, ctx: TCtx, permit: Permit) => Promise<SchemaOutput<TOut>>;
 };
 
 /** Any action whose context accepts `TCtx` — what a module stores. */
 export type AnyAction<TCtx> = ActionBase & {
-  readonly input: z.ZodType;
-  readonly previewOutput: z.ZodType<Revisioned>;
-  readonly output: z.ZodType;
+  readonly input: StandardSchemaV1;
+  readonly previewOutput: StandardSchemaV1<unknown, Revisioned>;
+  readonly output: StandardSchemaV1;
   readonly runPreview: (input: unknown, ctx: TCtx) => Promise<Revisioned>;
   readonly runExecute: (input: unknown, ctx: TCtx, permit: Permit) => Promise<unknown>;
 };
@@ -227,7 +230,7 @@ export type AnyAction<TCtx> = ActionBase & {
 // ---------------------------------------------------------------------------
 
 /** What a module author writes for a signal. */
-export type SignalDef<TPayload extends z.ZodType> = {
+export type SignalDef<TPayload extends StandardSchemaV1> = {
   /** e.g. `job.failed`. */
   readonly id: string;
   readonly summary: string;
@@ -235,7 +238,7 @@ export type SignalDef<TPayload extends z.ZodType> = {
 };
 
 /** A signal built by {@link defineSignal}. */
-export type Signal<TPayload extends z.ZodType = z.ZodType> = SignalDef<TPayload> & {
+export type Signal<TPayload extends StandardSchemaV1 = StandardSchemaV1> = SignalDef<TPayload> & {
   readonly kind: 'signal';
   readonly jsonSchema: { readonly payload: JsonObject };
 };
@@ -377,7 +380,7 @@ const moduleMetaSchema = z.object({
 });
 
 /** Define a read. The context type is taken from `load`'s second parameter (`unknown` when unused). */
-export function defineRead<TIn extends z.ZodType, TOut extends z.ZodType, TCtx = unknown>(
+export function defineRead<TIn extends StandardSchemaV1, TOut extends StandardSchemaV1, TCtx = unknown>(
   def: ReadDef<TIn, TOut, TCtx>,
 ): Read<TIn, TOut, TCtx> {
   assertDefinition(readMetaSchema, def, `Read "${def.id}"`);
@@ -413,9 +416,9 @@ export function defineRead<TIn extends z.ZodType, TOut extends z.ZodType, TCtx =
 
 /** Define an action. The preview schema must output a `revision` string; execute receives the approved {@link Permit}. */
 export function defineAction<
-  TIn extends z.ZodType,
-  TPreview extends z.ZodType<Revisioned>,
-  TOut extends z.ZodType,
+  TIn extends StandardSchemaV1,
+  TPreview extends StandardSchemaV1<unknown, Revisioned>,
+  TOut extends StandardSchemaV1,
   TCtx = unknown,
 >(def: ActionDef<TIn, TPreview, TOut, TCtx>): Action<TIn, TPreview, TOut, TCtx> {
   const maxTargets = def.maxTargets ?? DEFAULT_MAX_TARGETS;
@@ -458,8 +461,8 @@ export function defineAction<
   };
 }
 
-/** Define a signal: timestamped evidence a module emits, with a Zod-typed payload. */
-export function defineSignal<TPayload extends z.ZodType>(def: SignalDef<TPayload>): Signal<TPayload> {
+/** Define a signal: timestamped evidence a module emits, with a Standard Schema payload. */
+export function defineSignal<TPayload extends StandardSchemaV1>(def: SignalDef<TPayload>): Signal<TPayload> {
   assertDefinition(signalMetaSchema, def, `Signal "${def.id}"`);
   return {
     kind: 'signal',
@@ -612,15 +615,31 @@ function assertReference(found: boolean, moduleId: string, panelId: string, kind
   }
 }
 
-function toJsonSchema(schema: z.ZodType, io: 'input' | 'output', ownerId: string, field: string): JsonObject {
+/** The one JSON Schema dialect admin asks a schema for. */
+const JSON_SCHEMA_TARGET = 'draft-2020-12';
+const WITH_JSON_SCHEMA_FIX =
+  'Wrap the schema with withJsonSchema() from @arki/schema, or use a schema library that can emit JSON Schema.';
+
+/**
+ * The schema's JSON Schema: `input` for what a caller sends, `output` for what the server returns.
+ * A schema with no converter, or whose conversion throws, is a loud error naming `ownerId` and `field`.
+ */
+function toJsonSchema(schema: StandardSchemaV1, io: 'input' | 'output', ownerId: string, field: string): JsonObject {
+  if (!hasJsonSchema(schema)) {
+    throw new AdminError(
+      ADMIN_ERROR_CODES.invalidDefinition,
+      `The ${field} schema of "${ownerId}" cannot produce JSON Schema. ${WITH_JSON_SCHEMA_FIX}`,
+      WITH_JSON_SCHEMA_FIX,
+    );
+  }
   let raw: unknown;
   try {
-    raw = z.toJSONSchema(schema, { io });
+    raw = schema['~standard'].jsonSchema[io]({ target: JSON_SCHEMA_TARGET });
   } catch (error) {
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidDefinition,
-      `The ${field} schema of "${ownerId}" cannot be expressed as JSON Schema.`,
-      'Use JSON-representable schemas on the wire: no transforms on outputs, no dates, bigints, maps or custom types.',
+      `The ${field} schema of "${ownerId}" cannot be expressed as JSON Schema. ${WITH_JSON_SCHEMA_FIX}`,
+      `Use JSON-representable schemas on the wire: no dates, bigints, maps or custom types. ${WITH_JSON_SCHEMA_FIX}`,
       { cause: error },
     );
   }
@@ -636,37 +655,39 @@ function toJsonSchema(schema: z.ZodType, io: 'input' | 'output', ownerId: string
   return parsed.data;
 }
 
-async function parseInput<TSchema extends z.ZodType>(
+async function parseInput<TSchema extends StandardSchemaV1>(
   schema: TSchema,
   value: unknown,
   ownerId: string,
-): Promise<z.output<TSchema>> {
-  const result = await schema.safeParseAsync(value);
-  if (!result.success) {
+): Promise<SchemaOutput<TSchema>> {
+  try {
+    return await parseAsync<SchemaOutput<TSchema>>(schema, value);
+  } catch (error) {
+    if (!(error instanceof SchemaError)) throw error;
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidInput,
-      `Input for "${ownerId}" does not match its schema:\n${z.prettifyError(result.error)}`,
+      `Input for "${ownerId}" does not match its schema:\n${formatIssues(error.issues)}`,
       'Send input that matches the published input JSON Schema.',
-      { cause: result.error },
+      { cause: error },
     );
   }
-  return result.data;
 }
 
-async function parseOutput<TSchema extends z.ZodType>(
+async function parseOutput<TSchema extends StandardSchemaV1>(
   schema: TSchema,
   value: unknown,
   ownerId: string,
   step: string,
-): Promise<z.output<TSchema>> {
-  const result = await schema.safeParseAsync(value);
-  if (!result.success) {
+): Promise<SchemaOutput<TSchema>> {
+  try {
+    return await parseAsync<SchemaOutput<TSchema>>(schema, value);
+  } catch (error) {
+    if (!(error instanceof SchemaError)) throw error;
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidOutput,
-      `"${ownerId}" ${step} returned data that does not match its schema:\n${z.prettifyError(result.error)}`,
+      `"${ownerId}" ${step} returned data that does not match its schema:\n${formatIssues(error.issues)}`,
       `Fix the ${step} implementation of "${ownerId}" so it returns what its schema declares.`,
-      { cause: result.error },
+      { cause: error },
     );
   }
-  return result.data;
 }
