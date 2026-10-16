@@ -85,8 +85,4 @@ export const env = defineEnv({
     DB_DROP_ON_START: process.env['DB_DROP_ON_START'],
   },
 
-  options: {
-    skipValidation:
-      !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
-  },
 });

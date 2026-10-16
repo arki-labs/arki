@@ -7,9 +7,9 @@ import { z } from '@arki/contracts';
 import { defineEnv } from '@arki/env/core';
 
 /**
- * Defaults that must also hold when validation is skipped. `skipValidation`
- * is on outside `development`, and a skipped schema applies no zod defaults,
- * so callers fall back to these instead of silently picking a paid provider.
+ * Defaults that must also hold when validation is skipped (`SKIP_ENV_VALIDATION=1`).
+ * A skipped schema applies no zod defaults, so callers fall back to these
+ * instead of silently picking a paid provider.
  */
 export const DEFAULT_LLM_PROVIDER = 'ollama';
 export const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
@@ -119,7 +119,4 @@ export const env = defineEnv({
   },
   client: {},
   clientPrefix: '',
-  options: {
-    skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
-  },
 });

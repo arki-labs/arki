@@ -10,15 +10,12 @@ export const env = defineEnv({
   extends: [authEnv, dbEnv, kvEnv],
   server: {
     FOREMAN_TOKEN: z.string().min(1).optional(),
-    NODE_ENV: z.enum(['development', 'production']).default('development'),
+    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     VITE_URL: z
       .url()
       .default(() =>
         process.env['NODE_ENV'] === 'production' ? 'https://arki.com' : 'http://localhost:5181',
       ),
     PRODUCTION_URL: z.url().default('https://arki.com').optional(),
-  },
-  options: {
-    skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
   },
 });

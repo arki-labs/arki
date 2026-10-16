@@ -12,7 +12,7 @@
 import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DB_PLUGIN_ERROR_CODES, db } from './dot.js';
 
@@ -24,7 +24,28 @@ const widgets = pgTable('widgets', {
 const schema = { widgets };
 const relations = defineRelations(schema);
 
+// The env module validates DB_URL once and keeps the result, so deleting it from process.env
+// later changes nothing. A fresh module graph with the env mocked simulates a missing DB_URL;
+// DotPluginError comes from the same graph so `instanceof` still holds.
+async function importDotWithoutDbUrl(): Promise<{
+  db: (typeof import('./dot.js'))['db'];
+  DotPluginError: (typeof import('@arki/dot/plugin'))['DotPluginError'];
+}> {
+  vi.resetModules();
+  vi.doMock('./env.js', () => ({ env: { DB_URL: undefined } }));
+  const [{ db: freshDb }, { DotPluginError: FreshDotPluginError }] = await Promise.all([
+    import('./dot.js'),
+    import('@arki/dot/plugin'),
+  ]);
+  return { db: freshDb, DotPluginError: FreshDotPluginError };
+}
+
 describe('@arki/db/dot', () => {
+  afterEach(() => {
+    vi.doUnmock('./env.js');
+    vi.resetModules();
+  });
+
   it('contributes a db-kind service to the manifest', () => {
     const configured = defineApp('db-manifest-test')
       .use(db({ driver: 'pglite', memory: true, relations }))
@@ -75,24 +96,21 @@ describe('@arki/db/dot', () => {
     // every boot failure has a uniform outer shape. The original throw is
     // preserved on `.cause` — that's what consumers and coding agents
     // match against for the stable code / remediation / docsUrl.
-    const previous = process.env['DB_URL'];
-    delete process.env['DB_URL'];
-    try {
+    const { db: dbWithoutUrl, DotPluginError: FreshDotPluginError } = await importDotWithoutDbUrl();
+    {
       const caught = await defineApp('db-missing-url')
-        .use(db({ relations }))
+        .use(dbWithoutUrl({ relations }))
         .boot()
         .catch((e: unknown) => e);
       expect(caught).toBeInstanceOf(DotLifecycleError);
       const cause = (caught as DotLifecycleError).cause;
-      expect(cause).toBeInstanceOf(DotPluginError);
+      expect(cause).toBeInstanceOf(FreshDotPluginError);
       const pluginErr = cause as DotPluginError;
       expect(pluginErr.code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
       expect(pluginErr.code).toBe('ARKI_DB_PLUGIN_E001');
       expect(pluginErr.message).toMatch(/DB_URL is not configured/);
       expect(pluginErr.remediation).toMatch(/DB_URL|pglite/);
       expect(pluginErr.docsUrl).toMatch(/^https?:\/\//);
-    } finally {
-      if (previous !== undefined) process.env['DB_URL'] = previous;
     }
   });
 
@@ -101,11 +119,12 @@ describe('@arki/db/dot', () => {
     // at top level and features name `database.provides.db`. Importing that
     // module must not read env or open a pool.
     let reads = 0;
-    const database = db({
+    const { db: dbWithoutUrl } = await importDotWithoutDbUrl();
+    const database = dbWithoutUrl({
       relations,
       url: () => {
         reads += 1;
-        return process.env['DB_URL'];
+        return undefined;
       },
     });
     expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });
@@ -113,15 +132,9 @@ describe('@arki/db/dot', () => {
     builder.configure();
     expect(reads).toBe(0);
 
-    const previous = process.env['DB_URL'];
-    delete process.env['DB_URL'];
-    try {
-      const caught = await builder.boot().catch((error: unknown) => error);
-      expect(reads).toBe(1);
-      expect(((caught as DotLifecycleError).cause as DotPluginError).code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
-    } finally {
-      if (previous !== undefined) process.env['DB_URL'] = previous;
-    }
+    const caught = await builder.boot().catch((error: unknown) => error);
+    expect(reads).toBe(1);
+    expect(((caught as DotLifecycleError).cause as DotPluginError).code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
   });
 
   it('mounts a second db scope via rename()', async () => {

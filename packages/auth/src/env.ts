@@ -76,7 +76,4 @@ export const env = defineEnv({
   client: {},
   clientPrefix: '',
 
-  options: {
-    skipValidation: !!process.env.CI || process.env.NODE_ENV === 'test',
-  },
 });

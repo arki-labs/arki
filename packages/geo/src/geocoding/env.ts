@@ -25,12 +25,6 @@ export const geocodingEnv = defineEnv({
     GEOCODING_CACHE_TTL: z.coerce.number().default(2_592_000), // 30 days in seconds
     GEOCODING_CACHE_KEY_PREFIX: z.string().default('geo:'),
   },
-  options: {
-    skipValidation:
-      !!process.env['CI'] ||
-      !!process.env['SKIP_ENV_VALIDATION'] ||
-      process.env['npm_lifecycle_event'] === 'lint',
-  },
 });
 
 export type GeocodingEnv = typeof geocodingEnv;
