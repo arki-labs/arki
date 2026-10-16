@@ -5,7 +5,8 @@
  * `errorMap(...)`, so the client gets typed errors. The procedure hands the
  * usecase's result to `orThrowRpc(...)`, which returns the value or throws the
  * matching `ORPCError`. It also takes the handler's `errors`, so a failure the
- * usecase can return but the contract does not list is a compile error.
+ * usecase can return but the contract does not list is a compile error. On the
+ * client, `reviveRpcError(...)` turns the caught `ORPCError` back into the failure.
  *
  * @example
  * // model/errors.ts
@@ -14,6 +15,8 @@
  * byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
  * // entrypoints/procedures.ts
  * byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(context.usecases.find(input.id), errors)),
+ * // the frontend: the caught ORPCError back as the failure, ready for match()
+ * const failure = reviveRpcError(error, [PostNotFound]);
  */
 import { ORPCError } from '@orpc/server';
 
@@ -21,6 +24,7 @@ import type { Failure } from './failure.js';
 import type { StandardSchemaV1 } from './standard-schema.js';
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 import { isFailure, isThenable } from './failure.js';
+import { revive } from './revive.js';
 
 /** The parts of a `FailureDefinition` an error map needs. */
 type DefinitionShape = {
@@ -102,4 +106,34 @@ function orThrowRpcNow(value: unknown, errors: LooseErrors): unknown {
     throw new ORPCError(value.code, { status: value.status, message: value.message, data: value.data });
   }
   throw declared({ message: value.message, data: value.data });
+}
+
+/** The parts of a definition {@link reviveRpcError} needs: the same as `revive`. */
+type RevivableDefinition = {
+  readonly code: string;
+  readonly dataSchema: StandardSchemaV1 | undefined;
+  (...args: never[]): unknown;
+};
+
+/**
+ * The live failure a caught `ORPCError` stands for, when its code is one of
+ * `definitions`; `undefined` for any other error. Data is checked with the
+ * definition's schema like `revive`, so data that does not match throws
+ * `ARKI_FAILURE_E006`. Use it on the client to `match` on failures the
+ * contract declares.
+ *
+ * @example
+ * const post = await client.posts.byId({ id }).catch((error: unknown) => {
+ *   const failure = reviveRpcError(error, [PostNotFound]);
+ *   if (failure === undefined) throw error; // not a declared failure: still a bug
+ *   return failure;
+ * });
+ * //    ^? Post | Failure<'post.not_found', { id: string }>
+ */
+export function reviveRpcError<const Definitions extends readonly RevivableDefinition[]>(
+  error: unknown,
+  definitions: Definitions,
+): ReturnType<Definitions[number]> | undefined {
+  if (!(error instanceof ORPCError)) return undefined;
+  return revive(error, definitions);
 }

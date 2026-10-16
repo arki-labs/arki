@@ -190,6 +190,15 @@ byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(conte
 - `orThrowRpc(value, errors)` returns the value, or throws the failure through the handler's `errors`: the typed `ORPCError` the contract declares, with the failure's message and data. The client gets it as `defined: true`.
 - A failure the usecase can return but the contract does not list is a compile error: `Property '"post.locked"' is missing in type …`. Add its definition to `errorMap(...)`. If the types are bypassed anyway, the failure arrives as undeclared (`defined: false`).
 - Forgetting `orThrowRpc` is a compile error: `Post | Failure` is not the procedure's output.
+- `reviveRpcError(error, definitions)` is the client side: a caught `ORPCError` whose code is one of the definitions becomes the live failure, its data checked like `revive`. Anything else returns `undefined`, so rethrow it. Then `match` on the failure as the backend does.
+
+```ts
+const post = await client.posts.byId({ id }).catch((error: unknown) => {
+  const failure = reviveRpcError(error, [PostNotFound]);
+  if (failure === undefined) throw error;
+  return failure;
+}); // Post | Failure<'post.not_found', …>
+```
 
 `@orpc/server` is an optional peer dependency, needed only for this entry.
 

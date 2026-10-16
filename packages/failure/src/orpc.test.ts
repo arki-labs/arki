@@ -3,9 +3,11 @@ import { call, implement, ORPCError } from '@orpc/server';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { Failure } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
-import { defineFailure } from './failure.js';
-import { errorMap, orThrowRpc } from './orpc.js';
+import { defineFailure, isFailure } from './failure.js';
+import { match } from './handle.js';
+import { errorMap, orThrowRpc, reviveRpcError } from './orpc.js';
 
 const PostNotFound = defineFailure('post.not_found', {
   status: 404,
@@ -95,5 +97,66 @@ describe('orThrowRpc in a procedure', () => {
       expectTypeOf(orThrowRpc(find(input.id), errors)).toEqualTypeOf<Promise<Post>>();
       return orThrowRpc(find(input.id), errors);
     });
+  });
+});
+
+/** What the frontend does: call, catch, and get the declared failure back as a value. */
+const fetchPost = async (id: string) => {
+  try {
+    return await call(procedure, { id });
+  } catch (error) {
+    const failure = reviveRpcError(error, [PostNotFound, PostLocked]);
+    if (failure === undefined) throw error;
+    return failure;
+  }
+};
+
+describe('reviveRpcError on the client', () => {
+  it('turns the declared ORPCError back into the live failure, so the frontend can match on it like the backend', async () => {
+    const result = await fetchPost('nope');
+    expect(isFailure(result)).toBe(true);
+    expect(PostNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'post.not_found',
+      status: 404,
+      message: 'no post nope',
+      data: { id: 'nope' },
+    });
+    const label = match(result, {
+      ok: post => post.title,
+      'post.not_found': failure => `missing ${failure.data.id}`,
+      'post.locked': () => 'locked',
+    });
+    expect(label).toBe('missing nope');
+    expect(
+      match(await fetchPost('locked'), {
+        ok: () => 'ok',
+        'post.not_found': () => 'missing',
+        'post.locked': () => 'locked',
+      }),
+    ).toBe('locked');
+  });
+
+  it('types the result from the definitions passed, so a match must handle exactly those codes', async () => {
+    const result = await fetchPost('p1');
+    expectTypeOf(result).toEqualTypeOf<
+      Post | Failure<'post.not_found', { id: string }> | Failure<'post.locked', undefined>
+    >();
+    expect(result).toEqual({ id: 'p1', title: 'Hello' });
+  });
+
+  it('returns undefined for errors it was not told about, so unknown errors stay thrown as bugs', async () => {
+    const locked = await call(procedure, { id: 'locked' }).catch((error_: unknown) => error_);
+    expect(reviveRpcError(locked, [PostNotFound])).toBeUndefined();
+    expect(reviveRpcError(new TypeError('network down'), [PostNotFound])).toBeUndefined();
+    // A plain object that only looks like the error is JSON, not a caught ORPCError: that is revive's job.
+    expect(reviveRpcError({ code: 'post.not_found', data: { id: 'x' } }, [PostNotFound])).toBeUndefined();
+  });
+
+  it('refuses data that does not match the schema, so a server and client on different definitions fail loudly', () => {
+    const drifted = new ORPCError('post.not_found', { status: 404, data: { id: 42 } });
+    expect(() => reviveRpcError(drifted, [PostNotFound])).toThrow(
+      expect.objectContaining({ code: FAILURE_ERROR_CODES.invalidData }),
+    );
   });
 });
