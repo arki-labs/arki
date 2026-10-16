@@ -48,34 +48,45 @@ export function definitionClientPlugins<D extends AuthDefinition>(definition: D)
   return definition.methods.flatMap(method => pluginsOfMethod(method));
 }
 
-const WORKSPACES_CLIENT_PLUGINS = {
+const workspaceFactories = {
   true: () => organizationClient({ teams: { enabled: true } }),
   false: () => organizationClient({ teams: { enabled: false } }),
 };
+
+/** The organization plugin per `teams` value. */
+type WorkspacePlugins = {
+  [K in keyof typeof workspaceFactories]: ReturnType<(typeof workspaceFactories)[K]>;
+};
+
+/**
+ * The same factories, typed as a mapped type: indexing it with a generic key returns
+ * `WorkspacePlugins[K]`, so the compiler checks the helper's return type against its body
+ * (the "correlated union" pattern, TypeScript PR #47109).
+ */
+const WORKSPACES_CLIENT_PLUGINS: { [K in keyof WorkspacePlugins]: () => WorkspacePlugins[K] } = workspaceFactories;
 
 /**
  * The client plugins a definition's `workspaces` value needs: the organization API (typed with or
  * without teams), or none. An indexed access, not a conditional type, so it stays generic until
  * the definition is known (a conditional type would be resolved early to "maybe teams").
  */
-export type WorkspacesClientPlugins<W extends WorkspacesOption | undefined> = ReturnType<
-  (typeof WORKSPACES_CLIENT_PLUGINS)[`${NonNullable<W>['teams']}`]
->[];
+export type WorkspacesClientPlugins<W extends WorkspacesOption | undefined> =
+  WorkspacePlugins[`${NonNullable<W>['teams']}`][];
 
-/**
- * The organization client plugin when `workspaces` is on, typed from the value as written.
- *
- * The one signature states the return type per `W`; TypeScript cannot check a conditional return
- * type inside a generic body, so the body is written against the plain option and the signature
- * carries the mapping. Both branches are covered by `client.test.ts` (runtime) and the type test.
- */
+/** Reads `value[key]` and keeps the indexed type `T[K]`; destructuring would widen it. */
+function readProperty<T, K extends keyof T>(value: T, key: K): T[K] {
+  return value[key];
+}
+
+/** The organization client plugin when `workspaces` is on, typed from the value as written. */
 export function workspacesClientPlugins<D extends AuthDefinition>(
   definition: D,
-): WorkspacesClientPlugins<D['workspaces']>;
-export function workspacesClientPlugins({
-  workspaces,
-}: AuthDefinition): ReturnType<(typeof WORKSPACES_CLIENT_PLUGINS)['true' | 'false']>[] {
-  return workspaces === undefined ? [] : [WORKSPACES_CLIENT_PLUGINS[`${workspaces.teams}`]()];
+): WorkspacesClientPlugins<D['workspaces']> {
+  const workspaces = readProperty(definition, 'workspaces');
+  if (workspaces === undefined) return [];
+  const teams = readProperty(workspaces, 'teams');
+  const key: `${NonNullable<D['workspaces']>['teams']}` = `${teams}`;
+  return [WORKSPACES_CLIENT_PLUGINS[key]()];
 }
 
 export type AuthClientOptions<P extends readonly BetterAuthClientPlugin[]> = {
