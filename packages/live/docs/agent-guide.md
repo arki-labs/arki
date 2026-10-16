@@ -5,7 +5,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 ## The model
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
-2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. `change` frames carry the batch's `txids`.
+2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. A `change` frame carries the `txids` of exactly the commits that wrote its own tables.
 3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame `${epoch}.${seq}`, keeps a bounded ring, and feeds every open stream.
 4. A stream starts with `begin`: `resume` when its cursor is of this epoch and still in the ring (the missed frames follow), else `reset` (refetch every live query). A listener gap ends every stream with `gap` and the next `ready` starts a new epoch.
 5. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
@@ -86,4 +86,8 @@ bun run test
 bun run lint
 bun run test:docs
 bun run test:runtimes
+
+# In an app that mounts liveQueries: each live procedure with its tables, then the booted app's health.
+dot explain --json | jq '.data.actions[] | select(.meta.meta.live) | {id, reads: .meta.meta.live.reads}'
+dot doctor --json | jq '.data'
 ```

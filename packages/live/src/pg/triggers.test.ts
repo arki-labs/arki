@@ -18,7 +18,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { TableTag } from '../schema.js';
+import type { TableTag } from '../types.js';
 import { CHANNEL, parsePayload, POSTS, TABLES_SQL, TRIGGERS_SQL, USERS } from '../tests/fixtures.js';
 import { liveMigration, touch, verifyLiveTriggers } from './index.js';
 

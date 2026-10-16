@@ -388,9 +388,9 @@ describe('bounds and lifecycle', () => {
     expect(changes.map(change => change.cursor.split('.')[1])).toEqual(['1', '2', '3', '4', '5']);
   });
 
-  it('a frame carries the txids of its commits once each, on the last frame of a batch; replay keeps them; 256 commits flush at once', async () => {
-    // Why: a client awaits its own write by txid (awaitTxId, M3); a dropped or early txid would
-    // resolve before the queries it touched were invalidated, or never.
+  it('a frame carries, once each, the txids of exactly the commits that wrote its tables; replay keeps them; 256 commits flush at once', async () => {
+    // Why: a client awaits its own write by txid (awaitTxId, M3); a dropped txid would never
+    // resolve. And a txid on a frame of other tables would reveal writes a grant hides.
     const { source, hub } = rig();
     await startReady(hub, source);
     const feed = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
@@ -406,14 +406,17 @@ describe('bounds and lifecycle', () => {
       txids: ['9007199254740993', '12'],
     });
 
-    // 300 tables in one transaction: two frames, the txid on the second.
+    // 300 tables in one transaction: two frames, each naming it (it wrote tables of both).
     for (let index = 0; index < 300; index += 1) {
       source.emit({ kind: 'change', tags: [tag(`t${index}`)], txid: '13' });
     }
     await flush();
     const { value: head } = await feed.next();
     const { value: tail } = await feed.next();
-    expect([txidsOf(head), txidsOf(tail)]).toEqual([[], ['13']]);
+    expect([txidsOf(head), txidsOf(tail)]).toEqual([['13'], ['13']]);
+    if (head?.kind !== 'change') throw new Error('expected change');
+    expect(head.txidsByTag).toHaveLength(256);
+    expect(head.txidsByTag[0]).toEqual(['13']);
 
     // 256 distinct transactions in one window: flushed without waiting for the timer.
     for (let index = 0; index < 256; index += 1) {

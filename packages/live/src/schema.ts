@@ -1,6 +1,8 @@
 /**
- * The wire and meta shapes of `@arki/live`. Every type is `z.infer` of one
- * schema here; nothing is restated elsewhere.
+ * @internal The runtime checks of the wire and meta shapes. Internal: the
+ * public types are the plain ones in `types.ts`, and `schema.types.test.ts`
+ * proves each schema here parses to exactly that type. Nothing public may
+ * import this module's types (`library-check` TYPES_E001).
  */
 import { z } from 'zod';
 
@@ -57,10 +59,7 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
       manifest: liveManifestSchema,
     })
     .strict(),
-  /**
-   * Tables changed by commits. `txids` are those commits' transaction ids (decimal strings), on
-   * the last frame of a batch: once it is handled, every query those commits touched is invalidated.
-   */
+  /** Tables changed by commits, and the ids of exactly the commits that wrote them. */
   z
     .object({
       kind: z.literal('change'),
@@ -74,9 +73,3 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
   /** The server closes on purpose (max age, stop, slow client): reconnect with the cursor. */
   z.object({ kind: z.literal('bye') }).strict(),
 ]);
-
-export type TableTag = z.infer<typeof tableTagSchema>;
-export type LiveMeta = z.infer<typeof liveMetaSchema>;
-export type LiveManifest = z.infer<typeof liveManifestSchema>;
-export type LiveCursor = z.infer<typeof liveCursorSchema>;
-export type LiveEvent = z.infer<typeof liveEventSchema>;

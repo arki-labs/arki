@@ -1,4 +1,4 @@
-import type { LiveManifest, LiveMeta, TableTag } from './schema.js';
+import type { LiveManifest, LiveMeta, TableTag } from './types.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
 import { tableTagSchema } from './schema.js';
 
@@ -29,6 +29,13 @@ export function live(options: { readonly reads: readonly TableTag[] }): Required
     );
   }
   return { live: { version: 1, reads: [...reads.values()] } };
+}
+
+/** Every table the manifest reads, once each, in first-seen order. Feeds `liveMigration` and `verifyLiveTriggers`. */
+export function liveTables(manifest: LiveManifest): readonly TableTag[] {
+  const tables = new Map<string, TableTag>();
+  for (const entry of manifest) for (const read of entry.reads) tables.set(tagKey(read), read);
+  return [...tables.values()];
 }
 
 /** The paths whose declared reads include any of `tags`. Pure. */

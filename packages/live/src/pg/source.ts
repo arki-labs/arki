@@ -11,7 +11,7 @@ import type { ListenPool } from '@arki/db/pg';
 import { listenOnPool } from '@arki/db/pg';
 
 import type { LiveSource } from '../hub.js';
-import type { TableTag } from '../schema.js';
+import type { TableTag } from '../types.js';
 import { debugSource } from '../debug.js';
 import { tableTagSchema, txIdSchema } from '../schema.js';
 import { liveChannel } from './migration.js';

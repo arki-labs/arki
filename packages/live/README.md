@@ -2,7 +2,7 @@
 
 Live queries on your own Postgres. A procedure declares the tables it reads in its oRPC contract meta. A statement trigger publishes a hint at commit. A hub numbers those hints and feeds one stream per browser tab, and the client refetches the queries that read a changed table. Only table names travel; data always comes from a normal, authorized refetch.
 
-This release is the correctness core (milestone M0 of the lesson-01 plan): the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`. The Postgres source, the SSE endpoint, the Dot plugin and the React provider build on it.
+This release covers milestones M0 to M2 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint and the Dot plugin. The React provider builds on it.
 
 ## The guarantees
 
@@ -81,9 +81,59 @@ if (change.value?.kind !== 'change' || change.value.tags[0]?.table !== 'posts')
 await hub.stop();
 ```
 
-Each `change` frame also carries `txids`: the Postgres transaction ids (`pg_current_xact_id()`) of the commits behind it, as decimal strings, because an `xid8` can pass `Number.MAX_SAFE_INTEGER`. A batch that spans several frames puts them on its last frame, so once that frame is handled every query those commits touched is invalidated. A client will use this to wait for its own write (`awaitTxId`, coming); today it is informative only. Hints from a source without txids carry `txids: []`.
+Each `change` frame also carries `txids`: the Postgres transaction ids (`pg_current_xact_id()`) of the commits behind it, as decimal strings, because an `xid8` can pass `Number.MAX_SAFE_INTEGER`. A frame names exactly the commits that wrote one of its own tables, each once; a transaction that wrote tables on two frames of a split batch is on both. A client will use this to wait for its own write (`awaitTxId`, coming); today it is informative only. Hints from a source without txids carry `txids: []`.
 
 Reset rules: a cursor of the current epoch still in the ring resumes and replays the missed frames. No cursor, another epoch (a listener gap or a restart), an evicted cursor or one from the future resets. A listener gap ends every stream with `gap`.
+
+## Serve the stream
+
+`liveEndpoint` serves `GET /api/live` as server-sent events. Give the hub a pool of its own: the listener holds one client for as long as it runs.
+
+```ts
+import { oc } from '@orpc/contract';
+import pg from 'pg';
+import { z } from 'zod';
+
+import type { LiveMeta } from '@arki/live';
+import { listen } from '@arki/http';
+import { createLiveHub, live } from '@arki/live';
+import { liveEndpoint } from '@arki/live/http';
+import { liveManifest } from '@arki/live/orpc';
+import { pgSource } from '@arki/live/pg';
+
+const contract = oc.$meta<LiveMeta>({});
+const posts = { schema: 'public', table: 'posts' };
+const appContract = { posts: { list: contract.meta(live({ reads: [posts] })).output(z.array(z.string())) } };
+
+const listenPool = new pg.Pool({ connectionString: process.env.DB_URL, max: 1, application_name: 'blog_listener' });
+const hub = createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog' }) });
+await hub.start(); // rejects when the first LISTEN fails
+
+const endpoint = liveEndpoint({
+  hub,
+  manifest: liveManifest(appContract),
+  // null answers 401. `{ tables }` limits what this client sees; `{}` is every manifest table.
+  authorize: request => Promise.resolve(request.headers.get('authorization') === 'Bearer demo' ? {} : null),
+});
+await listen(endpoint.fetch, { port: 3000 });
+```
+
+In a TanStack Start route: `GET: ({ request }) => endpoint.fetch(request)` in `routes/api/live.ts`. In a Dot app, `liveQueries` from `@arki/live/dot` does all of this: it checks the triggers at boot (E002), listens at start, sends `bye` and gives the client back at stop, and publishes the bundle as `liveRoutes` for `http({ bundles: [liveQ.provides.liveRoutes] })`. Declare it after `dbMigrations` and before `http()`.
+
+What the endpoint does, in order, before any stream header: a malformed or repeated `cursor` answers 400 E004; `authorize` returning `null` answers 401 E005; a hub without its listener answers 503 E003 with `retry-after`. Then `hello` with the part of the manifest the grant allows (the procedures whose every table is granted), and `change` frames cut down to the granted tables. A frame keeps only the `txids` of transactions that wrote a granted table, and **a frame with no granted table is skipped whole**, so a client never learns that, or how often, a table it cannot read is written. After `maxAgeMs` (default 5 minutes) the stream sends `bye` and ends, and the client reconnects and is authorized again.
+
+Try it by hand (the demo test `src/tests/demo.pg.test.ts` does the same against Postgres 16 and 17):
+
+```sh
+curl -N -H 'authorization: Bearer demo' http://localhost:3000/api/live
+# data: {"kind":"hello","v":1,"mode":"reset","cursor":"k3v9….0","manifest":[…]}
+
+psql "$DB_URL" -c "insert into posts values ('p1', 'Hello')"
+# data: {"kind":"change","cursor":"k3v9….1","tags":[{"schema":"public","table":"posts"}],"txids":["748"]}
+
+psql "$DB_URL" -c "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'blog_listener'"
+# data: {"kind":"gap"}   then the stream ends; the next connect is a reset (new epoch)
+```
 
 ## Limits
 

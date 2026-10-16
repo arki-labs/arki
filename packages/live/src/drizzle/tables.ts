@@ -1,7 +1,7 @@
 import type { PgTable } from 'drizzle-orm/pg-core';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 
-import type { LiveMeta, TableTag } from '../schema.js';
+import type { LiveMeta, TableTag } from '../types.js';
 import { live as liveFromTags } from '../manifest.js';
 
 /**

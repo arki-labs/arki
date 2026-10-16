@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 
-import type { TableTag } from '../schema.js';
+import type { TableTag } from '../types.js';
 import { LIVE_ERROR_CODES, liveError } from '../errors.js';
 import { tagKey } from '../manifest.js';
 import { tableTagSchema } from '../schema.js';

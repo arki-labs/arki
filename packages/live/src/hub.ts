@@ -14,13 +14,17 @@
  *   another epoch, evicted, from the future) resets.
  * - A stream whose queue passes `subscriberFrames` gets `bye`: it reconnects
  *   with its cursor instead of buffering without bound.
+ * - `stop()` is final and settles once: every stream gets `bye`, the batch
+ *   timer is cleared, and the promise resolves only after the source stopped
+ *   (also when `start()` is still running). Every call returns that promise.
  */
 import { z } from 'zod';
 
-import type { LiveCursor, LiveEvent, TableTag } from './schema.js';
+import type { LiveCursor, LiveEvent, TableTag } from './types.js';
 import { debugHub } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
 import { tagKey } from './manifest.js';
+import { replayRing } from './replay.js';
 import { liveCursorSchema } from './schema.js';
 
 /** What a source reports: the listener is ready (or back), the listener lost continuity, or tables changed at commit. */
@@ -31,6 +35,18 @@ export type LiveSourceEvent =
 
 /** Where hints come from. `start` resolves with the function that stops it. */
 export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Promise<() => Promise<void>> };
+
+/** The hub's bounds. Every one is a positive integer; omitted ones take the default. */
+export type LiveLimits = {
+  /** Tags are unioned for this long, in ms (a fixed window, so a write storm still flushes). Default 20. */
+  readonly batchMs?: number;
+  /** Frames kept for resume. Default 4096. */
+  readonly replayFrames?: number;
+  /** Frames older than this many ms are evicted. Default 120 000. */
+  readonly replayMs?: number;
+  /** Over this many queued frames the stream gets `bye`. Default 256. */
+  readonly subscriberFrames?: number;
+};
 
 const limitsSchema = z
   .object({
@@ -43,14 +59,18 @@ const limitsSchema = z
     /** Over this many queued frames the stream gets `bye`. */
     subscriberFrames: z.int().positive().default(256),
   })
-  .strict();
+  .strict() satisfies z.ZodType<Required<LiveLimits>, LiveLimits>;
 
-export type LiveLimits = Readonly<z.input<typeof limitsSchema>>;
-
-/** What one stream yields: `begin` once, then `change` frames, ending with `gap` or `bye` when the hub ends it. */
+/**
+ * What one stream yields: `begin` once, then `change` frames, ending with `gap` or `bye` when the
+ * hub ends it. A `change` carries, next to its wire fields, `txidsByTag`: for each of its `tags`
+ * (same index) the transactions that wrote that table, so a filter that drops a tag drops the
+ * txids only it explains. `txids` is their union.
+ */
 export type LiveFeed =
   | { readonly kind: 'begin'; readonly mode: 'resume' | 'reset'; readonly cursor: LiveCursor }
-  | Extract<LiveEvent, { kind: 'change' | 'gap' | 'bye' }>;
+  | (Extract<LiveEvent, { kind: 'change' }> & { readonly txidsByTag: readonly (readonly string[])[] })
+  | Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
 
 export type LiveHub = {
   start(): Promise<void>;
@@ -61,9 +81,8 @@ export type LiveHub = {
   connections(): number;
 };
 
-type ChangeFrame = Extract<LiveEvent, { kind: 'change' }>;
+type ChangeFrame = Extract<LiveFeed, { kind: 'change' }>;
 type EndFrame = Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
-type RingEntry = { readonly seq: number; readonly at: number; readonly frame: ChangeFrame };
 
 type Subscriber = {
   /** `begin` and the replay, captured at attach. Not counted against `subscriberFrames`. */
@@ -79,7 +98,7 @@ type Subscriber = {
 };
 
 const MAX_TAGS_PER_FRAME = 256;
-/** A batch that reaches this many transactions flushes at once, so no txid is dropped. */
+/** A batch that reaches this many transactions flushes at once: no frame can name more. */
 const MAX_TXIDS_PER_FRAME = 256;
 const EPOCH = /^[a-z0-9]{12}$/;
 const EPOCH_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -136,14 +155,16 @@ export function createLiveHub(options: {
   const nextEpoch = options.epoch ?? randomEpoch;
 
   let state: 'idle' | 'ready' | 'unavailable' | 'stopped' = 'idle';
-  let started = false;
+  /** The source's start, once `start()` was called. */
+  let starting: Promise<void> | undefined;
+  let stopping: Promise<void> | undefined;
   let stopSource: (() => Promise<void>) | undefined;
   let epoch = '';
   let seq = 0;
-  /** The highest sequence no longer in the ring: a cursor below it cannot resume. */
-  let evictedThrough = 0;
-  const ring: RingEntry[] = [];
-  const batch = new Map<string, TableTag>();
+  const ring = replayRing<ChangeFrame>({ frames: limits.replayFrames, ms: limits.replayMs });
+  /** The open batch: each table, with the transactions that wrote it. */
+  const batch = new Map<string, { readonly tag: TableTag; readonly txids: Set<string> }>();
+  /** Every transaction of the open batch, for the per-frame cap. */
   const batchTxIds = new Set<string>();
   let batchTimer: ReturnType<typeof setTimeout> | undefined;
   const subscribers = new Set<Subscriber>();
@@ -155,14 +176,6 @@ export function createLiveHub(options: {
     batchTimer = undefined;
     batch.clear();
     batchTxIds.clear();
-  }
-
-  function evict(now: number): void {
-    for (let oldest = ring[0]; oldest; oldest = ring[0]) {
-      if (ring.length <= limits.replayFrames && now - oldest.at <= limits.replayMs) return;
-      ring.shift();
-      evictedThrough = oldest.seq;
-    }
   }
 
   /** The hub ends the stream: queued frames are dropped, `end` is the last thing it yields. Safe inside a loop over `subscribers` (a Set skips deleted entries). */
@@ -202,29 +215,31 @@ export function createLiveHub(options: {
   function flush(): void {
     if (batchTimer !== undefined) clearTimeout(batchTimer);
     batchTimer = undefined;
-    const tags = [...batch.values()];
-    const txids = [...batchTxIds];
+    const tables = [...batch.values()];
     batch.clear();
     batchTxIds.clear();
-    if (state !== 'ready' || tags.length === 0) return;
+    if (state !== 'ready' || tables.length === 0) return;
     const now = Date.now();
-    for (let from = 0; from < tags.length; from += MAX_TAGS_PER_FRAME) {
+    for (let from = 0; from < tables.length; from += MAX_TAGS_PER_FRAME) {
       seq += 1;
-      const last = from + MAX_TAGS_PER_FRAME >= tags.length;
+      const part = tables.slice(from, from + MAX_TAGS_PER_FRAME);
+      const txidsByTag = part.map(entry => [...entry.txids]);
+      // Each frame names exactly the transactions that wrote its own tables.
       const frame: ChangeFrame = {
         kind: 'change',
         cursor: cursorAt(seq),
-        tags: tags.slice(from, from + MAX_TAGS_PER_FRAME),
-        txids: last ? txids : [],
+        tags: part.map(entry => entry.tag),
+        txids: [...new Set(txidsByTag.flat())],
+        txidsByTag,
       };
-      ring.push({ seq, at: now, frame });
+      ring.add(seq, now, frame);
       for (const subscriber of subscribers) deliver(subscriber, frame);
     }
-    evict(now);
+    ring.evict(now);
     debugHub.debug('{epoch}: frame {seq} with {tables} tables to {streams} streams', {
       epoch,
       seq,
-      tables: tags.length,
+      tables: tables.length,
       streams: subscribers.size,
     });
   }
@@ -244,8 +259,7 @@ export function createLiveHub(options: {
     }
     epoch = next;
     seq = 0;
-    evictedThrough = 0;
-    ring.length = 0;
+    ring.clear();
     state = 'ready';
     debugHub.debug('{epoch}: ready', { epoch });
   }
@@ -266,7 +280,12 @@ export function createLiveHub(options: {
       }
       case 'change': {
         if (state !== 'ready') return;
-        for (const tag of event.tags) batch.set(tagKey(tag), tag);
+        for (const tag of event.tags) {
+          const key = tagKey(tag);
+          const entry = batch.get(key) ?? { tag, txids: new Set<string>() };
+          if (event.txid !== undefined) entry.txids.add(event.txid);
+          batch.set(key, entry);
+        }
         if (event.txid !== undefined) batchTxIds.add(event.txid);
         if (batchTxIds.size >= MAX_TXIDS_PER_FRAME) flush();
         else batchTimer ??= setTimeout(flush, limits.batchMs);
@@ -275,12 +294,28 @@ export function createLiveHub(options: {
     }
   }
 
-  /** The sequence to resume after, or `undefined` for a reset. */
-  function resumeAfter(cursor: LiveCursor): number | undefined {
+  /** The frames to replay after `cursor`, or `undefined` for a reset. */
+  function replayAfter(cursor: LiveCursor): readonly ChangeFrame[] | undefined {
     const dot = cursor.indexOf('.');
     if (cursor.slice(0, dot) !== epoch) return undefined;
-    const at = Number(cursor.slice(dot + 1));
-    return at >= evictedThrough && at <= seq ? at : undefined;
+    return ring.after(Number(cursor.slice(dot + 1)), seq);
+  }
+
+  /** Ends every stream, then stops the source once its start settled. Runs once. */
+  async function shutdown(): Promise<void> {
+    state = 'stopped';
+    clearBatch();
+    for (const subscriber of subscribers) finish(subscriber, { kind: 'bye' });
+    debugHub.debug('{epoch}: stopping', { epoch });
+    try {
+      await starting;
+    } catch {
+      // A failed start rejected to its own caller and left nothing to stop.
+    }
+    const stop = stopSource;
+    stopSource = undefined;
+    await stop?.();
+    debugHub.debug('{epoch}: stopped', { epoch });
   }
 
   async function* feed(subscriber: Subscriber): AsyncGenerator<LiveFeed, void, undefined> {
@@ -302,32 +337,26 @@ export function createLiveHub(options: {
   }
 
   return {
-    async start() {
-      if (started) {
-        throw liveError(
-          LIVE_ERROR_CODES.config,
-          'LiveHub.start() was called twice',
-          'Start a hub once; make a new hub after stop().',
+    start() {
+      if (starting !== undefined || stopping !== undefined) {
+        return Promise.reject(
+          liveError(
+            LIVE_ERROR_CODES.config,
+            `LiveHub.start() on a hub that was ${stopping === undefined ? 'already started' : 'stopped'}`,
+            'Start a hub once; make a new hub after stop().',
+          ),
         );
       }
-      started = true;
-      const stop = await options.source.start(receive);
-      if (state === 'stopped') {
-        await stop();
-        return;
-      }
-      stopSource = stop;
+      // `stop()` waits for this, then stops the source it resolved with.
+      starting = options.source.start(receive).then(stop => {
+        stopSource = stop;
+      });
+      return starting;
     },
 
-    async stop() {
-      if (state === 'stopped') return;
-      state = 'stopped';
-      clearBatch();
-      for (const subscriber of subscribers) finish(subscriber, { kind: 'bye' });
-      const stop = stopSource;
-      stopSource = undefined;
-      debugHub.debug('{epoch}: stopped', { epoch });
-      await stop?.();
+    stop() {
+      stopping ??= shutdown();
+      return stopping;
     },
 
     status: () => state,
@@ -348,15 +377,12 @@ export function createLiveHub(options: {
         );
       }
       // Attach and read the high-water mark in one synchronous step: no frame can fall between them.
-      evict(Date.now());
-      const after = cursor === undefined ? undefined : resumeAfter(cursor);
+      ring.evict(Date.now());
+      const replay = cursor === undefined ? undefined : replayAfter(cursor);
       const preamble: readonly LiveFeed[] =
-        cursor === undefined || after === undefined
+        cursor === undefined || replay === undefined
           ? [{ kind: 'begin', mode: 'reset', cursor: cursorAt(seq) }]
-          : [
-              { kind: 'begin', mode: 'resume', cursor },
-              ...ring.filter(entry => entry.seq > after).map(entry => entry.frame),
-            ];
+          : [{ kind: 'begin', mode: 'resume', cursor }, ...replay];
       const onAbort = (): void => close(subscriber);
       const subscriber: Subscriber = {
         preamble,
@@ -372,7 +398,7 @@ export function createLiveHub(options: {
       if (signal.aborted) close(subscriber);
       debugHub.debug('{epoch}: stream opened ({mode}, {replay} frames to replay)', {
         epoch,
-        mode: after === undefined ? 'reset' : 'resume',
+        mode: replay === undefined ? 'reset' : 'resume',
         replay: preamble.length - 1,
       });
       return feed(subscriber);

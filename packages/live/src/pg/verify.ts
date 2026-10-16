@@ -8,7 +8,7 @@ import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { TableTag } from '../schema.js';
+import type { TableTag } from '../types.js';
 import { LIVE_ERROR_CODES, liveError } from '../errors.js';
 import { tagKey } from '../manifest.js';
 import { checkTags, liveChannel, NOTIFY_FUNCTION, triggerName } from './migration.js';

@@ -22,3 +22,10 @@ export type LiveError = Error & { readonly code: LiveErrorCode; readonly remedia
 export function liveError(code: LiveErrorCode, message: string, remediation: string): LiveError {
   return Object.assign(new Error(`[${code}] ${message}`), { name: 'LiveError', code, remediation });
 }
+
+/** @internal Whether `error` is a {@link LiveError} (any code, or the one given). */
+export function isLiveError(error: unknown, code?: LiveErrorCode): error is LiveError {
+  if (!(error instanceof Error) || !('code' in error) || !('remediation' in error)) return false;
+  const codes: readonly unknown[] = Object.values(LIVE_ERROR_CODES);
+  return code === undefined ? codes.includes(error.code) : error.code === code;
+}

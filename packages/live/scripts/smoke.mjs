@@ -3,17 +3,18 @@
 // Chromium and Hermes, via `bun run test:runtimes`. No database and no peers:
 // it proves the schemas, `live()`, `affectedPaths` and the hub run everywhere.
 
-import {
-  affectedPaths,
-  createLiveHub,
-  live,
-  liveCursorSchema,
-  liveEventSchema,
-  tableTagSchema,
-} from '../dist/index.js';
+import { affectedPaths, createLiveHub, live, liveTables, parseLiveCursor, parseLiveEvent } from '../dist/index.js';
 import { fakeSource } from '../dist/testing.js';
 
 const posts = { schema: 'public', table: 'posts' };
+const refuses = fn => {
+  try {
+    fn();
+    return false;
+  } catch {
+    return true;
+  }
+};
 const manifest = [
   { path: ['posts', 'list'], reads: [posts] },
   { path: ['users', 'count'], reads: [{ schema: 'public', table: 'users' }] },
@@ -32,17 +33,31 @@ const gap = (await stream.next()).value;
 await hub.stop();
 
 const checks = [
-  ['tag schema accepts a table', tableTagSchema.safeParse(posts).success, true],
-  ['tag schema refuses 64 bytes', tableTagSchema.safeParse({ schema: 'public', table: 'é'.repeat(32) }).success, false],
+  [
+    'live() refuses a 64-byte name',
+    refuses(() => live({ reads: [{ schema: 'public', table: 'é'.repeat(32) }] })),
+    true,
+  ],
   [
     'live() dedupes',
     JSON.stringify(live({ reads: [posts, posts] })),
     '{"live":{"version":1,"reads":[{"schema":"public","table":"posts"}]}}',
   ],
   ['affectedPaths', JSON.stringify(affectedPaths(manifest, [posts])), '[["posts","list"]]'],
+  [
+    'liveTables',
+    JSON.stringify(liveTables([...manifest, { path: ['stats'], reads: [posts] }]).map(t => t.table)),
+    '["posts","users"]',
+  ],
   ['first connect resets', `${begin.kind}:${begin.mode}`, 'begin:reset'],
-  ['cursor shape', liveCursorSchema.safeParse(begin.cursor).success, true],
-  ['change frame is a wire event', liveEventSchema.safeParse(change).success, true],
+  ['cursor shape', parseLiveCursor(begin.cursor), begin.cursor],
+  ['malformed cursor', parseLiveCursor('nope'), undefined],
+  [
+    'change frame is a wire event',
+    parseLiveEvent({ kind: change.kind, cursor: change.cursor, tags: change.tags, txids: change.txids })?.kind,
+    'change',
+  ],
+  ['not a wire event', parseLiveEvent({ kind: 'change' }), undefined],
   ['change tags unioned', change.tags.length, 1],
   ['gap ends the stream', gap.kind, 'gap'],
   ['stopped', hub.status(), 'stopped'],

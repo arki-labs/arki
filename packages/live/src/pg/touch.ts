@@ -6,7 +6,7 @@
 import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 
-import type { TableTag } from '../schema.js';
+import type { TableTag } from '../types.js';
 import { checkTags, liveChannel } from './migration.js';
 
 /**
