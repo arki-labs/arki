@@ -1,5 +1,13 @@
 export { createAiSdkRuntime, toAiSdkToolSet, type AiSdkRuntimeOptions } from './ai-sdk-runtime';
-export type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './types';
+export { defineAgentTool } from './tool';
+export type {
+  AgentRuntime,
+  AgentTool,
+  AgentToolExecuteOptions,
+  RuntimeEvent,
+  RuntimeUsage,
+  ToolLoopInput,
+} from './types';
 export {
   initialRuntimeUiState,
   runtimeEventReducer,

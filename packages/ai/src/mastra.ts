@@ -4,6 +4,7 @@ import { createTool } from '@mastra/core/tools';
 
 import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './runtime/types';
 import { debugRuntime } from './debug';
+import { abortReason, runAgentTool } from './runtime/tool';
 
 /**
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK
@@ -35,19 +36,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * One neutral tool as a Mastra tool: gets the run's abort signal, and its result is checked.
+ * A named function per tool, not a closure in the loop: Hermes scopes loop `const`s to the
+ * function, so a loop closure would see the last tool.
+ */
+function toMastraTool(agentTool: AgentTool): ReturnType<typeof createTool> {
+  return createTool({
+    id: agentTool.name,
+    description: agentTool.description,
+    inputSchema: agentTool.inputSchema,
+    // Mastra 1.x createTool: execute is (inputData, context); inputData is the parsed schema.
+    execute: async (inputData, context) => runAgentTool(agentTool, inputData, context.abortSignal),
+  });
+}
+
 export function toMastraTools(
   tools: ReadonlyArray<AgentTool> | undefined,
 ): Record<string, ReturnType<typeof createTool>> {
   const out: Record<string, ReturnType<typeof createTool>> = {};
-  for (const agentTool of tools ?? []) {
-    out[agentTool.name] = createTool({
-      id: agentTool.name,
-      description: agentTool.description,
-      inputSchema: agentTool.inputSchema,
-      // Mastra 1.x createTool: execute is (inputData, context); inputData is the parsed schema.
-      execute: async inputData => agentTool.execute(inputData),
-    });
-  }
+  for (const agentTool of tools ?? []) out[agentTool.name] = toMastraTool(agentTool);
   return out;
 }
 
@@ -56,6 +64,8 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
 
   return {
     async *runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
+      const { signal } = input;
+      if (signal?.aborted) throw abortReason(signal);
       const maxSteps = input.maxSteps ?? defaultMaxSteps;
       debugRuntime.debug('mastra runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
         maxSteps,
@@ -73,12 +83,13 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
           tools: toMastraTools(input.tools),
         });
 
-        const stream = await agent.stream(input.prompt, { maxSteps });
+        const stream = await agent.stream(input.prompt, { maxSteps, abortSignal: signal });
 
         let text = '';
         let usage: RuntimeUsage | undefined;
 
         for await (const chunk of stream.fullStream) {
+          if (signal?.aborted) throw abortReason(signal);
           switch (chunk.type) {
             case 'text-delta':
               text += chunk.payload.text;
@@ -114,12 +125,14 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
           }
         }
 
+        if (signal?.aborted) throw abortReason(signal);
         debugRuntime.debug('mastra runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
           chars: text.length,
           totalTokens: usage?.totalTokens,
         });
         yield { type: 'run:finish', text, usage };
       } catch (error) {
+        if (signal?.aborted) throw abortReason(signal);
         debugRuntime.debug('mastra runToolLoop error', { error: errorMessage(error) });
         yield { type: 'run:error', error: errorMessage(error) };
       }

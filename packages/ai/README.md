@@ -181,6 +181,43 @@ const result = await agent.generate({
 });
 ```
 
+### Agent runtime (`runToolLoop`)
+
+`createAiSdkRuntime` runs a tool loop behind the framework-neutral `AgentRuntime` contract.
+Define tools with `defineAgentTool`: `execute`'s input type comes from `inputSchema`, and its return
+type comes from `output`.
+
+```typescript
+import { createAiSdkRuntime, defineAgentTool } from '@arki/ai';
+import { z } from '@arki/contracts';
+
+const weather = defineAgentTool({
+  name: 'weather',
+  description: 'Current temperature for a city.',
+  inputSchema: z.object({ city: z.string() }),
+  output: z.object({ celsius: z.number() }),
+  async execute({ city }, { signal }) {
+    const response = await fetch(`https://example.com/weather/${city}`, { signal });
+    return { celsius: Number(await response.text()) };
+  },
+});
+
+const controller = new AbortController();
+const runtime = createAiSdkRuntime({ model });
+for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather], signal: controller.signal })) {
+  // run:start, text:delta, tool:start, tool:result, tool:error, run:finish
+}
+```
+
+- **Cancel with `signal`.** After it aborts, the run starts no new model call or tool call. The
+  model call in flight and every tool see the abort. The loop rejects with the signal's reason.
+- **`output` is checked.** The runtime checks each result against `output` (Zod or any Standard
+  Schema) before the model sees it. The model gets the parsed value. A mismatch fails that tool
+  call with a `ToolOutputError` (code `TOOL_OUTPUT_ERROR`), which arrives as a `tool:error` event.
+- **Spans.** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the AI SDK's own telemetry
+  (`@ai-sdk/otel`) records one `step N` span per model step and one `execute_tool <name>` span per
+  tool call. With no endpoint, or no OpenTelemetry SDK registered, nothing is recorded.
+
 ### React Components
 
 ```typescript

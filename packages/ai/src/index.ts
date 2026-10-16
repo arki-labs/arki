@@ -28,6 +28,7 @@ export {
   ValidationError,
   RateLimitError,
   ConfigurationError,
+  ToolOutputError,
   isAIError,
   hasErrorMessage,
   getErrorMessage,
@@ -176,6 +177,7 @@ export { Flow, FlowError, createFlow, type FlowConfig, type FlowEvent, type Flow
 // See packages/ai/docs/adapter-layer-proposal.md
 export {
   createAiSdkRuntime,
+  defineAgentTool,
   fetchRuntimeEventStream,
   initialRuntimeUiState,
   readRuntimeEventStream,
@@ -184,6 +186,7 @@ export {
   toRuntimeEventStreamResponse,
   type AgentRuntime,
   type AgentTool,
+  type AgentToolExecuteOptions,
   type AiSdkRuntimeOptions,
   type RuntimeEvent,
   type RuntimeToolCall,

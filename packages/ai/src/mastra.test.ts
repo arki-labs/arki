@@ -73,3 +73,17 @@ describe('toMastraTools', () => {
     expect(toMastraTools(undefined)).toEqual({});
   });
 });
+
+describe('createMastraRuntime cancellation', () => {
+  it('rejects at once, without any model call, when the signal is already aborted', async () => {
+    // WHY: the Mastra backend honours the same AgentRuntime contract: a run cancelled before
+    // it began must cost nothing.
+    const controller = new AbortController();
+    controller.abort(new Error('gone'));
+    const model = textOnlyModel();
+    const runtime = createMastraRuntime({ model });
+
+    await expect(collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }))).rejects.toThrow('gone');
+    expect(model.doStreamCalls).toHaveLength(0);
+  });
+});

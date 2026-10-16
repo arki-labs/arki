@@ -1,3 +1,5 @@
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+
 /**
  * Custom error classes for @arki/ai
  */
@@ -86,6 +88,30 @@ export class ConfigurationError extends AIError {
     super(message, 'CONFIGURATION_ERROR');
     this.name = 'ConfigurationError';
     Object.setPrototypeOf(this, ConfigurationError.prototype);
+  }
+}
+
+/**
+ * A tool returned a result that does not match its `output` schema. The runtime throws it in
+ * place of the result, so the model never sees the bad value.
+ */
+export class ToolOutputError extends AIError {
+  /** What to do about it, in one sentence. */
+  readonly remediation: string;
+
+  constructor(
+    /** The tool's name. */
+    readonly tool: string,
+    /** What the output schema rejected. */
+    readonly issues: readonly StandardSchemaV1.Issue[],
+  ) {
+    super(
+      `Tool "${tool}" returned a result that does not match its output schema: ${issues.map(issue => issue.message).join('; ')}`,
+      'TOOL_OUTPUT_ERROR',
+    );
+    this.name = 'ToolOutputError';
+    this.remediation = `Change the execute of tool "${tool}" so it returns a value that matches its output schema.`;
+    Object.setPrototypeOf(this, ToolOutputError.prototype);
   }
 }
 

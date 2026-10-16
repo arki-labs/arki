@@ -38,7 +38,8 @@ let integration: OpenTelemetry | undefined;
  *   backends can group runs (e.g. `ollama.generateStructuredData`).
  */
 export function aiTelemetry(functionId?: string): { telemetry: TelemetryOptions } | Record<string, never> {
-  if (!process.env['OTEL_EXPORTER_OTLP_ENDPOINT']) return {};
+  // Browsers and Hermes have no `process`: no endpoint, so no telemetry.
+  if (typeof process === 'undefined' || !process.env['OTEL_EXPORTER_OTLP_ENDPOINT']) return {};
   integration ??= new OpenTelemetry();
   return {
     telemetry: {
