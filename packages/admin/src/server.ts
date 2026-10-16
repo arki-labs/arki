@@ -122,8 +122,12 @@ export async function fetchFleetSnapshot(
     const response = await fetchImpl(new URL(FLEET_ENDPOINT_PATH, entry.baseUrl), {
       headers: { authorization: `Bearer ${entry.token}` },
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'manual',
     });
 
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      return { id: entry.id, ok: false, error: `redirect (HTTP ${String(response.status)}) not followed` };
+    }
     if (!response.ok) {
       return { id: entry.id, ok: false, error: `HTTP ${response.status}` };
     }

@@ -137,6 +137,10 @@ const optionsSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 
+/** With `redirect: 'manual'` a 3xx comes back as a response (or opaque, status 0); never follow it. */
+const isRedirect = (response: Response): boolean =>
+  response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400);
+
 const scopesSchema = z.array(scopeSchema).max(64);
 
 /** What one signed request says, apart from the key that signs it. */
@@ -260,9 +264,18 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
         headers: payload === undefined ? signed.headers : { ...signed.headers, 'content-type': 'application/json' },
         body: payload === undefined ? undefined : body,
         signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'manual',
       });
+      if (isRedirect(response)) {
+        throw new AdminError(
+          ADMIN_ERROR_CODES.unreachable,
+          `${target.aud} answered with a redirect (HTTP ${String(response.status)}); Foreman does not follow redirects.`,
+          'Enroll the final base URL of the target; a redirect is never followed.',
+        );
+      }
       return { response, bytes: new Uint8Array(await response.arrayBuffer()), nonce: signed.nonce };
     } catch (error) {
+      if (error instanceof AdminError) throw error;
       throw new AdminError(
         ADMIN_ERROR_CODES.unreachable,
         `Could not reach ${target.aud} at ${target.baseUrl}.`,
