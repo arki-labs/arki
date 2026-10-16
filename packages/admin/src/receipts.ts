@@ -48,12 +48,23 @@ export const DEFAULT_RECEIPT_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const isoSchema = z.iso.datetime({ offset: true });
 const actionIdSchema = z.string().min(1).max(256);
+/**
+ * SHA-256 (`sha256:<hex>`) over the canonical JSON of the signed operation:
+ * audience, method, path, body hash and permit. A repeat answers from the
+ * receipt only when its hash matches. Absent on receipts written before it
+ * existed; those are matched by action id alone.
+ */
+const requestHashSchema = z
+  .string()
+  .regex(/^sha256:[\da-f]{64}$/)
+  .optional();
 
 /** Claimed, not settled: the action is running, or stopped before it recorded an outcome. */
 export const pendingReceiptSchema = z.object({
   status: z.literal('pending'),
   executionId: executionIdSchema,
   actionId: actionIdSchema,
+  requestHash: requestHashSchema,
   claimedAt: isoSchema,
 });
 
@@ -66,6 +77,7 @@ export const appliedReceiptSchema = z.object({
   status: z.literal('applied'),
   executionId: executionIdSchema,
   actionId: actionIdSchema,
+  requestHash: requestHashSchema,
   claimedAt: isoSchema,
   appliedAt: isoSchema,
   result: jsonValueSchema,
@@ -80,6 +92,7 @@ export const failedReceiptSchema = z.object({
   status: z.literal('failed'),
   executionId: executionIdSchema,
   actionId: actionIdSchema,
+  requestHash: requestHashSchema,
   claimedAt: isoSchema,
   failedAt: isoSchema,
   error: z.object({ code: z.enum(ADMIN_ERROR_CODES), message: z.string().max(2000) }),

@@ -326,7 +326,19 @@ export function createForemanHandler<TCtx>(
         'Pass `receipts` (kvReceiptStore or journalReceiptStore) to the Foreman handler.',
       );
     }
-    return executeOnce(receipts, action, parseInput(body), await options.context(request), permit, url);
+    // Everything signed that names the operation; `iat`, `nonce` and `scopes` change per attempt.
+    const requestHash = await sha256(
+      utf8(
+        canonicalJson({
+          aud: envelope.aud,
+          method: envelope.method,
+          path: envelope.path,
+          bodySha256: envelope.bodySha256,
+          permit: claim,
+        }),
+      ),
+    );
+    return executeOnce(receipts, action, parseInput(body), await options.context(request), permit, requestHash, url);
   }
 
   /** Run an action at most once per execution id, and settle its receipt before answering. */
@@ -336,6 +348,7 @@ export function createForemanHandler<TCtx>(
     input: unknown,
     ctx: TCtx,
     permit: Permit,
+    requestHash: string,
     url: URL,
   ): Promise<unknown> {
     const { executionId } = permit;
@@ -343,6 +356,7 @@ export function createForemanHandler<TCtx>(
       status: 'pending',
       executionId,
       actionId: action.id,
+      requestHash,
       claimedAt: clock.now().toISOString(),
     } as const;
     let claim: Awaited<ReturnType<ReceiptStore['claim']>>;
@@ -356,7 +370,7 @@ export function createForemanHandler<TCtx>(
         { cause: error },
       );
     }
-    if (!claim.claimed) return replay(claim.receipt, action.id, executionId);
+    if (!claim.claimed) return replay(claim.receipt, action.id, requestHash, executionId);
 
     let result: unknown;
     try {
@@ -389,13 +403,25 @@ export function createForemanHandler<TCtx>(
     return result;
   }
 
-  /** The stored outcome of an execution id this call did not claim. Never runs the action. */
-  function replay(receipt: StoredReceipt | undefined, actionId: string, executionId: string): unknown {
+  /**
+   * The stored outcome of an execution id this call did not claim. Never runs the action.
+   * Answers only a true repeat: the same signed operation (action, input, revision, approver).
+   * A receipt written before `requestHash` existed is matched by action id, as it was then:
+   * refusing it would send a real repeat back for approval, and an approved action could run twice.
+   */
+  function replay(
+    receipt: StoredReceipt | undefined,
+    actionId: string,
+    requestHash: string,
+    executionId: string,
+  ): unknown {
     logger.info('Foreman execute {executionId} repeated; answering from its receipt', { executionId });
-    if (receipt !== undefined && receipt.actionId !== actionId) {
+    const otherRequest =
+      receipt?.requestHash === undefined ? receipt?.actionId !== actionId : receipt.requestHash !== requestHash;
+    if (receipt !== undefined && otherRequest) {
       throw new AdminError(
         ADMIN_ERROR_CODES.staleApproval,
-        `Execution ${executionId} belongs to another action.`,
+        `Execution ${executionId} belongs to another request: a different action, input or approval.`,
         'An execution id runs one action once. Propose and approve this action again.',
       );
     }

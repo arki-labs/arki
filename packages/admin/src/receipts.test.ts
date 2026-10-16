@@ -234,6 +234,49 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
     expect(runs).toHaveLength(1);
   });
 
+  // A repeat answers "applied" with the first result. If only the action id were
+  // checked, the same execution id with other input (another job) or another
+  // pinned revision would be told it applied, though that request never ran.
+  it('the same execution id with other input or another revision is refused (E010), not answered as applied', async () => {
+    const { client, execute, runs } = setup();
+    await execute('exe_input');
+    const otherJob = client.execute(
+      'queue.retryJob',
+      { jobId: 'job_2' },
+      { scopes: ['queue:write'], permit: permit('exe_input', 'queue.retryJob') },
+    );
+    expect(await codeOf(otherJob)).toBe(ADMIN_ERROR_CODES.staleApproval);
+    const otherRevision = client.execute(
+      'queue.retryJob',
+      { jobId: 'job_1' },
+      { scopes: ['queue:write'], permit: { ...permit('exe_input', 'queue.retryJob'), expectedRevision: 'rev_4' } },
+    );
+    expect(await codeOf(otherRevision)).toBe(ADMIN_ERROR_CODES.staleApproval);
+    expect(runs).toHaveLength(1);
+  });
+
+  // An execution that spans the upgrade must not be sent back for approval:
+  // a second approval would run an action that already applied.
+  it('a receipt written before requestHash existed still answers a true repeat, matched by action id', async () => {
+    const clock = new MockClock(T0);
+    const inner = kvReceiptStore(memoryKv(clock), { namespace: AUD });
+    const legacy: ReceiptStore = {
+      claim: async receipt => {
+        const result = await inner.claim(receipt);
+        if (result.claimed || result.receipt === undefined) return result;
+        const { requestHash: _dropped, ...older } = result.receipt;
+        return { claimed: false, receipt: older };
+      },
+      get: executionId => inner.get(executionId),
+      settle: receipt => inner.settle(receipt),
+    };
+    const { execute, runs } = setup({ receipts: legacy });
+    const first = await execute('exe_legacy');
+    expect(await execute('exe_legacy')).toEqual(first);
+    expect(await codeOf(execute('exe_legacy', 'queue.dropJob'))).toBe(ADMIN_ERROR_CODES.staleApproval);
+    expect(runs).toHaveLength(1);
+  });
+
   it('the same execution id on another action is refused (E010) and nothing runs', async () => {
     const { execute, runs } = setup();
     await execute('exe_bound', 'queue.retryJob');
