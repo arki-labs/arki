@@ -6,6 +6,7 @@
 - `@arki/live`: the portable core. `createLiveHub`, `live` (meta from tags), `affectedPaths`, the schemas `tableTagSchema`, `liveMetaSchema`, `liveManifestSchema`, `liveCursorSchema`, `liveEventSchema`, `LIVE_ERROR_CODES` and the types.
 - `@arki/live/drizzle`: `live` (meta from Drizzle tables), `tableTag`, `snapshot` (one read-only repeatable-read transaction per call).
 - `@arki/live/orpc`: `liveRead`, the middleware that runs a live procedure inside one snapshot.
+- `@arki/live/pg`: `liveMigration` (the trigger SQL), `liveChannel`, `verifyLiveTriggers` (the boot check), `touch` (publish a tag by hand), `pgSource` (the hub's source on a `pg` pool).
 - `@arki/live/testing`: `fakeSource`, a source a test drives.
 
 ## Start here
@@ -16,6 +17,7 @@
 ## By task
 - [Declare what a procedure reads](docs/agent-guide.md#declare-what-a-procedure-reads)
 - [Give a procedure one snapshot](docs/agent-guide.md#give-a-procedure-one-snapshot)
+- [Publish tables from Postgres](docs/agent-guide.md#publish-tables-from-postgres)
 - [Drive the hub in a test](docs/agent-guide.md#drive-the-hub-in-a-test)
 
 ## Rules that bite

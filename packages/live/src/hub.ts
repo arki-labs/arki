@@ -27,7 +27,7 @@ import { liveCursorSchema } from './schema.js';
 export type LiveSourceEvent =
   | { readonly kind: 'ready' }
   | { readonly kind: 'gap' }
-  | { readonly kind: 'change'; readonly tags: readonly TableTag[] };
+  | { readonly kind: 'change'; readonly tags: readonly TableTag[]; readonly txid?: string };
 
 /** Where hints come from. `start` resolves with the function that stops it. */
 export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Promise<() => Promise<void>> };
@@ -79,6 +79,8 @@ type Subscriber = {
 };
 
 const MAX_TAGS_PER_FRAME = 256;
+/** A batch that reaches this many transactions flushes at once, so no txid is dropped. */
+const MAX_TXIDS_PER_FRAME = 256;
 const EPOCH = /^[a-z0-9]{12}$/;
 const EPOCH_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -142,6 +144,7 @@ export function createLiveHub(options: {
   let evictedThrough = 0;
   const ring: RingEntry[] = [];
   const batch = new Map<string, TableTag>();
+  const batchTxIds = new Set<string>();
   let batchTimer: ReturnType<typeof setTimeout> | undefined;
   const subscribers = new Set<Subscriber>();
 
@@ -151,6 +154,7 @@ export function createLiveHub(options: {
     if (batchTimer !== undefined) clearTimeout(batchTimer);
     batchTimer = undefined;
     batch.clear();
+    batchTxIds.clear();
   }
 
   function evict(now: number): void {
@@ -196,17 +200,22 @@ export function createLiveHub(options: {
   }
 
   function flush(): void {
+    if (batchTimer !== undefined) clearTimeout(batchTimer);
     batchTimer = undefined;
     const tags = [...batch.values()];
+    const txids = [...batchTxIds];
     batch.clear();
+    batchTxIds.clear();
     if (state !== 'ready' || tags.length === 0) return;
     const now = Date.now();
     for (let from = 0; from < tags.length; from += MAX_TAGS_PER_FRAME) {
       seq += 1;
+      const last = from + MAX_TAGS_PER_FRAME >= tags.length;
       const frame: ChangeFrame = {
         kind: 'change',
         cursor: cursorAt(seq),
         tags: tags.slice(from, from + MAX_TAGS_PER_FRAME),
+        txids: last ? txids : [],
       };
       ring.push({ seq, at: now, frame });
       for (const subscriber of subscribers) deliver(subscriber, frame);
@@ -258,7 +267,9 @@ export function createLiveHub(options: {
       case 'change': {
         if (state !== 'ready') return;
         for (const tag of event.tags) batch.set(tagKey(tag), tag);
-        batchTimer ??= setTimeout(flush, limits.batchMs);
+        if (event.txid !== undefined) batchTxIds.add(event.txid);
+        if (batchTxIds.size >= MAX_TXIDS_PER_FRAME) flush();
+        else batchTimer ??= setTimeout(flush, limits.batchMs);
         return;
       }
     }

@@ -330,6 +330,7 @@ defineApp('shop-worker')
 `trigger()` and `enqueue()` talk to Redis, outside your database transaction. If the transaction rolls back, the job still runs. If Redis is down after the commit, the job is lost. `@arki/queue/outbox` writes the job as a row in the `@arki/journal` jobs table, in your transaction. The row exists if and only if your write commits. The journal worker runs it. It needs no Redis, and it imports no BullMQ or pg-boss at runtime.
 
 ```typescript
+import { listenOnPool } from '@arki/db/pg';
 import { outbox, outboxRunner } from '@arki/queue/outbox';
 
 export const schedule = outbox({ tables }); // tables from journalTables()
@@ -388,7 +389,7 @@ defineApp('signup-worker')
   .features([signup])
   .entrypoints(
     journalWorker({
-      listen: onMessage => client.listen(journal.wakeChannel, onMessage), // PGlite; use listenOnPool with pg
+      listen: onMessage => client.listen(journal.wakeChannel, onMessage), // PGlite; with pg, listenOnPool from @arki/db/pg
       jobs: outboxJobs({ needs: {}, context: ({ db }) => ({ db }) }),
     }),
   );

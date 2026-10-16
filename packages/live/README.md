@@ -81,11 +81,13 @@ if (change.value?.kind !== 'change' || change.value.tags[0]?.table !== 'posts')
 await hub.stop();
 ```
 
+Each `change` frame also carries `txids`: the Postgres transaction ids (`pg_current_xact_id()`) of the commits behind it, as decimal strings, because an `xid8` can pass `Number.MAX_SAFE_INTEGER`. A batch that spans several frames puts them on its last frame, so once that frame is handled every query those commits touched is invalidated. A client will use this to wait for its own write (`awaitTxId`, coming); today it is informative only. Hints from a source without txids carry `txids: []`.
+
 Reset rules: a cursor of the current epoch still in the ring resumes and replays the missed frames. No cursor, another epoch (a listener gap or a restart), an evicted cursor or one from the future resets. A listener gap ends every stream with `gap`.
 
 ## Limits
 
-`batchMs` 20, `replayFrames` 4096, `replayMs` 120 000, `subscriberFrames` 256, 256 tags per frame, identifiers of at most 63 bytes.
+`batchMs` 20, `replayFrames` 4096, `replayMs` 120 000, `subscriberFrames` 256, 256 tags and 256 txids per frame (a window that reaches 256 transactions flushes at once), identifiers of at most 63 bytes.
 
 ## Errors
 

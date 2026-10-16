@@ -12,9 +12,10 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { listenOnPool } from '@arki/db/pg';
+
 import type { JobRunner, ScheduledJob } from './types.js';
 import { jobId } from './id.js';
-import { listenOnPool } from './listen.js';
 import { j, tables } from './test-support.js';
 
 let container: StartedPostgreSqlContainer;
@@ -176,7 +177,10 @@ describe('queue rows on Postgres', () => {
     const stale = journal.drain(dbA, { jobs, leaseSeconds: 1 });
     await sleep(150);
     // The stale worker stalled past its lease; another worker on another connection takes the row.
-    await dbB.update(tables.jobs).set({ leaseUntil: sql`now() - interval '1 second'` }).where(eq(tables.jobs.id, id));
+    await dbB
+      .update(tables.jobs)
+      .set({ leaseUntil: sql`now() - interval '1 second'` })
+      .where(eq(tables.jobs.id, id));
     const owner = journal.drain(dbB, { jobs, leaseSeconds: 1 });
     expect(await stale).toBe(1);
     expect(seen).toEqual(['stale:aborted']);

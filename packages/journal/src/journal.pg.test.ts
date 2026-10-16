@@ -12,7 +12,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { listenOnPool } from './listen.js';
+import { listenOnPool } from '@arki/db/pg';
+
 import {
   customerOrderCounts,
   j,

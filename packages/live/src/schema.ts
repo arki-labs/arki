@@ -37,6 +37,12 @@ export const liveManifestSchema = z
   )
   .max(4096);
 
+/**
+ * @internal A Postgres transaction id (`pg_current_xact_id()`, an `xid8`) in decimal. A string,
+ * because an `xid8` can pass `Number.MAX_SAFE_INTEGER`.
+ */
+export const txIdSchema = z.string().regex(/^[1-9]\d{0,19}$/);
+
 /** `${epoch}.${seq}`: the hub's random 12-character epoch and the frame number. Grants nothing. */
 export const liveCursorSchema = z.string().regex(/^[a-z0-9]{12}\.\d{1,15}$/);
 
@@ -51,8 +57,17 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
       manifest: liveManifestSchema,
     })
     .strict(),
+  /**
+   * Tables changed by commits. `txids` are those commits' transaction ids (decimal strings), on
+   * the last frame of a batch: once it is handled, every query those commits touched is invalidated.
+   */
   z
-    .object({ kind: z.literal('change'), cursor: liveCursorSchema, tags: z.array(tableTagSchema).min(1).max(256) })
+    .object({
+      kind: z.literal('change'),
+      cursor: liveCursorSchema,
+      tags: z.array(tableTagSchema).min(1).max(256),
+      txids: z.array(txIdSchema).max(256),
+    })
     .strict(),
   /** The server lost its Postgres listener: reconnect (the next `hello` is a reset). */
   z.object({ kind: z.literal('gap') }).strict(),

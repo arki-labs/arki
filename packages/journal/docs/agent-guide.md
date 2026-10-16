@@ -176,8 +176,11 @@ The job row is written in the caller's transaction. It exists if and only if the
 
 ```ts
 // backend/src/schedule.ts: once per app
+import { listenOnPool } from '@arki/db/pg';
 import { outbox } from '@arki/queue/outbox';
+
 import { tables } from './journal.tables';
+
 export const schedule = outbox({ tables });
 
 // usecase

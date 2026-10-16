@@ -5,7 +5,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 ## The model
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
-2. A statement trigger per table publishes `{ v: 1, tag: { schema, table } }` on `arki_live_<app>_v1` at commit. A rollback publishes nothing; one transaction publishes once per table.
+2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. `change` frames carry the batch's `txids`.
 3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame `${epoch}.${seq}`, keeps a bounded ring, and feeds every open stream.
 4. A stream starts with `begin`: `resume` when its cursor is of this epoch and still in the ring (the missed frames follow), else `reset` (refetch every live query). A listener gap ends every stream with `gap` and the next `ready` starts a new epoch.
 5. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
@@ -41,6 +41,14 @@ const both = await snapshot(
 });
 export { both };
 ```
+
+### Publish tables from Postgres
+
+1. Generate the trigger SQL: `liveMigration({ app: 'blog', tables: [tableTag(posts), tableTag(users)] })`. Paste `up` and `down` into a Drizzle custom migration (`drizzle-kit generate --custom`). The library never applies it.
+2. A partitioned table: a write straight into a leaf skips the root's trigger. Add `leaves: [{ leaf, root }]`; the leaf's trigger publishes the root's tag.
+3. At boot, `verifyLiveTriggers(db, { app, tables })` lists every hole (`missing-table`, `missing-trigger`, `disabled`, `wrong-function`, `wrong-events`, `wrong-args`, `partition-leaf-uncovered`). A view or a materialized view counts as missing: publish it with `touch(tx, app, tag)` inside the writing transaction.
+4. `createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog' }) })`, with a pool of its own. The hub is ready once `LISTEN` succeeds; a lost listener or an unreadable payload is a `gap`, and the reconnect is a new epoch.
+5. Library files: `src/pg/migration.ts`, `src/pg/verify.ts`, `src/pg/touch.ts`, `src/pg/source.ts`.
 
 ### Drive the hub in a test
 

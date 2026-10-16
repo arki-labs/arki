@@ -10,19 +10,20 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { defineApp } from '@arki/dot';
-import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature } from '@arki/dot/feature';
-import { plugin } from '@arki/dot/plugin';
-import { initJournal } from '@arki/journal';
-import { journalTables } from '@arki/journal/pg';
-import { openJournalDb } from '@arki/journal/testing';
 import { eq } from 'drizzle-orm';
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { repos } from './dot.js';
+import type { DepsOf } from '@arki/dot/feature';
+import { repos } from '@arki/db/dot';
+import { defineApp } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
+import { plugin } from '@arki/dot/plugin';
+
+import { initJournal } from './journal.js';
+import { journalTables } from './pg.js';
+import { openJournalDb } from './testing.js';
 
 type AccountId = `acc_${string}`;
 const accounts = pgTable('accounts', {

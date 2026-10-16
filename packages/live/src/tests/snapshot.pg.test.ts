@@ -157,7 +157,7 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
           };
         });
         await writerDb.execute(
-          sql`select pg_notify(${CHANNEL}, ${JSON.stringify({ v: 1, tag: { schema: 'test', table } })})`,
+          sql`select pg_notify(${CHANNEL}, ${JSON.stringify({ v: 1, tag: { schema: 'test', table }, txid: '1' })})`,
         );
         await arrived;
         const since = tags;

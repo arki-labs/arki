@@ -70,6 +70,8 @@ async function startReady(hub: LiveHub, source: ReturnType<typeof fakeSource>): 
   source.emit({ kind: 'ready' });
 }
 
+const txidsOf = (frame: LiveFeed | undefined) => (frame?.kind === 'change' ? frame.txids : null);
+
 /** Flush the batch window and let the streams drain. */
 async function flush(): Promise<void> {
   vi.advanceTimersByTime(BATCH_MS);
@@ -384,6 +386,52 @@ describe('bounds and lifecycle', () => {
     expect(changes).toHaveLength(5); // 100 ms of writes, a 20 ms window
     for (const change of changes) expect(change.tags).toEqual([tag('posts'), tag('users')]);
     expect(changes.map(change => change.cursor.split('.')[1])).toEqual(['1', '2', '3', '4', '5']);
+  });
+
+  it('a frame carries the txids of its commits once each, on the last frame of a batch; replay keeps them; 256 commits flush at once', async () => {
+    // Why: a client awaits its own write by txid (awaitTxId, M3); a dropped or early txid would
+    // resolve before the queries it touched were invalidated, or never.
+    const { source, hub } = rig();
+    await startReady(hub, source);
+    const feed = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const { value: begin } = await feed.next();
+    source.emit({ kind: 'change', tags: [tag('posts')], txid: '9007199254740993' });
+    source.emit({ kind: 'change', tags: [tag('users')], txid: '9007199254740993' });
+    source.emit({ kind: 'change', tags: [tag('posts')], txid: '12' });
+    await flush();
+    const { value: first } = await feed.next();
+    expect(first).toMatchObject({
+      kind: 'change',
+      tags: [tag('posts'), tag('users')],
+      txids: ['9007199254740993', '12'],
+    });
+
+    // 300 tables in one transaction: two frames, the txid on the second.
+    for (let index = 0; index < 300; index += 1) {
+      source.emit({ kind: 'change', tags: [tag(`t${index}`)], txid: '13' });
+    }
+    await flush();
+    const { value: head } = await feed.next();
+    const { value: tail } = await feed.next();
+    expect([txidsOf(head), txidsOf(tail)]).toEqual([[], ['13']]);
+
+    // 256 distinct transactions in one window: flushed without waiting for the timer.
+    for (let index = 0; index < 256; index += 1) {
+      source.emit({ kind: 'change', tags: [tag('posts')], txid: String(100 + index) });
+    }
+    await settle();
+    const { value: storm } = await feed.next();
+    expect(txidsOf(storm)).toHaveLength(256);
+
+    // Replay from before the first frame: the ring kept its txids.
+    const cursor = begin?.kind === 'begin' ? { cursor: begin.cursor } : {};
+    const replay = hub.open({ ...cursor, signal: new AbortController().signal });
+    const replayed = replay[Symbol.asyncIterator]();
+    const { value: resumed } = await replayed.next();
+    expect(resumed).toMatchObject({ kind: 'begin', mode: 'resume' });
+    const { value: again } = await replayed.next();
+    expect(again).toEqual(first);
+    await hub.stop();
   });
 
   it('stop ends blocked streams with bye and refuses new ones; an aborted stream detaches', async () => {

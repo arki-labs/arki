@@ -411,7 +411,9 @@ journal.wake(); // after the commit
 
 Every commit that recorded events notifies a Postgres channel, `journal.wakeChannel` (`journal_wake`, or `<schema>_journal_wake` for tables in a schema), with the seq range as JSON: `{ "from": 12, "to": 14 }`. Postgres delivers `NOTIFY` at commit, so a listener hears exactly the commits that happened, in every process, including commits of transactions the caller manages, where `journal.wake()` cannot help. The payload is small and bounded; a listener loads what it needs by seq.
 
-A worker hears it through `listen`: `journal.worker(db, { listen })`, where `listen` is `onMessage => unlisten`. `LISTEN` needs a dedicated connection. With a `pg` pool, use `listenOnPool(db.$client, journal.wakeChannel)`: it borrows one client for as long as the worker runs, replaces it when the connection drops, and gives it back on `stop()`. With PGlite, `onMessage => client.listen(journal.wakeChannel, onMessage)`. `LISTEN` hears only what is sent after it ran, and a connection can drop, so the worker keeps polling (`pollMs`); the channel makes it prompt, not correct. A listening worker drains at once on every commit.
+A worker hears it through `listen`: `journal.worker(db, { listen })`, where `listen` is `onMessage => unlisten`. `LISTEN` needs a dedicated connection. With a `pg` pool, use `listenOnPool(db.$client, journal.wakeChannel)` from `@arki/db/pg`: it borrows one client for as long as the worker runs, replaces it when the connection drops, and closes it on `stop()`. With PGlite, `onMessage => client.listen(journal.wakeChannel, onMessage)`. `LISTEN` hears only what is sent after it ran, and a connection can drop, so the worker keeps polling (`pollMs`); the channel makes it prompt, not correct. A listening worker drains at once on every commit.
+
+Taps or live queries? A tap reacts to an event in this process, after commit: a metric, a cache, a push to this process's subscribers. A page that shows the current rows of a table wants `@arki/live` instead: a statement trigger publishes every commit to the table, whether a command, a repository, raw SQL or a worker made it, so it needs no tap.
 
 A tap is a handler that fires from that channel: in-process, after commit, lossy. No job row, no retry, no order promised across entities. `j.tap('live-orders', order, { OrderPlaced: (e, { db }) => hub.publish(e) })`, with needs like an effect: `j.tap(name, entity, { hub: need<Hub>() }, handlers)`, given in `compose({ taps, services })`. It fires in every process whose worker listens, for every event in the announced range that it names, in seq order, with the root database and no `run`: a tap may not issue commands, because a lost notification must never mean lost writes. An error in a tap is logged and swallowed; the command already committed. Taps are not wrapped by effect hooks. A journal with taps refuses a worker without `listen`, unless `{ taps: false }` says that worker runs jobs only and another process listens. For a live page, a cache, a metric. For work that must happen, write an effect.
 
@@ -457,6 +459,8 @@ A queue row is a job that carries no event. An app writes it in its own transact
 The journal only stores and claims queue rows. It does not know what a job does. A `JobRunner` does. It is a small port: `names`, `run(job, { db, signal })` and `retryDelay(job, error)`. The typed way to write and run these rows is `@arki/queue/outbox`: `runAfter(tx, job, args)` writes the row, and `outboxRunner` is the runner. See the `@arki/queue` README.
 
 ```ts
+import { listenOnPool } from '@arki/db/pg';
+
 const worker = journal.worker(db, {
   listen: listenOnPool(db.$client, journal.wakeChannel),
   jobs: outboxRunner({ registry: jobs, context: () => ({ db }) }),

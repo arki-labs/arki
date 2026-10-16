@@ -1,6 +1,6 @@
 # @arki/db agent guide: transactions
 
-This guide covers `@arki/db/transaction`, `@arki/db/orpc` and `@arki/db/eslint`.
+This guide covers `@arki/db/transaction`, `@arki/db/orpc` and `@arki/db/eslint`, and the listener in `@arki/db/pg`.
 The README has the setup. This page has the rules an agent needs to get them right.
 
 ## File map
@@ -13,7 +13,9 @@ The README has the setup. This page has the rules an agent needs to get them rig
 | `src/composition.ts`         | `TransactionalDb` (the port every database fits), `createUnitOfWork`                                |
 | `src/__fixtures__/dot-app/`  | A Dot feature laid out the recommended way, run by `src/orpc.dot.test.ts`                           |
 | `src/transaction.pg.test.ts` | Real conflicts on PostgreSQL: write skew, deadlock, 40001 at COMMIT, lost commits                   |
-| `src/orpc.journal.test.ts`   | The receipt recipe for ambiguous commits                                                            |
+| `src/pg-listen.ts`           | `listenOnPool`: `LISTEN` on a dedicated pool client, reconnects, health check, `onState`            |
+
+The receipt recipe for ambiguous commits is tested in `@arki/journal` (`src/orpc.db.test.ts`), so `db` never depends on the journal.
 
 ## How one call runs
 
@@ -120,3 +122,14 @@ Never silence it with an alias or `as`: the effect still runs twice.
 | `retries`      | Extra attempts after the first                 | Total attempts (`retries + 1`)   |
 | retry          | A rerun after the database aborted the attempt | A replay                         |
 | replay         | A stored result returned for a repeated key    | A rerun                          |
+
+## Listening on a channel
+
+`listenOnPool(pool, channel, { retryMs, healthMs, onState })` from `@arki/db/pg` holds one client of `pool` and `LISTEN`s on `channel`.
+
+- Give it a pool of its own (`max: 1` is enough). The client is held for as long as it listens.
+- `onState('ready')` runs after every successful `LISTEN`. `onState('disconnected')` runs once per lost client: an `error`, an `end`, or a `select 1` health check with no answer within `healthMs`.
+- A lost client is released once (destroyed, never reused) and replaced every `retryMs`. Notifications sent in between are lost. Treat `disconnected` as a gap.
+- Stop runs `UNLISTEN` and closes the client. It never hands it back: its handlers stay on it.
+- If the first `LISTEN` fails, the start rejects and nothing retries.
+- Tests: `src/pg-listen.test.ts` (scripted pool), `src/pg-listen.pg.test.ts` (Postgres 16).

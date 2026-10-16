@@ -103,6 +103,7 @@
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",
+    "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/http": "workspace:*",
@@ -111,6 +112,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",

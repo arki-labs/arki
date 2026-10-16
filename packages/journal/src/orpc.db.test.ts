@@ -19,13 +19,13 @@ import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { CommandError, initJournal } from '@arki/journal';
-import { commandErrors } from '@arki/journal/orpc';
-import { journalTables } from '@arki/journal/pg';
-import { openJournalDb } from '@arki/journal/testing';
+import type { TransactionalDb } from '@arki/db/transaction';
+import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
 
-import type { TransactionalDb } from './composition.js';
-import { transactionalProcedure, transactionalProcedureConfig } from './orpc.js';
+import { CommandError, initJournal } from './index.js';
+import { commandErrors } from './orpc.js';
+import { journalTables } from './pg.js';
+import { openJournalDb } from './testing.js';
 
 type AccountId = `acc_${string}`;
 const accounts = pgTable('accounts', {
