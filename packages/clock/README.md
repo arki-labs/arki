@@ -14,7 +14,7 @@ pnpm add @arki/clock
 
 ## Why
 
-Code that calls `new Date()` or `Date.now()` directly is hard to test deterministically. Inject a `Clock` instead, and tests can swap in `MockClock` to advance time on demand — useful for cooling windows, scheduled jobs, expiration logic, and any time-sensitive flow.
+Code that calls `new Date()`, `Date.now()` or `setTimeout` directly is hard to test deterministically. Inject a `Clock` instead, and tests can swap in `MockClock` to advance time on demand — useful for cooling windows, scheduled jobs, expiration logic, retry delays, and any time-sensitive flow. A wait of minutes runs instantly.
 
 ## Usage
 
@@ -58,13 +58,17 @@ describe('isExpired', () => {
 
 ### `Clock`
 
-Interface with a single method:
+The type every clock implements:
 
 - `now(): Date` — return the current time as a `Date`.
+- `setTimer(callback, ms): () => void` — call `callback` once, `ms` milliseconds from now. Returns a function that cancels the timer. Throws `ARKI_CLOCK_E002` when `ms` is negative, not finite, or above `MAX_TIMER_MS`.
+- `sleep(ms, signal?): Promise<void>` — resolve `ms` milliseconds from now. Aborting `signal` clears the timer and rejects with `ARKI_CLOCK_E003` (`cause` is `signal.reason`).
+
+`MAX_TIMER_MS` is 2^31 - 1 ms (about 24.8 days), the longest delay every runtime's `setTimeout` honors.
 
 ### `SystemClock`
 
-Production implementation backed by the runtime `Date`. `now()` returns `new Date()`.
+Production implementation backed by the runtime `Date` and `setTimeout`. `now()` returns `new Date()`.
 
 ### `MockClock`
 
@@ -72,22 +76,34 @@ Controllable clock for tests.
 
 - `new MockClock(initialNow?: Date)` — defaults to the Unix epoch.
 - `now(): Date` — returns a fresh `Date` on every call (callers cannot corrupt internal state by mutating it).
-- `advance(ms: number): void` — moves time forward. Throws `ClockError` (`ARKI_CLOCK_E001`) on negative or non-finite values.
-- `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios.
+- `advance(ms: number): void` — moves time forward and fires every timer that comes due, in time order, each at its own due time. A timer set by a firing callback fires too if it is due within the step. Throws `ClockError` (`ARKI_CLOCK_E001`) on negative or non-finite values.
+- `advanceAsync(ms: number): Promise<void>` — like `advance`, but lets pending promise callbacks run before the first timer and after each one. Use it when async code sets the next timer after an `await`, like a retry loop. It waits one real macrotask per timer, so do not mix it with fake timers that replace `setTimeout`.
+- `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios. Fires no timers.
+
+```ts
+import { backoff, withRetry } from '@arki/resilience';
+
+const clock = new MockClock();
+const result = withRetry(callFlakyApi, { backoff: backoff.exponential({ base: 1000 }).upTo(3), clock });
+await clock.advanceAsync(10_000); // 1 s + 2 s + 4 s of retry delay, in about a millisecond
+await result;
+```
 
 ## Errors
 
 `import { ClockError } from '@arki/clock'`. Match on `error.code`, never on the message. Each error has a `remediation` string.
 
-| Code              | Raised by           | Meaning                                                             |
-| ----------------- | ------------------- | ------------------------------------------------------------------- |
-| `ARKI_CLOCK_E001` | `MockClock.advance` | The step is negative, `NaN` or not finite. Use `setNow` to go back. |
+| Code              | Raised by                           | Meaning                                                             |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| `ARKI_CLOCK_E001` | `MockClock.advance`, `advanceAsync` | The step is negative, `NaN` or not finite. Use `setNow` to go back. |
+| `ARKI_CLOCK_E002` | `setTimer`, `sleep`                 | The delay is negative, not finite, or above `MAX_TIMER_MS`.         |
+| `ARKI_CLOCK_E003` | `sleep`                             | The signal aborted the sleep. `cause` is `signal.reason`.           |
 
-`SystemClock` and the other `MockClock` methods never throw.
+`now()` and `setNow()` never throw.
 
 ## Runtime support
 
-Pure ESM with no dependencies and no `node:*` imports. It uses only `Date` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+Pure ESM with no dependencies and no `node:*` imports. It uses only `Date` and `setTimeout` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
 
 ## Documentation
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { MockClock, SystemClock } from './clock.js';
+import { MAX_TIMER_MS, MockClock, SystemClock } from './clock.js';
 import { CLOCK_ERROR_CODES, ClockError } from './errors.js';
 
 describe('ClockError', () => {
@@ -94,5 +94,132 @@ describe('MockClock', () => {
     const sevenTwoHoursMs = 72 * 60 * 60 * 1000;
     clock.advance(sevenTwoHoursMs);
     expect(clock.now().toISOString()).toBe('2026-04-24T12:00:00.000Z');
+  });
+});
+
+// Timers are why `MockClock` exists beyond `now()`: code that waits (retry
+// delays, debounce, sleeps) must finish instantly in tests, in the same order
+// it would in production.
+describe('MockClock timers', () => {
+  it('fires nothing until advance reaches the due time', () => {
+    const clock = new MockClock();
+    const fired: number[] = [];
+    clock.setTimer(() => fired.push(clock.now().getTime()), 1000);
+    clock.advance(999);
+    expect(fired).toEqual([]);
+    clock.advance(1);
+    expect(fired).toEqual([1000]);
+  });
+
+  it('fires due timers in time order, each at its own due time, then lands on the target', () => {
+    const clock = new MockClock();
+    const fired: string[] = [];
+    clock.setTimer(() => fired.push(`b@${String(clock.now().getTime())}`), 300);
+    clock.setTimer(() => fired.push(`a@${String(clock.now().getTime())}`), 100);
+    clock.setTimer(() => fired.push(`c@${String(clock.now().getTime())}`), 300);
+    clock.advance(1000);
+    // Equal due times keep the order they were set in.
+    expect(fired).toEqual(['a@100', 'b@300', 'c@300']);
+    expect(clock.now().getTime()).toBe(1000);
+  });
+
+  it('fires a timer set by a firing timer when it comes due within the same advance', () => {
+    const clock = new MockClock();
+    const fired: number[] = [];
+    clock.setTimer(() => {
+      fired.push(clock.now().getTime());
+      clock.setTimer(() => fired.push(clock.now().getTime()), 500);
+    }, 200);
+    clock.advance(800);
+    expect(fired).toEqual([200, 700]);
+  });
+
+  it('leaves a chained timer that is due after the target for the next advance', () => {
+    const clock = new MockClock();
+    const fired: number[] = [];
+    clock.setTimer(() => clock.setTimer(() => fired.push(clock.now().getTime()), 500), 200);
+    clock.advance(600);
+    expect(fired).toEqual([]);
+    clock.advance(100);
+    expect(fired).toEqual([700]);
+  });
+
+  it('never fires a cancelled timer, and cancelling twice is harmless', () => {
+    const clock = new MockClock();
+    const callback = vi.fn();
+    const cancel = clock.setTimer(callback, 10);
+    cancel();
+    cancel();
+    clock.advance(100);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('rejects a delay a real timer could not hold, so tests and production agree', () => {
+    const clock = new MockClock();
+    for (const ms of [-1, Number.NaN, Number.POSITIVE_INFINITY, MAX_TIMER_MS + 1]) {
+      expect(() => clock.setTimer(vi.fn(), ms)).toThrowError(/ARKI_CLOCK_E002/);
+    }
+  });
+
+  it('resolves sleep only when advance reaches it', async () => {
+    const clock = new MockClock();
+    let done = false;
+    const sleeping = clock.sleep(5000).then(() => {
+      done = true;
+    });
+    clock.advance(4999);
+    await Promise.resolve();
+    expect(done).toBe(false);
+    clock.advance(1);
+    await sleeping;
+    expect(done).toBe(true);
+  });
+
+  it('rejects sleep with a coded error carrying the abort reason', async () => {
+    const clock = new MockClock();
+    const controller = new AbortController();
+    const reason = new Error('stop');
+    const sleeping = clock.sleep(5000, controller.signal);
+    controller.abort(reason);
+    await expect(sleeping).rejects.toMatchObject({ code: CLOCK_ERROR_CODES.aborted, cause: reason });
+    const already = new AbortController();
+    already.abort(reason);
+    await expect(clock.sleep(10, already.signal)).rejects.toMatchObject({ code: 'ARKI_CLOCK_E003' });
+  });
+
+  it('advanceAsync fires timers that async code sets after each await', async () => {
+    const clock = new MockClock();
+    const wokeAt: number[] = [];
+    const loop = async (): Promise<void> => {
+      await clock.sleep(1000);
+      wokeAt.push(clock.now().getTime());
+      await clock.sleep(2000);
+      wokeAt.push(clock.now().getTime());
+      await clock.sleep(4000);
+      wokeAt.push(clock.now().getTime());
+    };
+    const running = loop();
+    await clock.advanceAsync(10_000);
+    await running;
+    expect(wokeAt).toEqual([1000, 3000, 7000]);
+    expect(clock.now().getTime()).toBe(10_000);
+  });
+
+  it('advanceAsync rejects a bad step like advance does', async () => {
+    await expect(new MockClock().advanceAsync(-1)).rejects.toThrow(/ARKI_CLOCK_E001/);
+  });
+});
+
+describe('SystemClock timers', () => {
+  it('fires a real timer and can cancel one', async () => {
+    const clock = new SystemClock();
+    const cancelled = vi.fn();
+    clock.setTimer(cancelled, 1)();
+    await clock.sleep(5);
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid delay', async () => {
+    await expect(new SystemClock().sleep(-1)).rejects.toThrow(/ARKI_CLOCK_E002/);
   });
 });

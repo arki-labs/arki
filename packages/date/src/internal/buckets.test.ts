@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { MockClock } from '@arki/clock';
+
 import type { CalendarUnit, WeekRules } from '../types.js';
 import { weekOf } from '../calendar.js';
 import { isThisMonth, isThisWeek, isThisYear, isToday, isTomorrow, isYesterday } from '../clock.js';
@@ -102,7 +104,7 @@ describe('integer buckets', () => {
     for (let index = 0; index < 2000; index++) {
       const zone = ZONES[index % ZONES.length] ?? 'UTC';
       const nowMs = Math.floor(next() * 4e12);
-      const clock = { now: () => new Date(nowMs) };
+      const clock = new MockClock(new Date(nowMs));
       const value = new Temporal.ZonedDateTime(BigInt(nowMs + Math.floor((next() - 0.5) * 9e9)) * 1_000_000n, zone);
       const today = Temporal.Instant.fromEpochMilliseconds(nowMs).toZonedDateTimeISO(zone).toPlainDate();
       for (const [check, unit, shift] of checks) {

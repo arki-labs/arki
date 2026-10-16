@@ -18,12 +18,27 @@ try {
 }
 const system = new SystemClock().now().getTime();
 
+const timers = new MockClock();
+const fired = [];
+function record(label) {
+  fired.push(`${label}@${timers.now().getTime()}`);
+}
+timers.setTimer(() => record('b'), 300);
+timers.setTimer(() => {
+  record('a');
+  timers.setTimer(() => record('c'), 250);
+}, 100);
+const cancel = timers.setTimer(() => record('x'), 50);
+cancel();
+timers.advance(1000);
+
 const checks = [
   ['advance moves forward', afterAdvance, '2026-01-01T00:00:01.500Z'],
   ['setNow may go back', afterSet, '2025-06-01T00:00:00.000Z'],
   ['now returns a fresh Date', clock.now().getTime() === 0, false],
   ['negative advance is coded', code, CLOCK_ERROR_CODES.invalidAdvance],
   ['system clock is current', Math.abs(system - Date.now()) < 1000, true],
+  ['timers fire in time order, chained ones included', fired.join(','), 'a@100,b@300,c@350'],
 ];
 
 let failed = 0;
