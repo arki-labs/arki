@@ -110,6 +110,10 @@ export function checkMaxKeys(maxKeys: number | undefined, where: string): number
   return checked;
 }
 
+/** One overflow hint: every client resets. Inlined like `PUBLISH_KEYS`. */
+const OVERFLOW = `    PERFORM pg_notify(TG_ARGV[0], json_build_object('v', 1, 'tag', json_build_object('schema', TG_ARGV[1], 'table', TG_ARGV[2]),
+      'txid', pg_current_xact_id()::text, 'overflow', true)::text);`;
+
 /**
  * The end of both scoped functions, written once here and inlined into each: a nested call into
  * `arki_live` would need USAGE on that schema for every role that writes a scoped table.
@@ -121,8 +125,7 @@ const PUBLISH_KEYS = `  IF keys IS NULL THEN
   -- Too many keys, a NULL one, or one past ${MAX_KEY_BYTES} bytes: one overflow, and every client resets.
   IF cardinality(keys) > TG_ARGV[4]::int OR array_position(keys, NULL) IS NOT NULL
       OR EXISTS (SELECT FROM unnest(keys) AS k WHERE octet_length(k) > ${MAX_KEY_BYTES}) THEN
-    PERFORM pg_notify(TG_ARGV[0], json_build_object('v', 1, 'tag', json_build_object('schema', TG_ARGV[1], 'table', TG_ARGV[2]),
-      'txid', pg_current_xact_id()::text, 'overflow', true)::text);
+${OVERFLOW}
     RETURN NULL;
   END IF;
   -- One NOTIFY per key: identical ones fold, so each (table, key) is hinted once per transaction.
@@ -146,17 +149,25 @@ ${PUBLISH_KEYS}
 END $$;`;
 
 /**
- * Definer, so row-level security cannot hide keys from it: its owner (the migration role) must
- * bypass RLS. It reads only the table it fires on, and only as a BEFORE TRUNCATE statement trigger;
- * nobody else may attach it.
+ * Invoker, like every other function here: it reads with the truncating role's own rights. Hint
+ * payloads travel over NOTIFY, and any role that can connect may LISTEN on any channel, so a key
+ * this role could not read must never be published. When row-level security applies to the role
+ * (`row_security_active`), or it may not read the key column, it scans nothing and sends one
+ * overflow instead: every client resets. Otherwise it reads the keys about to go, exactly. It runs
+ * only as a BEFORE TRUNCATE statement trigger; nobody else may attach it.
  */
 const NOTIFY_TRUNCATE_SQL = `CREATE OR REPLACE FUNCTION ${NOTIFY_TRUNCATE_FUNCTION}() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog AS $$
 DECLARE
   keys text[];
 BEGIN
   IF TG_OP <> 'TRUNCATE' OR TG_WHEN <> 'BEFORE' OR TG_LEVEL <> 'STATEMENT' THEN
     RAISE EXCEPTION '${NOTIFY_TRUNCATE_FUNCTION} runs only as a BEFORE TRUNCATE statement trigger';
+  END IF;
+  -- Rows this role cannot see have keys it must not publish: reset every client instead.
+  IF row_security_active(TG_RELID) OR NOT has_column_privilege(TG_RELID, TG_ARGV[3], 'SELECT') THEN
+${OVERFLOW}
+    RETURN NULL;
   END IF;
   EXECUTE format('SELECT array_agg(k) FROM (SELECT DISTINCT %I::text AS k FROM %I.%I LIMIT %s) distinct_keys',
     TG_ARGV[3], TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_ARGV[4]::int + 1) INTO keys;

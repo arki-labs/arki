@@ -1,12 +1,12 @@
 # @arki/live
 
-> Live queries on your own Postgres: procedures declare the tables they read in oRPC contract meta, a statement trigger publishes a hint at commit, and a hub feeds one stream per tab so clients refetch what a commit touched. Only table names travel.
+> Live queries on your own Postgres: procedures declare the tables they read in oRPC contract meta, a statement trigger publishes a hint at commit, and a hub feeds one stream per tab so clients refetch what a commit touched. A table scoped by a tenant key hints its changed keys too, and a client gets only its granted keys. Only table names and keys travel.
 
 ## Import paths
-- `@arki/live`: the portable core. `createLiveHub` (`hub.cursor()` for server rendering, `hub.open({ grant })`), `liveReceipts` (HMAC receipts instead of raw txids), `createLiveClient` (the stream reader with reconnects), `live` (meta from tags), `affectedPaths`, `liveTables`, `parseLiveEvent` and `parseLiveCursor` (shape checks for what arrives from outside; cursors are opaque), `LIVE_ERROR_CODES` and the plain types.
-- `@arki/live/drizzle`: `live` (meta from Drizzle tables), `tableTag`, `snapshot` (one read-only repeatable-read transaction per call).
+- `@arki/live`: the portable core. `createLiveHub` (`hub.cursor()` for server rendering, `hub.open({ view })`), `liveReceipts` (HMAC receipts instead of raw txids), `createLiveClient` (the stream reader with reconnects), `live` (meta from tags), `affectedPaths`, `liveTables`, `parseLiveEvent` and `parseLiveCursor` (shape checks for what arrives from outside; cursors are opaque), `LIVE_ERROR_CODES` and the plain types.
+- `@arki/live/drizzle`: `live` (meta from Drizzle tables, `scope: { org: 'input.orgId' | 'session' }`), `liveScopes` (which tables are scoped, by which NOT NULL key column), `tableTag`, `snapshot` (one read-only repeatable-read transaction per call).
 - `@arki/live/orpc`: `liveRead`, the middleware that runs a live procedure inside one snapshot; `liveManifest`, the live procedures of a contract.
-- `@arki/live/http`: `liveEndpoint`, the `GET /api/live` SSE stream (400/401/503 before headers, grant filter, `bye` at `maxAgeMs`).
+- `@arki/live/http`: `liveEndpoint`, the `GET /api/live` SSE stream (400/401/503 before headers, grant → view with keys per dimension, `reauthorize` tables, `bye` at `maxAgeMs`).
 - `@arki/live/dot`: `liveQueries`, the Dot plugin: trigger check at boot (E002), `LISTEN` at start, publishes `live` and `liveRoutes`.
 - `@arki/live/pg`: `liveMigration` (the trigger SQL), `liveChannel`, `verifyLiveTriggers` (the boot check), `touch` (publish a tag by hand), `pgSource` (the hub's source on a `pg` pool).
 - `@arki/live/react`: `LiveProvider` (one stream per tab), `useLiveQuery(orpc.x.queryOptions({ input }))`, `useLiveStatus`, `setLiveCursor` (dehydrate the hub cursor), `awaitTxId(queryClient, receipt)` (the mutation returns `receipts.of(txid)`).
@@ -24,6 +24,7 @@
 - [Drive the hub in a test](docs/agent-guide.md#drive-the-hub-in-a-test)
 - [Use live queries in React](docs/agent-guide.md#use-live-queries-in-react)
 - [Add a live table](docs/agent-guide.md#add-a-live-table)
+- [Scope a table by tenant](docs/agent-guide.md#scope-a-table-by-tenant)
 - [Debug "nothing updates"](docs/agent-guide.md#debug-nothing-updates)
 
 ## Rules that bite
@@ -36,6 +37,8 @@
 - No `initialData` on a live query (a type error); use `placeholderData`.
 - Server rendering: `setLiveCursor(queryClient, await hub.cursor())` before the page's data is read, never after.
 - Account switch: `queryClient.resetQueries()` and remount `<LiveProvider key={userId}>`; the old stream keeps the old grant until `maxAgeMs`.
-- A cursor resumes only by its age (`replayMs`). The `replayFrames` cap is an overload: a new epoch, every client resets.
+- A cursor resumes only by its age (`replayMs`). The `replayEnvelopes` and `replayBytes` caps are overloads: a new epoch, every client resets.
 - Frames carry receipts, never raw txids: `createLiveHub({ receipts: liveReceipts({ app, secret }) })`, the secret from app config (32+ characters, `openssl rand -base64 32`). A mutation returns `receipts.of(txid)`; never the txid itself.
-- The grant goes into the hub (`hub.open({ grant })`) and applies before each stream's window and queue. Never filter hints after them: a hidden write would change the stream's timing or cause its `bye`.
+- The grant becomes a view in the hub (`hub.open({ view })`) and applies before each stream's window and queue. Never filter hints after them: a hidden write would change the stream's timing or cause its `bye`.
+- Scoped table: grant keys per dimension (`{ scopes: { org: orgIds } }` or `'all'`); a dimension left out shows nothing. A procedure reading it declares `scope`, else it is live only for `'all'` grants. Scope by `user` when org members must not see each other's activity.
+- Never give a trigger function rights its caller lacks: any role that can connect may LISTEN on any channel. TRUNCATE under row-level security resets every client instead of publishing keys.

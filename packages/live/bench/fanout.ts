@@ -11,12 +11,11 @@
 // Streams open on the first call (the contract check), never inside a timed call. `arki-bench list`
 // and `check` import this file and exit, so nothing may hold a timer before a group runs.
 //
-// The replay cap. The hub keeps frames for `replayMs` and treats `replayFrames` as an overload cap:
-// reaching it starts a new epoch, and every stream ends with `gap`. Frames per second are at most
-// 1000 / batchMs, plus commits per second / 256 in a window that holds more than 256 transactions,
-// times ceil(tables per window / 256). So choose the cap ≥ replayMs / 1000 × that rate. Here every
-// call is one commit of one table, batchMs is 1 and replayMs is 10 s: at most 1000 frames per
-// second, so the ring holds at most 10 000 frames, under the default cap. Hitting it would end the
+// The replay caps. The hub keeps one envelope per transaction for `replayMs` and treats
+// `replayEnvelopes` and `replayBytes` as overload caps: reaching one starts a new epoch, and every
+// stream ends with `gap`. So choose `replayEnvelopes` ≥ replayMs / 1000 × the peak commits per
+// second. Here every call is one commit of one table and replayMs is 10 s: the ring holds one
+// envelope per call made in the last 10 s, far under the defaults. Hitting a cap would end the
 // streams with `gap`, and the call would throw instead of returning a wrong count.
 import type { LiveCursor, LiveEvent, LiveFeed, LiveManifest, LiveSourceEvent, TableTag } from '@arki/live';
 import { createLiveClient, createLiveHub, liveReceipts } from '@arki/live';

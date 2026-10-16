@@ -10,7 +10,8 @@
 //   query collection), invalidate-everything and `refetchInterval` polling, on one seeded workload
 //   in virtual time. Origin queries, wasted fetches and staleness are counts, not timings.
 // - Timed writer overhead (`writer.ts`): single-row, bulk and multi-table commits on PGlite, with
-//   and without the live triggers.
+//   no triggers, the table triggers and the scoped triggers; and one statement over 1, 1 000 and
+//   100 000 rows of 200 tenants.
 //
 // Not benchmarked:
 // - SSE parser against `@microsoft/fetch-event-source`: that package is not in the workspace
@@ -33,7 +34,7 @@ import {
   stormHub,
 } from './fanout.js';
 import { mean, outcome, workloads } from './workload.js';
-import { database, ROWS } from './writer.js';
+import { database, ITEMS, ROWS } from './writer.js';
 
 const STORM_STREAMS = 1000;
 const DELIVERY_STREAMS = 1000;
@@ -123,12 +124,13 @@ const stormGroup = compare<number>({
 
 const strategies: Record<Strategy, { readonly label: string; readonly package?: string }> = {
   live: { label: 'Lane A: live Query (invalidate by table)', package: '@arki/live' },
+  'live-scoped': { label: 'Lane A, scoped hints (per-tenant grants)', package: '@arki/live' },
   collection: { label: 'Lane B: live query collection (TanStack DB)', package: '@tanstack/query-db-collection' },
   'invalidate-all': { label: 'same hints, invalidate everything' },
   'poll-1s': { label: 'refetchInterval 1 s', package: '@tanstack/react-query' },
   'poll-5s': { label: 'refetchInterval 5 s', package: '@tanstack/react-query' },
 };
-const strategyKeys: readonly Strategy[] = ['live', 'collection', 'invalidate-all', 'poll-1s', 'poll-5s'];
+const strategyKeys: readonly Strategy[] = ['live', 'live-scoped', 'collection', 'invalidate-all', 'poll-1s', 'poll-5s'];
 
 function freshnessGroup(
   workload: Workload,
@@ -190,6 +192,7 @@ const freshness = workloads.flatMap(workload => [
 const writerCases = {
   'no-triggers': { label: 'no triggers (Postgres alone)', package: '@electric-sql/pglite' },
   triggers: { label: 'with @arki/live triggers + listener', package: '@arki/live' },
+  scoped: { label: 'with @arki/live scoped triggers (org) + listener', package: '@arki/live', variant: true },
 } as const;
 
 function writerGroup<Input>(
@@ -210,9 +213,10 @@ function writerGroup<Input>(
     cases: c => ({
       'no-triggers': c({
         ...writerCases['no-triggers'],
-        run: async (input: Input) => write(await database(false), input),
+        run: async (input: Input) => write(await database('none'), input),
       }),
-      triggers: c({ ...writerCases.triggers, run: async (input: Input) => write(await database(true), input) }),
+      triggers: c({ ...writerCases.triggers, run: async (input: Input) => write(await database('tables'), input) }),
+      scoped: c({ ...writerCases.scoped, run: async (input: Input) => write(await database('scoped'), input) }),
     }),
   });
 }
@@ -224,11 +228,11 @@ export default defineSuite({
   notes: [
     'Fan-out rows include the hub batch window (batchMs = 1). Real apps run the default 20 ms, which adds to every delivery and lowers the frame rate.',
     'The `endpoint` rows are in process: `liveEndpoint(...).fetch` read by `createLiveClient`, no sockets. Their grant names every table, so the filter runs on every tag and drops none.',
-    'Choosing `replayFrames` (the overload cap): frames per second ≤ 1000 / batchMs + peak commits per second / 256, times ceil(tables per window / 256). Set the cap ≥ replayMs / 1000 × that rate; reaching it starts a new epoch and every client resets.',
-    'Freshness metrics are deterministic counts from a seeded commit log: 0.5 commits per tenant per second for 30 s, half of them on the hot `likes` table; one tab per tenant with six queries. Hints name tables, not rows or tenants, so one tenant’s write refetches every tenant’s queries on that table.',
+    'Choosing `replayEnvelopes` (the overload cap, one envelope per transaction): set it ≥ replayMs / 1000 × the peak commits per second, and `replayBytes` above that many envelopes of about 64 bytes plus their keys. Reaching either starts a new epoch and every client resets.',
+    'Freshness metrics are deterministic counts from a seeded commit log: 0.5 commits per tenant per second for 30 s, half of them on the hot `likes` table; one tab per tenant with six queries. Table hints name tables, not rows or tenants, so one tenant’s write refetches every tenant’s queries on that table. Scoped hints (`live-scoped`) scope all four tables by tenant: each tab’s stream is projected through its own grant by the real hub, so only the writer’s tenant refetches. The run fails above 3.0 origin queries per commit or on any fetch outside the writer’s tenant.',
     'Lane B refetches the same queries as Lane A: a query collection is fed by the same TanStack query. What it adds is row-level diffing and cross-collection live queries on the client, not fewer origin queries.',
     'Not measured: an Electric collection (needs `wal_level=logical` and the Electric sync service), and an SSE parser comparison against `@microsoft/fetch-event-source` (not in the workspace catalog).',
-    'Writer groups use UPDATE so tables keep their size; the statement trigger fires once per statement, so the bulk group updates 1 000 rows with one hint.',
+    'Writer groups use UPDATE so tables keep their size; the statement trigger fires once per statement, so the bulk group updates 1 000 rows with one hint. Scoped triggers send one hint per distinct key: 200 for the 1 000-row and 100 000-row statements. Numbers pending an idle run.',
   ],
   groups: [
     fanoutGroup(1),
@@ -252,6 +256,13 @@ export default defineSuite({
       [ROWS],
       rows => rows,
       writer => writer.bulk(),
+    ),
+    writerGroup(
+      'writer-rows',
+      `Commit: 1, ${ROWS.toLocaleString('en-US')} or ${ITEMS.toLocaleString('en-US')} rows of 200 tenants in one statement`,
+      [1, 1000, ITEMS],
+      rows => rows,
+      (writer, rows) => writer.items(rows),
     ),
     writerGroup(
       'writer-multi-table',

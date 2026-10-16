@@ -7,7 +7,12 @@
  *    (else 400 E004).
  * 2. `authorize(request)`: `null` answers 401 E005.
  * 3. The grant picks what this client may see: the manifest entries whose
- *    every table it may read, and the tables whose hints it gets.
+ *    every table it may read, and the tables whose hints it gets. A scoped
+ *    table shows only the keys the grant lists for its dimension (`'all'`:
+ *    every key); a procedure reading it stays in the manifest when the grant
+ *    has `'all'` for that dimension, or has keys and the procedure declares
+ *    where its key comes from (`scope`). A dimension the grant leaves out
+ *    shows nothing: closed by default.
  * 4. The stream attaches to the hub (503 E003 while the hub is not ready). A
  *    well-formed cursor the hub cannot open (another hub's, changed, expired)
  *    is not an error: the stream starts with a reset.
@@ -19,21 +24,25 @@
  * them, and a hidden write changes nothing the stream shows, not even its
  * timing or when it gets `bye`. A client must not learn how often a table it
  * cannot read is written. After `maxAgeMs` the stream sends `bye` and ends,
- * so the client reconnects and is authorized again.
+ * so the client reconnects and is authorized again. Sooner for a frame that
+ * names a `reauthorize` table (memberships): `authorize` runs again before
+ * the frame goes out, and when the grant changed the stream sends `bye`
+ * instead, so the client resumes from its last cursor under the new grant.
  */
 import { z } from 'zod';
 
 import type { RouteBundle, SseContract } from '@arki/http';
 import { buildEngine, HttpError, optional, route, routes } from '@arki/http';
 
-import type { LiveFeed, LiveGrant, LiveHub } from './hub.js';
-import type { LiveEvent, LiveManifest, TableTag } from './types.js';
+import type { LiveFeed, LiveGrant, LiveHub, LiveView } from './hub.js';
+import type { LiveEvent, LiveManifest, LiveScopes, TableTag } from './types.js';
 import { debugHttp } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
 import { tagKey } from './manifest.js';
-import { liveCursorSchema, liveEventSchema } from './schema.js';
+import { liveCursorSchema, liveEventSchema, MAX_GRANT_KEYS, scopeKeySchema, tableTagSchema } from './schema.js';
+import { checkScopes, normalizeKey } from './scopes.js';
 
-/** What `authorize` grants a client. `tables` omitted: every table of the manifest. */
+/** What `authorize` grants a client: its tables (omitted: every table of the manifest) and its keys per scope dimension. */
 export type { LiveGrant } from './hub.js';
 
 /** The stream's contract: one optional cursor in, `LiveEvent` frames out, a heartbeat every 15 s (under Cloudflare's 100 s idle cap). */
@@ -59,14 +68,22 @@ const optionsSchema = z.object({
   maxAgeMs: z.int().positive().default(300_000),
 });
 
-/** What one client may see: its part of the manifest and the tables whose hints reach it. */
-type View = { readonly manifest: LiveManifest; readonly tables: readonly TableTag[] };
+type Hello = Extract<LiveEvent, { kind: 'hello' }>;
 
-function viewOf(manifest: LiveManifest, tables: ReadonlyMap<string, TableTag>): View {
-  return {
-    manifest: manifest.filter(entry => entry.reads.every(read => tables.has(tagKey(read)))),
-    tables: [...tables.values()],
-  };
+/**
+ * What one client may see: its part of the manifest, the view the hub applies, its own keys (for
+ * `hello`), and a fingerprint that is equal for two grants exactly when they show the same.
+ */
+type View = {
+  readonly manifest: LiveManifest;
+  readonly hub: LiveView;
+  readonly scopes: Hello['scopes'];
+  readonly fingerprint: string;
+};
+
+/** E001 for a grant `authorize` should never give. */
+function badGrant(problem: string, remediation: string): never {
+  throw liveError(LIVE_ERROR_CODES.config, `liveEndpoint(): authorize() granted ${problem}`, remediation);
 }
 
 /** The cursor of a request: none, or exactly one that parses. Anything else is a 400 before the stream opens. */
@@ -94,17 +111,38 @@ function toHttpError(error: unknown): unknown {
 async function* framesFor(
   feed: AsyncIterable<LiveFeed>,
   view: View,
-  expired: () => boolean,
-  end: () => void,
+  stream: {
+    readonly expired: () => boolean;
+    readonly end: () => void;
+    /** Whether a frame names a `reauthorize` table, and whether the request's grant still shows the same. */
+    readonly recheck: {
+      readonly needed: (tags: readonly TableTag[]) => boolean;
+      readonly same: () => Promise<boolean>;
+    };
+  },
 ): AsyncGenerator<LiveEvent, void, undefined> {
+  const { expired, end, recheck } = stream;
   try {
     for await (const item of feed) {
       switch (item.kind) {
         case 'begin': {
-          yield { kind: 'hello', v: 1, mode: item.mode, cursor: item.cursor, manifest: view.manifest };
+          yield {
+            kind: 'hello',
+            v: 1,
+            mode: item.mode,
+            cursor: item.cursor,
+            manifest: view.manifest,
+            ...(view.scopes === undefined ? {} : { scopes: view.scopes }),
+          };
           break;
         }
         case 'change': {
+          // Before the frame goes out: the client keeps the cursor before it, and resumes from there under the new grant.
+          if (recheck.needed(item.tags) && !(await recheck.same())) {
+            debugHttp.debug('a reauthorize table changed and so did the grant; sending bye');
+            yield { kind: 'bye' };
+            return;
+          }
           // Already through the grant: the hub sends only what this view shows.
           yield item;
           break;
@@ -124,40 +162,164 @@ async function* framesFor(
 
 /**
  * The live stream as an `@arki/http` route bundle and a plain fetch handler.
- * `manifest` is the app's (`liveManifest(contract)`); `authorize` sees the
- * request before any header is sent.
+ * `manifest` is the app's (`liveManifest(contract, { scopes })`); `scopes`
+ * the same declaration (`liveScopes`), which types the grant's dimensions;
+ * `authorize` sees the request before any header is sent. `reauthorize`
+ * lists the tables whose change may change a grant (memberships): a frame
+ * naming one runs `authorize` again (see the module comment). Its hints
+ * reach a client like any granted table's, so scope it by user.
  */
-export function liveEndpoint(options: {
+export function liveEndpoint<Dimension extends string = never>(options: {
   readonly hub: LiveHub;
   readonly manifest: LiveManifest;
-  readonly authorize: (request: Request) => Promise<LiveGrant | null>;
+  readonly scopes?: LiveScopes<Dimension>;
+  readonly authorize: (request: Request) => Promise<LiveGrant<NoInfer<Dimension>> | null>;
+  readonly reauthorize?: readonly TableTag[];
   readonly maxAgeMs?: number;
 }): LiveEndpoint {
+  const where = 'liveEndpoint()';
   const parsed = optionsSchema.safeParse({ maxAgeMs: options.maxAgeMs });
   if (!parsed.success) {
     throw liveError(
       LIVE_ERROR_CODES.config,
-      `liveEndpoint(): bad maxAgeMs: ${parsed.error.message}`,
+      `${where}: bad maxAgeMs: ${parsed.error.message}`,
       'maxAgeMs is a positive integer of milliseconds (default 300 000).',
     );
   }
   const { maxAgeMs } = parsed.data;
   const { hub, manifest } = options;
-  const manifestTables = new Map(manifest.flatMap(entry => entry.reads.map(read => [tagKey(read), read] as const)));
-  const everything = viewOf(manifest, manifestTables);
+  const { kinds, byTag } = checkScopes(options.scopes, where);
+  const reauthorize = new Map<string, TableTag>();
+  for (const tag of options.reauthorize ?? []) {
+    if (!tableTagSchema.safeParse(tag).success) {
+      throw liveError(
+        LIVE_ERROR_CODES.config,
+        `${where}: bad reauthorize table ${JSON.stringify(tag)}`,
+        'List { schema, table } tags: tableTag(memberships) from @arki/live/drizzle.',
+      );
+    }
+    reauthorize.set(tagKey(tag), { schema: tag.schema, table: tag.table });
+  }
+  /** Every table this endpoint can show: the manifest's reads, then the `reauthorize` tables. */
+  const known = new Map(manifest.flatMap(entry => entry.reads.map(read => [tagKey(read), read] as const)));
+  for (const [key, tag] of reauthorize) if (!known.has(key)) known.set(key, tag);
+  for (const entry of manifest) {
+    for (const read of entry.reads) {
+      const scoped = byTag.get(tagKey(read));
+      if (scoped !== undefined && entry.scope?.[scoped.dimension] === undefined) {
+        debugHttp.warn(
+          '[{code}] {path} reads {table}, scoped by {dimension}, without declaring scope.{dimension}: it is live only for grants with {dimension}: all',
+          {
+            code: LIVE_ERROR_CODES.config,
+            path: entry.path.join('.'),
+            table: `${read.schema}.${read.table}`,
+            dimension: scoped.dimension,
+          },
+        );
+      }
+    }
+  }
+
+  /** The grant's keys per dimension: each normalized, deduplicated and sorted, or `'all'`. E001 for a grant that cannot be right. */
+  function keysOf(scopes: LiveGrant['scopes']): ReadonlyMap<string, readonly string[] | 'all'> {
+    const keys = new Map<string, readonly string[] | 'all'>();
+    for (const [dimension, granted] of Object.entries(scopes ?? {})) {
+      if (granted === undefined) continue;
+      const kind = kinds.get(dimension);
+      if (kind === undefined) {
+        badGrant(
+          `scope ${dimension}, which liveScopes() does not declare`,
+          'Grant only declared dimensions, and pass the declaration: liveEndpoint({ scopes }).',
+        );
+        continue;
+      }
+      if (granted === 'all') {
+        keys.set(dimension, 'all');
+        continue;
+      }
+      if (granted.length > MAX_GRANT_KEYS) {
+        badGrant(
+          `${granted.length} ${dimension} keys, over ${MAX_GRANT_KEYS}`,
+          `Grant at most ${MAX_GRANT_KEYS} keys per dimension, or 'all'.`,
+        );
+      }
+      const normalized = new Set<string>();
+      for (const key of granted) {
+        const written = normalizeKey(kind, key);
+        if (written === undefined || !scopeKeySchema.safeParse(written).success) {
+          badGrant(
+            `${dimension} key ${JSON.stringify(key).slice(0, 80)}, which is not a ${kind} key`,
+            'Grant keys of the dimension key kind (uuid, text up to 512 bytes, integer).',
+          );
+        } else {
+          normalized.add(written);
+        }
+      }
+      keys.set(dimension, [...normalized].toSorted());
+    }
+    return keys;
+  }
 
   function viewFor(grant: LiveGrant): View {
-    if (grant.tables === undefined) return everything;
     const granted = new Map<string, TableTag>();
-    for (const tag of grant.tables) {
-      const known = manifestTables.get(tagKey(tag));
-      if (known !== undefined) granted.set(tagKey(tag), known);
+    for (const tag of grant.tables ?? known.values()) {
+      const table = known.get(tagKey(tag));
+      if (table !== undefined) granted.set(tagKey(tag), table);
     }
-    return viewOf(manifest, granted);
+    const keys = keysOf(grant.scopes);
+    const visible = manifest.filter(entry =>
+      entry.reads.every(read => {
+        if (!granted.has(tagKey(read))) return false;
+        const scoped = byTag.get(tagKey(read));
+        if (scoped === undefined) return true;
+        const own = keys.get(scoped.dimension);
+        if (own === 'all') return true;
+        return own !== undefined && own.length > 0 && entry.scope?.[scoped.dimension] !== undefined;
+      }),
+    );
+    const scopes = [...granted].flatMap(([key, tag]) => {
+      const scoped = byTag.get(key);
+      const own = scoped === undefined ? undefined : keys.get(scoped.dimension);
+      return scoped === undefined || own === undefined ? [] : [{ tag, name: scoped.dimension, keys: own }];
+    });
+    const view: LiveView = { tables: [...granted.values()], scopes };
+    return {
+      manifest: visible,
+      hub: view,
+      scopes:
+        kinds.size === 0
+          ? undefined
+          : Object.fromEntries([...keys].map(([name, own]) => [name, own === 'all' ? own : [...own]])),
+      fingerprint: JSON.stringify([visible.map(entry => entry.path), view]),
+    };
+  }
+
+  /** The grant `authorize` gives `request` now, as a view; `undefined` when it refuses. */
+  async function authorized(request: Request): Promise<View | undefined> {
+    const grant = await options.authorize(request);
+    return grant === null ? undefined : viewFor(grant);
+  }
+
+  /** Whether `request` is still granted exactly `view`. A refusal or a failing `authorize` is a change: the reconnect answers for it. */
+  async function same(request: Request, view: View): Promise<boolean> {
+    try {
+      const now = await authorized(request);
+      return now?.fingerprint === view.fingerprint;
+    } catch (error) {
+      debugHttp.warn('authorize() failed while re-checking a stream: {message}; sending bye', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   /** Attaches to the hub now (before the response exists) and ends the stream at `maxAgeMs` or when the request goes. */
-  async function open(view: View, cursor: string | undefined, request: AbortSignal): Promise<AsyncIterable<LiveEvent>> {
+  async function open(
+    view: View,
+    cursor: string | undefined,
+    request: Request,
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<LiveEvent>> {
     const detach = new AbortController();
     let expired = false;
     const timer = setTimeout(() => {
@@ -167,16 +329,16 @@ export function liveEndpoint(options: {
     }, maxAgeMs);
     function end(): void {
       clearTimeout(timer);
-      request.removeEventListener('abort', end);
+      signal.removeEventListener('abort', end);
       detach.abort();
     }
-    request.addEventListener('abort', end, { once: true });
-    if (request.aborted) end();
+    signal.addEventListener('abort', end, { once: true });
+    if (signal.aborted) end();
     let feed: AsyncIterable<LiveFeed>;
     try {
       feed = await hub.open({
         ...(cursor === undefined ? {} : { cursor }),
-        view: { tables: view.tables },
+        view: view.hub,
         signal: detach.signal,
       });
     } catch (error) {
@@ -185,25 +347,32 @@ export function liveEndpoint(options: {
     }
     debugHttp.debug('stream opened: {procedures} procedures, {tables} tables visible', {
       procedures: view.manifest.length,
-      tables: view.tables.length,
+      tables: view.hub.tables?.length ?? 0,
     });
-    return framesFor(feed, view, () => expired, end);
+    return framesFor(feed, view, {
+      expired: () => expired,
+      end,
+      recheck: {
+        needed: tags => reauthorize.size > 0 && tags.some(tag => reauthorize.has(tagKey(tag))),
+        same: () => same(request, view),
+      },
+    });
   }
 
   const bundle = routes()
     .derive('liveView', async (request, ctx) => {
       checkCursor(ctx.url);
-      const grant = await options.authorize(request);
-      if (grant === null) {
+      const view = await authorized(request);
+      if (view === undefined) {
         throw new HttpError(401, LIVE_ERROR_CODES.auth, 'the live stream refused this request', {
           remediation: 'Sign in again; the client stops reconnecting until its headers or session change.',
         });
       }
-      return viewFor(grant);
+      return view;
     })
     // Attaching waits for the hub to open the cursor, so it runs here, before any header.
-    .derive('liveFeed', (_request, ctx) =>
-      open(ctx.liveView, ctx.url.searchParams.get('cursor') ?? undefined, ctx.signal),
+    .derive('liveFeed', (request, ctx) =>
+      open(ctx.liveView, ctx.url.searchParams.get('cursor') ?? undefined, request, ctx.signal),
     )
     .bind(liveRoute, (_input, ctx) => ctx.liveFeed);
 

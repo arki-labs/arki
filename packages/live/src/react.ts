@@ -5,7 +5,11 @@
  * - `LiveProvider` opens the stream (in an effect, so never on the server) and
  *   turns frames into `invalidateQueries` calls by oRPC path: `hello` with
  *   `reset` invalidates every live path, `change` the paths whose tables
- *   changed. `[path]` matches every input of a procedure.
+ *   changed. `[path]` matches every input of a procedure. A scoped table's
+ *   change names its keys: a path whose scope comes from its input
+ *   (`input.orgId`) refetches only the queries whose input holds one of them
+ *   (compared the way Postgres prints the key kind; an input without the key
+ *   refetches too), a `session`-scoped path refetches whole.
  * - `useLiveQuery(orpc.x.queryOptions({ input }))` is `useQuery` with three
  *   rules: no `initialData` (a reset would bring it back after a 401), no
  *   retry on 401/403, and a warning when its path is not in the manifest.
@@ -20,7 +24,9 @@
  *   is reset once (its data dropped). The reset's own refetch fails again
  *   with no data left, so it does not reset again: no loop.
  * - A shrinking grant. Paths that leave the manifest on a new `hello` are
- *   removed from the cache: their data was read under the old grant.
+ *   removed from the cache: their data was read under the old grant. So are
+ *   the queries of keys the new `hello` no longer grants (a `session` path
+ *   whole, when it lost any key); the queries of newly granted keys refetch.
  *
  * Server rendering: put `await hub.cursor()` in the page's query cache with
  * `setLiveCursor(queryClient, cursor)` before the page's data is read. It is
@@ -40,12 +46,13 @@ import { createContext, createElement, useContext, useEffect, useRef, useState, 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { LiveStatus } from './client.js';
-import type { LiveCursor, LiveEvent, LiveManifest, LiveReceipt } from './types.js';
+import type { LiveCursor, LiveEvent, LiveKeyKind, LiveManifest, LiveReceipt } from './types.js';
 import { createLiveClient } from './client.js';
 import { debugReact } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
-import { affectedPaths } from './manifest.js';
+import { tagKey } from './manifest.js';
 import { parseLiveCursor } from './parse.js';
+import { normalizeKey } from './scopes.js';
 
 /** The query key that carries a server-rendered page's cursor to the client. */
 const CURSOR_KEY = ['@arki/live', 'cursor'] as const;
@@ -54,6 +61,76 @@ const RECENT_TXIDS = 1024;
 const DEFAULT_TXID_TIMEOUT_MS = 10_000;
 
 type TxIdWaiter = { readonly resolve: () => void };
+
+type Hello = Extract<LiveEvent, { kind: 'hello' }>;
+type Change = Extract<LiveEvent, { kind: 'change' }>;
+type Entry = LiveManifest[number];
+/** Keys one grant gives one dimension: a list, `'all'`, or none. */
+type Granted = string[] | 'all' | undefined;
+/** Where a procedure takes a dimension's key from its input. */
+type InputSource = { readonly path: readonly string[]; readonly kind: LiveKeyKind };
+
+/** The value at `path` in a query's input (oRPC keys are `[path, { input }]`), or `undefined`. */
+function inputAt(query: Query, path: readonly string[]): unknown {
+  const options = query.queryKey[1];
+  let value: unknown =
+    typeof options === 'object' && options !== null && Object.hasOwn(options, 'input')
+      ? Reflect.get(options, 'input')
+      : undefined;
+  for (const segment of path) {
+    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, segment)) return undefined;
+    value = Reflect.get(value, segment);
+  }
+  return value;
+}
+
+/** A query's key for `source`, as Postgres prints it; `undefined` when its input holds none that compares. */
+function queryKeyOf(query: Query, source: InputSource): string | undefined {
+  const value = inputAt(query, source.path);
+  if (typeof value === 'string') return normalizeKey(source.kind, value);
+  if (typeof value === 'number' || typeof value === 'bigint') return normalizeKey(source.kind, String(value));
+  return undefined;
+}
+
+function covers(granted: Granted, key: string): boolean {
+  return granted === 'all' || (granted?.includes(key) ?? false);
+}
+
+/** Whether `after` leaves out any key `before` granted. */
+function loses(before: Granted, after: Granted): boolean {
+  if (before === undefined || after === 'all') return false;
+  if (before === 'all') return true;
+  return before.some(key => !covers(after, key));
+}
+
+/**
+ * What a `change` refetches, per manifest entry that reads one of its tags: the whole path (an
+ * unscoped table, a `session` scope, or a scope the entry does not declare, so it is live only for
+ * `'all'` grants), or, per input-scoped dimension, the queries whose input holds a changed key.
+ */
+function targetsOf(
+  manifest: LiveManifest,
+  tags: Change['tags'],
+): Map<Entry, { whole: boolean; readonly keys: Map<InputSource, Set<string>> }> {
+  const targets = new Map<Entry, { whole: boolean; readonly keys: Map<InputSource, Set<string>> }>();
+  for (const tag of tags) {
+    const changed = tagKey(tag);
+    for (const entry of manifest) {
+      if (!entry.reads.some(read => tagKey(read) === changed)) continue;
+      const target = targets.get(entry) ?? { whole: false, keys: new Map<InputSource, Set<string>>() };
+      targets.set(entry, target);
+      const source = tag.scope === undefined ? undefined : entry.scope?.[tag.scope.name];
+      if (tag.scope === undefined || source === undefined || source.from === 'session') {
+        target.whole = true;
+        continue;
+      }
+      const keys = target.keys.get(source) ?? new Set<string>();
+      target.keys.set(source, keys);
+      for (const key of tag.scope.keys) keys.add(key);
+    }
+  }
+  return targets;
+}
 
 /** One provider's state for one `QueryClient`. Internal. */
 type LiveSession = {
@@ -84,6 +161,8 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
   let status: LiveStatus = 'connecting';
   let cursor = initialCursor;
   let manifest: LiveManifest | undefined;
+  /** The stream's own keys per dimension, from the last `hello` (none: an app without scoped tables). */
+  let granted: Hello['scopes'];
   /** JSON of each manifest path's key (`[...keyPrefix, ...path]`). */
   let manifestKeys = new Set<string>();
   const listeners = new Set<() => void>();
@@ -97,12 +176,63 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
 
   const keyOf = (path: readonly string[]): readonly string[] => [...keyPrefix, ...path];
 
-  function invalidate(path: readonly string[]): void {
-    const queryKey = [keyOf(path)];
-    for (const query of queryClient.getQueryCache().findAll({ queryKey })) {
+  /** Invalidates the path's queries (those `predicate` picks, when given), marking those in their first fetch. */
+  function invalidate(path: readonly string[], predicate?: (query: Query) => boolean): void {
+    const filters = { queryKey: [keyOf(path)], ...(predicate === undefined ? {} : { predicate }) };
+    for (const query of queryClient.getQueryCache().findAll(filters)) {
       if (query.state.data === undefined && query.state.fetchStatus === 'fetching') dirty.add(query);
     }
-    void queryClient.invalidateQueries({ queryKey });
+    void queryClient.invalidateQueries(filters);
+  }
+
+  function changed(tags: Change['tags']): void {
+    for (const [entry, target] of targetsOf(manifest ?? [], tags)) {
+      if (target.whole) {
+        invalidate(entry.path);
+        continue;
+      }
+      // An input without a comparable key refetches too: a false refetch over silent staleness.
+      invalidate(entry.path, query =>
+        [...target.keys].some(([source, keys]) => {
+          const key = queryKeyOf(query, source);
+          return key === undefined || keys.has(key);
+        }),
+      );
+    }
+  }
+
+  /**
+   * The grant moved: per dimension an entry is scoped by, drop the queries of keys it lost (read
+   * under the old grant) and, on a resume, refetch those of keys it gained (never tracked). A
+   * `session` path is dropped whole when it lost any key, refetched when it only gained.
+   */
+  function regrant(before: Hello['scopes'], after: Hello['scopes'], resume: boolean): void {
+    for (const entry of manifest ?? []) {
+      for (const [dimension, source] of Object.entries(entry.scope ?? {})) {
+        const was = before?.[dimension];
+        const is = after?.[dimension];
+        if (JSON.stringify(was) === JSON.stringify(is)) continue;
+        const queryKey = [keyOf(entry.path)];
+        if (source.from === 'session') {
+          if (loses(was, is)) queryClient.removeQueries({ queryKey });
+          else if (resume) invalidate(entry.path);
+          continue;
+        }
+        queryClient.removeQueries({
+          queryKey,
+          predicate: query => {
+            const key = queryKeyOf(query, source);
+            return key !== undefined && covers(was, key) && !covers(is, key);
+          },
+        });
+        if (resume) {
+          invalidate(entry.path, query => {
+            const key = queryKeyOf(query, source);
+            return key === undefined || (covers(is, key) && !covers(was, key));
+          });
+        }
+      }
+    }
   }
 
   function checkRegistered(pathKey: string): void {
@@ -126,10 +256,12 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
     }
   }
 
-  function hello(event: Extract<LiveEvent, { kind: 'hello' }>): void {
+  function hello(event: Hello): void {
     const previous = manifest;
     const previousKeys = manifestKeys;
+    const previousGrant = granted;
     manifest = event.manifest;
+    granted = event.scopes;
     manifestKeys = new Set(event.manifest.map(entry => JSON.stringify(keyOf(entry.path))));
     if (previous !== undefined) {
       // Read under the old grant: drop what this client may no longer see.
@@ -137,6 +269,7 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
         if (!manifestKeys.has(JSON.stringify(keyOf(entry.path))))
           queryClient.removeQueries({ queryKey: [keyOf(entry.path)] });
       }
+      regrant(previousGrant, granted, event.mode === 'resume');
     }
     if (event.mode === 'reset') {
       for (const entry of event.manifest) invalidate(entry.path);
@@ -171,7 +304,7 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
           return;
         }
         case 'change': {
-          for (const path of affectedPaths(manifest ?? [], event.tags)) invalidate(path);
+          changed(event.tags);
           settleTxIds(event.txids);
           cursor = event.cursor;
           return;

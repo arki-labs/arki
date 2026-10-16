@@ -1,28 +1,42 @@
 // Writer overhead: what the live triggers add to a commit, on PGlite (Postgres 17 in WASM, one
 // connection, in process).
 //
-// Two databases with the same tables and rows. `live` also runs `liveMigration(...).up` (one
-// statement trigger per table) and has a listener on the channel, as an app in production does.
-// `plain` has neither. Every write is an UPDATE, so the tables keep their size however long a run
-// times them; a statement trigger fires once per statement, whatever the row count.
+// Three databases with the same tables and rows. `tables` also runs `liveMigration(...).up` (one
+// statement trigger per table) and has a listener on the channel, as an app in production does;
+// `scoped` the same with every table scoped by its `org` column (200 tenants): per-event triggers
+// that read the statement's transition tables and send one NOTIFY per distinct key. `plain` has
+// neither. Every write is an UPDATE, so the tables keep their size however long a run times them;
+// a statement trigger fires once per statement, whatever the row count. `items` holds 100 000
+// rows for the row-count group (1, 1 000, 100 000 rows in one statement).
 //
 // The databases open on the first call (the contract check), not at import, so `arki-bench list`
 // and `check` exit.
 import { PGlite } from '@electric-sql/pglite';
 
-import type { TableTag } from '@arki/live';
+import type { LiveScopes, TableTag } from '@arki/live';
 import { liveChannel, liveMigration } from '@arki/live/pg';
 
 const APP = 'bench';
 export const ROWS = 1000;
+export const ITEMS = 100_000;
+const TENANTS = 200;
 const TABLES = ['posts', 'comments', 'users'] as const;
-const tags: readonly TableTag[] = TABLES.map(table => ({ schema: 'public', table }));
+const tags: readonly TableTag[] = [...TABLES, 'items'].map(table => ({ schema: 'public', table }));
+const scopes: LiveScopes<'org'> = {
+  dimensions: ['org'],
+  tables: tags.map(tag => ({ tag, dimension: 'org', column: 'org', kind: 'int' })),
+};
 
-const SCHEMA = TABLES.map(
-  table => `
-  CREATE TABLE ${table} (id int PRIMARY KEY, n int NOT NULL DEFAULT 0);
-  INSERT INTO ${table} (id) SELECT g FROM generate_series(1, ${ROWS}) AS g;`,
-).join('\n');
+const SCHEMA = [...TABLES.map(table => [table, ROWS] as const), ['items', ITEMS] as const]
+  .map(
+    ([table, rows]) => `
+  CREATE TABLE ${table} (id int PRIMARY KEY, org int NOT NULL, n int NOT NULL DEFAULT 0);
+  INSERT INTO ${table} (id, org) SELECT g, g % ${TENANTS} FROM generate_series(1, ${rows}) AS g;`,
+  )
+  .join('\n');
+
+/** Which triggers a database has: none, one per table, or scoped by `org`. */
+export type Triggers = 'none' | 'tables' | 'scoped';
 
 export type Writer = {
   /** One row of `posts`. Resolves with the rows it updated. */
@@ -31,6 +45,8 @@ export type Writer = {
   bulk(): Promise<number>;
   /** One row in each of the three tables, one transaction. */
   multi(id: number): Promise<number>;
+  /** The first `count` rows of `items` (each tenant's share) in one statement. */
+  items(count: number): Promise<number>;
 };
 
 function writer(db: PGlite): Writer {
@@ -53,14 +69,18 @@ function writer(db: PGlite): Writer {
         return rows;
       });
     },
+    async items(count) {
+      const result = await db.query('UPDATE items SET n = n + 1 WHERE id <= $1', [count]);
+      return result.affectedRows ?? 0;
+    },
   };
 }
 
-async function open(withTriggers: boolean): Promise<Writer> {
+async function open(triggers: Triggers): Promise<Writer> {
   const db = new PGlite();
   await db.exec(SCHEMA);
-  if (!withTriggers) return writer(db);
-  await db.exec(liveMigration({ app: APP, tables: tags }).up);
+  if (triggers === 'none') return writer(db);
+  await db.exec(liveMigration({ app: APP, tables: tags, ...(triggers === 'scoped' ? { scopes } : {}) }).up);
   // Prove the triggers publish before anything is timed: one write, one hint.
   let heard: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -74,14 +94,14 @@ async function open(withTriggers: boolean): Promise<Writer> {
   return writer(db);
 }
 
-const writers = new Map<boolean, Promise<Writer>>();
+const writers = new Map<Triggers, Promise<Writer>>();
 
-/** The database with (`true`) or without the live triggers, opened once per process. */
-export function database(withTriggers: boolean): Promise<Writer> {
-  let made = writers.get(withTriggers);
+/** The database with `triggers`, opened once per process. */
+export function database(triggers: Triggers): Promise<Writer> {
+  let made = writers.get(triggers);
   if (made === undefined) {
-    made = open(withTriggers);
-    writers.set(withTriggers, made);
+    made = open(triggers);
+    writers.set(triggers, made);
   }
   return made;
 }

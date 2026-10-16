@@ -3,14 +3,21 @@
 //
 // The app: tenants, each with one open tab (its own `QueryClient`) watching six queries:
 // `posts.list` (reads posts, users), three `posts.get` (posts, likes), `comments.list` (comments,
-// users) and `users.me` (users). `likes` is the hot table: half of all commits. Hints name tables,
-// not rows or tenants, so a write by one tenant refetches every tenant's queries on that table.
+// users) and `users.me` (users). `likes` is the hot table: half of all commits. Table hints name
+// tables, not rows or tenants, so a write by one tenant refetches every tenant's queries on that
+// table. Scoped hints name the tenant too.
 //
 // The strategies, over the same commits:
 //
 // - `live` (Lane A): the real hub batches the commits into frames (window = batchMs, 20 ms by
 //   default); each frame invalidates, in every client, the oRPC paths that read one of its tables
 //   (`affectedPaths`, then `invalidateQueries({ queryKey: [path] })`, the calls `LiveProvider` makes).
+// - `live-scoped`: every table is scoped by tenant (`org`). The real hub holds one stream per tab,
+//   each with the view of a grant `org: [tenant]`, so the projection keeps each tenant's keys on its
+//   own stream. Each frame invalidates, in its own tab only, the queries of the paths reading its
+//   tables whose `input.org` is a changed key (what `LiveProvider` does for `scope: { org:
+//   'input.org' }`). The run fails above 3.0 origin queries per commit (plan T14: ≈ 2.8 expected)
+//   or on any fetch outside the writer's tenant.
 // - `collection` (Lane B): the same frames and the same invalidation, but each query feeds a
 //   TanStack DB query collection (`queryCollectionOptions`) instead of a `QueryObserver`.
 // - `invalidate-all`: the same frames, but every frame invalidates every query.
@@ -30,11 +37,11 @@ import { createCollection } from '@tanstack/db';
 import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { environmentManager, QueryClient, QueryObserver, timeoutManager } from '@tanstack/react-query';
 
-import type { LiveManifest, TableTag } from '@arki/live';
+import type { LiveFeed, LiveManifest, TableTag } from '@arki/live';
 import { affectedPaths, createLiveHub, liveReceipts } from '@arki/live';
 import { fakeSource } from '@arki/live/testing';
 
-export type Strategy = 'live' | 'collection' | 'invalidate-all' | 'poll-1s' | 'poll-5s';
+export type Strategy = 'live' | 'live-scoped' | 'collection' | 'invalidate-all' | 'poll-1s' | 'poll-5s';
 
 export type Workload = {
   readonly id: string;
@@ -75,9 +82,19 @@ const WEIGHTS: readonly (readonly [Table, number])[] = [
 
 type Row = { readonly id: string; readonly value: string };
 type Procedure = 'posts.list' | 'posts.get' | 'comments.list' | 'users.me';
-type Query = { readonly procedure: Procedure; readonly input: string; readonly reads: readonly Table[] };
-type Commit = { readonly at: number; readonly table: Table; readonly row: string };
-type Frame = { readonly at: number; readonly tags: readonly TableTag[] };
+type Query = {
+  readonly procedure: Procedure;
+  readonly tenant: string;
+  readonly input: string;
+  readonly reads: readonly Table[];
+};
+type Commit = { readonly at: number; readonly table: Table; readonly tenant: string; readonly row: string };
+type FrameTag = TableTag & { readonly scope?: { readonly name: string; readonly keys: readonly string[] } | undefined };
+/** A frame and, for scoped hints, the tenant whose stream it reached. */
+type Frame = { readonly at: number; readonly tenant?: string; readonly tags: readonly FrameTag[] };
+
+/** Scoped hints stop the run above this (plan T14). */
+const MAX_SCOPED_QUERIES_PER_COMMIT = 3;
 
 /** mulberry32: a small seeded generator, so every run makes the same commit log. */
 function seeded(seed: number): () => number {
@@ -104,8 +121,8 @@ function commitLog(workload: Workload): readonly Commit[] {
       if (pick < weight) break;
       pick -= weight;
     }
-    const tenant = Math.floor(random() * workload.tenants);
-    commits.push({ at, table, row: `t${tenant}.${table}${Math.floor(random() * ROWS[table])}` });
+    const tenant = `t${Math.floor(random() * workload.tenants)}`;
+    commits.push({ at, table, tenant, row: `${tenant}.${table}${Math.floor(random() * ROWS[table])}` });
   }
   return commits.toSorted((a, b) => a.at - b.at);
 }
@@ -113,12 +130,12 @@ function commitLog(workload: Workload): readonly Commit[] {
 function queriesOf(tenant: number): readonly Query[] {
   const t = `t${tenant}`;
   return [
-    { procedure: 'posts.list', input: t, reads: ['posts', 'users'] },
-    { procedure: 'posts.get', input: `${t}.posts0`, reads: ['posts', 'likes'] },
-    { procedure: 'posts.get', input: `${t}.posts1`, reads: ['posts', 'likes'] },
-    { procedure: 'posts.get', input: `${t}.posts2`, reads: ['posts', 'likes'] },
-    { procedure: 'comments.list', input: t, reads: ['comments', 'users'] },
-    { procedure: 'users.me', input: `${t}.users0`, reads: ['users'] },
+    { procedure: 'posts.list', tenant: t, input: t, reads: ['posts', 'users'] },
+    { procedure: 'posts.get', tenant: t, input: `${t}.posts0`, reads: ['posts', 'likes'] },
+    { procedure: 'posts.get', tenant: t, input: `${t}.posts1`, reads: ['posts', 'likes'] },
+    { procedure: 'posts.get', tenant: t, input: `${t}.posts2`, reads: ['posts', 'likes'] },
+    { procedure: 'comments.list', tenant: t, input: t, reads: ['comments', 'users'] },
+    { procedure: 'users.me', tenant: t, input: `${t}.users0`, reads: ['users'] },
   ];
 }
 
@@ -268,13 +285,87 @@ async function framesOf(workload: Workload, commits: readonly Commit[]): Promise
   return frames;
 }
 
-function frameLog(workload: Workload, commits: readonly Commit[]): Promise<readonly Frame[]> {
-  let log = frameLogs.get(workload.id);
+/**
+ * Scoped hints: one stream per tenant, each with the view of grant `org: [tenant]` on all four
+ * tables. Each window's commits are emitted together; every tenant that wrote in it gets exactly
+ * one frame, naming only its own key and the receipts of its own commits.
+ */
+async function scopedFramesOf(workload: Workload, commits: readonly Commit[]): Promise<readonly Frame[]> {
+  const source = fakeSource();
+  const receipts = liveReceipts({ app: 'bench', secret: 'bench-only-secret-of-32-characters-01' });
+  const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts });
+  await hub.start();
+  source.emit({ kind: 'ready' });
+  const detach = new AbortController();
+  const tables = WEIGHTS.map(([table]) => tag(table));
+  const streams = new Map<string, AsyncIterator<LiveFeed>>();
+  for (let index = 0; index < workload.tenants; index += 1) {
+    const tenant = `t${index}`;
+    const view = { scopes: tables.map(table => ({ tag: table, name: 'org', keys: [tenant] })) };
+    const opened = await hub.open({ view, signal: detach.signal });
+    const feed = opened[Symbol.asyncIterator]();
+    await feed.next();
+    streams.set(tenant, feed);
+  }
+  const frames: Frame[] = [];
+  let index = 0;
+  while (index < commits.length) {
+    const start = commits[index]?.at ?? 0;
+    const writers = new Map<string, number>();
+    const window: Commit[] = [];
+    while (index < commits.length && (commits[index]?.at ?? 0) < start + BATCH_MS) {
+      const commit = commits[index];
+      if (commit) {
+        window.push(commit);
+        writers.set(commit.tenant, (writers.get(commit.tenant) ?? 0) + 1);
+      }
+      index += 1;
+    }
+    const next = [...writers].map(([tenant, count]) => ({ tenant, count, frame: streams.get(tenant)?.next() }));
+    for (const [offset, commit] of window.entries()) {
+      source.emit({
+        kind: 'change',
+        tags: [{ ...tag(commit.table), keys: [commit.tenant] }],
+        txid: String(index - window.length + offset + 1),
+      });
+    }
+    for (const { tenant, count, frame: pending } of next) {
+      const frame = await pending;
+      const own =
+        frame !== undefined &&
+        !frame.done &&
+        frame.value.kind === 'change' &&
+        frame.value.txids.length === count &&
+        frame.value.tags.every(each => each.scope?.name === 'org' && each.scope.keys.join(',') === tenant);
+      if (!own || frame.value.kind !== 'change') {
+        throw new Error(
+          `${workload.id}: tenant ${tenant} did not get exactly its own frame for the window at ${start} ms`,
+        );
+      }
+      frames.push({ at: start + BATCH_MS, tenant, tags: frame.value.tags });
+    }
+  }
+  detach.abort();
+  await hub.stop();
+  return frames;
+}
+
+function frameLog(workload: Workload, commits: readonly Commit[], scoped: boolean): Promise<readonly Frame[]> {
+  const key = `${workload.id}:${scoped ? 'scoped' : 'tables'}`;
+  let log = frameLogs.get(key);
   if (log === undefined) {
-    log = framesOf(workload, commits);
-    frameLogs.set(workload.id, log);
+    log = scoped ? scopedFramesOf(workload, commits) : framesOf(workload, commits);
+    frameLogs.set(key, log);
   }
   return log;
+}
+
+/** The tenant a query key's input names (`[path, { input: { org } }]`), as `LiveProvider` reads `input.org`. */
+function orgOf(queryKey: QueryKey): unknown {
+  const options = queryKey[1];
+  if (typeof options !== 'object' || options === null || !('input' in options)) return undefined;
+  const input = options.input;
+  return typeof input === 'object' && input !== null && 'org' in input ? input.org : undefined;
 }
 
 // ---- One simulation.
@@ -283,6 +374,8 @@ export type Outcome = {
   readonly commits: number;
   /** Origin queries after the first load. */
   readonly fetches: number;
+  /** Scoped hints only: origin queries of a tenant other than the one whose frame was being applied. */
+  readonly crossTenant: number;
   /** Origin queries whose answer equalled the client's previous one. */
   readonly wasted: number;
   /** For every change to a watched result: ms until the client asked again (cut at the end of the run). */
@@ -295,7 +388,8 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
   const time = tanstackClock();
   time.reset();
   const commits = commitLog(workload);
-  const frames = strategy.startsWith('poll') ? [] : await frameLog(workload, commits);
+  const scoped = strategy === 'live-scoped';
+  const frames = strategy.startsWith('poll') ? [] : await frameLog(workload, commits, scoped);
   const db = database();
   const end = workload.seconds * 1000 + 1000;
   const interval = strategy === 'poll-1s' ? 1000 : strategy === 'poll-5s' ? 5000 : false;
@@ -303,6 +397,9 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
   let counting = false;
   let fetches = 0;
   let wasted = 0;
+  let crossTenant = 0;
+  /** The tenant whose scoped frame is being applied and settled. */
+  let applying: string | undefined;
   const staleness: number[] = [];
   const trackers = new Map<string, Tracker>();
   const watched: { readonly query: Query; readonly tracker: Tracker }[] = [];
@@ -318,6 +415,7 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
     if (counting) {
       fetches += 1;
       if (text === tracker.served) wasted += 1;
+      if (scoped && query.tenant !== applying) crossTenant += 1;
     }
     if (tracker.pendingSince !== undefined) staleness.push(time.now() - tracker.pendingSince);
     tracker.pendingSince = undefined;
@@ -332,7 +430,7 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
       const tracker: Tracker = { served: undefined, pendingSince: undefined, truth: JSON.stringify(db.answer(query)) };
       trackers.set(`${query.procedure}:${query.input}`, tracker);
       watched.push({ query, tracker });
-      const queryKey: QueryKey = [query.procedure.split('.'), { input: query.input }];
+      const queryKey: QueryKey = [query.procedure.split('.'), { input: { org: query.tenant, id: query.input } }];
       if (strategy === 'collection') {
         const collection = createCollection(
           queryCollectionOptions({
@@ -372,6 +470,22 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
   counting = true;
 
   function apply(frame: Frame): void {
+    if (scoped) {
+      const queryClient = clients[Number(frame.tenant?.slice(1))];
+      for (const each of frame.tags) {
+        const keys = new Set(each.scope?.keys);
+        for (const path of affectedPaths(MANIFEST, [each])) {
+          void queryClient?.invalidateQueries({
+            queryKey: [path],
+            predicate: query => {
+              const org = orgOf(query.queryKey);
+              return typeof org === 'string' && keys.has(org);
+            },
+          });
+        }
+      }
+      return;
+    }
     for (const queryClient of clients) {
       if (strategy === 'invalidate-all') {
         void queryClient.invalidateQueries();
@@ -399,8 +513,10 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
     const frame = frames[frameAt];
     if (frame && (!commit || frame.at <= commit.at)) {
       await time.advanceTo(frame.at, settle);
+      applying = frame.tenant;
       apply(frame);
       await settle();
+      applying = undefined;
       frameAt += 1;
     } else if (commit) {
       await time.advanceTo(commit.at, settle);
@@ -432,10 +548,16 @@ async function simulate(workload: Workload, strategy: Strategy): Promise<Outcome
     }
   }
 
+  if (scoped && (crossTenant > 0 || fetches > MAX_SCOPED_QUERIES_PER_COMMIT * commits.length)) {
+    throw new Error(
+      `${workload.id}/live-scoped: ${fetches} origin queries for ${commits.length} commits (${crossTenant} outside the writer's tenant); at most ${MAX_SCOPED_QUERIES_PER_COMMIT} per commit and none outside`,
+    );
+  }
+
   for (const release of releases) await release();
   for (const queryClient of clients) queryClient.clear();
   time.reset();
-  return { commits: commits.length, fetches, wasted, staleness };
+  return { commits: commits.length, fetches, crossTenant, wasted, staleness };
 }
 
 /** Simulations share one virtual clock, so they run one at a time; each runs once per process (it is deterministic). */

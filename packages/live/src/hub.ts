@@ -93,8 +93,15 @@ export type LiveSourceEvent =
 /** Where hints come from. `start` resolves with the function that stops it. */
 export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Promise<() => Promise<void>> };
 
-/** What one stream may see. `tables` omitted: every table. */
-export type LiveGrant = { readonly tables?: readonly TableTag[] };
+/**
+ * What `authorize` grants one client. `tables` omitted: every table of the manifest. `scopes`, per
+ * dimension: the keys whose changes it may see (at most 4 096 each, in any form Postgres reads for
+ * the key kind), or `'all'`. A scoped table whose dimension the grant leaves out shows nothing.
+ */
+export type LiveGrant<Dimension extends string = string> = {
+  readonly tables?: readonly TableTag[];
+  readonly scopes?: Partial<Readonly<Record<Dimension, readonly string[] | 'all'>>>;
+};
 
 /**
  * What one stream sees, as the hub applies it. `tables` omitted: every table. A scoped table

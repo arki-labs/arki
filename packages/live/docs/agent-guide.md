@@ -6,9 +6,9 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
 2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. The txid stays in the hub: a `change` frame carries in `txids` the **receipts** of exactly the commits that wrote its own tables (`liveReceipts({ app, secret })`: an HMAC of the txid, 22 characters), never the raw id, which would reveal the database-wide transaction counter.
-3. The hub (`createLiveHub`) numbers each source change (a hint) inside an epoch, keeps `replayMs` of hints in a ring, and feeds every open stream through its grant (`hub.open({ grant })`). The grant applies before the stream's own `batchMs` window, queue and frame split: a hint with no granted table never reaches the stream (no window, no queue slot, no early flush, no `bye`). The cursor a client sees is a position (epoch, hint number, time taken) sealed with AES-GCM under a key per hub start: opaque, 75 characters, so a client cannot count the hints its grant hides. Streams whose windows close at one position share one sealed cursor.
-4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the cursor is at most `replayMs` old (the missed hints follow, through the stream's grant and windows, as it would have got them live), else `reset` (refetch every live query). The decision never depends on how many hints passed. A listener gap ends every stream with `gap` and the next `ready` starts a new epoch; so does an overload (the ring reached `replayFrames`), which resets every client at once.
-5. On the client, `LiveProvider` reads the stream (`createLiveClient`) and calls `invalidateQueries` by oRPC path: every live path on a reset, the affected paths on a change.
+3. The hub (`createLiveHub`) keeps one envelope per transaction (its tables, and a scoped table's changed keys) inside an epoch, keeps `replayMs` of envelopes in a ring, and feeds every open stream through its view (`hub.open({ view })`, which `liveEndpoint` builds from the grant). The view applies before the stream's own `batchMs` window, queue and frame split: a change with no granted table or key never reaches the stream (no window, no queue slot, no early flush, no `bye`). The cursor a client sees is a position (epoch, hint number, time taken) sealed with AES-GCM under a key per hub start: opaque, 75 characters, so a client cannot count the hints its grant hides. Streams whose windows close at one position share one sealed cursor.
+4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the cursor is at most `replayMs` old (the missed hints follow, through the stream's grant and windows, as it would have got them live), else `reset` (refetch every live query). The decision never depends on how many hints passed. A listener gap ends every stream with `gap` and the next `ready` starts a new epoch; so does an overload (the ring reached `replayEnvelopes` or `replayBytes`) and a scoped statement's overflow (over `maxKeys` keys, a key over 512 bytes, a TRUNCATE under row-level security), which reset every client at once.
+5. On the client, `LiveProvider` reads the stream (`createLiveClient`) and calls `invalidateQueries` by oRPC path: every live path on a reset, the affected paths on a change. For a scoped tag it invalidates only the queries whose input holds a changed key at the declared path (`'session'` paths whole), and on a `hello` with fewer keys it removes the queries of the lost keys.
 6. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
 
 ## Task map
@@ -51,12 +51,21 @@ export { both };
 4. `createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog' }) })`, with a pool of its own. The hub is ready once `LISTEN` succeeds; a lost listener or an unreadable payload is a `gap`, and the reconnect is a new epoch.
 5. Library files: `src/pg/migration.ts`, `src/pg/verify.ts`, `src/pg/touch.ts`, `src/pg/source.ts`.
 
+### Scope a table by tenant
+
+1. Declare once: `const scopes = liveScopes({ org: [[posts, posts.orgId]], user: [[memberships, memberships.userId]] })` (NOT NULL uuid, text, varchar or integer columns; one dimension per table, one key kind per dimension).
+2. Meta: `live({ reads: [posts], scope: { org: 'input.orgId' } })` refetches only queries whose input holds a changed key; `'session'` refetches the path on any granted key. No `scope`: live only for `org: 'all'` grants.
+3. `liveManifest(contract, { scopes })`, `liveMigration({ app, tables: [...liveTables(manifest), tableTag(memberships)], scopes, maxKeys })`, `verifyLiveTriggers(db, { app, tables, scopes, maxKeys })`; in Dot, `liveQueries({ scopes, reauthorize, maxKeys, ... })`.
+4. `liveEndpoint({ hub, manifest, scopes, authorize, reauthorize: [tableTag(memberships)] })`; `authorize` returns `LiveGrant<'org' | 'user'>`: `{ scopes: { org: session.orgIds, user: [session.userId] } }` or `'all'`. At most 4 096 keys per dimension, normalized by kind.
+5. `touch(tx, { app, scopes }, { schema, table, keys })` publishes keys by hand; with `scopes`, a scoped tag without keys is E001.
+6. A table read by several tenants (a shared `users`) stays unscoped. Library files: `src/drizzle/scopes.ts`, `src/scopes.ts`, `src/http.ts`, `src/react.ts`, `src/pg/migration.ts`.
+
 ### Drive the hub in a test
 
 1. `const source = fakeSource(); const hub = createLiveHub({ source, receipts }); await hub.start(); source.emit({ kind: 'ready' })`. Without `receipts` frames carry `txids: []`; with them, compare `txids` to `await receipts.of(txid)`.
-2. `await hub.open({ cursor, grant, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. `grant: { tables }` limits what the stream sees (omitted: every table). `begin` cursors are freshly sealed and `change` cursors are shared by streams whose windows close together, so compare modes and tags, never cursor strings.
+2. `await hub.open({ cursor, view, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. `view: { tables, scopes: [{ tag, name, keys }] }` limits what the stream sees (tables omitted: every table; a keyed change of a table without a `scopes` entry is hidden). `begin` cursors are freshly sealed and `change` cursors are shared by streams whose windows close together, so compare modes and tags, never cursor strings.
 3. `source.emit({ kind: 'change', tags })` then wait `batchMs`; `source.emit({ kind: 'gap' })` to simulate a lost listener.
-4. Age and the overload cap: `limits: { replayMs, replayFrames }`. With fake timers, `expect.poll` moves the fake clock while it waits: note `Date.now()` before the connect whose cursor's age you test.
+4. Age and the overload caps: `limits: { replayMs, replayEnvelopes, replayBytes }`. With fake timers, `expect.poll` moves the fake clock while it waits: note `Date.now()` before the connect whose cursor's age you test.
 5. Real Postgres: `src/tests/failure.pg.test.ts` has the barrier helpers (a held pool client, a role without LOGIN, a gated read, an open transaction).
 6. Library files: `src/hub.ts`, `src/replay.ts`, `src/cursor.ts`, `src/testing.ts`; the scripted client in `src/tests/scripted-client.ts`.
 
@@ -91,7 +100,9 @@ export { both };
 - A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with the handler context.
 - Never reuse an epoch: a custom `epoch()` must return a new 12-character `[a-z0-9]` value each call (E001 otherwise).
 - A stream that falls `subscriberFrames` behind gets `bye`; reconnect with the cursor.
-- Never evict replay hints by count or make resume depend on what happened since a cursor: hidden-table hints would leak. Never filter by grant after a stream's window or queue: a hidden write would then change its timing or cause its `bye`. Resume or reset depends on the cursor's age only; the `replayFrames` cap starts a new epoch for everyone.
+- Never evict replay hints by count or make resume depend on what happened since a cursor: hidden-table hints would leak. Never filter by grant after a stream's window or queue: a hidden write would then change its timing or cause its `bye`. Resume or reset depends on the cursor's age only; the `replayEnvelopes` and `replayBytes` caps start a new epoch for everyone.
+- Never make a trigger function `SECURITY DEFINER`: hint payloads travel over NOTIFY and any role that can connect may LISTEN, so a definer would publish keys its caller cannot read. Under row-level security the TRUNCATE trigger sends an overflow (every client resets).
+- A scoped table without a grant for its dimension shows nothing; a key not normalized by `normalizeKey` never matches. Keys never reach a client outside its grant, so they need no HMAC.
 - Never declare `live()` on a per-request table (sessions, counters): it refetches on every request. Do declare auth tables the answer depends on (memberships, roles).
 - Shortcuts that break the guarantee: the root `db` inside a `liveRead` handler, DDL at boot, reads on a replica.
 - Never parse or build a cursor: it is sealed. A cursor the hub cannot open resets; a malformed one is a 400.
@@ -99,7 +110,7 @@ export { both };
 - The receipts secret comes from the app config, the same on every instance (`openssl rand -base64 32`). Never put a raw txid on the wire or in a mutation's response.
 - `useLiveQuery` on a procedure that is not in the manifest never refreshes; the provider logs E001 once. Mutations get query utils from oRPC too, so the types cannot catch it.
 - Pass a `headers` function; a new one only matters after a 401/403 (the provider then tries again).
-- Hints say only which table changed. Every refetch is authorized by its own procedure.
+- Hints say only which table (and which granted keys) changed. Every refetch is authorized by its own procedure.
 
 ## Errors
 
