@@ -12,10 +12,12 @@
  *
  * Types cannot see folders, so these rules hold the shape:
  *
- * - `@orpc/server` only in the app core (`core/orpc.ts`, `root.ts`,
- *   `gateway.ts`, `cron.ts`) and `feature.ts` — a procedure never builds its own implementer.
+ * - `@orpc/server` only in the app's entrypoints (`entrypoints/{middleware,router,gateway,cron}.ts`;
+ *   older layout: `core/orpc.ts`, `root.ts`, `gateway.ts`, `cron.ts`) and `feature.ts` — a procedure never builds its own implementer.
  * - `@orpc/contract` only in contract files — `entrypoints/rpc.ts` and
- *   the app's `rpc.ts`.
+ *   the app's `rpc.ts` (or `entrypoints/rpc.ts`).
+ * - The app's own `model/` is a leaf like a feature's: every layer may import
+ *   it; it imports no `usecases/`, `infra/` or `entrypoints/` and no database runtime.
  * - A contract file imports only `@orpc/contract`, zod / `@arki/contracts`,
  *   the `offlineSafe` marker (`@arki/offline/orpc`), and its model (`../model/*`, or feature contracts from the app contract)
  *   — it ships to the browser.
@@ -58,8 +60,8 @@
 
 /** @typedef {{ group?: string[], regex?: string, message: string }} Pattern */
 
-const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app core (core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).' };
-const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts) only.' };
+const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app entrypoints (entrypoints/{middleware,router,gateway,cron}.ts; older layout: core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).' };
+const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts / entrypoints/rpc.ts) only.' };
 const DB_RUNTIME = {
   regex: '^(drizzle-orm(/(?!pg-core$).*)?|pg|postgres|@arki/db(/(?!id$|temporal$).*)?)$',
   message: 'model/ holds no database runtime (only model/tables.ts declares tables). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
@@ -94,8 +96,8 @@ const CONTRACT_ONLY = {
 const USECASE_INFRA = '^\\.{1,2}/(.*/)?infra(/|$)';
 // The app's database / kv modules are infra even when they sit outside the feature.
 const USECASE_DB_KV = '^\\.{1,2}/(.*/)?(db|kv)(/.*)?$';
-// The app core's oRPC module builds implementers; a usecase is not a procedure.
-const USECASE_CORE_ORPC = '^\\.{1,2}/(.*/)?core/orpc$';
+// The app's middleware module builds implementers; a usecase is not a procedure.
+const USECASE_CORE_ORPC = '^\\.{1,2}/(.*/)?(core/orpc|entrypoints/middleware)$';
 // Database runtimes: a usecase asks a store, it does not run queries itself.
 const USECASE_DB_RUNTIME = '^(drizzle-orm(/.*)?|pg|postgres|@arki/db(/.*)?)$';
 // The oRPC server belongs to the entrypoints and the app core.
@@ -133,17 +135,26 @@ const isTypeOnly = (/** @type {object} */ node, /** @type {'importKind' | 'expor
 const usecaseRuntimeImports = {
   meta: {
     type: 'problem',
-    schema: [{ type: 'object', properties: { patterns: { type: 'array', items: { type: 'string' } } }, additionalProperties: false }],
+    schema: [
+      {
+        type: 'object',
+        properties: { patterns: { type: 'array', items: { type: 'string' } }, allow: { type: 'array', items: { type: 'string' } } },
+        additionalProperties: false,
+      },
+    ],
     messages: {
       runtime:
         'A usecase takes {{source}} through the feature graph (a need or a private infra plugin), never by a runtime import. `import type` is fine.',
     },
   },
   create(context) {
-    const options = /** @type {{ patterns?: string[] } | undefined} */ (context.options[0]);
+    const options = /** @type {{ patterns?: string[], allow?: string[] } | undefined} */ (context.options[0]);
     const banned = (options?.patterns ?? []).map((source) => new RegExp(source));
+    // `allow` wins over `patterns`: a pure module under an infra path (an email template) is not a plugin.
+    const allowed = (options?.allow ?? []).map((source) => new RegExp(source));
     const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
       if (typeof source !== 'string') return;
+      if (allowed.some((re) => re.test(source))) return;
       if (banned.some((re) => re.test(source))) context.report({ node, messageId: 'runtime', data: { source: `"${source}"` } });
     };
     return {
@@ -383,16 +394,32 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 /**
  * @param {{ src?: string, legacy?: string[], clients?: string[] }} [options]
  *   `src`: the backend's source folder (default `'src'`).
- *   `legacy`: app-level files that still build router-first procedures and
- *   may import `@orpc/server` until they are deleted (e.g. `['src/core/offline.ts']`).
+ *   `legacy`: files (app-level, or inside a feature's layers) that still build router-first
+ *   procedures and may import `@orpc/server` until they are deleted
+ *   (e.g. `['src/features/highlights/entrypoints/idempotency.ts']`).
  *   `clients`: regex sources for app-specific external clients a usecase must take
  *   through the graph, never by a runtime import (e.g. `['^stripe$', '^web-push$']`).
+ *   `pure`: regex sources under an `infra/` path that hold no plugin — pure modules
+ *   such as email templates (e.g. `['/infra/mail/templates/']`) — which a usecase
+ *   may still runtime-import.
  */
-export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
+export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [] } = {}) {
   // `**`: a feature nested under another (`features/a/features/b`) is a root of its own.
   const features = `${src}/features/**`;
-  const contracts = [`${src}/rpc.ts`, `${features}/entrypoints/rpc.ts`];
-  const serverAllowed = [`${src}/core/orpc.ts`, `${src}/root.ts`, `${src}/gateway.ts`, `${src}/cron.ts`];
+  // The app's shared leaves (`model/`), with the same rules as a feature's `model/`.
+  const appModel = `${src}/model`;
+  const contracts = [`${src}/rpc.ts`, `${src}/entrypoints/rpc.ts`, `${features}/entrypoints/rpc.ts`];
+  const serverAllowed = [
+    `${src}/entrypoints/middleware.ts`,
+    `${src}/entrypoints/router.ts`,
+    `${src}/entrypoints/gateway.ts`,
+    `${src}/entrypoints/cron.ts`,
+    // Older layout.
+    `${src}/core/orpc.ts`,
+    `${src}/root.ts`,
+    `${src}/gateway.ts`,
+    `${src}/cron.ts`,
+  ];
 
   /** One config per file class, so each file gets exactly one `no-restricted-imports` list. */
   const rule = (/** @type {Pattern[]} */ patterns) => ({ 'no-restricted-imports': ['error', { patterns }] });
@@ -423,7 +450,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
       plugins: { 'arki-feature-layers': plugin },
       rules: {
         ...rule([SERVER, CONTRACT, USECASES_INWARD]),
-        'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients] }],
+        'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients], allow: pure }],
       },
     },
     {
@@ -442,7 +469,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
     {
       name: 'arki/feature-layers/infra-entrypoints',
       files: [`${features}/infra/**/*.ts`, `${features}/entrypoints/**/*.ts`],
-      ignores: [...TESTS, ...contracts],
+      ignores: [...TESTS, ...contracts, ...legacy],
       rules: rule([SERVER, CONTRACT]),
     },
     {
@@ -460,10 +487,22 @@ export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
       rules: { 'arki-feature-layers/feature-boundaries': 'error' },
     },
     {
-      // App-level code outside the features: the core builds implementers, nothing else does.
+      name: 'arki/feature-layers/app-model',
+      files: [`${appModel}/**/*.ts`],
+      ignores: [...TESTS, `${appModel}/**/tables.ts`, `${appModel}/**/tables/**`],
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME]),
+    },
+    {
+      name: 'arki/feature-layers/app-model-tables',
+      files: [`${appModel}/**/tables.ts`, `${appModel}/**/tables/**/*.ts`],
+      ignores: TESTS,
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD]),
+    },
+    {
+      // App-level code outside the features and model: the entrypoints build implementers, nothing else does.
       name: 'arki/feature-layers/app',
       files: [`${src}/**/*.ts`],
-      ignores: [...TESTS, `${src}/features/**`, ...contracts, ...serverAllowed, ...legacy],
+      ignores: [...TESTS, `${src}/features/**`, `${appModel}/**`, ...contracts, ...serverAllowed, ...legacy],
       rules: rule([SERVER, CONTRACT]),
     },
   ];
