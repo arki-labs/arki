@@ -4,12 +4,21 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { checkAll, checkLibrary, updateBaseline } from './library-check';
+import { leaves, readManifest } from './manifest';
 
 function packageDir(folder: string, manifest: object, turbo: object | null): string {
   const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), folder);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
   if (turbo) writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify(turbo));
+  // Fixtures model built packages: every declared `types` file exists (empty), so TYPES_W001 stays quiet.
+  for (const target of Object.values(readManifest(dir).exports)) {
+    for (const leaf of leaves(target)) {
+      if (leaf.conditions.at(-1) !== 'types' && !leaf.value.endsWith('.d.ts')) continue;
+      mkdirSync(path.dirname(path.join(dir, leaf.value)), { recursive: true });
+      writeFileSync(path.join(dir, leaf.value), '');
+    }
+  }
   return dir;
 }
 

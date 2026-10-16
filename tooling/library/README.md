@@ -107,7 +107,7 @@ bun run test:docs                 # at the root: turbo run test:docs --continue
 
 ## Rules and repairs
 
-`arki-library-check` (public packages only; DOC_E004 to DOC_E012 on a file fire only when that file exists):
+`arki-library-check` (DOC rules: public packages only, and DOC_E004 to DOC_E012 on a file fire only when that file exists; TYPES rules: every `packages/*` library, private ones too):
 
 | Rule     | Meaning                                                              | Repair                                                                                                                               |
 | -------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -126,6 +126,8 @@ bun run test:docs                 # at the root: turbo run test:docs --continue
 | DOC_E013 | no "test:docs" script                                                | Add `"test:docs": "arki-doc-examples"` and the devDependency `"@arki/library-tooling": "workspace:*"`.                               |
 | DOC_W001 | forward-looking language                                             | Say what exists today. Plans go in an RFC.                                                                                           |
 | DOC_W002 | llms.txt over 60 lines                                               | Group bullets.                                                                                                                       |
+| TYPES_E001 | export entry exposes Zod types (`./zod` entries and `@arki/contracts` are exempt) | Take a Standard Schema (`@arki/schema`) in the entry, or move the Zod helper to a `./zod` subpath.                                   |
+| TYPES_W001 | export entry types not built: Zod check skipped                      | Build the package (`turbo run build --filter=@arki/<name>`), then run the check again.                                               |
 
 `arki-doc-examples`:
 

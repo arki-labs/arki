@@ -17,6 +17,10 @@
  * DOC_E012 (`files` ships the docs), DOC_E013 (a `test:docs` script).
  * Warnings: DOC_W001 forward-looking words, DOC_W002 llms.txt over 60 lines.
  *
+ * Every library, private or public, also gets `public-types.ts`: TYPES_E001 (an
+ * export entry other than `./zod` exposes Zod types), TYPES_W001 (the entry's
+ * types file is not built, so that check is skipped).
+ *
  * `--all` checks every package under `packages/` and `tooling/`. Known errors
  * are listed with a reason in `tooling/library/library-check-baseline.json`; only
  * errors outside it fail the run, and a baseline entry that no longer matches
@@ -34,6 +38,7 @@ import { z } from 'zod';
 
 import { checkDocs } from './docs';
 import { leaves, readManifest } from './manifest';
+import { checkPublicTypes } from './public-types';
 import { complain, say } from './report';
 
 export type CheckResult = { readonly errors: string[]; readonly warnings: string[] };
@@ -113,6 +118,11 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
     errors.push(...docs.errors);
     warnings.push(...docs.warnings);
   }
+
+  // Private packages too: wave-1 Zod targets such as ai, queue and testing are private.
+  const types = checkPublicTypes(dir, manifest);
+  errors.push(...types.errors);
+  warnings.push(...types.warnings);
 
   return { errors, warnings };
 }
