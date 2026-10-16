@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { safeFetchBytes, validatePublicURL } from '../public-fetch.js';
+import { z } from 'zod';
+
+import { createClient } from '../client.js';
+import { route } from '../contract.js';
+import { publicFetch, safeFetchBytes, validatePublicURL } from '../public-fetch.js';
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), fetch: vi.fn(), destroy: vi.fn(), agent: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
@@ -158,5 +162,59 @@ describe('request method and body', () => {
       'Private network',
     );
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('publicFetch: the guard as a fetch, for the typed client', () => {
+  const getOrder = route.get('/orders/:id', {
+    id: 'orders.get',
+    params: z.object({ id: z.string() }),
+    output: z.object({ id: z.string() }),
+  });
+
+  it('serves a typed client: request through the pinned connection, response as a Response', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      new Response('{"id":"o1"}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const orders = createClient({ getOrder }, { baseUrl: 'https://api.example.com', fetch: publicFetch() });
+    await expect(orders.getOrder({ params: { id: 'o1' } })).resolves.toEqual({ id: 'o1' });
+    expect(mocks.fetch.mock.calls[0]?.[0].href).toBe('https://api.example.com/orders/o1');
+    expect(mocks.fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'GET', redirect: 'manual' });
+    expect(mocks.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a host whose DNS answer is private, before any connection', async () => {
+    mocks.lookup.mockResolvedValue([{ address: '10.1.2.3', family: 4 }]);
+    await expect(publicFetch()('https://api.example.com/orders/o1')).rejects.toThrow('Private network');
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a redirect to a private address, so a public API cannot bounce the call inside', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } }),
+    );
+    await expect(publicFetch()('https://api.example.com/orders/o1')).rejects.toThrow('Private network');
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the method, headers and body, and a 204 comes back with no body', async () => {
+    mocks.fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const response = await publicFetch()('https://api.example.com/orders', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'k1' },
+      body: '{"total":5}',
+    });
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+    expect(mocks.fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'k1' },
+      body: '{"total":5}',
+    });
+  });
+
+  it('caps the buffered body at maxBytes', async () => {
+    mocks.fetch.mockResolvedValueOnce(new Response('0123456789'));
+    await expect(publicFetch({ maxBytes: 4 })('https://api.example.com/big')).rejects.toThrow('size limit');
   });
 });

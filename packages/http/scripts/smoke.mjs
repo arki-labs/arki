@@ -98,6 +98,40 @@ async function main() {
     createClient(lockEvent, { baseUrl: 'https://api.test', fetch: traversal.fetch })({ params: { id: '..' } }),
   );
 
+  // A minimal retry policy, the shape @arki/resilience provides: one retry on a throw.
+  const oneRetry = {
+    execute: async fn => {
+      try {
+        return await fn({ signal: undefined });
+      } catch {
+        return fn({ signal: undefined });
+      }
+    },
+  };
+  let busyOnce = true;
+  const flaky = fakeFetch(() => {
+    const status = busyOnce ? 503 : 200;
+    busyOnce = false;
+    return status === 503
+      ? { status, body: { error: { code: 'ARKI_HTTP_E500', message: 'busy' } } }
+      : { status, body: { id: 'e1' } };
+  });
+  const retried = await createClient(getEvent, { baseUrl: 'https://api.test', fetch: flaky.fetch, policy: oneRetry })({
+    params: { id: 'e1' },
+  });
+
+  // timeoutMs needs AbortController: React Native provides it; bare Hermes does not.
+  const hanging = (url, init) =>
+    new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
+  const timedOut =
+    typeof AbortController === 'undefined'
+      ? { error: { code: 'ARKI_HTTP_E408' } }
+      : await outcome(
+          createClient(getEvent, { baseUrl: 'https://api.test', fetch: hanging, timeoutMs: 10 })({
+            params: { id: 'e1' },
+          }),
+        );
+
   const checks = [
     ['output decodes to a Date', moved.at instanceof Date && moved.at.getTime(), 5000],
     ['body encodes the Date as ISO', echo.sent[0].init.body, '{"at":"1970-01-01T00:00:05.000Z"}'],
@@ -116,6 +150,9 @@ async function main() {
     ['revived failure keeps its data', notFound.data && notFound.data.id, 'e9'],
     ['".." path param is E400', escaped.error && escaped.error.code, 'ARKI_HTTP_E400'],
     ['".." path param never sent', traversal.sent.length, 0],
+    ['a 503 GET is retried through the policy', flaky.sent.length, 2],
+    ['the retried call decodes the success', retried.id, 'e1'],
+    ['timeoutMs rejects with E408', timedOut.error && timedOut.error.code, 'ARKI_HTTP_E408'],
   ];
 
   let failedChecks = 0;

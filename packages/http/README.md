@@ -391,7 +391,43 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
   would change which endpoint the URL points at.
 - A contract with no `output` resolves `undefined` (it answers 204). One with `output: raw()` resolves the `Response`.
 - It only needs `fetch`, so it runs in browsers, React Native, Deno, Bun and
-  Node. Pass `fetch` to add auth or retries. SSE contracts are not supported.
+  Node. Pass `fetch` to add auth. SSE contracts are not supported.
+
+### Retries, timeouts, and calling URLs you do not control
+
+```ts
+import { backoff, createRetryPolicy } from '@arki/resilience';
+import { createClient } from '@arki/http/client';
+import { publicFetch } from '@arki/http/public-fetch';
+
+const partner = createClient(partnerRoutes, {
+  baseUrl: partnerUrl, // set by a user: it must not reach your private network
+  fetch: publicFetch(),
+  policy: createRetryPolicy({ backoff: backoff.exponential({ base: 200 }).upTo(3) }),
+  timeoutMs: 10_000,
+});
+```
+
+- **`policy`** runs each attempt; any `@arki/resilience` policy fits (one with a
+  fallback does not: its result might not be a response). The client, not the
+  policy, decides what is retried: only an outcome `retryOn` accepts goes back
+  into the policy. Anything else leaves it at once, even if the policy would
+  retry every error. When the policy gives up, the last answer is decoded as
+  usual, so the server's error code still reaches you.
+- **`retryOn`** defaults to `retryTransient`: a network failure (`fetch` throws a
+  `TypeError`) or a 408, 429, 502, 503 or 504, and only on a request that is
+  safe to send twice: GET, HEAD, OPTIONS, PUT, DELETE, or any request with an
+  `idempotency-key` header. A POST without one is never retried, because the
+  first try may have done the work before its answer was lost.
+- **`timeoutMs`** covers the whole call, retries included, until the response
+  arrives (reading the body is not timed). It throws `HttpError` 408
+  (`E408`). A caller's `signal` still aborts with its own reason. It needs
+  `AbortController`, which React Native provides and bare Hermes does not.
+- **`publicFetch()`** (Node and Bun) is the SSRF guard as a `fetch`: each hop
+  resolves the host, refuses a private answer, pins the connection to the
+  checked address, and follows a redirect only to another public URL. It
+  buffers the body (at most `maxBytes`, default 10 MB), so a streaming answer
+  arrives whole.
 
 ## Without DOT
 
@@ -424,6 +460,7 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |
+| `ARKI_HTTP_E408` | a client call got no response within `timeoutMs` (thrown by `@arki/http/client`, never sent on the wire) |
 | `ARKI_HTTP_E410` / `E411` / `E412` | idempotency: key missing (400), key reused for another request (422), request with this key still running (409) |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E420` / `E421` / `E422` | webhook: signature headers missing or malformed, no signature matches, signed time outside the window (all 401) |

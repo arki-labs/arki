@@ -52,6 +52,8 @@ export const HTTP_ERROR_CODES = {
   idempotencyInProgress: 'ARKI_HTTP_E412',
   /** A request body is larger than the route allows. Answers 413. */
   payloadTooLarge: 'ARKI_HTTP_E413',
+  /** A client call ran past its `timeoutMs`. Thrown by `@arki/http/client`; never sent on the wire. */
+  requestTimeout: 'ARKI_HTTP_E408',
   /** A webhook's signature headers are missing or malformed. Answers 401. */
   webhookMalformed: 'ARKI_HTTP_E420',
   /** No webhook signature matches the body with any of the secrets. Answers 401. */

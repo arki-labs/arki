@@ -117,6 +117,7 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@hono/zod-validator": "^0.9.1",

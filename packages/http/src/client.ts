@@ -107,13 +107,58 @@ export type ClientCall<TRoute> =
     ? (input?: ClientInput<TRoute>, init?: CallInit) => Promise<ClientOutput<TRoute>>
     : (input: ClientInput<TRoute>, init?: CallInit) => Promise<ClientOutput<TRoute>>;
 
+/**
+ * What the client needs from a retry policy: an `@arki/resilience` policy fits. A policy with a
+ * fallback does not, because its result could be the fallback instead of a response.
+ */
+export type ClientPolicy = {
+  execute<T>(fn: (context: { readonly signal: AbortSignal }) => PromiseLike<T> | T, signal?: AbortSignal): Promise<T>;
+};
+
+/** One attempt's outcome, as `retryOn` sees it: the response, or the error `fetch` threw. */
+export type RetryOutcome = {
+  readonly method: string;
+  /** True for GET, HEAD, OPTIONS, PUT and DELETE, and for any request with an `idempotency-key` header. */
+  readonly repeatable: boolean;
+} & ({ readonly response: Response; readonly error?: never } | { readonly error: unknown; readonly response?: never });
+
 /** Options for {@link createClient}. */
 export type ClientOptions = {
   /** Origin plus any path prefix, e.g. `https://api.example.com/v1`. A relative prefix (`/api`) works where fetch allows it. */
   readonly baseUrl: string;
-  /** The fetch to use. Defaults to the global `fetch`. Wrap it to add auth headers or retries. */
+  /**
+   * The fetch to use. Defaults to the global `fetch`. Wrap it to add auth headers. On a server that
+   * calls URLs it does not fully control, pass `publicFetch()` from `@arki/http/public-fetch`.
+   */
   readonly fetch?: (input: string, init: RequestInit) => Promise<Response>;
+  /**
+   * Gives up once the response has not arrived within this many milliseconds, retries included,
+   * and throws `HttpError` 408 (`ARKI_HTTP_E408`). Reading the body is not timed.
+   */
+  readonly timeoutMs?: number;
+  /**
+   * Runs each attempt, so it can retry and back off. Only an outcome `retryOn` accepts is retried;
+   * any other answer or error leaves the policy at once, whatever the policy itself would retry.
+   */
+  readonly policy?: ClientPolicy;
+  /** Which outcomes `policy` retries. Default {@link retryTransient}. */
+  readonly retryOn?: (outcome: RetryOutcome) => boolean;
 };
+
+const RETRY_STATUSES = new Set([408, 429, 502, 503, 504]);
+const REPEATABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
+
+/**
+ * The default `retryOn`: a network failure (`fetch` throws a `TypeError`) or a 408, 429, 502, 503
+ * or 504, and only on a request that is safe to send twice. A POST without an idempotency key is
+ * never retried: the first try may have done the work before the answer was lost.
+ */
+export function retryTransient(outcome: RetryOutcome): boolean {
+  if (!outcome.repeatable) return false;
+  return outcome.response === undefined
+    ? outcome.error instanceof TypeError
+    : RETRY_STATUSES.has(outcome.response.status);
+}
 
 /** Build one typed call from a single contract. */
 export function createClient<TRoute extends AnyRoute>(contract: TRoute, options: ClientOptions): ClientCall<TRoute>;
@@ -135,6 +180,9 @@ export function createClient(
   const transport: Transport = {
     baseUrl: options.baseUrl.replace(/\/+$/, ''),
     fetch: options.fetch ?? globalThis.fetch,
+    timeoutMs: options.timeoutMs,
+    policy: options.policy,
+    retryOn: options.retryOn ?? retryTransient,
   };
   if (isRoute(contractOrContracts)) return buildCall(contractOrContracts, transport);
   const calls: Record<string, ErasedCall> = {};
@@ -157,6 +205,9 @@ type ErasedCall = (input?: ErasedInput, init?: CallInit) => Promise<unknown>;
 type Transport = {
   readonly baseUrl: string;
   readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
+  readonly timeoutMs: number | undefined;
+  readonly policy: ClientPolicy | undefined;
+  readonly retryOn: (outcome: RetryOutcome) => boolean;
 };
 
 function isRoute(value: AnyRoute | Readonly<Record<string, AnyRoute>>): value is AnyRoute {
@@ -182,13 +233,13 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
     contract.headers === undefined ? {} : toStrings('headers', encodeWith(contract.headers, input.headers ?? {}, 'headers'));
   const headers: Record<string, string> = { ...declared, ...init.headers };
   const request: RequestInit = { method: contract.method, headers };
-  if (init.signal !== undefined) request.signal = init.signal;
   if (contract.body !== undefined) {
     if (!hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';
     request.body = JSON.stringify(encodeWith(contract.body, input.body, 'body'));
   }
 
-  const response = await transport.fetch(url, request);
+  const repeatable = REPEATABLE_METHODS.has(contract.method) || hasHeader(headers, 'idempotency-key');
+  const response = await send(transport, url, request, init.signal, repeatable);
   // A status the contract lists answers with that schema's body, ok or not.
   const listed = isRawOutput(contract.output) ? undefined : contract.responses?.[response.status];
   if (listed !== undefined) return decodeBody(contract, listed, response);
@@ -196,6 +247,93 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
   if (isRawOutput(contract.output)) return response;
   if (contract.output === undefined || response.status === 204) return undefined;
   return decodeBody(contract, contract.output, response);
+}
+
+/** A response `retryOn` accepted, thrown so the policy retries. Unwrapped when the policy gives up. */
+class RetryableResponse extends Error {
+  readonly response: Response;
+  constructor(response: Response) {
+    super(`retryable status ${response.status}`);
+    this.response = response;
+  }
+}
+
+type Attempt = { readonly response: Response } | { readonly error: unknown };
+
+/** Send once, or through the policy; either way under the deadline. */
+async function send(
+  transport: Transport,
+  url: string,
+  request: RequestInit,
+  signal: AbortSignal | undefined,
+  repeatable: boolean,
+): Promise<Response> {
+  const { policy, retryOn } = transport;
+  const method = request.method ?? 'GET';
+  const deadline = withDeadline(signal, transport.timeoutMs, `${method} ${url}`);
+  try {
+    if (policy === undefined) return await transport.fetch(url, withSignal(request, deadline.signal));
+    let previous: Response | undefined;
+    const attempt = async (context: { readonly signal: AbortSignal }): Promise<Attempt> => {
+      // A retried response is dropped unread: free its connection before the next try.
+      void previous?.body?.cancel().catch(() => null);
+      let response: Response;
+      try {
+        response = await transport.fetch(url, { ...request, signal: context.signal });
+      } catch (error) {
+        // Thrown back into the policy only when it may retry; anything else leaves it at once.
+        if (retryOn({ method, repeatable, error })) throw error;
+        return { error };
+      }
+      if (!retryOn({ method, repeatable, response })) return { response };
+      previous = response;
+      throw new RetryableResponse(response);
+    };
+    let outcome: Attempt;
+    try {
+      outcome = await policy.execute(attempt, deadline.signal);
+    } catch (error) {
+      if (error instanceof RetryableResponse) return error.response;
+      throw error;
+    }
+    if ('error' in outcome) throw outcome.error;
+    return outcome.response;
+  } catch (error) {
+    // A timeout or the caller's abort may surface as the policy's own cancel error: report the cause.
+    if (deadline.signal?.aborted === true && deadline.signal.reason !== undefined) throw deadline.signal.reason;
+    throw error;
+  } finally {
+    deadline.clear();
+  }
+}
+
+function withSignal(request: RequestInit, signal: AbortSignal | undefined): RequestInit {
+  return signal === undefined ? request : { ...request, signal };
+}
+
+type Deadline = { readonly signal: AbortSignal | undefined; readonly clear: () => void };
+
+/** The caller's signal, plus an abort after `timeoutMs` with `HttpError` 408. */
+function withDeadline(signal: AbortSignal | undefined, timeoutMs: number | undefined, what: string): Deadline {
+  if (timeoutMs === undefined) return { signal, clear: () => null };
+  const controller = new AbortController();
+  const follow = (): void => {
+    controller.abort(signal?.reason);
+  };
+  if (signal?.aborted === true) follow();
+  else signal?.addEventListener('abort', follow, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort(
+      new HttpError(408, HTTP_ERROR_CODES.requestTimeout, `${what} got no response within ${timeoutMs} ms`),
+    );
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', follow);
+    },
+  };
 }
 
 function hasHeader(headers: Readonly<Record<string, string>>, name: string): boolean {

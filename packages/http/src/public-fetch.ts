@@ -59,45 +59,45 @@ function basicAuthorization(url: URL): string {
   const pair = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
   return `Basic ${btoa(String.fromCodePoint(...new TextEncoder().encode(pair)))}`;
 }
-export async function safeFetchBytes(
-  value: string,
-  options: {
-    maxBytes?: number;
-    headers?: Record<string, string>;
-    timeoutMs?: number;
-    method?: string;
-    body?: string;
-    /** Accept `user:pass@` in `value`; it is stripped from the request URL and sent as a Basic `Authorization` header. */
-    allowCredentials?: boolean;
-    transport?: PublicFetchTransport;
-  } = {},
-) {
-  const transport = options.transport ?? systemTransport;
-  const signal = AbortSignal.timeout(options.timeoutMs ?? 30000);
-  let url = validatePublicURL(value, { allowCredentials: options.allowCredentials });
-  let headers = options.headers ?? {};
-  if (url.username !== '' || url.password !== '') {
-    // The header travels with the other headers: a cross-origin redirect drops it.
-    headers = { ...headers, authorization: basicAuthorization(url) };
-    url = new URL(url.href);
-    url.username = '';
-    url.password = '';
-  }
-  let method = options.method ?? 'GET';
-  let body = options.body;
+/** One request through the guard: the URL is already checked and carries no credentials. */
+type PinnedRequest = {
+  readonly url: URL;
+  readonly method: string;
+  readonly headers: Record<string, string>;
+  readonly body: string | Uint8Array<ArrayBuffer> | undefined;
+  readonly signal: AbortSignal | undefined;
+  readonly maxBytes: number;
+  readonly transport: PublicFetchTransport;
+};
+
+/** Rejects once `signal` aborts (at once when it already has), with its reason when that is an error. */
+function untilAborted(signal: AbortSignal): Promise<never> {
+  const reason = (): Error => (signal.reason instanceof Error ? signal.reason : new Error('Fetch aborted.'));
+  return new Promise<never>((_, reject) => {
+    if (signal.aborted) reject(reason());
+    else signal.addEventListener('abort', () => reject(reason()), { once: true });
+  });
+}
+
+/**
+ * The guard itself, shared by {@link safeFetchBytes} and {@link publicFetch}: every hop resolves
+ * the host, refuses any private answer, pins the connection to the checked address, and follows a
+ * redirect only to another public URL. The body is read here, under `maxBytes`, because the pinned
+ * connection is closed before this returns.
+ */
+async function fetchPinned(request: PinnedRequest) {
+  const { transport, signal, maxBytes } = request;
+  let { url, method, headers, body } = request;
   // Explicit package entry avoids Bun's undici shim, which drops dispatcher options.
   const { Agent } = await import('undici/index.js');
   for (let hop = 0; hop <= 5; hop++) {
-    const host = url.hostname.replace(/^\[|\]$/g, '');
-    const addresses = await Promise.race([
-      transport.lookup(host),
-      new Promise<never>((_, reject) =>
-        signal.addEventListener('abort', () => reject(new Error('Fetch timed out.')), { once: true }),
-      ),
-    ]);
-    if (!addresses.length || addresses.some(a => !isPublicAddress(a.address)))
+    const host = url.hostname.replaceAll(/^\[|\]$/g, '');
+    const addresses = await (signal === undefined
+      ? transport.lookup(host)
+      : Promise.race([transport.lookup(host), untilAborted(signal)]));
+    const [address] = addresses;
+    if (address === undefined || addresses.some(a => !isPublicAddress(a.address)))
       throw new Error('Private network addresses are not allowed.');
-    const address = addresses[0]!;
     // Resolve once and pin the connection; a second DNS answer must never select a private address.
     const agent = new Agent({
       connect: {
@@ -125,7 +125,7 @@ export async function safeFetchBytes(
       let size = 0;
       for await (const chunk of response.body ?? []) {
         size += chunk.length;
-        if (size > (options.maxBytes ?? 10000000)) {
+        if (size > maxBytes) {
           throw new Error('Response size limit exceeded.');
         }
         chunks.push(chunk);
@@ -139,7 +139,7 @@ export async function safeFetchBytes(
       return {
         bytes,
         status: response.status,
-        headers: new Headers(Array.from(response.headers.entries())),
+        headers: new Headers([...response.headers.entries()]),
         url: url.href,
       };
     } finally {
@@ -147,4 +147,70 @@ export async function safeFetchBytes(
     }
   }
   throw new Error('Feed redirect limit exceeded.');
+}
+
+export async function safeFetchBytes(
+  value: string,
+  options: {
+    maxBytes?: number;
+    headers?: Record<string, string>;
+    timeoutMs?: number;
+    method?: string;
+    body?: string;
+    /** Accept `user:pass@` in `value`; it is stripped from the request URL and sent as a Basic `Authorization` header. */
+    allowCredentials?: boolean;
+    transport?: PublicFetchTransport;
+  } = {},
+) {
+  let url = validatePublicURL(value, { allowCredentials: options.allowCredentials });
+  let headers = options.headers ?? {};
+  if (url.username !== '' || url.password !== '') {
+    // The header travels with the other headers: a cross-origin redirect drops it.
+    headers = { ...headers, authorization: basicAuthorization(url) };
+    url = new URL(url.href);
+    url.username = '';
+    url.password = '';
+  }
+  return fetchPinned({
+    url,
+    method: options.method ?? 'GET',
+    headers,
+    body: options.body,
+    signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+    maxBytes: options.maxBytes ?? 10_000_000,
+    transport: options.transport ?? systemTransport,
+  });
+}
+
+/** Statuses whose response must have no body; `new Response(bytes, { status })` throws for them. */
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+/**
+ * A `fetch` that reaches public addresses only, for server code that calls URLs it does not fully
+ * control: `createClient(contracts, { baseUrl, fetch: publicFetch() })`. Each hop is resolved,
+ * checked and pinned, as in {@link safeFetchBytes}; a private address or a redirect to one rejects.
+ *
+ * The response is buffered (at most `maxBytes`, default 10 MB) before it is returned, so a
+ * streaming body arrives whole. Credentials in the URL are refused; send them as a header.
+ */
+export function publicFetch(options: { maxBytes?: number; transport?: PublicFetchTransport } = {}) {
+  return async (input: string, init: RequestInit = {}): Promise<Response> => {
+    const body =
+      init.body === undefined || init.body === null || typeof init.body === 'string'
+        ? (init.body ?? undefined)
+        : new Uint8Array(await new Response(init.body).arrayBuffer());
+    const result = await fetchPinned({
+      url: validatePublicURL(input),
+      method: init.method ?? 'GET',
+      headers: Object.fromEntries(new Headers(init.headers)),
+      body,
+      signal: init.signal ?? undefined,
+      maxBytes: options.maxBytes ?? 10_000_000,
+      transport: options.transport ?? systemTransport,
+    });
+    return new Response(NULL_BODY_STATUSES.has(result.status) ? null : result.bytes, {
+      status: result.status,
+      headers: result.headers,
+    });
+  };
 }
