@@ -272,7 +272,11 @@ export type CtxOf<S extends NeedsShape> = {
  * `{ cache: Token<KV, 'arki.kv'> }` → `{ 'arki.kv': KV }`.
  */
 export type WireNeeds<S extends NeedsShape> = {
-  [K in keyof S as S[K] extends Token<unknown, infer WK> ? WK : K]: S[K] extends Service<infer T> ? T : never;
+  // The key alone: a handle carries `K` in `key`, `lazy.key` and `instance()`'s `${K}#${N}`; inferring through the
+  // whole Token splits a key that holds `#` into two candidates.
+  [K in keyof S as S[K] extends { readonly key: infer WK extends string } ? WK : K]: S[K] extends Service<infer T>
+    ? T
+    : never;
 };
 
 /**

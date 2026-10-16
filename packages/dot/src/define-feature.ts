@@ -47,7 +47,6 @@ import type {
   Provided,
   Service,
   ServiceRecord,
-  Token,
   WireNeeds,
 } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
@@ -96,16 +95,19 @@ export type UsecaseNeeds<N extends NeedsShape> = {
 };
 
 /** What `.usecases(create)` receives: the usecase-visible needs by alias, the infra services and the children's services by local key. */
-export type CoreDeps<N extends NeedsShape, I extends readonly AnyPlugin[], C extends readonly AnyDefinedFeature[]> = CtxOf<
-  UsecaseNeeds<N>
-> &
-  InfraProvides<I> &
-  ChildProvides<C>;
+export type CoreDeps<
+  N extends NeedsShape,
+  I extends readonly AnyPlugin[],
+  C extends readonly AnyDefinedFeature[],
+> = CtxOf<UsecaseNeeds<N>> & InfraProvides<I> & ChildProvides<C>;
 
 /** What `.provides` factories and every entrypoint receive: every need (entrypoint-only included), infra, children and the usecases object. */
-export type CoreServices<N extends NeedsShape, I extends readonly AnyPlugin[], C extends readonly AnyDefinedFeature[], U> = CtxOf<N> &
-  InfraProvides<I> &
-  ChildProvides<C> & { readonly usecases: U };
+export type CoreServices<
+  N extends NeedsShape,
+  I extends readonly AnyPlugin[],
+  C extends readonly AnyDefinedFeature[],
+  U,
+> = CtxOf<N> & InfraProvides<I> & ChildProvides<C> & { readonly usecases: U };
 
 /**
  * An entrypoint descriptor — the protocol adapter packages implement
@@ -176,8 +178,17 @@ type Qualify<TName extends string, K> = K extends string ? `${TName}.${K}` : nev
 /** A nested name has a dot; a top-level name has none. */
 type Nested<TName extends string> = TName extends `${string}.${string}` ? true : false;
 
-/** The wire key of a provided service: bare at the top level, `<name>.<key>` inside a parent. */
-type PublishKey<TName extends string, K> = K extends string ? (Nested<TName> extends true ? `${TName}.${K}` : K) : never;
+/** An instance is named `<feature>#<instance>` (`reports#eu`); its children carry the mark in their prefix. */
+type Instanced<TName extends string> = TName extends `${string}#${string}` ? true : false;
+
+/** The wire key of a provided service: bare at the top level, `<name>.<key>` inside a parent or for an instance. */
+type PublishKey<TName extends string, K> = K extends string
+  ? Nested<TName> extends true
+    ? `${TName}.${K}`
+    : Instanced<TName> extends true
+      ? `${TName}.${K}`
+      : K
+  : never;
 
 /** `digest.compile.rank` → `digest.compile`; a top-level name has no parent (`never`). */
 type ParentOf<F extends string> = F extends `${infer H}.${infer T}`
@@ -334,7 +345,9 @@ type OutOfScope<TName extends string, N> = {
 /** A need may name a public handle, its own scope's private infra, or a nested feature's provides from inside that feature's parent. */
 export type NeedsGuard<TName extends string, N> = ([InternalNeeds<N>] extends [never]
   ? unknown
-  : { readonly "DOT: a need names a feature's internal handle (usecases/services); need its provides instead": InternalNeeds<N> }) &
+  : {
+      readonly "DOT: a need names a feature's internal handle (usecases/services); need its provides instead": InternalNeeds<N>;
+    }) &
   ([OutOfScope<TName, N>] extends [never]
     ? unknown
     : {
@@ -348,8 +361,11 @@ type ChildName<C> = C extends { readonly name: infer X extends string } ? X : ne
 type NotChildName<TName extends string, C extends readonly AnyDefinedFeature[]> = {
   [K in keyof C]: ChildName<C[K]> extends `${TName}.${string}` ? never : ChildName<C[K]>;
 }[number];
-type ChildKeyCollision<N, I extends readonly AnyPlugin[], C extends readonly AnyDefinedFeature[]> = keyof ChildProvides<C> &
-  (keyof N | keyof InfraProvides<I> | ReservedAlias);
+type ChildKeyCollision<
+  N,
+  I extends readonly AnyPlugin[],
+  C extends readonly AnyDefinedFeature[],
+> = keyof ChildProvides<C> & (keyof N | keyof InfraProvides<I> | ReservedAlias);
 type SiblingDup<C extends readonly AnyDefinedFeature[], Seen = never> = C extends readonly [
   infer H extends AnyDefinedFeature,
   ...infer T extends readonly AnyDefinedFeature[],
@@ -387,12 +403,16 @@ type ChildContractGuard<C extends readonly AnyDefinedFeature[], E extends readon
   UnmountedChild<C, E>,
 ] extends [never]
   ? unknown
-  : { readonly "DOT: a child feature has an rpc contract this feature's contract does not mount": UnmountedChild<C, E> };
+  : {
+      readonly "DOT: a child feature has an rpc contract this feature's contract does not mount": UnmountedChild<C, E>;
+    };
 
 /** The keys the feature generates for itself: a provides factory may not take them. */
 type GeneratedKeys<TName extends string> = `${TName}.services` | `${TName}.usecases` | `feature.${TName}`;
 /** Inside a parent, a provided key must not also be an infra key: both publish under `<name>.<key>`. */
-type ProvidesGuard<TName extends string, I extends readonly AnyPlugin[], P> = ([keyof P & GeneratedKeys<TName>] extends [never]
+type ProvidesGuard<TName extends string, I extends readonly AnyPlugin[], P> = ([
+  keyof P & GeneratedKeys<TName>,
+] extends [never]
   ? unknown
   : {
       readonly 'DOT: a provided key is generated by the feature itself (services, usecases, feature slice)': keyof P &
@@ -418,7 +438,7 @@ export type ChildOverrides<TName extends string, C extends readonly AnyDefinedFe
     >;
 
 /** The wire key a declared need resolves to: a handle's own key, else the alias. */
-type WireKeyOfNeed<W, K> = W extends Token<unknown, infer WK extends string> ? WK : K;
+type WireKeyOfNeed<W, K> = W extends { readonly key: infer WK extends string } ? WK : K;
 
 /**
  * An infra plugin's needs shape once the feature owns it: an alias the
@@ -438,7 +458,9 @@ type OwnedShape<N extends NeedsShape, S extends NeedsShape> = string extends key
  */
 export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extends AnyPlugin, TLocal> = Plugin<
   {
-    [K in keyof PluginNeeds<P> as K extends TLocal ? Qualify<TName, K> : K extends keyof N ? WireKeyOfNeed<N[K], K> : K]: PluginNeeds<P>[K];
+    [
+      K in keyof PluginNeeds<P> as K extends TLocal ? Qualify<TName, K> : K extends keyof N ? WireKeyOfNeed<N[K], K> : K
+    ]: PluginNeeds<P>[K];
   },
   { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
   OwnedShape<N, PluginProviderIdentities<P>>
@@ -468,7 +490,9 @@ export type FeatureUnit<
   P extends ServiceRecord,
   E extends readonly AnyEntrypoint[],
 > = Plugin<
-  WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<ChildHandles<C>>,
+  WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<
+      ChildHandles<C>
+    >,
   { readonly [K in keyof P as PublishKey<TName, K>]: P[K] } & Readonly<Record<`${TName}.usecases`, U>> &
     Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
     Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
@@ -499,7 +523,12 @@ export type CoreHandles<
   U,
 > = N & {
   // Infra handles are scoped to this feature; the usecases handle is internal: nothing may need it.
-  readonly [K in keyof InfraProvides<I> & string]: ScopedHandle<InfraProvides<I>[K], `${TName}.${K}`, `${TName}/${string}`, TName>;
+  readonly [K in keyof InfraProvides<I> & string]: ScopedHandle<
+    InfraProvides<I>[K],
+    `${TName}.${K}`,
+    `${TName}/${string}`,
+    TName
+  >;
 } & ChildHandles<C> & { readonly usecases: ScopedHandle<U, `${TName}.usecases`, TName, TName, true> };
 
 declare const CoreServicesTag: unique symbol;
@@ -532,6 +561,85 @@ export type AnyFeatureCore = { readonly name: string; readonly handles: NeedsSha
  */
 export type DepsOf<C> = C extends { readonly [CoreServicesTag]?: infer D } ? D : never;
 
+declare const FeatureParamsTag: unique symbol;
+/** The type arguments of a finished feature, carried so `instance()` can re-derive a child's type under the new name. */
+export type FeatureParams<TName, N, I, C, U, P, E> = {
+  readonly name: TName;
+  readonly needs: N;
+  readonly infra: I;
+  readonly children: C;
+  readonly usecases: U;
+  readonly provides: P;
+  readonly entrypoints: E;
+};
+
+/** The service type a witness carries. */
+type Carried<W> = W extends Service<infer T> ? T : never;
+/** `instance(name, rebind)`: a rebound alias takes any handle carrying the same service type — another provider, another key. */
+export type RebindOf<N extends NeedsShape> = { readonly [K in keyof N]?: Service<Carried<N[K]>> };
+/** The feature's needs after a rebind: a rebound alias takes the new handle's type. */
+export type RebindNeeds<N extends NeedsShape, R> = {
+  readonly [K in keyof N]: K extends keyof R ? Exclude<R[K], undefined> : N[K];
+};
+/** Two bound handles name the same service: same provider, same key. An anonymous witness never matches. */
+type SameBound<A, B> = A extends { readonly provider: infer O extends string; readonly key: infer K extends string }
+  ? B extends { readonly provider: O; readonly key: K }
+    ? true
+    : false
+  : false;
+/** The lazy form of a handle (`handle.lazy`), for a child that needs the lazy form of a rebound handle. */
+type LazyFormOf<H> = H extends { readonly lazy: infer L } ? L : H;
+/** A child's need follows the parent's rebind when it is the same bound handle; a lazy need gets the new lazy form. */
+type FollowRebind<W, N, R> = {
+  [J in keyof R & keyof N]: SameBound<W, N[J]> extends true
+    ? W extends { readonly lazy: true }
+      ? LazyFormOf<Exclude<R[J], undefined>>
+      : Exclude<R[J], undefined>
+    : never;
+}[keyof R & keyof N];
+/** Pin a rebind result to a witness type; `RebindOf` already guarantees it, the constraint solver needs it spelled. */
+type AsWitness<X> = X extends Service<unknown> ? X : never;
+type RebindFollowed<CN extends NeedsShape, N, R> = {
+  readonly [K in keyof CN]: [FollowRebind<CN[K], N, R>] extends [never] ? CN[K] : AsWitness<FollowRebind<CN[K], N, R>>;
+};
+/** `reports.compile` under `reports#eu` → `reports#eu.compile`. */
+type Reparent<Name extends string, From extends string, To extends string> = Name extends `${From}.${infer Rest}`
+  ? `${To}.${Rest}`
+  : never;
+type InstanceOfChild<F, From extends string, To extends string, N, R> = F extends {
+  readonly [FeatureParamsTag]?: FeatureParams<
+    infer CName extends string,
+    infer CN extends NeedsShape,
+    infer CI extends readonly AnyPlugin[],
+    infer CC extends readonly AnyDefinedFeature[],
+    infer CU,
+    infer CP extends ServiceRecord,
+    infer CE extends readonly AnyEntrypoint[]
+  >;
+}
+  ? DefinedFeature<
+      Reparent<CName, From, To>,
+      RebindFollowed<CN, N, R>,
+      CI,
+      InstanceChildren<CC, From, To, N, R>,
+      CU,
+      CP,
+      CE
+    >
+  : never;
+/** The children of an instance: each re-derived under the new parent name, its needs following the rebind. */
+export type InstanceChildren<C extends readonly AnyDefinedFeature[], From extends string, To extends string, N, R> = {
+  readonly [K in keyof C]: InstanceOfChild<C[K], From, To, N, R>;
+};
+/** An instance name is one plain segment: no `.` (nesting), `/` (infra unit) or `#` (another instance). */
+type InstanceNameGuard<TInstance extends string> = TInstance extends '' | `${string}${'.' | '/' | '#'}${string}`
+  ? { readonly 'DOT: an instance name is one plain segment (no ".", "/" or "#")': TInstance }
+  : unknown;
+/** `#` marks an instance: `defineFeature('reports').instance('eu')`, never `defineFeature('reports#eu')`. */
+type FeatureNameGuard<TName extends string> = TName extends `${string}#${string}`
+  ? { readonly 'DOT: "#" marks an instance — define the feature without it and call .instance()': TName }
+  : unknown;
+
 /** A finished feature: what `.entrypoints(...)` returns and `defineApp().features([...])` mounts. */
 export type DefinedFeature<
   TName extends string,
@@ -542,6 +650,7 @@ export type DefinedFeature<
   P extends ServiceRecord,
   E extends readonly AnyEntrypoint[],
 > = FeatureCore<TName, N, I, C, U> & {
+  readonly [FeatureParamsTag]?: FeatureParams<TName, N, I, C, U, P, E>;
   /** Public handles, one per provided key — what other features name in their `needs`. Inside a parent they are scoped (`<name>.<key>`). */
   readonly provides: ScopedHandles<P, TName>;
   /** The nested features, as declared. Drivers and `dot explain` walk them. */
@@ -563,6 +672,27 @@ export type DefinedFeature<
    * Entrypoints and provides are kept.
    */
   override(values: Partial<InfraProvides<I>> & ChildOverrides<TName, C>): DefinedFeature<TName, N, I, C, U, P, E>;
+  /**
+   * A second copy of this feature, named `<name>#<instance>`: its own infra
+   * units, usecases, services and entrypoints, publishing under
+   * `<name>#<instance>.<key>`, so two copies mount side by side. `rebind`
+   * swaps a need's handle for another provider's handle of the same service
+   * type (`{ db: databaseEu.provides.db }`); a child that needs the same
+   * handle follows. The rpc entrypoint gets its own contract identity: the
+   * app contract mounts `copy.contract` under its own key.
+   */
+  instance<const TInstance extends string, const R extends RebindOf<N> = EmptyShape>(
+    name: TInstance & InstanceNameGuard<TInstance>,
+    rebind?: R,
+  ): DefinedFeature<
+    `${TName}#${TInstance}`,
+    RebindNeeds<N, R>,
+    I,
+    InstanceChildren<C, TName, `${TName}#${TInstance}`, N, R>,
+    U,
+    P,
+    E
+  >;
 };
 
 /** The erased finished feature — what the app builder accepts. */
@@ -823,7 +953,7 @@ type FeatureState = {
   readonly needs: NeedsShape;
   readonly infra: readonly AnyPlugin[];
   readonly children: readonly RuntimeFeature[];
-  readonly usecases: Factory | undefined;
+  readonly usecases: Readonly<Record<string, Factory>> | undefined;
   readonly provides: Readonly<Record<string, Factory>>;
 };
 
@@ -838,7 +968,12 @@ type RuntimeFeature = {
   readonly router: unknown;
   plugins(): readonly AnyPlugin[];
   override(values: Readonly<Record<string, unknown>>): RuntimeFeature;
+  instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature;
+  /** Recompile under another name, needs following `follow` (handle → handle). Internal: `instance()` drives it for the children. */
+  [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature;
 };
+
+const REPARENT: unique symbol = Symbol('dot.feature.reparent');
 
 type RuntimeStage = {
   readonly name: string;
@@ -886,6 +1021,17 @@ function parentOf(name: string): string | undefined {
   return at === -1 ? undefined : name.slice(0, at);
 }
 
+/**
+ * The instance segment of a feature name: `reports#eu` → `eu`, `reports#eu.audit` → `eu`, `reports` → `undefined`.
+ * Adapters qualify what they register by it (`send-digest#eu`), so a plain feature's names never change.
+ */
+export function instanceOf(name: string): string | undefined {
+  const at = name.indexOf('#');
+  if (at === -1) return undefined;
+  const dot = name.indexOf('.', at);
+  return name.slice(at + 1, dot === -1 ? undefined : dot);
+}
+
 type Ownership = { readonly scope?: string | undefined; readonly internal?: boolean };
 
 /** Mint a handle with explicit ownership; `.lazy` carries the same metadata. */
@@ -915,7 +1061,8 @@ export function entrypointOnly<H extends AnyHandle & { readonly lazy: object }>(
 /** A feature and every descendant, depth-first in declaration order — what drivers and `dot explain` walk. Each node once. */
 export function allFeatures<F extends { readonly name: string }>(features: readonly F[]): readonly F[] {
   // An object-form feature has no `features`; a chain feature lists its children there.
-  const childrenOf = (f: F): readonly F[] => ('features' in f && Array.isArray(f.features) ? (f.features as readonly F[]) : []);
+  const childrenOf = (f: F): readonly F[] =>
+    'features' in f && Array.isArray(f.features) ? (f.features as readonly F[]) : [];
   return features.flatMap(f => [f, ...allFeatures(childrenOf(f))]);
 }
 
@@ -925,7 +1072,8 @@ export function ownUnits(feature: AnyDefinedFeature): readonly AnyPlugin[] {
 }
 
 /** `H` with its ownership stripped: the same handle, public. */
-type PublicHandle<H> = H extends Handle<infer T, infer K extends string, infer O extends string> ? Handle<T, K, O> : never;
+type PublicHandle<H> =
+  H extends Handle<infer T, infer K extends string, infer O extends string> ? Handle<T, K, O> : never;
 /** The `<name>.services` handles among a unit list's provides, public. */
 type ServicesHandlesIn<Units> = Units extends readonly (infer U)[]
   ? U extends { readonly provides: infer P }
@@ -954,7 +1102,8 @@ export function requestServices<const T extends readonly AnyDefinedFeature[]>(
 ): { readonly provides: RequestHandles<T> } {
   const provides: Record<string, AnyHandle> = {};
   for (const f of features) Object.assign(provides, f.provides);
-  for (const node of allFeatures(features)) provides[`${node.name}.services`] = handleOf(`${node.name}.services`, node.name);
+  for (const node of allFeatures(features))
+    provides[`${node.name}.services`] = handleOf(`${node.name}.services`, node.name);
   // Erasure seam: built key by key at runtime; the type is read off the features' own units.
   return { provides: provides as RequestHandles<T> };
 }
@@ -984,15 +1133,23 @@ export function mountFeatures(features: readonly AnyDefinedFeature[]): {
   readonly units: readonly AnyPlugin[];
 } {
   const nodes = allFeatures(features);
-  const owned = new Map<object, string>();
-  for (const f of nodes) for (const [handle, scope] of f.owned) owned.set(handle, scope);
+  // A feature and its instances share the same infra plugin objects, so one raw handle may have several owners.
+  const owned = new Map<object, Set<string>>();
+  for (const f of nodes) {
+    for (const [handle, scope] of f.owned) {
+      const scopes = owned.get(handle) ?? new Set<string>();
+      scopes.add(scope);
+      owned.set(handle, scopes);
+    }
+  }
   const units = features.flatMap(f => f.plugins());
   for (const unit of units) {
     const feature = unit.name.split('/')[0] ?? unit.name;
     for (const [alias, witness] of Object.entries(unit.needs)) {
       // A remapped need (or an entrypointOnly clone) keeps the handle it was written with under `origin`.
-      const scope = owned.get(canonical(witness));
-      if (scope !== undefined && !within(feature, scope)) {
+      const scopes = owned.get(canonical(witness));
+      if (scopes !== undefined && ![...scopes].some(owner => within(feature, owner))) {
+        const scope = [...scopes].join('", "');
         throw new FeatureError({
           code: FEATURE_ERROR_CODES.missingCapability,
           message: `[feature] "${unit.name}": need "${alias}" is a raw infra handle of "${scope}" (private); it would otherwise bind to whatever publishes "${wireKeyOf(witness, alias)}".`,
@@ -1067,7 +1224,10 @@ function qualifyInfra(
       if (sibling === undefined) {
         // Not a sibling: the feature's own need under this alias (`.infra()` proved it exists). A lazy witness takes the lazy form.
         const own = declared[alias] ?? witness;
-        needs[alias] = isLazyWitness(witness) && !isLazyWitness(own) ? ((own as Provenance).lazy as Service<unknown> | undefined) ?? own : own;
+        needs[alias] =
+          isLazyWitness(witness) && !isLazyWitness(own)
+            ? (((own as Provenance).lazy as Service<unknown> | undefined) ?? own)
+            : own;
         continue;
       }
       // The sibling's key is qualified now; the need follows it (a lazy witness stays lazy).
@@ -1076,7 +1236,9 @@ function qualifyInfra(
     }
     const renamed = rename(p, qualified, unitName);
     // The unit's own handles carry ownership too, so `plugins()[i].provides[k]` is refused outside the feature.
-    const provides = Object.fromEntries(Object.keys(renamed.provides).map(key => [key, scopedHandleOf(key, unitName, feature)]));
+    const provides = Object.fromEntries(
+      Object.keys(renamed.provides).map(key => [key, scopedHandleOf(key, unitName, feature)]),
+    );
     return { ...renamed, needs, provides };
   });
   return { units, handles };
@@ -1146,8 +1308,10 @@ function compile(
   const servicesKey = `${state.name}.services`;
   const sliceKey = `feature.${state.name}`;
   const nested = parentOf(state.name) !== undefined;
-  // Inside a parent a provided key is scoped: `digest.compile.compiler`. At the top level it is public and bare.
-  const publishKey = (key: string): string => (nested ? `${state.name}.${key}` : key);
+  const instanced = state.name.includes('#');
+  // Inside a parent a provided key is scoped: `digest.compile.compiler`; an instance qualifies too
+  // (`reports#eu.summary`), so two copies mount side by side. At the top level it is public and bare.
+  const publishKey = (key: string): string => (nested || instanced ? `${state.name}.${key}` : key);
   // This feature's raw infra handles (and their lazy forms) → where they live now (`digest.repos`, unit `digest/store`).
   const ownedInfra = new Map<object, Remap>();
   for (const p of state.infra) {
@@ -1172,7 +1336,19 @@ function compile(
     if (!built.has(ctx)) {
       // Erasure seam: each factory was typed against these deps by `.usecases()`.
       const usecaseDeps = Object.fromEntries(Object.entries(ctx).filter(([k]) => !doorKeys.has(k)));
-      built.set(ctx, state.usecases === undefined ? {} : state.usecases(usecaseDeps as never));
+      // One object, one key per factory, each built from the same deps; each usecase runs in its own
+      // `feature.<name>.<usecase>` span — the final name, so an instance traces as itself.
+      built.set(
+        ctx,
+        state.usecases === undefined
+          ? {}
+          : Object.fromEntries(
+              Object.entries(state.usecases).map(([key, create]) => [
+                key,
+                traceUsecase(state.name, key, create(usecaseDeps as never)),
+              ]),
+            ),
+      );
     }
     return built.get(ctx);
   };
@@ -1221,7 +1397,8 @@ function compile(
   ];
 
   const provides: Record<string, AnyHandle> = {};
-  for (const key of Object.keys(state.provides)) provides[key] = scopedHandleOf(publishKey(key), state.name, parentOf(state.name));
+  for (const key of Object.keys(state.provides))
+    provides[key] = scopedHandleOf(publishKey(key), state.name, parentOf(state.name));
   // Raw infra handles this feature owns (and its descendants'): what `mountFeatures` refuses to outsiders.
   const owned = new Map<object, string>(state.children.flatMap(c => [...c.owned]));
   for (const p of state.infra) {
@@ -1231,6 +1408,17 @@ function compile(
     }
   }
   const rpc = entrypoints.find(e => e.kind === 'rpc');
+
+  // A copy under another name: needs follow the rebind, children are re-derived under the new parent,
+  // everything else is recompiled from the same declarations. Only the root copy gets its own rpc
+  // contract identity — a parent's router holds its children's routers by identity.
+  const reparent = (name: string, follow: ReadonlyMap<object, Service<unknown>>, root: boolean): RuntimeFeature => {
+    const needs = Object.fromEntries(Object.entries(state.needs).map(([alias, w]) => [alias, followRebind(w, follow)]));
+    const children = state.children.map(c => c[REPARENT](`${name}.${c.name.slice(state.name.length + 1)}`, follow));
+    const next: FeatureState = { ...state, name, needs, children };
+    const nextInfra = qualifyInfra(name, needs, next.infra);
+    return compile(next, nextInfra, handlesOf(next, nextInfra), root ? ownContract(entrypoints) : entrypoints);
+  };
 
   return {
     name: state.name,
@@ -1284,17 +1472,73 @@ function compile(
       const next = { ...state, infra: replaced, children };
       return compile(next, qualifyInfra(next.name, next.needs, next.infra), handles, entrypoints);
     },
+    instance: (suffix, rebind = {}) => {
+      if (suffix === '' || /[./#]/.test(suffix)) {
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.keyCollision,
+          message: `[feature] "${state.name}": instance name "${suffix}" is not one plain segment.`,
+          remediation:
+            'Letters, digits and dashes only: .instance("eu"). "." nests, "/" marks an infra unit, "#" an instance.',
+        });
+      }
+      const follow = new Map<object, Service<unknown>>();
+      for (const [alias, next] of Object.entries(rebind)) {
+        const own = state.needs[alias];
+        if (own === undefined) {
+          throw new FeatureError({
+            code: FEATURE_ERROR_CODES.unknownOverride,
+            message: `[feature] "${state.name}": instance("${suffix}") rebinds "${alias}", which is not a need.`,
+            remediation: `Needs: ${Object.keys(state.needs).join(', ') || '(none)'}.`,
+          });
+        }
+        follow.set(canonical(own), next);
+      }
+      return reparent(`${state.name}#${suffix}`, follow, true);
+    },
+    [REPARENT]: (name, follow) => reparent(name, follow, false),
   };
 }
 
-function stage(state: FeatureState): RuntimeStage {
-  const infra = qualifyInfra(state.name, state.needs, state.infra);
-  const handles: NeedsShape = {
+/** The witness after a rebind: the rebound handle (its lazy form for a lazy need), else the witness as written. */
+function followRebind(witness: Service<unknown>, follow: ReadonlyMap<object, Service<unknown>>): Service<unknown> {
+  const base = canonical(witness);
+  const direct = follow.get(base);
+  if (direct !== undefined) return direct;
+  for (const [from, to] of follow) {
+    if (lazyFormOf(from) !== base) continue;
+    const lazy = lazyFormOf(to);
+    return typeof lazy === 'object' && lazy !== null ? lazy : to;
+  }
+  return witness;
+}
+
+/**
+ * The rpc entrypoint with its own contract and router records: `routerFor`
+ * finds a feature by contract identity, so a copy needs its own. The
+ * procedures inside are shared; a child's router stays the same object, so
+ * the parent's mount check still finds it.
+ */
+function ownContract(entrypoints: readonly AnyEntrypoint[]): readonly AnyEntrypoint[] {
+  return entrypoints.map(e => {
+    if (e.kind !== 'rpc' || !('contract' in e) || !('router' in e)) return e;
+    const router: object = { ...(e.router as object) };
+    return { ...e, contract: { ...(e.contract as object) }, router, resolve: () => router };
+  });
+}
+
+/** The handles a feature's entrypoints and `bind(logic)` see: needs, qualified infra, children's provides, usecases. */
+function handlesOf(state: FeatureState, infra: ReturnType<typeof qualifyInfra>): NeedsShape {
+  return {
     ...state.needs,
     ...infra.handles,
     ...childHandles(state.children),
     usecases: scopedHandleOf(`${state.name}.usecases`, state.name, state.name, true),
   };
+}
+
+function stage(state: FeatureState): RuntimeStage {
+  const infra = qualifyInfra(state.name, state.needs, state.infra);
+  const handles = handlesOf(state, infra);
   return {
     name: state.name,
     handles,
@@ -1390,21 +1634,21 @@ function stage(state: FeatureState): RuntimeStage {
       }
       return stage({ ...state, infra: plugins });
     },
-    usecases: factories =>
-      stage({
-        ...state,
-        // One object, one key per factory, each built from the same deps; each
-        // usecase runs in its own `feature.<name>.<usecase>` span.
-        usecases: deps =>
-          Object.fromEntries(
-            Object.entries(factories).map(([key, create]) => [key, traceUsecase(state.name, key, create(deps))]),
-          ),
-      }),
+    usecases: factories => stage({ ...state, usecases: factories }),
     provides: factories => {
       const infraKeys = new Set(state.infra.flatMap(p => Object.keys(p.provides)));
       for (const key of Object.keys(factories)) {
-        if (RESERVED.has(key) || key === `${state.name}.usecases` || key === `${state.name}.services` || key === `feature.${state.name}`) {
-          throw collision(state.name, `provided service "${key}" is generated by the feature itself`, 'Rename the provided service.');
+        if (
+          RESERVED.has(key) ||
+          key === `${state.name}.usecases` ||
+          key === `${state.name}.services` ||
+          key === `feature.${state.name}`
+        ) {
+          throw collision(
+            state.name,
+            `provided service "${key}" is generated by the feature itself`,
+            'Rename the provided service.',
+          );
         }
         if (parentOf(state.name) !== undefined && infraKeys.has(key)) {
           throw collision(
@@ -1424,10 +1668,24 @@ function stage(state: FeatureState): RuntimeStage {
  * Declare a feature. Pure data capture — nothing runs until the app boots.
  * See the module comment for the chain; `.entrypoints(...)` finishes it.
  */
-export function defineFeature<const TName extends string>(name: TName): NeedsStage<TName> {
+export function defineFeature<const TName extends string>(name: TName & FeatureNameGuard<TName>): NeedsStage<TName> {
+  if (name.includes('#')) {
+    throw new FeatureError({
+      code: FEATURE_ERROR_CODES.keyCollision,
+      message: `[feature] "${name}": "#" marks an instance.`,
+      remediation: `Define the feature as "${name.split('#')[0]}" and call .instance("${name.split('#').slice(1).join('#')}").`,
+    });
+  }
   // Erasure seam: one runtime object serves every stage; the stage types
   // decide which step is callable and type each step's input and result.
-  return stage({ name, needs: {}, infra: [], children: [], usecases: undefined, provides: {} }) as unknown as NeedsStage<TName>;
+  return stage({
+    name,
+    needs: {},
+    infra: [],
+    children: [],
+    usecases: undefined,
+    provides: {},
+  }) as unknown as NeedsStage<TName>;
 }
 
 /* ------------------------------------------------------------------ */

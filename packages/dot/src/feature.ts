@@ -56,7 +56,16 @@ export type { FeatureErrorCode } from './feature-error.js';
 
 // The chain form (`defineFeature(name).needs().infra().usecases().provides().entrypoints()`)
 // and contract-first composition (`routerFor`). See RFC 2026-10-15-dot-feature-builder.
-export { allFeatures, defineFeature, entrypointOnly, mountFeatures, ownUnits, requestServices, routerFor } from './define-feature.js';
+export {
+  allFeatures,
+  defineFeature,
+  entrypointOnly,
+  instanceOf,
+  mountFeatures,
+  ownUnits,
+  requestServices,
+  routerFor,
+} from './define-feature.js';
 export type {
   AnyDefinedFeature,
   AnyEntrypoint,
@@ -79,15 +88,19 @@ export type {
   EntrypointPayloads,
   EntrypointsStage,
   FeatureCore,
+  FeatureParams,
   FeaturesStage,
   FeatureUnit,
   InfraProvides,
   InfraStage,
+  InstanceChildren,
   NeedsGuard,
   NeedsStage,
   ProvidesStage,
   QualifiedInfra,
   QualifiedPlugin,
+  RebindNeeds,
+  RebindOf,
   ReservedAlias,
   RouterFor,
   RouterOf,
@@ -489,7 +502,9 @@ export type HandleEntries<N extends NeedsShape> = {
 };
 
 function isHandle(witness: object): witness is AnyHandle {
-  return 'provider' in witness && typeof witness.provider === 'string' && 'key' in witness && typeof witness.key === 'string';
+  return (
+    'provider' in witness && typeof witness.provider === 'string' && 'key' in witness && typeof witness.key === 'string'
+  );
 }
 
 /**
