@@ -185,7 +185,7 @@ await uow(async tx => {
 });
 ```
 
-## In a Dot feature: `repos()`, `reader()`, `advisoryLocks()`
+## In a Dot feature: `repos()`, `reader()`
 
 All three live in `@arki/db/dot` and return plain plugins. In a
 `defineFeature` chain, `.infra(...)` makes them private to the feature.
@@ -299,25 +299,15 @@ A PGlite database is not the app's node-postgres type, so it cannot stand in
 for `database.provides.db` in a typed `fake(...)`; boot the app on the
 `pglite` driver instead.
 
-### `advisoryLocks({ namespace })` — one replica at a time
+### Locks: use `@arki/lock`
 
-```ts
-defineFeature('clustering')
-  .needs({ db: entrypointOnly(database.provides.db) })
-  .infra(advisoryLocks({ namespace: 'avocabo' }));
-// then: schedules(core, [{ name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler }])
-```
-
-Publishes `locks`, a PostgreSQL advisory lock service: `locks.tryRun(key, fn)`
-runs `fn` unless another session holds `<namespace>:<key>`, and holds the
-lock until `fn` ends — not a lease that runs out under a long job (a lease is
-just a lock with a kitchen timer). The lock
-pins one pooled connection for the job's duration, so the pool needs at least
-two. PGlite has one connection: a locked job that queries through the pool
-waits forever there, so fake `locks` in PGlite tests. Without Dot:
-`withAdvisoryLock(db, key, fn)` and `advisoryLocks(db, { namespace })` from
-`@arki/db/lock`. The key hash is the one Avocabo's `withCronLock` used, so old
-and new replicas exclude each other during a deploy.
+Locks live in [`@arki/lock`](../lock/README.md). For one replica at a time on
+this database, mount `locks({ namespace, needs: { db: database.provides.db },
+store: ({ db }) => pgSession(db) })` from `@arki/lock/dot` and give a schedule
+`lock: true`. Moving from the removed `advisoryLocks()`: pass
+`pgSession(db, { legacyKeys: true })` so the key hash stays
+`hashtext('<namespace>:<key>')` and old and new replicas exclude each other
+during the deploy.
 
 ## Keyset pagination: `keysetQuery`
 
@@ -353,8 +343,7 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
 - `@arki/db/runtime-local` — PGlite-backed embedded runtime.
 - `@arki/db/env` — validated env object.
 - `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers, and `idColumns(defineId(...))`.
-- `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()`, `advisoryLocks()` for Dot apps.
-- `@arki/db/lock` — `withAdvisoryLock`, `advisoryLocks`: PostgreSQL advisory locks.
+- `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()` for Dot apps.
 - `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.

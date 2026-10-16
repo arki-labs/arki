@@ -61,10 +61,8 @@ import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import { plugin, service, DotPluginError } from '@arki/dot/plugin';
 
 import type { PgliteInitOptions } from './runtime-local.js';
-import type { LockableDb } from './lock.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
-import { advisoryLocks as createAdvisoryLocks } from './lock.js';
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
 import { migrateDb } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -408,29 +406,3 @@ export function reader<R extends object, const M extends readonly MethodKeys<R>[
   return out as Pick<R, M[number]>;
 }
 
-/* ------------------------------------------------------------------ */
-/* advisoryLocks() — PostgreSQL advisory locks as a service             */
-/* ------------------------------------------------------------------ */
-
-/**
- * PostgreSQL advisory locks on the feature's `db`, published as `locks`.
- * `schedules(core, [{ …, lock: true }])` from `@arki/schedule/dot` uses it to
- * keep a job to one replica at a time, for as long as the job runs. The
- * feature declares the database: `.needs({ db: database.provides.db })`.
- *
- * @example
- * ```ts
- * defineFeature('clustering')
- *   .needs({ db: entrypointOnly(database.provides.db) })
- *   .infra(advisoryLocks({ namespace: 'avocabo' }))
- *   .usecases({ assign })
- *   .entrypoints(schedules(core, [{ name: 'cluster-assign', cron: '*\/5 * * * *', lock: true, handler }]));
- * ```
- */
-export function advisoryLocks(options: { readonly namespace: string }) {
-  return plugin({
-    name: 'locks',
-    needs: { db: service<LockableDb>() },
-    provides: { locks: ({ db }) => createAdvisoryLocks(db, options) },
-  });
-}

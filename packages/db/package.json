@@ -105,11 +105,6 @@
       "import": "./dist/migrate.js",
       "default": "./dist/migrate.js"
     },
-    "./lock": {
-      "types": "./dist/lock.d.ts",
-      "import": "./dist/lock.js",
-      "default": "./dist/lock.js"
-    },
     "./pagination": {
       "types": "./dist/pagination.d.ts",
       "import": "./dist/pagination.js",

@@ -17,7 +17,7 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { Repos, TxRepos } from './dot.js';
-import { DB_PLUGIN_ERROR_CODES, advisoryLocks, db, reader, repos, txRepos } from './dot.js';
+import { DB_PLUGIN_ERROR_CODES, db, reader, repos, txRepos } from './dot.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 const notes = pgTable('notes', { id: text('id').primaryKey(), body: text('body').notNull() });
@@ -190,25 +190,6 @@ describe('txRepos(): repositories only inside a transaction', () => {
         }),
       ).rejects.toThrow('roll back');
       expect(await app.services.db.transaction(tx => usecases.count(tx))).toBe(0);
-    } finally {
-      await app.dispose();
-    }
-  });
-});
-
-describe('advisoryLocks(): bound to the feature\'s db', () => {
-  it('is private to the feature and needs the db the feature declares', async () => {
-    const locks = advisoryLocks({ namespace: 'notes' });
-    const locking = defineFeature('locking').needs({ db: database.provides.db }).infra(locks).usecases({}).entrypoints();
-    const configured = defineApp('locking').infra(database).features([locking]).configure();
-    const byName = new Map(configured.manifest.plugins.map(p => [p.name, p]));
-    expect(byName.get('locking/locks')?.provides).toEqual(['locking.locks']);
-    expect(byName.get('locking/locks')?.dependencies).toEqual(['db']);
-    // @ts-expect-error a feature with no `db` cannot host the locks
-    expect(() => defineFeature('bare').infra(locks)).toThrow(/needs "db", which the feature does not declare/);
-    const app = await defineApp('locking-app').infra(database).features([locking]).start();
-    try {
-      expect(typeof app.services['locking.locks'].tryRun).toBe('function');
     } finally {
       await app.dispose();
     }
