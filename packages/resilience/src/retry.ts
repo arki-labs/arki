@@ -3,8 +3,13 @@
 // retry decision is fixed up front (attempt count, error filter), while a `Backoff` answers
 // "wait this long, or stop" per attempt. Cockatiel's `wrap` still composes it with the other
 // policies through `engineOf`, which adapts any `Policy`.
+//
+// A try fails when it throws, or when it returns a failure from `@arki/failure`. A returned
+// failure is an expected outcome, so it is retried only when the backoff's `while` says
+// so, and when retrying stops the caller gets the last failure back as a value.
 
 import type { Clock } from '@arki/clock';
+import { isFailure } from '@arki/failure';
 
 import type { Backoff } from './backoff.js';
 import type {
@@ -46,7 +51,10 @@ function nowMs(): number {
 /** A signal that never aborts, for calls made without one. */
 const neverAborted = new AbortController().signal;
 
-/** @internal A retry policy: tries `fn`, then waits on `clock` as long as `backoff` says, until it says stop. */
+/**
+ * @internal A retry policy: tries `fn`, then waits on `clock` as long as `backoff` says,
+ * until it says stop. Then it rethrows the last error, or returns the last failure.
+ */
 export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
   const success = createEvent<SuccessEvent>();
   const failure = createEvent<FailureEvent>();
@@ -56,26 +64,38 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
   async function execute<T>(fn: PolicyCallback<T>, signal: AbortSignal = neverAborted): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const started = success.listening() || failure.listening() ? nowMs() : 0;
+      let failed: { readonly error: unknown } | { readonly value: Awaited<T> };
       try {
         const value = await fn({ signal, attempt });
-        if (success.listening()) success.emit({ duration: nowMs() - started });
-        return value;
+        if (!isFailure<unknown>(value)) {
+          if (success.listening()) success.emit({ duration: nowMs() - started });
+          return value;
+        }
+        failed = { value };
       } catch (error) {
-        const delay = signal.aborted ? undefined : backoff.delay(attempt + 1, error);
-        if (failure.listening()) {
-          failure.emit({ duration: nowMs() - started, handled: delay !== undefined, reason: { error } });
+        failed = { error };
+      }
+      const delay = signal.aborted
+        ? undefined
+        : backoff.delay(attempt + 1, 'error' in failed ? failed.error : failed.value);
+      if (failure.listening()) {
+        failure.emit({ duration: nowMs() - started, handled: delay !== undefined, reason: failed });
+      }
+      if (delay === undefined) {
+        if ('error' in failed) {
+          giveUp.emit(failed);
+          throw failed.error;
         }
-        if (delay === undefined) {
-          giveUp.emit({ error });
-          throw error;
-        }
-        retry.emit({ error, attempt: attempt + 1, delay });
-        try {
-          await clock.sleep(delay, signal);
-        } catch (sleepError) {
-          if (!signal.aborted) throw sleepError;
-          throw new CancelledError('Operation cancelled by the caller', { cause: signal.reason });
-        }
+        // A failure that was never retried is simply the answer; only a retried one ran out of retries.
+        if (attempt > 0) giveUp.emit(failed);
+        return failed.value;
+      }
+      retry.emit({ ...failed, attempt: attempt + 1, delay });
+      try {
+        await clock.sleep(delay, signal);
+      } catch (sleepError) {
+        if (!signal.aborted) throw sleepError;
+        throw new CancelledError('Operation cancelled by the caller', { cause: signal.reason });
       }
     }
   }

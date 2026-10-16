@@ -2,26 +2,40 @@
 // jobs and `@arki/journal` effects all take the same `Backoff` value.
 
 import { MAX_TIMER_MS } from '@arki/clock';
+import { isFailure } from '@arki/failure';
 
 import { InvalidBackoffError } from './errors.js';
 
 /**
  * How long to wait before each retry, and when to stop. Immutable: `upTo` and `while`
- * return a new backoff. Each call narrows the backoff; none widens it.
+ * return a new backoff. Each call narrows the backoff, except that the first `while`
+ * decides alone whether a returned failure is retried.
+ *
+ * A try fails in one of two ways: it throws an error, or it returns a failure from
+ * `@arki/failure` (an expected outcome, such as "card declined"). Without `while`, a
+ * backoff retries every thrown error and no returned failure.
  */
 export type Backoff = {
   /**
    * The wait in milliseconds before retry number `attempt` (1 for the first retry) after
-   * `error` failed the previous try. `undefined` means stop: do not retry. Throws
-   * `InvalidBackoffError` when `attempt` is not a whole number from 1.
+   * `reason` failed the previous try: the error it threw, or the failure it returned.
+   * `undefined` means stop: do not retry. Throws `InvalidBackoffError` when `attempt` is
+   * not a whole number from 1.
    */
-  delay(attempt: number, error: unknown): number | undefined;
+  delay(attempt: number, reason: unknown): number | undefined;
   /** The most retries this backoff allows: what `upTo` set, or `Infinity`. */
   readonly maxRetries: number;
   /** The same backoff, stopping after at most `retries` retries. `upTo(0)` never retries. */
   upTo(retries: number): Backoff;
-  /** The same backoff, retrying only errors for which `predicate` returns true. */
-  while(predicate: (error: unknown) => boolean): Backoff;
+  /**
+   * The same backoff, retrying only the reasons for which `predicate` returns true. A
+   * reason is a thrown error or a returned failure, so the predicate sees both: a
+   * returned failure is retried only when a predicate says yes to it. A negative
+   * predicate such as `reason => !(reason instanceof BadInput)` says yes to failures too.
+   *
+   * @example backoff.exponential({ base: 100 }).while(reason => isFailure(reason) && reason.code === 'db.timeout')
+   */
+  while(predicate: (reason: unknown) => boolean): Backoff;
 };
 
 /** Options of {@link backoff.exponential}. */
@@ -61,18 +75,21 @@ function assertAttempt(attempt: number): void {
   }
 }
 
-/** Builds a backoff from its exact wait per retry, its retry limit and its error filter. */
+/**
+ * Builds a backoff from its exact wait per retry, its retry limit and its filter. Without
+ * a filter, thrown errors are retried and returned failures are not.
+ */
 function create(
   wait: (attempt: number) => number,
   maxRetries: number,
-  retryable?: (error: unknown) => boolean,
+  retryable?: (reason: unknown) => boolean,
 ): Backoff {
   return {
     maxRetries,
-    delay(attempt, error) {
+    delay(attempt, reason) {
       assertAttempt(attempt);
       if (attempt > maxRetries) return;
-      if (retryable !== undefined && !retryable(error)) return;
+      if (retryable === undefined ? isFailure(reason) : !retryable(reason)) return;
       return wait(attempt);
     },
     upTo(retries) {
@@ -85,7 +102,7 @@ function create(
       return create(
         wait,
         maxRetries,
-        retryable === undefined ? predicate : error => retryable(error) && predicate(error),
+        retryable === undefined ? predicate : reason => retryable(reason) && predicate(reason),
       );
     },
   };

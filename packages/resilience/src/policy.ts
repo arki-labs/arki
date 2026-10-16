@@ -21,7 +21,7 @@ export type Subscription = { dispose(): void };
 /** An event method: pass a listener, get a subscription back. */
 export type PolicyEvent<E> = (listener: (event: E) => void) => Subscription;
 
-/** Why a call counted as a failure: the error it threw, or the value the policy rejected. */
+/** Why a call counted as a failure: the error it threw, or the value it returned (a failure from `@arki/failure`). */
 export type FailureReason = { error: unknown } | { value: unknown };
 
 export type SuccessEvent = {
@@ -59,7 +59,10 @@ export type Policy = {
 
 export type RetryPolicy = Policy & {
   readonly onRetry: PolicyEvent<RetryEvent>;
-  /** Fires when the last attempt has failed and the error is about to reach the caller. */
+  /**
+   * Fires when the last attempt has failed and its error, or its failure after at least one
+   * retry, is about to reach the caller. A returned failure that was never retried does not fire it.
+   */
   readonly onGiveUp: PolicyEvent<FailureReason>;
 };
 

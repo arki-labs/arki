@@ -58,6 +58,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/clock": "workspace:*",
+    "@arki/failure": "workspace:*",
     "cockatiel": "catalog:"
   },
   "devDependencies": {
