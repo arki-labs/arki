@@ -6,8 +6,8 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
 2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. A `change` frame carries the `txids` of exactly the commits that wrote its own tables.
-3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame inside an epoch, keeps a bounded ring, and feeds every open stream. The cursor a client sees is that position sealed with AES-GCM (a key per hub start, a fresh IV each time): opaque, 64 characters, so a client cannot count the frames its grant hides.
-4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the position is still in the ring (the missed frames follow), else `reset` (refetch every live query). A listener gap ends every stream with `gap` and the next `ready` starts a new epoch.
+3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame inside an epoch, keeps `replayMs` of frames in a ring, and feeds every open stream. The cursor a client sees is that position (epoch, frame number, time taken) sealed with AES-GCM under a key per hub start: opaque, 75 characters, so a client cannot count the frames its grant hides. A `change` frame is sealed once and shared by every stream.
+4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the cursor is at most `replayMs` old (the missed frames follow), else `reset` (refetch every live query). The decision never depends on how many frames passed. A listener gap ends every stream with `gap` and the next `ready` starts a new epoch; so does an overload (the ring reached `replayFrames`), which resets every client at once.
 5. On the client, `LiveProvider` reads the stream (`createLiveClient`) and calls `invalidateQueries` by oRPC path: every live path on a reset, the affected paths on a change.
 6. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
 
@@ -54,9 +54,24 @@ export { both };
 ### Drive the hub in a test
 
 1. `const source = fakeSource(); const hub = createLiveHub({ source }); await hub.start(); source.emit({ kind: 'ready' })`.
-2. `await hub.open({ cursor, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. Every cursor it yields is freshly sealed, so compare modes and tags, never cursor strings.
+2. `await hub.open({ cursor, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. `begin` cursors are freshly sealed and a `change` frame's cursor is shared by every stream, so compare modes and tags, never cursor strings.
 3. `source.emit({ kind: 'change', tags })` then wait `batchMs`; `source.emit({ kind: 'gap' })` to simulate a lost listener.
-4. Library files: `src/hub.ts`, `src/cursor.ts`, `src/testing.ts`; the scripted client in `src/tests/scripted-client.ts`.
+4. Age and the overload cap: `limits: { replayMs, replayFrames }`. With fake timers, `expect.poll` moves the fake clock while it waits: note `Date.now()` before the connect whose cursor's age you test.
+5. Real Postgres: `src/tests/failure.pg.test.ts` has the barrier helpers (a held pool client, a role without LOGIN, a gated read, an open transaction).
+6. Library files: `src/hub.ts`, `src/replay.ts`, `src/cursor.ts`, `src/testing.ts`; the scripted client in `src/tests/scripted-client.ts`.
+
+### Add a live table
+
+1. Meta: add the table to `live({ reads: [...] })` of every procedure that reads it.
+2. Migration: regenerate `liveMigration({ app, tables: liveTables(liveManifest(contract)) })` and add the new table's trigger in a new custom migration. Never run DDL at boot.
+3. Restart: the boot check (`verifyLiveTriggers`, E002) passes only once the migration ran.
+
+### Debug "nothing updates"
+
+1. `verifyLiveTriggers(db, { app, tables })` returns the holes; an empty array means every declared table publishes.
+2. In `psql`: `LISTEN arki_live_<app>_v1;`, then write the table. No notification means no trigger (or a view: `touch` it).
+3. `dot explain --json` lists each live procedure with its tables: a procedure missing there has no `live()` meta.
+4. In the browser: `useLiveStatus()` is `live`? A hook on a path not in the manifest logs E001 (`DEBUG=arki:live:*`).
 
 ### Use live queries in React
 
@@ -65,8 +80,9 @@ export { both };
 3. A mutation that returns `pg_current_xact_id()::text` of its own transaction can `await awaitTxId(queryClient, txid)` in `onSuccess`.
 4. Server rendering: `setLiveCursor(queryClient, await hub.cursor())` first, then load the page's data, then `dehydrate`. Keep `staleTime` above 0 so hydrated data is not refetched on mount.
 5. TanStack DB: `createCollection(queryCollectionOptions({ ...orpc.x.queryOptions({ input }), queryClient, getKey }))` from `@tanstack/query-db-collection`; the provider's invalidation refreshes it.
-6. Tests: `waitForInvalidation(queryClient, ['posts', 'list'])` before the write; the real hub and `liveEndpoint(...).fetch` can serve as the provider's `fetch` (see `src/tests/react.test.ts`).
-7. Library files: `src/client.ts`, `src/react.ts`.
+6. Sign-out or account switch: `queryClient.resetQueries()` and remount the provider with `key={userId}`, so the old account's data, fetches in flight and stream grant are gone (`src/tests/session.pg.test.ts`).
+7. Tests: `waitForInvalidation(queryClient, ['posts', 'list'])` before the write; the real hub and `liveEndpoint(...).fetch` can serve as the provider's `fetch` (see `src/tests/react.test.ts`). Triggers in a test database: `pglite.exec(liveMigration({ app, tables }).up)` (there is no `applyLiveTriggers`: `/testing` loads with no peer).
+8. Library files: `src/client.ts`, `src/react.ts`.
 
 ## Rules that bite
 
@@ -75,6 +91,9 @@ export { both };
 - A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with the handler context.
 - Never reuse an epoch: a custom `epoch()` must return a new 12-character `[a-z0-9]` value each call (E001 otherwise).
 - A stream that falls `subscriberFrames` behind gets `bye`; reconnect with the cursor.
+- Never evict replay frames by count or make resume depend on what happened since a cursor: hidden-table frames would leak. Resume or reset depends on the cursor's age only; the `replayFrames` cap starts a new epoch for everyone.
+- Never declare `live()` on a per-request table (sessions, counters): it refetches on every request. Do declare auth tables the answer depends on (memberships, roles).
+- Shortcuts that break the guarantee: the root `db` inside a `liveRead` handler, DDL at boot, reads on a replica.
 - Never parse or build a cursor: it is sealed. A cursor the hub cannot open resets; a malformed one is a 400.
 - The hub needs `crypto.subtle`: `start()` rejects with E001 without it (bare Hermes, a browser page that is not a secure context).
 - `useLiveQuery` on a procedure that is not in the manifest never refreshes; the provider logs E001 once. Mutations get query utils from oRPC too, so the types cannot catch it.
@@ -100,7 +119,11 @@ bun run typecheck
 bun run test
 bun run lint
 bun run test:docs
-bun run test:runtimes
+bun run test:runtimes -- --require-all   # Hermes needs HERMES_BIN
+bun run test:peers                      # every entry with its optional peers absent
+bun run test:pack                       # the tarball
+bun run test:e2e                        # Playwright on the Start fixture (Docker)
+../../node_modules/.bin/arki-bench list # the benchmark cases and contracts, nothing timed
 
 # In an app that mounts liveQueries: each live procedure with its tables, then the booted app's health.
 dot explain --json | jq '.data.actions[] | select(.meta.meta.live) | {id, reads: .meta.meta.live.reads}'

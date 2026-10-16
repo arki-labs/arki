@@ -170,7 +170,7 @@ describe('the grant filter', () => {
     // Frames 1 and 2 never arrive: not their tags, not their txids, and the opaque cursor does not count them.
     expect(change).toEqual({
       kind: 'change',
-      cursor: expect.stringMatching(/^[\w-]{64}$/),
+      cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
       txids: ['43'],
     });
@@ -182,7 +182,7 @@ describe('the grant filter', () => {
     // and with 3 hidden frames between the two visible ones: the cursors look alike.
     const none = await visibleCursors(0);
     const three = await visibleCursors(3);
-    for (const cursor of [...none, ...three]) expect(cursor).toMatch(/^[\w-]{64}$/);
+    for (const cursor of [...none, ...three]) expect(cursor).toMatch(/^[\w-]{75}$/);
     expect(new Set([...none, ...three]).size).toBe(6);
   });
 
@@ -220,10 +220,67 @@ describe('the grant filter', () => {
     source.emit({ kind: 'change', tags: Array.from({ length: 299 }, (_, index) => tag(`hidden_${index}`)), txid: '8' });
     expect(await client.next()).toEqual({
       kind: 'change',
-      cursor: expect.stringMatching(/^[\w-]{64}$/),
+      cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
       txids: ['7'],
     });
+  });
+
+  it('hidden volume changes nothing: two grants with one old cursor both resume after 5 000 hidden frames', async () => {
+    // Why (founder rule): whether a cursor resumes must not depend on writes a client cannot see.
+    // The old ring evicted by count (4 096), so enough hidden frames turned a resume into a reset
+    // and told the client they happened. Only the cursor's age decides now.
+    const { stream, source, hub } = await rig();
+    const first = await stream('', { tables: [POSTS] });
+    const hello = await first.next();
+    if (hello?.kind !== 'hello') throw new Error('expected hello');
+    await first.cancel();
+    await vi.waitFor(() => expect(hub.connections()).toBe(0));
+    // No stream is open, so fake timers flush the batches quickly without touching a stream's timers.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      for (let frame = 0; frame < 5000; frame += 1) {
+        source.emit({ kind: 'change', tags: [SECRETS], txid: String(frame + 1) });
+        vi.advanceTimersByTime(1);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const narrow = await stream(`?cursor=${hello.cursor}`, { tables: [POSTS] });
+    const wide = await stream(`?cursor=${hello.cursor}`, { tables: [POSTS, SECRETS] });
+    expect(await narrow.next()).toMatchObject({ kind: 'hello', mode: 'resume' });
+    expect(await wide.next()).toMatchObject({ kind: 'hello', mode: 'resume' });
+    // The wide grant sees the hidden table's frames; the narrow one none of them.
+    expect(await wide.next()).toMatchObject({ kind: 'change', tags: [SECRETS], txids: ['1'] });
+  });
+
+  it('past the age both grants reset, whether hidden frames happened or not', async () => {
+    const { stream, commit } = await rig();
+    const cursorOf = async (): Promise<string> => {
+      const reader = await stream('', { tables: [POSTS] });
+      const hello = await reader.next();
+      await reader.cancel();
+      if (hello?.kind !== 'hello') throw new Error('expected hello');
+      return hello.cursor;
+    };
+    const quiet = await cursorOf();
+    const busy = await cursorOf();
+    await commit([SECRETS], '1');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 120_001);
+      const modes: unknown[] = [];
+      for (const cursor of [quiet, busy]) {
+        for (const tables of [[POSTS], [POSTS, SECRETS]]) {
+          const reader = await stream(`?cursor=${cursor}`, { tables });
+          const hello = await reader.next();
+          modes.push(hello?.kind === 'hello' ? hello.mode : undefined);
+        }
+      }
+      expect(modes).toEqual(['reset', 'reset', 'reset', 'reset']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a resume replays only the frames the grant shows', async () => {

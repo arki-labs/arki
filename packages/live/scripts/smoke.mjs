@@ -49,7 +49,7 @@ if (globalThis.crypto?.subtle) {
   await hub.stop();
   hubChecks.push(
     ['first connect resets', `${begin.kind}:${begin.mode}`, 'begin:reset'],
-    ['opaque cursor', parseLiveCursor(begin.cursor)?.length, 64],
+    ['opaque cursor', parseLiveCursor(begin.cursor)?.length, 75],
     [
       'change frame is a wire event',
       parseLiveEvent({ kind: change.kind, cursor: change.cursor, tags: change.tags, txids: change.txids })?.kind,

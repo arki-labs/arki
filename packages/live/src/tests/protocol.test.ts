@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 
 import type { LiveFeed, LiveHub, LiveLimits, LiveManifest, TableTag } from '../index.js';
 import type { LiveQuery, ScriptedClient } from './scripted-client.js';
+import { debugHub } from '../debug.js';
 import { createLiveHub, LIVE_ERROR_CODES } from '../index.js';
 import { fakeSource } from '../testing.js';
 import { CHANNEL, parsePayload, TABLES_SQL, TRIGGERS_SQL } from './fixtures.js';
@@ -33,8 +34,9 @@ const changesOf = (client: ScriptedClient): number => client.log.filter(entry =>
  * pool at no fixed point of the event loop. `settle()` waits for every encrypt and decrypt in
  * flight, lets the stream pumps run, and repeats until a turn starts no new one.
  */
-function cryptoBarrier(): { settle(): Promise<void>; restore(): void } {
+function cryptoBarrier(): { settle(): Promise<void>; restore(): void; encrypts(): number } {
   const inFlight = new Set<Promise<unknown>>();
+  let encrypts = 0;
   const subtle = globalThis.crypto.subtle;
   const encrypt = subtle.encrypt.bind(subtle);
   const decrypt = subtle.decrypt.bind(subtle);
@@ -47,7 +49,10 @@ function cryptoBarrier(): { settle(): Promise<void>; restore(): void } {
     return promise;
   }
   const spies = [
-    vi.spyOn(subtle, 'encrypt').mockImplementation((...args) => track(encrypt(...args))),
+    vi.spyOn(subtle, 'encrypt').mockImplementation((...args) => {
+      encrypts += 1;
+      return track(encrypt(...args));
+    }),
     vi.spyOn(subtle, 'decrypt').mockImplementation((...args) => track(decrypt(...args))),
   ];
   return {
@@ -61,6 +66,7 @@ function cryptoBarrier(): { settle(): Promise<void>; restore(): void } {
     restore() {
       for (const spy of spies) spy.mockRestore();
     },
+    encrypts: () => encrypts,
   };
 }
 
@@ -238,7 +244,7 @@ describe('reset rules', () => {
     db.commit('users');
     await flush();
     const first = await feed.next();
-    expect(first.value).toMatchObject({ kind: 'begin', mode: 'reset', cursor: expect.stringMatching(/^[\w-]{64}$/) });
+    expect(first.value).toMatchObject({ kind: 'begin', mode: 'reset', cursor: expect.stringMatching(/^[\w-]{75}$/) });
     const second = await feed.next();
     expect(second.value).toMatchObject({ kind: 'change', tags: [tag('users')] });
   });
@@ -308,31 +314,93 @@ describe('reset rules', () => {
     expect(a.log.at(-1)).toBe('reset');
   });
 
-  it('a cursor evicted by count resets; the oldest cursor still covered resumes', async () => {
-    const { source, hub, db, client } = rig({ replayFrames: 2 });
+  it('resume or reset depends on the cursor age alone: thousands of frames still resume, an old cursor resets with nothing written', async () => {
+    // Why (founder rule): frames of tables a client cannot see count too. If the number of frames
+    // decided resume or reset, a reset would tell a client that many hidden writes happened. Only
+    // the cursor's age decides, and the client knows that already.
+    const { source, hub, client } = rig({ replayMs: 200_000 });
     await startReady(hub, source);
     const a = client();
     await a.fetchAll();
     await a.connect();
     await settle();
-    await a.disconnect(); // cursor at frame 0
-    db.commit('posts');
-    await flush(); // frame 1
-    db.commit('users');
-    await flush(); // frame 2: the ring holds 1..2, so cursor 0 is the exact boundary
-    await a.connect();
-    await settle();
-    expect(a.log).toEqual(['reset', 'resume', 'change', 'change']);
-
-    await a.disconnect(); // cursor at frame 2
-    for (const table of ['posts', 'users', 'posts']) {
-      db.commit(table);
-      await flush(); // frames 3, 4, 5: frame 3 is evicted
+    await a.disconnect();
+    // 5 000 frames (more than the old count bound of 4 096), 100 s in all, inside the age: it resumes.
+    for (let frame = 0; frame < 5000; frame += 1) {
+      source.emit({ kind: 'change', tags: [tag('users')] });
+      vi.advanceTimersByTime(BATCH_MS);
     }
     await a.connect();
     await settle();
-    expect(a.log.slice(4)).toEqual(['reset']);
+    expect(a.log).toEqual(['reset', 'resume', ...Array.from({ length: 5000 }, () => 'change')]);
+
+    // Older than replayMs with no write at all since: it resets all the same.
+    await a.disconnect();
+    vi.advanceTimersByTime(200_001);
+    await a.connect();
+    await settle();
+    expect(a.log.at(-1)).toBe('reset');
     expect(await a.stalePaths()).toEqual([]);
+    await hub.stop();
+  });
+
+  it('a cursor exactly replayMs old resumes; one millisecond older resets', async () => {
+    const { source, hub, db, client } = rig({ replayMs: 60_000 });
+    await startReady(hub, source);
+    const a = client();
+    await a.fetchAll();
+    await a.connect();
+    await settle();
+    await a.disconnect();
+    db.commit('posts');
+    await flush();
+    vi.advanceTimersByTime(60_000 - BATCH_MS);
+    await a.connect();
+    await settle();
+    expect(a.log).toEqual(['reset', 'resume', 'change']);
+    await a.disconnect();
+    // Its cursor is the change frame's, taken BATCH_MS after the first: still inside the age.
+    vi.advanceTimersByTime(BATCH_MS);
+    await a.connect();
+    await settle();
+    expect(a.log.at(-1)).toBe('resume');
+    await a.disconnect();
+    vi.advanceTimersByTime(1);
+    await a.connect();
+    await settle();
+    expect(a.log.at(-1)).toBe('reset');
+    await hub.stop();
+  });
+
+  it('the cap on the ring is an overload, not an eviction: a new epoch, every stream ends with gap, every client resets together', async () => {
+    // Why: evicting the oldest frames at a cap would bring back the count leak for the clients
+    // whose cursors fall off. A new epoch treats every client the same: it reveals only "overloaded".
+    const warn = vi.spyOn(debugHub, 'warn');
+    const { source, hub, db, client } = rig({ replayFrames: 3 });
+    await startReady(hub, source);
+    const [a, b, c] = [client(), client(), client()];
+    for (const each of [a, b, c]) {
+      await each.fetchAll();
+      await each.connect();
+    }
+    await settle();
+    await c.disconnect(); // c is away, with a young cursor
+    for (const table of ['posts', 'users', 'posts']) {
+      db.commit(table);
+      await flush();
+    }
+    expect(warn).not.toHaveBeenCalled();
+    db.commit('users');
+    await flush(); // the fourth frame meets a full ring
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[1]).toMatchObject({ cap: 3, frames: 3, streams: 2 });
+    expect([a.log.at(-1), b.log.at(-1)]).toEqual(['gap', 'gap']);
+    expect(hub.connections()).toBe(0);
+    for (const each of [a, b, c]) await each.connect();
+    await settle();
+    expect([a.log.at(-1), b.log.at(-1), c.log.at(-1)]).toEqual(['reset', 'reset', 'reset']);
+    for (const each of [a, b, c]) expect(await each.stalePaths()).toEqual([]);
+    await hub.stop();
   });
 
   it('a cursor evicted by age resets', async () => {
@@ -369,14 +437,14 @@ describe('reset rules', () => {
     // One character changed: the tag check fails, so it resets (not a 400: it is well-formed).
     const flipped = `${cursor.slice(0, 20)}${cursor[20] === 'A' ? 'B' : 'A'}${cursor.slice(21)}`;
     expect(await first(flipped)).toMatchObject({ kind: 'begin', mode: 'reset' });
-    // Well-formed but not 64 characters of this hub's layout.
+    // Well-formed but not 75 characters of this hub's layout.
     expect(await first('a'.repeat(64))).toMatchObject({ kind: 'begin', mode: 'reset' });
 
     // Another hub's cursor, at the same position: a different key, so it resets.
     const other = rig();
     await startReady(other.hub, other.source);
     const foreign = await other.hub.cursor();
-    expect(foreign).toMatch(/^[\w-]{64}$/);
+    expect(foreign).toMatch(/^[\w-]{75}$/);
     expect(await first(foreign)).toMatchObject({ kind: 'begin', mode: 'reset' });
 
     // The same hub after a listener gap: a new epoch, so the old cursor resets.
@@ -518,9 +586,37 @@ describe('bounds and lifecycle', () => {
     const { value: resumed } = await replayed.next();
     expect(resumed).toMatchObject({ kind: 'begin', mode: 'resume' });
     const { value: again } = await replayed.next();
-    // The same frame, with a freshly sealed cursor.
-    expect({ ...again, cursor: '' }).toEqual({ ...first, cursor: '' });
-    expect(again?.kind === 'change' && first?.kind === 'change' && again.cursor !== first.cursor).toBe(true);
+    // The same frame, cursor included: a frame is sealed once.
+    expect(again).toEqual(first);
+    await hub.stop();
+  });
+
+  it('a frame is sealed once however many streams get it: one AES-GCM call per frame, not per client', async () => {
+    // Why: at 1 000 clients, sealing per stream is 1 000 encrypts per frame and dominates fan-out.
+    // Sharing is safe: each client sees only its own stream, the frame number stays sealed, and
+    // `begin` cursors are still fresh per stream.
+    const { source, hub, db } = rig();
+    await startReady(hub, source);
+    const feeds = await Promise.all([1, 2, 3].map(() => hub.open({ signal: new AbortController().signal })));
+    const streams = feeds.map(feed => feed[Symbol.asyncIterator]());
+    const begins = await Promise.all(streams.map(stream => stream.next()));
+    const before = barrier.encrypts();
+
+    db.commit('posts');
+    await flush();
+    const results = await Promise.all(streams.map(stream => stream.next()));
+    const frames = results.map(result => result.value);
+    expect(barrier.encrypts() - before).toBe(1);
+    const cursors = frames.map(frame => (frame?.kind === 'change' ? frame.cursor : undefined));
+    expect(new Set(cursors).size).toBe(1);
+    expect(cursors[0]).toMatch(/^[\w-]{75}$/);
+    // Begin cursors of one position still differ per stream.
+    expect(new Set(begins.map(begin => (begin.value?.kind === 'begin' ? begin.value.cursor : undefined))).size).toBe(3);
+
+    // The shared cursor resumes like any other: nothing to replay after it.
+    const resumedFeed = await hub.open({ cursor: cursors[0], signal: new AbortController().signal });
+    const resumed = await resumedFeed[Symbol.asyncIterator]().next();
+    expect(resumed.value).toMatchObject({ kind: 'begin', mode: 'resume' });
     await hub.stop();
   });
 
@@ -568,7 +664,7 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
     const pglite = new PGlite();
     await pglite.exec(TABLES_SQL + TRIGGERS_SQL);
     const source = fakeSource();
-    const hub = createLiveHub({ source, limits: { replayFrames: 2 } });
+    const hub = createLiveHub({ source, limits: { replayMs: 60_000 } });
     let hints = 0;
     const listen = () =>
       pglite.listen(CHANNEL, payload => {
@@ -629,14 +725,15 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
     await expect.poll(fresh).toEqual([]);
     expect([a.log.at(-1), b.log.at(-1)]).toEqual(['reset', 'reset']);
 
-    // Evicted cursor: B is away for three separate frames; the ring keeps two.
+    // Evicted cursor: B is away longer than the ring's age while a commit lands.
     await b.disconnect();
-    for (const id of ['p5', 'p6', 'p7']) {
-      const before = changesOf(a);
-      await pglite.query(`insert into posts values ('${id}', '${id}', 'u1')`);
-      await expect.poll(() => changesOf(a)).toBe(before + 1);
-    }
+    const before = changesOf(a);
+    await pglite.query(`insert into posts values ('p5', 'p5', 'u1')`);
+    await expect.poll(() => changesOf(a)).toBe(before + 1);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 60_001);
     await b.connect();
+    vi.useRealTimers();
     await expect.poll(fresh).toEqual([]);
     expect(b.log.at(-1)).toBe('reset');
 

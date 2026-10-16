@@ -23,13 +23,17 @@
 - [Publish tables from Postgres](docs/agent-guide.md#publish-tables-from-postgres)
 - [Drive the hub in a test](docs/agent-guide.md#drive-the-hub-in-a-test)
 - [Use live queries in React](docs/agent-guide.md#use-live-queries-in-react)
+- [Add a live table](docs/agent-guide.md#add-a-live-table)
+- [Debug "nothing updates"](docs/agent-guide.md#debug-nothing-updates)
 
 ## Rules that bite
 - Declare every table a live procedure reads. An undeclared table never refetches.
 - Inside a `liveRead` handler read only through `context.liveRead`. The root `db` is a second snapshot.
 - `snapshot()` takes the root database, never a `tx`: a nested transaction is a savepoint.
 - Type the `liveRead` select with the handler context (`{ db, repos }`), not `Deps`: an `entrypointOnly` db is not in `Deps`.
-- Never declare `live()` on a per-request table (sessions, counters): it refetches constantly.
+- Never declare `live()` on a per-request table (sessions, counters): it refetches constantly. Do declare auth tables the answer depends on (memberships, roles).
 - Never parse a cursor: it is sealed. Send it back as received.
 - No `initialData` on a live query (a type error); use `placeholderData`.
 - Server rendering: `setLiveCursor(queryClient, await hub.cursor())` before the page's data is read, never after.
+- Account switch: `queryClient.resetQueries()` and remount `<LiveProvider key={userId}>`; the old stream keeps the old grant until `maxAgeMs`.
+- A cursor resumes only by its age (`replayMs`). The `replayFrames` cap is an overload: a new epoch, every client resets.

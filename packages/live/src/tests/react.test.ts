@@ -313,7 +313,7 @@ describe('server rendering with the hub cursor (D4)', () => {
     expect(queryClient.getQueryData(context.postsKey)).toEqual(['v0']);
     context.mount(queryClient, [context.Posts]);
     await waitFor(() => expect(queryClient.getQueryData(context.postsKey)).toEqual(['v1']));
-    expect(context.urls[0]).toMatch(/\?cursor=[\w-]{64}$/);
+    expect(context.urls[0]).toMatch(/\?cursor=[\w-]{75}$/);
   });
 
   it('with no commit in between, the client resumes and refetches nothing', async () => {

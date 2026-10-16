@@ -96,7 +96,7 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   throw new Error('expected a rejection');
 }
 
-describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
+describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
   let container: StartedPostgreSqlContainer;
   const pools: pg.Pool[] = [];
   let handlerDb: Db;

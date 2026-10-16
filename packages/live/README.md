@@ -2,17 +2,18 @@
 
 Live queries on your own Postgres. A procedure declares the tables it reads in its oRPC contract meta. A statement trigger publishes a hint at commit. A hub numbers those hints and feeds one stream per browser tab, and the client refetches the queries that read a changed table. Only table names travel; data always comes from a normal, authorized refetch.
 
-This release covers milestones M0 to M3 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot plugin, the stream client and the React provider.
+This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot plugin, the stream client and the React provider, proven by a failure matrix on Postgres 16 and 18, a browser run on a TanStack Start app, and contract-checked benchmarks.
 
 ## The guarantees
 
-| Name                   | Promise                                                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Committed-write hint   | A tracked statement publishes only if its transaction commits. False positives are allowed.                                          |
-| Live updates           | While connected, authorized and with complete declarations, every active live query refetches after a commit to a table it declares. |
-| One snapshot per query | All reads through one `liveRead()` call's readers run in one `REPEATABLE READ READ ONLY` transaction.                                |
-| Safe reconnect         | After any reconnect the client has replayed every missed hint, or it resets (refetches every live query).                            |
-| Bounded memory         | The replay ring and every stream queue are bounded. Overload becomes `bye` and a reconnect, never unbounded buffering.               |
+| Name                      | Promise                                                                                                                                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Committed-write hint      | A tracked statement publishes only if its transaction commits. False positives are allowed.                                                                                        |
+| Live updates              | While connected, authorized and with complete declarations, every active live query refetches after a commit to a table it declares.                                               |
+| One snapshot per query    | All reads through one `liveRead()` call's readers run in one `REPEATABLE READ READ ONLY` transaction.                                                                              |
+| Safe reconnect            | After any reconnect the client has replayed every missed hint, or it resets (refetches every live query).                                                                          |
+| Hidden writes stay hidden | Writes to tables a client may not see change none of its frames, txids or cursors, nor whether it resumes or resets. One exception: an overloaded hub resets every client at once. |
+| Bounded memory            | The replay ring keeps `replayMs` of frames under a hard cap; every stream queue is bounded. Overload becomes a reconnect, never unbounded buffering.                               |
 
 Not promised: two queries agreeing with each other, ordering between tables inside one batch, exactly-once hints.
 
@@ -85,9 +86,11 @@ await hub.stop();
 
 Each `change` frame also carries `txids`: the Postgres transaction ids (`pg_current_xact_id()`) of the commits behind it, as decimal strings, because an `xid8` can pass `Number.MAX_SAFE_INTEGER`. A frame names exactly the commits that wrote one of its own tables, each once; a transaction that wrote tables on two frames of a split batch is on both. A client waits for its own write with `awaitTxId` (below). Hints from a source without txids carry `txids: []`.
 
-Cursors are opaque. Inside the hub a position is its epoch and frame number; on the wire it is sealed with AES-GCM under a key the hub makes at `start()`, with a fresh random IV every time. Every cursor is 64 base64url characters, two cursors for one position differ, and none can be read. Keep it as a string.
+Cursors are opaque. Inside the hub a position is its epoch, its frame number and the time it was taken; on the wire it is sealed with AES-GCM under a key the hub makes at `start()`, with a random IV. Every cursor is 75 base64url characters and none can be read. A `change` frame is sealed once and every stream that gets it gets that cursor (one AES-GCM call per frame, not per client); `begin` cursors and `hub.cursor()` are sealed fresh each time. Keep it as a string.
 
-Reset rules: a cursor this hub sealed, of the current epoch and still in the ring, resumes and replays the missed frames. No cursor, a cursor the hub cannot open (another hub's or replica's, changed, from before a restart), another epoch (a listener gap), or an evicted position resets. A listener gap ends every stream with `gap`.
+Reset rules: a cursor this hub sealed, of the current epoch and at most `replayMs` old, resumes and replays the missed frames. The ring evicts by that same age, so every frame a young cursor needs is still there. No cursor, a cursor the hub cannot open (another hub's or replica's, changed, from before a restart), another epoch (a listener gap) or an older cursor resets. The decision depends on the cursor's age alone, never on how many frames passed: frames of tables a client cannot see count too, so a count would tell it they happened.
+
+Two things end every stream with `gap`: a listener gap, and an overload. `replayFrames` is a hard cap on the ring, not an eviction: a ring that reaches it starts a new epoch, so every client resets together. That reveals only "the hub was overloaded", the same to everyone. It is logged at warn (`arki:live:hub`, with the cap, the frames held and the streams). Size the cap above the peak frame rate times `replayMs`: at most 1000 / `batchMs` frames per second, plus one per 256 commits, times one per 256 tables in a window. The default, 65 536, covers about 500 frames per second for 120 s.
 
 `hub.cursor()` gives the current position as a new cursor (or `undefined` while the hub is not ready). It reads the position when called, so a server that calls it before reading a page's data can hand it to the client, and the client replays every commit since (see Server rendering).
 
@@ -128,14 +131,14 @@ In a TanStack Start route: `GET: ({ request }) => endpoint.fetch(request)` in `r
 
 What the endpoint does, in order, before any stream header: a malformed or repeated `cursor` answers 400 E004 (a well-formed cursor the hub cannot open is not an error: the stream starts with a reset); `authorize` returning `null` answers 401 E005; a hub without its listener answers 503 E003 with `retry-after`. Then `hello` with the part of the manifest the grant allows (the procedures whose every table is granted), and `change` frames cut down to the granted tables. A frame keeps only the `txids` of transactions that wrote a granted table, and **a frame with no granted table is skipped whole**. Because cursors are opaque, a client cannot count the frames it was not sent either. What it can still see is the timing of the frames it does get: a hidden write that lands in the same batch window as a visible one is merged into that frame without a trace, but the stream as a whole shows only when visible tables changed. After `maxAgeMs` (default 5 minutes) the stream sends `bye` and ends, and the client reconnects and is authorized again.
 
-Try it by hand (the demo test `src/tests/demo.pg.test.ts` does the same against Postgres 16 and 17):
+Try it by hand (the demo test `src/tests/demo.pg.test.ts` does the same against Postgres 16 and 18):
 
 ```sh
 curl -N -H 'authorization: Bearer demo' http://localhost:3000/api/live
-# data: {"kind":"hello","v":1,"mode":"reset","cursor":"q8Zt…(64 characters)","manifest":[…]}
+# data: {"kind":"hello","v":1,"mode":"reset","cursor":"q8Zt…(75 characters)","manifest":[…]}
 
 psql "$DB_URL" -c "insert into posts values ('p1', 'Hello')"
-# data: {"kind":"change","cursor":"Vb3K…(64 characters)","tags":[{"schema":"public","table":"posts"}],"txids":["748"]}
+# data: {"kind":"change","cursor":"Vb3K…(75 characters)","tags":[{"schema":"public","table":"posts"}],"txids":["748"]}
 
 psql "$DB_URL" -c "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'blog_listener'"
 # data: {"kind":"gap"}   then the stream ends; the next connect is a reset (new epoch)
@@ -200,7 +203,7 @@ export function App() {
 }
 ```
 
-What the provider does with each frame: `hello` with `reset` invalidates every live path (`[path]` matches every input of a procedure); `change` invalidates the paths whose tables changed; the cursor is saved after that. On `bye` it reconnects at once with the cursor; on `gap`, a dropped connection or a 5xx it backs off (250 ms doubling to 10 s, jittered; a 503 waits at least its `retry-after`), and `online` or the page becoming visible ends the wait. On 401/403 it stops (`unauthorized`) until the `headers` function changes. A new `headers` function while live does not reconnect: the latest one is read before each connect.
+What the provider does with each frame: `hello` with `reset` invalidates every live path (`[path]` matches every input of a procedure); `change` invalidates the paths whose tables changed; the cursor is saved after that. On `bye` it reconnects at once with the cursor; on `gap`, a dropped connection or a 5xx it backs off (250 ms doubling to 10 s, jittered; a 503 waits at least its `retry-after`), and `online` or the page becoming visible ends the wait. On 401/403 it stops (`unauthorized`) until the `headers` function changes. A new `headers` function while live does not reconnect: the latest one is read before each connect. A connection can die without a close (Wi-Fi gone, a NAT that forgot it); the server sends a keepalive every 15 s, so a read that gets no byte for 35 s drops the connection and backs off, and in a browser `offline` drops it at once.
 
 Rules `useLiveQuery` adds to `useQuery`, each for a bug plain invalidation has:
 
@@ -275,13 +278,106 @@ export async function dehydratePage(hub: LiveHub, queryClient: QueryClient, load
 
 The provider connects with that cursor. The hub resumes when the client reaches the same hub (the same replica, the same listener epoch, still in the ring) and replays any commit since the cursor; anything else resets, which is safe. In TanStack Start, call `hub.cursor()` from a server function in the root route's loader on the server only, before the child loaders run, with `setupRouterSsrQueryIntegration` dehydrating the query client. Hydrated data is refetched only if a commit came after the cursor, as long as `staleTime` keeps it fresh on mount.
 
+### Sign-out and account switch
+
+The stream is authorized when it connects and again every `maxAgeMs`, not on every frame. So when the account changes, remount the provider for the new one (`key`) and reset the queries. The reset drops the old account's data and cancels its fetches still in flight; the remount closes the old stream, whose grant was the old account's.
+
+```tsx
+import type { ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+import { LiveProvider } from '@arki/live/react';
+
+const queryClient = new QueryClient();
+
+export function SignedInApp({ userId, children }: { readonly userId: string | null; readonly children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LiveProvider key={userId ?? 'signed-out'} url="/api/live">
+        {children}
+      </LiveProvider>
+    </QueryClientProvider>
+  );
+}
+
+export async function switchAccount(signIn: () => Promise<void>) {
+  await signIn();
+  await queryClient.resetQueries();
+}
+```
+
+Without the remount the old stream keeps the old grant's table hints until `maxAgeMs`. `src/tests/session.pg.test.ts` proves the recipe with a fetch in flight and an `@arki/offline` write queued by the old account (it is dead-lettered, never sent).
+
 ### Testing
 
 `waitForInvalidation(queryClient, ['posts', 'list'])` from `@arki/live/testing` resolves when a query of that path is invalidated (E006 after the timeout). Call it before the write.
 
+To install the triggers in a test database, run the migration SQL: `await pglite.exec(liveMigration({ app, tables }).up)`, or `db.execute(sql.raw(…))` with Drizzle. (`/testing` has no `applyLiveTriggers`: it must load with no peer installed, and building a Drizzle `SQL` value needs `drizzle-orm` at run time.)
+
+## Write paths
+
+Every write that commits through Postgres publishes: a journal command, a repository, raw SQL, a queue worker, a `psql` session. The trigger is a statement trigger on insert, update, delete and truncate, so a statement that touches no row still publishes (a false positive, allowed). Partitioned tables need the trigger on every leaf; `verifyLiveTriggers` reports a leaf without one. What no trigger sees — a view, a materialized-view refresh, a table you chose not to track — is published by hand with `touch(tx, app, tag)` in the writing transaction.
+
+## Security
+
+- The stream needs `authorize`. It decides which tables a client gets hints for; every refetch is still authorized by its procedure, so a hint never carries data.
+- A hint tells its receiver that a table changed, and when. On a table shared by tenants, any client granted it sees the activity of every tenant on it. Grant only what the client's procedures read.
+- Hidden writes stay hidden (the guarantee above): frames, txids, cursors and resume-or-reset do not depend on them; only a global overload reset does.
+- Revocation: data stops at the next refetch (a 401/403 resets the query once); the stream itself is refused at its next reconnect, at most `maxAgeMs` (5 min) later. On sign-out or an account switch, follow the recipe above.
+
+## Operations
+
+- Give the listener its own pool of one connection. It holds that client while it runs.
+- Reads must hit the primary: a replica can lag behind the hint that made the client refetch.
+- The listen session never sits in a long transaction: Postgres delivers notifications between transactions.
+- Declare the tables a procedure's answer depends on, auth tables included (memberships, roles). Do not declare per-request tables (sessions, counters): they would refetch on every request. Revocation is covered by the refetch and `maxAgeMs`.
+- Proxies must stream: `@arki/http` sends `x-accel-buffering: no` and a 15 s heartbeat (under Cloudflare's 100 s idle cap).
+- Watch `select pg_notification_queue_usage()`. A listener that stops reading lets the queue fill, and a full queue fails commits that notify.
+- Postgres 14 or later (tested on 16 and 18).
+
+## When to use Electric, Zero or PowerSync instead
+
+`@arki/live` refetches: each commit to a table makes every live query that reads it ask the server again. That is simple and safe (any SQL, auth stays in the procedure, nothing to run beside Postgres), and its cost grows with clients × queries × writes. Table-level hints also refetch every input of a procedure, so many tenants on one hot table cost more origin queries per commit than slow polling would.
+
+| Pick                                              | When                                                                                                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Electric (with TanStack DB's Electric collection) | Many clients watch the same hot rows and refetch cost dominates. You want row-level sync and can run logical replication (`wal_level=logical`) and the Electric service. |
+| Zero                                              | You want client-side incremental queries over a local replica (instant filters and sorts over many rows), and accept its schema and permission model.                    |
+| PowerSync                                         | The app must read and edit relational data offline for long periods (durable local SQLite), with a sync service. Short offline writes are `@arki/offline`'s queue.       |
+| `@arki/live`                                      | Online screens over any SQL and aggregates, auth in your procedures, your own Postgres, PGlite in tests, no extra service.                                               |
+
 ## Limits
 
-`batchMs` 20, `replayFrames` 4096, `replayMs` 120 000, `subscriberFrames` 256, 256 tags and 256 txids per frame (a window that reaches 256 transactions flushes at once), identifiers of at most 63 bytes.
+`batchMs` 20, `replayMs` 120 000 (the age up to which a cursor resumes), `replayFrames` 65 536 (the overload cap), `subscriberFrames` 256, 256 tags and 256 txids per frame (a window that reaches 256 transactions flushes at once), identifiers of at most 63 bytes. A stream that receives no byte for 35 s is dropped by the client.
+
+## Tests
+
+- `bun run test`: unit tests, PGlite, and Postgres 16 and 18 through testcontainers (Docker). The failure matrix (`src/tests/failure.pg.test.ts`) has one test per named scenario: commits around `LISTEN`, reverse commit order, rollback, listener gap, replica switch, server restart, cursor expiry and overload, slow subscriber, untracked table, pool exhaustion, a listen connection that ends cleanly. Barriers, not sleeps.
+- `bun run test:e2e`: Playwright on a TanStack Start app (`e2e/app`) with real Postgres: two tabs, a network loss, a server restart.
+- `bun run test:runtimes -- --require-all`, `bun run test:peers` (every entry with its optional peers absent), `bun run test:pack` (the tarball).
+- `examples/dot.ts`, a Dot app with live queries, is compiled by `bun run typecheck`.
+
+<!-- bench:start -->
+
+## Benchmarks
+
+Numbers pending an idle publish run (`bun run bench --profile publish --write-readme`); none is recorded yet.
+
+What `bench/live.bench.ts` measures, each case checked against its contract before it is timed:
+
+- Fan-out: one commit to 1, 100 and 1 000 streams, cursor sealing included, at the hub and through the endpoint and client. The overload cap is never reached.
+- A reconnect storm: 1 000 streams resuming from one cursor.
+- Freshness per strategy (deterministic counts): origin queries per commit, wasted fetches, staleness, for live queries, a TanStack DB query collection, invalidate-everything and `refetchInterval` polling, on 20 and 200 tenants with a hot table.
+- Writer overhead on PGlite: single-row, bulk and multi-table commits with and without the triggers.
+
+Not measured: an Electric collection (it needs logical replication and the Electric service) and a parser race against `@microsoft/fetch-event-source` (not in the workspace catalog).
+<!-- bench:end -->
+
+## Where this differs from the plan
+
+- Plan § 5 steps 5 and 7 bound the ring by count and age and reset an "evicted" cursor. The hub evicts by age only and decides resume or reset by the cursor's age; `replayFrames` is an overload cap that starts a new epoch (see Reset rules).
+- Plan § 5 step 8: the `bye` at `maxAgeMs` comes from `liveEndpoint`, and a slow subscriber's `bye` from the hub; an overload ends streams with `gap`, not `bye`. The client also closes a connection that sent nothing for 35 s.
+- Plan § 3 lists `applyLiveTriggers` in `/testing`; it is not shipped (see Testing).
 
 ## Errors
 

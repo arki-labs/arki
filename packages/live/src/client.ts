@@ -20,6 +20,12 @@
  * `:keepalive` comments are skipped. The cursor is saved only after
  * `onEvent` settles, so a frame the app has not handled is resent on resume.
  * `online` and a page becoming visible end a backoff wait at once.
+ *
+ * A connection can die without a close (Wi-Fi gone, a NAT that forgot it):
+ * no FIN, no RST, the read just waits. The server sends a keepalive every
+ * 15 s, so a read that gets no byte for 35 s (two missed heartbeats, plus
+ * slack) drops the connection and backs off like any lost one. In a browser,
+ * `offline` drops it at once.
  */
 import { backoff } from '@arki/resilience';
 
@@ -54,6 +60,11 @@ export type LiveClientOptions = {
 
 /** 250 ms, doubling to 10 s, each wait 75–125% of that so many clients do not return at once. */
 const RECONNECT = backoff.exponential({ base: 250, max: 10_000, jitter: 0.25 });
+const noop = (): void => {
+  // Already closed or errored: nothing left to release.
+};
+/** No byte for this long means the connection is dead: two missed 15 s heartbeats, plus slack. */
+const IDLE_MS = 35_000;
 /** A `retry-after` longer than this is cut to it. */
 const MAX_RETRY_AFTER_MS = 300_000;
 
@@ -62,17 +73,36 @@ type SseMessage = { readonly event: string; readonly data: string };
 /**
  * The messages of an SSE body. Lines end at `\n`, `\r\n` or `\r`; a `\r` at the
  * end of a chunk waits for the next one, in case it is half of `\r\n`.
- * Comments (`:keepalive`) and unknown fields are skipped.
+ * Comments (`:keepalive`) and unknown fields are skipped. A read that waits
+ * `IDLE_MS` calls `idle`; `drop` aborting cancels the read and throws its reason.
  */
-async function* sseMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<SseMessage, void, undefined> {
+async function* sseMessages(
+  body: ReadableStream<Uint8Array>,
+  drop: AbortSignal,
+  idle: () => void,
+): AsyncGenerator<SseMessage, void, undefined> {
   const reader = body.getReader();
+  const cancel = (): void => {
+    reader.cancel().catch(noop);
+  };
+  drop.addEventListener('abort', cancel, { once: true });
   const decoder = new TextDecoder();
   let buffer = '';
   let event = '';
   let data: string[] = [];
   try {
     for (;;) {
-      const chunk = await reader.read();
+      const timer = setTimeout(idle, IDLE_MS);
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } finally {
+        clearTimeout(timer);
+      }
+      if (drop.aborted) {
+        const reason: unknown = drop.reason;
+        throw reason instanceof Error ? reason : new Error('the live connection was dropped');
+      }
       buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       let start = 0;
       for (let index = 0; index < buffer.length; index += 1) {
@@ -100,6 +130,7 @@ async function* sseMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<Ss
       if (chunk.done) return;
     }
   } finally {
+    drop.removeEventListener('abort', cancel);
     try {
       await reader.cancel();
     } catch {
@@ -133,16 +164,21 @@ type Outcome =
   | { readonly next: 'backoff'; readonly reason: unknown; readonly minMs?: number }
   | { readonly next: 'stop' };
 
-/** Calls `wake` when the network comes back or the page becomes visible; returns the unsubscribe. Browser only. */
-function onNetworkBack(wake: () => void): () => void {
+/**
+ * Calls `wake` when the network comes back or the page becomes visible, and `lost` when the
+ * browser goes offline; returns the unsubscribe. Browser only.
+ */
+function onNetwork(wake: () => void, lost: () => void): () => void {
   if (!('addEventListener' in globalThis)) return (): void => undefined;
   const visible = (): void => {
     if (!('document' in globalThis) || document.visibilityState === 'visible') wake();
   };
   globalThis.addEventListener('online', wake);
+  globalThis.addEventListener('offline', lost);
   globalThis.addEventListener('visibilitychange', visible);
   return () => {
     globalThis.removeEventListener('online', wake);
+    globalThis.removeEventListener('offline', lost);
     globalThis.removeEventListener('visibilitychange', visible);
   };
 }
@@ -159,6 +195,8 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   let attempt = 0;
   /** Ends the current backoff wait early. */
   let wakeUp: (() => void) | undefined;
+  /** Drops the current connection (it went idle, or the browser went offline). */
+  let dropConnection: ((reason: Error) => void) | undefined;
 
   function setStatus(next: LiveStatus): void {
     if (status === next || status === 'closed') return;
@@ -167,11 +205,26 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   }
 
   async function connect(): Promise<Outcome> {
+    // One controller per connection: `stop()` aborts it, and so does a dead connection.
+    const connection = new AbortController();
+    const forward = (): void => connection.abort(abort.signal.reason);
+    abort.signal.addEventListener('abort', forward, { once: true });
+    if (abort.signal.aborted) forward();
+    dropConnection = reason => connection.abort(reason);
+    try {
+      return await connectOnce(connection);
+    } finally {
+      abort.signal.removeEventListener('abort', forward);
+      dropConnection = undefined;
+    }
+  }
+
+  async function connectOnce(connection: AbortController): Promise<Outcome> {
     const headers = new Headers(await options.headers?.());
     headers.set('accept', 'text/event-stream');
     const response = await fetcher(withCursor(options.url, cursor), {
       headers,
-      signal: abort.signal,
+      signal: connection.signal,
       cache: 'no-store',
       ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
     });
@@ -201,7 +254,11 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
         'Use a fetch with streaming responses (React Native: `expo/fetch`), and pass it as `fetch`.',
       );
     }
-    for await (const message of sseMessages(response.body)) {
+    const idle = (): void => {
+      debugClient.debug('no byte from the live stream for {idleMs} ms; dropping the connection', { idleMs: IDLE_MS });
+      connection.abort(new Error(`the live stream sent nothing for ${IDLE_MS} ms`));
+    };
+    for await (const message of sseMessages(response.body, connection.signal, idle)) {
       if (message.event === 'error') {
         return { next: 'backoff', reason: new Error(`live stream error frame: ${message.data}`) };
       }
@@ -243,7 +300,10 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   }
 
   async function run(): Promise<void> {
-    const unsubscribe = onNetworkBack(() => wakeUp?.());
+    const unsubscribe = onNetwork(
+      () => wakeUp?.(),
+      () => dropConnection?.(new Error('the browser went offline')),
+    );
     try {
       while (!stopped()) {
         let outcome: Outcome;

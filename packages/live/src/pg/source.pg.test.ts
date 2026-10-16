@@ -106,7 +106,7 @@ async function watch(hub: LiveHub): Promise<{
   return { tags, txids, ended: () => end, stop: () => abort.abort() };
 }
 
-describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
+describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
   let container: StartedPostgreSqlContainer;
   const pools: pg.Pool[] = [];
   let writer: Db;
@@ -258,9 +258,11 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
       await writer.execute(sql`insert into posts (id, title) values (${nextId()}, 'In the gap')`);
       await expect.poll(() => hub.status()).toBe('ready');
 
+      const back = client.log.length;
       expect(await client.connect()).toBe(true);
-      // It sent its old cursor: the new epoch cannot open it, so the hub reset it.
-      await expect.poll(() => client.log.at(-1)).toBe('reset');
+      // It sent its old cursor: the new epoch cannot open it, so the hub reset it. (The write's hint
+      // may follow, when the listener was back before the commit.)
+      await expect.poll(() => client.log[back]).toBe('reset');
       await converged(client);
     } finally {
       await client.disconnect();

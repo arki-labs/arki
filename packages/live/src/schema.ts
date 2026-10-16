@@ -45,7 +45,7 @@ export const liveManifestSchema = z
  */
 export const txIdSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 
-/** An opaque base64url token of 16 to 256 characters (the hub's are 64): a sealed stream position. Grants nothing. */
+/** An opaque base64url token of 16 to 256 characters (the hub's are 75): a sealed stream position. Grants nothing. */
 export const liveCursorSchema = z.string().regex(/^[\w-]{16,256}$/);
 
 /** The frames of the SSE stream. */

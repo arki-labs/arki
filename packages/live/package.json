@@ -82,6 +82,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
@@ -89,8 +90,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:pack": "node scripts/pack-check.mjs",
+    "test:peers": "node scripts/peer-absence.mjs",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false && tsc -p examples/tsconfig.json && tsc -p e2e/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -99,12 +103,16 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/http": "workspace:*",
     "@arki/journal": "workspace:*",
     "@arki/library-tooling": "workspace:*",
+    "@arki/offline": "workspace:*",
+    "@arki/playwright-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@electric-sql/pglite": "catalog:",
@@ -113,21 +121,27 @@
     "@orpc/server": "catalog:backend",
     "@orpc/shared": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@playwright/test": "catalog:testing",
     "@tanstack/db": "catalog:",
     "@tanstack/query-db-collection": "catalog:",
     "@tanstack/react-query": "catalog:tanstack/react-query",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/react-start": "catalog:tanstack/start",
     "@testcontainers/postgresql": "catalog:testing",
     "@testing-library/react": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
     "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
+    "idb-keyval": "catalog:",
     "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
     "react": "catalog:react",
     "react-dom": "catalog:react",
+    "vite": "catalog:build-tools",
     "vitest": "catalog:"
   },
   "peerDependencies": {

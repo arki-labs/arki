@@ -202,6 +202,53 @@ describe('reconnecting', () => {
     }
   });
 
+  it('a connection that goes silent (no byte, no close) is dropped after 35 s and resumed with its cursor', async () => {
+    // Why: a half-open connection (network gone, no FIN or RST) would otherwise stay `live` forever
+    // and miss every write. The server sends a keepalive every 15 s; two missed ones mean it is dead.
+    const encoder = new TextEncoder();
+    let push: ((text: string) => void) | undefined;
+    const open = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = text => controller.enqueue(encoder.encode(text));
+      },
+    });
+    const { fetch, urls } = scriptedFetch([() => sse(open)]);
+    const { statuses } = client(fetch);
+    await vi.advanceTimersByTimeAsync(0);
+    push?.(frame(hello()));
+    await vi.advanceTimersByTimeAsync(34_000);
+    push?.(':keepalive\n\n');
+    await vi.advanceTimersByTimeAsync(34_000);
+    // Keepalives keep it open.
+    expect(urls).toHaveLength(1);
+    expect(statuses.at(-1)).toBe('live');
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(statuses.at(-1)).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(urls).toEqual(['/api/live', `/api/live?cursor=${CURSOR_A}`]);
+  });
+
+  it('the browser going offline drops the stream at once; coming back online reconnects at once', async () => {
+    const target = new EventTarget();
+    vi.stubGlobal('addEventListener', target.addEventListener.bind(target));
+    vi.stubGlobal('removeEventListener', target.removeEventListener.bind(target));
+    try {
+      const { fetch, urls } = scriptedFetch([() => sse(body([frame(hello())]))]);
+      const { statuses } = client(fetch);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(statuses.at(-1)).toBe('live');
+      target.dispatchEvent(new Event('offline'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(statuses.at(-1)).toBe('reconnecting');
+      expect(urls).toHaveLength(1);
+      target.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(urls).toEqual(['/api/live', `/api/live?cursor=${CURSOR_A}`]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('stop aborts the stream and ends every retry', async () => {
     const { fetch, urls } = scriptedFetch([() => new Response(null, { status: 500 })]);
     const { live, statuses } = client(fetch);

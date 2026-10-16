@@ -11,11 +11,25 @@
  *   at `start()`, fresh IV every time (`cursor.ts`). A client cannot count
  *   the frames its grant hides from it. A cursor this hub cannot open is
  *   unknown and resets.
+ * - A `change` frame is sealed once, the first time a stream needs it, and
+ *   every stream that gets the frame gets that same cursor. Sealing per
+ *   stream would cost one AES-GCM call per client per frame; this costs one
+ *   per frame. It leaks nothing: a client sees one frame's cursor whichever
+ *   stream it came on, and still cannot read the frame number. `begin`
+ *   cursors and `cursor()` are sealed fresh each time.
  * - `open()` opens the cursor, then attaches the stream and reads the ring's
  *   high-water mark in one synchronous step. Every later frame reaches it; every earlier one is in the
  *   replay or covered by a reset.
- * - A cursor of this epoch still in the ring resumes. Anything else (none,
- *   another epoch, evicted, from the future) resets.
+ * - Resume or reset depends on the cursor's age alone: a cursor of this
+ *   epoch taken at most `replayMs` ago resumes, an older one resets. The ring
+ *   evicts by that same age, so every frame a young cursor needs is kept.
+ *   Anything else (none, another epoch, from the future) resets. Never by
+ *   count: frames of hidden tables count too, so a client could learn from a
+ *   reset that many of them happened.
+ * - `replayFrames` is a hard cap, not an eviction: a ring that reaches it
+ *   means the hub is overloaded. It starts a new epoch and ends every stream
+ *   with `gap`, so every client resets together; that reveals only "the hub
+ *   was overloaded", the same to everyone. Logged at warn.
  * - A stream whose queue passes `subscriberFrames` gets `bye`: it reconnects
  *   with its cursor instead of buffering without bound.
  * - `stop()` is final and settles once: every stream gets `bye`, the batch
@@ -46,9 +60,13 @@ export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Pro
 export type LiveLimits = {
   /** Tags are unioned for this long, in ms (a fixed window, so a write storm still flushes). Default 20. */
   readonly batchMs?: number;
-  /** Frames kept for resume. Default 4096. */
+  /**
+   * The most frames the replay ring may hold. Reaching it is an overload: a new epoch starts and
+   * every client resets together. Size it above `replayMs` × the peak frame rate (at most
+   * 1000 / `batchMs` + commits per second / 256, per 256 tables in a window). Default 65 536.
+   */
   readonly replayFrames?: number;
-  /** Frames older than this many ms are evicted. Default 120 000. */
+  /** A cursor taken this many ms ago still resumes; older ones reset, and frames older than this are evicted. Default 120 000. */
   readonly replayMs?: number;
   /** Over this many queued frames the stream gets `bye`. Default 256. */
   readonly subscriberFrames?: number;
@@ -58,9 +76,9 @@ const limitsSchema = z
   .object({
     /** Tags are unioned for this long (a fixed window, so a write storm still flushes). */
     batchMs: z.int().positive().default(20),
-    /** Frames kept for resume. */
-    replayFrames: z.int().positive().default(4096),
-    /** Frames older than this are evicted. */
+    /** The ring's hard cap: reaching it starts a new epoch (an overload). */
+    replayFrames: z.int().positive().default(65_536),
+    /** The age up to which a cursor resumes; frames older than this are evicted. */
     replayMs: z.int().positive().default(120_000),
     /** Over this many queued frames the stream gets `bye`. */
     subscriberFrames: z.int().positive().default(256),
@@ -99,8 +117,11 @@ export type LiveHub = {
 
 type ChangeFrame = Extract<LiveFeed, { kind: 'change' }>;
 type EndFrame = Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
-/** A frame as the hub holds it: its position, not yet sealed into a cursor. */
-type HeldChange = Omit<ChangeFrame, 'cursor'> & { readonly at: CursorPosition };
+/** A frame as the hub holds it: its position, and its cursor, sealed on first use and shared by every stream. */
+type HeldChange = Omit<ChangeFrame, 'cursor'> & {
+  readonly at: CursorPosition;
+  readonly cursor: () => Promise<LiveCursor>;
+};
 type Held = { readonly kind: 'begin'; readonly mode: 'resume' | 'reset'; readonly at: CursorPosition } | HeldChange;
 
 type Subscriber = {
@@ -182,7 +203,7 @@ export function createLiveHub(options: {
   let cipher: CursorCipher | undefined;
   let epoch = '';
   let seq = 0;
-  const ring = replayRing<HeldChange>({ frames: limits.replayFrames, ms: limits.replayMs });
+  const ring = replayRing<HeldChange>({ ms: limits.replayMs });
   /** The open batch: each table, with the transactions that wrote it. */
   const batch = new Map<string, { readonly tag: TableTag; readonly txids: Set<string> }>();
   /** Every transaction of the open batch, for the per-frame cap. */
@@ -237,16 +258,25 @@ export function createLiveHub(options: {
     const tables = [...batch.values()];
     batch.clear();
     batchTxIds.clear();
-    if (state !== 'ready' || tables.length === 0) return;
+    if (state !== 'ready' || cipher === undefined || tables.length === 0) return;
+    const sealer = cipher;
     const now = Date.now();
+    ring.evict(now);
     for (let from = 0; from < tables.length; from += MAX_TAGS_PER_FRAME) {
+      if (ring.size() >= limits.replayFrames) {
+        overload();
+        return;
+      }
       seq += 1;
       const part = tables.slice(from, from + MAX_TAGS_PER_FRAME);
       const txidsByTag = part.map(entry => [...entry.txids]);
+      const at: CursorPosition = { epoch, seq, at: now };
+      let sealed: Promise<LiveCursor> | undefined;
       // Each frame names exactly the transactions that wrote its own tables.
       const frame: HeldChange = {
         kind: 'change',
-        at: { epoch, seq },
+        at,
+        cursor: () => (sealed ??= sealer.seal(at)),
         tags: part.map(entry => entry.tag),
         txids: [...new Set(txidsByTag.flat())],
         txidsByTag,
@@ -254,7 +284,6 @@ export function createLiveHub(options: {
       ring.add(seq, now, frame);
       for (const subscriber of subscribers) deliver(subscriber, frame);
     }
-    ring.evict(now);
     debugHub.debug('{epoch}: frame {seq} with {tables} tables to {streams} streams', {
       epoch,
       seq,
@@ -281,6 +310,18 @@ export function createLiveHub(options: {
     ring.clear();
     state = 'ready';
     debugHub.debug('{epoch}: ready', { epoch });
+  }
+
+  /**
+   * The ring reached its cap: a new epoch, every stream ends with `gap`, every client resets. The
+   * frame being flushed is not sent: the resets refetch every live query, which covers it.
+   */
+  function overload(): void {
+    debugHub.warn(
+      '{epoch}: overloaded: the replay ring reached its cap of {cap} frames within {replayMs} ms; starting a new epoch, {streams} streams reset',
+      { epoch, cap: limits.replayFrames, frames: ring.size(), replayMs: limits.replayMs, streams: subscribers.size },
+    );
+    beginEpoch();
   }
 
   function receive(event: LiveSourceEvent): void {
@@ -313,9 +354,12 @@ export function createLiveHub(options: {
     }
   }
 
-  /** The frames to replay after `position`, or `undefined` for a reset (another epoch, evicted, from the future). */
-  function replayAfter(position: CursorPosition): readonly HeldChange[] | undefined {
-    if (position.epoch !== epoch) return undefined;
+  /**
+   * The frames to replay after `position`, or `undefined` for a reset: another epoch, older than
+   * `replayMs` (by its own age only, whatever happened since), or from the future.
+   */
+  function replayAfter(position: CursorPosition, now: number): readonly HeldChange[] | undefined {
+    if (position.epoch !== epoch || now - position.at > limits.replayMs) return undefined;
     return ring.after(position.seq, seq);
   }
 
@@ -355,7 +399,7 @@ export function createLiveHub(options: {
       }
       case 'change': {
         const { tags, txids, txidsByTag } = item;
-        return { kind: 'change', cursor: await sealer.seal(item.at), tags, txids, txidsByTag };
+        return { kind: 'change', cursor: await item.cursor(), tags, txids, txidsByTag };
       }
       default: {
         return item;
@@ -425,11 +469,12 @@ export function createLiveHub(options: {
       // The hub may have changed while the cursor was opened: check again, then attach and read the
       // high-water mark in one synchronous step, so no frame can fall between them.
       const sealer = assertReady();
-      ring.evict(Date.now());
-      const replay = position === undefined ? undefined : replayAfter(position);
+      const now = Date.now();
+      ring.evict(now);
+      const replay = position === undefined ? undefined : replayAfter(position, now);
       const preamble: readonly Held[] =
         position === undefined || replay === undefined
-          ? [{ kind: 'begin', mode: 'reset', at: { epoch, seq } }]
+          ? [{ kind: 'begin', mode: 'reset', at: { epoch, seq, at: now } }]
           : [{ kind: 'begin', mode: 'resume', at: position }, ...replay];
       const onAbort = (): void => close(subscriber);
       const subscriber: Subscriber = {
@@ -455,7 +500,7 @@ export function createLiveHub(options: {
     async cursor() {
       // The position is read now, before any await: what the caller reads afterwards is covered.
       if (state !== 'ready' || cipher === undefined) return;
-      return cipher.seal({ epoch, seq });
+      return cipher.seal({ epoch, seq, at: Date.now() });
     },
 
     connections: () => subscribers.size,

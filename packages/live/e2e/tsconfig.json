@@ -1,0 +1,11 @@
+{
+  "extends": "@arki/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node", "@tanstack/start-client-core"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "app/dist", "test-results", "playwright-report"]
+}

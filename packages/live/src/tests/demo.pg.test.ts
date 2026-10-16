@@ -1,5 +1,5 @@
 /**
- * The M2 demo as a test, on real Postgres 16 and 17 (testcontainers) behind a
+ * The M2 demo as a test, on real Postgres 16 and 18 (testcontainers) behind a
  * real HTTP server — what the README's `curl -N` recipe shows by hand:
  *
  *   1. `GET /api/live` answers `hello` (a reset: no cursor yet).
@@ -37,7 +37,7 @@ const manifest = liveManifest({ posts: { list: contract.meta(live({ reads: [POST
 const LISTENER = 'blog_listener';
 const TOKEN = 'demo-token';
 
-describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('demo on %s', image => {
+describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('demo on %s', image => {
   let container: StartedPostgreSqlContainer;
   let writer: pg.Pool;
   let listenPool: pg.Pool;
@@ -91,7 +91,7 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('demo on %s', image 
     const txid = inserted.rows[0]?.txid;
     expect(await stream.next()).toEqual({
       kind: 'change',
-      cursor: expect.stringMatching(/^[\w-]{64}$/),
+      cursor: expect.stringMatching(/^[\w-]{75}$/),
       tags: [POSTS],
       txids: [txid],
     });

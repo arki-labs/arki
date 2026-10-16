@@ -86,19 +86,21 @@ afterEach(() => {
 });
 
 describe('the replay ring (step 5)', () => {
-  it('keeps exactly `frames` frames: the cursor at the bound resumes, one below resets', () => {
-    const ring = replayRing<string>({ frames: 3, ms: 1000 });
-    for (let seq = 1; seq <= 5; seq += 1) ring.add(seq, 0, `f${seq}`);
-    ring.evict(0);
-    expect(ring.after(2, 5)).toEqual(['f3', 'f4', 'f5']);
-    expect(ring.after(1, 5)).toBeUndefined();
-    expect(ring.after(5, 5)).toEqual([]);
+  it('never evicts by count: every frame inside the age is kept, and a cursor anywhere in it resumes', () => {
+    // Why: hidden-table frames count too; a count bound would make resume depend on them.
+    const ring = replayRing<string>({ ms: 1000 });
+    for (let seq = 1; seq <= 10_000; seq += 1) ring.add(seq, 0, `f${seq}`);
+    ring.evict(1000);
+    expect(ring.size()).toBe(10_000);
+    expect(ring.after(0, 10_000)).toHaveLength(10_000);
+    expect(ring.after(9997, 10_000)).toEqual(['f9998', 'f9999', 'f10000']);
+    expect(ring.after(10_000, 10_000)).toEqual([]);
     // A cursor ahead of the last frame (another hub's numbering) never resumes.
-    expect(ring.after(6, 5)).toBeUndefined();
+    expect(ring.after(10_001, 10_000)).toBeUndefined();
   });
 
   it('keeps a frame exactly `ms` old and evicts it one millisecond later', () => {
-    const ring = replayRing<string>({ frames: 100, ms: 1000 });
+    const ring = replayRing<string>({ ms: 1000 });
     ring.add(1, 0, 'old');
     ring.add(2, 500, 'new');
     ring.evict(1000);
@@ -151,7 +153,7 @@ describe('start (step 2)', () => {
     expect(begin).toMatchObject({ kind: 'begin', mode: 'reset' });
     if (begin?.kind !== 'begin') throw new Error('expected begin');
     // Opaque: 64 base64url characters, nothing ordinal to read.
-    expect(parseLiveCursor(begin.cursor)).toMatch(/^[\w-]{64}$/);
+    expect(parseLiveCursor(begin.cursor)).toMatch(/^[\w-]{75}$/);
     await hub.stop();
   });
 
