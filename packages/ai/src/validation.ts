@@ -3,6 +3,8 @@
  */
 
 import { z } from '@arki/contracts';
+import { SchemaError, pathOf, parse, parseAsync } from '@arki/schema';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { ValidationError } from './errors';
 
 /**
@@ -180,47 +182,42 @@ export const chatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 /**
- * Validate input with detailed error messages
+ * Validate input with detailed error messages.
+ * Takes any Standard Schema (zod, valibot, arktype, ...). A schema that
+ * cannot run synchronously throws `SchemaRunError`; that is a bug, not bad input.
  */
-export function validateInput<T>(
-  schema: z.ZodSchema<T>,
+export function validateInput<S extends StandardSchemaV1>(
+  schema: S,
   input: unknown,
   errorMessage?: string
-): T {
-  const result = schema.safeParse(input);
-
-  if (!result.success) {
-    const errorDetails = result.error.issues.map(e =>
-      `${e.path.join('.')}: ${e.message}`
-    ).join(', ');
-
-    throw new ValidationError(
-      errorMessage || `Input validation failed: ${errorDetails}`
-    );
+): SchemaOutput<S> {
+  try {
+    return parse(schema, input);
+  } catch (error) {
+    throw toValidationError(error, errorMessage);
   }
-
-  return result.data;
 }
 
 /**
  * Async validation wrapper
  */
-export async function validateInputAsync<T>(
-  schema: z.ZodSchema<T>,
+export async function validateInputAsync<S extends StandardSchemaV1>(
+  schema: S,
   input: unknown,
   errorMessage?: string
-): Promise<T> {
-  const result = await schema.safeParseAsync(input);
-
-  if (!result.success) {
-    const errorDetails = result.error.issues.map(e =>
-      `${e.path.join('.')}: ${e.message}`
-    ).join(', ');
-
-    throw new ValidationError(
-      errorMessage || `Input validation failed: ${errorDetails}`
-    );
+): Promise<SchemaOutput<S>> {
+  try {
+    return await parseAsync(schema, input);
+  } catch (error) {
+    throw toValidationError(error, errorMessage);
   }
+}
 
-  return result.data;
+/** Turns invalid-input errors into `ValidationError`; anything else is rethrown as is. */
+function toValidationError(error: unknown, errorMessage?: string): unknown {
+  if (!(error instanceof SchemaError)) return error;
+  return new ValidationError(
+    errorMessage || `Input validation failed: ${error.message}`,
+    error.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message }))
+  );
 }

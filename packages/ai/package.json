@@ -128,10 +128,12 @@
     "@opentelemetry/api": "catalog:opentelemetry",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",
     "streamdown": "catalog:ai",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "types": "./dist/src/index.d.ts",
