@@ -73,6 +73,8 @@ log.debug('state {state}', () => ({ state: inspect(big) })); // runs only when d
 log.emit({ level: 'info', eventName: 'payment.accepted', body: { amount: 42 } });
 ```
 
+A failure value from [`@arki/failure`](../failure) is a field like any other: `log.warn('lookup failed', { failure })`. It prints `code`, `message`, `status`, `data` and `remediation`, plus `causes`: the cause chain, nearest first, through nested failures and thrown errors. The list stops at a cycle or after 64 links, the same limit as `findCause`. `@arki/log` knows a failure by its `'~failure'` brand, so it still has no dependencies. `serializeFailure(failure)` returns the same plain fields.
+
 The template is never turned into a string on the hot path. Formatters render it after redaction, so a secret cannot end up in the message text. `{{` and `}}` are literal braces.
 
 ## Context
@@ -154,7 +156,7 @@ const app = await defineApp('checkout')
 
 | Entry | Holds |
 | --- | --- |
-| `@arki/log` | `getLogger`, `configure`, `createLogging`, `withContext`, `shareContext`, `Level`, processors, formatters, core sinks, wrappers, types |
+| `@arki/log` | `getLogger`, `configure`, `createLogging`, `withContext`, `shareContext`, `Level`, `serializeFailure`, processors, formatters, core sinks, wrappers, types |
 | `@arki/log/node` | `stdout`, `stderr`, `file`, `fromEnv`, `asyncContext` |
 | `@arki/log/otel` | `otelTrace`, `otelSink` |
 | `@arki/log/testing` | `fakeLog` |

@@ -1,5 +1,5 @@
 import type { Fields, Value } from './types.js';
-import { serializeError } from './serialize.js';
+import { isFailureLike, serializeError, serializeFailure } from './serialize.js';
 
 // A hand-written JSON writer for field values (RFC §13). Strings with nothing to
 // escape skip JSON.stringify; everything else is written directly.
@@ -41,6 +41,7 @@ export function jsonValue(value: Value, depth = 0): string {
   if (depth >= MAX_DEPTH) return '"[MaxDepth]"';
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? 'null' : `"${value.toISOString()}"`;
   if (value instanceof Error) return `{${jsonMembers(serializeError(value), depth + 1)}}`;
+  if (isFailureLike(value)) return `{${jsonMembers(serializeFailure(value), depth + 1)}}`;
   if (isValueArray(value)) {
     let out = '[';
     for (const [index, element] of value.entries()) {
@@ -92,13 +93,14 @@ export function isValueArray(value: Value): value is readonly Value[] {
   return Array.isArray(value);
 }
 
-/** A plain field map: not an array, Date or Error. */
+/** A plain field map: not an array, Date, Error or failure. */
 export function isFieldMap(value: Value): value is Fields {
   return (
     typeof value === 'object' &&
     value !== null &&
     !isValueArray(value) &&
     !(value instanceof Date) &&
-    !(value instanceof Error)
+    !(value instanceof Error) &&
+    !isFailureLike(value)
   );
 }

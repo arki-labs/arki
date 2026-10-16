@@ -76,6 +76,7 @@
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
@@ -87,7 +88,8 @@
     "pino": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@opentelemetry/api": "catalog:opentelemetry",

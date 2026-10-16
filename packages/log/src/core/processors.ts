@@ -1,7 +1,7 @@
 import type { Fields, LogRecord, Processor, Value } from './types.js';
 import { isFieldMap } from './json.js';
 import { updateRecord } from './record.js';
-import { serializeError } from './serialize.js';
+import { isFailureLike, serializeError, serializeFailure } from './serialize.js';
 
 export type Censor = string | ((value: Value, path: string) => Value);
 
@@ -34,6 +34,12 @@ export function redact(paths: readonly string[], options: { readonly censor?: Ce
         }
       }
       return copy ?? value;
+    }
+    if (isFailureLike(value)) {
+      // Like the error below: redact the serialised failure, so paths reach its data and causes.
+      const serialised = serializeFailure(value);
+      const redacted = apply(serialised, segments, index, path);
+      return redacted === serialised ? value : redacted;
     }
     if (!isFieldMap(value)) return value;
     let copy: Record<string, Value> | undefined;

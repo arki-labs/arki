@@ -6,7 +6,7 @@ import type { AnyValue, AnyValueMap, LoggerProvider } from '@opentelemetry/api-l
 import { isSpanContextValid, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 
 import type { LogRecord, Sink, TraceContext, TraceSource, Value } from '../core/types.js';
-import { serializeError } from '../core/serialize.js';
+import { isFailureLike, serializeError, serializeFailure } from '../core/serialize.js';
 
 /** The instrumentation scope name `otelSink` asks the provider for. */
 const SCOPE_NAME = '@arki/log';
@@ -86,6 +86,7 @@ function toAnyValue(value: Value): AnyValue {
   }
   if (value instanceof Date) return value.toISOString();
   if (value instanceof Error) return toAnyValue(serializeError(value));
+  if (isFailureLike(value)) return toAnyValue(serializeFailure(value));
   if (isValueArray(value)) return value.map(item => toAnyValue(item));
   const map: AnyValueMap = {};
   for (const key in value) map[key] = toAnyValue(value[key]);

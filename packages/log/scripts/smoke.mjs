@@ -2,7 +2,7 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes.
 // It imports the core entry only; the unit tests cover the details.
 
-import { configure, getLogger, json, memorySink } from '../dist/core/index.js';
+import { configure, getLogger, json, memorySink, serializeFailure } from '../dist/core/index.js';
 
 // Created before configure(): late binding must make it obey the config.
 const log = getLogger('smoke').child('child');
@@ -21,6 +21,12 @@ const records = memory.records;
 const info = records.find(record => record.levelName === 'info');
 const line = JSON.parse(json()(records[1]));
 
+// A failure as `@arki/failure` makes it: the brand and `cause` live on the prototype.
+const failureProto = Object.defineProperty({}, '~failure', { value: true });
+Object.defineProperty(failureProto, 'cause', { get: () => new Error('disk full') });
+const failure = Object.assign(Object.create(failureProto), { code: 'db.down', message: 'db down', status: 503 });
+const failureFields = serializeFailure(failure);
+
 const checks = [
   ['record count (replayed warn + 5 levels)', records.length, 6],
   ['replayed record first', records[0]?.message(), 'early 0'],
@@ -28,6 +34,7 @@ const checks = [
   ['rendered message', info?.message(), 'info from smoke'],
   ['disabled level wrote nothing', records.filter(record => record.levelName === 'trace').length, 0],
   ['json line', `${line.levelName}:${line.message}`, 'debug:debug from smoke'],
+  ['failure cause chain', `${failureFields.code}<-${failureFields.causes?.[0]?.message}`, 'db.down<-disk full'],
 ];
 
 const runtime =
