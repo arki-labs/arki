@@ -6,7 +6,9 @@
  */
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
-import type { QueueEvent } from './queue.ts';
+import type { Identified, InputOf } from '@arki/contracts/orpc';
+
+import type { OfflineSafeOperation, QueueEvent } from './queue.ts';
 import { useOfflineQueue } from './OfflineQueueProvider.tsx';
 
 // ---------------------------------------------------------------------------
@@ -53,43 +55,31 @@ const getServerFalse = (): boolean => false;
 // useOfflineMutation
 // ---------------------------------------------------------------------------
 
-export interface UseOfflineMutationOptions {
-  /**
-   * Dot-path of the procedure on the server router (e.g. `['highlights', 'create']`).
-   *
-   * Kept explicit rather than inferred because oRPC's client erases path metadata
-   * at the leaf — the procedure callable carries the path only in a closure.
-   */
-  path: readonly string[];
-}
-
-export interface UseOfflineMutationResult<TInput> {
-  mutate: (input: TInput) => Promise<{ idempotencyKey: string }>;
-  isQueued: boolean;
-}
+export type UseOfflineMutationResult<TInput> = {
+  readonly mutate: (input: TInput) => Promise<{ idempotencyKey: string }>;
+  readonly isQueued: boolean;
+};
 
 /**
- * Enqueues a mutation by procedure path. The replay loop uses the queue's
- * configured `rpc.call(path, input, headers)` to actually invoke the server.
- *
- * The caller's server-side procedure MUST be marked with `.use(offlineSafe())`
- * — otherwise replays are not deduped. There is no compile-time enforcement
- * of this contract (oRPC client procedures do not carry meta typings); it is
- * the developer's responsibility to keep client and server in sync.
+ * Queue calls to an offline-safe procedure. Pass its utils leaf from
+ * `createOrpcUtils` — `useOfflineMutation(orpc.posts.create)`. It compiles
+ * only when the contract marked the procedure `offlineSafe(p)`; the input
+ * type comes from the contract. The replay loop sends each call with an
+ * `Idempotency-Key`, which the server's `idempotency(repo)` middleware uses
+ * to dedupe replays.
  */
-export function useOfflineMutation<TInput = unknown>(
-  options: UseOfflineMutationOptions,
-): UseOfflineMutationResult<TInput> {
+export function useOfflineMutation<Op extends OfflineSafeOperation>(
+  carrier: Identified<Op>,
+): UseOfflineMutationResult<InputOf<Op>> {
   const { queue } = useOfflineQueue();
   const status = useQueueStatus();
-  const { path } = options;
 
   const mutate = useCallback(
-    async (input: TInput): Promise<{ idempotencyKey: string }> => {
-      const result = await queue.enqueue<TInput>({ path, input });
+    async (input: InputOf<Op>): Promise<{ idempotencyKey: string }> => {
+      const result = await queue.enqueue(carrier, input);
       return { idempotencyKey: result.idempotencyKey };
     },
-    [queue, path],
+    [queue, carrier],
   );
 
   return {

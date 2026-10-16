@@ -17,7 +17,7 @@
  * - `@orpc/contract` only in contract files — `entrypoints/rpc.ts` and
  *   the app's `rpc.ts`.
  * - A contract file imports only `@orpc/contract`, zod / `@arki/contracts`,
- *   and its model (`../model/*`, or feature contracts from the app contract)
+ *   the `offlineSafe` marker (`@arki/offline/orpc`), and its model (`../model/*`, or feature contracts from the app contract)
  *   — it ships to the browser.
  * - `model/` imports no `usecases/`, `infra/` or `entrypoints/`, and no
  *   database runtime — except `model/tables.ts`, which declares tables.
@@ -73,14 +73,15 @@ const MODEL_INWARD = layer(['usecases', 'infra', 'entrypoints'], 'model/ is the 
 const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoints/: a usecase does not know how it is called.');
 
 /**
- * Only the contract's own vocabulary: oRPC contract, zod, its model, and (in
- * the app contract) the feature contracts.
+ * Only the contract's own vocabulary: oRPC contract, zod, the `offlineSafe`
+ * marker (policy is declared on the contract), its model, and (in the app
+ * contract) the feature contracts.
  */
 const CONTRACT_ONLY = {
   regex:
-    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$).*',
+    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$).*',
   message:
-    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, ../model/* and its child contracts (../features/<child>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
+    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), ../model/* and its child contracts (../features/<child>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
 };
 
 /**

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { oc } from '@orpc/contract';
+import { z } from 'zod';
+
+import { OPERATION, operations } from '@arki/contracts/orpc';
+
 import type { QueuedMutation, AnyRpcClient } from '../../src/mutations/queue.ts';
+import { offlineSafe } from '../../src/orpc/offline-safe-marker.ts';
 import * as idbKeyval from 'idb-keyval';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +39,16 @@ const { createOfflineMutationQueue } = await import('../../src/mutations/queue.t
 // ---------------------------------------------------------------------------
 
 const TEST_PATH = ['posts', 'create'] as const;
+
+const contract = {
+  posts: {
+    create: offlineSafe(oc.input(z.object({ title: z.string() }))),
+    list: oc.input(z.object({ cursor: z.string().optional() })),
+  },
+};
+const ops = operations(contract);
+/** The utils leaf of posts.create, reduced to what the queue reads: its operation. */
+const createPost = { [OPERATION]: ops.posts.create };
 
 function makeRpc(
   behavior: 'success' | 'fail-401' | 'fail-422' | 'fail-500' | 'network-error' = 'success',
@@ -75,7 +91,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q1', deadLetterStorageKey: 'dl1' });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Hello' } });
+    await queue.enqueue(createPost, { title: 'Hello' });
 
     // The mutation must be persisted: we verify by checking the raw storage key
     const raw = store['q1'];
@@ -85,11 +101,32 @@ describe('OfflineMutationQueue', () => {
     queue.dispose();
   });
 
+  it('enqueue() persists the path the contract gives the operation', async () => {
+    const queue = createOfflineMutationQueue({ rpc: makeRpc('success'), storageKey: 'qp', deadLetterStorageKey: 'dlp' });
+
+    await queue.enqueue(createPost, { title: 'Path' });
+
+    expect(store['qp']).toContain(JSON.stringify(TEST_PATH));
+    queue.dispose();
+  });
+
+  it('enqueue() refuses, at run time, a procedure the contract did not mark offlineSafe and a forged carrier', async () => {
+    const queue = createOfflineMutationQueue({ rpc: makeRpc('success'), storageKey: 'qr', deadLetterStorageKey: 'dlr' });
+    const unmarked: object = { [OPERATION]: ops.posts.list };
+    const forged: object = { [OPERATION]: { path: ['posts', 'create'], name: 'posts.delete', meta: { offlineSafe: true } } };
+
+    // Plain JavaScript callers have no compiler; Reflect.apply stands in for one.
+    await expect(Reflect.apply(queue.enqueue, queue, [unmarked, {}])).rejects.toThrow(/not marked offlineSafe/);
+    await expect(Reflect.apply(queue.enqueue, queue, [forged, {}])).rejects.toThrow(TypeError);
+    expect(store['qr']).toBeUndefined();
+    queue.dispose();
+  });
+
   it('enqueue() returns the idempotencyKey matching the stored mutation id', async () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q2', deadLetterStorageKey: 'dl2' });
 
-    const result = await queue.enqueue({ path: TEST_PATH, input: { title: 'World' } });
+    const result = await queue.enqueue(createPost, { title: 'World' });
 
     expect(result.idempotencyKey).toBe('test-id-1');
     expect(result.status).toBe('queued');
@@ -101,9 +138,9 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q3', deadLetterStorageKey: 'dl3' });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'First' } });
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Second' } });
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Third' } });
+    await queue.enqueue(createPost, { title: 'First' });
+    await queue.enqueue(createPost, { title: 'Second' });
+    await queue.enqueue(createPost, { title: 'Third' });
 
     // Read the stored state to verify order
     const { createQueueStorage } = await import('../../src/mutations/storage.ts');
@@ -125,7 +162,7 @@ describe('OfflineMutationQueue', () => {
     const events: Array<{ type: string }> = [];
     queue.subscribe((event) => events.push(event));
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Event test' } });
+    await queue.enqueue(createPost, { title: 'Event test' });
 
     const enqueued = events.find((e) => e.type === 'enqueued');
     expect(enqueued).toBeDefined();
@@ -149,7 +186,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Will fail' } });
+    await queue.enqueue(createPost, { title: 'Will fail' });
     await queue.drain();
 
     // Wait for dead-letter count update (it's async via subscribe)
@@ -170,7 +207,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Permanent fail' } });
+    await queue.enqueue(createPost, { title: 'Permanent fail' });
     await queue.drain();
 
     const items = await queue.deadLetter.list();
@@ -189,7 +226,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Discard me' } });
+    await queue.enqueue(createPost, { title: 'Discard me' });
     await queue.drain();
 
     const before = await queue.deadLetter.list();
@@ -220,7 +257,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue({ path: TEST_PATH, input: { title: 'Retry me' } });
+    await queue.enqueue(createPost, { title: 'Retry me' });
     await queue.drain();
 
     const dlBefore = await queue.deadLetter.list();

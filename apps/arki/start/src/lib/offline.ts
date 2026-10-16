@@ -8,8 +8,9 @@ import { createIdbPersister } from '@arki/offline/query';
  * network outages.
  *
  * For Tier 2 (queued offline writes), see @arki/offline/mutations and
- * @arki/offline/preset docs. Tier 2 requires backend idempotency — every
- * queued mutation must be marked with .use(offlineSafe()) on the server.
+ * @arki/offline/preset docs. Tier 2 requires backend idempotency — mark each
+ * queued procedure `offlineSafe(p)` on its contract (@arki/offline/orpc) and
+ * install `idempotency(repo)` once on the server's implementer.
  */
 export const idbPersister = createIdbPersister({
   storageKey: 'arki-query',

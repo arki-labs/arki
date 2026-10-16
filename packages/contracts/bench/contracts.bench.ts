@@ -7,10 +7,16 @@
 
 import { boolean, integer, jsonb, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 import { createInsertSchema as drizzleInsert, createSelectSchema as drizzleSelect } from 'drizzle-orm/zod';
+import { createORPCClient } from '@orpc/client';
+import type { ClientLink } from '@orpc/client';
+import type { ContractRouterClient } from '@orpc/contract';
+import { oc } from '@orpc/contract';
+import { createTanstackQueryUtils } from '@orpc/tanstack-query';
 import { z } from 'zod/v4';
 
 import { compare, defineSuite } from '@arki/bench';
 import { COLUMN_ZOD_SCHEMA, createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';
+import { operations } from '@arki/contracts/orpc';
 
 const idColumn = () => {
   const builder = varchar('id', { length: 256 }).notNull().primaryKey();
@@ -155,6 +161,33 @@ const INSERT_CONTRACT = {
   description:
     'the outcome of parsing an insert payload, `ok` or `error:<path of the first issue>`; nullable columns may be left out; a wrong id prefix is an error on `id`',
 };
+const procedure = () => oc.input(z.object({ id: z.string() })).output(z.object({ id: z.string() }));
+
+/** A generated contract of `count` procedures in one group, and its leaf keys in order. */
+type ContractSize = {
+  name: string;
+  contract: { readonly items: Record<string, ReturnType<typeof procedure>> };
+  keys: readonly string[];
+};
+
+function contractOf(count: number): ContractSize {
+  const items: Record<string, ReturnType<typeof procedure>> = {};
+  for (let index = 0; index < count; index++) {
+    items[`p${String(index)}`] = procedure();
+  }
+  return { name: `${String(count)} procedures`, contract: { items }, keys: Object.keys(items) };
+}
+
+const contractSizes: readonly ContractSize[] = [contractOf(10), contractOf(100), contractOf(1000)];
+
+// The utils proxy never sends a request here; the link only satisfies the client's type.
+const silentLink: ClientLink<Record<never, never>> = { call: () => Promise.resolve(null) };
+
+const OPERATIONS_CONTRACT = {
+  id: 'contracts-operations/v1',
+  description: 'the dotted name of every procedure in the contract, in contract order, read from the built tree',
+};
+
 const NO_PREFIX_CHECK = 'does not check the ID prefix (accepts `org_abc123` as a user id)';
 
 export default defineSuite({
@@ -165,6 +198,7 @@ export default defineSuite({
     '`@arki/contracts` calls `drizzle-orm/zod`, then adds the per-column runtime schemas that ID factories stash on a column. Its extra work is the ID prefix check; plain `drizzle-orm/zod` does not do it, so it is shown without a ratio.',
     'The hand-written object checks the prefix too, and the same rules the table implies (32-bit integers, a JSON value in the `jsonb` column), but it never reads the table: it shows the floor for building and parsing, not a replacement that stays in sync with the table.',
     'Building usually happens once at startup; parsing happens on every row.',
+    '`operations()` walks a whole contract once, eagerly; oRPC\'s `createTanstackQueryUtils` is a lazy Proxy that does the work on each property access. The table shows the cost of touching every leaf once, which is what an app that renders many screens pays.',
   ],
   groups: [
     compare<Probe>({
@@ -294,6 +328,37 @@ export default defineSuite({
           differs: NO_PREFIX_CHECK,
           setup: probe => ({ schema: drizzleInsert(users), row: probe.row }),
           run: ({ schema, row }) => outcome(schema, row),
+        }),
+      }),
+    }),
+    compare<ContractSize>({
+      id: 'operations',
+      title: 'Build the operation tree and touch every leaf',
+      contract: OPERATIONS_CONTRACT,
+      inputs: contractSizes,
+      expected: size => size.keys.map(key => `items.${key}`).join(','),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/contracts/orpc operations',
+          package: '@arki/contracts',
+          setup: size => size,
+          run: ({ contract, keys }) => {
+            const tree = operations(contract);
+            return keys.map(key => tree.items[key]?.name ?? '').join(',');
+          },
+        }),
+        orpc: c({
+          label: '@orpc/tanstack-query createTanstackQueryUtils',
+          package: '@orpc/tanstack-query',
+          setup: size => {
+            const client: ContractRouterClient<typeof size.contract> = createORPCClient(silentLink);
+            return { client, keys: size.keys };
+          },
+          run: ({ client, keys }) => {
+            const utils = createTanstackQueryUtils(client);
+            return keys.map(key => utils.items[key]?.key()[0].join('.') ?? '').join(',');
+          },
         }),
       }),
     }),

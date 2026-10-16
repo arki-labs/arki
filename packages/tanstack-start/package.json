@@ -33,6 +33,11 @@
       "import": "./src/orpc/client.ts",
       "browser": "./src/orpc/client.ts"
     },
+    "./orpc/query": {
+      "types": "./dist/src/orpc/query.d.ts",
+      "import": "./src/orpc/query.ts",
+      "browser": "./src/orpc/query.ts"
+    },
     "./orpc/server": {
       "types": "./dist/src/orpc/server.d.ts",
       "import": "./src/orpc/server.ts",
@@ -101,9 +106,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/ui": "workspace:*",
     "@orpc/client": "catalog:backend",
+    "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
     "@sentry/core": "^11.6.0",
@@ -150,10 +157,14 @@
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@sentry/tanstackstart-react": "catalog:",
+    "@testing-library/react": "catalog:testing",
     "@types/bun": "catalog:",
     "@types/node": "catalog:node",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "jsdom": "catalog:text-processing",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
     "vitest": "catalog:"
   },
   "sideEffects": [

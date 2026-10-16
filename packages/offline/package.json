@@ -75,14 +75,15 @@
   },
   "dependencies": {
     "@arki/async": "workspace:*",
+    "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/log": "workspace:*",
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "^0.12.3",
     "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
     "@tanstack/query-persist-client-core": "^5.104.1",
     "@tanstack/react-db": "catalog:",
     "@tanstack/react-query-persist-client": "catalog:tanstack/react-query",
-    "debug": "catalog:",
     "idb-keyval": "catalog:",
     "nanoid": "catalog:utilities",
     "superjson": "catalog:utilities",
@@ -91,6 +92,7 @@
     "workbox-strategies": "catalog:tanstack/start"
   },
   "peerDependencies": {
+    "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "drizzle-orm": "catalog:drizzle",
@@ -102,6 +104,8 @@
     "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@testing-library/react": "catalog:testing",

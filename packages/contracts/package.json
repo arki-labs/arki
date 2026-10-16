@@ -34,6 +34,11 @@
       "import": "./dist/drizzle.js",
       "default": "./dist/drizzle.js"
     },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -41,10 +46,13 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "README.md",
+    "docs/**",
+    "llms.txt",
     "LICENSE",
     "package.json"
   ],
@@ -56,6 +64,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "test": "vitest run",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -64,9 +73,13 @@
     "zod-form-data": "catalog:validation"
   },
   "peerDependencies": {
+    "@orpc/contract": "catalog:backend",
     "drizzle-orm": "catalog:drizzle"
   },
   "peerDependenciesMeta": {
+    "@orpc/contract": {
+      "optional": true
+    },
     "drizzle-orm": {
       "optional": true
     }
@@ -74,9 +87,13 @@
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/client": "catalog:backend",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/tanstack-query": "catalog:backend",
     "@types/node": "catalog:node",
     "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:",

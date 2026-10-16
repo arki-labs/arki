@@ -1,0 +1,15 @@
+# @arki/contracts
+
+> Shared Zod schemas for arki apps: prefixed ids, keyset pagination, Drizzle-derived branded schemas, and one typed identity per oRPC contract procedure.
+
+## Entries
+- @arki/contracts — z (zod/v4), formData, defineId(prefix), keyset(order), pageInput(keyset), page(item), Page<T>. Portable (Node, Bun, Deno, browser, Hermes).
+- @arki/contracts/drizzle — createSelectSchema, createInsertSchema, createUpdateSchema (branded, from a Drizzle table). Peer: drizzle-orm.
+- @arki/contracts/orpc — operations(contract) → a frozen tree with an Operation { path, name, meta } at each leaf; operationAt(contract, path) → Operation | undefined; OPERATION ('~op'), Identified<Op>, operationOf(carrier) (throws TypeError without one); types Operation, AnyOperation, OperationOf<C>, Operations<C>, InputOf, OutputOf, ErrorOf, MetaOf. Portable. Peer: @orpc/contract.
+
+## Rules
+- Policy goes on the contract, once. Mark it in the contract meta (e.g. offlineSafe(p) from @arki/offline/orpc); read it from the operation. Never restate it on the client.
+- name === path.join('.') — the same string the server stores (offline_idempotency_keys.procedure_path).
+- A contract key may not contain "." or be one of ~op, key, call, queryKey, queryOptions, infiniteKey, infiniteOptions, mutationKey, mutationOptions: operations() throws TypeError naming the path.
+- Input types are the client side of the schema (before transforms); output types the parsed side.
+- Works on minifyContractRouter output (reads path and meta only).

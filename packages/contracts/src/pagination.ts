@@ -37,8 +37,8 @@ export type Keyset<O extends KeysetOrder> = {
   readonly encode: (row: CursorValues<O>) => string;
   /** The values inside a cursor. Throws a `TypeError` on a cursor this keyset did not make. */
   readonly decode: (cursor: string) => CursorValues<O>;
-  /** Validates a cursor string sent by a client (it must decode). */
-  readonly cursor: z.ZodType<string>;
+  /** Validates a cursor string sent by a client (it must decode). A string on both sides of the wire. */
+  readonly cursor: z.ZodType<string, string>;
 };
 
 /** Tagged so a `Date` comes back a `Date`, not a string that happens to look like one. */

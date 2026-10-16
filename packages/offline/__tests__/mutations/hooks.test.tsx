@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
 import { createElement } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
+import { oc } from '@orpc/contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+
+import { OPERATION, operations } from '@arki/contracts/orpc';
 
 import type { OfflineMutationQueue, QueueEvent } from '../../src/mutations/queue.ts';
-import { useQueueStatus } from '../../src/mutations/hooks.ts';
+import { useOfflineMutation, useQueueStatus } from '../../src/mutations/hooks.ts';
 import { OfflineQueueProvider } from '../../src/mutations/OfflineQueueProvider.tsx';
+import { offlineSafe } from '../../src/orpc/offline-safe-marker.ts';
 
 afterEach(() => {
   cleanup();
@@ -53,5 +58,23 @@ describe('useQueueStatus', () => {
     render(createElement(OfflineQueueProvider, { queue }, createElement(QueueStatusView)));
 
     expect(screen.getByTestId('queue-status').textContent).toBe('queued=2 sending=true dead=1');
+  });
+});
+
+describe('useOfflineMutation', () => {
+  it('enqueues through the carrier it was given, so the queue persists the contract path', async () => {
+    const contract = { highlights: { create: offlineSafe(oc.input(z.object({ text: z.string() }))) } };
+    const carrier = { [OPERATION]: operations(contract).highlights.create };
+    const queue = makeQueueStub();
+    vi.mocked(queue.enqueue).mockResolvedValue({ idempotencyKey: 'k1', status: 'queued' });
+
+    const { result } = renderHook(() => useOfflineMutation(carrier), {
+      wrapper: ({ children }) => createElement(OfflineQueueProvider, { queue }, children),
+    });
+    const sent = await act(() => result.current.mutate({ text: 'hi' }));
+
+    expect(sent).toEqual({ idempotencyKey: 'k1' });
+    expect(queue.enqueue).toHaveBeenCalledWith(carrier, { text: 'hi' });
+    expect(carrier[OPERATION].path).toEqual(['highlights', 'create']);
   });
 });

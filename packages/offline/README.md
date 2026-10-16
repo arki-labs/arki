@@ -82,40 +82,62 @@ export const offline = createOfflineRuntime({
 </offline.Provider>
 ```
 
+#### The strict idempotency contract
+
+Every procedure queued by Tier 2 **must** be safe to execute twice with the same result. Declare it **once, on the contract**, with `offlineSafe(p)`:
+
+```ts
+// features/posts/entrypoints/rpc.ts — the browser-safe contract
+import { oc } from '@orpc/contract';
+import { offlineSafe } from '@arki/offline/orpc';
+
+export const postsRpcContract = {
+  create: offlineSafe(oc.input(createPostInput).output(post)),   // meta: { offlineSafe: true }, in value AND type
+  list: oc.input(pageInput(postOrder)).output(page(post)),
+};
+```
+
+`offlineSafe(p)` is the only way to get `offlineSafe: true` into the meta *type*: `.meta({ offlineSafe: true })` keeps the type the builder declared, so the compiler could never see it.
+
+Install the `idempotency(repo)` middleware **once**, where the app builds its implementer:
+
+```ts
+// core/orpc.ts (server)
+import { IdempotencyRepository, idempotency } from '@arki/offline/orpc';
+
+export const implementer = implement(rpcContract)
+  .$context<RequestContext>()
+  .use(idempotency(new IdempotencyRepository(db, idempotencyKeys)));
+```
+
+It acts only on procedures whose contract meta says `offlineSafe: true`; every other procedure passes straight through. For a marked one:
+
+1. Reads `Idempotency-Key` from the request header (the replay loop sends it). No key or no signed-in user → runs the handler as usual.
+2. Looks up `(idempotency_key, procedure_path, user_id)` in `offline_idempotency_keys`.
+3. Found within the 7-day TTL → returns the stored response **without re-running the handler**.
+4. Not found → runs the handler and stores its output on success.
+5. On error → stores nothing (the client can safely retry).
+
+On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@arki/tanstack-start/orpc/client`), so it carries the procedure's identity:
+
 ```tsx
+// lib/orpc/client.tsx
+export const orpc = createOrpcUtils(rpcContract, rpcClient);
+
 // Inside a component
 import { useOfflineMutation } from '@arki/offline/mutations';
 
-const { mutate, isQueued } = useOfflineMutation(orpc.posts.createPost);
+const { mutate, isQueued } = useOfflineMutation(orpc.posts.create);   // input typed from the contract
 await mutate({ title: 'Hello' });
-// Returns { idempotencyKey } — same key is attached to the HTTP header on replay
+// Returns { idempotencyKey } — the replay sends the same key as the Idempotency-Key header
 ```
 
-#### The strict idempotency contract
+**TypeScript enforcement:** `useOfflineMutation(orpc.posts.create)` and `queue.enqueue(orpc.posts.create, input)` only compile when the contract marked the procedure with `offlineSafe(p)`. An unmarked procedure, an optional `offlineSafe?: true`, `offlineSafe: false`, or a raw `createTanstackQueryUtils` leaf (no identity) is a compile-time error. `enqueue` checks the mark at run time too, for plain JavaScript callers.
 
-Every procedure queued by Tier 2 **must** be safe to execute twice with the same result. Mark them server-side with `offlineSafe()`:
+**Not promised:**
 
-```ts
-// In your backend procedure file
-import { offlineSafe } from '@arki/offline/orpc';
-
-export const createPost = protectedProcedure
-  .use(offlineSafe())      // stamps .meta.offlineSafe = true + idempotency middleware
-  .input(createPostInput)
-  .handler(async ({ input, context }) => {
-    // handler is skipped on replay — middleware returns cached response instead
-  });
-```
-
-The `offlineSafe()` middleware:
-
-1. Reads `Idempotency-Key` from the request header (sent by the client interceptor).
-2. Looks up `(idempotency_key, procedure_path, user_id)` in the `idempotency_keys` table.
-3. If found within 7-day TTL → returns the cached response **without re-running the handler**.
-4. If not found → wraps the handler, stores `(key, response_json)` on success.
-5. On error → does NOT store (client can safely retry).
-
-**TypeScript enforcement:** `queue.enqueue(procedure, input)` only compiles when `procedure.meta.offlineSafe` is `true`. Passing an unmarked procedure is a compile-time error — not a runtime one.
+- **That the handler is idempotent.** The mark is a declaration. A replay that misses the cache (a different key, an expired row) runs the handler again, side effects included. Making the handler safe to repeat is the author's job.
+- **That two concurrent replays run once.** The middleware is best-effort: lookup, run and store are separate steps, so two replays of one key arriving together can both run the handler.
 
 Add the idempotency table to each app's Drizzle schema:
 

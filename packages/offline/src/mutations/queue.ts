@@ -7,6 +7,11 @@
  */
 import { nanoid } from 'nanoid';
 
+import type { Identified, InputOf, Operation } from '@arki/contracts/orpc';
+import { operationOf } from '@arki/contracts/orpc';
+
+import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.ts';
+
 import { createQueueStorage } from './storage.ts';
 import type { QueueStorage } from './storage.ts';
 import { createDeadLetterStore } from './dead-letter.ts';
@@ -57,16 +62,20 @@ export interface OfflineMutationQueueOptions {
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
 }
 
-export interface EnqueueOptions<TInput = unknown> {
-  /** Dot-path of the procedure on the server router, e.g. `['highlights', 'create']`. */
-  path: readonly string[];
-  /** Serializable input. The replay loop sends it back through `rpc.call`. */
-  input: TInput;
-}
+/** An operation whose contract meta says `offlineSafe: true` (see `offlineSafe(p)` in `@arki/offline/orpc`). */
+export type OfflineSafeOperation = Operation<unknown, unknown, unknown, OfflineSafeMeta>;
 
 export interface OfflineMutationQueue {
-  enqueue<TInput = unknown>(
-    options: EnqueueOptions<TInput>,
+  /**
+   * Queue a call to an offline-safe procedure. `carrier` is its utils leaf
+   * (`orpc.posts.create` from `createOrpcUtils`): it carries the procedure's
+   * path, and the compiler accepts it only when the contract marked it
+   * `offlineSafe`. The input is serialisable; the replay loop sends it back
+   * through `rpc.call(path, input, headers)`.
+   */
+  enqueue<Op extends OfflineSafeOperation>(
+    carrier: Identified<Op>,
+    input: InputOf<Op>,
   ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }>;
 
   status(): { queued: number; sending: boolean; deadLettered: number };
@@ -175,15 +184,22 @@ export function createOfflineMutationQueue(
   // Public API
   // -------------------------------------------------------------------------
 
-  async function enqueue<TInput = unknown>(
-    options: EnqueueOptions<TInput>,
+  async function enqueue<Op extends OfflineSafeOperation>(
+    carrier: Identified<Op>,
+    input: InputOf<Op>,
   ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }> {
+    // Checked at run time too: plain JavaScript callers and forged objects get no compiler.
+    const op = operationOf(carrier);
+    const marked: unknown = op.meta.offlineSafe;
+    if (marked !== true) {
+      throw new TypeError(`${op.name} is not marked offlineSafe on its contract, so it cannot be queued offline.`);
+    }
     const id = nanoid();
     const entry: QueuedMutation = {
       id,
       idempotencyKey: id,
-      procedurePath: options.path,
-      input: options.input,
+      procedurePath: op.path,
+      input,
       enqueuedAt: Date.now(),
       attempts: 0,
     };

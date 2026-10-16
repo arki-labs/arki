@@ -140,6 +140,45 @@ export const listStories = oc
 - **"No more pages" is `nextCursor: null`**, decided by fetching one extra
   row — never guessed from a short page.
 
+### Operations: `@arki/contracts/orpc`
+
+An oRPC contract already knows each procedure's path, input, output, errors
+and meta. `operations(contract)` turns that into plain data — one
+**operation** per procedure — so the client can carry a procedure's identity
+next to its query utils, and a policy written once on the contract (say,
+`offlineSafe: true`) can be checked by the compiler where it is used.
+
+```ts
+import { oc } from '@orpc/contract';
+import { operations } from '@arki/contracts/orpc';
+
+const contract = { posts: { create: oc.input(createPost).output(post) } };
+const ops = operations(contract);
+
+ops.posts.create.name; // 'posts.create' — the string the server stores as procedure_path
+ops.posts.create.path; // ['posts', 'create']
+ops.posts.create.meta; // the contract meta, value and type
+```
+
+- **Why on the contract.** Types are written once, on the contract; the
+  operation is inferred from it (`OperationOf<typeof contract.posts.create>`).
+  Nothing is restated on the client.
+- **Plain, frozen data.** No Proxy, no schemas: safe to log, compare by
+  `name` and persist (`path` and `name`).
+- **Fails loud at build time.** A key with `.` (the name would be
+  ambiguous) or a reserved key (`~op`, `key`, `call`, `queryKey`,
+  `queryOptions`, `infiniteKey`, `infiniteOptions`, `mutationKey`,
+  `mutationOptions` — a query-utils group would shadow it) throws a
+  `TypeError` naming the path.
+- **Bundles.** The walk reads only path and meta, so a
+  `minifyContractRouter` output works the same: an app can later ship a
+  minified contract to the browser without its Zod schemas.
+- **Carrying it.** `createOrpcUtils` (in `@arki/tanstack-start/orpc/client`)
+  puts each leaf's operation under `'~op'`; `operationOf(leaf)` reads it
+  back, and throws for a value without one (a raw client, a forged object).
+
+`@orpc/contract` is an optional peer: only this entry imports it.
+
 ## API
 
 Main entry, `@arki/contracts` (no Drizzle):
@@ -149,6 +188,13 @@ Main entry, `@arki/contracts` (no Drizzle):
 - `UserId`, `userIdSchema` — shared id types.
 - `defineId(prefix)`, `IdOf<typeof id>`, `IdDeclaration`, `assertUniqueIdPrefixes(...ids)` — prefixed ids declared once.
 - `keyset(order)`, `pageInput(keyset, options?)`, `page(itemSchema)`, `Page<T>`, `Keyset`, `CursorValue` — keyset pagination.
+
+oRPC entry, `@arki/contracts/orpc` (peer: `@orpc/contract`):
+
+- `operations(contract)`, `Operations<C>` — the operation tree of a contract.
+- `operationAt(contract, path)` — the operation at a path, or `undefined`.
+- `Operation<I, O, E, M>`, `AnyOperation`, `OperationOf<C>`, `InputOf<Op>`, `OutputOf<Op>`, `ErrorOf<Op>`, `MetaOf<Op>` — the identity and its types.
+- `OPERATION` (`'~op'`), `Identified<Op>`, `operationOf(carrier)` — a value that carries an operation.
 
 Drizzle entry, `@arki/contracts/drizzle`:
 

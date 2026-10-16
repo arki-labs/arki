@@ -1,13 +1,17 @@
 import { and, eq, gt } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AnyRelations } from 'drizzle-orm';
+import type { PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 
 import type { IdempotencyKeysTable } from './idempotency-table';
 
 const TTL_DAYS = 7;
 
+/** Any async Postgres drizzle database: node-postgres in production, PGlite in tests and local runs. */
+export type IdempotencyDatabase = PgAsyncDatabase<PgQueryResultHKT, AnyRelations>;
+
 export class IdempotencyRepository {
   constructor(
-    private readonly db: NodePgDatabase<any>,
+    private readonly db: IdempotencyDatabase,
     private readonly table: IdempotencyKeysTable,
   ) {}
 
