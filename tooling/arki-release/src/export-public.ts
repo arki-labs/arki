@@ -40,20 +40,12 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-
 import debugFactory from 'debug';
 
-import { loadCatalogs } from './catalogs';
-import {
-  buildCopyPlan,
-  executeCopyPlan,
-  removeDirectory,
-  type CopyPlanEntry,
-} from './files';
-import { runInventory, type InventoryItem, type ParsedManifest } from './inventory';
-import { createEnvelope } from './json-output';
-import { DEFAULT_LEAK_PATTERNS, scanDirectory } from './leaks';
-import { materializeManifest } from './manifest';
+import { parseLlmsTxt } from '@arki/library-tooling/src/docs';
+
+import type { CopyPlanEntry } from './files';
+import type { InventoryItem, ParsedManifest } from './inventory';
 import type {
   CatalogTables,
   ExportItem,
@@ -65,6 +57,12 @@ import type {
   ReleaseCommandEnvelope,
   ReleaseError,
 } from './types';
+import { loadCatalogs } from './catalogs';
+import { buildCopyPlan, executeCopyPlan, removeDirectory } from './files';
+import { runInventory } from './inventory';
+import { createEnvelope } from './json-output';
+import { DEFAULT_LEAK_PATTERNS, scanDirectory } from './leaks';
+import { materializeManifest } from './manifest';
 
 const debug = debugFactory('arki:release:export');
 
@@ -138,17 +136,14 @@ export async function exportPublicTree(
 
   // 1. Path-safety guard — refuse to clean / write outside rootCwd.
   const relativeFromRoot = path.relative(rootCwd, outputPath);
-  if (
-    relativeFromRoot.length === 0 ||
-    relativeFromRoot.startsWith('..') ||
-    path.isAbsolute(relativeFromRoot)
-  ) {
+  if (relativeFromRoot.length === 0 || relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
     errors.push({
       code: EXPORT_ERROR_CODES.outputPathOutsideRoot,
       severity: 'error',
       message: `Refusing to export to \`${outputPath}\` — path is outside the workspace root \`${rootCwd}\`.`,
       target: outputPath,
-      remediation: 'Pass --output as a path inside the workspace, or adjust `publicTreePath` in arki.release.config.ts.',
+      remediation:
+        'Pass --output as a path inside the workspace, or adjust `publicTreePath` in arki.release.config.ts.',
     });
     const summary: ExportSummary = {
       message: `Export refused: output path \`${outputPath}\` escapes the workspace root.`,
@@ -191,12 +186,8 @@ export async function exportPublicTree(
   // 4. Catalogs + workspace/version maps.
   const rootManifest = await loadRootManifest(sourceRoot);
   const catalogs = loadCatalogs(rootManifest);
-  const workspaceVersions = new Map<string, string>(
-    inventoryEnv.items.map(item => [item.name, item.version]),
-  );
-  const privateArkiPackages = new Set<string>(
-    inventoryEnv.items.filter(item => item.private).map(item => item.name),
-  );
+  const workspaceVersions = new Map<string, string>(inventoryEnv.items.map(item => [item.name, item.version]));
+  const privateArkiPackages = new Set<string>(inventoryEnv.items.filter(item => item.private).map(item => item.name));
 
   // 5. Wipe + recreate output dir.
   await removeDirectory(outputPath);
@@ -231,6 +222,7 @@ export async function exportPublicTree(
 
   // 7. Root tree scaffolding.
   await writeRootScaffolding(outputPath, options.skipWorkspacesRoot ?? false);
+  await writeRootLlmsTxt(rootCwd, outputPath, exportItems);
 
   const status: 'success' | 'failure' = failed > 0 ? 'failure' : 'success';
   const summary: ExportSummary = {
@@ -290,9 +282,7 @@ async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSin
   // The public folder is derived from the npm name, not from the source folder.
   // The source folder must already match it (RFC B17: folder = name), so a
   // mismatch means the tree is not flat yet, and the export fails loudly.
-  const packageDirName = opts.item.name.startsWith('@arki/')
-    ? opts.item.name.slice('@arki/'.length)
-    : opts.item.name;
+  const packageDirName = opts.item.name.startsWith('@arki/') ? opts.item.name.slice('@arki/'.length) : opts.item.name;
   const packageDestDir = path.join(opts.outputPath, 'packages', packageDirName);
 
   const baseItem = {
@@ -437,7 +427,8 @@ function buildLeakGateError(packageName: string, hits: readonly LeakHit[]): Rele
     severity: 'error',
     message: `${packageName}: ${hits.length.toString()} leak hit(s) in source — refusing to copy. First: ${first?.description ?? '<unknown>'}. Hits: ${preview}${more}.`,
     target: packageName,
-    remediation: 'Run `bun release:arki audit --package <name>` to inspect; remove the leaked identifier(s) and re-run.',
+    remediation:
+      'Run `bun release:arki audit --package <name>` to inspect; remove the leaked identifier(s) and re-run.',
   };
 }
 
@@ -447,10 +438,7 @@ function buildLeakGateError(packageName: string, hits: readonly LeakHit[]): Rele
  * these via a side-channel cast — we attach them here so the
  * materializer doesn't need to know about disk I/O.
  */
-function synthesizeParsedManifest(
-  item: InventoryItem,
-  raw: RawManifest,
-): ParsedManifest {
+function synthesizeParsedManifest(item: InventoryItem, raw: RawManifest): ParsedManifest {
   const extras: Partial<RawManifest> = {
     description: raw.description,
     type: raw.type,
@@ -625,10 +613,7 @@ async function loadRootManifest(rootCwd: string): Promise<unknown> {
  * byte-identical output, so `removeDirectory` + `writeRootScaffolding`
  * is safe to run on every export.
  */
-async function writeRootScaffolding(
-  outputPath: string,
-  skipWorkspacesRoot: boolean,
-): Promise<void> {
+async function writeRootScaffolding(outputPath: string, skipWorkspacesRoot: boolean): Promise<void> {
   // Conditionally include the `workspaces` field. Omitting it makes the
   // tree publish-safe (npm publish parent-walks find a non-workspace
   // root and behave normally); including it makes the tree dev-friendly
@@ -655,10 +640,46 @@ async function writeRootScaffolding(
   await writeJsonFile(path.join(outputPath, '.changeset', 'config.json'), CHANGESET_CONFIG);
   await writeTextFile(path.join(outputPath, '.changeset', 'README.md'), CHANGESET_README);
 
-  await writeTextFile(
-    path.join(outputPath, '.github', 'workflows', 'release.yml'),
-    RELEASE_WORKFLOW,
-  );
+  await writeTextFile(path.join(outputPath, '.github', 'workflows', 'release.yml'), RELEASE_WORKFLOW);
+}
+
+/**
+ * The mirror's root `llms.txt` (lesson 13): one bullet per exported package,
+ * linking its own `llms.txt` and quoting that file's summary line. A package
+ * without one links its README with the manifest `description`, so every
+ * exported package is listed. Sorted by name, so the output is deterministic.
+ */
+async function writeRootLlmsTxt(rootCwd: string, outputPath: string, items: readonly ExportItem[]): Promise<void> {
+  const lines = [
+    '# ARKI',
+    '',
+    '> ARKI is a family of TypeScript packages under the `@arki/*` npm scope. Each package ships its own `llms.txt`; read it before its README.',
+    '',
+    '## Packages',
+  ];
+  const exported = items.filter(item => item.status === 'exported').toSorted((a, b) => a.name.localeCompare(b.name));
+  for (const item of exported) {
+    const dir = path.join(rootCwd, item.destPath);
+    const folder = path.relative(outputPath, dir).split(path.sep).join('/');
+    const llms = await readOptionalText(path.join(dir, 'llms.txt'));
+    if (llms !== undefined) {
+      lines.push(`- [${item.name}](${folder}/llms.txt): ${parseLlmsTxt(llms).summary}`);
+    } else {
+      const { description } = await readRawManifest(path.join(dir, 'package.json'));
+      lines.push(`- [${item.name}](${folder}/README.md): ${description ?? 'no summary yet.'}`);
+    }
+  }
+  await writeTextFile(path.join(outputPath, 'llms.txt'), `${lines.join('\n')}\n`);
+}
+
+/** A file's text, or `undefined` when it does not exist. */
+async function readOptionalText(file: string): Promise<string | undefined> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
 }
 
 /**
@@ -853,7 +874,7 @@ const PUBLIC_README = [
   '   Tiny polished kernel over broad rough framework.',
   '4. **Peer respect, not ridicule.** AdonisJS, ElysiaJS, Hono, NestJS',
   '   are excellent at the jobs they were built for. DOT does a',
-  "   different job. We learn from them.",
+  '   different job. We learn from them.',
   '5. **Agents are first-class readers.** Every error has a stable code.',
   '   Every CLI has a `--json` envelope. Every page has an `llms.txt`',
   '   entry. The site is tested for agent comprehension, not only human',
@@ -861,11 +882,11 @@ const PUBLIC_README = [
   '',
   '## Status',
   '',
-  "ARKI is on the experimental track (`0.0.x` for foundation packages,",
-  "`0.1.x` for the kernel and adapters). The kernel is stable in shape;",
-  "adapters are stable per their per-package README; the public API may",
-  "evolve before `1.0`. The release scorecard at the upstream workspace",
-  "gates every publish.",
+  'ARKI is on the experimental track (`0.0.x` for foundation packages,',
+  '`0.1.x` for the kernel and adapters). The kernel is stable in shape;',
+  'adapters are stable per their per-package README; the public API may',
+  'evolve before `1.0`. The release scorecard at the upstream workspace',
+  'gates every publish.',
   '',
   '## License',
   '',
@@ -1049,7 +1070,7 @@ const RELEASE_WORKFLOW = [
   '        run: bun run -F "@arki/*" build',
   '',
   '      - name: Publish canary snapshot',
-  '        if: github.event_name == \'workflow_dispatch\' && github.event.inputs.canary == \'true\'',
+  "        if: github.event_name == 'workflow_dispatch' && github.event.inputs.canary == 'true'",
   '        env:',
   '          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}',
   '          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}',
@@ -1058,7 +1079,7 @@ const RELEASE_WORKFLOW = [
   '          bunx changeset publish --tag canary --no-git-tag',
   '',
   '      - name: Create release PR or publish (stable)',
-  '        if: github.event_name == \'push\' || (github.event_name == \'workflow_dispatch\' && github.event.inputs.canary != \'true\')',
+  "        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.canary != 'true')",
   '        uses: changesets/action@v1',
   '        with:',
   '          publish: bunx changeset publish',

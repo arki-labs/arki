@@ -1,3 +1,419 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "package": "@arki/assert",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/assert",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/assert",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/async",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/async",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/async",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/bench",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/bench",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/bench",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/cas",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/cas",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/cas",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/clock",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/clock",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/clock",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/contracts",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/contracts",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/contracts",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/date",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/date",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/date",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/db",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/db",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/db",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/design-systems",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/design-systems",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/design-systems",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/env",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/env",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/env",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/expr",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/expr",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/expr",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/failure",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/failure",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/failure",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/http",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/http",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/http",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/icons",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/icons",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/icons",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/journal",
+      "error": "DOC_E005 llms.txt missing or misordered section: found Import paths, Start here, By task, Files, Rules that bite",
+      "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
+    },
+    {
+      "package": "@arki/journal",
+      "error": "DOC_E006 llms.txt \"Import paths\" differs from exports: missing ./errors, ./projection, ./testing",
+      "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
+    },
+    {
+      "package": "@arki/journal",
+      "error": "DOC_E009 link leaves the package: docs/agent-guide.md links ../../../apps/games-platform/backend/src/features/README.md",
+      "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
+    },
+    {
+      "package": "@arki/journal",
+      "error": "DOC_E010 agent guide missing or misordered section: missing Verify",
+      "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
+    },
+    {
+      "package": "@arki/journal",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 pilot: journal docs wait for the lesson 03 session that owns @arki/journal"
+    },
+    {
+      "package": "@arki/kv",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/kv",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/kv",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/lock",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/lock",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/lock",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/log",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/log",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/log",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/math",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/math",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/math",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/money",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/money",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/money",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/payments",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/payments",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/payments",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/react-hooks",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/react-hooks",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/react-hooks",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/resilience",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/resilience",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/resilience",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/string",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/string",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/string",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/theme",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/theme",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/theme",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ts",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ts",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ts",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ui",
+      "error": "DOC_E002 no llms.txt",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ui",
+      "error": "DOC_E003 no docs/agent-guide.md",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    },
+    {
+      "package": "@arki/ui",
+      "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
+      "reason": "lesson 13 wave A|B: docs backlog"
+    }
+  ]
 }

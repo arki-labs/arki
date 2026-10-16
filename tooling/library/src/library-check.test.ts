@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { checkAll, checkLibrary } from './library-check';
+import { checkAll, checkLibrary, updateBaseline } from './library-check';
 
 function packageDir(folder: string, manifest: object, turbo: object | null): string {
   const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), folder);
@@ -13,8 +13,10 @@ function packageDir(folder: string, manifest: object, turbo: object | null): str
   return dir;
 }
 
+// Private, so the agent-docs rules stay out of these tests; `docs.test.ts` covers them.
 const good = {
   name: '@arki/demo',
+  private: true,
   sideEffects: false,
   exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', default: './dist/index.js' } },
 };
@@ -109,5 +111,18 @@ describe('checkAll', () => {
   it('flags a baseline entry that no longer matches an error, so the file cannot rot', () => {
     const entry = { package: '@arki/demo', error: 'export "." has no "types"', reason: 'fixed long ago' };
     expect(checkAll(repo(), [entry]).stale).toEqual([entry]);
+  });
+});
+
+describe('updateBaseline', () => {
+  it('drops stale entries, keeps known reasons and adds new errors with the given reason', () => {
+    const kept = { package: '@arki/b', error: 'E1', reason: 'old reason' };
+    const stale = { package: '@arki/a', error: 'E0', reason: 'fixed' };
+    const entries = updateBaseline(
+      [kept, stale],
+      { errors: [{ package: '@arki/a', error: 'E2' }], stale: [stale] },
+      'new',
+    );
+    expect(entries).toEqual([{ package: '@arki/a', error: 'E2', reason: 'new' }, kept]);
   });
 });

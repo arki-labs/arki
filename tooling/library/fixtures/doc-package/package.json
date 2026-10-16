@@ -1,0 +1,27 @@
+{
+  "name": "@arki/doc-package",
+  "version": "0.0.0",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "import": "./dist/pg.js",
+      "default": "./dist/pg.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "llms.txt",
+    "docs/**"
+  ],
+  "scripts": {
+    "test:docs": "arki-doc-examples"
+  }
+}

@@ -1,227 +1,345 @@
 # DOT for Agents
 
-DOT treats coding agents as first-class framework users. A well-built agent
-should be able to enter a DOT app, understand its runtime graph, run
-deterministic checks, make a scoped change, and verify the result — without
-diving through implementation details of every package.
+This guide is the agent's playbook for `@arki/dot`. Read [`llms.txt`](../llms.txt)
+first: it lists the import paths and links here by task. When this guide, the
+README or `llms.txt` disagree with the code, the code wins: `src/index.ts` for
+the kernel API and `src/cli/index.ts` for the CLI. Every TypeScript block in
+this guide and in the README is compiled by `bun run test:docs`.
 
-This guide is the agent's playbook.
+## The model
 
-## Why DOT is agent-native
+1. A DOT app is a list of plugins. `defineApp(name).use(a).use(b)` builds it.
+   Declaration order is boot order. Teardown runs in reverse.
+2. A plugin declares `needs` (typed handles or `service<T>()` witnesses) and
+   `provides` (one factory per key). The type of a service is inferred from its
+   factory. It is written once.
+3. Wrong wiring is a compile error at the `.use()` call: a missing provider, a
+   type mismatch, a key collision. The kernel checks again at runtime with
+   coded errors (`DOT_LIFECYCLE_E012`, `E013`, `E020`).
+4. A plugin has five hooks: `configure` (sync, no I/O), `boot` (side effects,
+   returns nothing), `start`, `stop`, `dispose`.
+5. A feature is one chain: `defineFeature(name).needs(...).infra(...).usecases(...).provides(...).entrypoints(...)`
+   from `@arki/dot/feature`. The app mounts it with `.features([...])`.
+6. `app.manifest` is the static graph (plugins, services, actions,
+   dependencies, lifecycle, projections). `app.diagnostics` is the runtime
+   snapshot (per-plugin status, lifecycle, issues).
+7. The CLI prints both as JSON. `dot explain --json` puts the manifest in
+   `.data`. `dot doctor --json` puts the diagnostics snapshot in `.data`. There
+   is no `.data.manifest` and no `.data.diagnostics`.
+8. `dot explain` only calls `configure()`. It runs no `boot` hook.
+   `dot doctor` calls `configure()`, then `boot()`, reads the diagnostics, then
+   `dispose()`. It never calls `start()`.
+9. The kernel has no MCP dependency. An MCP server can wrap the `--json`
+   output. There is no `@arki/dot/mcp`.
 
-- **Inspectable app graph.** `app.manifest` is structured data: plugins,
-  services, routes, lifecycle hooks, dependency edges. No prose, no
-  source-diving.
-- **Structured diagnostics.** Every issue carries a stable `code`,
-  `severity`, `message`, `remediation`, and `docsUrl`. Agents read these
-  directly.
-- **JSON-first CLI.** `dot explain --json` and `dot doctor --json` emit
-  envelopes that parse without text scraping.
-- **No hidden conventions.** What you see in the manifest is what runs at
-  boot. No magic paths.
-- **Deterministic generators.** When `dot new` lands (v1.1), it will support
-  `--dry-run --json` so agents can preview exact file changes before
-  writing.
+## Task map
 
-## 1. Inspect the app graph
+### Start a new app
 
-Run `dot explain` to get a `DotAppManifest`:
+`dot new` scaffolds an app. Templates: `stack` (default; TanStack Start, oRPC,
+Postgres through `@arki/db`, `@arki/journal`) and `minimal` (`defineApp` + env).
+Code: `src/cli/new.ts`; envelope types `DotNewEnvelope` and `DotNewOperation`
+in `src/cli/json.ts`, exported from `@arki/dot/cli`.
 
-```sh
-npx dot explain --json
-```
+1. Preview. No files are written:
 
-Envelope:
+   ```sh
+   npx dot new my-app --dry-run --json
+   npx dot new my-app --template minimal --dry-run --json
+   ```
+
+2. Read `.operations`. Each entry has `path`, `action` (`create`, `overwrite`
+   or `skip`), `contentHash` (sha256), `contentBytes` and `reason`.
+3. Write the files:
+
+   ```sh
+   npx dot new my-app --json
+   ```
+
+   The real run returns the same envelope. Pass `--target <dir>` to pick the
+   folder and `--force` to overwrite files that exist.
+4. Read the generated `AGENTS.md` in the new app. It lists the verify commands
+   for that app.
+
+Real output of `dot new demo --dry-run --json` (captured from the CLI;
+`target` is the absolute path, shortened here; the stack template plans 38
+operations, the first two are shown):
 
 ```json
 {
   "status": "success",
-  "command": "explain",
-  "generatedAt": "2026-05-21T08:00:00.000Z",
-  "data": {
-    "manifest": {
-      "app": { "name": "my-app" },
-      "plugins": [ /* ... */ ],
-      "routes": [ /* ... */ ],
-      "services": [ /* ... */ ],
-      "lifecycle": [ /* ... */ ],
-      "dependencies": [ /* ... */ ]
-    }
+  "command": "new",
+  "generatedAt": "2026-10-16T04:41:17.683Z",
+  "app": {
+    "name": "demo",
+    "target": "/tmp/demo"
   },
+  "operations": [
+    {
+      "path": ".dockerignore",
+      "action": "create",
+      "contentHash": "330dbfbfe5764a6b2b280e4a146d93c3a043a5988ea78b27808a947fa63e572e",
+      "contentBytes": 80,
+      "reason": "Keeps node_modules, build output and env files out of the Docker context"
+    },
+    {
+      "path": ".env.example",
+      "action": "create",
+      "contentHash": "4df36adce2bf57b1422d78793a5ec7566b7aa6cef9eaefac0314971541835271",
+      "contentBytes": 322,
+      "reason": "Env vars the app reads, with local defaults"
+    }
+  ],
   "errors": []
 }
 ```
 
-Walk the graph from agent code (TypeScript):
+An unknown template gives `"status": "failure"` and one `DOT_CLI_E005` issue
+in `.errors`. Read the plan from code:
 
 ```ts
-import { defineApp } from '@arki/dot';
-import { app } from './app.js'; // your already-defined builder
+import { spawnSync } from 'node:child_process';
+import type { DotNewEnvelope } from '@arki/dot/cli';
 
-const configured = (app as ReturnType<typeof defineApp>).configure();
-const plugins = configured.manifest.plugins.map(p => p.name);
-const actions = configured.manifest.actions;
+const result = spawnSync('npx', ['dot', 'new', 'my-app', '--dry-run', '--json'], { encoding: 'utf8' });
+const plan: DotNewEnvelope = JSON.parse(result.stdout);
+export const overwrites = plan.operations.filter(op => op.action !== 'create').map(op => op.path);
 ```
 
-When invoking the CLI from an agent, prefer `spawn`/`execFile` on
-`'npx'` with the args `['dot', 'explain', '--json']` rather than shell
-interpolation. The CLI prints the JSON envelope to stdout.
+### Inspect the app graph
 
-The manifest is the **only authoritative source** for "what does this app
-do?". Do not infer this by reading `app.ts` — read the manifest.
+1. Run `npx dot explain --json`. The CLI finds `./dot.config.ts`,
+   `./src/app.ts` or `./app.ts`; pass `--app <path>` otherwise. The file's
+   default export is the builder.
+2. Read `.data`. It is the `DotAppManifest` (`src/manifest.ts`). Real output
+   for a two-plugin app (`reports` needs `database`'s `db`):
 
-## 2. Check runtime health
+   ```json
+   {
+     "status": "success",
+     "command": "explain",
+     "generatedAt": "2026-10-16T04:41:31.497Z",
+     "data": {
+       "manifestVersion": 2,
+       "app": { "name": "jq-demo" },
+       "plugins": [
+         { "name": "database", "dependencies": [], "provides": ["db"] },
+         { "name": "reports", "dependencies": ["db"], "provides": ["reports"] }
+       ],
+       "actions": [],
+       "services": [{ "name": "reports", "plugin": "reports", "kind": "custom" }],
+       "lifecycle": [
+         { "plugin": "database", "hooks": ["boot"] },
+         { "plugin": "reports", "hooks": ["configure", "boot", "start"] }
+       ],
+       "dependencies": [{ "from": "reports", "to": "database", "kind": "requires", "key": "db" }],
+       "projections": []
+     },
+     "errors": []
+   }
+   ```
 
-```sh
-npx dot doctor --json
+3. The manifest is the source of truth for "what does this app do?". Do not
+   guess it from `app.ts`.
+
+The same data in code, without the CLI. `configure()` gives the manifest;
+`boot()` gives the diagnostics:
+
+```ts run
+import { defineApp, plugin } from '@arki/dot';
+
+const database = plugin({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
+const reports = plugin({
+  name: 'reports',
+  needs: { db: database.provides.db },
+  provides: { reports: ({ db }) => ({ daily: () => db.query('daily') }) },
+});
+
+// `dot explain --json` prints this manifest under `.data`. No boot hook runs.
+const configured = defineApp('shop').use(database).use(reports).configure();
+const names = configured.manifest.plugins.map(p => p.name).join(',');
+if (names !== 'database,reports') throw new Error(`unexpected plugins: ${names}`);
+const edge = configured.manifest.dependencies.find(d => d.from === 'reports');
+if (edge?.to !== 'database' || edge.key !== 'db') throw new Error('reports must depend on database through db');
+
+// `dot doctor --json` prints this snapshot under `.data`: boot, read, dispose.
+const app = await configured.boot();
+const notOk = app.diagnostics.plugins.filter(p => p.status !== 'ok').map(p => p.plugin);
+await app.dispose();
+if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
 ```
 
-Look at `data.diagnostics.issues`:
+### Check runtime health
 
-```json
-{
-  "data": {
-    "diagnostics": {
-      "issues": [
-        {
-          "code": "ENV_E001",
-          "severity": "error",
-          "plugin": "env",
-          "message": "Missing required env var: DATABASE_URL",
-          "remediation": "Add DATABASE_URL to your environment or .env file.",
-          "docsUrl": "https://example.com/dot/docs/diagnostics#env-e001"
-        }
-      ]
-    }
-  }
-}
-```
-
-Each issue is actionable. Agent logic:
+1. Run `npx dot doctor --json`. It exits `1` on a `failure` envelope and `0`
+   on `success` or `warning`. Read stdout either way.
+2. `.status` is the worst severity found: `failure`, `warning` or `success`.
+3. `.errors` is the flat list of every issue. `.data.issues` holds app-level
+   issues; `.data.plugins[].issues`, `.data.actions[].issues`,
+   `.data.services[].issues` and `.data.lifecycle[].issues` hold the rest.
+4. Each issue has `code`, `severity`, `plugin`, `message`, `remediation` and
+   `docsUrl`. Apply the `remediation`, then run doctor again.
 
 ```ts
-for (const issue of envelope.data.diagnostics.issues) {
-  if (issue.severity === 'error') {
-    // Read `remediation`. If automatable, apply it. Otherwise report.
-  }
-}
+import { spawnSync } from 'node:child_process';
+import type { DotCliEnvelope, DotDiagnosticsSnapshot } from '@arki/dot';
+
+// doctor exits 1 on a failure envelope; stdout still holds the JSON.
+const result = spawnSync('npx', ['dot', 'doctor', '--json'], { encoding: 'utf8' });
+const envelope: DotCliEnvelope<DotDiagnosticsSnapshot> = JSON.parse(result.stdout);
+export const fixes = envelope.errors
+  .filter(issue => issue.severity === 'error')
+  .map(issue => `${issue.code} (${issue.plugin ?? 'app'}): ${issue.remediation}`);
+export const failedPlugins = envelope.data.plugins.filter(p => p.status === 'failed').map(p => p.plugin);
 ```
 
-Even if `boot()` fails, `dot doctor` still emits a diagnostics envelope —
-boot failure is observable, not opaque.
-
-## 3. Safe code generation
-
-When generating plugins, routes, or services:
-
-- **Always validate against the manifest contract** before writing. A
-  generated plugin must produce a valid `DotManifestContribution`.
-- **Use the test harness.** Boot the generated plugin in `testApp([...])`
-  before claiming the change is done.
-- **Prefer adapters over hand-rolled plugins.** If a package exposes
-  `./dot`, use it.
-
-`dot new <app>` (v1.1) and `dot add <plugin>` (deferred) will both support
-`--dry-run --json` so agents can preview the exact file operations. Until
-those land, agents must use the existing `defineApp(...).use(...)` API
-directly and verify with `dot explain`.
-
-## 4. The verification loop
-
-After any change, an agent should run this sequence:
-
-```sh
-# 1. Types still check out
-npx tsc --noEmit
-
-# 2. Manifest is still well-formed
-npx dot explain --json | jq '.status'  # expect "success"
-
-# 3. App still boots and is healthy
-npx dot doctor --json | jq '.status'   # expect "success" or "warning"
-```
-
-A change is "done" when all three pass. Skipping verification is the
-single biggest correlate of broken commits.
-
-## 5. Recipes
-
-### Add an env var
-
-1. Edit the `env({ schema: { ... } })` plugin in `app.ts` to add the new
-   key.
-2. `npx dot explain --json | jq '.data.manifest.services[] | select(.kind == "env")'`
-   — confirm the env plugin is still registered.
-3. `npx dot doctor --json | jq '.data.diagnostics.issues'` — should be
-   empty unless the env var is missing at runtime.
-
-### Add an action
-
-1. Edit the plugin that owns the boundary domain. Prefer `actions: [...]`
-   on the plugin definition, or call `ctx.registerAction({
-   id, binding, direction, address })` from `configure` for dynamic cases.
-2. `npx dot explain --json | jq '.data.manifest.actions'` — confirm the
-   action appears with the right plugin owner.
-3. `npx dot doctor --json | jq '.data.diagnostics.actions'` — confirm
-   `status: "ok"`.
+Pass `--observability` to also check that an OpenTelemetry SDK is registered
+(`DOT_CLI_E007` warning when not). Pass `--graph` to print the observed wiring
+as Mermaid.
 
 ### Add a plugin
 
-1. Import the plugin and chain `.use(plugin)` onto the builder in `app.ts`.
-2. `npx dot explain --json | jq '.data.manifest.plugins'` — confirm the new
-   plugin is in the list.
-3. `npx dot doctor --json | jq '.data.diagnostics.lifecycle'` — confirm
-   every hook ran.
+1. Write the plugin with `plugin({ name, needs, provides, ...hooks })` from
+   `@arki/dot`. Name needs by handle (`database.provides.db`) when you can
+   import the provider.
+2. Chain `.use(myPlugin)` after its providers in `app.ts`.
+3. `npx dot explain --json | jq '.data.plugins[].name'`: the plugin is listed.
+4. `npx dot doctor --json | jq '.data.lifecycle'`: every hook ran.
+
+### Add a feature
+
+1. Write the chain in `features/<name>/feature.ts` with `defineFeature` from
+   `@arki/dot/feature`. Order: `needs`, `infra`, `usecases`, `provides`,
+   `entrypoints`. The README section "Features as a chain" has the full shape.
+2. One file per usecase in `usecases/`. It imports `type Deps` from
+   `../feature` and asks for `Pick<Deps, ...>`.
+3. Mount it with `.features([myFeature])`.
+4. `npx dot explain --json | jq '.data.dependencies'`: the feature's edges
+   show, with the capability `key`.
+
+### Add an action
+
+1. Declare `actions: [...]` on the plugin, or call `ctx.registerAction({ id,
+   binding, direction, address })` in `configure`. `rpc()` from
+   `@arki/dot/orpc` adds one action per procedure.
+2. `npx dot explain --json | jq '.data.actions'`: the action is listed with its
+   plugin.
+3. `npx dot doctor --json | jq '.data.actions'`: its `status` is `"ok"`.
+
+### Add an env var
+
+1. Add the key to the env schema of the env plugin (`@arki/env/dot`).
+2. `npx dot explain --json | jq '.data.services[] | select(.kind == "env")'`:
+   the env service is still registered.
+3. `npx dot doctor --json | jq '.data.issues'`: empty unless the var is
+   missing at runtime.
 
 ### Debug a boot failure
 
-1. `npx dot doctor --json | jq '.data.diagnostics.issues[] | select(.severity == "error")'`.
-2. Read the first `remediation`. Apply it.
-3. Re-run. Repeat.
+1. `npx dot doctor --json | jq '.errors[] | select(.severity == "error")'`.
+2. `npx dot doctor --json | jq '.data.plugins[] | select(.status != "ok")'`
+   names the plugin.
+3. `DOT_LIFECYCLE_E003` means that plugin's `boot` threw. The kernel already
+   rolled back the plugins that booted before it.
+4. Apply the first `remediation`. Run doctor again. Repeat.
 
-If the first issue's `code` is `DOT_LIFECYCLE_E003` (boot failure), the
-`plugin` field tells you exactly which plugin's `boot` threw. The kernel
-already cleaned up everything else.
+### Work in a generated app
 
-## 6. AGENTS.md convention
+Every app from `dot new` has an `AGENTS.md` at its root. It names the verify
+commands, the files agents may edit, and where DOT files live. Read it first.
+With no `AGENTS.md`, read the manifest, ask before large edits, and run the
+`Verify` commands after each change.
 
-Every app generated by `dot new` will include an `AGENTS.md` file at the
-app root. This file documents:
+## Rules that bite
 
-- **Verification commands** — the exact `typecheck`, `test`, and `dot
-  doctor` commands the agent should run.
-- **Local conventions** — naming, file layout, where to put new plugins.
-- **Public / private boundaries** — which files agents may freely edit and
-  which require human review.
-- **Where DOT artifacts live** — `dot.config.ts`, `app.ts`, `src/plugins/`.
+- `configure` is sync. A `configure` that returns a Promise fails with
+  `DOT_LIFECYCLE_E001`.
+- `boot` returns nothing. Values go in `provides`. A value-returning `boot`
+  does not compile.
+- Providers come before consumers in `.use()` and `.features([...])`. The
+  wrong order is a compile error, and `DOT_LIFECYCLE_E020` for erased code.
+- Two providers of one wire key collide. Use `rename(plugin, { key: 'newKey' }, 'new-name')`
+  for a second instance.
+- `$`-prefixed keys are reserved for the kernel (`$app`, `$plugin`,
+  `$config`, `$signal`).
+- An app has at most one logging plugin. `log()` from `@arki/dot/log` goes first.
+- Do not cast an app to reach its manifest. Call `.configure().manifest` on
+  the builder, or read `app.manifest` on a booted app.
+- `.data` is the payload. `jq '.data.manifest'` and `jq '.data.diagnostics'`
+  return `null`.
+- `dot doctor` never calls `start()`. Workers and servers in `start` are not
+  checked by doctor; test them in your app's tests.
+- `@orpc/server` is an optional peer. Only `@arki/dot/orpc` loads it.
+- Adapters (`@arki/env/dot`, `@arki/db/dot`, `@arki/kv/dot`,
+  `@arki/journal/dot`) live in their own packages. `@arki/dot` never imports
+  them.
 
-Agents working in a DOT app should **read `AGENTS.md` first**. It is the
-contract between the app's author and the agents that will modify it. If
-no `AGENTS.md` exists, work conservatively: read the manifest, ask before
-editing, and verify every change with the loop above.
+## Errors
 
-> **Status:** the `AGENTS.md` convention is documented in this section and
-> emitted by `dot new` in v1. Run `dot new my-app` and the generated
-> `AGENTS.md` will document verification commands, public/private
-> boundaries, and DOT artifact locations.
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| `DOT_CLI_E001` | No app file found and no `--app`. | Pass `--app <path>` or add `src/app.ts`. |
+| `DOT_CLI_E002` | The app file's default export is not a DOT app or builder. | `export default defineApp(...)...`. |
+| `DOT_CLI_E003` | Importing the app file threw. | Fix the import error it prints. |
+| `DOT_CLI_E004` | Unknown command. | Use `explain`, `doctor` or `new`. |
+| `DOT_CLI_E005` | Bad arguments, for example an unknown `--template`. | Run `dot --help`. |
+| `DOT_CLI_E006` | `configure` or `boot` threw while the CLI prepared the app. | Run `dot doctor --json` for per-plugin issues. |
+| `DOT_CLI_E007` | `--observability`: no OpenTelemetry SDK registered (warning). | Register an SDK; see `docs/observability.md`. |
+| `DOT_CLI_E008`–`E011` | `explain --as`: projection missing, failed to import, failed to run, or claimed twice. | Check the projection module the app registers. |
+| `DOT_LIFECYCLE_E001` | `configure` returned a Promise. | Move async work to `boot`. |
+| `DOT_LIFECYCLE_E002` | `configure` threw. | Fix the plugin config. |
+| `DOT_LIFECYCLE_E003` | `boot` threw. Booted plugins were rolled back. | Read the issue's `plugin` and `remediation`. |
+| `DOT_LIFECYCLE_E004` | `start` threw. | Fix the plugin's `start`. |
+| `DOT_LIFECYCLE_E005` / `E006` | One or more `stop` / `dispose` hooks threw. | Read the aggregated causes. |
+| `DOT_LIFECYCLE_E007` / `E008` | The app was reused after `dispose` or after a failure. | Build a new app. |
+| `DOT_LIFECYCLE_E011` | A plugin was registered twice. | Remove the duplicate `.use()`. |
+| `DOT_LIFECYCLE_E012` | A need has no provider (erased or JS graphs). | Mount the provider earlier. |
+| `DOT_LIFECYCLE_E013` | A wire key is provided twice. | `rename` one provider. |
+| `DOT_LIFECYCLE_E014` | A key uses the reserved `$` prefix. | Rename the key. |
+| `DOT_LIFECYCLE_E015` | A hook ran past `hookTimeoutMs`. | Pass `$signal` to the hook's I/O; raise the budget only with a reason. |
+| `DOT_LIFECYCLE_E016` / `E017` | Duplicate action id, or action meta that is not JSON. | Rename the action; keep meta plain JSON. |
+| `DOT_LIFECYCLE_E018` | More than one logging plugin. | Keep one `log()`. |
+| `DOT_LIFECYCLE_E019` | Feature needs form a ring. | Extract the shared piece into a third unit. |
+| `DOT_LIFECYCLE_E020` | A provider is mounted after its consumer. | Move it earlier; the message names both positions. |
+| `FEATURE_E005` | A handle is missing from the services bag. | Mount the provider; check the gateway's needs. |
+| `FEATURE_E006` | A feature key collides with another slot or a reserved name. | Rename the alias or key. |
+| `FEATURE_E010` | A procedure's contract `meta` is not plain JSON. | Keep contract meta JSON-safe. |
 
-## 7. MCP is a future adapter
+Full lifecycle table: [Lifecycle](lifecycle.md). Diagnostics shapes:
+[Diagnostics](diagnostics.md).
 
-DOT's CLI JSON output is **consumable by MCP servers**, but the kernel
-**does not depend on MCP**. There is no `@arki/dot/mcp` import. There is no
-MCP runtime requirement.
+## Verify
 
-An MCP adapter — published separately as something like `@arki/dot-mcp`
-when demand emerges — can layer on top of `dot explain --json` and
-`dot doctor --json` to expose them as MCP tools. The kernel does not
-care.
+Run these after a change. A change is done when all pass.
 
-This keeps the kernel small, lets MCP evolve at its own cadence, and means
-DOT works equally well for agents that don't use MCP at all (REPL agents,
-CI agents, IDE agents).
+In `packages/dot` (changes to the library or its docs):
+
+```sh
+bun run build          # the doc examples compile against dist/
+bun run test:docs      # every ts block in README.md and this guide
+bun run test           # vitest, includes src/cli/json-paths.test.ts
+bun run typecheck
+bun run lint
+```
+
+In an app (changes to an app built on DOT):
+
+```sh
+npx tsc --noEmit
+npx dot explain --json | jq -e '.status == "success"'
+npx dot explain --json | jq '.data.plugins[].name'
+npx dot doctor --json | jq -e '.status != "failure"'
+npx dot doctor --json | jq '.data.plugins[] | select(.status != "ok")'
+```
+
+The last command prints nothing on a healthy app. `src/cli/json-paths.test.ts`
+checks that every `jq` path in this guide exists in the real CLI output.
 
 ## See also
 
-- [Diagnostics](./diagnostics.md) — full manifest + diagnostics contracts.
-- [Lifecycle](./lifecycle.md) — every error code that appears in `issues`.
-- [Quickstart](./quickstart.md) — the basic boot path agents will see.
+- [Diagnostics](diagnostics.md): the manifest and diagnostics contracts.
+- [Lifecycle](lifecycle.md): every lifecycle error code.
+- [Plugin authoring](plugin-authoring.md): write a plugin.
+- [Adapter authoring](adapter-authoring.md): expose a package as a `./dot` plugin.
+- [Observability](observability.md): OpenTelemetry, observers, `app.timeline()`.
+- [Quickstart](quickstart.md): boot a first app.

@@ -38,6 +38,7 @@
     "@arki/env": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/kv": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",

@@ -26,6 +26,9 @@ const manifestSchema = z.object({
   peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() })).optional(),
   sideEffects: z.union([z.boolean(), z.array(z.string())]).optional(),
   arki: arkiSchema.optional(),
+  private: z.boolean().optional(),
+  scripts: z.record(z.string(), z.string()).optional(),
+  files: z.array(z.string()).optional(),
 });
 
 export type Manifest = {
@@ -41,6 +44,11 @@ export type Manifest = {
   readonly sideEffects: boolean | readonly string[] | undefined;
   /** The engines the package claims; every engine when `arki.runtimes` is absent. */
   readonly runtimes: ReadonlySet<Runtime>;
+  /** `"private": true` keeps the package off npm; it defaults to `false`. */
+  readonly private: boolean;
+  readonly scripts: Readonly<Record<string, string>>;
+  /** The `files` allow-list; `undefined` means npm ships everything. */
+  readonly files: readonly string[] | undefined;
 };
 
 /** Reads and validates `<dir>/package.json`. */
@@ -60,6 +68,9 @@ export function readManifest(dir: string): Manifest {
     peerDependenciesMeta,
     sideEffects,
     arki,
+    private: isPrivate,
+    scripts,
+    files,
   } = parsed.data;
   return {
     name,
@@ -75,6 +86,9 @@ export function readManifest(dir: string): Manifest {
     ),
     sideEffects,
     runtimes: new Set(arki?.runtimes ?? RUNTIMES),
+    private: isPrivate ?? false,
+    scripts: scripts ?? {},
+    files,
   };
 }
 

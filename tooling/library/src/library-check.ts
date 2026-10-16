@@ -9,17 +9,30 @@
  * Warnings (printed, exit 0): a `"./*"` wildcard export, `sideEffects` is not
  * `false` or an exact file list.
  *
+ * A public library (`"private"` is not `true`) also gets the agent-docs rules
+ * of `docs.ts`: DOC_E001-E003 (README.md, llms.txt, docs/agent-guide.md exist),
+ * DOC_E004-E007 (llms.txt shape, "Import paths" equals `exports`, 80 lines /
+ * 8 KiB), DOC_E008-E009 (links resolve inside the package), DOC_E010-E011
+ * (guide sections; `dot explain/doctor --json` for a `./dot` export),
+ * DOC_E012 (`files` ships the docs), DOC_E013 (a `test:docs` script).
+ * Warnings: DOC_W001 forward-looking words, DOC_W002 llms.txt over 60 lines.
+ *
  * `--all` checks every package under `packages/` and `tooling/`. Known errors
  * are listed with a reason in `tooling/library/library-check-baseline.json`; only
  * errors outside it fail the run, and a baseline entry that no longer matches
  * an error fails it too (so the file cannot rot).
+ *
+ * `--all --update-baseline [--reason "<why>"]` rewrites that file: stale entries
+ * are dropped, matching ones keep their reason, and every new error is added
+ * with `--reason` (required when there is one). The diff is the review.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
+import { checkDocs } from './docs';
 import { leaves, readManifest } from './manifest';
 import { complain, say } from './report';
 
@@ -95,6 +108,12 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
     errors.push('no Boundaries tag: add "tags": ["<layer>"] to turbo.json');
   }
 
+  if (!manifest.private) {
+    const docs = checkDocs(dir, manifest);
+    errors.push(...docs.errors);
+    warnings.push(...docs.warnings);
+  }
+
   return { errors, warnings };
 }
 
@@ -167,11 +186,48 @@ export function checkAll(root: string, baseline: readonly BaselineEntry[]): AllR
   return { errors, warnings, baselined, stale: baseline.filter(entry => !used.has(entry)) };
 }
 
+/**
+ * The baseline after `--update-baseline`: entries that still match an error,
+ * plus one entry per unbaselined error with `reason`, sorted by package then error.
+ */
+export function updateBaseline(
+  baseline: readonly BaselineEntry[],
+  result: Pick<AllResult, 'errors' | 'stale'>,
+  reason: string,
+): BaselineEntry[] {
+  const kept = baseline.filter(entry => !result.stale.includes(entry));
+  const added = result.errors.map(({ package: name, error }) => ({ package: name, error, reason }));
+  return [...kept, ...added].toSorted((a, b) => a.package.localeCompare(b.package) || a.error.localeCompare(b.error));
+}
+
 function main(): number {
-  const { values } = parseArgs({ options: { all: { type: 'boolean' }, baseline: { type: 'string' } } });
+  const { values } = parseArgs({
+    options: {
+      all: { type: 'boolean' },
+      baseline: { type: 'string' },
+      'update-baseline': { type: 'boolean' },
+      reason: { type: 'string' },
+    },
+  });
   if (values.all) {
-    const baseline = readBaseline(values.baseline ? path.resolve(values.baseline) : BASELINE_FILE);
-    const { errors, warnings, baselined, stale } = checkAll(findRepoRoot(process.cwd()), baseline);
+    const file = values.baseline ? path.resolve(values.baseline) : BASELINE_FILE;
+    const baseline = readBaseline(file);
+    const result = checkAll(findRepoRoot(process.cwd()), baseline);
+    if (values['update-baseline']) {
+      if (result.errors.length > 0 && !values.reason) {
+        complain(
+          `arki-library-check: ${String(result.errors.length)} new error(s); pass --reason "<why>" to baseline them`,
+        );
+        return 1;
+      }
+      const entries = updateBaseline(baseline, result, values.reason ?? '');
+      writeFileSync(file, `${JSON.stringify({ entries }, null, 2)}\n`);
+      say(
+        `arki-library-check: baseline updated (${String(result.errors.length)} added, ${String(result.stale.length)} removed, ${String(entries.length)} total)`,
+      );
+      return 0;
+    }
+    const { errors, warnings, baselined, stale } = result;
     for (const { package: name, warning } of warnings) say(`WARN  ${name}: ${warning}`);
     for (const { package: name, error } of errors) complain(`ERROR ${name}: ${error}`);
     for (const entry of stale)

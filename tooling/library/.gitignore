@@ -1,0 +1,2 @@
+# The doc-examples fixture commits a tiny build so its tests need no build step.
+!fixtures/doc-package/dist/

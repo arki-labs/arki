@@ -10,14 +10,13 @@
  * Each test isolates its own temp dir so they can run in parallel.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { exportPublicTree } from './export-public';
 import type { ReleaseConfig } from './types';
+import { exportPublicTree } from './export-public';
 
 /** Shared metadata defaults used by every fixture. */
 const defaults: ReleaseConfig['publicMetadataDefaults'] = {
@@ -41,7 +40,10 @@ const baseConfig: ReleaseConfig = {
   ],
 };
 
-const uiConfig: ReleaseConfig = { ...baseConfig, waves: [{ id: 'frontend', label: 'Frontend', packages: ['@arki/ui'] }] };
+const uiConfig: ReleaseConfig = {
+  ...baseConfig,
+  waves: [{ id: 'frontend', label: 'Frontend', packages: ['@arki/ui'] }],
+};
 
 /** Write a file under a temp workspace, creating parents on demand. */
 function writeFixtureFile(root: string, relPath: string, contents: string): void {
@@ -132,7 +134,7 @@ describe('exportPublicTree', () => {
       files: ['dist'],
     });
     writeFixtureFile(tmp, 'packages/assert/README.md', '# @arki/assert\n');
-    writeFixtureFile(tmp, 'packages/assert/dist/index.js', "export const ok = true;\n");
+    writeFixtureFile(tmp, 'packages/assert/dist/index.js', 'export const ok = true;\n');
     writeFixtureFile(tmp, 'packages/assert/dist/index.d.ts', 'export declare const ok: boolean;\n');
 
     const envelope = await exportPublicTree({ rootCwd: tmp, config: baseConfig });
@@ -291,11 +293,7 @@ describe('exportPublicTree', () => {
     writeFixtureFile(tmp, 'packages/assert/src/index.ts', 'export const ok = true;\n');
     writeFixtureFile(tmp, 'packages/assert/src/foo.test.ts', 'import { test } from "vitest";\n');
     writeFixtureFile(tmp, 'packages/assert/.env', 'SECRET=42\n');
-    writeFixtureFile(
-      tmp,
-      'packages/assert/node_modules/dep/index.js',
-      "module.exports = 'no';\n",
-    );
+    writeFixtureFile(tmp, 'packages/assert/node_modules/dep/index.js', "module.exports = 'no';\n");
 
     const envelope = await exportPublicTree({ rootCwd: tmp, config: baseConfig });
     expect(envelope.summary.exported).toBe(1);
@@ -328,6 +326,33 @@ describe('exportPublicTree', () => {
 
     const readme = readFileSync(path.join(outDir, 'README.md'), 'utf8');
     expect(readme).toMatch(/generated/i);
+  });
+
+  it('writes a root llms.txt that lists every exported package, so an agent finds each package index', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', { name: '@arki/assert', version: '1.0.0', description: 'Test assertions.' });
+    writeFixtureFile(tmp, 'packages/assert/index.js', 'export {};\n');
+    writePkg(tmp, 'contracts', {
+      name: '@arki/contracts',
+      version: '1.0.0',
+      description: 'Contracts.',
+      files: ['index.js', 'llms.txt'],
+    });
+    writeFixtureFile(tmp, 'packages/contracts/index.js', 'export {};\n');
+    writeFixtureFile(
+      tmp,
+      'packages/contracts/llms.txt',
+      '# @arki/contracts\n\n> Typed contracts for every boundary.\n\n## Import paths\n',
+    );
+
+    const envelope = await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+    const exported = envelope.items.filter(item => item.status === 'exported').map(item => item.name);
+    const llms = readFileSync(path.join(tmp, baseConfig.publicTreePath, 'llms.txt'), 'utf8');
+
+    expect(llms.startsWith('# ARKI\n\n> ')).toBe(true);
+    for (const name of exported) expect(llms).toContain(`- [${name}](`);
+    expect(llms).toContain('- [@arki/assert](packages/assert/README.md): Test assertions.');
+    expect(llms).toContain('- [@arki/contracts](packages/contracts/llms.txt): Typed contracts for every boundary.');
   });
 
   it('omits the workspaces field when skipWorkspacesRoot is set', async () => {
@@ -378,19 +403,14 @@ describe('exportPublicTree', () => {
     const agents = readFileSync(path.join(outDir, 'AGENTS.md'), 'utf8');
     expect(agents).toMatch(/Agent-discoverable contract/);
 
-    const changesetCfg = readJson(
-      path.join(outDir, '.changeset/config.json'),
-    ) as Record<string, unknown>;
+    const changesetCfg = readJson(path.join(outDir, '.changeset/config.json')) as Record<string, unknown>;
     expect(changesetCfg['access']).toBe('public');
     // Public repo defaults to `main`, even though the workspace uses `master`.
     expect(changesetCfg['baseBranch']).toBe('main');
     // commit:false leaves the version-bump commit to changesets/action.
     expect(changesetCfg['commit']).toBe(false);
 
-    const workflow = readFileSync(
-      path.join(outDir, '.github/workflows/release.yml'),
-      'utf8',
-    );
+    const workflow = readFileSync(path.join(outDir, '.github/workflows/release.yml'), 'utf8');
     expect(workflow).toMatch(/name: Release/);
     expect(workflow).toMatch(/changesets\/action@v1/);
     expect(workflow).toMatch(/NPM_TOKEN/);
@@ -440,9 +460,10 @@ describe('exportPublicTree', () => {
     const envelope = await exportPublicTree({ rootCwd: tmp, config: baseConfig });
     expect(envelope.status).toBe('success');
 
-    const destManifest = readJson(
-      path.join(tmp, baseConfig.publicTreePath, 'packages/assert/package.json'),
-    ) as Record<string, unknown>;
+    const destManifest = readJson(path.join(tmp, baseConfig.publicTreePath, 'packages/assert/package.json')) as Record<
+      string,
+      unknown
+    >;
     const deps = destManifest['dependencies'] as Record<string, string>;
     expect(deps['zod']).toBe('^4.0.0');
     expect(destManifest['devDependencies']).toBeUndefined();
@@ -451,7 +472,14 @@ describe('exportPublicTree', () => {
 
   it('names the public folder after the npm name, so @arki/ui ships as packages/ui', async () => {
     writeRoot(tmp);
-    writePkg(tmp, 'ui', { name: '@arki/ui', version: '1.0.0', type: 'module', main: 'dist/index.js', types: 'dist/index.d.ts', files: ['dist'] });
+    writePkg(tmp, 'ui', {
+      name: '@arki/ui',
+      version: '1.0.0',
+      type: 'module',
+      main: 'dist/index.js',
+      types: 'dist/index.d.ts',
+      files: ['dist'],
+    });
     writeFixtureFile(tmp, 'packages/ui/dist/index.js', 'export const ok = true;\n');
     writeFixtureFile(tmp, 'packages/ui/dist/index.d.ts', 'export declare const ok: boolean;\n');
 
@@ -463,7 +491,14 @@ describe('exportPublicTree', () => {
 
   it('fails loudly when the source folder differs from the npm name, because the tree is not flat', async () => {
     writeRoot(tmp);
-    writePkg(tmp, 'base', { name: '@arki/ui', version: '1.0.0', type: 'module', main: 'dist/index.js', types: 'dist/index.d.ts', files: ['dist'] });
+    writePkg(tmp, 'base', {
+      name: '@arki/ui',
+      version: '1.0.0',
+      type: 'module',
+      main: 'dist/index.js',
+      types: 'dist/index.d.ts',
+      files: ['dist'],
+    });
     writeFixtureFile(tmp, 'packages/base/dist/index.js', 'export const ok = true;\n');
 
     const envelope = await exportPublicTree({ rootCwd: tmp, config: uiConfig });

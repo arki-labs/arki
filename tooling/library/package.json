@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "arki-doc-examples": "./src/doc-examples.ts",
     "arki-layers": "./src/layers.ts",
     "arki-library-check": "./src/library-check.ts",
     "arki-runtimes": "./src/runtimes.ts"

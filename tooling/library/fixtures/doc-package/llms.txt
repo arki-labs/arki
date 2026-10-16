@@ -1,0 +1,18 @@
+# @arki/doc-package
+
+> A fixture for the agent-docs rules of `arki-library-check` and `arki-doc-examples`. Never published.
+
+## Import paths
+- `@arki/doc-package`: `greet(name)`.
+- `@arki/doc-package/pg`: `connect(url)`.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Greet someone](docs/agent-guide.md#greet-someone)
+
+## Rules that bite
+- `greet` takes a name, never a number.

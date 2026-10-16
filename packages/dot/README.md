@@ -29,7 +29,7 @@ each plugin is one small mark, and the *combination* of plugins is what gives th
 app its value. Two plugins on a die make a value of two; six plugins make six. The
 plugins **are** the app — not optional add-ons to a hidden core.
 
-```ts
+```ts skip="uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
 import { defineApp } from '@arki/dot';
 import { env } from '@arki/env/dot';      // env plugin
 import { db } from '@arki/db/dot';        // db plugin
@@ -63,10 +63,13 @@ bun add @arki/dot
 
 ## Quick start
 
-```ts
-import { defineApp, plugin, service } from '@arki/dot';
+```ts run
+import { defineApp, plugin } from '@arki/dot';
 
-type Db = { query(sql: string): Promise<unknown[]> };
+// Stand-ins for your real database and Stripe clients.
+type Db = { query(sql: string): Promise<unknown[]>; close(): Promise<void> };
+const openDb = async (url = 'memory://'): Promise<Db> => ({ query: async sql => [url, sql], close: async () => {} });
+const makeStripeClient = (db: Db) => ({ charge: (cents: number) => db.query(`charge ${cents}`) });
 
 const dbPlugin = plugin({
   name: 'database',
@@ -84,21 +87,19 @@ const billingPlugin = plugin({
   needs: { db: dbPlugin.provides.db }, // typed handle — destructure in hooks
   configure(ctx) {
     // Validate config, register schemas, no I/O.
+    ctx.registerService('stripe', 'custom');
   },
   provides: {
     stripe: ({ db }) => makeStripeClient(db), // factories see the needs
   },
   async boot({ stripe }) {
-    // Side effects only (seed, warm-up). Returns nothing.
+    await stripe.charge(0); // side effects only (seed, warm-up). Returns nothing.
   },
   async start({ stripe }) {
-    // Begin processing — workers, subscriptions, schedulers.
+    await stripe.charge(0); // begin processing — workers, subscriptions, schedulers.
   },
-  async stop({ stripe }) {
-    // Stop processing — drain workers, unsubscribe.
-  },
-  async dispose({ stripe }) {
-    // Close connections, free resources.
+  async stop({ db }) {
+    await db.query('select 1'); // stop processing — drain workers, unsubscribe.
   },
 });
 
@@ -108,6 +109,8 @@ const app = await defineApp('acme')
   .start();
 
 // app.manifest, app.diagnostics — agent-friendly envelopes.
+const order = app.manifest.plugins.map(p => p.name).join(' → ');
+if (order !== 'database → billing') throw new Error(`plugins boot in declaration order, got ${order}`);
 
 await app.stop();
 await app.dispose();
@@ -128,7 +131,14 @@ carries `T` at the type level. The property name you give it is your local
 alias *and* (for anonymous witnesses) the wire key:
 
 ```ts
-const search = plugin({
+import { plugin, service } from '@arki/dot';
+
+type Db = { query(sql: string): Promise<unknown[]> };
+type Logger = { info(message: string): void };
+type SearchIndex = { flush(db: Db): Promise<void> };
+declare function buildIndex(db: Db): Promise<SearchIndex>; // your code
+
+export const search = plugin({
   name: 'search',
   needs: {
     db: service<Db>(),                 // wire key 'db', local alias 'db'
@@ -147,10 +157,15 @@ const search = plugin({
 provides** — and because teardown runs in reverse declaration order, a plugin's
 needs are still alive in its `dispose`:
 
-```ts
-async dispose({ search, db }) {        // own provide + still-live need
-  await search.flush(db);
-},
+```ts continue
+export const indexer = plugin({
+  name: 'indexer',
+  needs: { db: service<Db>() },
+  provides: { search: ({ db }) => buildIndex(db) },
+  async dispose({ search, db }) {      // own provide + still-live need
+    await search.flush(db);
+  },
+});
 ```
 
 ### Wrong wiring does not compile
@@ -158,7 +173,7 @@ async dispose({ search, db }) {        // own provide + still-live need
 Declaration order IS boot order. The `.use()` guard makes unsatisfied needs,
 type mismatches, and key collisions **compile errors at the call site**:
 
-```ts
+```ts skip="shows wiring that must not compile"
 defineApp('shop')
   .use(billing)      // ❌ "Expected 2 arguments, but got 1."
   .use(database);    //    billing's `db` need has no earlier provider
@@ -188,7 +203,7 @@ A feature is one chain; each step has its folder (`model/` has no step).
 Each step's type offers only the later steps, and each step's input is typed
 from the earlier ones (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`).
 
-```ts
+```ts skip="the app wiring uses log(config), schedule() and a gateway from other @arki packages; the oRPC example below compiles the same chain"
 import { defineApp } from '@arki/dot';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, routerFor } from '@arki/dot/feature';
@@ -261,24 +276,53 @@ record with `sliceOf(ctx, f)`, and a chain feature's own units with
 `@orpc/server` is an optional peer; only this subpath loads it.
 
 ```ts
-// core/orpc.ts — once per app
-import { needsMiddleware } from '@arki/dot/orpc';
+import { plugin } from '@arki/dot';
+import type { DepsOf, ServicesBag } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
+import { needsMiddleware, rpc } from '@arki/dot/orpc';
+import { oc } from '@orpc/contract';
+import { implement, ORPCError, os } from '@orpc/server';
+import { z } from 'zod';
 
+// core/orpc.ts — once per app
+type Session = { readonly user: { readonly id: string } };
 export type RequestContext = { session: Session | null; headers: Headers; services: ServicesBag };
 export const bind = needsMiddleware<RequestContext>();
+export const authed = os.$context<RequestContext>().middleware(({ context, next }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED');
+  return next({ context: { session: context.session } });
+});
+
+// features/daily-digest/entrypoints/rpc.ts — browser-safe: oRPC contract and zod only
+export const digestRpcContract = oc.router({
+  preview: oc.output(z.array(z.string())),
+  admin: { purge: oc.output(z.number()) },
+});
+
+// infra/ and usecases/, cut short
+export const billing = plugin({
+  name: 'billing',
+  provides: { entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 25 : 3) }) },
+});
+export const store = plugin({
+  name: 'store',
+  provides: { store: () => ({ itemsFor: async (userId: string) => [`${userId}:welcome`], purge: async () => 0 }) },
+});
+export const preview =
+  ({ store, plans }: Pick<Deps, 'store' | 'plans'>) =>
+  async (userId: string) =>
+    (await store.itemsFor(userId)).slice(0, plans.capFor(userId));
+export const purge = ({ store }: Pick<Deps, 'store'>) => () => store.purge();
 
 // features/daily-digest/feature.ts — the chain stays in one file, the one map of the feature
-const dailyDigestDeps = defineFeature('daily-digest').needs({ plans }).infra(store);
+const dailyDigestDeps = defineFeature('daily-digest').needs({ plans: billing.provides.entitlements }).infra(store);
 export type Deps = DepsOf<typeof dailyDigestDeps>;
-export const dailyDigestLogic = dailyDigestDeps.usecases({ preview });
+export const dailyDigestLogic = dailyDigestDeps.usecases({ preview, purge });
 export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(dailyDigestLogic));
-export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
-```
 
-```ts
-// features/daily-digest/entrypoints/procedures.ts — the whole tree; `import type`, so no runtime import back
-import type { rpcImplementer } from '../feature';
-
+// features/daily-digest/entrypoints/procedures.ts — the whole tree. In its own file it
+// reads the implementer as a type only (`import type { rpcImplementer } from '../feature'`),
+// so there is no runtime import back.
 export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
     impl.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
@@ -287,6 +331,9 @@ export const digestProcedures = {
       impl.admin.purge.handler(({ context }) => context.usecases.purge()),
   },
 };
+
+// back in feature.ts
+export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
 ```
 
 - **`bind(dailyDigestLogic)`** puts the feature's needs, private infra and `usecases` on the
@@ -353,7 +400,7 @@ inert data: router fragments and repo factories fold without any kernel, and
 boot-time slices (`jobs()`, `schedules()`, `endpoints()`) say what the
 feature hands its adapters.
 
-```ts
+```ts skip="uses jobs() from @arki/queue, which depends on @arki/dot"
 import { feature } from '@arki/dot/feature';
 
 export const orders = feature('orders', {
@@ -367,7 +414,7 @@ export const orders = feature('orders', {
 
 The app wires its units in three steps — the hexagon of ports and adapters:
 
-```ts
+```ts skip="mounts adapters from @arki/db, @arki/queue and @arki/http, which depend on @arki/dot"
 defineApp('shop')
   .use(db({ relations }))            // driven: what features need
   .use(queue({ connection }))
@@ -389,18 +436,29 @@ each receiving the feature's needs. Consumers name the capability by handle —
 the type comes from the provider's factory, so it is written once:
 
 ```ts
-const billing = feature('billing', {
+import { defineApp, plugin, service } from '@arki/dot';
+import { feature } from '@arki/dot/feature';
+
+// Stand-ins for your own modules.
+type Db = { query(sql: string): Promise<unknown[]> };
+type Entitlements = { planOf(userId: string): Promise<string>; warmUp(): Promise<void> };
+declare function openDb(): Db;
+declare function createEntitlements(db: Db): Entitlements;
+declare function createDigest(access: Entitlements): { previewFor(userId: string): Promise<string[]> };
+const database = plugin({ name: 'database', provides: { db: () => openDb() } });
+
+export const billing = feature('billing', {
   needs: { db: service<Db>() },
   provides: { entitlements: ({ db }) => createEntitlements(db) },
   boot: ({ entitlements }) => entitlements.warmUp(), // side effects only; sees the factories' values
 });
 
-const digest = feature('daily-digest', {
+export const digest = feature('daily-digest', {
   needs: { access: billing.provides.entitlements }, // typed from createEntitlements
   provides: { digest: ({ access }) => createDigest(access) },
 });
 
-defineApp('app').use(db()).features([billing, digest]); // provider first: boot order
+export const app = defineApp('app').use(database).features([billing, digest]); // provider first: boot order
 ```
 
 `billing.provides.entitlements` is an ordinary token on the `entitlements` wire
@@ -431,23 +489,35 @@ the context are part of it, so the type loops. The context carries an opaque
 (so the builder proves every provider boots first) and builds the bag:
 
 ```ts
+import { service, type NeedsShape } from '@arki/dot';
+import type { ServicesBag } from '@arki/dot/feature';
 import { feature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
+import { os } from '@orpc/server';
+
+// Stand-ins for your own modules.
+type Db = { query(sql: string): Promise<unknown[]> };
+type Entitlements = { planOf(userId: string): Promise<string> };
+declare function createEntitlements(): Entitlements;
+declare function ingest(entitlements: Entitlements): Promise<void>;
+export const billing = feature('billing', { provides: { entitlements: () => createEntitlements() } });
+const features = [billing] as const;
 
 export const gateway = feature('gateway', {
   needs: { db: service<Db>(), ...providesOf(features) },
   provides: {
     rpc: ctx => ({
-      context: (headers: Headers) => createContext({ headers, db: ctx.db, services: servicesOf(ctx, features) }),
+      context: (headers: Headers) => ({ headers, db: ctx.db, services: servicesOf(ctx, features) }),
     }),
   },
 });
 
 // core/orpc.ts — the one app-side middleware
+const o = os.$context<{ services: ServicesBag }>();
 export const needs = <N extends NeedsShape>(n: N) =>
   o.middleware(({ context, next }) => next({ context: { services: resolveNeeds(context.services, n) } }));
 
 // a procedure names the handles it uses, inline — typed from the provider
-export const ingestUrl = protectedProcedure
+export const ingestUrl = o
   .use(needs({ entitlements: billing.provides.entitlements }))
   .handler(({ context }) => ingest(context.services.entitlements));
 ```
@@ -464,12 +534,20 @@ name) and `.lazy`. The kernel checks every plugin's needs against every
 plugin's static provides at `configure()`.
 
 ```ts
-import { type Provided } from '@arki/dot';
+import { plugin, type Provided } from '@arki/dot';
 
-export const database = db({ relations, url: () => env.DB_URL });
+// Stand-ins for your own clients; with @arki/db this is `db({ relations, url: () => env.DB_URL })`.
+type Pg = { query(sql: string): Promise<unknown[]> };
+type Kv = { get(key: string): Promise<string | null> };
+declare function connectPg(url: string): Pg;
+declare function connectKv(): Kv;
+declare function makeReports(db: Db): { daily(): Promise<unknown[]> };
+
+export const database = plugin({ name: 'database', provides: { db: () => connectPg('postgres://localhost/app') } });
+export const cache = plugin({ name: 'cache', provides: { kv: () => connectKv() } });
 export type Db = Provided<typeof database.provides.db>; // the one alias an app names
 
-const reports = plugin({
+export const reports = plugin({
   name: 'reports',
   needs: {
     db: database.provides.db,              // typed from the provider
@@ -488,13 +566,17 @@ In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
 `fake:<key>` that provides `value` under the handle's wire key, type-checked
 against the handle:
 
-```ts
+```ts continue
+import { defineApp } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
 
+const testDb: Db = { query: async () => [] };
 const app = await defineApp('t')
-  .use(fake(database.provides.db, db))
-  .features([billing, digest])
+  .use(fake(database.provides.db, testDb))
+  .use(fake(cache.provides.kv, { get: async () => null }))
+  .use(reports)
   .boot();
+await app.dispose();
 ```
 
 ### Tokens — cross-package service contracts
@@ -504,20 +586,27 @@ When a contract spans packages, a **token** owns the wire key and the local
 alias becomes free choice:
 
 ```ts
+import { plugin, token } from '@arki/dot';
+
+type PgDatabase = { execute(sql: string): Promise<unknown[]> };
+declare function connect(): PgDatabase; // your code
+
 // The package that owns the contract exports the token:
-export const Db = token<NodePgDatabase<Schema>>()('arki.db');
+export const Db = token<PgDatabase>()('arki.db');
 
 // A provider publishes under the token's key:
-const database = plugin({
+export const database = plugin({
   name: 'database',
-  provides: { [Db.key]: () => connect() }, // → { 'arki.db': NodePgDatabase }
+  provides: { [Db.key]: () => connect() }, // → { 'arki.db': PgDatabase }
 });
 
 // Any consumer, any package, any local alias:
-const reports = plugin({
+export const reports = plugin({
   name: 'reports',
   needs: { warehouse: Db },                // wire key 'arki.db', alias yours
-  boot: ({ warehouse }) => { /* typed */ },
+  boot: async ({ warehouse }) => {
+    await warehouse.execute('select 1');   // typed as PgDatabase
+  },
 });
 ```
 
@@ -528,6 +617,16 @@ compile time. `rename` is the multi-instance primitive, and
 `Token.instance()` derives the matching contract:
 
 ```ts
+import { defineApp, plugin, rename, token } from '@arki/dot';
+
+type PgDatabase = { execute(sql: string): Promise<unknown[]> };
+declare function connect(url: string): PgDatabase; // your code
+const Db = token<PgDatabase>()('arki.db');
+const database = ({ url }: { url: string }) =>
+  plugin({ name: 'database', provides: { [Db.key]: () => connect(url) } });
+const PRIMARY_URL = 'postgres://primary/shop';
+const REPLICA_URL = 'postgres://replica/shop';
+
 const ReportsDb = Db.instance('reports');  // token for key 'arki.db#reports'
 
 const app = await defineApp('shop')
@@ -540,9 +639,12 @@ const app = await defineApp('shop')
   .use(plugin({
     name: 'analytics',
     needs: { primary: Db, replica: ReportsDb },
-    boot: ({ primary, replica }) => { /* two live instances, both typed */ },
+    boot: async ({ primary, replica }) => {
+      await Promise.all([primary.execute('select 1'), replica.execute('select 1')]); // two live instances, both typed
+    },
   }))
   .boot();
+await app.dispose();
 ```
 
 Renames compose left-to-right and are applied at publish time — collision
@@ -560,7 +662,12 @@ kernel auto-disposes initialized ones during teardown, *after* the
 publishing plugin's own `dispose` hook, even if that plugin has none:
 
 ```ts
-const search = plugin({
+import { lazy, plugin, service } from '@arki/dot';
+
+type SearchClient = { query(text: string): Promise<string[]>; close(): Promise<void> };
+declare function connectToElastic(): Promise<SearchClient>; // your code
+
+export const search = plugin({
   name: 'search',
   provides: {
     search: () => lazy(() => connectToElastic(), {
@@ -574,13 +681,13 @@ Consumers that shouldn't care whether a provider is eager or lazy declare a
 **lifting witness** — `service.lazy<T>()` always delivers a `Lazy<T>`
 handle, wrapping eager provides and passing lazy ones through by identity:
 
-```ts
-const suggestions = plugin({
+```ts continue
+export const suggestions = plugin({
   name: 'suggestions',
   needs: { search: service.lazy<SearchClient>() },
   async start({ search }) {
     const client = await search.get();     // first access initializes
-    /* ... */
+    await client.query('warm-up');
   },
 });
 ```
@@ -607,7 +714,31 @@ A distilled commerce platform showing everything above working together.
 exact boot/teardown ordering.)
 
 ```ts
-import { defineApp, lazy, plugin, provide, rename, service, token } from '@arki/dot';
+import { defineApp, lazy, plugin, rename, service, token } from '@arki/dot';
+
+// ── stand-ins for your own modules ──────────────────────────────────────
+type AppEnv = { OTEL_ENDPOINT: string; REDIS_URL: string; ELASTIC_URL: string; PORT: number };
+type Metrics = { flush(): Promise<void> };
+type DbHandle = { end(): Promise<void> };
+type CacheHandle = { quit(): Promise<void> };
+type MessageBus = { publish(topic: string, body: unknown): Promise<void> };
+type SearchClient = { close(): Promise<void> };
+type Catalog = { list(): Promise<unknown[]> };
+type Checkout = { pay(orderId: string): Promise<void> };
+type Reporting = { daily(): Promise<unknown[]> };
+declare function parseEnv(config: unknown): AppEnv;
+declare function makeMetrics(endpoint: string): Metrics;
+declare function connectPg(url: string, options: { metrics: Metrics }): DbHandle;
+declare function connectRedis(url: string): CacheHandle;
+declare function connectElastic(url: string): Promise<SearchClient>;
+declare function makeInMemoryBus(): MessageBus;
+declare function makeCatalog(deps: object): Catalog;
+declare function makeCheckout(deps: object): Checkout;
+declare function makeReporting(replica: DbHandle, catalog: Catalog): Reporting;
+declare function makeOutbox(db: DbHandle, bus: MessageBus): { startPolling(): void; drain(): Promise<void> };
+declare function buildServer(options: object): { listen(): Promise<void>; close(): Promise<void> };
+declare const PRIMARY_URL: string;
+declare const REPLICA_URL: string;
 
 // ── contracts.ts — tokens owned by their respective packages ─────────
 export const Env = token<AppEnv>()('shop.env');
@@ -793,14 +924,31 @@ does not compile; a fake of the wrong shape fails at the `.provide()`
 call site:
 
 ```ts
+import { plugin, service, token } from '@arki/dot';
 import { testPlugin } from '@arki/dot/test-harness';
+import { expect } from 'vitest';
+
+type Pg = { query(sql: string): Promise<unknown[]> };
+type Kv = { get(key: string): Promise<string | null> };
+const Db = token<Pg>()('shop.db');
+const catalog = plugin({
+  name: 'catalog',
+  needs: { db: Db, cache: service<Kv>() },
+  provides: {
+    catalog: ({ db, cache }) => ({
+      list: async () => ((await cache.get('catalog:empty')) ? [] : db.query('select * from products')),
+    }),
+  },
+});
+const fakeDb: Pg = { query: async () => [] };
+const fakeKv: Kv = { get: async () => null };
 
 const app = await testPlugin(catalog)
   .provide(Db, fakeDb)             // token need
   .provide('cache', fakeKv)        // anonymous need — wire key is the alias
   .boot();
 
-expect(app.services.catalog.list()).toEqual([]);
+expect(await app.services.catalog.list()).toEqual([]);
 await app.dispose();
 ```
 
@@ -819,8 +967,18 @@ Two kernel helpers close the gap between "boots on my machine" and "runs
 under a process manager":
 
 ```ts
+import { defineApp, hookSignals, plugin } from '@arki/dot';
+
+const worker = plugin({
+  name: 'worker',
+  provides: { jobs: () => ({ poll: () => setInterval(() => {}, 1_000) }) },
+  start: ({ jobs }) => {
+    jobs.poll(); // begin processing
+  },
+});
+
 const app = await defineApp('shop', { hookTimeoutMs: 30_000 })
-  .use(/* ... */)
+  .use(worker)
   .start();
 
 hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
@@ -959,7 +1117,7 @@ lifecycle hooks, manifest schema, diagnostics envelope) and runs them. Adapters
 that bridge databases, queues, auth providers, and HTTP routers live in their
 own packages and consume `@arki/dot` as a peer dependency:
 
-```ts
+```ts skip="adapter packages depend on @arki/dot, so dot cannot import them"
 import { env } from '@arki/env/dot';
 import { db } from '@arki/db/dot';
 import { kv } from '@arki/kv/dot';

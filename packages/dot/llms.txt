@@ -1,40 +1,46 @@
 # @arki/dot
 
-> TypeScript-first application composition framework with typed plugins, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, OTel-first observability, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
+> The app kernel for `@arki`: typed plugins, a 5-hook lifecycle (`configure`, `boot`, `start`, `stop`, `dispose`), features as a chain, and a JSON CLI (`dot new`, `dot explain`, `dot doctor`). It is not a web server, an ORM or a DI container; adapters live in other packages.
 
-`@arki/dot` is the kernel. Package adapters (`@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`) layer on top and are versioned independently.
+Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: it IS the manifest (`explain`) or the diagnostics snapshot (`doctor`).
 
-## Quickstart
+## Import paths
+- `@arki/dot`: `defineApp`, `plugin`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `testApp`, `testPlugin`, `fake`; types `Provided`, `NeedsShape`, `DotAppManifest`, `DotDiagnosticsSnapshot`, `DotCliEnvelope`.
+- `@arki/dot/plugin`: the adapter-author surface: `plugin`, `handleOf`, `lazy`, `token`, `rename`, `defineApp`, contract types.
+- `@arki/dot/feature`: `defineFeature`, `DepsOf`, `routerFor`, `entrypointOnly`, `providesOf`, `servicesOf`, `resolveNeeds`, `ServicesBag`; object-form `feature()`.
+- `@arki/dot/orpc`: `needsMiddleware`, `rpc`. Optional peer `@orpc/server`.
+- `@arki/dot/log`: `log()`, the logging plugin. Mount it first.
+- `@arki/dot/test-harness`: `testPlugin`, `testApp`, `bootTestApp`, `fake`.
+- `@arki/dot/cli`: `main`, `runExplain`, `runDoctor`, `runNew`; types `DotNewEnvelope`, `DotNewOperation`. The `dot` bin.
 
-- [Quickstart tutorial](docs/quickstart.md): Boot your first DOT app in five minutes
-- [README](README.md): Overview, install, top-level concepts
-- [Quickstart example](../env/docs/examples/quickstart.ts): Runnable code for the quickstart
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview, with compiled examples.
 
-## Plugins and lifecycle
+## By task
+- [Start a new app (`dot new --dry-run --json`, then `dot new --json`)](docs/agent-guide.md#start-a-new-app)
+- [Inspect the app graph (`dot explain --json`)](docs/agent-guide.md#inspect-the-app-graph)
+- [Check runtime health (`dot doctor --json`)](docs/agent-guide.md#check-runtime-health)
+- [Add a plugin](docs/agent-guide.md#add-a-plugin)
+- [Add a feature](docs/agent-guide.md#add-a-feature)
+- [Add an action](docs/agent-guide.md#add-an-action)
+- [Debug a boot failure](docs/agent-guide.md#debug-a-boot-failure)
+- [Look up an error code](docs/agent-guide.md#errors)
+- [Write a plugin](docs/plugin-authoring.md)
+- [Expose a package as a `./dot` adapter](docs/adapter-authoring.md)
 
-- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, `provides` factories, typed handles (`database.provides.db`), `fake()`, DI, manifest contribution
-- [Lifecycle](docs/lifecycle.md): The 5-hook contract — state machine, failure ordering, idempotency rules, error codes
-- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT plugin via a `./dot` subpath export
+## Rules that bite
+- `.data` is the payload. There is no `.data.manifest` and no `.data.diagnostics`.
+- `dot explain` only configures. `dot doctor` boots and disposes; it never calls `start()`.
+- `configure` is sync and does no I/O. `boot` returns nothing; values go in `provides`.
+- Providers come before consumers. The wrong order is a compile error, or `DOT_LIFECYCLE_E020`.
+- A second instance of a plugin needs `rename`, or its keys collide (`DOT_LIFECYCLE_E013`).
+- Do not cast an app to read its manifest. Call `.configure().manifest`.
+- `@arki/dot` never imports its adapters (`@arki/env/dot`, `@arki/db/dot`, `@arki/kv/dot`, `@arki/journal/dot`).
 
-## Diagnostics & observability
-
-- [Diagnostics](docs/diagnostics.md): `app.manifest`, `app.diagnostics`, `dot explain`, `dot doctor`
-- [Manifest contract](docs/diagnostics.md#dotappmanifest): Static graph — five-array shape
-- [Diagnostics contract](docs/diagnostics.md#dotdiagnosticssnapshot): Runtime snapshot — five-array shape
-- [`DiagnosticIssue` shape](docs/diagnostics.md#diagnosticissue): Stable code, severity, remediation, docsUrl
-- [Observability](docs/observability.md): OTel-first traces + metrics + log correlation, `arki:dot:lifecycle` namespace, zero-cost-when-off discipline
-- [In-process observers](docs/observability.md#in-process-observers): `DotLifecycleObserver` + `defineApp({ observers })` + `app.subscribe(...)` for tests / CLI / ad-hoc inspection — peer of OTel, not layered under it
-- [ASCII timeline](docs/observability.md#ascii-timeline): `app.timeline()` / `renderTimeline(snapshot)` — per-phase, per-plugin duration waterfall
-- [`dot doctor --observability`](docs/observability.md#verifying-sdk-registration): SDK-registration probe — emits coded warning issue (`DOT_CLI_E007`) when no OTel SDK is registered, with remediation pointing at the quick-reference
-
-## For agents
-
-- [Agent guide](docs/agent-guide.md): How agents inspect, generate, and verify DOT apps
-- [The verification loop](docs/agent-guide.md#4-the-verification-loop): `tsc --noEmit` + `dot explain --json` + `dot doctor --json`
-- [AGENTS.md convention](docs/agent-guide.md#6-agentsmd-convention): Per-app agent guidance file (emitted by `dot new`, ships in v1.1)
-- [MCP is a future adapter](docs/agent-guide.md#7-mcp-is-a-future-adapter): The kernel does not depend on MCP
-
-## Releases
-
-- [Release policy](docs/release-policy.md): SemVer, public surface, deprecation cycle, stability gates
-- [Upgrade guide](docs/upgrade-guide.md): Migration notes across breaking changes (empty in v0.1)
+## Optional
+- [Lifecycle](docs/lifecycle.md): state machine, failure order, every error code.
+- [Diagnostics](docs/diagnostics.md): manifest and diagnostics contracts.
+- [Observability](docs/observability.md): OpenTelemetry, observers, `app.timeline()`.
+- [Quickstart](docs/quickstart.md), [Principles](docs/principles.md), [Release policy](docs/release-policy.md)

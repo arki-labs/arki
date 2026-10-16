@@ -6,8 +6,8 @@ Every `@arki/*` package goes into exactly one tier. The tier decides its licence
 
 | Tier | Licence | Quality rule | On docs site |
 | --- | --- | --- | --- |
-| **1. Stack** | MIT | Stability contract; works inside the one supported stack (TanStack Start, oRPC, Drizzle, Postgres, Better Auth); server-only adapters declared honestly | Yes — the product |
-| **2. Libraries** | MIT | Five runtimes + benchmarks vs competitors (current rule) | Yes — own section |
+| **1. Stack** | MIT | Stability contract; works inside the one supported stack (TanStack Start, oRPC, Drizzle, Postgres, Better Auth); server-only adapters declared honestly; ships `llms.txt` + agent guide; README examples compile (`test:docs`) | Yes — the product |
+| **2. Libraries** | MIT | Five runtimes + benchmarks vs competitors (current rule); ships `llms.txt` + agent guide; README examples compile (`test:docs`) | Yes — own section |
 | **3. Licence** | Paid, source included | Tested inside the Stack; upgrade recipe per release | Yes — behind licence |
 | **4. Out of brand** | Stays private or ships under its own name | None beyond today's | No |
 

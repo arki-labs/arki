@@ -79,6 +79,8 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "templates/**",
+    "docs/**",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"
@@ -91,7 +93,8 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:docs": "arki-doc-examples"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -112,6 +115,7 @@
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
