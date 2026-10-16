@@ -2,6 +2,13 @@
   "name": "@arki/auth",
   "version": "0.1.3",
   "private": true,
+  "description": "Sign-in for Arki apps: one definition, one Postgres-backed engine, and the principal, guards and client types inferred from your own tables.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/auth"
+  },
+  "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
@@ -180,16 +187,61 @@
       "import": "./src/workspaces/server/types.ts",
       "node": "./src/workspaces/server/types.ts"
     },
+    "./pg": {
+      "types": "./dist/src/pg/index.d.ts",
+      "import": "./src/pg/index.ts",
+      "node": "./src/pg/index.ts"
+    },
+    "./pg/workspaces": {
+      "types": "./dist/src/pg/workspaces/index.d.ts",
+      "import": "./src/pg/workspaces/index.ts",
+      "node": "./src/pg/workspaces/index.ts"
+    },
+    "./http": {
+      "types": "./dist/src/http.d.ts",
+      "import": "./src/http.ts",
+      "node": "./src/http.ts"
+    },
+    "./testing": {
+      "types": "./dist/src/testing/index.d.ts",
+      "import": "./src/testing/index.ts",
+      "node": "./src/testing/index.ts"
+    },
+    "./testing/tanstack-start": {
+      "types": "./dist/src/testing/tanstack-start.d.ts",
+      "import": "./src/testing/tanstack-start.ts",
+      "node": "./src/testing/tanstack-start.ts"
+    },
+    "./zod": {
+      "types": "./dist/src/zod.d.ts",
+      "import": "./src/zod.ts",
+      "default": "./src/zod.ts"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
+    "!src/**/__fixtures__/**",
+    "docs/**",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -214,26 +266,36 @@
   "devDependencies": {
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/http": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
+    "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "drizzle-kit": "catalog:drizzle",
+    "pg": "catalog:drizzle",
+    "rate-limiter-flexible": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
+    "@arki/http": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/ui": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
+    "drizzle-kit": "catalog:drizzle",
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "vitest": "catalog:"
@@ -242,10 +304,16 @@
     "@arki/dot": {
       "optional": true
     },
+    "@arki/http": {
+      "optional": true
+    },
     "@arki/icons": {
       "optional": true
     },
     "@arki/ui": {
+      "optional": true
+    },
+    "@electric-sql/pglite": {
       "optional": true
     },
     "@orpc/server": {
@@ -260,6 +328,9 @@
     "@tanstack/react-start": {
       "optional": true
     },
+    "drizzle-kit": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },
@@ -269,5 +340,13 @@
     "vitest": {
       "optional": true
     }
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser"
+    ]
   }
 }

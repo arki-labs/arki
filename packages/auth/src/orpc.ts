@@ -23,7 +23,11 @@
  * `@orpc/server` is an optional peer: import this module only in an app
  * that serves oRPC.
  */
+import type { Meta, MiddlewareOptions, MiddlewareResult } from '@orpc/server';
 import { ORPCError } from '@orpc/server';
+
+import type { AnyPrincipal } from './principal.js';
+import { AUTH_ERROR_CODES } from './errors.js';
 
 /** Anything with an owner: the row's `userId`. */
 export type Owned = { readonly userId: string };
@@ -56,4 +60,54 @@ export function assertOwnedOrForbidden<T extends Owned>(
   if (row.userId !== actorId) {
     throw new ORPCError('FORBIDDEN', { message: `You do not have access to this ${label}` });
   }
+}
+
+/**
+ * Principal guards for oRPC procedures. `C` is the app's request context; its `principal` is the
+ * auth's principal or `null` for a guest. Each guard narrows `context.principal` to non-null.
+ *
+ * - `authed`: a guest → `UNAUTHORIZED` with `data.code` `ARKI_AUTH_E401`.
+ * - `verified`: also refuses an unverified email → `FORBIDDEN`, `ARKI_AUTH_E403`.
+ * - `role(name)`: also refuses a principal without that role → `FORBIDDEN`, `ARKI_AUTH_E403`.
+ *
+ * @example
+ * export const { authed, verified, role } = guards<RequestContext>();
+ * impl.adminStats.use(role('admin')).handler(({ context }) => stats(context.principal.user.id));
+ */
+const forbidden = (message: string) =>
+  new ORPCError('FORBIDDEN', { message, data: { code: AUTH_ERROR_CODES.forbidden } });
+
+export type PrincipalGuard<C extends { readonly principal: AnyPrincipal | null }> = <TOutput>(
+  options: MiddlewareOptions<C, TOutput, Record<never, never>, Meta>,
+) => MiddlewareResult<{ readonly principal: NonNullable<C['principal']> }, TOutput>;
+
+export function guards<C extends { readonly principal: AnyPrincipal | null }>(): {
+  readonly authed: PrincipalGuard<C>;
+  readonly verified: PrincipalGuard<C>;
+  readonly role: (name: string) => PrincipalGuard<C>;
+} {
+  const signedIn = (principal: C['principal']): NonNullable<C['principal']> => {
+    if (principal === null) {
+      throw new ORPCError('UNAUTHORIZED', {
+        message: 'Sign in to continue.',
+        data: { code: AUTH_ERROR_CODES.unauthenticated },
+      });
+    }
+    return principal;
+  };
+  return {
+    authed: ({ context, next }) => next({ context: { principal: signedIn(context.principal) } }),
+    verified: ({ context, next }) => {
+      const principal = signedIn(context.principal);
+      if (!principal.user.emailVerified) throw forbidden('Verify your email address first.');
+      return next({ context: { principal } });
+    },
+    role:
+      name =>
+      ({ context, next }) => {
+        const principal = signedIn(context.principal);
+        if (!principal.roles.includes(name)) throw forbidden('You do not have access to this.');
+        return next({ context: { principal } });
+      },
+  };
 }

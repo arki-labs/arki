@@ -21,6 +21,9 @@ import { cn } from '@arki/ui/cn';
 import { Input } from '@arki/ui/input';
 import { Label } from '@arki/ui/label';
 
+import type { AuthDefinition } from '../definition.js';
+import { authCapabilities } from './capabilities.js';
+
 /**
  * Reusable, brand-neutral sign-in form shared across every Arki app.
  *
@@ -150,8 +153,30 @@ function renderSentDescription(template: string, email: string): ReactNode {
   ));
 }
 
-export interface SignInFormProps {
-  config: AuthUiConfig;
+/**
+ * What the form renders from: the app's auth definition (the same object the server boots from).
+ * `config` is the older hand-written form of the same facts.
+ */
+export type SignInFormSource =
+  | { definition: AuthDefinition; config?: never }
+  | {
+      /** @deprecated Pass `definition` instead. */
+      config: AuthUiConfig;
+      definition?: never;
+    };
+
+/** The methods the form renders, read from either source. */
+function formMethods(source: SignInFormSource): {
+  social: readonly SocialProviderId[];
+  password: boolean;
+  magicLink: boolean;
+} {
+  if (source.definition !== undefined) return authCapabilities(source.definition);
+  const { config } = source;
+  return { social: config.socialProviders, password: config.credentials, magicLink: config.magicLink };
+}
+
+export type SignInFormProps = SignInFormSource & {
   handlers: SignInHandlers;
   localization?: Partial<SignInLocalization>;
   /** Which mode to open in. Clamped to an available mode. */
@@ -163,14 +188,13 @@ export interface SignInFormProps {
   /** Rendered below the card body (e.g. a "Sign up" link). */
   footer?: ReactNode;
   className?: string;
-}
+};
 
 function Spinner() {
   return <CircleNotch className="size-4 animate-spin" aria-hidden />;
 }
 
 export function SignInForm({
-  config,
   handlers,
   localization,
   initialMode,
@@ -178,11 +202,13 @@ export function SignInForm({
   header,
   footer,
   className,
+  ...source
 }: SignInFormProps) {
   const l = { ...DEFAULT_LOCALIZATION, ...localization };
 
-  const canMagicLink = config.magicLink;
-  const canPassword = config.credentials;
+  const methods = formMethods(source);
+  const canMagicLink = methods.magicLink;
+  const canPassword = methods.password;
   const bothModes = canMagicLink && canPassword;
   const defaultMode: Mode =
     (initialMode && (initialMode === 'password' ? canPassword : canMagicLink) ? initialMode : undefined) ??
@@ -467,7 +493,7 @@ export function SignInForm({
               </form>
             ) : null}
 
-            {config.socialProviders.length > 0 ? (
+            {methods.social.length > 0 ? (
               <>
                 {hasEmailAuth ? (
                   <div className="flex items-center gap-3">
@@ -478,7 +504,7 @@ export function SignInForm({
                 ) : null}
 
                 <div className="flex flex-col gap-2">
-                  {config.socialProviders.map(provider => {
+                  {methods.social.map(provider => {
                     const meta = SOCIAL_PROVIDERS[provider];
                     const Icon = meta.Icon;
                     return (
@@ -525,7 +551,8 @@ type AuthClientResult = { error?: { message?: string | null } | null };
 export interface SignInCapableAuthClient {
   signIn: {
     email(params: { email: string; password: string; callbackURL?: string }): Promise<AuthClientResult>;
-    magicLink(params: { email: string; callbackURL?: string }): Promise<AuthClientResult>;
+    /** Absent when the definition does not enable magic links. */
+    magicLink?(params: { email: string; callbackURL?: string }): Promise<AuthClientResult>;
     social(params: { provider: SocialProviderId; callbackURL?: string }): Promise<AuthClientResult>;
   };
 }
@@ -558,6 +585,7 @@ export function createSignInHandlers(
 
   return {
     onMagicLink: async email => {
+      if (authClient.signIn.magicLink === undefined) throw new Error('Magic-link sign-in is not enabled.');
       assertOk(await authClient.signIn.magicLink({ email, callbackURL: redirectTo }));
     },
     onPasswordSignIn: async (email, password) => {

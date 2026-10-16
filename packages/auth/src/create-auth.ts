@@ -1,7 +1,8 @@
 import { betterAuth as _betterAuth } from 'better-auth';
 
-/** Shortest auth secret accepted in production. Matches Better Auth's own warning threshold. */
-export const AUTH_SECRET_MIN_LENGTH = 32;
+import { AUTH_SECRET_MIN_LENGTH } from './constants';
+
+export { AUTH_SECRET_MIN_LENGTH } from './constants';
 
 /**
  * Refuse a missing or short auth secret in production.

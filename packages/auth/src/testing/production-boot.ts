@@ -23,6 +23,9 @@ import { expect, vi } from 'vitest';
 import type * as MailModule from '@arki/mail';
 
 import type { DefinedAuth } from '../define-auth-backend';
+import type { AuthDefinition } from '../definition.js';
+import type { AuthEngine } from '../pg/engine.js';
+import { isSocialMethod } from '../definition.js';
 
 const MUTATED_ENV_KEYS = [
   'NODE_ENV',
@@ -107,6 +110,44 @@ export async function assertEmailPasswordEnabled(
   try {
     const { auth } = await importAuth();
     expect(auth.options.emailAndPassword?.enabled).toBe(true);
+    return auth;
+  } finally {
+    restoreEnv();
+  }
+}
+
+/** What `assertAuthBoots` reads: the definition and the engine it was built into. */
+export type BootableAuth = {
+  readonly definition: AuthDefinition;
+  readonly engine: AuthEngine;
+};
+
+/**
+ * Boots an app's auth module as production and asserts the engine serves exactly what the
+ * definition declares: every method enabled (the C1 bug class: a method that silently is not),
+ * rate limiting on, secure cookies. It reads the built options and sends no request, so no
+ * database, KV or mail is needed.
+ *
+ * @param importAuth dynamic importer of the module that builds the auth, e.g.
+ *   `() => import('../../infra/auth')`. Dynamic, so the production env is in place first.
+ */
+export async function assertAuthBoots<A extends BootableAuth>(
+  importAuth: () => Promise<{ readonly auth: A }>,
+): Promise<A> {
+  const restoreEnv = applyProductionBootEnv();
+  try {
+    const { auth } = await importAuth();
+    const { options } = auth.engine;
+    const { methods } = auth.definition;
+    expect(options.emailAndPassword?.enabled ?? false, 'password sign-in').toBe(methods.includes('password'));
+    expect(options.plugins?.some(entry => entry.id === 'magic-link') ?? false, 'magic link').toBe(
+      methods.includes('magicLink'),
+    );
+    expect(new Set(Object.keys(options.socialProviders ?? {})), 'social providers').toEqual(
+      new Set(methods.filter(method => isSocialMethod(method))),
+    );
+    expect(options.rateLimit?.enabled, 'rate limiting').toBe(true);
+    expect(options.advanced?.useSecureCookies, 'secure cookies').toBe(true);
     return auth;
   } finally {
     restoreEnv();

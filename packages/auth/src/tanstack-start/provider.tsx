@@ -6,6 +6,8 @@ import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { AuthQueryProvider } from '@daveyplate/better-auth-tanstack';
 import { AuthUIProviderTanstack } from '@daveyplate/better-auth-ui/tanstack';
 
+import type { AuthCapabilities } from '../react/capabilities.js';
+
 /**
  * Safe image wrapper that validates src before rendering.
  * Returns null to allow AvatarFallback to display instead of a broken image.
@@ -17,12 +19,27 @@ function SafeImage({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElem
   return <img src={src} alt={alt ?? ''} {...props} />;
 }
 
+/** The UI flags that follow the definition: which sign-in methods the auth screens offer. */
+function methodProps(capabilities: AuthCapabilities): Pick<AuthUIProviderProps, 'credentials' | 'magicLink' | 'social'> {
+  return {
+    credentials: capabilities.password,
+    magicLink: capabilities.magicLink,
+    social: capabilities.social.length > 0 ? { providers: [...capabilities.social] } : undefined,
+  };
+}
+
+/**
+ * `capabilities` (from `createAuthClient(definition).capabilities`) decides which sign-in methods
+ * the auth screens offer. Without it the provider keeps its older fixed set (password, magic link,
+ * Google and Facebook).
+ */
 export function ArkiAuthProvider({
   children,
   authClient,
+  capabilities,
   disabled = false,
   ...props
-}: AuthUIProviderProps & { children: ReactNode; disabled?: boolean }) {
+}: AuthUIProviderProps & { children: ReactNode; disabled?: boolean; capabilities?: AuthCapabilities }) {
   const tsNavigate = useNavigate();
   const router = useRouter();
 
@@ -51,17 +68,12 @@ export function ArkiAuthProvider({
         deleteUser={{
           verification: true,
         }}
-        magicLink={true}
         optimistic={true}
         emailVerification={true}
-        credentials={true}
         account={true}
-        social={{
-          providers: [
-            'google',
-            'facebook',
-          ],
-        }}
+        {...(capabilities === undefined
+          ? { magicLink: true, credentials: true, social: { providers: ['google', 'facebook'] } }
+          : methodProps(capabilities))}
         {...props}
       >
         {children}
