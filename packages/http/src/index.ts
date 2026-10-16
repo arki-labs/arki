@@ -15,10 +15,12 @@
 export { route } from './contract.js';
 export type {
   ContractLike,
+  FailureDefinitionLike,
   HttpMethod,
   ParamsOf,
   PathParams,
   RouteContract,
+  RouteFailure,
   SchemaLike,
   SseContract,
 } from './contract.js';

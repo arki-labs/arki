@@ -13,6 +13,8 @@
 
 import type { z } from 'zod';
 
+import type { Failure, StandardSchemaV1 } from '@arki/failure';
+
 import type { RouteMeta } from './openapi.js';
 import { contractMeta } from './openapi.js';
 
@@ -47,10 +49,34 @@ export type SchemaLike = {
 };
 
 /**
- * A JSON route contract. Create via {@link route}. The generics carry the
- * validated input/output types into the bound handler's signature.
+ * A failure definition as a contract lists it: what `defineFailure` returns.
+ * The client revives a listed failure with it (code + data schema); the
+ * failure value itself carries the status and message the server answers with.
  */
-export type RouteContract<TPath extends string = string, TQuery = undefined, TBody = undefined, TOutput = undefined> = {
+export type FailureDefinitionLike = {
+  readonly code: string;
+  readonly dataSchema: StandardSchemaV1 | undefined;
+  (...args: never[]): Failure;
+};
+
+/** The failure values a contract lists: `RouteFailure<typeof getPost>`. */
+export type RouteFailure<TContract> =
+  TContract extends RouteContract<string, unknown, unknown, unknown, infer TFailures>
+    ? ReturnType<TFailures[number]>
+    : never;
+
+/**
+ * A JSON route contract. Create via {@link route}. The generics carry the
+ * validated input/output types into the bound handler's signature, and the
+ * listed failures into what the handler may return and the client resolves to.
+ */
+export type RouteContract<
+  TPath extends string = string,
+  TQuery = undefined,
+  TBody = undefined,
+  TOutput = undefined,
+  TFailures extends readonly FailureDefinitionLike[] = readonly [],
+> = {
   readonly kind: 'http';
   /** Stable identifier — lands in the manifest and OpenAPI `operationId`. */
   readonly id: string;
@@ -60,6 +86,12 @@ export type RouteContract<TPath extends string = string, TQuery = undefined, TBo
   readonly query?: z.ZodType<TQuery>;
   readonly body?: z.ZodType<TBody>;
   readonly output?: z.ZodType<TOutput>;
+  /**
+   * The failures the handler may return, as `defineFailure` definitions. A
+   * returned failure answers with its status and the error envelope; the
+   * client resolves to it instead of throwing.
+   */
+  readonly failures?: TFailures;
   toDotAction(): RouteMeta;
 };
 
@@ -96,26 +128,34 @@ export type ContractLike = {
   readonly query?: SchemaLike;
   readonly body?: SchemaLike;
   readonly output?: SchemaLike;
+  readonly failures?: readonly FailureDefinitionLike[];
   readonly event?: SchemaLike;
   readonly heartbeatMs?: number;
   toDotAction(): RouteMeta;
 };
 
-type RouteDef<TQuery, TBody, TOutput> = {
+type RouteDef<TQuery, TBody, TOutput, TFailures> = {
   readonly id: string;
   readonly summary?: string;
   readonly query?: z.ZodType<TQuery>;
   readonly body?: z.ZodType<TBody>;
   readonly output?: z.ZodType<TOutput>;
+  readonly failures?: TFailures;
 };
 
 const makeRoute =
   <TMethod extends HttpMethod>(method: TMethod) =>
-  <TPath extends string, TQuery = undefined, TBody = undefined, TOutput = undefined>(
+  <
+    TPath extends string,
+    TQuery = undefined,
+    TBody = undefined,
+    TOutput = undefined,
+    const TFailures extends readonly FailureDefinitionLike[] = readonly [],
+  >(
     path: TPath,
-    def: RouteDef<TQuery, TBody, TOutput>,
-  ): RouteContract<TPath, TQuery, TBody, TOutput> => {
-    const contract: RouteContract<TPath, TQuery, TBody, TOutput> = {
+    def: RouteDef<TQuery, TBody, TOutput, TFailures>,
+  ): RouteContract<TPath, TQuery, TBody, TOutput, TFailures> => {
+    const contract: RouteContract<TPath, TQuery, TBody, TOutput, TFailures> = {
       kind: 'http',
       method,
       path,
@@ -134,6 +174,12 @@ const makeRoute =
  *   id: 'orders.list',
  *   query: z.object({ status: z.enum(['open', 'shipped']).optional() }),
  *   output: z.array(Order),
+ * });
+ *
+ * export const getOrder = route.get('/orders/:id', {
+ *   id: 'orders.get',
+ *   output: Order,
+ *   failures: [OrderNotFound], // defineFailure definitions the handler may return
  * });
  *
  * export const progress = route.sse('/orders/:id/progress', {

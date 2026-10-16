@@ -10,6 +10,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
+
 import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
@@ -234,6 +236,14 @@ async function settle(contract: ContractLike, pending: PromiseLike<unknown>): Pr
 }
 
 function toResponse(contract: ContractLike, result: unknown): Response {
+  // A returned failure is an expected outcome, not output: it answers with
+  // its own status in the error envelope, and the output schema never sees it.
+  if (isFailure(result)) {
+    return errorResponse(result.status, result.code, result.message, {
+      ...(result.remediation === undefined ? {} : { remediation: result.remediation }),
+      ...(result.data === undefined ? {} : { data: result.data }),
+    });
+  }
   if (result instanceof Response) return result;
   return serializeOutput(contract, result);
 }

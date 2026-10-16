@@ -84,6 +84,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/ts": "workspace:*",
     "@hono/node-server": "catalog:",

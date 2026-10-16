@@ -93,6 +93,23 @@ describe('createClient', () => {
     });
   });
 
+  it('refuses a path param that would change which endpoint is called, without sending it', async () => {
+    // `..` in /events/:id/move resolves to /move: another endpoint, called with the user's cookies.
+    const wire = recordingFetch(engine.fetch);
+    const move = createClient(moveEvent, { baseUrl: BASE, fetch: wire.fetch });
+    for (const id of ['..', '.', '']) {
+      await expect(move({ params: { id }, body: { at: new Date(0) } })).rejects.toMatchObject({
+        status: 400,
+        code: HTTP_ERROR_CODES.badRequest,
+        message: expect.stringContaining('"id"'),
+      });
+    }
+    expect(wire.sent).toHaveLength(0);
+    // Dots inside a value are an ordinary id: only a whole "." or ".." segment moves the URL.
+    await move({ params: { id: '..e1' }, body: { at: new Date(0) } });
+    expect(wire.sent[0]?.url).toBe(`${BASE}/events/..e1/move`);
+  });
+
   it('rejects a bad input with the 400 code the server would answer, without sending it', async () => {
     const wire = recordingFetch(engine.fetch);
     const move = createClient(moveEvent, { baseUrl: BASE, fetch: wire.fetch });

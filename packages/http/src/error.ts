@@ -9,7 +9,9 @@
  *    propagate into `app.diagnostics.issues`.
  *  - {@link HttpError} — per-request failures. Thrown from handlers,
  *    derivers, or validation; serialized onto the wire as the coded
- *    envelope `{ error: { code, message, remediation?, docsUrl? } }`.
+ *    envelope `{ error: { code, message, remediation?, docsUrl?, data? } }`.
+ *    A handler that returns an `@arki/failure` failure gets the same
+ *    envelope, with the failure's status, code, message and data.
  *
  * Every code is stable API. Match on codes, never parse messages.
  */
@@ -111,6 +113,8 @@ export type HttpErrorEnvelope = {
     readonly message: string;
     readonly remediation?: string;
     readonly docsUrl?: string;
+    /** The failure's data, when a handler returned an `@arki/failure` failure that carries some. */
+    readonly data?: unknown;
   };
 };
 
@@ -153,6 +157,7 @@ export function errorResponse(
     readonly remediation?: string;
     readonly docsUrl?: string;
     readonly headers?: Readonly<Record<string, string>>;
+    readonly data?: unknown;
   } = {},
 ): Response {
   const envelope: HttpErrorEnvelope = {
@@ -161,6 +166,7 @@ export function errorResponse(
       message,
       ...(options.remediation === undefined ? {} : { remediation: options.remediation }),
       ...(options.docsUrl === undefined ? {} : { docsUrl: options.docsUrl }),
+      ...(options.data === undefined ? {} : { data: options.data }),
     },
   };
   return Response.json(envelope, { status, ...(options.headers === undefined ? {} : { headers: options.headers }) });

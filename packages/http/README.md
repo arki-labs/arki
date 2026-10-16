@@ -43,7 +43,31 @@ validated against the contract on the way out. Input is decoded and output
 (and every SSE event) is encoded, so a zod codec works both ways: with
 `z.codec(z.iso.datetime(), z.date(), …)` your handler gets and returns a
 `Date`, and the wire carries the ISO string. Failures serialize as a
-coded envelope: `{ "error": { "code", "message", "remediation?", "docsUrl?" } }`.
+coded envelope: `{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }`.
+
+### Returning failures
+
+A contract lists the [`@arki/failure`](../failure) failures its handler may
+return. The handler returns a failure like any value; the engine answers
+with the failure's status and the same envelope (`code`, `message`,
+`remediation`, `data`). The output schema never runs on a failure.
+
+```ts
+export const OrderNotFound = defineFailure('order.not_found', {
+  status: 404,
+  data: z.object({ id: z.string() }),
+  message: 'no order {id}',
+});
+
+export const getOrder = route.get('/orders/:id', { id: 'orders.get', output: Order, failures: [OrderNotFound] });
+
+routes().bind(getOrder, ({ params }) => usecases.find(params.id)); // Order | Failure<'order.not_found', …>
+```
+
+A handler that can return a failure the contract does not list is a compile
+error. Add its definition to `failures`. `RouteFailure<typeof getOrder>` is
+the union of the listed failures. Failure `data` is sent as plain JSON, so
+its schema must be JSON-safe: a `Date` field fails `revive` on the client.
 
 ## Inside a DOT app
 
@@ -253,9 +277,15 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
   A wrong input does not compile.
 - Query and body are encoded with their schemas and the output is decoded,
   exactly mirroring the server, so codecs round-trip.
-- A non-2xx answer throws `HttpError` with the server's `code`. An answer
+- A non-2xx answer whose code is one of the contract's `failures` resolves to
+  that failure, revived with `revive` from `@arki/failure`, so the call's type
+  is `Output | the listed failures` and you can `match` on it. Data its
+  definition rejects throws `E500`.
+- Any other non-2xx answer throws `HttpError` with the server's `code`. An answer
   without the envelope gets a code by status (`E400`, `E401`, `E403`, `E404`,
   else `E500`). A body that breaks the output schema throws `E500`.
+- A path param that is empty, `.` or `..` throws `E400` before sending: it
+  would change which endpoint the URL points at.
 - A contract with no output schema resolves to the raw `Response`.
 - It only needs `fetch`, so it runs in browsers, React Native, Deno, Bun and
   Node. Pass `fetch` to add auth or retries. SSE contracts are not supported.

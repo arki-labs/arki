@@ -26,7 +26,7 @@
  * typed. Same accumulation idiom as `defineApp().use()`.
  */
 
-import type { ContractLike, ParamsOf, RouteContract, SseContract } from './contract.js';
+import type { ContractLike, FailureDefinitionLike, ParamsOf, RouteContract, SseContract } from './contract.js';
 import type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
 import { BASE_CTX_KEYS } from './derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
@@ -43,17 +43,25 @@ export type RouteInput<TPath extends string, TQuery, TBody> = {
 
 /**
  * What a JSON handler may return: the contract's output type (serialized
- * and validated), or a raw `Response` as the escape hatch — redirects,
- * files, custom streams. Contracts without an output schema must return
- * a `Response`.
+ * and validated), one of the contract's listed failures (answered with its
+ * status and the error envelope), or a raw `Response` as the escape hatch —
+ * redirects, files, custom streams. Contracts without an output schema must
+ * return a `Response` or a listed failure. A failure the contract does not
+ * list is a compile error.
  */
-export type HandlerResult<TOutput> = [TOutput] extends [undefined] ? Response : TOutput | Response;
+export type HandlerResult<TOutput, TFailure = never> = [TOutput] extends [undefined]
+  ? Response | TFailure
+  : TOutput | Response | TFailure;
 
 /** Handler signature inferred from a {@link RouteContract}. */
-export type RouteHandler<TPath extends string, TQuery, TBody, TOutput, TCtx extends BaseRequestCtx> = (
-  input: RouteInput<TPath, TQuery, TBody>,
-  ctx: TCtx,
-) => MaybePromise<HandlerResult<TOutput>>;
+export type RouteHandler<
+  TPath extends string,
+  TQuery,
+  TBody,
+  TOutput,
+  TCtx extends BaseRequestCtx,
+  TFailure = never,
+> = (input: RouteInput<TPath, TQuery, TBody>, ctx: TCtx) => MaybePromise<HandlerResult<TOutput, TFailure>>;
 
 /**
  * Handler signature inferred from an {@link SseContract}: an async
@@ -211,9 +219,16 @@ export type RouteBundleBuilder<TCtx extends BaseRequestCtx = BaseRequestCtx> = R
    * generics to the contract — without it, a handler returning the wrong
    * shape would silently widen `TOutput` instead of failing to compile.
    */
-  bind<TPath extends string, TQuery, TBody, TOutput>(
-    contract: RouteContract<TPath, TQuery, TBody, TOutput>,
-    handler: RouteHandler<TPath, NoInfer<TQuery>, NoInfer<TBody>, NoInfer<TOutput>, TCtx>,
+  bind<TPath extends string, TQuery, TBody, TOutput, TFailures extends readonly FailureDefinitionLike[]>(
+    contract: RouteContract<TPath, TQuery, TBody, TOutput, TFailures>,
+    handler: RouteHandler<
+      TPath,
+      NoInfer<TQuery>,
+      NoInfer<TBody>,
+      NoInfer<TOutput>,
+      TCtx,
+      ReturnType<NoInfer<TFailures>[number]>
+    >,
   ): RouteBundleBuilder<TCtx>;
   /** Bind an SSE contract to its event generator. */
   bind<TPath extends string, TQuery, TEvent>(

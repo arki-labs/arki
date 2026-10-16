@@ -6,6 +6,8 @@
 
 import { z } from 'zod';
 
+import { defineFailure, isFailure } from '@arki/failure';
+
 import { createClient } from '../dist/client.js';
 
 const isoDate = z.codec(z.iso.datetime(), z.date(), {
@@ -24,6 +26,19 @@ const moveEvent = {
   output: z.object({ id: z.string(), at: isoDate }),
 };
 const lockEvent = { kind: 'http', id: 'events.lock', method: 'DELETE', path: '/events/:id' };
+const EventNotFound = defineFailure('event.not_found', {
+  status: 404,
+  data: z.object({ id: z.string() }),
+  message: 'no event {id}',
+});
+const getEvent = {
+  kind: 'http',
+  id: 'events.get',
+  method: 'GET',
+  path: '/events/:id',
+  output: z.object({ id: z.string() }),
+  failures: [EventNotFound],
+};
 
 /** A fake server: records each request, answers with what `answer` returns. */
 function fakeFetch(answer) {
@@ -70,6 +85,19 @@ async function main() {
     }),
   );
 
+  const missing = fakeFetch(() => ({
+    status: 404,
+    body: { error: { code: 'event.not_found', message: 'no event e9', data: { id: 'e9' } } },
+  }));
+  const notFound = await createClient(getEvent, { baseUrl: 'https://api.test', fetch: missing.fetch })({
+    params: { id: 'e9' },
+  });
+
+  const traversal = fakeFetch(() => ({ status: 200, body: {} }));
+  const escaped = await outcome(
+    createClient(lockEvent, { baseUrl: 'https://api.test', fetch: traversal.fetch })({ params: { id: '..' } }),
+  );
+
   const checks = [
     ['output decodes to a Date', moved.at instanceof Date && moved.at.getTime(), 5000],
     ['body encodes the Date as ISO', echo.sent[0].init.body, '{"at":"1970-01-01T00:00:05.000Z"}'],
@@ -84,6 +112,10 @@ async function main() {
     ['server status kept', denied.error && denied.error.status, 403],
     ['bad input is E400', invalid.error && invalid.error.code, 'ARKI_HTTP_E400'],
     ['bad input never sent', unused.sent.length, 0],
+    ['listed failure is revived, not thrown', isFailure(notFound) && EventNotFound.is(notFound), true],
+    ['revived failure keeps its data', notFound.data && notFound.data.id, 'e9'],
+    ['".." path param is E400', escaped.error && escaped.error.code, 'ARKI_HTTP_E400'],
+    ['".." path param never sent', traversal.sent.length, 0],
   ];
 
   let failedChecks = 0;

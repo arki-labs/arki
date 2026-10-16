@@ -12,7 +12,9 @@
  * Inputs are typed from the contract and encoded the way the server decodes
  * them: path params are URL-escaped, query and body run through their schema
  * in the encode direction (so a codec turns a `Date` into its ISO string).
- * The output is decoded with the output schema. A failed call throws
+ * The output is decoded with the output schema. A failed call whose code is
+ * one of the contract's `failures` resolves to that failure, revived and its
+ * data checked with the definition's schema; any other failed call throws
  * {@link HttpError} with the server's error code.
  *
  * Uses only `fetch` — no Node APIs — so it runs in browsers, React Native,
@@ -22,11 +24,13 @@
 
 import { z } from 'zod';
 
-import type { ParamsOf, PathParams, RouteContract } from './contract.js';
+import { revive } from '@arki/failure';
+
+import type { FailureDefinitionLike, ParamsOf, PathParams, RouteContract, RouteFailure } from './contract.js';
 import { formatIssues, HTTP_ERROR_CODES, HttpError } from './error.js';
 
 /** Any JSON route contract — what {@link createClient} accepts. */
-type AnyRoute = RouteContract<string, unknown, unknown, unknown>;
+type AnyRoute = RouteContract<string, unknown, unknown, unknown, readonly FailureDefinitionLike[]>;
 
 /** Nothing to pass: the identity for the input intersections below. */
 type NoInput = Record<never, never>;
@@ -49,7 +53,7 @@ type BodyInput<TBody> = [TBody] extends [undefined] ? NoInput : { readonly body:
  * output types — the same values the server handler receives.
  */
 export type ClientInput<TRoute> =
-  TRoute extends RouteContract<infer TPath, infer TQuery, infer TBody, unknown>
+  TRoute extends RouteContract<infer TPath, infer TQuery, infer TBody, unknown, readonly FailureDefinitionLike[]>
     ? Flatten<ParamsInput<TPath> & QueryInput<TQuery> & BodyInput<TBody>>
     : never;
 
@@ -58,13 +62,12 @@ type Flatten<T> = { [K in keyof T]: T[K] };
 
 /**
  * What one client call resolves to: the output schema's output type, or the
- * raw `Response` when the contract declares no output schema.
+ * raw `Response` when the contract declares no output schema, or one of the
+ * failures the contract lists.
  */
 export type ClientOutput<TRoute> =
-  TRoute extends RouteContract<string, unknown, unknown, infer TOutput>
-    ? [TOutput] extends [undefined]
-      ? Response
-      : TOutput
+  TRoute extends RouteContract<string, unknown, unknown, infer TOutput, readonly FailureDefinitionLike[]>
+    ? ([TOutput] extends [undefined] ? Response : TOutput) | RouteFailure<TRoute>
     : never;
 
 /** Per-call options: an abort signal and extra request headers. */
@@ -155,7 +158,7 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
   }
 
   const response = await transport.fetch(url, request);
-  if (!response.ok) throw await toHttpError(contract, response);
+  if (!response.ok) return await toListedFailure(contract, response);
   if (contract.output === undefined) return response;
   return decodeOutput(contract, contract.output, response);
 }
@@ -178,6 +181,14 @@ function fillSegment(segment: string, params: Readonly<Record<string, string>>):
   const value = params[name];
   if (value === undefined) {
     throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `path parameter "${name}" is missing`);
+  }
+  // encodeURIComponent keeps "." and "..", and fetch resolves them: `..` in
+  // `/orders/:id/cancel` would call `/cancel`, another endpoint, with the
+  // user's cookies. An empty value collapses the segment the same way.
+  if (value === '' || value === '.' || value === '..') {
+    throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `path parameter "${name}" must not be empty, "." or ".."`, {
+      remediation: 'A path parameter fills exactly one segment; pass a real id.',
+    });
   }
   return encodeURIComponent(value);
 }
@@ -253,11 +264,16 @@ const errorEnvelopeSchema = z.object({
     message: z.string(),
     remediation: z.string().optional(),
     docsUrl: z.string().optional(),
+    data: z.unknown().optional(),
   }),
 });
 
-/** Turn a non-2xx response into an {@link HttpError}, keeping the server's code when it sent the envelope. */
-async function toHttpError(contract: AnyRoute, response: Response): Promise<HttpError> {
+/**
+ * A non-2xx response as the failure it stands for, when its code is one the
+ * contract lists. Anything else throws {@link HttpError}, keeping the
+ * server's code when it sent the envelope.
+ */
+async function toListedFailure(contract: AnyRoute, response: Response): Promise<unknown> {
   let body: unknown;
   try {
     body = await response.json();
@@ -266,17 +282,38 @@ async function toHttpError(contract: AnyRoute, response: Response): Promise<Http
   }
   const envelope = errorEnvelopeSchema.safeParse(body);
   if (envelope.success) {
+    const failure = reviveListed(contract, envelope.data.error);
+    if (failure !== undefined) return failure;
     const { code, message, remediation, docsUrl } = envelope.data.error;
-    return new HttpError(response.status, code, message, {
+    throw new HttpError(response.status, code, message, {
       ...(remediation === undefined ? {} : { remediation }),
       ...(docsUrl === undefined ? {} : { docsUrl }),
     });
   }
-  return new HttpError(
+  throw new HttpError(
     response.status,
     codeForStatus(response.status),
     `${contract.method} ${contract.path} answered ${response.status} without an error envelope`,
   );
+}
+
+/** The listed failure the envelope's code names, its data checked by `revive`; `undefined` when not listed. */
+function reviveListed(contract: AnyRoute, error: { readonly code: string; readonly data?: unknown }): unknown {
+  if (contract.failures === undefined) return undefined;
+  try {
+    return revive(error, contract.failures);
+  } catch (error_) {
+    throw new HttpError(
+      500,
+      HTTP_ERROR_CODES.internal,
+      `failure "${error.code}" from "${contract.id}" carries data its definition rejects: ${messageOf(error_)}`,
+      {
+        cause: error_,
+        remediation:
+          'The client and server disagree on the failure definition. Deploy the same contract version to both.',
+      },
+    );
+  }
 }
 
 /** The wire code a status maps to when the response carried no envelope (a proxy, a gateway). */
