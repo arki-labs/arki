@@ -7,7 +7,7 @@ import { createRetryPolicy, createTimeoutPolicy } from './policies.js';
  * wrap it in a second promise and add microtask hops to every call. A policy that throws instead of
  * rejecting still yields a rejected promise, as an `async` function would.
  */
-function run<T>(policy: Policy, fn: PolicyCallback<T>): Promise<T> {
+function run<T, F>(policy: Policy<F>, fn: PolicyCallback<T>): Promise<T | F> {
   try {
     return policy.execute(fn);
   } catch (error) {
@@ -27,7 +27,7 @@ function run<T>(policy: Policy, fn: PolicyCallback<T>): Promise<T> {
  * );
  * ```
  */
-export function withResilience<T>(fn: PolicyCallback<T>, policy: Policy): Promise<T> {
+export function withResilience<T, F = never>(fn: PolicyCallback<T>, policy: Policy<F>): Promise<T | F> {
   return run(policy, fn);
 }
 

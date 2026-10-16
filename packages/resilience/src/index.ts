@@ -47,16 +47,22 @@ export {
   noop,
 } from './policies.js';
 
+// A last answer when a policy gives up
+export { withFallback } from './fallback.js';
+
 export type {
   RetryPolicyOptions,
   CircuitBreakerPolicyOptions,
   TimeoutPolicyOptions,
   BulkheadPolicyOptions,
   ResiliencePolicyOptions,
+  ResiliencePolicy,
+  ResilienceComponents,
 } from './policies.js';
 
 // Pre-configured presets
-export { externalApiPolicy, databasePolicy, backgroundJobPolicy } from './presets.js';
+export { externalApiPolicy, databasePolicy, backgroundJobPolicy, definePresets } from './presets.js';
+export type { Presets } from './presets.js';
 
 // Event / observability helpers
 export { attachPolicyLogger } from './events.js';

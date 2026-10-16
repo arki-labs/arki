@@ -48,9 +48,17 @@ export type RetryEvent = FailureReason & {
 /** Fired when a circuit breaker opens. `isolated` means it was opened by hand. */
 export type BreakEvent = FailureReason | { isolated: true };
 
-/** Any policy: runs a function and reports how each call ended. */
-export type Policy = {
-  execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T>;
+/** Type-only brand. Never set at runtime. Not `@internal`: the published `.d.ts` needs it. */
+declare const fallbackType: unique symbol;
+
+/**
+ * Any policy: runs a function and reports how each call ended. `F` is what a fallback may
+ * resolve instead of the function's own `T`; it is `never` for a plain policy.
+ */
+export type Policy<F = never> = {
+  /** Phantom: makes a policy with a fallback unassignable to a plain `Policy`, so `wrap` rejects it. */
+  readonly [fallbackType]?: () => F;
+  execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F>;
   /** Fires once per call that ends well, even when that took retries. */
   readonly onSuccess: PolicyEvent<SuccessEvent>;
   /** Fires on every failed attempt the policy sees. */

@@ -12,11 +12,13 @@ import {
   createCircuitBreakerPolicy,
   createRetryPolicy,
   createTimeoutPolicy,
+  definePresets,
   externalApiPolicy,
   isBulkheadRejectedError,
   isResilienceError,
   noop,
   TimeoutError,
+  withFallback,
   withResilience,
   wrap,
 } from '../dist/index.js';
@@ -73,7 +75,22 @@ const clockRetry = createRetryPolicy({ backoff: backoff.constant(5000).upTo(2), 
 await clock.advanceAsync(20_000);
 const clockResult = `${await clockRetry}@${clockCalls.join(',')}`;
 
+const presets = definePresets({ a: { circuitBreaker: { consecutiveFailures: 1 } }, b: {} });
+await presets.a.execute(() => Promise.reject(new Error('down'))).catch(() => undefined);
+const presetA = await errorName(presets.a.execute(() => 'x'));
+const presetB = await presets.b.execute(() => 'fine');
+const fellBack = await withFallback(presets.a, () => 'cached').execute(() => 'live');
+const notHidden = new AbortController();
+notHidden.abort();
+const abortKept = await errorName(
+  withFallback(wrap(createTimeoutPolicy()), () => 'hidden').execute(pending, notHidden.signal),
+);
+
 const checks = [
+  ['preset breaker is its own', presetA, 'CircuitOpenError'],
+  ['other preset unaffected', presetB, 'fine'],
+  ['fallback on open breaker', fellBack, 'cached'],
+  ['fallback does not hide a cancel', abortKept, 'CancelledError'],
   ['retry on a MockClock', clockResult, 'ok@0,5000,10000'],
   ['retry', retryResult, 'ok'],
   ['retry attempts', retried.join(','), '0,1'],

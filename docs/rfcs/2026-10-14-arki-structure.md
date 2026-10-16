@@ -73,8 +73,8 @@ Result: 77 → about 68 folders. New: `async`, `seo`, `feedback`, `domains`. Gon
              geo, domains, scraping, images, formats, md-to-pdf, rss, admin, diff, text,
              text-bible, text-embeddings, text-hyphen, mw-dictionary, books-import,
              offline, dictionary
- kernel      dot, feature, env
- foundation  ts, math, string, date, clock, money, log, contracts, resilience, assert,
+ kernel      dot, feature, env, resilience
+ foundation  ts, math, string, date, clock, money, log, contracts, assert,
              async, games, games-solitaire, poetry
 ```
 

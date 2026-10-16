@@ -1,0 +1,59 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { backoff, CircuitOpenError, definePresets } from './index.js';
+
+/** Passed to `.catch` where the test only needs the call to settle. */
+function swallow(): void {
+  // the failure is expected
+}
+
+const boom = (): never => {
+  throw new Error('down');
+};
+
+describe('definePresets', () => {
+  it('gives each name its own breaker, so one dead downstream does not block another', async () => {
+    const presets = definePresets({
+      carrier: { circuitBreaker: { consecutiveFailures: 1 }, retry: backoff.constant(1).upTo(0) },
+      db: { circuitBreaker: { consecutiveFailures: 1 }, retry: backoff.constant(1).upTo(0) },
+    });
+    await presets.carrier.execute(boom).catch(swallow);
+
+    await expect(presets.carrier.execute(() => 1)).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(await presets.db.execute(() => 'fine')).toBe('fine');
+  });
+
+  it('applies the options of its own name, not defaults', async () => {
+    const presets = definePresets({ flaky: { retry: backoff.constant(1).upTo(2) } });
+    const fn = vi.fn(boom);
+    await presets.flaky.execute(fn).catch(swallow);
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('components are the parts the preset runs, so their events fire on a composed call', async () => {
+    const presets = definePresets({
+      x: { circuitBreaker: { consecutiveFailures: 2 }, retry: backoff.constant(1).upTo(1) },
+    });
+    const onRetry = vi.fn();
+    const onBreak = vi.fn();
+    presets.x.components.retry.onRetry(onRetry);
+    presets.x.components.circuitBreaker.onBreak(onBreak);
+    await presets.x.execute(boom).catch(swallow);
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onBreak).toHaveBeenCalledTimes(1);
+  });
+
+  it('has a bulkhead component only when one was configured', () => {
+    const presets = definePresets({ plain: {}, limited: { bulkhead: { maxConcurrent: 1 } } });
+    expect(presets.plain.components.bulkhead).toBeUndefined();
+    expect('bulkhead' in presets.plain.components).toBe(false);
+    expect(presets.limited.components.bulkhead).toBeDefined();
+  });
+
+  it('keeps names like toString as ordinary preset names', () => {
+    const presets = definePresets({ toString: {}, constructor: {} });
+    expect(Object.keys(presets)).toEqual(['toString', 'constructor']);
+    expect(typeof presets.toString.execute).toBe('function');
+  });
+});

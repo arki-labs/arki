@@ -31,6 +31,36 @@ Three curated presets ship out of the box:
 - `databasePolicy` — short timeout + retry for transient connection errors.
 - `backgroundJobPolicy` — longer timeout + aggressive retry for long-running work.
 
+### Fallback
+
+```ts
+import { createResiliencePolicy, withFallback } from '@arki/resilience';
+
+const quotes = withFallback(createResiliencePolicy(), () => null);
+const quote = await quotes.execute(() => fetchQuote()); // Quote | null
+```
+
+`withFallback(policy, fallback)` returns a policy whose call resolves to `T | F`: the function's own result, or what `fallback(error)` returns when the policy gives up (retries used up, circuit open, timeout, ...). The type comes from the fallback, so `null` and `{ stale: true }` show up in the result type.
+
+- A fallback never hides a cancel. If the caller's signal is aborted, the error is rethrown and `fallback` does not run.
+- To fall back on some errors only, rethrow the others: `(error) => { if (!isBrokenCircuitError(error)) throw error; return cached; }`.
+- Put it outermost. `wrap` does not accept a policy with a fallback (a compile error), because inside a retry it would hide the errors the retry needs.
+
+### Named presets
+
+```ts
+import { backoff, definePresets } from '@arki/resilience';
+
+const presets = definePresets({
+  carrier: { retry: backoff.exponential({ base: 200, max: 5000 }).upTo(3), timeout: { timeoutMs: 10_000 } },
+  search: { bulkhead: { maxConcurrent: 20 } },
+});
+
+await presets.carrier.execute(() => callCarrier());
+```
+
+Each name gets its own composed policy, so its own breaker. A typo in a name or an option does not compile. A `presets` object shared by two apps shares its breakers too (same downstream, same health). `createResiliencePolicy` and every preset expose `components` (`retry`, `circuitBreaker`, `timeout`, and `bulkhead` when configured): the exact policies the composed one runs, so you can listen to their events.
+
 ### Building policies
 
 ```ts
@@ -162,7 +192,19 @@ import { attachPolicyLogger } from '@arki/resilience';
 const detach = attachPolicyLogger(policy, logger, 'billing');
 ```
 
-`logger` needs `info`, `warn` and `error` methods. The helper subscribes to the events a policy exposes: every policy has `onSuccess` and `onFailure`; a retry policy adds `onRetry` and `onGiveUp`; a circuit breaker adds `onBreak`, `onHalfOpen` and `onReset`; a timeout policy adds `onTimeout`; a bulkhead adds `onReject`. Each event method takes a listener and returns a subscription with `dispose()`. A composed policy (`wrap`, `createResiliencePolicy`, the presets) exposes only `onSuccess` and `onFailure`.
+`logger` needs `info`, `warn` and `error` methods. The helper subscribes to the events a policy exposes: every policy has `onSuccess` and `onFailure`; a retry policy adds `onRetry` and `onGiveUp`; a circuit breaker adds `onBreak`, `onHalfOpen` and `onReset`; a timeout policy adds `onTimeout`; a bulkhead adds `onReject`. Each event method takes a listener and returns a subscription with `dispose()`. A composed policy (`wrap`, `createResiliencePolicy`, the presets) exposes only `onSuccess` and `onFailure` itself; `createResiliencePolicy` and the presets also give you `components`, whose events are the full set. `attachPolicyLogger` returns a function that ends all its subscriptions.
+
+### Dot plugin
+
+```ts
+import { defineApp } from '@arki/dot';
+import { resilience } from '@arki/resilience/dot';
+
+const app = await defineApp('my-app').use(resilience(presets)).boot();
+await app.services.resilience.run('carrier', () => callCarrier());
+```
+
+`services.resilience` has `for(name)` (the preset itself) and `run(name, fn, signal?)`. Names are typed from `presets`. While the app runs, the plugin logs the events of every preset component (retry, give up, circuit open / half-open / closed, timeout, bulkhead reject) at `debug` in the `arki:resilience` category. Turn them on with `DEBUG=arki:resilience`. `dispose` ends the subscriptions. For other levels or per-call records, use `attachPolicyLogger`. `@arki/dot` is an optional peer dependency.
 
 ## API
 
@@ -171,10 +213,12 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 - `createRetryPolicy({ backoff?, clock? })`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.
+- `withFallback(policy, fallback)` — a last answer when a policy gives up; `definePresets({ name: options })` — named composed policies.
+- `@arki/resilience/dot`: `resilience(presets)` plugin, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
 - `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError`, `InvalidBackoffError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
-- Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`.
+- Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`, `Presets`, `ResiliencePolicy`, `ResilienceComponents`. `Policy<F>` carries the fallback type `F` (`never` for a plain policy).
 
 ## Errors
 
@@ -190,6 +234,12 @@ Every error the policies raise is a `ResilienceError` with a stable `code` and a
 | `ARKI_RESILIENCE_E006` | `InvalidBackoffError`   | A `backoff` builder got an option it cannot use.                 |
 
 The codes are also exported as `RESILIENCE_ERROR_CODES`.
+
+The Dot plugin has one code of its own, exported as `RESILIENCE_PLUGIN_ERROR_CODES`:
+
+| Code                          | Meaning                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `ARKI_RESILIENCE_PLUGIN_E001` | `for` or `run` got a name that is not in the presets (untyped JS only). Use a name from `definePresets`. |
 
 ## Runtime support
 

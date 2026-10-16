@@ -14,20 +14,20 @@ export type PolicyLogger = {
 // Type guards for policy event detection
 // ---------------------------------------------------------------------------
 
-function hasRetryEvents(policy: Policy): policy is RetryPolicy {
+function hasRetryEvents(policy: Policy<unknown>): policy is RetryPolicy {
   return 'onRetry' in policy;
 }
 
-function hasCircuitBreakerEvents(policy: Policy): policy is CircuitBreakerPolicy {
+function hasCircuitBreakerEvents(policy: Policy<unknown>): policy is CircuitBreakerPolicy {
   return 'onBreak' in policy && 'onReset' in policy && 'onHalfOpen' in policy;
 }
 
-function hasTimeoutEvents(policy: Policy): policy is TimeoutPolicy {
+function hasTimeoutEvents(policy: Policy<unknown>): policy is TimeoutPolicy {
   return 'onTimeout' in policy;
 }
 
-/** One line of text for a failure, whatever was thrown. */
-function describe(reason: FailureReason): string {
+/** One line of text for a failure, whatever was thrown. @internal */
+export function describe(reason: FailureReason): string {
   if ('error' in reason) {
     return reason.error instanceof Error ? reason.error.message : String(reason.error);
   }
@@ -44,7 +44,11 @@ function describe(reason: FailureReason): string {
  *
  * Returns a cleanup function that disposes all subscriptions.
  */
-export function attachPolicyLogger(policy: Policy, logger: PolicyLogger, policyName = 'resilience'): () => void {
+export function attachPolicyLogger(
+  policy: Policy<unknown>,
+  logger: PolicyLogger,
+  policyName = 'resilience',
+): () => void {
   const disposables: { dispose(): void }[] = [];
 
   // Retry events

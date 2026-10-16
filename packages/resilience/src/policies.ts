@@ -133,6 +133,18 @@ export function wrap(first: Policy, ...rest: Policy[]): Policy {
 /** A policy that only runs the function. Useful as a default or in tests. */
 export const noop: Policy = fromEngine(cockatielNoop, {});
 
+/** The parts a composed resilience policy runs. Their events fire on every composed call. */
+export type ResilienceComponents = {
+  readonly retry: RetryPolicy;
+  readonly circuitBreaker: CircuitBreakerPolicy;
+  readonly timeout: TimeoutPolicy;
+  /** Set only when the `bulkhead` option was given. */
+  readonly bulkhead?: BulkheadPolicy;
+};
+
+/** What `createResiliencePolicy` returns: the composed policy plus the parts it runs. */
+export type ResiliencePolicy = Policy & { readonly components: ResilienceComponents };
+
 /**
  * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.
  *
@@ -140,12 +152,22 @@ export const noop: Policy = fromEngine(cockatielNoop, {});
  * call may be retried while individual attempts are protected by the breaker
  * and the timeout. With `bulkhead`, the bulkhead wraps all of it, so one
  * logical call holds one slot for all its attempts.
+ *
+ * `components` holds the parts it runs, so you can listen to their events.
  */
-export function createResiliencePolicy(options: ResiliencePolicyOptions = {}): Policy {
-  const retryPolicy = createRetryPolicy({ backoff: options.retry, clock: options.clock });
-  const breakerPolicy = createCircuitBreakerPolicy(options.circuitBreaker);
+export function createResiliencePolicy(options: ResiliencePolicyOptions = {}): ResiliencePolicy {
+  const retry = createRetryPolicy({ backoff: options.retry, clock: options.clock });
+  const circuitBreaker = createCircuitBreakerPolicy(options.circuitBreaker);
   const timeoutPolicy = createTimeoutPolicy(options.timeout);
 
-  if (options.bulkhead === undefined) return wrap(retryPolicy, breakerPolicy, timeoutPolicy);
-  return wrap(createBulkheadPolicy(options.bulkhead), retryPolicy, breakerPolicy, timeoutPolicy);
+  if (options.bulkhead === undefined) {
+    return fromEngine(cockatielWrap(engineOf(retry), engineOf(circuitBreaker), engineOf(timeoutPolicy)), {
+      components: { retry, circuitBreaker, timeout: timeoutPolicy },
+    });
+  }
+  const bulkhead = createBulkheadPolicy(options.bulkhead);
+  return fromEngine(
+    cockatielWrap(engineOf(bulkhead), engineOf(retry), engineOf(circuitBreaker), engineOf(timeoutPolicy)),
+    { components: { retry, circuitBreaker, timeout: timeoutPolicy, bulkhead } },
+  );
 }
