@@ -135,7 +135,7 @@ export function actorRun<TContext extends { readonly journal: Door }>(
 
 export type IdempotentOptions<TContext> = {
   /**
-   * Who is asking: the signed-in actor or tenant. The key becomes `${scope}:${header value}`, so two
+   * Who is asking: the signed-in actor or tenant. The key becomes `${scope.length}:${scope}:${header value}`, so two
    * callers never share a key. Return `undefined` for an anonymous request: it runs with no key.
    */
   readonly scope: (context: TContext) => string | undefined;
@@ -179,6 +179,8 @@ export function idempotent<TContext extends { readonly headers: Headers }>(optio
     if (supplied.length > MAX_KEY_LENGTH)
       throw new ORPCError('BAD_REQUEST', { message: `${header} must be at most ${MAX_KEY_LENGTH} characters` });
     const scope = options.scope(context);
-    return next({ context: added(scope === undefined ? undefined : `${scope}:${supplied}`) });
+    // The scope's length goes first: the client picks the key, colons included, so `a` + `b:c` and
+    // `a:b` + `c` must not meet in one key.
+    return next({ context: added(scope === undefined ? undefined : `${scope.length}:${scope}:${supplied}`) });
   });
 }

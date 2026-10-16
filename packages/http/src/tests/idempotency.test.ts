@@ -79,6 +79,22 @@ const created = (_req: Request, calls: number) =>
 
 const keyed = { 'idempotency-key': 'k1', 'x-user': 'u1' };
 
+/** A keyed POST whose body streams in 40-byte chunks with no content-length, like a chunked upload. */
+const chunkedPost = (bytes: number) => {
+  const chunk = new TextEncoder().encode('z'.repeat(40));
+  return new Request('http://x/orders', {
+    method: 'POST',
+    headers: keyed,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let sent = 0; sent < bytes; sent += chunk.byteLength) controller.enqueue(chunk);
+        controller.close();
+      },
+    }),
+    duplex: 'half',
+  });
+};
+
 describe('idempotent', () => {
   it('replays the stored body and only the allowlisted headers, without running the handler again', async () => {
     const { fetch, calls } = setup(created);
@@ -194,6 +210,23 @@ describe('idempotent', () => {
     await small.fetch(post('/orders', hugeBody, keyed));
     await small.fetch(post('/orders', hugeBody, keyed));
     expect(small.calls()).toBe(2);
+  });
+
+  it('caps a chunked request body by counting bytes, not by trusting content-length', async () => {
+    // No content-length: before the cap counted bytes, the whole stream was buffered first.
+    const { cache, fetch, calls } = setup(
+      async req => {
+        const text = await req.text();
+        return Response.json({ size: text.length });
+      },
+      { maxBodyBytes: 50 },
+    );
+    const first = await fetch(chunkedPost(80));
+    await fetch(chunkedPost(80));
+    expect(calls()).toBe(2);
+    expect(cache.entries.size).toBe(0);
+    // The handler still gets the whole body: the cap only read a clone.
+    expect(await first.json()).toEqual({ size: 80 });
   });
 
   it('lets the handler read the body after the middleware fingerprinted it', async () => {

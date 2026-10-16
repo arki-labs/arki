@@ -169,7 +169,7 @@ idempotent({ cache: responseCache(db, tables), scope, routes: ['POST /orders'], 
 
 Give it the root database, not a command's transaction. The two uses of the table stay apart: a cache row has a key that starts with `http:`, `command = 'http.response'`, and an `expires_at`; a command receipt never expires. `begin` is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE expires_at <= now()`, so two concurrent first requests meet on the row lock, and an expired key is taken in the same statement. `finish` and `abandon` match the request's `owner`, so a slow request whose key expired and was given away cannot overwrite the new entry. Expiry uses the database clock. `pruneReceipts` removes old cache rows too.
 
-For oRPC, `idempotent({ scope })` from `@arki/journal/orpc` reads `Idempotency-Key` from `context.headers`. Place it before `actorRun`: `os.use(idempotent({ scope: ctx => ctx.session?.user.id })).use(asActor)`. Each command the procedure runs then uses `${scope}:${key}:${commandName}` as its receipt key, so a procedure with two commands replays both. The same effect without oRPC: `journal.bind(db, meta, { idempotencyKey, keyPerCommand: true })`.
+For oRPC, `idempotent({ scope })` from `@arki/journal/orpc` reads `Idempotency-Key` from `context.headers`. Place it before `actorRun`: `os.use(idempotent({ scope: ctx => ctx.session?.user.id })).use(asActor)`. Each command the procedure runs then uses `${scope.length}:${scope}:${key}:${commandName}` as its receipt key (the length keeps a key with colons from reaching another scope), so a procedure with two commands replays both. The same effect without oRPC: `journal.bind(db, meta, { idempotencyKey, keyPerCommand: true })`.
 
 ### Where commands run from
 

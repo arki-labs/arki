@@ -77,6 +77,39 @@ const toHex = (bytes: ArrayBuffer): string =>
 const sha256 = async (data: Uint8Array<ArrayBuffer> | string): Promise<string> =>
   toHex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? textEncoder.encode(data) : data));
 
+/**
+ * Reads a body, but stops once it passes `limit` bytes: `undefined` then, and the rest stays unread.
+ * `Content-Length` can be absent (chunked) or wrong, so only counting the bytes keeps the cap real.
+ */
+const readCapped = async (
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  if (body === null) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let chunk = await reader.read();
+  while (!chunk.done) {
+    size += chunk.value.byteLength;
+    if (size > limit) {
+      // Not awaited: a cloned body is one branch of a tee, and its cancel settles only once the
+      // other branch, still in use by the handler or the client, is done too.
+      void reader.cancel().catch(() => null);
+      return undefined;
+    }
+    chunks.push(chunk.value);
+    chunk = await reader.read();
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const part of chunks) {
+    bytes.set(part, at);
+    at += part.byteLength;
+  }
+  return bytes;
+};
+
 const toBase64 = (bytes: Uint8Array): string => {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x80_00) binary += String.fromCodePoint(...bytes.subarray(i, i + 0x80_00));
@@ -167,8 +200,8 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
 
     const declared = Number(req.headers.get('content-length') ?? 0);
     if (declared > maxBodyBytes) return next(req);
-    const body = new Uint8Array(await req.clone().arrayBuffer());
-    if (body.byteLength > maxBodyBytes) return next(req);
+    const body = await readCapped(req.clone().body, maxBodyBytes);
+    if (body === undefined) return next(req);
 
     const key = await sha256(`${principal.length}:${principal}${supplied}`);
     const fingerprint = await fingerprintOf(req, url, body);
@@ -205,8 +238,8 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
       await cache.abandon(key, owner);
       return response;
     }
-    const bytes = new Uint8Array(await response.clone().arrayBuffer());
-    if (bytes.byteLength > maxBodyBytes) {
+    const bytes = await readCapped(response.clone().body, maxBodyBytes);
+    if (bytes === undefined) {
       await cache.abandon(key, owner);
       return response;
     }

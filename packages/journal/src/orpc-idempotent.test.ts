@@ -80,7 +80,7 @@ describe('idempotent() with actorRun', () => {
     expect(await events(id)).toHaveLength(2);
     const keys = await db.select({ key: tables.receipts.key }).from(tables.receipts);
     expect(keys.map(row => row.key)).toEqual(
-      expect.arrayContaining(['usr_ana:req-1:placeOrder', 'usr_ana:req-1:payOrder']),
+      expect.arrayContaining(['7:usr_ana:req-1:placeOrder', '7:usr_ana:req-1:payOrder']),
     );
   });
 
@@ -89,6 +89,17 @@ describe('idempotent() with actorRun', () => {
     const b = orderId(++next);
     await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'same' }) });
     await call(placeAndPay, { id: b }, { context: context({ 'idempotency-key': 'same' }, { user: { id: 'usr_bo' } }) });
+    expect(await events(a)).toHaveLength(2);
+    expect(await events(b)).toHaveLength(2);
+  });
+
+  it('a key with colons cannot reach another scope: user "a" + key "b:x" and user "a:b" + key "x" stay apart', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'b:x' }, { user: { id: 'a' } }) });
+    // Joined without the length, both would be "a:b:x:…" and the second call, with another input,
+    // would hit the first one's receipt.
+    await call(placeAndPay, { id: b }, { context: context({ 'idempotency-key': 'x' }, { user: { id: 'a:b' } }) });
     expect(await events(a)).toHaveLength(2);
     expect(await events(b)).toHaveLength(2);
   });
