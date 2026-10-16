@@ -110,8 +110,10 @@ describe('journal response cache (Postgres)', () => {
     const headers = { 'x-user': 'u1', 'idempotency-key': freshKey() };
     const firstA = one.fetch(post({ a: 1 }, headers));
     const firstB = two.fetch(post({ a: 1 }, headers));
-    await sleep(200);
-    // Whoever lost the race is already answered; the other is still inside the handler.
+    // Only the loser can answer while the gate is shut: the winner is inside the handler. So the
+    // first answer is the loser's, however slow the machine is (a fixed sleep was flaky under load).
+    const loser = await Promise.race([firstA, firstB]);
+    expect(loser.status).toBe(409);
     release();
     const results = await Promise.all([firstA, firstB]);
     expect(results.map(res => res.status).toSorted()).toEqual([201, 409]);
