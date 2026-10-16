@@ -185,6 +185,131 @@ await uow(async tx => {
 });
 ```
 
+## Transactional procedures: `transactionalProcedure`
+
+One oRPC middleware makes a contract-first procedure one SERIALIZABLE
+transaction. Per call it opens the transaction, binds the repositories to it
+(`withTx(tx)`, once per attempt) and runs the handler. When PostgreSQL aborts
+the transaction with `40001` or `40P01`, it runs the handler again in a fresh
+transaction. The handler cannot forget the transaction: it never sees the pool.
+
+```ts
+import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+
+const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 });
+
+export const transfer = implement(contract, transactionalProcedureConfig)
+  .transfer.use(transact) // always the last `.use()`
+  .handler(({ context: { repos }, input }) => moveMoney(repos, input));
+```
+
+Two rules, both checked on the first call of each procedure (`ARKI_DB_TX_E004`):
+
+- **`transact` is the last `.use()`.** A middleware after it would run again on
+  every retry. Put auth, timing and error mapping before it.
+- **Pass `transactionalProcedureConfig` to `implement`.** Then the output is
+  validated inside the transaction, so a bad output rolls back. Input is still
+  validated once, before every middleware, however often the handler reruns.
+
+A stream output is refused (`ARKI_DB_TX_E005`): it would be read after the
+transaction closed. A second `transact` on the same call is refused
+(`ARKI_DB_TX_E003`). A transaction passed as the root database is refused
+(`ARKI_DB_TX_E006`): a nested transaction cannot set its isolation level.
+
+In a Dot feature, see [Transactional procedures in a feature](#transactional-procedures-in-a-feature).
+
+### Serializable retry outside oRPC: `runTransaction`
+
+Jobs, scripts and journal effects use the same loop without oRPC:
+
+```ts
+import { runTransaction } from '@arki/db/transaction';
+
+const moved = await runTransaction(db, async (tx, attempt) => moveMoney(tx, input), {
+  retries: 3, // extra attempts: at most 4 runs
+  signal, // stops before the next attempt and during the wait
+});
+```
+
+`@arki/db/transaction` and `@arki/db/orpc` are portable: no driver, and they
+run on Node, Bun, Deno, browsers and Hermes (`bun run test:runtimes`).
+
+### What is retried
+
+- Only SQLSTATE `40001` (serialization failure) and `40P01` (deadlock). The
+  nearest `code` in the error's `cause` chain decides, so a Drizzle query error
+  defers to the driver error inside it, and an `ORPCError` is always final.
+- `retries` counts extra attempts: `3` means at most 4 runs. Default 3, at
+  most 10. The wait is about 10, 20, 40 … ms, varied ±25%, never above 250 ms.
+  It starts only after the transaction rolled back and released its connection.
+- Out of retries: `runTransaction` throws `DbTransactionError`
+  (`ARKI_DB_TX_E001`, with `attempts`, `sqlState` and the last error as
+  `cause`). The middleware turns it into `ORPCError('CONFLICT')`, a 409 the
+  client may send again. The database error is not attached.
+- Everything else runs once and reaches the caller unchanged: `23505`, a lost
+  connection, a timeout, your own errors.
+
+### Guarantees
+
+| Promised | Not promised |
+| --- | --- |
+| Writes through `tx` and the bound repos commit or roll back together | Pool-bound services, external calls |
+| Each attempt starts at SERIALIZABLE (node-postgres and PGlite) | Other writers' isolation |
+| A conflict reruns the whole handler in a fresh transaction | Middlewares before `transact` do not rerun |
+| At most `1 + retries` handler runs per call | SQL time: use statement timeouts |
+| The middleware returns only after `COMMIT` succeeded | Delivery of the response |
+| A bad output rolls back (with `transactionalProcedureConfig`) | — |
+
+- **Effects run per attempt.** A `fetch` in a retried handler runs twice. The
+  lint rule below reports it; the runtime does not stop it.
+- **PGlite never conflicts.** It has one connection. The retry path is proven
+  on real PostgreSQL (`src/transaction.pg.test.ts`).
+- **A swallowed SQL error poisons the transaction** (`25P02`). Do not catch a
+  database error and carry on inside the handler.
+
+### Ambiguous commits and receipts
+
+When the connection drops around `COMMIT`, nobody knows whether the commit
+happened. That error is **not** retried: a retry could apply the work twice.
+The client gets a 500. Recovery is an idempotency key and a journal receipt:
+
+```ts
+.handler(({ context, input }) =>
+  journal.run(context.tx, deposit, { id: input.id, amount: input.amount }, meta, {
+    // Scope the key: tenant, actor, operation, version, then the client's key (validated, ≤ 256 chars in all).
+    idempotencyKey: `${context.tenantId}:${context.actorId}:accounts.deposit:v1:${input.key}`,
+  }),
+)
+```
+
+The command runs as a savepoint of the procedure's transaction, so its events,
+jobs and receipt commit or roll back with it. The client repeats the same
+logical action with the same key: after a real commit the journal replays the
+receipt and writes nothing; after a rollback it runs fresh. The receipted
+command must cover every write a replay would repeat. Full recipe:
+[`docs/agent-guide.md`](docs/agent-guide.md#ambiguous-commit-recovery).
+
+### Lint: `db/no-effects-in-transaction`
+
+```js
+// eslint.config.js (needs typed linting: parserOptions.projectService)
+import db from '@arki/db/eslint';
+
+export default [...baseConfig, db.configs.recommended];
+```
+
+It reports, inside a function whose parameter carries the transaction scope
+(a usecase taking `TransactionScopeOf<typeof transact>`) or whose `context`
+does (a handler after `.use(transact)`), and in every callback nested there:
+the global `fetch` (also via `globalThis`, an alias or destructuring), BullMQ
+`Queue#add` / `#addBulk`, `@arki/queue` `trigger()` / `enqueue()`, and any
+`.effect()`. Without type information it throws instead of passing silently.
+
+Blind spots, by design: dynamic member names, values typed as a plain object
+type, helper functions whose parameters do not carry the scope, and SDK
+wrappers (`stripe.checkout.sessions.create()` is just a method). Review the
+usecases a transaction calls before you adopt it.
+
 ## In a Dot feature: `repos()`, `reader()`
 
 All three live in `@arki/db/dot` and return plain plugins. In a
@@ -243,6 +368,49 @@ transaction (a savepoint), call `repos.withTx(inner)` on the original set
 again — the set `withTx` returns has no `withTx` of its own. Forgetting
 `withTx` inside a transaction reads through the pool, exactly like
 forgetting to pass `tx` by hand today.
+
+### Transactional procedures in a feature
+
+Usecases are built once at boot, so they capture the pool-bound repositories.
+A middleware cannot rebind them. The pattern that works: mount the repository
+plugin under another name, and let a transaction-aware usecase take the scope
+per call.
+
+```ts
+// feature.ts
+const accountsDeps = defineFeature('accounts')
+  .needs({ db: database.provides.db })
+  .infra(rename(repository, { repos: 'repositories' })); // the pool-bound source keeps its own name
+export type Deps = DepsOf<typeof accountsDeps>;
+export type AccountsTx = TransactionScopeOf<typeof transact>; // { tx, repos, '~arkiTransaction' }, inferred
+export const accountsLogic = accountsDeps.usecases({ transfer: () => transfer, balance });
+export const rpcImplementer = implement(accountsRpcContract, transactionalProcedureConfig)
+  .$context<RequestContext>()
+  .use(bind(accountsLogic));
+
+// entrypoints/transact.ts — declared once per feature
+export const transact = transactionalProcedure((ctx: Pick<Deps, 'db' | 'repositories'>) => ctx.db, {
+  retries: 3,
+  repos: ctx => ctx.repositories,
+});
+
+// usecases/transfer.ts
+export async function transfer({ repos }: AccountsTx, input: TransferInput) {
+  await repos.accounts.add(input.from, -input.cents); // already bound to this call's tx
+  await repos.accounts.add(input.to, input.cents);
+}
+
+// entrypoints/procedures.ts — the procedure still only calls a usecase
+transfer: (impl: typeof rpcImplementer) =>
+  impl.transfer.use(transact).handler(({ context, input }) => context.usecases.transfer(context, input)),
+```
+
+- `repositories` (pool) and `repos` (bound to `tx`) never share a name, so
+  oRPC's own context check holds without a cast.
+- Plain reads keep using `repositories`, bound at boot.
+- Tests replace the source like any infra key: `.override({ repositories: fake })`.
+- The whole layout is a working app in `src/__fixtures__/dot-app/`
+  (`src/orpc.dot.test.ts` runs it, and runs the feature-layer lint on it).
 
 ### Journal-backed features
 
@@ -345,6 +513,9 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
 - `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers, and `idColumns(defineId(...))`.
 - `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()` for Dot apps.
 - `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
+- `@arki/db/transaction` — `runTransaction`, `retryableSqlState`, `DbTransactionError`: serializable retry on `40001` / `40P01`. Portable.
+- `@arki/db/orpc` — `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`: the oRPC middleware. Portable; needs the optional peer `@orpc/server`.
+- `@arki/db/eslint` — the `db/no-effects-in-transaction` rule. Tooling only; needs `eslint`, `@typescript-eslint/utils` and `typescript`.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.

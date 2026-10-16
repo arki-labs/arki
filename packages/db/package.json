@@ -110,6 +110,21 @@
       "import": "./dist/pagination.js",
       "default": "./dist/pagination.js"
     },
+    "./transaction": {
+      "types": "./dist/transaction.d.ts",
+      "import": "./dist/transaction.js",
+      "default": "./dist/transaction.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint.d.ts",
+      "import": "./dist/eslint.js",
+      "default": "./dist/eslint.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -117,10 +132,14 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
+    "!src/**/__fixtures__/**",
     "README.md",
+    "llms.txt",
+    "docs/**",
     "LICENSE",
     "package.json"
   ],
@@ -132,14 +151,17 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "test": "vitest run",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/clock": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
@@ -153,24 +175,48 @@
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/journal": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
     "@testcontainers/postgresql": "catalog:testing",
     "@types/bun": "catalog:",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
+    "@typescript-eslint/parser": "^8.71.1",
+    "@typescript-eslint/rule-tester": "^8.71.1",
+    "@typescript-eslint/utils": "^8.71.1",
     "drizzle-kit": "catalog:drizzle",
+    "eslint": "catalog:",
     "nanoid": "^6.0.2",
+    "p-retry": "^8.0.1",
     "typescript": "catalog:",
     "uuid": "^14.0.3",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@arki/dot": "workspace:*"
+    "@arki/dot": "workspace:*",
+    "@orpc/server": "catalog:backend",
+    "@typescript-eslint/utils": "^8.0.0",
+    "eslint": ">=9.0.0",
+    "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
+      "optional": true
+    },
+    "@orpc/server": {
+      "optional": true
+    },
+    "@typescript-eslint/utils": {
+      "optional": true
+    },
+    "eslint": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   },
