@@ -98,6 +98,12 @@ export default tseslint.config(
         // intentional — the extracted key exists only to drop it from `rest`, not to be used.
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
       ],
+      // Standard Schema types come from @arki/schema, the one package that imports the spec.
+      // A separate rule name from core `no-restricted-imports`, so presets that set that rule cannot erase this ban.
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { paths: [{ name: '@standard-schema/spec', message: 'Import Standard Schema types from @arki/schema.' }] },
+      ],
       '@typescript-eslint/consistent-type-imports': [
         'warn',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
