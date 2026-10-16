@@ -21,7 +21,7 @@ import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from '
 import { duplicateScheduleError } from './errors.ts';
 import { addFlow } from './flow-jobs.ts';
 import { jobDefaultOptions } from './job-options.ts';
-import { defaultJobRetry, jobAttempts, workerBackoffStrategy } from './job-retry.ts';
+import { defaultJobRetry, jobAttempts, throwIfReturnedFailure, workerBackoffStrategy } from './job-retry.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
 import { parseRedisConnection } from './redis-connection.ts';
 
@@ -143,6 +143,8 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           {}, // Meta will be populated by middleware if needed
           ctx => internal.handler(validatedData, ctx),
         );
+        // A returned failure fails the job; the backoff decides whether it runs again.
+        throwIfReturnedFailure(handlerResult);
         debugJob.debug('[{internalName}] Job {jobId} completed successfully', {
           internalName: internal.name,
           jobId: job.id,

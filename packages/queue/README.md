@@ -153,11 +153,13 @@ q.job
     retry: backoff
       .exponential({ base: 1_000, max: 30_000 })
       .upTo(4) // 5 tries in all
-      .while(error => !(error instanceof ValidationError)), // a bad input fails at once
+      .while(error => error instanceof NetworkError), // other errors fail at once
   });
 ```
 
 Without `retry`, a job gets `backoff.exponential({ base: 1000 }).upTo(2)`: 3 tries, 1 s then 2 s apart. `backoff.constant(ms)` waits the same time before every retry, and `.upTo(0)` turns retries off. BullMQ's `attempts` is set to `upTo + 1`. BullMQ cannot store a function, so every job uses its custom backoff, and the job's worker asks the `Backoff` for each delay.
+
+A handler may return a failure from [`@arki/failure`](../failure) for an expected outcome, such as a declined card. The job then fails at once, without a retry: running it again would repeat the outcome, or charge the card again. It runs again only when the job's `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. The job's `failedReason` is the failure as JSON (code, message, status, data), so the board and the foreman show why it failed. A thrown error retries as before. The `runtime-local` queue (pg-boss) does not apply `retry` yet, so there a returned failure still completes the job.
 
 ### Middleware
 

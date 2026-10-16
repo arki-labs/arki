@@ -4,10 +4,19 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { z } from '@arki/contracts';
+import { defineFailure, isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { jobDefaultOptions } from './job-options.ts';
-import { customJobBackoff, defaultJobRetry, jobAttempts, workerBackoffStrategy } from './job-retry.ts';
+import {
+  customJobBackoff,
+  defaultJobRetry,
+  jobAttempts,
+  ReturnedFailureError,
+  throwIfReturnedFailure,
+  workerBackoffStrategy,
+} from './job-retry.ts';
 
 describe('job retry bridge to BullMQ', () => {
   it('sets BullMQ attempts to the retries plus the first try', () => {
@@ -39,5 +48,68 @@ describe('job retry bridge to BullMQ', () => {
     expect(jobDefaultOptions({ retry: backoff.constant(5).upTo(1), bullmqOptions: { attempts: 9 } })).toMatchObject({
       attempts: 9,
     });
+  });
+});
+
+// A handler returns a failure for an expected outcome, such as a declined card. Running the
+// job again repeats the outcome at best, and charges the customer again at worst, so the
+// job fails at once. Only a failure the job's `while` asks for, such as a database timeout,
+// runs again. BullMQ sees the failure as the error the worker threw, and stores its message.
+/** The error the worker throws for a handler's result. */
+function thrownFor(result: unknown): unknown {
+  try {
+    throwIfReturnedFailure(result);
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+describe('a handler that returns a failure', () => {
+  const CardDeclined = defineFailure('card.declined', {
+    status: 402,
+    data: z.object({ last4: z.string() }),
+    message: 'card {last4} was declined',
+  });
+  const DbTimeout = defineFailure('db.timeout', { status: 503 });
+
+  it('fails the job without a retry: a declined card is tried once, not 3 times', () => {
+    const error = thrownFor(CardDeclined({ last4: '4242' }));
+    expect(error).toBeInstanceOf(ReturnedFailureError);
+    if (!(error instanceof ReturnedFailureError)) return;
+    // The default retry allows 3 tries, but it never spends one on an expected failure.
+    expect(workerBackoffStrategy(defaultJobRetry)(1, 'custom', error)).toBe(-1);
+  });
+
+  it('keeps code, message, status and data in the failed reason, for the board and the foreman', () => {
+    const error = thrownFor(CardDeclined({ last4: '4242' }));
+    if (!(error instanceof Error)) throw new Error('the failure did not fail the job');
+    // BullMQ stores `error.message` as the job's failedReason.
+    expect(JSON.parse(error.message)).toMatchObject({
+      code: 'card.declined',
+      message: 'card 4242 was declined',
+      status: 402,
+      data: { last4: '4242' },
+    });
+  });
+
+  it('runs the job again for a failure that while() accepts, such as a database timeout', () => {
+    const strategy = workerBackoffStrategy(
+      backoff
+        .exponential({ base: 1000 })
+        .upTo(2)
+        .while(reason => isFailure(reason) && reason.code === 'db.timeout'),
+    );
+    const timeout = thrownFor(DbTimeout());
+    const declined = thrownFor(CardDeclined({ last4: '4242' }));
+    if (!(timeout instanceof Error && declined instanceof Error)) throw new Error('the failures did not fail the job');
+    expect(strategy(1, 'custom', timeout)).toBe(1000);
+    expect(strategy(2, 'custom', timeout)).toBe(2000);
+    expect(strategy(1, 'custom', declined)).toBe(-1);
+  });
+
+  it('a thrown error keeps the default retries, and a plain result completes the job', () => {
+    expect(workerBackoffStrategy(defaultJobRetry)(1, 'custom', new Error('redis blip'))).toBe(1000);
+    expect(thrownFor({ charged: true })).toBeUndefined();
   });
 });

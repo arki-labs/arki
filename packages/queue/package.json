@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@bull-board/api": "catalog:queue",
