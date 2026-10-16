@@ -316,6 +316,57 @@ describe('OfflineMutationQueue', () => {
     queue.dispose();
   });
 
+  // An offline reload loses the session: actorId() answers null. Alice's write
+  // must still reach Alice once she is back, and must never reach Bob.
+  describe('offline reload: the session is unknown at enqueue', () => {
+    async function writeAfterReload(rpc: AnyRpcClient, key: string) {
+      // Before the reload: Alice was signed in on this device.
+      const before = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: key, deadLetterStorageKey: `dl-${key}` });
+      await before.enqueue(createPost, { title: 'Before reload' });
+      before.dispose();
+      for (const k of Object.keys(store)) if (k === key) delete store[k];
+
+      // After the reload: a fresh queue, the session not known yet.
+      let signedIn: string | null = null;
+      const after = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: key, deadLetterStorageKey: `dl-${key}` });
+      await after.enqueue(createPost, { title: 'Offline after reload' });
+      return { queue: after, signIn: (id: string) => (signedIn = id) };
+    }
+
+    it('sends the write once the same user signs in', async () => {
+      const rpc = makeRpc('success');
+      const { queue, signIn } = await writeAfterReload(rpc, 'q-reload-a');
+
+      signIn(ALICE);
+      await queue.drain();
+
+      expect(rpc.call).toHaveBeenCalledOnce();
+      expect(await queue.deadLetter.list()).toHaveLength(0);
+      queue.dispose();
+    });
+
+    it('never sends it for a different user: ACTOR_MISMATCH', async () => {
+      const rpc = makeRpc('success');
+      const { queue, signIn } = await writeAfterReload(rpc, 'q-reload-b');
+
+      signIn('usr_bob');
+      await queue.drain();
+
+      expect(rpc.call).not.toHaveBeenCalled();
+      const [dead] = await queue.deadLetter.list();
+      expect(dead?.actorId).toBe(ALICE);
+      expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
+      queue.dispose();
+    });
+
+    it('keeps null when no user was ever signed in on this device', async () => {
+      const queue = createOfflineMutationQueue({ actorId: () => null, rpc: makeRpc('success'), storageKey: 'q-nobody', deadLetterStorageKey: 'dl-nobody' });
+      await queue.enqueue(createPost, { title: 'Anonymous' });
+      expect(store['q-nobody']).toContain('"actorId":null');
+      queue.dispose();
+    });
+  });
+
   it('dispose() removes event listeners and prevents future emissions', async () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q9', deadLetterStorageKey: 'dl9' });

@@ -23,7 +23,7 @@ export interface ReplayLoopOptions {
   storage: QueueStorage;
   dlStore: DeadLetterStore;
   rpc: AnyRpcClient;
-  /** Who is signed in now (`null`: nobody). Read once per drain pass. */
+  /** Who is signed in now (`null`: nobody). Read right before every send attempt. */
   actorId: () => string | null;
   maxRetries: number;
   backoff: (attempt: number) => number;
@@ -112,6 +112,21 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
     let current = entry;
 
     while (true) {
+      // The request carries the session signed in at this moment, not the one
+      // that queued the write. Read it right before every attempt (a retry
+      // backoff can span an account switch) and never send under another actor.
+      const signedIn = actorId();
+      if (current.actorId !== signedIn) {
+        if (signedIn === null) {
+          // Signed out: wait for a sign-in; `drain()` after it resumes.
+          emit({ type: 'auth-required' });
+          return false;
+        }
+        const message = 'Queued under another account; not sent under the account signed in now';
+        await deadLetter({ ...current, lastError: { code: 'ACTOR_MISMATCH', message } }, new Error(message));
+        return true;
+      }
+
       const result = await trySend(current);
 
       if (result === 'sent') {
@@ -169,8 +184,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       // Process entries one at a time in FIFO order.
       // Re-read the head of the queue before each entry so late-enqueuers
       // are included in the same drain pass.
-      let entries = await storage.read();
-      const signedIn = actorId();
+      const entries = await storage.read();
 
       for (const snapshot of entries) {
         if (halted) break;
@@ -180,25 +194,9 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
         const live = current.find((m) => m.id === snapshot.id);
         if (!live) continue;
 
-        // The request carries the session signed in now, not the one that
-        // queued the write. Never send it under a different actor.
-        if (live.actorId !== signedIn) {
-          if (signedIn === null) {
-            // Signed out: wait for a sign-in; `drain()` after it resumes.
-            emit({ type: 'auth-required' });
-            break;
-          }
-          const message = 'Queued under another account; not sent under the account signed in now';
-          await deadLetter({ ...live, lastError: { code: 'ACTOR_MISMATCH', message } }, new Error(message));
-          continue;
-        }
-
         const shouldContinue = await processEntry(live);
         if (!shouldContinue) break;
       }
-
-      entries = await storage.read();
-      void entries; // suppress unused-var lint
     } finally {
       draining = false;
       onStateChange(false);

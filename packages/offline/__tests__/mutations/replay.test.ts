@@ -447,6 +447,48 @@ describe('ReplayLoop', () => {
       expect(await storage.read()).toHaveLength(0);
     });
 
+    // The session can change while a pass runs. Reading it once per pass would
+    // send Alice's second write with Bob's cookie.
+    it('re-reads the actor before each entry: a switch mid-pass dead-letters the rest, unsent', async () => {
+      let signedIn: string | null = ALICE;
+      const { loop, dlStore, rpc } = loopFor(() => signedIn, [makeEntry('id-1'), makeEntry('id-2')]);
+      vi.mocked(rpc.call).mockImplementationOnce(async (path, _input, headers = {}) => {
+        rpc.calls.push({ path, headers });
+        signedIn = 'usr_bob';
+        return { ok: true };
+      });
+
+      await loop.drainNow();
+
+      expect(rpc.calls.map((c) => c.headers['Idempotency-Key'])).toEqual(['id-1']);
+      expect(dlStore._entries.map((m) => [m.id, m.lastError?.code])).toEqual([['id-2', 'ACTOR_MISMATCH']]);
+    });
+
+    it('re-reads the actor before each retry: a switch during backoff dead-letters the write, unsent', async () => {
+      let signedIn: string | null = ALICE;
+      const storage = makeStorage([makeEntry('id-1')]);
+      const dlStore = makeDeadLetterStore();
+      const rpc = makeRpc('fail-500');
+      const loop = createReplayLoop({
+        actorId: () => signedIn,
+        storage,
+        dlStore,
+        rpc,
+        maxRetries: 3,
+        backoff: () => {
+          signedIn = 'usr_bob';
+          return 0;
+        },
+        onStateChange: vi.fn(),
+        emit: vi.fn(),
+      });
+
+      await loop.drainNow();
+
+      expect(rpc.calls).toHaveLength(1);
+      expect(dlStore._entries[0]?.lastError?.code).toBe('ACTOR_MISMATCH');
+    });
+
     it("sends Bob's own writes and dead-letters only Alice's in a mixed queue", async () => {
       const bobs: QueuedMutation = { ...makeEntry('id-2'), actorId: 'usr_bob' };
       const { loop, dlStore, rpc } = loopFor(() => 'usr_bob', [makeEntry('id-1'), bobs]);

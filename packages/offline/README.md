@@ -76,7 +76,7 @@ export const offline = createOfflineRuntime({
 
 #### Account switch: a queued write replays only under the account that made it
 
-The replay request carries the session signed in *at replay*, not the one that queued the write. So each queued entry stores `actorId()` from the moment it was queued. At the start of every drain pass the queue reads `actorId()` again and compares:
+The replay request carries the session signed in *at replay*, not the one that queued the write. So each queued entry stores `actorId()` from the moment it was queued. Right before every send attempt (each entry, and each retry after a backoff) the queue reads `actorId()` again and compares, so an account switch in the middle of a replay cannot carry the rest of the queue into the new session:
 
 | Signed in at replay | What happens to the entry |
 | --- | --- |
@@ -87,6 +87,10 @@ The replay request carries the session signed in *at replay*, not the one that q
 `deadLetter.retry(id)` keeps the original `actorId`, so a retry sends the write only once its own actor is signed in again. Nothing ever rebinds a write to the current account. An entry queued while signed out (`actorId: null`) is sent only while nobody is signed in.
 
 `actorId` must answer synchronously from local state (it runs offline). Feed it from your session store, and call `queue.drain()` when the user signs in.
+
+**Unknown session (offline reload).** After a reload without network the app often cannot tell who is signed in, so `actorId()` answers `null`. The queue remembers every non-null `actorId()` on the device (key `<storageKey>:last-actor`). A write queued while `actorId()` is `null` is bound to that last actor; if no actor was ever seen on the device it stays `null`. The replay rules above do not change, so such a write is sent only once that last user is signed in again, and is dead-lettered as `ACTOR_MISMATCH` for anyone else.
+
+The remembered id is kept after sign-out. The queue has no sign-out signal: `null` means both "signed out" and "not known yet". Keeping it is safe: it is only a binding for new writes, never a credential. A write bound to it still needs that same user signed in at replay, and any other account gets `ACTOR_MISMATCH`.
 
 ```tsx
 // src/root-provider.tsx

@@ -12,8 +12,8 @@ import { operationOf } from '@arki/contracts/orpc';
 
 import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.ts';
 
-import { createQueueStorage } from './storage.ts';
-import type { QueueStorage } from './storage.ts';
+import { createLastActorStore, createQueueStorage } from './storage.ts';
+import type { LastActorStore, QueueStorage } from './storage.ts';
 import { createDeadLetterStore } from './dead-letter.ts';
 import type { DeadLetterStore } from './dead-letter.ts';
 import { createReplayLoop } from './replay.ts';
@@ -29,8 +29,9 @@ export interface QueuedMutation {
   procedurePath: readonly string[];
   input: unknown;
   /**
-   * Who was signed in when the call was queued (`actorId()` at enqueue), or
-   * `null` when nobody was. Replay sends the call only while this same actor
+   * Who was signed in when the call was queued (`actorId()` at enqueue). When
+   * the session was unknown (`null`), the last actor signed in on this device;
+   * `null` only when there was none. Replay sends the call only while this same actor
    * is signed in, so a queued write never runs under another account.
    */
   actorId: string | null;
@@ -70,9 +71,11 @@ export interface OfflineMutationQueueOptions {
   deadLetterStorageKey?: string;
   rpc: AnyRpcClient;
   /**
-   * The id of whoever is signed in right now, or `null` when nobody is. Read
-   * at enqueue (the entry is bound to it) and at the start of every drain
-   * pass. It must answer synchronously from local state: it runs offline.
+   * The id of whoever is signed in right now, or `null` when nobody is (or the
+   * session is not known yet). Read at enqueue (the entry is bound to it) and
+   * at the start of every drain pass. Every non-null answer is remembered on
+   * the device as its last actor. It must answer synchronously from local
+   * state: it runs offline.
    */
   actorId: () => string | null;
   maxRetries?: number;
@@ -139,6 +142,14 @@ export function createOfflineMutationQueue(
   } = options;
 
   const storage: QueueStorage = createQueueStorage(storageKey);
+  const lastActor: LastActorStore = createLastActorStore(`${storageKey}:last-actor`);
+
+  /** Who is signed in now; remembers every non-null answer as this device's last actor. */
+  function signedInActor(): string | null {
+    const id = actorId();
+    if (id !== null) void lastActor.remember(id);
+    return id;
+  }
   const dlStore: DeadLetterStore = createDeadLetterStore(deadLetterStorageKey);
 
   const listeners = new Set<(event: QueueEvent) => void>();
@@ -188,7 +199,7 @@ export function createOfflineMutationQueue(
     storage,
     dlStore,
     rpc,
-    actorId,
+    actorId: signedInActor,
     maxRetries,
     backoff,
     onDeadLetter,
@@ -215,12 +226,15 @@ export function createOfflineMutationQueue(
       throw new TypeError(`${op.name} is not marked offlineSafe on its contract, so it cannot be queued offline.`);
     }
     const id = nanoid();
+    // Session unknown (e.g. an offline reload): bind to this device's last
+    // actor. Replay still sends it only while that same actor is signed in.
+    const bound = signedInActor() ?? (await lastActor.read());
     const entry: QueuedMutation = {
       id,
       idempotencyKey: id,
       procedurePath: op.path,
       input,
-      actorId: actorId(),
+      actorId: bound,
       enqueuedAt: Date.now(),
       attempts: 0,
     };
