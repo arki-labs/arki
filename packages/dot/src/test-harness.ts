@@ -19,13 +19,13 @@
  *   });
  *
  *   it('publishes a counter service', async () => {
- *     const app = await bootTestApp<{ counter: { value: number } }>([myPlugin]);
+ *     const app = await bootTestApp([myPlugin]); // app.services typed from the plugins
  *     expect(app.services.counter.value).toBe(0);
  *     await app.dispose();
  *   });
  */
 
-import type { DotApp, DotAppBuilder } from './define-app.js';
+import type { DotApp, DotAppBuilder, ListGuard, UseAllAvail, UseAllGuard } from './define-app.js';
 import type { AnyPlugin, EmptyShape, Handle, Plugin, ServiceRecord, Token } from './plugin-contract.js';
 import { defineApp } from './define-app.js';
 import { handleOf, plugin as definePlugin } from './plugin-contract.js';
@@ -46,48 +46,71 @@ type LooseBuilder = {
   use(plugin: AnyPlugin): LooseBuilder;
 };
 
-/**
- * Build a DOT app builder pre-populated with the given plugins, ready to
- * `.configure()`, `.boot()` or `.start()` from a test.
- */
-export function testApp<TServices extends ServiceRecord = EmptyShape>(
-  plugins: readonly AnyPlugin[] = [],
-  options: TestAppOptions = {},
-): DotAppBuilder<TServices> {
+/** Mount the plugins in order on a fresh builder. Erased: the typed `testApp` casts the result. */
+function mountAll(plugins: readonly AnyPlugin[], options: TestAppOptions): unknown {
   let builder: unknown = defineApp(options.name ?? 'test-app', { config: options.config });
   for (const p of plugins) {
     builder = (builder as LooseBuilder).use(p);
   }
-  return builder as DotAppBuilder<TServices>;
+  return builder;
+}
+
+/**
+ * What `testApp(plugins)` exposes as `app.services`: the services the tuple
+ * accumulates, as `.useAll()` would type them. A runtime-built array
+ * (`feature.plugins()`) has no tuple to read, so it gets the open record.
+ */
+export type TestAppServices<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length']
+  ? ServiceRecord
+  : UseAllAvail<EmptyShape, TPlugins>;
+
+/**
+ * The `.useAll()` wiring check on the argument, minus the tuple requirement:
+ * a test may mount a runtime-built array and let the kernel check it at boot.
+ */
+type TestAppGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length']
+  ? unknown
+  : ListGuard<UseAllGuard<EmptyShape, TPlugins>>;
+
+/**
+ * Build a DOT app builder pre-populated with the given plugins, ready to
+ * `.configure()`, `.boot()` or `.start()` from a test. The services are read
+ * off the plugins — `testApp([database]).boot()` gives `app.services.db` —
+ * and a tuple that would not mount (a need before its provider, a wire key
+ * provided twice) is a compile error on the argument.
+ */
+export function testApp<const TPlugins extends readonly AnyPlugin[] = readonly []>(
+  plugins?: TPlugins & TestAppGuard<TPlugins>,
+  options: TestAppOptions = {},
+): DotAppBuilder<TestAppServices<TPlugins>> {
+  return mountAll(plugins ?? [], options) as DotAppBuilder<TestAppServices<TPlugins>>;
 }
 
 /**
  * Convenience: build, boot, return the running app. Caller is responsible for
  * calling `app.dispose()` when finished.
  */
-export async function bootTestApp<TServices extends ServiceRecord = EmptyShape>(
-  plugins: readonly AnyPlugin[] = [],
+export async function bootTestApp<const TPlugins extends readonly AnyPlugin[] = readonly []>(
+  plugins?: TPlugins & TestAppGuard<TPlugins>,
   options: TestAppOptions = {},
-): Promise<DotApp<TServices>> {
-  return testApp<TServices>(plugins, options).boot();
+): Promise<DotApp<TestAppServices<TPlugins>>> {
+  return (mountAll(plugins ?? [], options) as DotAppBuilder<TestAppServices<TPlugins>>).boot();
 }
 
 /**
- * Rest-tuple guard for {@link TestPluginBuilder.boot} — the same trick the app
- * builder's `UseGuard` uses. While any need is still unprovided, `boot()`
- * demands an impossible second argument, so the call site fails with
- * "Expected 2 arguments, but got 1" and the error payload names the
- * missing wire keys and their types.
+ * `this` type for {@link TestPluginBuilder.boot}: the builder itself once every
+ * need is provided, else a record naming the missing wire keys and their
+ * types. A `this` parameter puts that record in the error text ("The 'this'
+ * context of type … is not assignable to method's 'this' of type { 'DOT-TEST:
+ * …' }"), on the `.boot()` call.
  */
-type TestPluginBootGuard<TRemaining extends ServiceRecord> = keyof TRemaining extends never
-  ? readonly []
-  : readonly [
-      needs: {
-        readonly 'DOT-TEST: plugin needs still unprovided — call .provide() for each': {
-          readonly [K in keyof TRemaining]: TRemaining[K];
-        };
-      },
-    ];
+type BootReady<TRemaining extends ServiceRecord, TSelf> = keyof TRemaining extends never
+  ? TSelf
+  : {
+      readonly 'DOT-TEST: plugin needs still unprovided — call .provide() for each': {
+        readonly [K in keyof TRemaining]: TRemaining[K];
+      };
+    };
 
 /**
  * Typed unit-test builder for a single plugin — see {@link testPlugin}.
@@ -122,9 +145,9 @@ export type TestPluginBuilder<TRemaining extends ServiceRecord, TServices extend
     value: TRemaining[K],
   ): TestPluginBuilder<Omit<TRemaining, K>, TServices & Readonly<Record<K, TRemaining[K]>>>;
   /** Boot the plugin against the provided fakes. Compile error until every need is provided. */
-  boot(...guard: TestPluginBootGuard<TRemaining>): Promise<DotApp<TServices>>;
+  boot(this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices>>): Promise<DotApp<TServices>>;
   /** Boot + start. Same guard as {@link TestPluginBuilder.boot}. */
-  start(...guard: TestPluginBootGuard<TRemaining>): Promise<DotApp<TServices>>;
+  start(this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices>>): Promise<DotApp<TServices>>;
 };
 
 /** Internal accumulating state for {@link testPlugin}. */
@@ -192,10 +215,11 @@ function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<Servic
       });
     }
     plugins.push(state.plugin);
-    return testApp<ServiceRecord>(plugins, {
+    const builder = mountAll(plugins, {
       name: state.options.name ?? `test:${state.plugin.name}`,
       ...(state.options.config === undefined ? {} : { config: state.options.config }),
-    }).boot();
+    }) as DotAppBuilder<ServiceRecord>;
+    return builder.boot();
   };
 
   const impl = {
@@ -203,10 +227,10 @@ function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<Servic
       const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
       return makeTestPluginBuilder({ ...state, fakes: { ...state.fakes, [key]: value } });
     },
-    async boot(..._guard: readonly unknown[]) {
+    async boot() {
       return bootApp();
     },
-    async start(..._guard: readonly unknown[]) {
+    async start() {
       const app = await bootApp();
       await app.start();
       return app;

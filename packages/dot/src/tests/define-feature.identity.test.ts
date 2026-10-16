@@ -56,6 +56,7 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
   });
 
   it('the raw unit list says the same thing', async () => {
+    // @ts-expect-error -- the raw list needs `db` before anything provides it; the type guard on testApp's argument says so too
     await expect(testApp(parent.plugins()).boot()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.UnsatisfiedNeed,
     });

@@ -49,7 +49,7 @@ describe('testPlugin', () => {
       provides: { rows: ({ db }) => db.query('q') },
     });
 
-    // @ts-expect-error — `cache` is still unprovided ("Expected 2 arguments").
+    // @ts-expect-error — `cache` is still unprovided: `.boot()`'s `this` type names it.
     // The runtime boot really does reject (kernel E012) — swallow it so the
     // compile-time demonstration doesn't leak an unhandled rejection.
     void testPlugin(consumer).provide(Db, { query: () => [] }).boot().catch(() => null);

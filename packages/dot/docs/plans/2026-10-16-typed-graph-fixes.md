@@ -316,6 +316,35 @@ array, write it as a tuple literal.
 
 **Verify**: `turbo typecheck test --filter=@arki/dot`.
 
+### Phase 4 result (2026-10-16) — DONE
+
+- Task 4.1: `.use()`, `.serve()`, `.useAll()` and `.features()` take the guard on the argument
+  (`plugin: (Plugin | Driven) & ListGuard<UseGuard<…>>`, lists `TPlugins & ListGuard<UseAllGuard<…>>`); the rest-tuple
+  parameters are gone from the types and from the erased builder. `ListGuard` is exported. `UseGuard` short-circuits to
+  `[]` when `TAvail` is the open record (`string extends keyof TAvail`): the erased `DotAppBuilder<ServiceRecord>` has
+  nothing to check (the kernel checks at boot), and without this the implementation's `impl as DotAppBuilder<TAvail>`
+  cast stopped being comparable. `testPlugin(...).boot()` / `.start()` carry the guard as a `this` type (`BootReady`),
+  so the message is "The 'this' context … is not assignable to method's 'this' of type { 'DOT-TEST: …' }".
+- Task 4.2: `testApp(plugins)` / `bootTestApp(plugins)` infer `app.services` from the tuple (`TestAppServices`,
+  = `UseAllAvail<EmptyShape, TPlugins>`); a tuple that would not mount is a compile error on the argument
+  (`TestAppGuard`, the `.useAll()` check minus the tuple requirement). A runtime-built array (`feature.plugins()`)
+  mounts and gives the open record. `makeTestPluginBuilder` builds through the erased `mountAll`. The explicit
+  `testApp<TServices>()` form is gone (0.x, no compat): the type argument is now the plugin tuple.
+- Probe 02/03 after the change (first error line per site, was `TS2554: Expected 2 arguments, but got 1`):
+  `TS2345: Argument of type '[DefinedFeature<…>]' is not assignable to parameter of type 'readonly [DefinedFeature<…>]
+  & { ...; }'` followed by `Property ''DOT: a unit in this list cannot be mounted at its position'' is missing …
+  NeedsError<…>`. The label is in the message, on the argument; TypeScript elides it to `{ ...; }` on the first line
+  when the type is long and prints it on the second.
+- Tests: `define-app.test.ts` "the wiring errors sit on the argument, with the DOT label; testApp types its services
+  from the tuple" (`Parameters<typeof bare.use<…>>[0]` has the needs label, `withDb.use<…>` the collision label,
+  `bare.useAll<…>` the list label; `testApp([db, consumer]).boot()` types `services.db`; the reversed tuple is a red
+  line). Three existing tests that boot a wrong-order list on purpose gain `@ts-expect-error` (the guard now agrees with
+  the kernel); the `testPlugin` guard test's directive text updated.
+- Evidence (isolated HEAD + the six files; identical to the working tree on every line of mine): `@arki/dot` tsc 0,
+  353/354 — the one failure is `cli/new.test.ts` "TEMPLATE_VERSIONS are not behind the workspace packages", a HEAD-vs-
+  working-tree version drift from the other session's uncommitted bumps (it passes in the working tree: 354/354).
+  Prettier clean on the new lines.
+
 ---
 
 ## Phase 5 — Fix #5: near-linear app guard, with a budget test

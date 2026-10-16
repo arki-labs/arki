@@ -8,6 +8,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
+import type { EmptyShape } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
 import { initPlugins } from '../init-plugins.js';
 import { plugin, rename, service } from '../plugin-contract.js';
@@ -119,6 +120,34 @@ describe('defineApp', () => {
     expect(app.services.db).toBeDefined();
     expect(app.services.reportsDb).toBeDefined();
     expect(app.services.db).not.toBe(app.services.reportsDb);
+    await app.dispose();
+  });
+
+  it('the wiring errors sit on the argument, with the DOT label; testApp types its services from the tuple', async () => {
+    const consumer = plugin({
+      name: 'consumer',
+      needs: { db: service<DbService>() },
+      boot: () => {
+        /* side effects only */
+      },
+    });
+    const bare = defineApp('app');
+    type UseArg = Parameters<typeof bare.use<{ readonly db: DbService }, EmptyShape>>[0];
+    expectTypeOf<UseArg>().toHaveProperty(
+      'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)',
+    );
+    const withDb = bare.use(makeDbPlugin());
+    type CollisionArg = Parameters<typeof withDb.use<EmptyShape, { readonly db: DbService }>>[0];
+    expectTypeOf<CollisionArg>().toHaveProperty(
+      'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()',
+    );
+    type ListArg = Parameters<typeof bare.useAll<readonly [typeof consumer]>>[0];
+    expectTypeOf<ListArg>().toHaveProperty('DOT: a unit in this list cannot be mounted at its position');
+
+    const app = await testApp([makeDbPlugin(), consumer]).boot();
+    expectTypeOf(app.services.db).toEqualTypeOf<DbService>();
+    // @ts-expect-error — the tuple would not mount: consumer before its provider
+    testApp([consumer, makeDbPlugin()]);
     await app.dispose();
   });
 

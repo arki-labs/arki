@@ -71,19 +71,25 @@ type CollisionError<TAvail, TProvides> = {
 export type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
 
 /**
- * Rest-tuple guard. Satisfied → `[]` (call `.use(plugin)` with one argument).
- * Violated → a required second argument of an unconstructible error type,
- * so the call site fails with the diagnostic embedded in the expected type.
+ * One unit's wiring check. Satisfied → `[]`; violated → `[error]` with the
+ * diagnostic as the error type. `ListGuard` turns it into a type on the
+ * argument itself, so the call site fails on the plugin with the `DOT:`
+ * label in the message (not with "Expected 2 arguments, but got 1").
+ * The open record (`DotAppBuilder<ServiceRecord>`, the erased builder a
+ * runtime-built plugin list gives) has nothing to check: the kernel checks
+ * it at boot.
  */
 export type UseGuard<
   TAvail extends ServiceRecord,
   TNeeds extends ServiceRecord,
   TProvides extends ServiceRecord,
-> = [TAvail] extends [TNeeds]
-  ? [keyof TAvail & keyof TProvides] extends [never]
-    ? []
-    : [error: CollisionError<TAvail, TProvides>]
-  : [error: NeedsError<TAvail, TNeeds>];
+> = string extends keyof TAvail
+  ? []
+  : [TAvail] extends [TNeeds]
+    ? [keyof TAvail & keyof TProvides] extends [never]
+      ? []
+      : [error: CollisionError<TAvail, TProvides>]
+    : [error: NeedsError<TAvail, TNeeds>];
 
 type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = TPlugins extends readonly [
   infer Head,
@@ -137,7 +143,9 @@ export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly 
  * otherwise the error record — intersected with the argument tuple, so the
  * call fails with the diagnostic in the expected type.
  */
-type ListGuard<TGuard extends readonly unknown[]> = TGuard extends readonly [error: infer TError] ? TError : unknown;
+export type ListGuard<TGuard extends readonly unknown[]> = TGuard extends readonly [error: infer TError]
+  ? TError
+  : unknown;
 
 /** A list of plugins and adapters, each seen as the plugin it mounts (an adapter's `bind` result). */
 type AsPlugins<TUnits extends readonly unknown[]> = {
@@ -260,8 +268,8 @@ export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAva
    * plain plugin is mounted as-is. Same compile-time guard as `.use()`.
    */
   serve<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-    adapter: Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>,
-    ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>
+    adapter: (Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>) &
+      ListGuard<UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>>,
   ): DotServeBuilder<TAvail & NormalizeProvides<TProvides>>;
   /**
    * Register the app's entrypoints — what calls into the features (HTTP
@@ -296,8 +304,8 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail
    * rejected here: it calls into the features, so it belongs in `.serve()`.
    */
   use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-    plugin: Plugin<TNeeds, TProvides> | Driven<TNeeds, TProvides>,
-    ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>
+    plugin: (Plugin<TNeeds, TProvides> | Driven<TNeeds, TProvides>) &
+      ListGuard<UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>>,
   ): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
   /**
    * Register a tuple of plugins in declaration order. This is type-equivalent
@@ -305,8 +313,7 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail
    * guard across the whole tuple.
    */
   useAll<const TPlugins extends readonly AnyPlugin[]>(
-    plugins: TPlugins,
-    ...guard: UseAllGuard<TAvail, TPlugins>
+    plugins: TPlugins & ListGuard<UseAllGuard<TAvail, TPlugins>>,
   ): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
   /**
    * Register what the app runs on — logging, observability, database,
@@ -324,8 +331,7 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail
    * Called once: after it, only `.serve()` / `.entrypoints()` remain.
    */
   features<const TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]>(
-    features: TFeatures,
-    ...guard: UseAllGuard<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>
+    features: TFeatures & ListGuard<UseAllGuard<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>>,
   ): DotServeBuilder<UseAllAvail<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>>;
 } & Pick<DotServeBuilder<TAvail>, 'serve' | 'entrypoints'>;
 
@@ -417,10 +423,7 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
   // v1 crossed in its wrapApp helper. The phase split is type-only too:
   // one runtime object serves every phase.
   const impl = {
-    features(
-      features: readonly (AnyFeature | AnyDefinedFeature)[],
-      ..._guard: readonly unknown[]
-    ): DotAppBuilder<ServiceRecord> {
+    features(features: readonly (AnyFeature | AnyDefinedFeature)[]): DotAppBuilder<ServiceRecord> {
       // Assembly: a chain feature's raw infra handles may be held only inside its scope (FEATURE_E005 otherwise).
       mountFeatures(features.filter(f => isDefinedFeature(f)));
       const nextState: BuilderState = {
@@ -438,7 +441,7 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
-    serve(adapter: AnyPlugin | Driver, ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    serve(adapter: AnyPlugin | Driver): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
         plugins: [...state.plugins, bindAdapter(adapter, state.features)],
@@ -459,14 +462,14 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
-    use(plugin: AnyPlugin | Driven, ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    use(plugin: AnyPlugin | Driven): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
         plugins: [...state.plugins, plugin],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
-    useAll(plugins: readonly AnyPlugin[], ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    useAll(plugins: readonly AnyPlugin[]): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
         plugins: [...state.plugins, ...plugins],

@@ -394,9 +394,11 @@ describe('compilation into kernel units', () => {
 
   it('keeps the kernel order checks: the feature before its own infra (E020), or without it (E012)', async () => {
     const [storeUnit, mailerUnit, featureUnit] = digest.plugins();
+    // @ts-expect-error -- the feature before its own infra: the tuple guard on testApp's argument refuses it too
     await expect(testApp([database, billing, featureUnit, storeUnit, mailerUnit]).start()).rejects.toMatchObject({
       code: 'DOT_LIFECYCLE_E020',
     });
+    // @ts-expect-error -- the feature without its infra
     await expect(testApp([database, billing, featureUnit]).start()).rejects.toMatchObject({
       code: 'DOT_LIFECYCLE_E012',
     });
