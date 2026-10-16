@@ -93,8 +93,7 @@
     "@t3-oss/env-core": "catalog:env",
     "ioredis": "catalog:",
     "keyv": "catalog:backend",
-    "rate-limiter-flexible": "catalog:",
-    "zod": "catalog:"
+    "rate-limiter-flexible": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
