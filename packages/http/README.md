@@ -42,7 +42,11 @@ export const createOrder = route.post('/orders', {
 Input validation (params/headers/query/body) happens before your handler runs;
 output is validated against the contract on the way out. Any schema that
 implements [Standard Schema](https://standardschema.dev) works; an async one
-too. Failures serialize as a coded envelope:
+too. Output is only as narrow as its schema: zod and valibot objects drop
+keys they do not declare, an arktype object keeps them unless it declares
+`'+': 'delete'`. A handler that returns a whole database row needs a schema
+that drops undeclared keys, or must pick the fields itself. Failures
+serialize as a coded envelope:
 `{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }`.
 
 ### Wire forms: a bare schema, or `codec(decode, encode)`

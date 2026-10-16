@@ -26,6 +26,24 @@ const handWrittenWithJson = withJsonSchema(handWritten, countJson, countOutJson)
 
 const out = z.object({ ok: z.boolean() });
 
+describe('read output and undeclared keys', () => {
+  // Output used to be zod-only, so undeclared keys were always dropped. Now the schema decides,
+  // and the docs promise exactly this: a row's secret column reaches the client unless the
+  // output schema drops it.
+  const row = { ok: true, secret: 'hash' };
+  const readWith = (id: string, output: StandardSchemaV1<unknown, { ok: boolean }>) =>
+    defineRead({ id, summary: 's', permission: 'x:read', input: z.object({}), output, load: async () => row });
+
+  it('drops undeclared keys with a zod object or an arktype object that deletes them', async () => {
+    expect(await readWith('x.zodOut', z.object({ ok: z.boolean() })).run({}, null)).toEqual({ ok: true });
+    expect(await readWith('x.arkDelete', type({ '+': 'delete', ok: 'boolean' })).run({}, null)).toEqual({ ok: true });
+  });
+
+  it('keeps undeclared keys with a plain arktype object', async () => {
+    expect(await readWith('x.arkKeep', type({ ok: 'boolean' })).run({}, null)).toEqual(row);
+  });
+});
+
 describe('reads accept any Standard Schema', () => {
   it('runs zod, valibot, arktype and hand-written input schemas', async () => {
     const readZod = defineRead({

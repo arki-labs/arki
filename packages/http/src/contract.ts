@@ -137,7 +137,9 @@ export type RouteDef<TPath extends string> = {
   /**
    * The success body. A schema: the handler returns its value, sent as
    * 200 JSON. `raw()`: the handler returns a `Response`. Absent: the handler
-   * returns nothing and the route answers 204.
+   * returns nothing and the route answers 204. Keys the schema does not
+   * declare are sent unless the schema drops them (zod and valibot objects
+   * do; an arktype object needs `'+': 'delete'`).
    */
   readonly output?: Wire | RawOutput;
   readonly responses?: ResponseSchemas;

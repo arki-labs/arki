@@ -88,6 +88,8 @@ The slice lands under the `routes` key, so `feature()` throws `ARKI_DOT_E024` if
 
 Reads, actions and signals take any Standard Schema (Zod, Valibot, ArkType, hand-written). The manifest JSON Schema comes from the schema itself: use a library that can emit JSON Schema, or wrap the schema with `withJsonSchema` from `@arki/schema`. A schema that cannot is an error at define time, naming the read or action.
 
+Output is only as narrow as its schema. Zod and Valibot objects drop keys they do not declare; an ArkType object keeps them unless it declares `'+': 'delete'`. If a `load` returns a whole database row, use a schema that drops undeclared keys, or pick the fields yourself, so a secret column never reaches the admin client.
+
 `core.health` has two reads, `core.health.status` and `core.health.checks`, in the v1 `fleetHealthSchema` shape. `core.manifest.get` returns the same manifest as `GET /api/foreman/manifest`. `core.receipts.get` is there when the app passes `receipts`. Both attachments add them for you (`withCoreModules`).
 
 ## Receipts

@@ -128,7 +128,11 @@ export type ReadDef<TIn extends StandardSchemaV1, TOut extends StandardSchemaV1,
   readonly summary: string;
   readonly permission: Permission;
   readonly input: TIn;
-  /** Parsed on the way out: unknown keys of plain objects are stripped. */
+  /**
+   * Parsed on the way out. Whether keys the schema does not declare reach the client is the
+   * schema's choice: zod and valibot objects drop them, an arktype object keeps them unless it
+   * declares `'+': 'delete'`. A `load` that returns a whole row must use a schema that drops them.
+   */
   readonly output: TOut;
   readonly load: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TOut>>;
 };
