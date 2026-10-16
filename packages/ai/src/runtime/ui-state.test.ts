@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RuntimeEvent } from './types';
-import { initialRuntimeUiState, runtimeEventReducer, type RuntimeUiState } from './ui-state';
+import type { RuntimeUiState } from './ui-state';
+import { initialRuntimeUiState, runtimeEventReducer } from './ui-state';
 
 /** Fold a sequence of events from the initial state. */
 function reduceAll(events: RuntimeEvent[]): RuntimeUiState {
@@ -44,6 +45,19 @@ describe('runtimeEventReducer', () => {
     ]);
     expect(state.toolCalls[0]?.status).toBe('error');
     expect(state.toolCalls[0]?.error).toBe('boom');
+  });
+
+  it('marks a tool call failed, apart from a thrown error, and keeps the failure', () => {
+    // WHY: a returned failure is an expected outcome the model can correct; a UI must be able to
+    // show it differently from a crashed tool.
+    const failure = { code: 'city.not_found', message: 'no city Osl', remediation: 'Fix the spelling.', data: {} };
+    const state = reduceAll([
+      { type: 'run:start' },
+      { type: 'tool:start', tool: 'weather', args: { city: 'Osl' } },
+      { type: 'tool:failure', tool: 'weather', failure },
+    ]);
+    expect(state.toolCalls[0]).toMatchObject({ status: 'failed', failure });
+    expect(state.toolCalls[0]?.error).toBeUndefined();
   });
 
   it('run:start resets prior state (re-run in the same surface)', () => {

@@ -6,6 +6,7 @@ export type {
   AgentToolExecuteOptions,
   RuntimeEvent,
   RuntimeUsage,
+  ToolFailure,
   ToolLoopInput,
 } from './types';
 export {

@@ -1,6 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { z } from 'zod';
 
+import type { Failure } from '@arki/failure';
+
 /**
  * Agent-runtime adapter layer — neutral contracts.
  *
@@ -31,9 +33,22 @@ export type RuntimeEvent =
   | { type: 'text:delta'; delta: string }
   | { type: 'tool:start'; tool: string; args: unknown }
   | { type: 'tool:result'; tool: string; result: unknown }
+  /** The tool returned a failure from `@arki/failure`; the model got `{ error: failure }` as the result. */
+  | { type: 'tool:failure'; tool: string; failure: ToolFailure }
   | { type: 'tool:error'; tool: string; error: string }
   | { type: 'run:finish'; text: string; usage?: RuntimeUsage }
   | { type: 'run:error'; error: string };
+
+/**
+ * What the model receives, as `{ error: ToolFailure }`, when a tool returns a failure from
+ * `@arki/failure`. The remediation tells the model how to correct its next call.
+ */
+export type ToolFailure = {
+  code: string;
+  message: string;
+  remediation: string | undefined;
+  data: unknown;
+};
 
 /** What a tool's `execute` receives besides its input. */
 export type AgentToolExecuteOptions = {
@@ -68,8 +83,16 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
    * `inputSchema` before it calls `execute`, so `input` always has the declared type.
    * The return type comes from `output` when it is declared (`NoInfer` stops `execute` from
    * widening it).
+   *
+   * It may also return a failure from `@arki/failure` for an expected outcome ("city not
+   * found"). The model then gets `{ error: { code, message, remediation, data } }` so it can
+   * correct its next call, the output schema check is skipped, and the run emits
+   * `tool:failure`. A thrown error stays a `tool:error`.
    */
-  execute(input: TInput, options: AgentToolExecuteOptions): NoInfer<TOutput> | Promise<NoInfer<TOutput>>;
+  execute(
+    input: TInput,
+    options: AgentToolExecuteOptions,
+  ): NoInfer<TOutput> | Failure | Promise<NoInfer<TOutput> | Failure>;
   /**
    * D-F-08 marker: required tools form the evidence floor. P0 records this but does NOT
    * enforce an eager floor — callers pre-run required tools and inject their results (as the

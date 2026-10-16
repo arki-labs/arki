@@ -1,6 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 
-import type { AgentTool } from './types';
+import { isFailure } from '@arki/failure';
+
+import type { AgentTool, ToolFailure } from './types';
 import { ToolOutputError } from '../errors';
 
 /**
@@ -47,6 +49,8 @@ async function checkToolOutput(
 /**
  * Runs one tool call the way every runtime adapter must: refuses to start once `signal` has
  * aborted, hands `signal` to the tool, and checks the result against the tool's `output`.
+ * A returned failure skips that check: it reaches `onFailure`, and the model gets
+ * `{ error: { code, message, remediation, data } }`.
  *
  * @internal Shared by the runtime adapters; not part of the public barrel.
  */
@@ -54,8 +58,19 @@ export async function runAgentTool(
   agentTool: AgentTool,
   input: unknown,
   signal: AbortSignal = new AbortController().signal,
+  onFailure?: (failure: ToolFailure) => void,
 ): Promise<unknown> {
   if (signal.aborted) throw abortReason(signal);
   const result = await agentTool.execute(input, { signal });
+  if (isFailure(result)) {
+    const failure: ToolFailure = {
+      code: result.code,
+      message: result.message,
+      remediation: result.remediation,
+      data: result.data,
+    };
+    onFailure?.(failure);
+    return { error: failure };
+  }
   return agentTool.output === undefined ? result : checkToolOutput(agentTool.name, agentTool.output, result);
 }

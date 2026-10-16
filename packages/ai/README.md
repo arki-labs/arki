@@ -205,7 +205,7 @@ const weather = defineAgentTool({
 const controller = new AbortController();
 const runtime = createAiSdkRuntime({ model });
 for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather], signal: controller.signal })) {
-  // run:start, text:delta, tool:start, tool:result, tool:error, run:finish
+  // run:start, text:delta, tool:start, tool:result, tool:failure, tool:error, run:finish
 }
 ```
 
@@ -214,6 +214,12 @@ for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather
 - **`output` is checked.** The runtime checks each result against `output` (Zod or any Standard
   Schema) before the model sees it. The model gets the parsed value. A mismatch fails that tool
   call with a `ToolOutputError` (code `TOOL_OUTPUT_ERROR`), which arrives as a `tool:error` event.
+- **Return a failure for an expected outcome.** `execute` may return a failure from
+  [`@arki/failure`](../failure), such as `CityNotFound({ city })`. The model gets
+  `{ error: { code, message, remediation, data } }` as the tool result, so the remediation sentence
+  can steer its next call. The `output` check is skipped, and the run emits
+  `{ type: 'tool:failure', tool, failure }`. `runtimeEventReducer` marks that call `failed`. A thrown
+  error is still a `tool:error`. Both runtimes (AI SDK and Mastra) behave the same.
 - **Spans.** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the AI SDK's own telemetry
   (`@ai-sdk/otel`) records one `step N` span per model step and one `execute_tool <name>` span per
   tool call. With no endpoint, or no OpenTelemetry SDK registered, nothing is recorded.

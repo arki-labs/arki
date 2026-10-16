@@ -4,8 +4,11 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { createMastraRuntime, toMastraTools } from './mastra';
+import { defineFailure } from '@arki/failure';
+
 import type { RuntimeEvent } from './runtime/types';
+import { createMastraRuntime, toMastraTools } from './mastra';
+import { defineAgentTool } from './runtime/tool';
 
 async function collect(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
@@ -85,5 +88,92 @@ describe('createMastraRuntime cancellation', () => {
 
     await expect(collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }))).rejects.toThrow('gone');
     expect(model.doStreamCalls).toHaveLength(0);
+  });
+});
+
+const finish = (unified: 'stop' | 'tool-calls'): LanguageModelV4StreamPart => ({
+  type: 'finish',
+  finishReason: { unified, raw: unified },
+  usage: {
+    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  },
+});
+
+/** Step 1 calls `toolName`; every later step answers "done". */
+function toolCallingModel(toolName: string): MockLanguageModelV4 {
+  const firstStep: LanguageModelV4StreamPart[] = [
+    { type: 'stream-start', warnings: [] },
+    { type: 'tool-call', toolCallId: 'call-1', toolName, input: '{"city":"Oslo"}' },
+    finish('tool-calls'),
+  ];
+  const laterStep: LanguageModelV4StreamPart[] = [
+    { type: 'stream-start', warnings: [] },
+    { type: 'text-start', id: '1' },
+    { type: 'text-delta', id: '1', delta: 'done' },
+    { type: 'text-end', id: '1' },
+    finish('stop'),
+  ];
+  let calls = 0;
+  return new MockLanguageModelV4({
+    doStream: () => {
+      calls += 1;
+      return Promise.resolve({ stream: simulateReadableStream({ chunks: calls === 1 ? firstStep : laterStep }) });
+    },
+  });
+}
+
+const CityNotFound = defineFailure('city.not_found', {
+  status: 404,
+  data: z.object({ city: z.string() }),
+  message: 'no city {city}',
+  remediation: 'Use the English name of a real city, such as "Oslo".',
+});
+
+describe('createMastraRuntime tool failures', () => {
+  it('sends the model the failure with its remediation, skips the output check and emits tool:failure', async () => {
+    // WHY: both runtimes must behave the same, so a feature can swap backends without its
+    // tools or its event consumers noticing.
+    const weather = defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      output: z.object({ celsius: z.number() }),
+      execute: ({ city }) => CityNotFound({ city }),
+    });
+    const model = toolCallingModel('weather');
+    const events = await collect(createMastraRuntime({ model }).runToolLoop({ prompt: 'x', tools: [weather] }));
+
+    expect(events).toContainEqual({
+      type: 'tool:failure',
+      tool: 'weather',
+      failure: {
+        code: 'city.not_found',
+        message: 'no city Oslo',
+        remediation: CityNotFound.remediation,
+        data: { city: 'Oslo' },
+      },
+    });
+    expect(events.some(event => event.type === 'tool:result' || event.type === 'tool:error')).toBe(false);
+    const secondPrompt = JSON.stringify(model.doStreamCalls[1]?.prompt);
+    expect(secondPrompt).toContain('city.not_found');
+    expect(secondPrompt).toContain('Use the English name of a real city');
+  });
+
+  it('keeps a thrown error a tool:error', async () => {
+    // WHY: a throw is a bug, not an expected outcome; it must not look like a failure value.
+    const broken = defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      execute: () => {
+        throw new Error('weather API down');
+      },
+    });
+    const events = await collect(
+      createMastraRuntime({ model: toolCallingModel('weather') }).runToolLoop({ prompt: 'x', tools: [broken] }),
+    );
+    expect(events).toContainEqual({ type: 'tool:error', tool: 'weather', error: 'weather API down' });
+    expect(events.some(event => event.type === 'tool:failure')).toBe(false);
   });
 });

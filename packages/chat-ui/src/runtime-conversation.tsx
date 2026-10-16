@@ -46,6 +46,7 @@ function toToolStatus(status: RuntimeToolCall['status']): ToolCallStatus {
     case 'done': {
       return 'complete';
     }
+    case 'failed':
     case 'error': {
       return 'error';
     }
@@ -78,6 +79,10 @@ function RuntimeConversation({ state, renderText, hideStatus, className, ...prop
           {toolCall.status === 'error' && toolCall.error ? (
             <ToolCallResult>
               <span className="text-destructive">{toolCall.error}</span>
+            </ToolCallResult>
+          ) : toolCall.status === 'failed' && toolCall.failure ? (
+            <ToolCallResult>
+              <span className="text-destructive">{toolCall.failure.message}</span>
             </ToolCallResult>
           ) : null}
         </ToolCall>

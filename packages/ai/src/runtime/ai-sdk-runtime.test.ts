@@ -6,9 +6,11 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { defineFailure } from '@arki/failure';
+
+import type { AgentTool, RuntimeEvent } from './types';
 import { createAiSdkRuntime, toAiSdkToolSet } from './ai-sdk-runtime';
 import { defineAgentTool } from './tool';
-import type { AgentTool, RuntimeEvent } from './types';
 
 /** Drains the async event stream into an array for assertions. */
 async function collect(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEvent[]> {
@@ -243,6 +245,79 @@ describe('createAiSdkRuntime tool output schema', () => {
       output: z.object({ celsius: z.number() }),
       // @ts-expect-error -- the return does not match the output schema
       execute: () => ({ celsius: 'warm' }),
+    });
+  });
+});
+
+const CityNotFound = defineFailure('city.not_found', {
+  status: 404,
+  data: z.object({ city: z.string() }),
+  message: 'no city {city}',
+  remediation: 'Use the English name of a real city, such as "Oslo".',
+});
+
+describe('createAiSdkRuntime tool failures', () => {
+  const weather = defineAgentTool({
+    name: 'weather',
+    description: 'Weather for a city.',
+    inputSchema: z.object({ city: z.string() }),
+    output: z.object({ celsius: z.number() }),
+    execute: ({ city }) => CityNotFound({ city }),
+  });
+
+  it('sends the model the failure with its remediation, skips the output check and emits tool:failure', async () => {
+    // WHY: the remediation sentence is how the model corrects its next call. If the failure
+    // were checked against the output schema, or thrown, the model would only see "invalid output".
+    const model = toolCallingModel('weather');
+    const events = await collect(createAiSdkRuntime({ model }).runToolLoop({ prompt: 'x', tools: [weather] }));
+
+    const failure = {
+      code: 'city.not_found',
+      message: 'no city Oslo',
+      remediation: CityNotFound.remediation,
+      data: { city: 'Oslo' },
+    };
+    expect(events).toContainEqual({ type: 'tool:failure', tool: 'weather', failure });
+    expect(events.some(event => event.type === 'tool:result' || event.type === 'tool:error')).toBe(false);
+    expect(secondPrompt(model)).toContain('city.not_found');
+    expect(secondPrompt(model)).toContain('Use the English name of a real city');
+    expect(events.at(-1)?.type).toBe('run:finish');
+  });
+
+  it('keeps a thrown error a tool:error', async () => {
+    // WHY: a throw is a bug, not an expected outcome; it must not look like a failure value.
+    const broken = defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      execute: () => {
+        throw new Error('weather API down');
+      },
+    });
+    const events = await collect(
+      createAiSdkRuntime({ model: toolCallingModel('weather') }).runToolLoop({ prompt: 'x', tools: [broken] }),
+    );
+    expect(events).toContainEqual({ type: 'tool:error', tool: 'weather', error: 'weather API down' });
+    expect(events.some(event => event.type === 'tool:failure')).toBe(false);
+  });
+
+  it('types execute to admit failures without widening the output type', () => {
+    // WHY: returning a failure must compile, while a wrong success value must still fail to.
+    expectTypeOf(weather).toEqualTypeOf<AgentTool<{ city: string }, { celsius: number }>>();
+    defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      output: z.object({ celsius: z.number() }),
+      execute: ({ city }) => (city === 'Oslo' ? { celsius: 3 } : CityNotFound({ city })),
+    });
+    defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      output: z.object({ celsius: z.number() }),
+      // @ts-expect-error -- a failure is allowed, a wrong success value is not
+      execute: ({ city }) => (city === 'Oslo' ? { celsius: 'cold' } : CityNotFound({ city })),
     });
   });
 });

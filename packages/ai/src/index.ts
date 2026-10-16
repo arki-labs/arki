@@ -193,6 +193,7 @@ export {
   type RuntimeUiState,
   type RuntimeUiStatus,
   type RuntimeUsage,
+  type ToolFailure,
   type ToolLoopInput,
 } from './runtime';
 

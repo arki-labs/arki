@@ -65,6 +65,7 @@
     "@arki/async": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@qdrant/js-client-rest": "catalog:",
     "@standard-schema/spec": "^1.1.0",

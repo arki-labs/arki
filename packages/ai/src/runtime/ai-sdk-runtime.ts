@@ -1,7 +1,7 @@
 import type { LanguageModel, ToolSet } from 'ai';
 import { isStepCount, streamText, tool } from 'ai';
 
-import type { AgentRuntime, AgentTool, RuntimeEvent, ToolLoopInput } from './types';
+import type { AgentRuntime, AgentTool, RuntimeEvent, ToolFailure, ToolLoopInput } from './types';
 import { aiTelemetry } from '../ai-service/telemetry';
 import { debugRuntime } from '../debug';
 import { abortReason, runAgentTool } from './tool';
@@ -30,19 +30,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** One neutral tool as an AI-SDK tool: gets the run's abort signal, and its result is checked. */
-function toAiSdkTool(agentTool: AgentTool) {
+/**
+ * One neutral tool as an AI-SDK tool: gets the run's abort signal, its result is checked, and a
+ * returned failure reaches `onFailure` with the tool call's id.
+ */
+function toAiSdkTool(agentTool: AgentTool, onFailure?: (toolCallId: string, failure: ToolFailure) => void) {
   return tool({
     description: agentTool.description,
     inputSchema: agentTool.inputSchema,
-    execute: (input: unknown, { abortSignal }) => runAgentTool(agentTool, input, abortSignal),
+    execute: (input: unknown, { abortSignal, toolCallId }) =>
+      runAgentTool(agentTool, input, abortSignal, failure => onFailure?.(toolCallId, failure)),
   });
 }
 
-/** Convert neutral `AgentTool`s into an AI-SDK `ToolSet` (auto-executed inside the loop). */
-export function toAiSdkToolSet(tools: ReadonlyArray<AgentTool> | undefined): ToolSet | undefined {
+/**
+ * Convert neutral `AgentTool`s into an AI-SDK `ToolSet` (auto-executed inside the loop).
+ * `onFailure` hears each tool call that returned a failure from `@arki/failure`.
+ */
+export function toAiSdkToolSet(
+  tools: ReadonlyArray<AgentTool> | undefined,
+  onFailure?: (toolCallId: string, failure: ToolFailure) => void,
+): ToolSet | undefined {
   if (!tools || tools.length === 0) return undefined;
-  return Object.fromEntries(tools.map(agentTool => [agentTool.name, toAiSdkTool(agentTool)] as const));
+  return Object.fromEntries(tools.map(agentTool => [agentTool.name, toAiSdkTool(agentTool, onFailure)] as const));
 }
 
 export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
@@ -59,12 +69,14 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
       });
       yield { type: 'run:start' };
 
+      // Tool calls whose tool returned a failure, by call id: their result becomes `tool:failure`.
+      const failures = new Map<string, ToolFailure>();
       try {
         const result = streamText({
           model: options.model,
           instructions: input.system,
           prompt: input.prompt,
-          tools: toAiSdkToolSet(input.tools),
+          tools: toAiSdkToolSet(input.tools, (toolCallId, failure) => failures.set(toolCallId, failure)),
           abortSignal: signal,
           // The abort check stops the loop between steps, so no new model call starts.
           stopWhen: [isStepCount(maxSteps), () => signal?.aborted === true],
@@ -80,9 +92,13 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
             case 'tool-call':
               yield { type: 'tool:start', tool: part.toolName, args: part.input };
               break;
-            case 'tool-result':
-              yield { type: 'tool:result', tool: part.toolName, result: part.output };
+            case 'tool-result': {
+              const failure = failures.get(part.toolCallId);
+              yield failure === undefined
+                ? { type: 'tool:result', tool: part.toolName, result: part.output }
+                : { type: 'tool:failure', tool: part.toolName, failure };
               break;
+            }
             case 'tool-error':
               yield { type: 'tool:error', tool: part.toolName, error: errorMessage(part.error) };
               break;

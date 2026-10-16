@@ -2,7 +2,7 @@ import type { MastraModelConfig } from '@mastra/core/llm';
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
 
-import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './runtime/types';
+import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types';
 import { debugRuntime } from './debug';
 import { abortReason, runAgentTool } from './runtime/tool';
 
@@ -37,25 +37,36 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * One neutral tool as a Mastra tool: gets the run's abort signal, and its result is checked.
+ * One neutral tool as a Mastra tool: gets the run's abort signal, its result is checked, and a
+ * returned failure reaches `onFailure` with the tool call's id.
  * A named function per tool, not a closure in the loop: Hermes scopes loop `const`s to the
  * function, so a loop closure would see the last tool.
  */
-function toMastraTool(agentTool: AgentTool): ReturnType<typeof createTool> {
+function toMastraTool(
+  agentTool: AgentTool,
+  onFailure?: (toolCallId: string, failure: ToolFailure) => void,
+): ReturnType<typeof createTool> {
   return createTool({
     id: agentTool.name,
     description: agentTool.description,
     inputSchema: agentTool.inputSchema,
     // Mastra 1.x createTool: execute is (inputData, context); inputData is the parsed schema.
-    execute: async (inputData, context) => runAgentTool(agentTool, inputData, context.abortSignal),
+    execute: async (inputData, context) =>
+      runAgentTool(agentTool, inputData, context.abortSignal, failure => {
+        // Mastra sets the call id when an agent runs the tool, which is the only way this runtime runs it.
+        const toolCallId = context.agent?.toolCallId;
+        if (toolCallId !== undefined) onFailure?.(toolCallId, failure);
+      }),
   });
 }
 
+/** `onFailure` hears each tool call that returned a failure from `@arki/failure`. */
 export function toMastraTools(
   tools: ReadonlyArray<AgentTool> | undefined,
+  onFailure?: (toolCallId: string, failure: ToolFailure) => void,
 ): Record<string, ReturnType<typeof createTool>> {
   const out: Record<string, ReturnType<typeof createTool>> = {};
-  for (const agentTool of tools ?? []) out[agentTool.name] = toMastraTool(agentTool);
+  for (const agentTool of tools ?? []) out[agentTool.name] = toMastraTool(agentTool, onFailure);
   return out;
 }
 
@@ -73,6 +84,8 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
       });
       yield { type: 'run:start' };
 
+      // Tool calls whose tool returned a failure, by call id: their result becomes `tool:failure`.
+      const failures = new Map<string, ToolFailure>();
       try {
         const agentName = options.name ?? 'arki-runtime-agent';
         const agent = new Agent({
@@ -80,7 +93,7 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
           name: agentName,
           instructions: input.system ?? options.instructions ?? 'You are a helpful assistant.',
           model: options.model,
-          tools: toMastraTools(input.tools),
+          tools: toMastraTools(input.tools, (toolCallId, failure) => failures.set(toolCallId, failure)),
         });
 
         const stream = await agent.stream(input.prompt, { maxSteps, abortSignal: signal });
@@ -98,9 +111,13 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
             case 'tool-call':
               yield { type: 'tool:start', tool: chunk.payload.toolName, args: chunk.payload.args };
               break;
-            case 'tool-result':
-              yield { type: 'tool:result', tool: chunk.payload.toolName, result: chunk.payload.result };
+            case 'tool-result': {
+              const failure = failures.get(chunk.payload.toolCallId);
+              yield failure === undefined
+                ? { type: 'tool:result', tool: chunk.payload.toolName, result: chunk.payload.result }
+                : { type: 'tool:failure', tool: chunk.payload.toolName, failure };
               break;
+            }
             case 'tool-error':
               yield {
                 type: 'tool:error',

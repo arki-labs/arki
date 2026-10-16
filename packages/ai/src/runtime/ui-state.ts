@@ -1,4 +1,4 @@
-import type { RuntimeEvent, RuntimeUsage } from './types';
+import type { RuntimeEvent, RuntimeUsage, ToolFailure } from './types';
 
 /**
  * UI-adapter layer (P2): a framework-agnostic reduction of the normalized `RuntimeEvent`
@@ -15,15 +15,17 @@ export interface RuntimeToolCall {
   tool: string;
   args?: unknown;
   result?: unknown;
+  /** The failure the tool returned (an expected outcome the model can correct), not a thrown error. */
+  failure?: ToolFailure;
   error?: string;
-  status: 'running' | 'done' | 'error';
+  status: 'running' | 'done' | 'failed' | 'error';
 }
 
 export interface RuntimeUiState {
   status: RuntimeUiStatus;
   /** Accumulated assistant text (deltas joined; finalized on run:finish). */
   text: string;
-  /** Tool calls in start order, each progressing running → done|error. */
+  /** Tool calls in start order, each progressing running → done|failed|error. */
   toolCalls: RuntimeToolCall[];
   usage?: RuntimeUsage;
   error?: string;
@@ -63,9 +65,21 @@ export function runtimeEventReducer(state: RuntimeUiState, event: RuntimeEvent):
     case 'tool:start':
       return { ...state, toolCalls: [...state.toolCalls, { tool: event.tool, args: event.args, status: 'running' }] };
     case 'tool:result':
-      return { ...state, toolCalls: settleToolCall(state.toolCalls, event.tool, { result: event.result, status: 'done' }) };
+      return {
+        ...state,
+        toolCalls: settleToolCall(state.toolCalls, event.tool, { result: event.result, status: 'done' }),
+      };
+    case 'tool:failure': {
+      return {
+        ...state,
+        toolCalls: settleToolCall(state.toolCalls, event.tool, { failure: event.failure, status: 'failed' }),
+      };
+    }
     case 'tool:error':
-      return { ...state, toolCalls: settleToolCall(state.toolCalls, event.tool, { error: event.error, status: 'error' }) };
+      return {
+        ...state,
+        toolCalls: settleToolCall(state.toolCalls, event.tool, { error: event.error, status: 'error' }),
+      };
     case 'run:finish':
       return { ...state, status: 'done', text: event.text.length > 0 ? event.text : state.text, usage: event.usage };
     case 'run:error':
