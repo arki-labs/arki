@@ -5,16 +5,16 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { mailer } from '@arki/mail';
+import { defineTemplate, mailer } from '@arki/mail';
 import { magicLink, resetPassword, verifyEmail } from '@arki/mail/templates/auth';
 import { mailSink } from '@arki/mail/testing';
 
-import type { AuthMailBrandPicker } from './types.js';
+import type { AuthLinkTemplate, AuthMailBrandPicker } from './types.js';
 import { PASSWORD, post } from '../__fixtures__/http.js';
 import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { testAuth } from '../testing/index.js';
-import { authMail } from './mail.js';
+import { authLinkInput, authMail } from './mail.js';
 
 const definition = defineAuth({
   app: { name: 'Kapodopera', key: 'kapodopera' },
@@ -31,6 +31,29 @@ const brandOfHost: AuthMailBrandPicker = ({ request }) => {
 };
 
 const fromHost = (host: string) => ({ 'x-forwarded-host': host });
+
+/** Each brand's own site, which a branded mail links its wordmark and footer to. */
+const SITES: Readonly<Record<string, string>> = {
+  'readingpath.test': 'https://readingpath.test',
+  'strophie.test': 'https://strophie.test',
+};
+
+/** Like `brandOfHost`, and also names the brand's site. */
+const brandWithSite: AuthMailBrandPicker = async event => {
+  const brand = await brandOfHost(event);
+  const appUrl = SITES[event.request?.headers.get('x-forwarded-host') ?? ''];
+  return appUrl === undefined ? brand : { ...brand, appUrl };
+};
+
+/** A custom template that renders the brand's site, as a multi-brand app's own mail would. */
+const siteTemplate = (base: AuthLinkTemplate): AuthLinkTemplate =>
+  defineTemplate({
+    name: base.name,
+    input: authLinkInput,
+    subject: data => `${data.appName}: ${base.name}`,
+    text: data => `${data.appName} (${data.appUrl ?? 'no site'}): ${data.url}`,
+    html: data => `<a href="${data.appUrl ?? ''}">${data.appName}</a><a href="${data.url}">go</a>`,
+  });
 
 describe('mailBrand', () => {
   it('gives two hosts two brands for the magic link, verify and reset mails', async () => {
@@ -56,6 +79,63 @@ describe('mailBrand', () => {
     } finally {
       await dispose();
     }
+  });
+
+  it('hands two hosts two brand sites in the magic link, verify and reset mails of custom templates', async () => {
+    const { auth, mail, dispose } = await testAuth(definition, {
+      tables: authTables,
+      mailBrand: brandWithSite,
+      templates: {
+        magicLink: siteTemplate(magicLink),
+        verifyEmail: siteTemplate(verifyEmail),
+        resetPassword: siteTemplate(resetPassword),
+      },
+    });
+    try {
+      for (const [host, site] of Object.entries(SITES)) {
+        const email = `ada@${host}`;
+        await post(auth, '/sign-in/magic-link', { email }, fromHost(host));
+        await post(auth, '/sign-up/email', { email: `new.${email}`, password: PASSWORD, name: 'Ada' }, fromHost(host));
+        await post(auth, '/request-password-reset', { email: `new.${email}`, redirectTo: '/reset' }, fromHost(host));
+
+        const sent = [...mail.sentTo(email), ...mail.sentTo(`new.${email}`)];
+        expect(new Set(sent.map(record => record.template))).toEqual(
+          new Set([magicLink.name, resetPassword.name, verifyEmail.name]),
+        );
+        for (const { message } of sent) {
+          expect(message.text).toContain(`(${site})`);
+          expect(message.html).toContain(`href="${site}"`);
+          for (const other of Object.values(SITES).filter(value => value !== site)) {
+            expect(message.text).not.toContain(other);
+          }
+        }
+      }
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('the default templates take no site: a picked appUrl changes nothing in them', async () => {
+    const { auth, mail, dispose } = await testAuth(definition, { tables: authTables, mailBrand: brandWithSite });
+    try {
+      await post(auth, '/sign-in/magic-link', { email: 'ada@readingpath.test' }, fromHost('readingpath.test'));
+      const [record] = mail.sentTo('ada@readingpath.test');
+      expect(record?.message.from).toBe('ReadingPath <auth@kapodopera.test>');
+      expect(record?.message.text).toContain('ReadingPath');
+      expect(record?.message.text).not.toContain('https://readingpath.test');
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('refuses a site that is not an absolute http(s) URL', async () => {
+    const result = await authLinkInput['~standard'].validate({
+      appName: 'ReadingPath',
+      url: 'https://kapodopera.test/link',
+      expiresInMinutes: 5,
+      appUrl: 'javascript:alert(1)',
+    });
+    expect(result.issues?.[0]?.path).toEqual(['appUrl']);
   });
 
   it('keeps the default brand when the request has no known host', async () => {

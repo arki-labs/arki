@@ -387,6 +387,22 @@ export const brandOfHost: AuthMailBrandPicker = ({ request }) => {
 - With no request, or an unknown host, return `{}` to keep the default.
 - A picker that throws fails the mail with E006. Nothing is sent under a wrong brand.
 - Custom `templates` get the picked `appName` too.
+- `appUrl` is the brand's own site. Only a custom template that declares `input: authLinkInput` (from `@arki/auth/pg`) receives it, as `data.appUrl`. The default `@arki/mail` templates take no site and ignore it. It must be an absolute http(s) URL, or the mail fails with E006.
+
+```ts skip="a fragment of the bindings"
+import { authLinkInput } from '@arki/auth/pg';
+import { defineTemplate } from '@arki/mail';
+import { magicLink } from '@arki/mail/templates/auth';
+
+const brandedMagicLink = defineTemplate({
+  name: magicLink.name,
+  input: authLinkInput,
+  subject: data => `Sign in to ${data.appName}`,
+  text: data => `Sign in to ${data.appName}: ${data.url}`,
+  html: data => page({ home: data.appUrl, action: data.url }),
+});
+// createAuth(authDefinition, { ..., mailBrand: brandOfHost, templates: { magicLink: brandedMagicLink } })
+```
 
 ## Endpoint contract
 

@@ -26,6 +26,9 @@ export type {
   AuthEvents,
   AuthMailBrand,
   AuthMailBrandPicker,
+  AuthLinkInputSchema,
+  AuthLinkMailData,
+  AuthLinkMailInput,
   AuthLinkTemplate,
   AuthRuntime,
   AuthSessions,
@@ -47,6 +50,7 @@ export type {
 } from './types.js';
 export { assertAuthSecret } from './secret.js';
 export { additionalFieldsFromColumns } from './fields.js';
+export { authLinkInput } from './mail.js';
 // The table factories still live in `../schema`; the delete step moves them here.
 export {
   authAccountColumns,

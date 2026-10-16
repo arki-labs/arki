@@ -7,7 +7,7 @@ import type { AnyPgTable, PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/
 
 import type { KV } from '@arki/kv';
 import type { Mailer, MailTemplate } from '@arki/mail';
-import type { magicLink } from '@arki/mail/templates/auth';
+import type { AuthLinkData, AuthLinkInput, magicLink } from '@arki/mail/templates/auth';
 
 import type { AuthDefinition, AuthMethod, ExposedFields, SocialMethod, SocialMethodsOf } from '../definition.js';
 import type {
@@ -92,8 +92,41 @@ export type AuthRuntime<D> = {
   readonly clientIp?: { readonly header: string };
 } & ProvidersFor<D>;
 
-/** The link mails. Each takes the `@arki/mail/templates/auth` link input. */
-export type AuthLinkTemplate = MailTemplate<(typeof magicLink)['input']>;
+/** The input of an auth link mail: the `@arki/mail/templates/auth` link input, plus the brand's site. */
+export type AuthLinkMailInput = AuthLinkInput & { readonly appUrl?: string };
+/** What an auth link template renders from. `appUrl` is the picked brand's site, when the picker named one. */
+export type AuthLinkMailData = AuthLinkData & { readonly appUrl?: string };
+
+/** A failed validation, in the shape the `@arki/mail` link input reports it. */
+type AuthLinkMailIssues = Extract<
+  Awaited<ReturnType<(typeof magicLink)['input']['~standard']['validate']>>,
+  { readonly issues: unknown }
+>;
+
+/**
+ * A Standard Schema for {@link AuthLinkMailInput}. `authLinkInput` is the one this package ships:
+ * the `@arki/mail` link rules, plus an optional http(s) `appUrl`. The default templates' schema
+ * fits this type too; it just drops `appUrl`.
+ */
+export type AuthLinkInputSchema = {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (
+      value: unknown,
+    ) =>
+      | AuthLinkMailIssues
+      | { readonly value: AuthLinkMailData; readonly issues?: undefined }
+      | Promise<AuthLinkMailIssues | { readonly value: AuthLinkMailData; readonly issues?: undefined }>;
+    readonly types?: { readonly input: AuthLinkMailInput; readonly output: AuthLinkMailData } | undefined;
+  };
+};
+
+/**
+ * The link mails. The `@arki/mail/templates/auth` templates fit as they are. A custom template that
+ * also wants the brand's site declares `input: authLinkInput` and reads `data.appUrl`.
+ */
+export type AuthLinkTemplate = MailTemplate<AuthLinkInputSchema>;
 export type AuthTemplates = {
   readonly magicLink: AuthLinkTemplate;
   readonly verifyEmail: AuthLinkTemplate;
@@ -109,8 +142,11 @@ export type RateLimitStore = Pick<KV, 'getRateLimiter'>;
  */
 export type RateLimitBinding = { readonly store: RateLimitStore | 'memory' };
 
-/** The brand on one auth mail. A field left out keeps the default: the app's name, the mailer's sender. */
-export type AuthMailBrand = { readonly appName?: string; readonly from?: string };
+/**
+ * The brand on one auth mail. A field left out keeps the default: the app's name, the mailer's sender.
+ * `appUrl`, the brand's site, reaches only custom `templates` that declare `input: authLinkInput`.
+ */
+export type AuthMailBrand = { readonly appName?: string; readonly from?: string; readonly appUrl?: string };
 
 /**
  * Picks the brand of each auth mail from the request that asked for it, so one backend can send
