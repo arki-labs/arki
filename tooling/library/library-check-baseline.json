@@ -17,53 +17,58 @@
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./core\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./server\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./http\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./env\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./module\" exposes Zod types: ZodArray, ZodEnum, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./http\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./core\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./module\" exposes Zod types: ZodArray, ZodEnum, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./env\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./pg\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./receipts\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./receipts\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/admin",
-      "error": "TYPES_E001 export \"./server\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./pg\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/ai",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodSchema, ZodString, ZodType, ZodURL, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodURL, ZodUnion, ZodUnknown",
+      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
     },
     {
       "package": "@arki/ai",
-      "error": "TYPES_E001 export \"./react\" exposes Zod types: ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodURL, ZodUnion, ZodUnknown",
+      "reason": "standard-schema wave 3: pre-existing, missed by the wave-0 seed (stale dist); producer schemas, removed in wave 4"
+    },
+    {
+      "package": "@arki/ai",
+      "error": "TYPES_E001 export \"./drizzle\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
+      "reason": "standard-schema wave 3: pre-existing, missed by the wave-0 seed (stale dist); producer schemas, removed in wave 4"
     },
     {
       "package": "@arki/assert",
@@ -414,36 +419,6 @@
       "package": "@arki/http",
       "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
       "reason": "lesson 13 wave A|B: docs backlog"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodError, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \"./idempotency\" exposes Zod types: ZodInt, ZodObject, ZodRecord, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \"./projection\" exposes Zod types: ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/http",
-      "error": "TYPES_E001 export \"./webhooks\" exposes Zod types: ZodError",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
       "package": "@arki/icons",
