@@ -9,7 +9,7 @@ export {
   UNOSEND_PRO_QUOTA,
 } from './client/create';
 export type { EmailClientConfig } from './client/create';
-export { EmailProcedure } from './client/email-procedure';
+export { EmailBuilder, EmailProcedure } from './client/email-procedure';
 
 // Providers
 export { resendProvider } from './providers/resend';

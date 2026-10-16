@@ -115,6 +115,7 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@react-email/render": "catalog:react-email",
     "zod": "catalog:"
   },
@@ -125,9 +126,11 @@
     "@arki/vitest-config": "workspace:*",
     "@aws-sdk/client-sesv2": "catalog:",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "react": "catalog:react",
     "react-email": "catalog:",
     "resend": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {

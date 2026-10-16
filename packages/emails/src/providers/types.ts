@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from '@arki/schema';
 import type * as React from 'react';
 
 /**
@@ -27,7 +28,11 @@ export type SendEmailPayload = {
 export type SendEmailResult = {
   /** Provider-assigned message ID, or null on failure. */
   data: { id: string } | null;
-  error: { message: string; name: string } | null;
+  /**
+   * `issues` is set only on a `ValidationError` from `EmailProcedure.send`:
+   * exactly what the input schema reported, paths included.
+   */
+  error: { message: string; name: string; issues?: readonly StandardSchemaV1.Issue[] } | null;
 };
 
 /**

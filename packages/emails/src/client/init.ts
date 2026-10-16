@@ -2,7 +2,7 @@ import type { QuotaStore } from '../providers/quota-store';
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from '../providers/types';
 import { debugEmails } from '../debug';
 import { quotaRouter } from '../providers/quota-router';
-import { EmailProcedure } from './email-procedure';
+import { EmailBuilder } from './email-procedure';
 
 type InitEmailsOptions = {
   /**
@@ -61,7 +61,7 @@ export type EmailClient = {
    * await magicLink.send({ to: user.email, input: { url } });
    * ```
    */
-  email: EmailProcedure<never>;
+  email: EmailBuilder;
 };
 
 /**
@@ -115,6 +115,6 @@ export function initEmails(options: InitEmailsOptions): EmailClient {
       return activeProvider.send(payload);
     },
 
-    email: new EmailProcedure(activeProvider),
+    email: new EmailBuilder(activeProvider),
   };
 }
