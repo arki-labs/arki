@@ -292,12 +292,7 @@
     },
     {
       "package": "@arki/emails",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodCustom, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodString, ZodType, ZodTypeAny, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/emails",
-      "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodType, ZodTypeAny",
+      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodCustom, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion, ZodUnknown",
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
@@ -333,11 +328,6 @@
     {
       "package": "@arki/env",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/env",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodType",
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
@@ -987,12 +977,12 @@
     },
     {
       "package": "@arki/scraping",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodType, ZodUnknown",
+      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
       "package": "@arki/scraping",
-      "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodType, ZodUnknown",
+      "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
@@ -1084,26 +1074,6 @@
       "package": "@arki/string",
       "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
       "reason": "lesson 13 wave A|B: docs backlog"
-    },
-    {
-      "package": "@arki/testing",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodSchema",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/testing",
-      "error": "TYPES_E001 export \"./assertions\" exposes Zod types: ZodSchema",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/testing",
-      "error": "TYPES_E001 export \"./server/integration-tester\" exposes Zod types: ZodSchema",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/testing",
-      "error": "TYPES_E001 export \"./server/tester-builder\" exposes Zod types: ZodSchema",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
       "package": "@arki/text",
