@@ -48,6 +48,7 @@ import type {
   WireNeeds,
 } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
+import { traceUsecase } from './kernel/otel.js';
 import { handleOf, isLazyWitness, rename } from './plugin-contract.js';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -1239,8 +1240,12 @@ function stage(state: FeatureState): RuntimeStage {
     usecases: factories =>
       stage({
         ...state,
-        // One object, one key per factory, each built from the same deps.
-        usecases: deps => Object.fromEntries(Object.entries(factories).map(([key, create]) => [key, create(deps)])),
+        // One object, one key per factory, each built from the same deps; each
+        // usecase runs in its own `feature.<name>.<usecase>` span.
+        usecases: deps =>
+          Object.fromEntries(
+            Object.entries(factories).map(([key, create]) => [key, traceUsecase(state.name, key, create(deps))]),
+          ),
       }),
     provides: factories => {
       const infraKeys = new Set(state.infra.flatMap(p => Object.keys(p.provides)));

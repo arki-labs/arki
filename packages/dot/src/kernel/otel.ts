@@ -1,5 +1,7 @@
 import type { Span } from '@opentelemetry/api';
-import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
+
+import { isFailure } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 
@@ -23,6 +25,8 @@ import type { DotLifecycleHook } from '../lifecycle.js';
  *   - Hook span:  `dot.plugin.<hook>` — one child span per plugin's hook
  *     execution. The plugin name lives on `dot.plugin.name`, not in the span
  *     name, so backends can aggregate by hook across plugins.
+ *   - Usecase span: `feature.<feature>.<usecase>` — one active span per call
+ *     of a `defineFeature(...).usecases(...)` function (see {@link traceUsecase}).
  *   - Attributes (`dot.app.name`, `dot.plugin.name`, `dot.plugin.version`,
  *     `dot.hook`, `dot.plugin.order`) follow the OTel convention of
  *     namespacing under the library's prefix.
@@ -238,4 +242,80 @@ export function withPhaseSpan<R>(
       }
     },
   );
+}
+
+/**
+ * Wrap one usecase so each call runs in an active span named
+ * `feature.<featureName>.<usecaseName>`. A value that is not a function is
+ * returned as is.
+ *
+ * - Returns (or resolves to) an `@arki/failure` failure: status ERROR with
+ *   `failure.code` and `failure.status`, and no exception event — a failure
+ *   is an expected outcome, not a bug.
+ * - Throws (or rejects): the exception is recorded, status ERROR, and the
+ *   same value is rethrown.
+ * - Anything else: status OK, like the kernel's hook spans.
+ *
+ * With no SDK registered (or a sampler that drops the span) the call goes
+ * straight through: same `this`, same arguments, the very same return value
+ * (a promise is not re-wrapped). Sync usecases stay sync; an async one ends
+ * its span when its promise settles.
+ */
+export function traceUsecase(featureName: string, usecaseName: string, usecase: unknown): unknown {
+  if (typeof usecase !== 'function') return usecase;
+  // A const keeps the narrowing inside `traced` (a parameter's would not survive the hoisted function).
+  const call = usecase;
+  const spanName = `feature.${featureName}.${usecaseName}`;
+  function traced(this: unknown, ...args: unknown[]): unknown {
+    const span = tracer.startSpan(spanName);
+    if (!span.isRecording()) return Reflect.apply(call, this, args);
+    return context.with(trace.setSpan(context.active(), span), () =>
+      settleUsecaseSpan(span, () => Reflect.apply(call, this, args)),
+    );
+  }
+  Object.defineProperty(traced, 'name', { value: usecase.name });
+  // Own properties a usecase carries (such as its declared errors) stay readable on the wrapper.
+  return Object.assign(traced, usecase);
+}
+
+/** Run `call` and end `span` when its result is known: now, or when its promise settles. */
+function settleUsecaseSpan(span: Span, call: () => unknown): unknown {
+  let result: unknown;
+  try {
+    result = call();
+  } catch (error) {
+    endThrownUsecase(span, error);
+    throw error;
+  }
+  // `instanceof Promise`, as the hook spans do: a thenable such as a query builder must not be run by `.then`.
+  if (result instanceof Promise) {
+    return result.then(
+      (value: unknown) => {
+        endReturnedUsecase(span, value);
+        return value;
+      },
+      (error: unknown) => {
+        endThrownUsecase(span, error);
+        throw error;
+      },
+    );
+  }
+  endReturnedUsecase(span, result);
+  return result;
+}
+
+function endReturnedUsecase(span: Span, value: unknown): void {
+  if (isFailure(value)) {
+    span.setAttributes({ 'failure.code': value.code, 'failure.status': value.status });
+    span.setStatus({ code: SpanStatusCode.ERROR, message: value.code });
+  } else {
+    span.setStatus({ code: SpanStatusCode.OK });
+  }
+  span.end();
+}
+
+function endThrownUsecase(span: Span, error: unknown): void {
+  span.recordException(error instanceof Error ? error : stringifyForSpan(error));
+  span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
+  span.end();
 }

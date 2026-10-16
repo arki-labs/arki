@@ -96,6 +96,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"

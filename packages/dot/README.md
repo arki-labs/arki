@@ -322,6 +322,30 @@ export const digestProcedures = {
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
   the kind of cycle no amount of coffee fixes).
 
+#### Spans for every usecase
+
+Each usecase call runs in an OpenTelemetry span named
+`feature.<feature>.<usecase>` (`feature.daily-digest.preview`). You write no
+tracing code, and the usecase types do not change.
+
+- **Returns a failure** (an `@arki/failure` value, directly or through a
+  promise): status ERROR, with the attributes `failure.code` and
+  `failure.status`. No exception is recorded — a failure is an expected
+  outcome, not a bug.
+- **Throws or rejects:** the exception is recorded, status ERROR, and the
+  same value is rethrown.
+- **Anything else:** status OK.
+
+The span is active while the usecase runs, so spans it starts (a database
+query, an HTTP call) nest under it. An async usecase ends its span when its
+promise settles. With no OpenTelemetry SDK registered, the call goes straight
+through: same `this`, same arguments, the very same return value.
+
+`rpc()` adds no span of its own: oRPC already has one per procedure
+(`call_procedure`, with `procedure.path`). Register `ORPCInstrumentation`
+from `@orpc/otel` with your SDK to turn it on; the usecase spans then nest
+under it.
+
 ### Features and the hexagon (object form — removed when the migration to `defineFeature` ends)
 
 Domain modules are `feature()` values from `@arki/dot/feature`. A feature is
