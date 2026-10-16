@@ -1,7 +1,7 @@
 import type { AnyContent, ConfigurationWithContent, WriterHook } from '@content-collections/core';
 import { defineConfig } from '@content-collections/core';
 
-export type { GetTypeByName } from '@content-collections/core';
+export type { GetTypeByName, Meta } from '@content-collections/core';
 export { defineCollection } from '@content-collections/core';
 export { compileMDX } from './lib/compile-mdx.js';
 export { addIdToHeadings } from './plugins/add-id-to-headings.js';
