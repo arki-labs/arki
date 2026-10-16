@@ -2,6 +2,8 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // One real-timer call per feature; the unit tests cover the details.
 
+import { MockClock } from '@arki/clock';
+
 import { all, AsyncError, debounce, mapConcurrent, race, scoped, sleep, throttle, timeout } from '../dist/index.js';
 
 async function main() {
@@ -107,7 +109,20 @@ async function main() {
     }),
   );
 
+  // Long waits on a MockClock: debounce and sleep follow its time, not real time.
+  const clock = new MockClock();
+  const debouncedOnClock = [];
+  const onClock = debounce(value => debouncedOnClock.push(`${value}@${clock.now().getTime()}`), 60_000, { clock });
+  onClock('a');
+  clock.advance(30_000);
+  onClock('b');
+  clock.advance(60_000);
+  const slept = sleep(3_600_000, { clock }).then(() => clock.now().getTime());
+  clock.advance(3_600_000);
+
   const checks = [
+    ['debounce on a MockClock', debouncedOnClock.join(','), 'b@90000'],
+    ['sleep on a MockClock', await slept, 3_690_000],
     ['sleep resolves', await sleep(5).then(() => 'ok'), 'ok'],
     ['sleep(0) waits past microtasks', await zero, true],
     ['invalid wait', await rejection(sleep(-1)), 'ARKI_ASYNC_E001'],

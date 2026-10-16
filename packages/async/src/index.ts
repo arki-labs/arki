@@ -1,5 +1,5 @@
 export { all, mapConcurrent, race, timeout } from './concurrency.js';
-export type { ConcurrencyOptions, SignalOptions } from './concurrency.js';
+export type { ConcurrencyOptions, SignalOptions, TimeoutOptions } from './concurrency.js';
 export { ASYNC_ERROR_CODES, AsyncError, MAX_WAIT_MS } from './errors.js';
 export type { AsyncErrorCode } from './errors.js';
 export { debounce, throttle } from './schedule.js';

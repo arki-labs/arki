@@ -1,6 +1,8 @@
 import { debounce as debounceLodash, throttle as throttleLodash } from 'lodash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { MockClock } from '@arki/clock';
+
 import { AsyncError, MAX_WAIT_MS } from './errors.js';
 import { debounce, throttle } from './schedule.js';
 
@@ -324,4 +326,49 @@ describe('matches lodash on random schedules', () => {
       }
     });
   }
+});
+
+// With a clock, debounce and throttle follow its time and timers, so a test
+// drives them with `advance` and needs no fake timers.
+describe('debounce and throttle with a clock', () => {
+  it('debounce reads the clock for both time and timers', () => {
+    vi.useRealTimers();
+    const clock = new MockClock();
+    const fn = vi.fn<(n: number) => void>();
+    const d = debounce(fn, 30_000, { clock });
+    d(1);
+    clock.advance(20_000);
+    d(2);
+    clock.advance(29_999);
+    expect(fn).not.toHaveBeenCalled();
+    clock.advance(1);
+    expect(fn).toHaveBeenCalledExactlyOnceWith(2);
+    expect(d.pending).toBe(false);
+  });
+
+  it('throttle with maxWait semantics fires leading and trailing on the clock', () => {
+    vi.useRealTimers();
+    const clock = new MockClock();
+    const fn = vi.fn<(n: number) => void>();
+    const t = throttle(fn, 60_000, { clock });
+    t(1);
+    clock.advance(10_000);
+    t(2);
+    clock.advance(10_000);
+    t(3);
+    expect(fn.mock.calls).toEqual([[1]]);
+    clock.advance(40_000);
+    expect(fn.mock.calls).toEqual([[1], [3]]);
+  });
+
+  it('cancel drops the clock timer', () => {
+    vi.useRealTimers();
+    const clock = new MockClock();
+    const fn = vi.fn();
+    const d = debounce(fn, 1000, { clock });
+    d();
+    d.cancel();
+    clock.advance(5000);
+    expect(fn).not.toHaveBeenCalled();
+  });
 });

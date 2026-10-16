@@ -1,11 +1,20 @@
+import type { Clock } from '@arki/clock';
+
 import type { Outcome } from './signal.js';
 import { abortedError, assertWait, invalidConcurrency, isValidConcurrency, timedOut } from './errors.js';
 import { attempt, unwrap } from './signal.js';
+import { systemClock } from './system-clock.js';
 
-/** Options of {@link race} and {@link timeout}. */
+/** Options of {@link race}; {@link timeout} takes them too. */
 export type SignalOptions = {
   /** Aborting it aborts the tasks' signals and rejects with `ARKI_ASYNC_E002`; `cause` is `signal.reason`. */
   readonly signal?: AbortSignal;
+};
+
+/** Options of {@link timeout}. */
+export type TimeoutOptions = SignalOptions & {
+  /** Whose timer measures the deadline. Default: the system clock. Pass a `MockClock` to make tests instant. */
+  readonly clock?: Clock;
 };
 
 /** Options of {@link all} and {@link mapConcurrent}. */
@@ -214,10 +223,10 @@ export async function race<T>(
 export async function timeout<T>(
   task: (signal: AbortSignal) => Promise<T>,
   ms: number,
-  options: SignalOptions = {},
+  options: TimeoutOptions = {},
 ): Promise<T> {
   assertWait('timeout', 'ms', ms);
-  const { signal: outer } = options;
+  const { signal: outer, clock = systemClock } = options;
   if (outer?.aborted) throw abortedError('timeout()', outer.reason);
   const outcome = await new Promise<Outcome<T>>(resolve => {
     const controller = new AbortController();
@@ -227,7 +236,7 @@ export async function timeout<T>(
     function finish(): boolean {
       if (settled) return false;
       settled = true;
-      clearTimeout(timer);
+      cancelTimer();
       outer?.removeEventListener('abort', onAbort);
       return true;
     }
@@ -238,7 +247,7 @@ export async function timeout<T>(
       resolve({ ok: false, error: abortedError('timeout()', outer?.reason) });
     }
 
-    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+    const cancelTimer = clock.setTimer(() => {
       if (!finish()) return;
       const error = timedOut(ms);
       controller.abort(error);

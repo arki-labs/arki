@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { MockClock } from '@arki/clock';
+
 import { AsyncError, MAX_WAIT_MS } from './errors.js';
 import { sleep } from './sleep.js';
 
@@ -105,5 +107,30 @@ describe('sleep', () => {
     controller.abort();
     await promise;
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// A clock lets a caller's tests run long waits instantly, with no fake timers.
+describe('sleep with a clock', () => {
+  it('waits on the given clock, not on real time', async () => {
+    const clock = new MockClock();
+    let done = false;
+    void sleep(60_000, { clock }).then(() => (done = true));
+    clock.advance(59_999);
+    await Promise.resolve();
+    expect(done).toBe(false);
+    clock.advance(1);
+    await Promise.resolve();
+    expect(done).toBe(true);
+  });
+
+  it('still rejects with its own coded error when the signal aborts', async () => {
+    const clock = new MockClock();
+    const controller = new AbortController();
+    const result = settled(sleep(60_000, { clock, signal: controller.signal }));
+    controller.abort('stop');
+    const error = await result;
+    expect(error).toMatchObject({ code: 'ARKI_ASYNC_E002', cause: 'stop' });
+    clock.advance(60_000);
   });
 });

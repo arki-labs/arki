@@ -5,7 +5,7 @@ Small timing and concurrency helpers for every JavaScript runtime: an abortable 
 - **Same as lodash.** `debounce` and `throttle` call the function at the same moments as lodash, with the latest arguments. A migration is a one-line import change. The test suite replays random call schedules against lodash and requires identical results.
 - **No leaks.** `sleep` clears its timer and its abort listener when it settles. `scoped` releases what its body acquired, and `all`, `mapConcurrent` and `race` never settle while a task they started is still running.
 - **Coded errors.** Every failure is an `AsyncError` with a stable `code` and a `remediation`.
-- **Runs everywhere.** Pure ESM, no dependencies. It only uses `setTimeout`, `clearTimeout`, `AbortController`, `AbortSignal`, `AggregateError` and `Date.now`, at call time. Tested on Node, Bun, Deno and Chromium; built for React Native (Hermes), which has no `Promise.withResolvers` or `AbortSignal.any`, so this package uses neither. Importing it does nothing. Vitest and Jest fake timers work without any setup.
+- **Runs everywhere.** Pure ESM. Its one dependency is `@arki/clock`. It only uses `setTimeout`, `clearTimeout`, `AbortController`, `AbortSignal`, `AggregateError` and `Date.now`, at call time. Tested on Node, Bun, Deno and Chromium; built for React Native (Hermes), which has no `Promise.withResolvers` or `AbortSignal.any`, so this package uses neither. Importing it does nothing. Vitest and Jest fake timers work without any setup.
 
 ```ts
 import { debounce, sleep, throttle } from '@arki/async';
@@ -21,15 +21,25 @@ save.cancel(); // drop it
 
 ## API
 
-### `sleep(ms, { signal }?)`
+### `sleep(ms, { signal, clock }?)`
 
 Returns a promise that resolves after `ms` milliseconds. `ms` is a number from `0` to `2_147_483_647` (about 24.8 days).
 
 - `sleep(0)` still waits for the next macrotask. It never resolves in the same tick.
 - An invalid `ms` rejects the promise with `ARKI_ASYNC_E001`. `sleep` never throws synchronously.
 - An already-aborted signal rejects at once and creates no timer. Aborting during the wait clears the timer and rejects with `ARKI_ASYNC_E002`. In both cases `error.cause` is `signal.reason`.
+- `clock` is the `@arki/clock` `Clock` whose timer it waits on. The default is the system clock. Pass a `MockClock` and its `advance(ms)` ends the wait, so tests run instantly without fake timers.
 
-### `debounce(fn, wait, { leading, trailing, maxWait }?)`
+```ts
+import { MockClock } from '@arki/clock';
+
+const clock = new MockClock();
+const done = sleep(60_000, { clock });
+clock.advance(60_000);
+await done; // no real minute passed
+```
+
+### `debounce(fn, wait, { leading, trailing, maxWait, clock }?)`
 
 Delays `fn` until `wait` ms pass without a new call.
 
@@ -38,12 +48,13 @@ Delays `fn` until `wait` ms pass without a new call.
 | `leading`  | `false` | Call on the first call of a burst.                                        |
 | `trailing` | `true`  | Call after the burst ends, with the latest arguments.                     |
 | `maxWait`  | none    | Longest a burst may delay the call. Values below `wait` are raised to it. |
+| `clock`    | system  | The `Clock` whose time and timers it uses. Pass a `MockClock` in tests.   |
 
 With `leading` and `trailing` both on, `fn` runs on the trailing edge only if there was more than one call in the burst.
 
-### `throttle(fn, wait, { leading, trailing }?)`
+### `throttle(fn, wait, { leading, trailing, clock }?)`
 
-Calls `fn` at most once per `wait` ms. It is `debounce` with `maxWait = wait`, and both edges on by default.
+Calls `fn` at most once per `wait` ms. It is `debounce` with `maxWait = wait`, and both edges on by default. `clock` works as in `debounce`.
 
 ### `Scheduled<A>`
 
@@ -120,7 +131,7 @@ const body = await race(mirrors.map(url => signal => fetch(url, { signal }).then
 
 When one task fulfills, every other task's signal aborts, and the promise waits for those losers to settle before it resolves. The winner's signal is never aborted. When every task rejects (or the list is empty), it rejects with an `AggregateError` of their errors in input order. Aborting `signal` aborts every task, waits for them, and rejects with `ARKI_ASYNC_E002`.
 
-### `timeout(task, ms, { signal }?)`
+### `timeout(task, ms, { signal, clock }?)`
 
 Runs `task` with a deadline.
 
@@ -130,7 +141,7 @@ import { timeout } from '@arki/async';
 const res = await timeout(signal => fetch(url, { signal }), 5000); // rejects with ARKI_ASYNC_E004 after 5 s
 ```
 
-At `ms` the task's signal aborts (reason: the `ARKI_ASYNC_E004` error) and the promise rejects at once. Cancellation is cooperative: `timeout` does not wait for a task that ignores its signal, so such a task can keep running. Inside `scoped`, pass `scope.signal` as `signal`; the scope still owns that work and aborts it when the scope ends. `ms` follows the `sleep` rules (`ARKI_ASYNC_E001`).
+At `ms` the task's signal aborts (reason: the `ARKI_ASYNC_E004` error) and the promise rejects at once. Cancellation is cooperative: `timeout` does not wait for a task that ignores its signal, so such a task can keep running. Inside `scoped`, pass `scope.signal` as `signal`; the scope still owns that work and aborts it when the scope ends. `ms` follows the `sleep` rules (`ARKI_ASYNC_E001`). `clock` sets whose timer measures the deadline, as in `sleep`.
 
 ### Invalid `concurrency`
 

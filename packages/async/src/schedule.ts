@@ -1,4 +1,7 @@
+import type { Clock } from '@arki/clock';
+
 import { assertWait } from './errors.js';
+import { systemClock } from './system-clock.js';
 
 /** A debounced or throttled function. */
 export type Scheduled<A extends readonly unknown[]> = {
@@ -19,6 +22,8 @@ export type DebounceOptions = {
   readonly trailing?: boolean;
   /** Longest time a burst may delay the call. Raised to `wait` when smaller. */
   readonly maxWait?: number;
+  /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */
+  readonly clock?: Clock;
 };
 
 /** Options of {@link throttle}. */
@@ -27,6 +32,8 @@ export type ThrottleOptions = {
   readonly leading?: boolean;
   /** Call at the end of the window with the latest arguments. Default `true`. */
   readonly trailing?: boolean;
+  /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */
+  readonly clock?: Clock;
 };
 
 /**
@@ -41,13 +48,18 @@ function schedule<A extends readonly unknown[]>(
   leading: boolean,
   trailing: boolean,
   maxWait: number | undefined,
+  clock: Clock | undefined,
 ): Scheduled<A> {
   assertWait(name, 'wait', wait);
   if (maxWait !== undefined) assertWait(name, 'maxWait', maxWait);
   const longest = maxWait === undefined ? undefined : Math.max(maxWait, wait);
+  // `Date.now()` skips the `Date` that a clock's `now()` allocates on every call.
+  const now = clock === undefined ? () => Date.now() : () => clock.now().getTime();
+  const timers = clock ?? systemClock;
 
   let lastArgs: A | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the running timer; `undefined` while none runs. */
+  let timer: (() => void) | undefined;
   let lastCallTime: number | undefined;
   let lastInvokeTime = 0;
 
@@ -76,37 +88,37 @@ function schedule<A extends readonly unknown[]>(
   };
 
   const expired = (): void => {
-    const time = Date.now();
+    const time = now();
     if (shouldInvoke(time)) trailingEdge(time);
-    else timer = setTimeout(expired, remaining(time));
+    else timer = timers.setTimer(expired, remaining(time));
   };
 
   const scheduled = (...args: A): void => {
-    const time = Date.now();
+    const time = now();
     const invoking = shouldInvoke(time);
     lastArgs = args;
     lastCallTime = time;
     if (invoking) {
       if (timer === undefined) {
         lastInvokeTime = time;
-        timer = setTimeout(expired, wait);
+        timer = timers.setTimer(expired, wait);
         if (leading) invoke(time);
         return;
       }
       if (longest !== undefined) {
-        clearTimeout(timer);
-        timer = setTimeout(expired, wait);
+        timer();
+        timer = timers.setTimer(expired, wait);
         invoke(time);
         return;
       }
     }
-    timer ??= setTimeout(expired, wait);
+    timer ??= timers.setTimer(expired, wait);
   };
 
   Object.defineProperties(scheduled, {
     cancel: {
       value: (): void => {
-        if (timer !== undefined) clearTimeout(timer);
+        if (timer !== undefined) timer();
         lastInvokeTime = 0;
         lastArgs = lastCallTime = timer = undefined;
       },
@@ -114,8 +126,8 @@ function schedule<A extends readonly unknown[]>(
     flush: {
       value: (): void => {
         if (timer === undefined) return;
-        clearTimeout(timer);
-        trailingEdge(Date.now());
+        timer();
+        trailingEdge(now());
       },
     },
     pending: { get: (): boolean => timer !== undefined },
@@ -139,7 +151,15 @@ export function debounce<A extends readonly unknown[]>(
   wait: number,
   options: DebounceOptions = {},
 ): Scheduled<A> {
-  return schedule('debounce', fn, wait, options.leading ?? false, options.trailing ?? true, options.maxWait);
+  return schedule(
+    'debounce',
+    fn,
+    wait,
+    options.leading ?? false,
+    options.trailing ?? true,
+    options.maxWait,
+    options.clock,
+  );
 }
 
 /**
@@ -151,5 +171,5 @@ export function throttle<A extends readonly unknown[]>(
   wait: number,
   options: ThrottleOptions = {},
 ): Scheduled<A> {
-  return schedule('throttle', fn, wait, options.leading ?? true, options.trailing ?? true, wait);
+  return schedule('throttle', fn, wait, options.leading ?? true, options.trailing ?? true, wait, options.clock);
 }

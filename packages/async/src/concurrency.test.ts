@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { MockClock } from '@arki/clock';
+
 import type { AsyncError } from './errors.js';
 import { all, mapConcurrent, race, timeout } from './concurrency.js';
 import { sleep } from './sleep.js';
@@ -361,5 +363,27 @@ describe('timeout', () => {
     expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'user' } });
     expect(seen?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// A deadline of minutes must be testable without waiting minutes or faking globals.
+describe('timeout with a clock', () => {
+  it('measures the deadline on the given clock', async () => {
+    const clock = new MockClock();
+    const promise = settled(timeout(signal => sleep(10 * 60_000, { signal, clock }), 5 * 60_000, { clock }));
+    clock.advance(5 * 60_000 - 1);
+    await Promise.resolve();
+    clock.advance(1);
+    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E004' } });
+  });
+
+  it('cancels its clock timer once the task wins, so a later advance fires nothing', async () => {
+    const clock = new MockClock();
+    const promise = timeout(() => Promise.resolve('ok'), 1000, { clock });
+    await expect(promise).resolves.toBe('ok');
+    const fired = vi.fn();
+    clock.setTimer(fired, 2000);
+    clock.advance(2000);
+    expect(fired).toHaveBeenCalledOnce();
   });
 });
