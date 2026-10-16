@@ -254,6 +254,48 @@ describe('the chain: each step typed from the earlier ones', () => {
     expect(lean.name).toBe('x');
   });
 
+  it('accepts a usecase whose returned function has a default parameter', () => {
+    const lean = defineFeature('x').needs({ db: database.provides.db }).infra(store);
+    type Deps = DepsOf<typeof lean>;
+    // A usecase file: `(deps) => (fail = false) => …`. The default makes the inner parameter optional; that is
+    // the usecase's own shape and says nothing about which deps the factory asks for.
+    const pendingOrNull =
+      ({ store }: Pick<Deps, 'store'>) =>
+      (fail = false) =>
+        fail ? null : store.pendingFor('u1');
+    const logic = lean.usecases({
+      pendingOrNull,
+      inline:
+        ({ store }: Pick<Deps, 'store'>) =>
+        (fail = false) =>
+          fail ? null : store.pendingFor('u1'),
+    });
+    expectTypeOf<Provided<typeof logic.handles.usecases>['pendingOrNull']>().toEqualTypeOf<
+      ReturnType<typeof pendingOrNull>
+    >();
+    expectTypeOf<Provided<typeof logic.handles.usecases>['inline']>().toEqualTypeOf<
+      (fail?: boolean) => Promise<Digest | null> | null
+    >();
+    expect(logic.name).toBe('x');
+    const unused = () => {
+      // The default parameter buys nothing: a dep the feature lacks is still a compile error.
+      const needsMailer =
+        ({ mailer }: { mailer: Mailer }) =>
+        (fail = false) =>
+          fail ? null : mailer.sendPending('u1');
+      // @ts-expect-error -- `mailer` is neither a need nor an infra service of `x`
+      lean.usecases({ needsMailer });
+      // @ts-expect-error -- the same, written inline: the second inference pass still checks the deps
+      lean.usecases({
+        needsMailer:
+          ({ mailer }: { mailer: Mailer }) =>
+          (fail = false) =>
+            fail ? null : mailer.sendPending('u1'),
+      });
+    };
+    expect(unused).toBeTypeOf('function');
+  });
+
   it('accepts factories that ask for a subset of the deps, or for nothing', async () => {
     const lean = defineFeature('lean')
       .needs({ db: database.provides.db })

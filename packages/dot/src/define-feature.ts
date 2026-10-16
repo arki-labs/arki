@@ -558,8 +558,15 @@ export type UsecaseFactories = Readonly<Record<string, (deps: never) => unknown>
 export type Usecases<F extends UsecaseFactories> = { readonly [K in keyof F]: ReturnType<F[K]> };
 
 type DepsAskedBy<Fn> = Fn extends (deps: infer D) => unknown ? D : never;
+/**
+ * The usecases whose factory asks for deps `D` does not satisfy. A factory that asks for `never`
+ * asks for nothing and is never bad: that is the `(deps: never) => unknown` of the constraint, which
+ * is what `F` is while TypeScript's first pass over a context-sensitive call (an inline factory whose
+ * returned function has an untyped or defaulted parameter) has not inferred `F` yet. Flagging it there
+ * rejects the call before the second pass can infer `F` and check the real factories.
+ */
 type BadUsecases<D, F extends UsecaseFactories> = {
-  [K in keyof F]: [D] extends [DepsAskedBy<F[K]>] ? never : K;
+  [K in keyof F]: [DepsAskedBy<F[K]>] extends [never] ? never : [D] extends [DepsAskedBy<F[K]>] ? never : K;
 }[keyof F];
 
 /** Names each usecase that asks for a dep the feature does not have, and the deps it lacks. */
