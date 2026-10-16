@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
 import { z } from '@arki/contracts';
+import { backoff } from '@arki/resilience';
 
 import type { BullMQQueueInstance } from '../types/builder.ts';
 import { initQueue } from '../init.ts';
@@ -51,7 +52,7 @@ async function start() {
   const sendMail = q.job
     .name(`send-mail-${crypto.randomUUID()}`)
     .input(z.object({ to: z.string() }))
-    .options({ retry: { attempts: 1 } })
+    .options({ retry: backoff.constant(0).upTo(0) })
     .handler(() => {
       runs += 1;
       if (open) return Promise.resolve('sent');
@@ -60,7 +61,7 @@ async function start() {
   const other = q.job
     .name(`other-${crypto.randomUUID()}`)
     .input(z.object({ n: z.number() }))
-    .options({ retry: { attempts: 1 } })
+    .options({ retry: backoff.constant(0).upTo(0) })
     .handler(() => {
       throw new Error('other failed');
     });

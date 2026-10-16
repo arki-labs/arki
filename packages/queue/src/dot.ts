@@ -103,14 +103,7 @@ function collectQueueDefinitions(
 function retryMeta(options: JobOptions | undefined): JsonObject | undefined {
   const retry = options?.retry;
   if (retry === undefined) return undefined;
-  const meta: JsonObject = { attempts: retry.attempts };
-  if (retry.backoff !== undefined) {
-    meta['backoff'] = {
-      type: retry.backoff.type,
-      ...('delay' in retry.backoff ? { delay: retry.backoff.delay } : {}),
-    };
-  }
-  return meta;
+  return { attempts: Number.isFinite(retry.maxRetries) ? retry.maxRetries + 1 : 'unlimited' };
 }
 
 function actionForJob(job: JobDefinition<unknown, unknown, unknown>, direction: 'in' | 'out'): QueueDotAction {

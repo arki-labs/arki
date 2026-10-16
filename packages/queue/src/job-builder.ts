@@ -11,6 +11,7 @@ import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+import { defaultJobRetry, jobAttempts } from './job-retry.ts';
 
 /**
  * Internal state for job builder
@@ -84,7 +85,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
         '[{value1}] Setting job options (retry attempts: {attempts}, maxParallelism: {maxParallelism})',
         {
           value1: state.name ?? 'unnamed',
-          attempts: options.retry?.attempts ?? 3,
+          attempts: jobAttempts(options.retry ?? defaultJobRetry),
           maxParallelism: options.maxParallelism ?? 5,
         },
       );

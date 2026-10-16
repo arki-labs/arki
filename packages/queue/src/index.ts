@@ -103,7 +103,6 @@ export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 
 // Type exports
 export type {
-  BackoffStrategy,
   FlowDefinition,
   FlowEnqueueResult,
   FlowStepOptions,
@@ -121,7 +120,6 @@ export type {
   QueueEnqueue,
   QueueInstance,
   QueuePriority,
-  RetryConfig,
   ScheduleDefinition,
   TriggerOptions,
 } from './types/index.ts';
@@ -130,14 +128,21 @@ export type {
 export { QUEUE_PRIORITIES } from './types/index.ts';
 
 // Coded errors for declaration mistakes and invalid enqueue input
-export { QUEUE_DEFINITION_ERROR_CODES, QUEUE_INPUT_ERROR_CODES, QueueDefinitionError, QueueInputError } from './errors.ts';
+export {
+  QUEUE_DEFINITION_ERROR_CODES,
+  QUEUE_INPUT_ERROR_CODES,
+  QueueDefinitionError,
+  QueueInputError,
+} from './errors.ts';
 
 // Cron pattern helpers
 export { CronPatterns } from './cron-patterns.ts';
 export type { DayOfWeek } from './cron-patterns.ts';
 
 // Retry strategies
-export { COMMON_RETRY_CONFIGS, createBackoffStrategy } from './retry-strategies.ts';
+// Retry schedules for `JobOptions.retry`, from @arki/resilience
+export { backoff } from '@arki/resilience';
+export type { Backoff } from '@arki/resilience';
 
 // Durable backend for @arki/schedule, for processes that do not boot through Dot
 export { createDurableScheduler } from './durable-scheduler.ts';

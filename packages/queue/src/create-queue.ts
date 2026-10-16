@@ -19,11 +19,11 @@ import type { BullMQQueueInstance, FlowDefinition, FlowEnqueueResult, ScheduleDe
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
-import { createJobContext, executeMiddlewareChain } from './middleware.ts';
-import { parseRedisConnection } from './redis-connection.ts';
 import { addFlow } from './flow-jobs.ts';
 import { jobDefaultOptions } from './job-options.ts';
-import { getWorkerBackoffStrategy } from './retry-strategies.ts';
+import { defaultJobRetry, jobAttempts, workerBackoffStrategy } from './job-retry.ts';
+import { createJobContext, executeMiddlewareChain } from './middleware.ts';
+import { parseRedisConnection } from './redis-connection.ts';
 
 /**
  * Registry type - nested structure of jobs, schedules, and flows
@@ -103,12 +103,12 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     // Create BullMQ queue
     debugRegister.debug('[{internalName}] Creating BullMQ queue with {value2} retry attempts', {
       internalName: internal.name,
-      value2: internal.options?.retry?.attempts ?? 3,
+      value2: jobAttempts(internal.options?.retry ?? defaultJobRetry),
     });
     const queue = new Queue(internal.name, jobQueueOptions(internal.options, connection, keyPrefix));
 
-    // Get custom backoff strategy if needed
-    const backoffStrategy = getWorkerBackoffStrategy(internal.options?.retry);
+    // Every job retries through BullMQ's custom backoff, answered by the job's `Backoff`
+    const backoffStrategy = workerBackoffStrategy(internal.options?.retry ?? defaultJobRetry);
 
     // Create BullMQ worker
     debugWorker.debug('[{internalName}] Creating worker with concurrency: {concurrency}', {
@@ -155,14 +155,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
         autorun: false,
         concurrency: internal.options?.maxParallelism ?? 5,
         ...internal.options?.workerOptions,
-        ...((backoffStrategy || internal.options?.workerOptions?.settings) && {
-          settings: {
-            ...internal.options?.workerOptions?.settings,
-            ...(backoffStrategy && {
-              backoffStrategy,
-            }),
-          },
-        }),
+        settings: {
+          ...internal.options?.workerOptions?.settings,
+          backoffStrategy,
+        },
       },
     );
 

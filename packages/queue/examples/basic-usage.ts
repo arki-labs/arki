@@ -7,6 +7,7 @@
 import { z } from '@arki/contracts';
 
 import {
+  backoff,
   errorHandlingMiddleware,
   initQueue,
   loggingMiddleware,
@@ -123,10 +124,7 @@ const sendEmail = baseJob
   )
   .options({
     maxParallelism: 50,
-    retry: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-    },
+    retry: backoff.exponential({ base: 1000 }).upTo(2),
   })
   .handler(async (data, ctx) => {
     // Context has: db, repo, kv

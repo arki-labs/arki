@@ -7,12 +7,12 @@
 import type { DefaultJobOptions } from 'bullmq';
 
 import type { JobOptions } from './types/job.ts';
-import { toBullMQBackoff } from './retry-strategies.ts';
+import { customJobBackoff, defaultJobRetry, jobAttempts } from './job-retry.ts';
 
 export function jobDefaultOptions(options: JobOptions | undefined): DefaultJobOptions {
   return {
-    attempts: options?.retry?.attempts ?? 3,
-    backoff: toBullMQBackoff(options?.retry),
+    attempts: jobAttempts(options?.retry ?? defaultJobRetry),
+    backoff: customJobBackoff,
     ...options?.bullmqOptions,
   };
 }

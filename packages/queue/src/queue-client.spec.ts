@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
+import { backoff } from '@arki/resilience';
 
 import { jobs, queue, queueWorker } from './dot.ts';
 import { initQueue } from './init.ts';
@@ -48,7 +49,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
     const sendMail = q.job
       .name(`send-mail-${crypto.randomUUID()}`)
       .input(z.object({ to: z.string() }))
-      .options({ retry: { attempts: 5 } })
+      .options({ retry: backoff.exponential({ base: 1000 }).upTo(4) })
       .handler((data, ctx) => {
         received.push(`${ctx.worker}:${data.to}`);
         return Promise.resolve('sent');

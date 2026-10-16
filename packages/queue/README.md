@@ -32,7 +32,7 @@ pnpm add @arki/queue bullmq ioredis zod superjson
 
 ```typescript
 import { z } from '@arki/contracts';
-import { errorHandlingMiddleware, initQueue, loggingMiddleware, timingMiddleware } from '@arki/queue';
+import { backoff, errorHandlingMiddleware, initQueue, loggingMiddleware, timingMiddleware } from '@arki/queue';
 
 // 1. Define your application context type
 type AppContext = {
@@ -67,10 +67,7 @@ const sendEmail = baseJob
   )
   .options({
     maxParallelism: 50,
-    retry: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-    },
+    retry: backoff.exponential({ base: 1000 }).upTo(2), // 3 tries in all, 1 s then 2 s apart
   })
   .handler(async (data, ctx) => {
     // ctx has: db, repo, kv (from context)
@@ -141,6 +138,26 @@ const myJob = authenticatedJob
     return { success: true };
   });
 ```
+
+#### Retries
+
+A job's `retry` option is a `Backoff` from `@arki/resilience`, re-exported here as `backoff`. The same value drives resilience policies and `@arki/journal` effects.
+
+```typescript
+import { backoff } from '@arki/queue';
+
+q.job
+  .name('sync')
+  .input(schema)
+  .options({
+    retry: backoff
+      .exponential({ base: 1_000, max: 30_000 })
+      .upTo(4) // 5 tries in all
+      .while(error => !(error instanceof ValidationError)), // a bad input fails at once
+  });
+```
+
+Without `retry`, a job gets `backoff.exponential({ base: 1000 }).upTo(2)`: 3 tries, 1 s then 2 s apart. `backoff.constant(ms)` waits the same time before every retry, and `.upTo(0)` turns retries off. BullMQ's `attempts` is set to `upTo + 1`. BullMQ cannot store a function, so every job uses its custom backoff, and the job's worker asks the `Backoff` for each delay.
 
 ### Middleware
 

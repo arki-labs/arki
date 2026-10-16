@@ -14,6 +14,7 @@ import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { backoff } from '@arki/resilience';
 
 import type { JobContext } from './types/job.ts';
 import { initQueue } from './init.ts';
@@ -756,7 +757,7 @@ describe('Error Handling in Middleware', () => {
       .name('test-error-middleware')
       .input(z.object({ value: z.number() }))
       .options({
-        retry: { attempts: 1, backoff: { type: 'fixed', delay: 100 } },
+        retry: backoff.constant(100).upTo(0),
       })
       .handler(async () => {
         return { success: true };
@@ -910,7 +911,7 @@ describe('Onion order (middleware wraps the handler)', () => {
       .use(catching)
       .name('onion-error')
       .input(z.object({}))
-      .options({ retry: { attempts: 1, backoff: { type: 'fixed', delay: 10 } } })
+      .options({ retry: backoff.constant(10).upTo(0) })
       .handler(async () => {
         throw new Error('handler failed');
       });

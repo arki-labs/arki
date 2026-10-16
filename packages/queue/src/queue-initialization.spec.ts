@@ -4,17 +4,18 @@
  * Tests the complete flow from queue creation to job execution using real Redis.
  * Covers: initialization, job registration, worker startup, job execution, and shutdown.
  */
+import type { StartedTestContainer } from 'testcontainers';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
-import type { StartedTestContainer } from 'testcontainers';
 import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { backoff } from '@arki/resilience';
 
-import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
 import type { QueueBuilder } from './types/builder.ts';
 import type { JobContext } from './types/job.ts';
+import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
 import { initQueue } from './init.ts';
 
 // Test context type
@@ -134,18 +135,14 @@ describe('Queue Initialization', () => {
         .input(z.object({ id: z.string() }))
         .options({
           maxParallelism: 10,
-          retry: {
-            attempts: 5,
-            backoff: { type: 'exponential', delay: 2000 },
-            maxDelay: 60000,
-          },
+          retry: backoff.exponential({ base: 2000, max: 60_000 }).upTo(4),
         })
         .handler(async data => {
           return { processed: data.id };
         });
 
       expect(job._internal.options?.maxParallelism).toBe(10);
-      expect(job._internal.options?.retry?.attempts).toBe(5);
+      expect(job._internal.options?.retry?.maxRetries).toBe(4);
     });
 
     it('should throw error if name is missing', () => {
@@ -225,7 +222,7 @@ describe('Job Registration and Execution', () => {
           }),
         )
         // One attempt: the default 3 would retry the invalid input before it fails
-        .options({ retry: { attempts: 1 } })
+        .options({ retry: backoff.constant(0).upTo(0) })
         .handler(async data => {
           return { valid: true, email: data.email, age: data.age };
         });
@@ -661,10 +658,7 @@ describe('Retry and Error Handling', () => {
       .name('test-retry-job')
       .input(z.object({ shouldFail: z.boolean() }))
       .options({
-        retry: {
-          attempts: 3,
-          backoff: { type: 'fixed', delay: 100 },
-        },
+        retry: backoff.constant(100).upTo(2),
       })
       .handler(async data => {
         attemptCount++;
@@ -716,11 +710,7 @@ describe('Retry and Error Handling', () => {
       .name('test-maxdelay-job')
       .input(z.object({ id: z.string() }))
       .options({
-        retry: {
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 1000 },
-          maxDelay: 2000, // Cap at 2 seconds
-        },
+        retry: backoff.exponential({ base: 1000, max: 2000 }).upTo(4),
       })
       .handler(async () => {
         attemptCount++;
@@ -762,10 +752,7 @@ describe('Retry and Error Handling', () => {
       .name('test-failure-job')
       .input(z.object({ throwError: z.boolean() }))
       .options({
-        retry: {
-          attempts: 1, // Don't retry
-          backoff: { type: 'fixed', delay: 100 },
-        },
+        retry: backoff.constant(100).upTo(0),
       })
       .handler(async data => {
         if (data.throwError) {
@@ -962,10 +949,7 @@ describe('Real-World Scenarios', () => {
       .name('test-api-call-job')
       .input(z.object({ userId: z.string() }))
       .options({
-        retry: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 500 },
-        },
+        retry: backoff.exponential({ base: 500 }).upTo(2),
       })
       .handler(async data => {
         const result = await mockApiCall(data.userId);
@@ -1086,7 +1070,11 @@ describe('Schedules trigger their job', () => {
 
     // The app's own repeat job on the same queue: outside the `schedule:` id space.
     const jobQueue = bullQueue('sched-shared');
-    await jobQueue.upsertJobScheduler('app-own-repeat', { every: 60_000 }, { name: 'sched-shared', data: { slot: 'x' } });
+    await jobQueue.upsertJobScheduler(
+      'app-own-repeat',
+      { every: 60_000 },
+      { name: 'sched-shared', data: { slot: 'x' } },
+    );
     expect((await jobQueue.getJobSchedulers()).map(s => s.key).sort()).toEqual([
       'app-own-repeat',
       'schedule:sched-shared-a',

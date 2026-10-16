@@ -11,8 +11,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { backoff } from '@arki/resilience';
 
-import { QUEUE_DEFINITION_ERROR_CODES, QUEUE_INPUT_ERROR_CODES, QueueDefinitionError, QueueInputError } from './errors.ts';
+import {
+  QUEUE_DEFINITION_ERROR_CODES,
+  QUEUE_INPUT_ERROR_CODES,
+  QueueDefinitionError,
+  QueueInputError,
+} from './errors.ts';
 import { toFlowJobs } from './flow-jobs.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
@@ -31,7 +37,7 @@ const reserveJob = q.job
 const paymentJob = q.job
   .name('orders.payment')
   .input(orderInput)
-  .options({ retry: { attempts: 7 } })
+  .options({ retry: backoff.exponential({ base: 1000 }).upTo(6) })
   .handler(() => Promise.resolve('paid'));
 const notifyJob = q.job
   .name('orders.notify')
