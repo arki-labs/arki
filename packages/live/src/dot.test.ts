@@ -17,16 +17,16 @@ import { oc } from '@orpc/contract';
 import { implement } from '@orpc/server';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { ListenClient, ListenPool } from '@arki/db/pg';
 import { defineApp, DotLifecycleError } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { plugin } from '@arki/dot/plugin';
 import { http } from '@arki/http/dot';
 
+import type * as hubModule from './hub.js';
 import type { LiveMeta } from './index.js';
 import { liveQueries } from './dot.js';
 import { live, tableTag } from './drizzle/index.js';
@@ -34,7 +34,31 @@ import { LIVE_ERROR_CODES, liveTables } from './index.js';
 import { liveManifest } from './orpc/index.js';
 import { liveMigration } from './pg/index.js';
 import { RECEIPTS } from './tests/fixtures.js';
+import { pglitePool } from './tests/pglite-pool.js';
 import { sseReader } from './tests/sse-reader.js';
+
+/** How many `hub.onChange` subscriptions the hubs made by `liveQueries` hold right now. */
+const changeListeners = vi.hoisted(() => ({ active: 0 }));
+vi.mock('./hub.js', async importOriginal => {
+  const original = await importOriginal<typeof hubModule>();
+  return {
+    ...original,
+    createLiveHub: (...args: Parameters<typeof original.createLiveHub>) => {
+      const hub = original.createLiveHub(...args);
+      return {
+        ...hub,
+        onChange(listener: Parameters<typeof hub.onChange>[0]) {
+          changeListeners.active += 1;
+          const off = hub.onChange(listener);
+          return () => {
+            changeListeners.active -= 1;
+            off();
+          };
+        },
+      };
+    },
+  };
+});
 
 const posts = pgTable('posts', { id: text('id').primaryKey(), title: text('title').notNull() });
 const authors = pgTable('authors', { id: text('id').primaryKey(), name: text('name').notNull() });
@@ -55,44 +79,6 @@ const postsFeature = defineFeature('posts').entrypoints(
 );
 const appContract = { posts: postsContract };
 const TRIGGERS = liveMigration({ app: 'blog', tables: liveTables(liveManifest(appContract)) }).up;
-
-type Notification = { readonly channel: string; readonly payload?: string };
-type Handlers = {
-  notification: (message: Notification) => void;
-  error: (error: Error) => void;
-  end: () => void;
-};
-
-/** A listen "pool" on one PGlite instance, counting what the listener takes and gives back. */
-function pglitePool(
-  pglite: PGlite,
-): ListenPool & { readonly stats: { connects: number; releases: number; queries: string[] } } {
-  const stats = { connects: 0, releases: 0, queries: [] as string[] };
-  return {
-    stats,
-    connect() {
-      stats.connects += 1;
-      const handlers: { [Event in keyof Handlers]: Handlers[Event][] } = { notification: [], error: [], end: [] };
-      const unsubscribe = pglite.onNotification((channel, payload) => {
-        for (const listener of handlers.notification) listener({ channel, payload });
-      });
-      const client: ListenClient = {
-        async query(text) {
-          stats.queries.push(text);
-          return await pglite.query(text);
-        },
-        on<Event extends keyof Handlers>(event: Event, listener: Handlers[Event]) {
-          handlers[event].push(listener);
-        },
-        release() {
-          stats.releases += 1;
-          unsubscribe();
-        },
-      };
-      return Promise.resolve(client);
-    },
-  };
-}
 
 /** The blog app: PGlite, its tables (with or without triggers), live queries, `http()` on a free port. */
 function blogApp(options: { readonly triggers: boolean; readonly failStart?: boolean }) {
@@ -123,6 +109,7 @@ function blogApp(options: { readonly triggers: boolean; readonly failStart?: boo
     pool: () => pool,
     contract: appContract,
     authorize: () => Promise.resolve({}),
+    reauthorize: [tableTag(authors)],
     limits: { batchMs: 1 },
     receipts: RECEIPTS,
   });
@@ -184,6 +171,20 @@ describe('liveQueries', () => {
     }
     expect(stats).toMatchObject({ connects: 1, releases: 1 });
     expect(stats.queries).toContain('UNLISTEN "arki_live_blog_v1"');
+  });
+
+  it("stop releases the endpoint's onChange subscription, and so does a rolled-back start", async () => {
+    // Earlier tests (a boot that fails builds the hub and never stops it) leave their own count.
+    const before = changeListeners.active;
+    const started = await blogApp({ triggers: true }).app.start();
+    expect(changeListeners.active).toBe(before + 1);
+    await started.dispose();
+    expect(changeListeners.active).toBe(before);
+    const failure = await blogApp({ triggers: true, failStart: true })
+      .app.start()
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DotLifecycleError);
+    expect(changeListeners.active).toBe(before);
   });
 
   it('a start that fails later in the app rolls back and gives the listen client back', async () => {

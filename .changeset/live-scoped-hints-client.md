@@ -13,3 +13,9 @@ Scoped hints, endpoint and client half: grants carry keys per dimension, members
 - Benchmarks: a scoped-hints strategy (per-tenant grants through the real hub; the run fails above 3.0 origin queries per commit or on a cross-tenant fetch) and a writer group over 1, 1 000 and 100 000 rows with scoped triggers.
 
 Breaking (0.x): `LiveGrant` gains a type parameter and `scopes`; `liveEndpoint` and `liveQueries` take `scopes`; a grant without a dimension no longer sees keyed hints of tables scoped by it.
+
+Follow-up:
+
+- `reauthorize` no longer fails open. The endpoint watches writes to `reauthorize` tables through the new `hub.onChange(listener)` (the hub's changes before any view; server-side only), so a stream whose grant cannot see the table is re-checked too. A write scoped by the principal's dimension re-checks only the streams whose grant holds its key; otherwise every stream. The re-check runs `authorize` silently, once per burst, and the stream's frames wait for it; an unchanged view gets nothing, a changed view sends `bye`, and a refusal or a throwing `authorize` ends the stream with `bye` (fail closed).
+- Benchmarks: the scoped-trigger cost moves from a timed unit test to a bench group (`writer-insert-one-row`, a one-row insert into a 20 000-row table); the test suite now checks only that a one-row write names its own keys on a full table.
+- `LiveEndpoint.close()` (new): releases the endpoint's `hub.onChange` subscription and ends its open streams with `bye`. Call it before rebuilding an endpoint on the same hub (hot reload); `liveQueries` calls it on stop and on a rolled-back start, so no listener piles up.

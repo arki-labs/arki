@@ -34,7 +34,7 @@ import {
   stormHub,
 } from './fanout.js';
 import { mean, outcome, workloads } from './workload.js';
-import { database, ITEMS, ROWS } from './writer.js';
+import { database, INSERTS, ITEMS, ROWS } from './writer.js';
 
 const STORM_STREAMS = 1000;
 const DELIVERY_STREAMS = 1000;
@@ -232,7 +232,7 @@ export default defineSuite({
     'Freshness metrics are deterministic counts from a seeded commit log: 0.5 commits per tenant per second for 30 s, half of them on the hot `likes` table; one tab per tenant with six queries. Table hints name tables, not rows or tenants, so one tenant’s write refetches every tenant’s queries on that table. Scoped hints (`live-scoped`) scope all four tables by tenant: each tab’s stream is projected through its own grant by the real hub, so only the writer’s tenant refetches. The run fails above 3.0 origin queries per commit or on any fetch outside the writer’s tenant.',
     'Lane B refetches the same queries as Lane A: a query collection is fed by the same TanStack query. What it adds is row-level diffing and cross-collection live queries on the client, not fewer origin queries.',
     'Not measured: an Electric collection (needs `wal_level=logical` and the Electric sync service), and an SSE parser comparison against `@microsoft/fetch-event-source` (not in the workspace catalog).',
-    'Writer groups use UPDATE so tables keep their size; the statement trigger fires once per statement, so the bulk group updates 1 000 rows with one hint. Scoped triggers send one hint per distinct key: 200 for the 1 000-row and 100 000-row statements. Numbers pending an idle run.',
+    'Writer groups use UPDATE so tables keep their size; the statement trigger fires once per statement, so the bulk group updates 1 000 rows with one hint. Scoped triggers send one hint per distinct key: 200 for the 1 000-row and 100 000-row statements. The one-row insert group is the scoped-trigger cost lane (plan T13 expects the scoped row under twice the table-trigger row once the commit is counted); it is timed here, alone, never in the parallel test suite. Numbers pending an idle run.',
   ],
   groups: [
     fanoutGroup(1),
@@ -256,6 +256,13 @@ export default defineSuite({
       [ROWS],
       rows => rows,
       writer => writer.bulk(),
+    ),
+    writerGroup(
+      'writer-insert-one-row',
+      `Commit: insert one row into a table of ${INSERTS.toLocaleString('en-US')} rows`,
+      [3, 77, 150],
+      () => 1,
+      (writer, org) => writer.insertOne(org),
     ),
     writerGroup(
       'writer-rows',

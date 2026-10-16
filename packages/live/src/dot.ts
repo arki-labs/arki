@@ -7,7 +7,7 @@
  *   boot with E002, before anything listens.
  * - `start`: the hub `LISTEN`s on its own pool. Declare the plugin after
  *   `dbMigrations` and before `http()`, so it listens before ingress opens.
- * - `stop`: every stream gets `bye`, `UNLISTEN`, the client goes back to the
+ * - `stop`: the endpoint drops its `hub.onChange` subscription, every stream gets `bye`, `UNLISTEN`, the client goes back to the
  *   pool (the pool itself is the caller's). The kernel also runs it when a
  *   later plugin fails to start, so that rollback leaves nothing held. Boot
  *   takes nothing to release: the listener connects only at start.
@@ -22,7 +22,7 @@ import type { ListenPool } from '@arki/db/pg';
 import type { CtxOf, NeedsShape, NoReservedKeys } from '@arki/dot/plugin';
 import { plugin } from '@arki/dot/plugin';
 
-import type { LiveGrant } from './http.js';
+import type { LiveEndpoint, LiveGrant } from './http.js';
 import type { LiveHub, LiveLimits } from './hub.js';
 import type { LiveReceipts } from './receipts.js';
 import type { LiveScopes, TableTag } from './types.js';
@@ -72,6 +72,8 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys, Dimension
   };
   /** The hub of the current boot: `live` makes it, `liveRoutes` (the next factory, in key order) serves it. */
   let booted: LiveHub | undefined;
+  /** The endpoint of the current boot: `stop` closes it, which releases its `hub.onChange` subscription. */
+  let endpoint: LiveEndpoint | undefined;
 
   return plugin({
     name: 'live',
@@ -95,13 +97,14 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys, Dimension
             'The Dot kernel runs provides factories in key order; this @arki/dot does not. Report it.',
           );
         }
-        return liveEndpoint({
+        endpoint = liveEndpoint({
           hub,
           manifest,
           ...scoped,
           authorize: options.authorize,
           ...(options.maxAgeMs === undefined ? {} : { maxAgeMs: options.maxAgeMs }),
-        }).routes;
+        });
+        return endpoint.routes;
       },
     },
     async boot(ctx) {
@@ -129,6 +132,8 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys, Dimension
       await live.start();
     },
     async stop({ live }) {
+      endpoint?.close();
+      endpoint = undefined;
       await live.stop();
     },
   });

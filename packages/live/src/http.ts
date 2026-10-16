@@ -24,10 +24,16 @@
  * them, and a hidden write changes nothing the stream shows, not even its
  * timing or when it gets `bye`. A client must not learn how often a table it
  * cannot read is written. After `maxAgeMs` the stream sends `bye` and ends,
- * so the client reconnects and is authorized again. Sooner for a frame that
- * names a `reauthorize` table (memberships): `authorize` runs again before
- * the frame goes out, and when the grant changed the stream sends `bye`
- * instead, so the client resumes from its last cursor under the new grant.
+ * so the client reconnects and is authorized again. Sooner after a write to
+ * a `reauthorize` table (memberships), seen by the hub before any view
+ * applies, so a stream whose grant cannot see that table still re-checks:
+ * every stream whose principal the write may concern (its key in the write,
+ * when the table is scoped by a dimension the grant has keys of; every
+ * stream otherwise) runs `authorize` again, silently, once per burst. Its
+ * frames wait for the re-check. An unchanged view gets nothing; a changed
+ * one, a refusal or a failing `authorize` ends the stream with `bye` (fail
+ * closed), and the client resumes from its last cursor under the new grant
+ * or is refused at reconnect.
  */
 import { z } from 'zod';
 
@@ -61,6 +67,11 @@ export type LiveEndpoint = {
   readonly routes: RouteBundle;
   /** For a TanStack Start route: `GET: ({ request }) => endpoint.fetch(request)`. */
   readonly fetch: (request: Request) => Promise<Response>;
+  /**
+   * Releases the endpoint's `hub.onChange` subscription and ends its open streams with `bye`. Call it
+   * before building another endpoint on the same hub (hot reload); the Dot plugin calls it on stop.
+   */
+  readonly close: () => void;
 };
 
 const optionsSchema = z.object({
@@ -107,19 +118,21 @@ function toHttpError(error: unknown): unknown {
   return error;
 }
 
+/** One stream's `reauthorize` state. */
+type Recheck = {
+  /** The scheduled or running re-check: frames wait for it. */
+  pending: Promise<void> | undefined;
+  /** Writes that concerned this stream so far: one that comes while a re-check runs makes it run once more. */
+  writes: number;
+  /** The grant changed, or `authorize` refused or failed: the stream ends with `bye`. */
+  revoked: boolean;
+};
+
 /** Hub frames to wire frames for one client. `end` detaches it (idempotent). */
 async function* framesFor(
   feed: AsyncIterable<LiveFeed>,
   view: View,
-  stream: {
-    readonly expired: () => boolean;
-    readonly end: () => void;
-    /** Whether a frame names a `reauthorize` table, and whether the request's grant still shows the same. */
-    readonly recheck: {
-      readonly needed: (tags: readonly TableTag[]) => boolean;
-      readonly same: () => Promise<boolean>;
-    };
-  },
+  stream: { readonly expired: () => boolean; readonly end: () => void; readonly recheck: Recheck },
 ): AsyncGenerator<LiveEvent, void, undefined> {
   const { expired, end, recheck } = stream;
   try {
@@ -137,9 +150,9 @@ async function* framesFor(
           break;
         }
         case 'change': {
-          // Before the frame goes out: the client keeps the cursor before it, and resumes from there under the new grant.
-          if (recheck.needed(item.tags) && !(await recheck.same())) {
-            debugHttp.debug('a reauthorize table changed and so did the grant; sending bye');
+          // A re-check under way decides first: on a new grant the client resumes from the cursor before this frame.
+          if (recheck.pending !== undefined) await recheck.pending;
+          if (recheck.revoked) {
             yield { kind: 'bye' };
             return;
           }
@@ -153,8 +166,8 @@ async function* framesFor(
         }
       }
     }
-    // The hub ended the feed without a frame: either the max age passed, or the request is gone.
-    if (expired()) yield { kind: 'bye' };
+    // The hub ended the feed without a frame: the max age passed, the grant changed, or the request is gone.
+    if (expired() || recheck.revoked) yield { kind: 'bye' };
   } finally {
     end();
   }
@@ -165,9 +178,10 @@ async function* framesFor(
  * `manifest` is the app's (`liveManifest(contract, { scopes })`); `scopes`
  * the same declaration (`liveScopes`), which types the grant's dimensions;
  * `authorize` sees the request before any header is sent. `reauthorize`
- * lists the tables whose change may change a grant (memberships): a frame
- * naming one runs `authorize` again (see the module comment). Its hints
- * reach a client like any granted table's, so scope it by user.
+ * lists the tables whose change may change a grant (memberships): a write to
+ * one runs `authorize` again for the streams it may concern (see the module
+ * comment). Scope it by the principal's dimension (`user`), or every write
+ * re-checks every stream.
  */
 export function liveEndpoint<Dimension extends string = never>(options: {
   readonly hub: LiveHub;
@@ -313,6 +327,61 @@ export function liveEndpoint<Dimension extends string = never>(options: {
     }
   }
 
+  type Stream = { readonly request: Request; readonly view: View; readonly recheck: Recheck; readonly end: () => void };
+  /** Open streams, for `reauthorize`. */
+  const streams = new Set<Stream>();
+
+  /**
+   * Whether a write to a `reauthorize` table may concern `view`'s principal: its key is in the
+   * write, when the table is scoped by a dimension the grant has keys of; otherwise always.
+   */
+  function concerns(view: View, tag: TableTag & { readonly keys?: readonly string[] }): boolean {
+    const scoped = byTag.get(tagKey(tag));
+    const own = scoped === undefined ? undefined : view.scopes?.[scoped.dimension];
+    if (own === undefined || own === 'all' || own.length === 0 || tag.keys === undefined) return true;
+    return tag.keys.some(key => own.includes(key));
+  }
+
+  /** Runs `authorize` again after the current burst of writes, and once more for writes during it. */
+  async function recheck(stream: Stream): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    let checked = -1;
+    while (checked !== stream.recheck.writes) {
+      checked = stream.recheck.writes;
+      if (!(await same(stream.request, stream.view))) {
+        debugHttp.debug('a reauthorize table changed and so did the grant; sending bye');
+        stream.recheck.revoked = true;
+        stream.end();
+        return;
+      }
+    }
+  }
+
+  function trigger(stream: Stream): void {
+    if (stream.recheck.revoked) return;
+    stream.recheck.writes += 1;
+    if (stream.recheck.pending !== undefined) return;
+    stream.recheck.pending = recheck(stream).finally(() => {
+      stream.recheck.pending = undefined;
+    });
+  }
+
+  // The hub's changes before any view: a stream whose grant cannot see the table still re-checks.
+  const unsubscribe =
+    reauthorize.size === 0
+      ? undefined
+      : hub.onChange(tags => {
+          for (const tag of tags) {
+            if (!reauthorize.has(tagKey(tag))) continue;
+            for (const stream of streams) if (concerns(stream.view, tag)) trigger(stream);
+          }
+        });
+
+  function close(): void {
+    unsubscribe?.();
+    for (const stream of streams) stream.end();
+  }
+
   /** Attaches to the hub now (before the response exists) and ends the stream at `maxAgeMs` or when the request goes. */
   async function open(
     view: View,
@@ -327,8 +396,10 @@ export function liveEndpoint<Dimension extends string = never>(options: {
       debugHttp.debug('a stream reached its max age of {maxAgeMs} ms; sending bye', { maxAgeMs });
       end();
     }, maxAgeMs);
+    const stream: Stream = { request, view, recheck: { pending: undefined, writes: 0, revoked: false }, end };
     function end(): void {
       clearTimeout(timer);
+      streams.delete(stream);
       signal.removeEventListener('abort', end);
       detach.abort();
     }
@@ -345,18 +416,12 @@ export function liveEndpoint<Dimension extends string = never>(options: {
       end();
       throw toHttpError(error);
     }
+    if (!detach.signal.aborted) streams.add(stream);
     debugHttp.debug('stream opened: {procedures} procedures, {tables} tables visible', {
       procedures: view.manifest.length,
       tables: view.hub.tables?.length ?? 0,
     });
-    return framesFor(feed, view, {
-      expired: () => expired,
-      end,
-      recheck: {
-        needed: tags => reauthorize.size > 0 && tags.some(tag => reauthorize.has(tagKey(tag))),
-        same: () => same(request, view),
-      },
-    });
+    return framesFor(feed, view, { expired: () => expired, end, recheck: stream.recheck });
   }
 
   const bundle = routes()
@@ -376,5 +441,5 @@ export function liveEndpoint<Dimension extends string = never>(options: {
     )
     .bind(liveRoute, (_input, ctx) => ctx.liveFeed);
 
-  return { contract: liveRoute, routes: bundle, fetch: buildEngine([bundle]).fetch };
+  return { contract: liveRoute, routes: bundle, fetch: buildEngine([bundle]).fetch, close };
 }

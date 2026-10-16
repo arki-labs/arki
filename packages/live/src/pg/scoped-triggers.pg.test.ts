@@ -34,7 +34,6 @@ type Executor = { execute(query: SQL): Promise<unknown> };
 /** One database: run SQL, hear the app's channel, run a Drizzle transaction. */
 type Backend = {
   readonly exec: (text: string) => Promise<void>;
-  readonly query: (text: string) => Promise<readonly Record<string, unknown>[]>;
   readonly db: Executor;
   readonly transaction: (work: (tx: Executor) => Promise<void>) => Promise<void>;
   readonly heard: string[];
@@ -48,8 +47,6 @@ const DOCS = tag('docs');
 const RLS_DOCS = tag('rls_docs');
 const RLS_NOTES = tag('rls_notes');
 const EVENTS = tag('events');
-/** Unscoped: today's single statement trigger, the baseline T13 compares a scoped trigger with. */
-const PLAIN = tag('plain');
 
 const scopes: LiveScopes<'org'> = {
   dimensions: ['org'],
@@ -61,11 +58,10 @@ const scopes: LiveScopes<'org'> = {
   })),
 };
 const leaves = ['events_eu', 'events_eu_1', 'events_us'].map(leaf => ({ leaf: tag(leaf), root: EVENTS }));
-const migration = liveMigration({ app: 'blog', tables: [DOCS, RLS_DOCS, RLS_NOTES, EVENTS, PLAIN], leaves, scopes });
+const migration = liveMigration({ app: 'blog', tables: [DOCS, RLS_DOCS, RLS_NOTES, EVENTS], leaves, scopes });
 
 const SCHEMA_SQL = `
 CREATE TABLE docs (id int PRIMARY KEY, org text NOT NULL);
-CREATE TABLE plain (id int PRIMARY KEY, org text NOT NULL);
 CREATE TABLE rls_docs (id int PRIMARY KEY, org text NOT NULL);
 CREATE TABLE rls_notes (id int PRIMARY KEY, doc_id int NOT NULL REFERENCES rls_docs (id), org text NOT NULL);
 ALTER TABLE rls_docs ENABLE ROW LEVEL SECURITY;
@@ -95,10 +91,6 @@ async function onPglite(): Promise<Backend> {
     exec: async text => {
       await client.exec(text);
     },
-    query: async text => {
-      const result = await client.query<Record<string, unknown>>(text);
-      return result.rows;
-    },
     db,
     transaction: work => db.transaction(work),
     heard,
@@ -123,10 +115,6 @@ async function onPostgres(container: StartedPostgreSqlContainer): Promise<Backen
   return {
     exec: async text => {
       await pool.query(text);
-    },
-    query: async text => {
-      const result = await pool.query<Record<string, unknown>>(text);
-      return result.rows;
     },
     db,
     transaction: work => db.transaction(work),
@@ -282,28 +270,19 @@ describe.each([
     expect(await settle()).toEqual(['docs:OVERFLOW']);
   });
 
-  it('T13: a one-row write to a scoped table costs under twice one to an unscoped table; 100 000 rows over 200 keys send 200 hints and commit', async () => {
-    // Why: scoping is opt-in per table, and the README promises the common one-row write stays
-    // cheap. Both tables already hold 20 000 rows, so a trigger that scanned its table, not the
-    // statement's own rows, would fail here. Alternate the two and keep the best of five rounds of
-    // 200 one-row transactions each, so a busy machine slows both alike.
-    const filler = (table: string) =>
-      backend.exec(`INSERT INTO ${table} SELECT g, 'filler' || (g % 500) FROM generate_series(100001, 120000) AS g`);
-    await filler('plain');
-    await filler('docs');
-    await settle();
-    const best = { plain: Number.POSITIVE_INFINITY, docs: Number.POSITIVE_INFINITY };
-    for (let round = 0; round < 5; round += 1) {
-      for (const table of ['plain', 'docs'] as const) {
-        const started = performance.now();
-        for (let row = 1; row <= 200; row += 1) await backend.exec(`INSERT INTO ${table} VALUES (${row}, 'k')`);
-        best[table] = Math.min(best[table], performance.now() - started);
-        await backend.exec(`DELETE FROM ${table} WHERE id <= 200`);
-      }
-      await settle();
-    }
-    expect(best.docs).toBeLessThan(2 * best.plain);
-    await backend.exec(`TRUNCATE plain; DELETE FROM docs`);
+  it('T13: a one-row write names only its own keys, on a table of 20 000 rows; 100 000 rows over 200 keys send 200 hints and commit', async () => {
+    // Why: a trigger must read the statement's transition table, never the whole table. A table
+    // scan would cost the bulk of a big table on every one-row write, and would name its 500 keys.
+    // (The cost itself is timed in the bench, `writer-insert-one-row`, never in this parallel suite.)
+    await backend.exec(`INSERT INTO docs SELECT g, 'filler' || (g % 500) FROM generate_series(100001, 120000) AS g`);
+    expect(await settle()).toHaveLength(500);
+    await backend.exec(`INSERT INTO docs VALUES (1, 'k')`);
+    expect(await settle()).toEqual(['docs:k']);
+    await backend.exec(`UPDATE docs SET org = 'moved' WHERE id = 100001`);
+    expect(await settleSorted()).toEqual(['docs:filler1', 'docs:moved']);
+    await backend.exec(`DELETE FROM docs WHERE id = 1`);
+    expect(await settle()).toEqual(['docs:k']);
+    await backend.exec(`DELETE FROM docs`);
     await settle();
 
     await backend.exec(`INSERT INTO docs SELECT g, 'org' || (g % 200) FROM generate_series(1, 100000) AS g`);

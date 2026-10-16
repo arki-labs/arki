@@ -71,8 +71,11 @@ async function rig(grant: LiveGrant | null) {
   await hub.start();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
-  const state: { grant: LiveGrant | null } = { grant };
-  const authorize = vi.fn(() => Promise.resolve(state.grant));
+  /** `fail`: `authorize` throws, as a session store that is down would. */
+  const state: { grant: LiveGrant | null; fail: boolean } = { grant, fail: false };
+  const authorize = vi.fn(() =>
+    state.fail ? Promise.reject(new Error('the session store is down')) : Promise.resolve(state.grant),
+  );
   const endpoint = liveEndpoint({ hub, manifest, scopes, authorize, reauthorize: [MEMBERSHIPS] });
   const request = (query = '') => endpoint.fetch(new Request(`http://live.test/api/live${query}`));
   const stream = async (query = ''): Promise<SseReader> => {
@@ -87,7 +90,7 @@ async function rig(grant: LiveGrant | null) {
     source.emit({ kind: 'change', tags, txid });
     await sleep(5);
   };
-  return { hub, state, authorize, request, stream, commit };
+  return { source, hub, state, authorize, request, stream, commit };
 }
 
 /** Every frame up to the next `bye` or end, after `hello`. */
@@ -189,6 +192,46 @@ describe('T7: the grant becomes the view: own keys only, closed by default', () 
 });
 
 describe('T11: a write to a reauthorize table re-runs authorize', () => {
+  it('a grant that cannot see memberships is still re-checked: its membership row goes, bye, and the reconnect is narrower', async () => {
+    // Fail-open before: the re-check ran on the projected frame, which this grant never gets.
+    const { stream, commit, state, authorize } = await rig({ tables: [POSTS], scopes: { org: [A], user: ['u1'] } });
+    const client = await stream();
+    expect(await client.next()).toMatchObject({ kind: 'hello', manifest: [LIST] });
+    state.grant = { tables: [POSTS], scopes: { org: [], user: ['u1'] } };
+    await commit('1', { ...MEMBERSHIPS, keys: ['u1'] }); // the membership row is deleted
+    expect(await until(client, 2)).toEqual([{ kind: 'bye' }]);
+    const again = await stream();
+    expect(await again.next()).toMatchObject({ kind: 'hello', manifest: [], scopes: { org: [], user: ['u1'] } });
+    expect(authorize).toHaveBeenCalledTimes(3);
+  });
+
+  it('authorize throwing during a re-check ends the stream (fail closed), also for a grant that cannot see memberships', async () => {
+    const { stream, commit, state, request } = await rig({ tables: [POSTS], scopes: { org: [A], user: ['u1'] } });
+    const client = await stream();
+    await client.next();
+    state.fail = true;
+    await commit('1', { ...MEMBERSHIPS, keys: ['u1'] });
+    expect(await until(client, 2)).toEqual([{ kind: 'bye' }]);
+    const failed = await request();
+    expect(failed.status).toBe(500);
+    await failed.body?.cancel();
+  });
+
+  it('a burst of 50 membership writes runs authorize once per stream it concerns', async () => {
+    // The grant does not see memberships: the re-checks come from the hub's changes, not from frames.
+    const { source, stream, commit, authorize } = await rig({ tables: [POSTS], scopes: { org: [A], user: ['u1'] } });
+    const client = await stream();
+    await client.next();
+    for (let txid = 1; txid <= 50; txid += 1) {
+      source.emit({ kind: 'change', tags: [{ ...MEMBERSHIPS, keys: ['u1'] }], txid: String(txid) });
+    }
+    await commit('51', { ...POSTS, keys: [A] });
+    // The post, after one re-check that kept the grant.
+    const frame = await client.next();
+    expect(frame?.kind === 'change' ? frame.tags : []).toContainEqual({ ...POSTS, scope: { name: 'org', keys: [A] } });
+    expect(authorize).toHaveBeenCalledTimes(2);
+  });
+
   it('a removed org ends the stream with bye; the resume replays under the new grant: the gained org since the cursor, never the removed one', async () => {
     const { stream, commit, state, authorize } = await rig({ scopes: { org: [A], user: ['u1'] } });
     const client = await stream();
@@ -210,8 +253,8 @@ describe('T11: a write to a reauthorize table re-runs authorize', () => {
       { ...POSTS, scope: { name: 'org', keys: [B] } },
       { ...MEMBERSHIPS, scope: { name: 'user', keys: ['u1'] } },
     ]);
-    // One per connect, one per memberships frame: live (the bye), and replayed (now the same grant, so it goes out).
-    expect(authorize).toHaveBeenCalledTimes(4);
+    // One per connect, one for the membership write; a replayed frame is no new write.
+    expect(authorize).toHaveBeenCalledTimes(3);
   });
 
   it('an unchanged grant keeps the stream: the memberships frame goes out, no bye', async () => {
@@ -227,10 +270,45 @@ describe('T11: a write to a reauthorize table re-runs authorize', () => {
     expect(authorize).toHaveBeenCalledTimes(2);
   });
 
-  it('another user’s membership change never reaches the stream, so it runs no authorize', async () => {
-    const { stream, commit, authorize } = await rig({ scopes: { org: [A], user: ['u1'] } });
+  it('close() releases the endpoint: rebuilding on the same hub leaves one onChange subscription, and only it re-checks', async () => {
+    const { hub, source, state } = await rig({ tables: [POSTS], scopes: { org: [A], user: ['u1'] } });
+    let active = 0;
+    const counted: typeof hub = {
+      ...hub,
+      onChange(listener) {
+        active += 1;
+        const off = hub.onChange(listener);
+        return () => {
+          active -= 1;
+          off();
+        };
+      },
+    };
+    const build = (authorize: () => Promise<LiveGrant | null>) =>
+      liveEndpoint({ hub: counted, manifest, scopes, authorize, reauthorize: [MEMBERSHIPS] });
+    const firstAuthorize = vi.fn(() => Promise.resolve(state.grant));
+    const secondAuthorize = vi.fn(() => Promise.resolve(state.grant));
+    const first = build(firstAuthorize);
+    first.close(); // hot reload: the old endpoint goes before its replacement is built
+    const second = build(secondAuthorize);
+    expect(active).toBe(1);
+    const reader = sseReader(await second.fetch(new Request('http://live.test/api/live')));
+    cleanups.push(() => reader.cancel());
+    await reader.next();
+    source.emit({ kind: 'change', tags: [{ ...MEMBERSHIPS, keys: ['u1'] }], txid: '1' });
+    await sleep(5);
+    expect(firstAuthorize).not.toHaveBeenCalled();
+    expect(secondAuthorize).toHaveBeenCalledTimes(2); // its own open, then the re-check
+    second.close();
+    expect(active).toBe(0);
+  });
+
+  it('another user’s membership change causes no bye, no frame and no authorize on this stream', async () => {
+    const { stream, commit, state, authorize } = await rig({ scopes: { org: [A], user: ['u1'] } });
     const client = await stream();
     await client.next();
+    // Even if authorize would now answer differently: the write does not concern this principal.
+    state.grant = { scopes: { org: [B], user: ['u1'] } };
     await commit('1', { ...MEMBERSHIPS, keys: ['u2'] });
     await commit('2', { ...POSTS, keys: [A] });
     expect(await client.next()).toMatchObject({ tags: [{ ...POSTS, scope: { name: 'org', keys: [A] } }] });

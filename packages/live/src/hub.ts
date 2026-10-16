@@ -181,6 +181,12 @@ export type LiveHub = {
    */
   cursor(): Promise<LiveCursor | undefined>;
   connections(): number;
+  /**
+   * Calls `listener` with the tables (and keys) of every change the source reports while the hub
+   * is ready, before any view applies. Server-side only: nothing here is filtered by a grant, so
+   * never send it to a client (`liveEndpoint` uses it for `reauthorize`). Returns the unsubscribe.
+   */
+  onChange(listener: (tags: Extract<LiveSourceEvent, { kind: 'change' }>['tags']) => void): () => void;
 };
 
 type EndFrame = Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
@@ -382,6 +388,7 @@ export function createLiveHub(options: {
   let toldNoReceipts = false;
   const ring = replayRing<Envelope>({ ms: limits.replayMs });
   const subscribers = new Set<Subscriber>();
+  const changeListeners = new Set<(tags: Extract<LiveSourceEvent, { kind: 'change' }>['tags']) => void>();
 
   /** The hub ends the stream: queued frames are dropped, `end` is the last thing it yields. Safe inside a loop over `subscribers` (a Set skips deleted entries). */
   function finish(subscriber: Subscriber, end: EndFrame): void {
@@ -655,6 +662,16 @@ export function createLiveHub(options: {
       }
       case 'change': {
         if (state !== 'ready' || cipher === undefined || event.tags.length === 0) return;
+        // First, so a listener's reaction (a re-check) is under way before any stream sees the change.
+        for (const listener of changeListeners) {
+          try {
+            listener(event.tags);
+          } catch (error) {
+            debugHub.warn('an onChange listener threw: {message}', {
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         const now = Date.now();
         ring.evict(now);
         change(cipher, event, now);
@@ -885,5 +902,10 @@ export function createLiveHub(options: {
     },
 
     connections: () => subscribers.size,
+
+    onChange(listener) {
+      changeListeners.add(listener);
+      return () => changeListeners.delete(listener);
+    },
   };
 }
