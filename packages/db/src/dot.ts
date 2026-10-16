@@ -370,6 +370,56 @@ export function txRepos<const F extends RepoFactories>(factories: F & SameDataba
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* transactions() — open a transaction, and nothing else               */
+/* ------------------------------------------------------------------ */
+
+/** Anything with Drizzle's `transaction(fn)` handing `fn` a `Tx`: the database handle, or a transaction (then `fn` runs in a savepoint). */
+export type Transactable<Tx> = { transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> };
+
+/** The transaction type `TDb.transaction(fn)` hands to `fn` — read off the database, never restated. */
+export type TxOf<TDb> = TDb extends { transaction(fn: (tx: infer Tx) => never): unknown } ? Tx : never;
+
+/**
+ * The `transaction` service: run `fn` inside one transaction of the bound
+ * database. It commits when `fn` returns and rolls back when `fn` throws.
+ * The `tx` it hands out is the database's own transaction type, so
+ * `repos.withTx(tx)` takes it with no cast.
+ */
+export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
+
+/**
+ * A feature's transaction opener as one private infra plugin: it needs `db`
+ * unbound (the feature binds its own handle at `.infra()`) and publishes
+ * `transaction(fn)` — and nothing else: no query builder, no `db`. Pair it
+ * with `.needs({ db: entrypointOnly(database.provides.db) })`: a usecase
+ * may open a transaction and hand its `tx` on, but it can never run raw SQL.
+ * `TDb` is the feature's database type (`Db` from the app's `db.ts`); the
+ * transaction type is read off it.
+ *
+ * @example
+ * ```ts
+ * const digestDeps = defineFeature('digest')
+ *   .needs({ db: entrypointOnly(database.provides.db) })
+ *   .infra(store, transactions<Db>());
+ * // usecases/compile.ts
+ * const compile = ({ transaction, compiler }: Deps) => (plan: DigestPlan) => transaction(tx => compiler.store(tx, plan));
+ * ```
+ */
+export function transactions<TDb extends Transactable<Tx>, Tx = TxOf<TDb>>() {
+  return plugin({
+    name: 'transactions',
+    // Unbound: the feature binds `db` to its own handle at `.infra()`.
+    needs: { db: service<TDb>() },
+    provides: {
+      transaction:
+        ({ db }): OpenTransaction<Tx> =>
+        fn =>
+          db.transaction(fn),
+    },
+  });
+}
+
 /** The keys of `R` whose values are functions. */
 type MethodKeys<R> = { [K in keyof R]: R[K] extends (...args: never[]) => unknown ? K : never }[keyof R];
 

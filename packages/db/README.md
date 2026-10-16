@@ -310,9 +310,9 @@ type, helper functions whose parameters do not carry the scope, and SDK
 wrappers (`stripe.checkout.sessions.create()` is just a method). Review the
 usecases a transaction calls before you adopt it.
 
-## In a Dot feature: `repos()`, `reader()`
+## In a Dot feature: `repos()`, `transactions()`, `reader()`
 
-All three live in `@arki/db/dot` and return plain plugins. In a
+All of these live in `@arki/db/dot` and return plain plugins. In a
 `defineFeature` chain, `.infra(...)` makes them private to the feature.
 
 ### `repos(factories)` — repositories built once
@@ -368,6 +368,32 @@ transaction (a savepoint), call `repos.withTx(inner)` on the original set
 again — the set `withTx` returns has no `withTx` of its own. Forgetting
 `withTx` inside a transaction reads through the pool, exactly like
 forgetting to pass `tx` by hand today.
+
+### `transactions()` — a usecase may open a transaction, never run SQL
+
+```ts
+// features/digest/feature.ts
+const digestDeps = defineFeature('digest')
+  .needs({ db: entrypointOnly(database.provides.db) })
+  .infra(store, transactions<Db>()); // Db from the app's db.ts
+
+// features/digest/usecases/compile.ts
+export const compile =
+  ({ transaction, compiler }: Pick<Deps, 'transaction' | 'compiler'>) =>
+  (plan: DigestPlan) =>
+    transaction(tx => compiler.store(tx, plan)); // tx is the database's own transaction type
+```
+
+- **One function, nothing else.** The plugin publishes `transaction(fn)`:
+  `fn` runs inside one transaction of the feature's `db`, committed when it
+  returns and rolled back when it throws. No query builder and no `db`
+  leave the plugin, so with `db` entrypoint-only a usecase can open a
+  transaction and hand its `tx` on, but never run raw SQL.
+- **`db` stays unbound.** Like `repos()`, it needs `db` by alias; the
+  feature names the handle once in `.needs()`. A feature that lists it
+  without declaring `db` is refused (compile error, runtime error).
+- **The `tx` type is read off the database** (`TxOf<Db>`), so
+  `repos.withTx(tx)` and a child's `store(tx, …)` take it with no cast.
 
 ### Transactional procedures in a feature
 
