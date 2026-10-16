@@ -29,7 +29,7 @@ import { memoryKv } from './test-support';
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 
 const APP_ID = 'novelette';
-const ENVIRONMENT = 'production';
+const ENVIRONMENT = 'prod';
 const BASE_URL = 'https://novelette.test';
 const T0 = new Date('2026-10-14T12:00:00Z');
 
@@ -118,7 +118,7 @@ function appOptions(env: ForemanEnv, clock: MockClock): ForemanAppOptions<{ tena
     app: { version: '1.2.3', commit: 'abc1234' },
     packages: { '@arki/queue': '0.1.0' },
     nonces: memoryNonces(clock),
-    receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:production' }),
+    receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:prod' }),
     clock,
     health: () => health,
     modules: [queueModule()],

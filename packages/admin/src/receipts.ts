@@ -146,7 +146,7 @@ export type ReceiptKV = {
 
 export type KvReceiptStoreOptions = {
   /**
-   * Whose receipts these are: the app's audience, `slug:environment` (`novelette:production`).
+   * Whose receipts these are: the app's audience, `slug:environment` (`novelette:prod`).
    * Every key carries it, so two apps (or two environments) on one KV never read each other's receipts.
    */
   namespace: string;

@@ -8,7 +8,7 @@
  *   use: [
  *     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
  *       env,
- *       environment: 'production',
+ *       environment: 'prod',
  *       app: { version: pkg.version },
  *       nonces: kv,
  *       health: () => healthOf(db),

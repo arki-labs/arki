@@ -43,6 +43,7 @@ import {
   FOREMAN_BASE_PATH,
   FOREMAN_HEADERS,
   FOREMAN_PROTOCOL_VERSION,
+  foremanEnvironmentSchema,
   fromBase64Url,
   importPrivateKey,
   importPublicKey,
@@ -165,7 +166,8 @@ export function createForemanHandler<TCtx>(
   const registry = buildRegistry(options.modules);
   const clock = options.clock ?? new SystemClock();
   const basePath = config.basePath ?? FOREMAN_BASE_PATH;
-  const [appId = '', environment = ''] = config.identity.aud.split(':');
+  const [appId = '', environmentName = ''] = config.identity.aud.split(':');
+  const environment = foremanEnvironmentSchema.parse(environmentName); // `audienceSchema` already guarantees it
   const receipts = options.receipts;
   if (config.writes === 'on' && receipts === undefined) {
     logger.warn('Foreman writes are on but no receipt store is configured: every execute is refused.');

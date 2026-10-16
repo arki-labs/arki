@@ -12,7 +12,7 @@ import { z } from '@arki/contracts';
 
 import type { FleetHealth } from './contract';
 import type { AnyForemanModule, ForemanModule } from './module';
-import type { ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
+import type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
 import type { ReceiptStore } from './receipts';
 import { fleetHealthCheckSchema, fleetHealthSchema } from './contract';
 import { defineModule, defineRead, describeModule } from './module';
@@ -25,8 +25,8 @@ export const CORE_MANIFEST_MODULE_ID = 'core.manifest';
 export const CORE_MODULE_VERSION = '1.0.0';
 
 export type CoreModulesOptions<TCtx> = {
-  /** This target: `id` and `environment` make up the audience (`novelette:production`). */
-  app: { id: string; environment: string; version: string; commit?: string };
+  /** This target: `id` and `environment` make up the audience (`novelette:prod`). */
+  app: { id: string; environment: ForemanEnvironment; version: string; commit?: string };
   /** Installed `@arki/*` versions. */
   packages?: Record<string, string>;
   /** `FOREMAN_WRITES`. */

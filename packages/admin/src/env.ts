@@ -6,15 +6,16 @@
 import { z } from '@arki/contracts';
 
 import type { CreateForemanHandlerOptions } from './dispatcher';
+import type { ForemanEnvironment } from './protocol';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { writesModeSchema } from './protocol';
+import { foremanEnvironmentSchema, writesModeSchema } from './protocol';
 
 /**
  * Spread into the app's env schema (`defineEnv({ server: { ...foremanEnvShape } })`).
  * Every key is optional so an app without Foreman keys still boots.
  */
 export const foremanEnvShape = {
-  /** App slug, e.g. `novelette`. With the environment it forms the audience `novelette:production`. */
+  /** App slug, e.g. `novelette`. With the environment it forms the audience `novelette:prod`. */
   FOREMAN_APP_ID: z.string().min(1).optional(),
   /** This app's identity key (PKCS#8, base64url). Signs every response. */
   FOREMAN_APP_KEY: z.string().min(1).optional(),
@@ -25,12 +26,25 @@ export const foremanEnvShape = {
   /** Foreman's execute public key. Must differ from the read key. */
   FOREMAN_EXECUTE_KEY: z.string().min(1).optional(),
   FOREMAN_EXECUTE_KEY_NEXT: z.string().min(1).optional(),
+  /** `prod`, `staging` or `dev`. Overrides what `foremanEnvironmentFromNodeEnv` derives from NODE_ENV (set it to `staging` on a staging deploy). */
+  FOREMAN_ENVIRONMENT: foremanEnvironmentSchema.optional(),
   /** `on` allows executes. Anything else, or unset, refuses every execute. */
   FOREMAN_WRITES: writesModeSchema.optional(),
 };
 
 /** The `FOREMAN_*` part of a validated env: exactly what `foremanEnvShape` parses to, every key optional. */
 export type ForemanEnv = z.output<z.ZodObject<typeof foremanEnvShape>>;
+
+/**
+ * The Foreman environment an app runs as. `FOREMAN_ENVIRONMENT` wins; otherwise
+ * `production` is `prod` and anything else (`development`, `test`, unset) is `dev`.
+ */
+export function foremanEnvironmentFromNodeEnv(
+  nodeEnv: string | undefined,
+  override?: ForemanEnvironment,
+): ForemanEnvironment {
+  return override ?? (nodeEnv === 'production' ? 'prod' : 'dev');
+}
 
 /** The handler config the env describes. */
 export type ForemanEnvConfig = Pick<CreateForemanHandlerOptions<never>, 'identity' | 'keys' | 'writes'> & {
@@ -42,7 +56,7 @@ export type ForemanEnvConfig = Pick<CreateForemanHandlerOptions<never>, 'identit
  * is set (v2 off). Throws `ARKI_ADMIN_E014` when only some are set, so a typo
  * in one key cannot leave a half-configured target.
  */
-export function foremanConfigFromEnv(env: ForemanEnv, environment: string): ForemanEnvConfig | undefined {
+export function foremanConfigFromEnv(env: ForemanEnv, environment: ForemanEnvironment): ForemanEnvConfig | undefined {
   const required = ['FOREMAN_APP_ID', 'FOREMAN_APP_KEY', 'FOREMAN_READ_KEY', 'FOREMAN_EXECUTE_KEY'] as const;
   const missing = required.filter(name => env[name] === undefined);
   if (missing.length === required.length) return undefined;

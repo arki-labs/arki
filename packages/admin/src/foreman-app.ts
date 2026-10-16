@@ -8,6 +8,7 @@ import { getLogger } from '@arki/log';
 import type { CoreModulesOptions } from './core';
 import type { CreateForemanHandlerOptions } from './dispatcher';
 import type { ForemanEnv } from './env';
+import type { ForemanEnvironment } from './protocol';
 import { withCoreModules } from './core';
 import { createForemanHandler } from './dispatcher';
 import { foremanConfigFromEnv } from './env';
@@ -22,8 +23,8 @@ export type ForemanAppOptions<TCtx> = Pick<
   Pick<CoreModulesOptions<TCtx>, 'health' | 'modules' | 'packages' | 'providers'> & {
     /** The app's validated env. The `FOREMAN_*` keys come from `foremanEnvShape`. */
     env: ForemanEnv;
-    /** `production`, `preview`, `staging`, … The second half of the audience. */
-    environment: string;
+    /** `prod`, `staging` or `dev`: the second half of the audience. Use `foremanEnvironmentFromNodeEnv`. */
+    environment: ForemanEnvironment;
     app: { version: string; commit?: string };
   };
 

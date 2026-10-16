@@ -34,7 +34,7 @@ import { memoryKv } from './test-support';
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 
-const AUD = 'novelette:production';
+const AUD = 'novelette:prod';
 const BASE_URL = 'https://novelette.test';
 const T0 = new Date('2026-10-14T12:00:00Z');
 const READ_PATH = foremanPaths.read('queue.failedJobs');
@@ -126,7 +126,7 @@ function setup(options: SetupOptions = {}) {
     keys: options.keys ?? { read: { current: readPair.publicKey }, execute: { current: executePair.publicKey } },
     writes: options.writes ?? 'on',
     nonces: memoryNonces(clock),
-    receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:production' }),
+    receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:prod' }),
     modules: [module],
     context: () => ({ tenant: 'acme' }),
     app: { version: '1.2.3' },
@@ -228,7 +228,7 @@ describe('T(admin-protocol) happy paths', () => {
     const negotiated = await setup().client.negotiate();
     expect(negotiated.protocol).toBe(2);
     if (negotiated.protocol !== 2) return;
-    expect(negotiated.manifest.app).toEqual({ id: 'novelette', version: '1.2.3', environment: 'production' });
+    expect(negotiated.manifest.app).toEqual({ id: 'novelette', version: '1.2.3', environment: 'prod' });
     expect(negotiated.manifest.readiness.writes).toBe('on');
     expect(negotiated.manifest.modules[0]?.actions[0]?.schemaHash).toBe(retryHash);
   });

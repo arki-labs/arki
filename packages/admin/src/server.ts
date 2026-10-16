@@ -145,10 +145,11 @@ export type { FleetSnapshot } from './contract';
 // Protocol 2 — the signed dispatcher (portable; re-exported here because apps mount it server-side).
 export type { CreateForemanHandlerOptions, NonceStore, PublicKeyRing } from './dispatcher';
 export { createForemanHandler } from './dispatcher';
-export type { ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
+export type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
 export {
   FOREMAN_BASE_PATH,
   FOREMAN_PROTOCOL_VERSION,
+  foremanEnvironmentSchema,
   foremanManifestSchema,
   generateForemanKeyPair,
   NONCE_TTL_SECONDS,

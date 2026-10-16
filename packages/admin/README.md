@@ -10,7 +10,8 @@ Set all four variables, or none. With none set, `/api/foreman/*` answers 404 and
 
 | Variable              | What                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------- |
-| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `novelette:production`. |
+| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `novelette:prod`. |
+| `FOREMAN_ENVIRONMENT` | Optional `prod`, `staging` or `dev`. Overrides what `foremanEnvironmentFromNodeEnv(NODE_ENV)` returns. |
 | `FOREMAN_APP_KEY`     | The app's identity key. It signs every response.                                   |
 | `FOREMAN_READ_KEY`    | Foreman's read public key. `_NEXT` holds the new key while rotating.               |
 | `FOREMAN_EXECUTE_KEY` | Foreman's execute public key. Must differ from the read key. `_NEXT` as above.     |
@@ -30,10 +31,10 @@ let handler: ((request: Request) => Promise<Response>) | undefined;
 export function handleForeman(request: Request) {
   handler ??= createForemanHandlerFromEnv({
     env, // validated env that includes foremanEnvShape
-    environment: 'production',
+    environment: 'prod',
     app: { version, commit },
     nonces: kv, // any @arki/kv KV
-    receipts: kvReceiptStore(kv, { namespace: 'myapp:production' }), // required for executes; also serves core.receipts
+    receipts: kvReceiptStore(kv, { namespace: 'myapp:prod' }), // required for executes; also serves core.receipts
     context: () => ({}),
     health: async () => (await getFleetSnapshot()).health, // reuse the /api/fleet function
     modules: [queueForemanModule({ queues })],
@@ -63,7 +64,7 @@ export const operations = feature('operations', {
   use: [
     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
       env,
-      environment: 'production',
+      environment: 'prod',
       app: { version },
       nonces: kv,
       receipts: journalReceiptStore({
@@ -81,7 +82,7 @@ export const operations = feature('operations', {
 });
 ```
 
-The slice lands under the `routes` key, so `feature()` throws `FEATURE_E003` if the same feature also holds an `endpoints()` slice. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
+The slice lands under the `routes` key, so `feature()` throws `ARKI_DOT_E024` if the same feature also holds an `endpoints()` slice. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
 
 ## Modules every target serves
 
@@ -108,7 +109,7 @@ A second execute with the same id never runs the action again. It gets the store
 
 An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) did apply: it is recorded `applied` with `result: null`.
 
-**Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:production`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
+**Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:prod`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
 
 **DOT app with a journal: `journalReceiptStore(...)`** (`@arki/admin/pg`). Add the table and migrate:
 

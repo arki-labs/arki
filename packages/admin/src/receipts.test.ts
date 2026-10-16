@@ -32,7 +32,7 @@ type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 type Behaviour = 'ok' | 'throw' | 'badOutput';
 
-const AUD = 'novelette:production';
+const AUD = 'novelette:prod';
 const BASE_URL = 'https://novelette.test';
 const T0 = new Date('2026-10-14T12:00:00Z');
 
@@ -102,7 +102,7 @@ function setup(options: SetupOptions = {}) {
     nonces: memoryKv(clock),
     receipts,
     modules: withCoreModules<Ctx>({
-      app: { id: 'novelette', environment: 'production', version: '1.2.3' },
+      app: { id: 'novelette', environment: 'prod', version: '1.2.3' },
       writes: 'on',
       health: () => ({ status: 'ok', checks: [] }),
       receipts,
@@ -324,8 +324,8 @@ describe('T(admin-receipts) the receipt read', () => {
 describe('T(admin-receipts) the KV store', () => {
   it('two apps on one KV never see each other’s receipts: every key carries the namespace', async () => {
     const kv = memoryKv(new MockClock(T0));
-    const novelette = kvReceiptStore(kv, { namespace: 'novelette:production' });
-    const brandability = kvReceiptStore(kv, { namespace: 'brandability:production' });
+    const novelette = kvReceiptStore(kv, { namespace: 'novelette:prod' });
+    const brandability = kvReceiptStore(kv, { namespace: 'brandability:prod' });
     const claim = {
       status: 'pending',
       executionId: 'exe_shared',
@@ -339,7 +339,7 @@ describe('T(admin-receipts) the KV store', () => {
     expect(await novelette.get('exe_shared')).toMatchObject({ status: 'pending' });
     expect(
       [...kv.entries.keys()].every(
-        key => key.includes('novelette:production') || key.includes('brandability:production'),
+        key => key.includes('novelette:prod') || key.includes('brandability:prod'),
       ),
     ).toBe(true);
   });
@@ -349,7 +349,7 @@ describe('T(admin-receipts) the KV store', () => {
     for (const namespace of [
       '',
       'novelette',
-      'novelette:production:claim',
+      'novelette:prod:claim',
       'a:b:value:x',
       'Nove lette:prod',
       'novelette:',
