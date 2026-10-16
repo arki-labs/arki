@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import type { IdOf } from './ids.js';
 import { assertUniqueIdPrefixes, defineId, userIdSchema } from './ids.js';

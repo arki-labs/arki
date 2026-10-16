@@ -36,7 +36,7 @@ import { z } from '@arki/contracts';
 const Email = z.email();
 ```
 
-The package re-exports everything from `zod/v4`, so you do not need a direct `zod` import alongside it.
+The package re-exports everything from `zod`, so you do not need a direct `zod` import alongside it.
 
 ### Form data helpers
 
@@ -186,7 +186,7 @@ ops.posts.create.meta; // the contract meta, value and type
 Main entry, `@arki/contracts` (no Drizzle):
 
 - `formData` — re-exported `zod-form-data` namespace.
-- `z`, `ZodError`, every Zod export — re-exported from `zod/v4`.
+- `z`, `ZodError`, every Zod export — re-exported from `zod`.
 - `UserId`, `userIdSchema` — shared id types.
 - `defineId(prefix)`, `IdOf<typeof id>`, `IdDeclaration`, `assertUniqueIdPrefixes(...ids)` — prefixed ids declared once.
 - `keyset(order)`, `pageInput(keyset, options?)`, `page(itemSchema)`, `Page<T>`, `Keyset`, `CursorValue` — keyset pagination.

@@ -3,7 +3,7 @@
 > Shared Zod schemas for arki apps: prefixed ids, keyset pagination, Drizzle-derived branded schemas, and one typed identity per oRPC contract procedure.
 
 ## Entries
-- @arki/contracts — z (zod/v4), formData, defineId(prefix), keyset(order), pageInput(keyset), page(item), Page<T>. Portable (Node, Bun, Deno, browser, Hermes).
+- @arki/contracts — z (zod), formData, defineId(prefix), keyset(order), pageInput(keyset), page(item), Page<T>. Portable (Node, Bun, Deno, browser, Hermes).
 - @arki/contracts/drizzle — createSelectSchema, createInsertSchema, createUpdateSchema (branded, from a Drizzle table). Peer: drizzle-orm.
 - @arki/contracts/orpc — operations(contract) → a frozen tree with an Operation { path, name, meta } at each leaf; operationAt(contract, path) → Operation | undefined; OPERATION ('~op'), Identified<Op>, operationOf(carrier) (throws TypeError without one); types Operation, AnyOperation, OperationOf<C>, Operations<C>, InputOf, OutputOf, ErrorOf, MetaOf. Portable. Peer: @orpc/contract.
 

@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import type { CursorValue } from './pagination.js';
 import { keyset, page, pageInput } from './pagination.js';

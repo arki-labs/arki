@@ -1,7 +1,7 @@
 // The README's `@arki/contracts/orpc` example, compiled.
 import { oc } from '@orpc/contract';
 import { expectTypeOf, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import { operations } from './orpc.js';
 

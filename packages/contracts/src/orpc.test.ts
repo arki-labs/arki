@@ -1,6 +1,6 @@
 import { minifyContractRouter, oc } from '@orpc/contract';
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import { OPERATION, operationAt, operationOf, operations } from './orpc.js';
 

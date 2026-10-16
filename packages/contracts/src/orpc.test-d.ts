@@ -1,7 +1,7 @@
 import type { ORPCError } from '@orpc/contract';
 import { oc } from '@orpc/contract';
 import { describe, expectTypeOf, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import type { ErrorOf, Identified, InputOf, MetaOf, Operation, OperationOf, Operations, OutputOf } from './orpc.js';
 import { operationOf, operations } from './orpc.js';

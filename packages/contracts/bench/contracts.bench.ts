@@ -12,7 +12,7 @@ import type { ClientLink } from '@orpc/client';
 import type { ContractRouterClient } from '@orpc/contract';
 import { oc } from '@orpc/contract';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import { compare, defineSuite } from '@arki/bench';
 import { COLUMN_ZOD_SCHEMA, createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';

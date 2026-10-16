@@ -1,6 +1,6 @@
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import { COLUMN_ZOD_SCHEMA, createInsertSchema, createSelectSchema, createUpdateSchema } from './drizzle.js';
 

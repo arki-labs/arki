@@ -5,7 +5,7 @@ import {
   createUpdateSchema as drizzleCreateUpdateSchema,
 } from 'drizzle-orm/zod';
 import type { BuildRefine } from 'drizzle-orm/zod';
-import type { z } from 'zod/v4';
+import type { z } from 'zod';
 import type { InferInsertModel, InferSelectModel, Table } from 'drizzle-orm';
 
 export {

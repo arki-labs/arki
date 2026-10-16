@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { z } from 'zod/v4';
+import type { z } from 'zod';
 
 import { keyset, pageInput } from './pagination.js';
 

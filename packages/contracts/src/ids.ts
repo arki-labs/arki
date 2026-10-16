@@ -1,4 +1,4 @@
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
 
