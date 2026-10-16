@@ -1,3 +1,5 @@
+import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
+
 export const DB_COMPOSITION_ERROR_CODES = {
   duplicateSchemaKey: 'DB_COMPOSITION_E001',
   projectionNameMissing: 'DB_COMPOSITION_E002',
@@ -27,10 +29,10 @@ type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) e
   ? I
   : never;
 
-type DuplicateKeys<TSlices extends readonly SchemaSlice[], TSeen extends PropertyKey = never> = TSlices extends readonly [
-  infer Head,
-  ...infer Tail,
-]
+type DuplicateKeys<
+  TSlices extends readonly SchemaSlice[],
+  TSeen extends PropertyKey = never,
+> = TSlices extends readonly [infer Head, ...infer Tail]
   ? Head extends SchemaSlice
     ? Tail extends readonly SchemaSlice[]
       ? (keyof Head & TSeen) | DuplicateKeys<Tail, TSeen | keyof Head>
@@ -67,22 +69,22 @@ export function composeSchema<const TSlices extends readonly SchemaSlice[]>(
   return schema as ComposedSchema<TSlices>;
 }
 
+/**
+ * A database that can open a transaction: Drizzle's `db.transaction(fn, config)`.
+ * `config` sets the isolation level (`runTransaction` passes `serializable`). A
+ * `transaction` that takes no config still fits.
+ */
 export type TransactionalDb<TTransaction> = {
-  transaction<TResult>(fn: (tx: TTransaction) => Promise<TResult>): Promise<TResult>;
+  transaction<TResult>(fn: (tx: TTransaction) => Promise<TResult>, config?: PgTransactionConfig): Promise<TResult>;
 };
 
 export type UnitOfWorkScopes<TFactories extends Record<string, (tx: never) => unknown>> = {
   readonly [K in keyof TFactories]: ReturnType<TFactories[K]>;
 };
 
-export type UnitOfWork<TScopes> = <TResult>(
-  fn: (scopes: TScopes) => Promise<TResult> | TResult,
-) => Promise<TResult>;
+export type UnitOfWork<TScopes> = <TResult>(fn: (scopes: TScopes) => Promise<TResult> | TResult) => Promise<TResult>;
 
-export function createUnitOfWork<
-  TTransaction,
-  const TFactories extends Record<string, (tx: TTransaction) => unknown>,
->(
+export function createUnitOfWork<TTransaction, const TFactories extends Record<string, (tx: TTransaction) => unknown>>(
   db: TransactionalDb<TTransaction>,
   factories: TFactories,
 ): UnitOfWork<{

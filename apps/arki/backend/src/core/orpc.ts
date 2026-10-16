@@ -206,21 +206,18 @@ export const roleProcedure = (roles: UserRole[]) => {
 /**
  * Transaction-wrapped procedures
  *
- * oRPC middleware cannot inject a Drizzle transaction into context because middleware
- * does not have access to procedure input and cannot fully substitute the DB instance
- * type-safely. Instead, use `context.db.transaction()` directly inside the handler:
+ * Use `transactionalProcedure` from `@arki/db/orpc`. It opens one SERIALIZABLE
+ * transaction per call, hands the handler `tx` and repositories bound with
+ * `withTx(tx)`, and reruns the handler on a serialization failure or deadlock:
  *
  * ```typescript
- * export const createWithRelated = protectedProcedure
- *   .input(schema)
- *   .handler(async ({ context, input }) => {
- *     return await context.db.transaction(async (tx) => {
- *       const item = await context.repo.items.create(tx, input);
- *       await context.repo.related.link(tx, { itemId: item.id });
- *       return item;
- *     });
- *   });
+ * const transact = transactionalProcedure(db, { repos: () => repositories });
+ * export const createWithRelated = implement(contract, transactionalProcedureConfig)
+ *   .createWithRelated.use(transact) // always the last `.use()`
+ *   .handler(({ context: { repos }, input }) => createItemWithRelated(repos, input));
  * ```
+ *
+ * See "Transactional procedures" in the `@arki/db` README.
  */
 
 /**

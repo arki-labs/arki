@@ -1,0 +1,37 @@
+# @arki/db
+
+> Drizzle ORM helpers for ARKI: Postgres and PGlite runtimes, branded ids, feature-owned schema, repositories for Dot features, and serializable transactional procedures for oRPC.
+
+## Import paths
+- `@arki/db` / `@arki/db/init`: `createDb`, `initDb`. Imports node-postgres; server only.
+- `@arki/db/dot`: the Dot plugins `db()`, `dbMigrations()`, `repos()`, `reader()`, `advisoryLocks()`.
+- `@arki/db/transaction`: `runTransaction`, `retryableSqlState`, `DbTransactionError`, `isDbTransactionError`, `DB_TRANSACTION_ERROR_CODES`. Portable.
+- `@arki/db/orpc`: `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`, `TransactionContext`. Portable; optional peer `@orpc/server`.
+- `@arki/db/eslint`: the rule `db/no-effects-in-transaction`. Tooling only; needs typed linting.
+- `@arki/db/id`, `@arki/db/id-factory`, `@arki/db/temporal`, `@arki/db/pagination`, `@arki/db/orm`, `@arki/db/pg`, `@arki/db/runtime-local`: see the README.
+
+## Start here
+- [README](README.md): usage, Dot features, transactional procedures.
+- [Agent guide](docs/agent-guide.md): transactions in depth. File map, decision table, the SQLSTATE allowlist, the error codes, words easy to mix up.
+
+## By task
+- [Make a procedure transactional](README.md#transactional-procedures-transactionalprocedure), and [in a Dot feature](README.md#transactional-procedures-in-a-feature)
+- [Handle a 409 from a transactional procedure](docs/agent-guide.md#decide-what-to-do-with-a-failure)
+- [Run a journal command inside one](docs/agent-guide.md#ambiguous-commit-recovery)
+- [Read a `db/no-effects-in-transaction` report](docs/agent-guide.md#lint-reports)
+- [Retry outside oRPC (jobs, scripts)](README.md#serializable-retry-outside-orpc-runtransaction)
+
+## Files
+- `src/transaction.ts`: settings, `runTransaction`, the SQLSTATE classifier, `DbTransactionError`.
+- `src/orpc.ts`: the middleware, its pipeline checks, `transactionalProcedureConfig`.
+- `src/eslint.ts`: the lint rule.
+- `src/composition.ts`: `TransactionalDb`, `createUnitOfWork`, `composeSchema`.
+- `src/dot.ts`: the Dot plugins, `Repos<F>`, `RepoSet<F>`.
+
+## Rules that bite
+- `transact` is the last `.use()` of the procedure. Anything after it reruns on every retry (`ARKI_DB_TX_E004`).
+- `implement(contract, transactionalProcedureConfig)`, or output is validated after the commit (`ARKI_DB_TX_E004`).
+- No `fetch`, queue writes or `.effect()` inside transactional code: they run once per attempt and do not roll back.
+- Only `40001` and `40P01` are retried. A lost connection around `COMMIT` is never retried; recover with an idempotency key and a journal receipt.
+- PGlite never conflicts (one connection). Prove retry behaviour on real PostgreSQL.
+- In a Dot feature, rename the pool-bound repos source to `repositories`; the bound set is `repos`.
