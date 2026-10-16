@@ -3,16 +3,18 @@ import { implement } from '@orpc/server';
 
 import type { DepsOf } from '../../../../feature.js';
 import type { RequestContext } from '../orpc.js';
-import { defineFeature } from '../../../../feature.js';
+import { defineFeature, entrypointOnly } from '../../../../feature.js';
 import { rpc } from '../../../../orpc.js';
-import { billing } from '../infra.js';
+import { billing, database } from '../infra.js';
 import { bind } from '../orpc.js';
 import { digestProcedures } from './procedures.js';
 import { digestRpcContract } from './rpc.js';
 import { store } from './store.js';
 import { preview } from './usecases/preview.js';
 
-const digestDeps = defineFeature('digest').needs({ plans: billing.provides.entitlements }).infra(store);
+const digestDeps = defineFeature('digest')
+  .needs({ db: entrypointOnly(database.provides.db), plans: billing.provides.entitlements })
+  .infra(store);
 
 /** What a usecase may ask for: the needs by alias and the infra services by key. */
 export type Deps = DepsOf<typeof digestDeps>;

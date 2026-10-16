@@ -72,12 +72,12 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
     expect(probe).toBeDefined();
   });
 
-  it('names the alias when the services bag lacks a handle, instead of a handler crashing on undefined', async () => {
+  it("names the feature's services key when the bag lacks it, instead of a handler crashing on undefined", async () => {
     const failure: unknown = await clientFor({})
       .digest.preview()
       .catch((error: unknown) => error);
     expect(failure).toMatchObject({ code: FEATURE_ERROR_CODES.missingCapability });
-    expect(String(failure)).toContain('"plans"');
+    expect(String(failure)).toContain('"digest.services"');
   });
 
   it('refuses at compile time an alias that would shadow a request-context key', () => {

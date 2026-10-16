@@ -139,6 +139,28 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     expect(sent).toEqual([id]);
   });
 
+  it('registers a nested child projection once: the parent lists it, the child owns it', async () => {
+    const audit = defineFeature('orders.audit')
+      .infra(journalProjections(countPlaced('child-audit-count', 'child')))
+      .usecases({})
+      .entrypoints();
+    const orders = defineFeature('orders')
+      .infra(journalProjections(countPlaced('parent-orders-count', 'parent')))
+      .features(audit)
+      .usecases({})
+      .entrypoints();
+    const app = track(
+      await defineApp('nested-journal').infra(dbPlugin(), journal({ j, tables })).features([orders]).boot(),
+    );
+    await app.start();
+    // Without `ownUnits`, the parent's `plugins()` would list the child's unit too and `audit` would be a duplicate owner.
+    expect(app.services.journal.catalog.projections).toEqual(['parent-orders-count', 'child-audit-count']);
+    const id = orderId(++next);
+    await app.services.journal.run(db, placeOrder, { id, customerId: 'nested' }, meta);
+    expect(await placedCount('parent:nested')).toBe(1);
+    expect(await placedCount('child:nested')).toBe(1);
+  });
+
   it('refuses a duplicate across the two forms and names both features, so a job never has two owners', async () => {
     const chain = defineFeature('chain')
       .infra(journalProjections(countPlaced('twice-count', 'a')))

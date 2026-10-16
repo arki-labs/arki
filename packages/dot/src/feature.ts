@@ -56,12 +56,17 @@ export type { FeatureErrorCode } from './feature-error.js';
 
 // The chain form (`defineFeature(name).needs().infra().usecases().provides().entrypoints()`)
 // and contract-first composition (`routerFor`). See RFC 2026-10-15-dot-feature-builder.
-export { defineFeature, routerFor } from './define-feature.js';
+export { allFeatures, defineFeature, entrypointOnly, mountFeatures, ownUnits, requestServices, routerFor } from './define-feature.js';
 export type {
   AnyDefinedFeature,
   AnyEntrypoint,
   AnyFeatureCore,
   AppContract,
+  ChildHandles,
+  ChildOverrides,
+  ChildProvides,
+  ChildrenGuard,
+  ChildUnits,
   ContractOf,
   CoreDeps,
   CoreHandles,
@@ -69,12 +74,16 @@ export type {
   DefinedFeature,
   DepsOf,
   Entrypoint,
+  EntrypointOnly,
+  RequestHandles,
   EntrypointPayloads,
   EntrypointsStage,
   FeatureCore,
+  FeaturesStage,
   FeatureUnit,
   InfraProvides,
   InfraStage,
+  NeedsGuard,
   NeedsStage,
   ProvidesStage,
   QualifiedInfra,
@@ -83,8 +92,12 @@ export type {
   RouterFor,
   RouterOf,
   RpcEntrypoint,
+  ScopedHandle,
+  ScopedHandles,
+  UnitsOf,
   UsecaseFactories,
   UsecaseGuard,
+  UsecaseNeeds,
   Usecases,
   UsecasesStage,
 } from './define-feature.js';

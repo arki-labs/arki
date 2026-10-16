@@ -31,6 +31,7 @@ import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
 import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
+import { allFeatures, mountFeatures } from './define-feature.js';
 import { bindDriver, plug } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
@@ -420,6 +421,8 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
       features: readonly (AnyFeature | AnyDefinedFeature)[],
       ..._guard: readonly unknown[]
     ): DotAppBuilder<ServiceRecord> {
+      // Assembly: a chain feature's raw infra handles may be held only inside its scope (FEATURE_E005 otherwise).
+      mountFeatures(features.filter(f => isDefinedFeature(f)));
       const nextState: BuilderState = {
         ...state,
         plugins: [
@@ -428,8 +431,10 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
             isDefinedFeature(f) ? f.plugins() : [{ ...(plug(f) as AnyPlugin), role: 'feature' }],
           ),
         ],
-        // Adapters read both forms through the descriptor protocol (`entrypointsOf`), so features pass as they are.
-        features: [...state.features, ...features],
+        // Adapters read both forms through the descriptor protocol (`entrypointsOf`). The list is the
+        // normalized node list — each nested feature once, depth-first — so a driver (`.entrypoints`) and a
+        // driven adapter (`.infra`) read each node's own declarations exactly once.
+        features: [...state.features, ...allFeatures(features)],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },

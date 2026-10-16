@@ -35,7 +35,7 @@
 
 import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot/plugin';
-import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
+import { allFeatures, driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
 import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
@@ -655,14 +655,23 @@ type FeatureScheduleDefsOf<F> =
       : never
     : never;
 
-/** Every feature-owned schedule name the feature tuple declares. */
+/**
+ * A feature and every feature nested under it (`.features(...)`), as a
+ * union. Bounded to eight levels, so a loosely typed list
+ * (`readonly MountedFeature[]`) cannot recurse without end.
+ */
+type FeatureTreeOf<F, TDepth extends readonly unknown[] = []> = TDepth['length'] extends 8
+  ? F
+  : F | (F extends { readonly features: readonly (infer TChild)[] } ? FeatureTreeOf<TChild, [...TDepth, 1]> : never);
+
+/** Every feature-owned schedule name the feature tuple declares, nested children included. */
 export type ScheduleNameOf<TFeatures extends readonly MountedFeature[]> = FeatureScheduleDefsOf<
-  TFeatures[number]
+  FeatureTreeOf<TFeatures[number]>
 >['name'];
 
 /** The resolved value of the handler named `TName`. */
 export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName extends string> =
-  FeatureScheduleDefsOf<TFeatures[number]> extends infer TDef
+  FeatureScheduleDefsOf<FeatureTreeOf<TFeatures[number]>> extends infer TDef
     ? TDef extends { readonly name: TName; readonly handler: (services: never) => infer TResult }
       ? Awaited<TResult>
       : never
@@ -688,7 +697,7 @@ function declaredNames(slice: AnyFeatureSlice): readonly string[] {
 /**
  * A typed client over the `scheduler` service: `trigger` accepts only the
  * names the features declared with `schedules(needs | core, defs)` — object-form
- * and chain features alike — and a `ran`
+ * and chain features alike, nested children included — and a `ran`
  * outcome's `value` is that handler's resolved return type. Throws a coded
  * error when the scheduler does not run one of those schedules (the
  * features were not mounted on this app).
@@ -703,7 +712,7 @@ export function composeSchedules<const TFeatures extends readonly MountedFeature
   scheduler: ScheduleService,
 ): ScheduleClient<TFeatures> {
   const served = new Set(scheduler.names);
-  for (const f of features) {
+  for (const f of allFeatures(features)) {
     for (const name of entrypointsOf(f).flatMap(slice => declaredNames(slice))) {
       if (served.has(name)) continue;
       throw new ScheduleError({

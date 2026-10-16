@@ -190,28 +190,37 @@ await uow(async tx => {
 All three live in `@arki/db/dot` and return plain plugins. In a
 `defineFeature` chain, `.infra(...)` makes them private to the feature.
 
-### `repos(handle, factories)` — repositories built once
+### `repos(factories)` — repositories built once
 
 ```ts
 // features/highlights/infra/repository.ts
-export const repository = repos(database.provides.db, {
+export const repository = repos({
   highlights: (db: Database) => new HighlightRepository(db), // Database = Db | Transaction
   collections: createCollectionRepository,
 });
 
 // features/highlights/feature.ts
 export const core = defineFeature('highlights')
+  .needs({ db: entrypointOnly(database.provides.db) })
   .infra(repository)
   .usecases(({ repos }) => ({ list: (itemId: ItemId) => repos.highlights.listByItem(itemId) }));
 ```
 
 - **One set per boot.** The factories run once, when the app boots, bound to
   the database pool. No `createXRepository(context.db)` per request.
-- **The database is explicit.** Pass the handle. With two databases
-  (`rename(db(...), { db: 'reportsDb' })`), `repos(reports.provides.reportsDb, …)`
-  binds to that one; nothing is picked by the name `db` behind your back. The
-  handle's type must be one the factories accept, and all factories must take
-  the same type — both are compile errors otherwise.
+- **The database is explicit.** The store needs `db` unbound; the feature
+  names it in `.needs()`. With two databases
+  (`rename(db(...), { db: 'reportsDb' })`), `.needs({ db: reports.provides.reportsDb })`
+  binds the store to that one; nothing is picked by the name `db` behind your
+  back. The feature's `db` must be a type the factories accept, and all
+  factories must take the same type — both are compile errors (`.infra()`
+  and `repos()`), and the first is a runtime error too. `entrypointOnly`
+  keeps `db` out of the usecases' deps: entrypoints open transactions,
+  usecases take `tx`.
+- **`txRepos(factories)`** is the same store for a scope that owns its
+  transactions: the published `repos` has `withTx(tx)` only, so
+  `repos.highlights` is a compile error and every query runs inside a
+  transaction an entrypoint opened.
 - **Private by default.** The feature's handlers and usecases see `repos`;
   other features do not. `dot explain` draws
   `highlights → highlights/repos → database`.
@@ -290,10 +299,12 @@ A PGlite database is not the app's node-postgres type, so it cannot stand in
 for `database.provides.db` in a typed `fake(...)`; boot the app on the
 `pglite` driver instead.
 
-### `advisoryLocks(handle, { namespace })` — one replica at a time
+### `advisoryLocks({ namespace })` — one replica at a time
 
 ```ts
-defineFeature('clustering').infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' }));
+defineFeature('clustering')
+  .needs({ db: entrypointOnly(database.provides.db) })
+  .infra(advisoryLocks({ namespace: 'avocabo' }));
 // then: schedules(core, [{ name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler }])
 ```
 

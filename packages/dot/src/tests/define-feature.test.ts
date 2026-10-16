@@ -132,7 +132,7 @@ const effects = <C extends AnyFeatureCore>(
 
 /* ---- feature.ts ---- */
 
-const digestDeps = defineFeature('digest').needs({ plans: billing.provides.entitlements }).infra(store, mailer);
+const digestDeps = defineFeature('digest').needs({ db: database.provides.db, plans: billing.provides.entitlements }).infra(store, mailer);
 const digestLogic = digestDeps.usecases({ preview, sendDue });
 
 /** entrypoints/procedures.ts: a factory over the logic stage (`import type` in a real app), resolving the handles per request. */
@@ -206,11 +206,11 @@ describe('the chain: each step typed from the earlier ones', () => {
     expectTypeOf<HandlerContext>().toHaveProperty('mailer');
     expectTypeOf<HandlerContext>().toHaveProperty('plans');
     expectTypeOf<HandlerContext['store']>().toEqualTypeOf<Store>();
-    // @ts-expect-error -- `db` is the store's need, not the feature's: it never reaches a handler.
-    expectTypeOf<HandlerContext['db']>().toBeNever();
+    // `db` is the feature's own need (the store takes it from the feature), so a handler sees it too.
+    expectTypeOf<HandlerContext['db']>().toEqualTypeOf<Db>();
     expectTypeOf<DepsOf<typeof digestLogic>['usecases']>().toEqualTypeOf<DigestUsecases>();
     // Before `.usecases()`, `DepsOf` is what a usecase may ask for: needs + infra, and no `usecases` yet.
-    expectTypeOf<keyof DepsOf<typeof digestDeps>>().toEqualTypeOf<'plans' | 'store' | 'stats' | 'mailer'>();
+    expectTypeOf<keyof DepsOf<typeof digestDeps>>().toEqualTypeOf<'db' | 'plans' | 'store' | 'stats' | 'mailer'>();
   });
 
   it('rejects steps out of order at compile time', () => {
@@ -227,12 +227,12 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('accepts empty steps without widening the later checks', () => {
-    const empty = defineFeature('x').needs({}).infra(store).usecases({}).provides({}).entrypoints(rpc({}, {}));
+    const empty = defineFeature('x').needs({ db: database.provides.db }).infra(store).usecases({}).provides({}).entrypoints(rpc({}, {}));
     expect(empty.plugins().map(p => p.name)).toEqual(['x/store', 'x']);
   });
 
   it('rejects usecases that ask for what neither needs nor infra provide', () => {
-    const lean = defineFeature('x').needs({ plans: billing.provides.entitlements }).infra(store);
+    const lean = defineFeature('x').needs({ db: database.provides.db, plans: billing.provides.entitlements }).infra(store);
     const unused = () => {
       // @ts-expect-error -- `queue` is neither a need nor an infra service
       lean.usecases({ needsQueue: (deps: { queue: unknown }) => deps });
@@ -246,7 +246,7 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('names the usecase and the missing dep in the error', () => {
-    const lean = defineFeature('x').infra(store);
+    const lean = defineFeature('x').needs({ db: database.provides.db }).infra(store);
     type Arg = Parameters<typeof lean.usecases<{ sendDue: typeof sendDue }>>[0];
     expectTypeOf<Arg['DOT: a usecase asks for a dep the feature does not provide']>().toEqualTypeOf<{
       readonly sendDue: 'mailer';
@@ -256,6 +256,7 @@ describe('the chain: each step typed from the earlier ones', () => {
 
   it('accepts factories that ask for a subset of the deps, or for nothing', async () => {
     const lean = defineFeature('lean')
+      .needs({ db: database.provides.db })
       .infra(store)
       .usecases({ raw: ({ store }: { store: Store }) => store.pendingFor, ping: () => () => 'pong' })
       .provides({ lean: ({ usecases }) => usecases })
@@ -283,6 +284,7 @@ describe('compilation into kernel units', () => {
 
   it('keeps private keys private: two features may each have a `store`', async () => {
     const other = defineFeature('other')
+      .needs({ db: database.provides.db })
       .infra(store)
       .provides({ n: ({ stats }) => stats })
       .entrypoints();
@@ -294,7 +296,7 @@ describe('compilation into kernel units', () => {
   it('puts every edge in the manifest and in `dot explain`: feature → private infra → app infra', async () => {
     const app = await boot(digest);
     const unit = (name: string) => app.manifest.plugins.find(p => p.name === name);
-    expect(unit('digest')?.dependencies).toEqual(['entitlements', 'digest.store', 'digest.stats', 'digest.mailer']);
+    expect(unit('digest')?.dependencies).toEqual(['db', 'entitlements', 'digest.store', 'digest.stats', 'digest.mailer']);
     expect(unit('digest/mailer')?.dependencies).toEqual(['digest.store']);
     expect(unit('digest/store')?.dependencies).toEqual(['db']);
     let text = '';

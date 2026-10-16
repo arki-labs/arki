@@ -26,7 +26,8 @@ const outbox = plugin({
   provides: { outbox: ({ db }) => ({ pending: () => db.rows }) },
 });
 
-const base = defineFeature('digest').infra(outbox);
+/** The feature names the database the outbox binds; a bound infra need must match the feature's own. */
+const base = defineFeature('digest').needs({ db: database.provides.db }).infra(outbox);
 const core = base.usecases({
   sendDue:
     ({ outbox }: DepsOf<typeof base>) =>
@@ -67,8 +68,8 @@ describe('schedules(core, defs)', () => {
         },
       },
     ]);
-    // @ts-expect-error -- `db` is the outbox's need, not the feature's
-    schedules(core, [{ name: 'leaky', every: '1m', handler: ({ db }) => db }]);
+    // @ts-expect-error -- `ledger` belongs to another feature, not to this core
+    schedules(core, [{ name: 'leaky', every: '1m', handler: ({ ledger }) => ledger }]);
     expect(true).toBe(true);
   });
 
@@ -107,6 +108,49 @@ describe('composeSchedules over both feature forms', () => {
       { status: 'ran', value: 'closed' },
     ]);
     // @ts-expect-error -- no feature declares this name
+    void client.trigger('nope');
+    await app.dispose();
+  });
+});
+
+/** `digest.cleanup`: a child with its own schedule, mounted through its parent only. */
+const purged = (): string => 'purged';
+const cleanupCore = defineFeature('digest.cleanup').usecases({ purge: () => purged });
+const cleanup = cleanupCore.entrypoints(
+  schedules(cleanupCore, [{ name: 'purge-old', every: '1h', handler: ({ usecases }) => usecases.purge() }]),
+);
+const parentCore = defineFeature('digest')
+  .needs({ db: database.provides.db })
+  .infra(outbox)
+  .features(cleanup)
+  .usecases({ sendDue: ({ outbox }: DepsOf<typeof base>) => () => `sent ${outbox.pending()}` });
+const parent = parentCore.entrypoints(
+  schedules(parentCore, [{ name: 'send-digest', cron: '*/15 * * * *', handler: ({ usecases }) => usecases.sendDue() }]),
+);
+
+const bootNested = () =>
+  defineApp('nested').infra(database).features([parent]).entrypoints(schedule({ clock: 'host' })).start();
+
+describe('nested features', () => {
+  it("runs the child's schedule once, under the child's name in the manifest", async () => {
+    const app = await bootNested();
+    expect(app.services.scheduler.names.filter(name => name === 'purge-old')).toEqual(['purge-old']);
+    expect(app.manifest.actions.find(action => action.id === 'purge-old.fire')).toMatchObject({
+      binding: 'schedule',
+      plugin: 'digest.cleanup',
+    });
+    await expect(app.services.scheduler.trigger('purge-old')).resolves.toMatchObject({ value: 'purged' });
+    await app.dispose();
+  });
+
+  it('composeSchedules over the parent alone knows the child names, typed from the child handler', async () => {
+    const app = await bootNested();
+    const client = composeSchedules([parent], app.services.scheduler);
+    const purged = await client.trigger('purge-old');
+    if (purged.status === 'ran') expectTypeOf(purged.value).toEqualTypeOf<string>();
+    expect(purged).toMatchObject({ status: 'ran', value: 'purged' });
+    await expect(client.trigger('send-digest')).resolves.toMatchObject({ value: 'sent 3' });
+    // @ts-expect-error -- no feature in the tree declares this name
     void client.trigger('nope');
     await app.dispose();
   });

@@ -2,21 +2,22 @@
  * `repos()` — a feature's repositories as one private infra plugin.
  *
  * These tests pin what the builder and the apps rely on: the set is built
- * once per boot and bound to the database the handle names (not "whatever is
- * called db"); `withTx` rebinds to a real Drizzle transaction, nested ones
- * included; `withTx` is reserved; cross-feature readers keep `this`; and
- * tests replace the whole set with fakes that type-check. PGlite throughout.
+ * once per boot and bound to the database the feature names in `.needs()`
+ * (not "whatever is called db"); `withTx` rebinds to a real Drizzle
+ * transaction, nested ones included; `withTx` is reserved; cross-feature
+ * readers keep `this`; `txRepos` publishes `withTx` only; and tests replace
+ * the whole set with fakes that type-check. PGlite throughout.
  */
 import { defineApp, rename } from '@arki/dot';
 import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import type { Provided } from '@arki/dot/plugin';
 import { defineRelations, eq, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import type { Repos } from './dot.js';
-import { DB_PLUGIN_ERROR_CODES, db, reader, repos } from './dot.js';
+import type { Repos, TxRepos } from './dot.js';
+import { DB_PLUGIN_ERROR_CODES, advisoryLocks, db, reader, repos, txRepos } from './dot.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 const notes = pgTable('notes', { id: text('id').primaryKey(), body: text('body').notNull() });
@@ -57,9 +58,9 @@ const factories = {
   },
   counts: createCountRepository,
 };
-const repository = repos(database.provides.db, factories);
+const repository = repos(factories);
 
-const base = defineFeature('notes').infra(repository);
+const base = defineFeature('notes').needs({ db: database.provides.db }).infra(repository);
 type Deps = DepsOf<typeof base>;
 const core = base.usecases({
   write:
@@ -109,10 +110,10 @@ describe('repos(): boot and wiring', () => {
     }
   });
 
-  it('binds to the database the handle names — a second database is never picked by accident', async () => {
+  it('binds to the database the feature needs — a second database is never picked by accident', async () => {
     const reports = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
-    const reportRepos = repos(reports.provides.reportsDb, { counts: createCountRepository });
-    const statsBase = defineFeature('stats').infra(reportRepos);
+    const reportRepos = repos({ counts: createCountRepository });
+    const statsBase = defineFeature('stats').needs({ db: reports.provides.reportsDb }).infra(reportRepos);
     const stats = statsBase
       .usecases({ count: ({ repos }: DepsOf<typeof statsBase>) => () => repos.counts.count() })
       .entrypoints();
@@ -128,21 +129,89 @@ describe('repos(): boot and wiring', () => {
     }
   });
 
-  it('refuses a database the factories do not take, and factories that disagree', () => {
-    const vectors = repos(database.provides.db, { a: (handle: Database) => ({ handle }) });
+  it('refuses a feature whose db the factories do not take, and factories that disagree', () => {
+    const vectors = repos({ a: (handle: Db & { readonly vector: true }) => ({ handle }) });
     expectTypeOf(vectors.provides.repos).not.toBeNever();
-    // @ts-expect-error the handle's database is not `Db & { vector: true }`
-    repos(database.provides.db, { a: (handle: Db & { readonly vector: true }) => ({ handle }) });
+    // @ts-expect-error the feature's db is not `Db & { vector: true }`
+    defineFeature('vectors').needs({ db: database.provides.db }).infra(vectors);
+    // @ts-expect-error a feature with no `db` cannot host the store — and the same refusal at runtime
+    expect(() => defineFeature('bare').infra(repository)).toThrow(/needs "db", which the feature does not declare/);
     // @ts-expect-error `b` wants a stricter database than `a`
-    repos(database.provides.db, { a: (handle: Database) => ({ handle }), b: (handle: Db & { vector: true }) => ({ handle }) });
+    repos({ a: (handle: Database) => ({ handle }), b: (handle: Db & { vector: true }) => ({ handle }) });
   });
 
   it('reserves withTx, at compile time and at runtime', () => {
     const withTx = (handle: Database) => ({ handle });
     // @ts-expect-error withTx is the rebinding helper, not a repository name
-    expect(() => repos(database.provides.db, { withTx })).toThrow(
-      expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }),
-    );
+    expect(() => repos({ withTx })).toThrow(expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }));
+    // @ts-expect-error same rule for the transaction-only store
+    expect(() => txRepos({ withTx })).toThrow(expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }));
+  });
+});
+
+describe('txRepos(): repositories only inside a transaction', () => {
+  const store = txRepos(factories);
+  const scopedBase = defineFeature('ledger').needs({ db: entrypointOnly(database.provides.db) }).infra(store);
+  type ScopedDeps = DepsOf<typeof scopedBase>;
+  const ledger = scopedBase
+    .usecases({
+      write:
+        ({ repos }: ScopedDeps) =>
+        (tx: Transaction, id: string, body: string) =>
+          repos.withTx(tx).notes.add(id, body),
+      count:
+        ({ repos }: ScopedDeps) =>
+        (tx: Transaction) =>
+          repos.withTx(tx).counts.count(),
+    })
+    .entrypoints();
+
+  it('publishes withTx and nothing else; usecases never see the db', () => {
+    expectTypeOf<Provided<typeof store.provides.repos>>().toEqualTypeOf<TxRepos<typeof factories>>();
+    // @ts-expect-error no database-bound set: `repos.notes` does not exist
+    scopedBase.usecases({ bad: ({ repos }: ScopedDeps) => () => repos.notes });
+    // @ts-expect-error `db` is entrypoint-only: a usecase cannot open its own transaction
+    scopedBase.usecases({ bad: ({ db }: { db: Db }) => () => db });
+    expectTypeOf<keyof ScopedDeps>().toEqualTypeOf<'repos'>();
+  });
+
+  it('a rollback undoes the writes made through withTx(tx)', async () => {
+    const app = await defineApp('ledger-app').infra(database).features([ledger]).start();
+    try {
+      await createTable(app.services.db);
+      const usecases = app.services['ledger.usecases'];
+      const set = app.services['ledger.repos'];
+      expect(Object.keys(set)).toEqual(['withTx']);
+      await expect(
+        app.services.db.transaction(async tx => {
+          await usecases.write(tx, 'l1', 'inside');
+          expect(await usecases.count(tx)).toBe(1);
+          throw new Error('roll back');
+        }),
+      ).rejects.toThrow('roll back');
+      expect(await app.services.db.transaction(tx => usecases.count(tx))).toBe(0);
+    } finally {
+      await app.dispose();
+    }
+  });
+});
+
+describe('advisoryLocks(): bound to the feature\'s db', () => {
+  it('is private to the feature and needs the db the feature declares', async () => {
+    const locks = advisoryLocks({ namespace: 'notes' });
+    const locking = defineFeature('locking').needs({ db: database.provides.db }).infra(locks).usecases({}).entrypoints();
+    const configured = defineApp('locking').infra(database).features([locking]).configure();
+    const byName = new Map(configured.manifest.plugins.map(p => [p.name, p]));
+    expect(byName.get('locking/locks')?.provides).toEqual(['locking.locks']);
+    expect(byName.get('locking/locks')?.dependencies).toEqual(['db']);
+    // @ts-expect-error a feature with no `db` cannot host the locks
+    expect(() => defineFeature('bare').infra(locks)).toThrow(/needs "db", which the feature does not declare/);
+    const app = await defineApp('locking-app').infra(database).features([locking]).start();
+    try {
+      expect(typeof app.services['locking.locks'].tryRun).toBe('function');
+    } finally {
+      await app.dispose();
+    }
   });
 });
 

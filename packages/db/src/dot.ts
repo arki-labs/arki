@@ -57,7 +57,7 @@ import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
-import type { EmptyShape, Plugin, Token } from '@arki/dot/plugin';
+import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import { plugin, service, DotPluginError } from '@arki/dot/plugin';
 
 import type { PgliteInitOptions } from './runtime-local.js';
@@ -288,35 +288,13 @@ function bindAll<F extends RepoFactories>(factories: F, database: DatabaseOf<F>)
 }
 
 /**
- * A feature's repositories as one infra plugin: built once at boot, bound to
- * the database the handle names, published as `repos`. In the feature chain
- * it becomes private (`highlights.repos`), and `dot explain` draws
- * `highlights → highlights/repos → database`.
- *
- * - The database is explicit: pass the handle (`database.provides.db`, or a
- *   second database's handle). Its type must be one the factories accept —
- *   a compile error otherwise. Nothing is chosen by name behind your back.
- * - `withTx` is reserved (compile error and `ARKI_DB_PLUGIN_E002`).
- * - Tests replace the whole set: `feature.override({ repos })` takes a full
- *   `Repos<F>`. See the README for fakes that type-check.
- *
- * @example
- * ```ts
- * // features/highlights/infra/repository.ts
- * export const repository = repos(database.provides.db, {
- *   highlights: (db: Database) => new HighlightRepository(db),
- *   collections: createCollectionRepository,
- * });
- * // feature.ts
- * defineFeature('highlights').infra(repository).usecases({
- *   list: ({ repos }: Deps) => (itemId: ItemId) => repos.highlights.listByItem(itemId),
- * });
- * ```
+ * The `repos` service of a transaction-owning scope: `withTx(tx)` only. There
+ * is no database-bound set to call by mistake, so every query runs inside a
+ * transaction an entrypoint opened. See `txRepos()`.
  */
-export function repos<K extends string, const F extends RepoFactories>(
-  database: Token<NoInfer<DatabaseOf<F>>, K>,
-  factories: F & SameDatabase<F> & NoWithTx,
-) {
+export type TxRepos<F extends RepoFactories> = { withTx(tx: DatabaseOf<F>): RepoSet<F> };
+
+function refuseReservedRepoName(factories: RepoFactories): void {
   if (Object.hasOwn(factories, 'withTx')) {
     throw new DotPluginError({
       code: DB_PLUGIN_ERROR_CODES.reservedRepoName,
@@ -325,13 +303,71 @@ export function repos<K extends string, const F extends RepoFactories>(
       docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e002',
     });
   }
+}
+
+/**
+ * A feature's repositories as one infra plugin: built once at boot, bound to
+ * the feature's `db`, published as `repos`. In the feature chain it becomes
+ * private (`highlights.repos`), and `dot explain` draws
+ * `highlights → highlights/repos → database`.
+ *
+ * - The plugin needs `db` unbound (`DatabaseOf<F>`, read off the factories).
+ *   The feature declares which database that is: `.needs({ db: database.provides.db })`
+ *   (or a second database's handle, `.needs({ db: reports.provides.reportsDb })`).
+ *   A feature that declares no `db`, or one of another type, fails at `.infra()`.
+ *   Nothing is chosen by name behind your back.
+ * - `withTx` is reserved (compile error and `ARKI_DB_PLUGIN_E002`).
+ * - Tests replace the whole set: `feature.override({ repos })` takes a full
+ *   `Repos<F>`. See the README for fakes that type-check.
+ *
+ * @example
+ * ```ts
+ * // features/highlights/infra/repository.ts
+ * export const repository = repos({
+ *   highlights: (db: Database) => new HighlightRepository(db),
+ *   collections: createCollectionRepository,
+ * });
+ * // feature.ts
+ * defineFeature('highlights')
+ *   .needs({ db: entrypointOnly(database.provides.db) })
+ *   .infra(repository)
+ *   .usecases({ list: ({ repos }: Deps) => (itemId: ItemId) => repos.highlights.listByItem(itemId) });
+ * ```
+ */
+export function repos<const F extends RepoFactories>(factories: F & SameDatabase<F> & NoWithTx) {
+  refuseReservedRepoName(factories);
   return plugin({
     name: 'repos',
-    // The handle is the need: the kernel orders this plugin after the database
-    // that publishes it, and the app builder checks its type.
-    needs: { db: database },
+    // Unbound: the feature binds `db` to its own handle at `.infra()`, and the
+    // kernel orders this plugin after the database that publishes it.
+    needs: { db: service<DatabaseOf<F>>() },
     provides: {
       repos: ({ db }): Repos<F> => ({ ...bindAll(factories, db), withTx: (tx: DatabaseOf<F>) => bindAll(factories, tx) }),
+    },
+  });
+}
+
+/**
+ * `repos()` for a scope that owns its transactions: the published `repos`
+ * has `withTx(tx)` and nothing else. Pair it with
+ * `.needs({ db: entrypointOnly(database.provides.db) })`: entrypoints open the
+ * transaction, usecases take `tx`, and no usecase can reach a database-bound
+ * repository — `repos.highlights` is a compile error.
+ *
+ * @example
+ * ```ts
+ * export const store = txRepos({ digests: (tx: Transaction) => new DigestRepository(tx) });
+ * // usecases/run.ts
+ * const run = ({ repos }: Deps) => (tx: Transaction, id: DigestId) => repos.withTx(tx).digests.get(id);
+ * ```
+ */
+export function txRepos<const F extends RepoFactories>(factories: F & SameDatabase<F> & NoWithTx) {
+  refuseReservedRepoName(factories);
+  return plugin({
+    name: 'repos',
+    needs: { db: service<DatabaseOf<F>>() },
+    provides: {
+      repos: (): TxRepos<F> => ({ withTx: (tx: DatabaseOf<F>) => bindAll(factories, tx) }),
     },
   });
 }
@@ -377,25 +413,24 @@ export function reader<R extends object, const M extends readonly MethodKeys<R>[
 /* ------------------------------------------------------------------ */
 
 /**
- * PostgreSQL advisory locks on the database the handle names, published as
- * `locks`. `schedules(core, [{ …, lock: true }])` from `@arki/schedule/dot`
- * uses it to keep a job to one replica at a time, for as long as the job runs.
+ * PostgreSQL advisory locks on the feature's `db`, published as `locks`.
+ * `schedules(core, [{ …, lock: true }])` from `@arki/schedule/dot` uses it to
+ * keep a job to one replica at a time, for as long as the job runs. The
+ * feature declares the database: `.needs({ db: database.provides.db })`.
  *
  * @example
  * ```ts
  * defineFeature('clustering')
- *   .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' }))
+ *   .needs({ db: entrypointOnly(database.provides.db) })
+ *   .infra(advisoryLocks({ namespace: 'avocabo' }))
  *   .usecases({ assign })
  *   .entrypoints(schedules(core, [{ name: 'cluster-assign', cron: '*\/5 * * * *', lock: true, handler }]));
  * ```
  */
-export function advisoryLocks<K extends string>(
-  database: Token<LockableDb, K>,
-  options: { readonly namespace: string },
-) {
+export function advisoryLocks(options: { readonly namespace: string }) {
   return plugin({
     name: 'locks',
-    needs: { db: database },
+    needs: { db: service<LockableDb>() },
     provides: { locks: ({ db }) => createAdvisoryLocks(db, options) },
   });
 }

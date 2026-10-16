@@ -29,7 +29,7 @@ import type { z } from 'zod';
 
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
 import type { EmptyShape, Plugin, Service } from '@arki/dot/plugin';
-import { driven, driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
+import { driven, driver, entrypointsOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { Journal, JournalDefinitions } from './api.js';
@@ -344,13 +344,16 @@ function isProjectionsUnit(unit: object): unit is { readonly handlers: unknown }
  * `journal` slice (`journalHandlers` in `use`, or `journalEffects` in
  * `.entrypoints`) and any `journalProjections` unit in a chain feature's
  * `.infra`. Read from the feature value, so it works before anything boots.
+ * Only the feature's OWN units: the app mounts every nested child as its own
+ * node, so reading a parent's `plugins()` (which lists the children's units
+ * too) would register each child projection twice.
  */
 function declaredBy(feature: MountedFeature): readonly unknown[] {
   const declared: unknown[] = [];
   const slice = entrypointsOf(feature).find(item => item.key === 'journal');
   if (slice !== undefined) declared.push('handlers' in slice ? slice.handlers : undefined);
   if ('plugins' in feature) {
-    for (const unit of feature.plugins()) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
+    for (const unit of ownUnits(feature)) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
   }
   return declared;
 }

@@ -10,6 +10,8 @@ const NEW_RULE = 'arki-feature-layers/usecase-runtime-imports';
 const BACK = 'arki-feature-layers/feature-runtime-imports';
 const RESTRICT = 'no-restricted-imports';
 const CALLS_USECASES = 'arki-feature-layers/procedures-call-usecases';
+const INFRA = 'arki-feature-layers/infra-runtime-imports';
+const BOUNDARY = 'arki-feature-layers/feature-boundaries';
 
 const linter = new Linter();
 
@@ -141,4 +143,69 @@ test('a procedure may not runtime-import infra; import type is fine', () => {
 
 test('usecases may read repos: the procedures rule only covers entrypoints/procedures.ts', () => {
   assert.deepEqual(ruleIds(USECASE, `export const f = ({ repos }) => () => repos.push.find();`), []);
+});
+
+test('an infra plugin declares its needs unbound: no runtime import of the app db/kv modules or any feature.ts', () => {
+  const store = 'src/features/demo/infra/store.ts';
+  assert.deepEqual(ruleIds(store, `import { database } from '../../../db';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import { cache } from '../../../kv';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import type { Database } from '../../../db';`), []);
+  assert.deepEqual(ruleIds(store, `import { demoLogic } from '../feature';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import { otherLogic } from '../../other/feature';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import type { Repos } from '../../other/feature';`), []);
+  assert.deepEqual(ruleIds(store, `import { run } from '../usecases/run';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import { plugin, service } from '@arki/dot/plugin';`), []);
+});
+
+test('a nested child is a feature root of its own: every layer rule applies there first', () => {
+  const child = 'src/features/digest/features/compile/usecases/compile-for.ts';
+  assert.deepEqual(ruleIds(child, `import { ranker } from '../infra/ranker';`), [NEW_RULE]);
+  assert.deepEqual(ruleIds(child, `import { c } from '../entrypoints/rpc';`), [RESTRICT]);
+  assert.deepEqual(ruleIds(child, `import { compileLogic } from '../feature';`), [BACK]);
+  assert.deepEqual(ruleIds('src/features/digest/features/compile/infra/ranker.ts', `import { database } from '../../../../../db';`), [INFRA]);
+  assert.deepEqual(ruleIds('src/features/digest/features/compile/entrypoints/rpc.ts', `import { x } from '../usecases/compile-for';`), [RESTRICT]);
+});
+
+test("a parent's contract mounts its children's contracts; the app contract still mounts the top-level ones", () => {
+  const parent = 'src/features/digest/entrypoints/rpc.ts';
+  assert.deepEqual(ruleIds(parent, `import { compileRpcContract } from '../features/compile/entrypoints/rpc';`), []);
+  assert.deepEqual(ruleIds(parent, `import { compileLogic } from '../features/compile/feature';`), [RESTRICT]);
+  assert.deepEqual(ruleIds('src/rpc.ts', `import { digestRpcContract } from './features/digest/entrypoints/rpc';`), []);
+});
+
+test('features keep to their own layers: another feature is reached through feature.ts, its contract or its model', () => {
+  assert.deepEqual(ruleIds(USECASE, `import { run } from '../../other/usecases/run';`), [BOUNDARY]);
+  assert.deepEqual(ruleIds(USECASE, `import type { Run } from '../../other/usecases/run';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { otherLogic } from '../../other/feature';`), []);
+  // (From a usecase, any entrypoints/ import is the usecases layer rule's business; a procedure may mount another contract.)
+  assert.deepEqual(ruleIds(PROCEDURES, `import { otherRpcContract } from '../../other/entrypoints/rpc';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { ItemId } from '../../other/model/ids';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { procedures } from '../../other/entrypoints/procedures';`).sort(), [BOUNDARY, RESTRICT].sort());
+  assert.deepEqual(ruleIds('src/features/demo/feature.ts', `import { store } from '../other/infra/store';`), [BOUNDARY]);
+  assert.deepEqual(ruleIds('src/features/demo/feature.ts', `import { otherLogic } from '../other/feature';`), []);
+  // A parent never reaches into a child's layers either; it mounts the child's feature.ts.
+  assert.deepEqual(ruleIds(USECASE, `import { compileFor } from '../features/compile/usecases/compile-for';`), [BOUNDARY]);
+  assert.deepEqual(ruleIds('src/features/demo/feature.ts', `import { compileLogic } from './features/compile/feature';`), []);
+});
+
+test("a nested child may use an ancestor's infra, never a cousin's", () => {
+  const child = 'src/features/digest/features/compile/infra/ranker.ts';
+  assert.deepEqual(ruleIds(child, `import { bindRepos } from '../../../infra/store';`), []);
+  assert.deepEqual(ruleIds(child, `import { mailer } from '../../deliver/infra/mailer';`), [BOUNDARY]);
+  assert.deepEqual(ruleIds('src/features/digest/features/compile/features/rank/feature.ts', `import { bindRepos } from '../../../../infra/store';`), []);
+  // The usecases layer rule still holds at depth: a usecase runtime-imports no infra, an ancestor's included.
+  assert.deepEqual(ruleIds('src/features/digest/features/compile/features/rank/usecases/top.ts', `import { bindRepos } from '../../../../../infra/store';`), [NEW_RULE]);
+});
+
+test('the boundary rule reads dynamic imports, template literals included; computed ones are skipped', () => {
+  assert.deepEqual(ruleIds(USECASE, `export const f = async () => import('../../other/usecases/run');`), [BOUNDARY]);
+  assert.deepEqual(ruleIds(USECASE, 'export const f = async () => import(`../../other/usecases/run`);'), [BOUNDARY]);
+  assert.deepEqual(ruleIds(USECASE, 'export const f = async (n) => import(`../../other/usecases/${n}`);'), []);
+  assert.deepEqual(ruleIds(USECASE, `export type R = typeof import('../../other/usecases/run');`), []);
+});
+
+test('legacy shapes wait to convert: an importer outside a layer, or a target outside one, is not checked', () => {
+  assert.deepEqual(ruleIds('src/features/demo/services/x.ts', `import { run } from '../../other/usecases/run';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { service } from '../../other/service';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { helper } from '../../../lib/helper';`), []);
 });

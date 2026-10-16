@@ -44,7 +44,6 @@ import type { HandleEntries, ServicesBag } from './feature.js';
 import type { JsonObject } from './manifest.js';
 import type { ActionDeclaration, CtxOf, NeedsShape } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
-import { resolveNeeds } from './feature.js';
 import { toJsonObject } from './manifest.js';
 
 /** The least a request context carries for `bind`: the services bag the gateway built for this request. */
@@ -64,10 +63,13 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
  * Make the app's `bind` for its request context type, once:
  * `export const bind = needsMiddleware<RequestContext>()`.
  *
- * `bind(logic)` is an oRPC middleware. It resolves `logic.handles` from
- * `context.services` (missing key → `FEATURE_E005`, naming the alias) and
- * adds them to the context. Driven services such as `db` are not handles, so
- * they never reach a handler unless the feature itself needs them — the
+ * `bind(logic)` is an oRPC middleware. It reads the feature's resolved
+ * services — the one bag key `<name>.services` the feature unit publishes
+ * (needs, private infra, children's provides and usecases, by alias) — and
+ * adds them to the context. One key per feature, read by the feature's own
+ * name: no per-handle resolution, so a nested feature's remapped needs just
+ * work. A missing key → `FEATURE_E005`, naming the feature. Driven services
+ * such as `db` reach a handler only when the feature itself needs them — the
  * feature's store does, the procedure does not.
  *
  * An alias equal to a request-context key is a compile error at `bind(logic)`;
@@ -76,27 +78,39 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
  */
 export function needsMiddleware<Ctx extends RequestContextShape>() {
   const builder = os.$context<Ctx>();
-  return <H extends NeedsShape>(logic: { readonly handles: H } & ShadowGuard<Ctx, H>) =>
-    builder.middleware(({ context, next }) =>
-      next({
-        // Erasure seam: oRPC asks that new context keys agree with the current
-        // ones (`IntersectPick`). No alias is a request key — the guard above
-        // proves it — but TypeScript cannot see that through a generic `H`.
-        context: resolveNeeds(context.services, logic.handles) as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
-      }),
-    );
+  return <H extends NeedsShape>(logic: { readonly name: string; readonly handles: H } & ShadowGuard<Ctx, H>) =>
+    builder.middleware(({ context, next }) => {
+      const key = `${logic.name}.services`;
+      const services = context.services[key];
+      if (services === undefined) {
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.missingCapability,
+          message: `[feature] "${logic.name}": its services ("${key}") are not in the request context's bag.`,
+          remediation: "Spread providesOf(units) over the features' plugins() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
+        });
+      }
+      return next({
+        // Erasure seam: the kernel built this record from the unit's needs, which the
+        // chain typed as the feature's handles. oRPC asks that new context keys agree
+        // with the current ones (`IntersectPick`); no alias is a request key — the
+        // guard above proves it — but TypeScript cannot see that through a generic `H`.
+        context: services as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
+      });
+    });
 }
 
 /**
  * Shaped like the contract: a leaf is `(impl) => impl.<path>.handler(…)`, a group
- * is a nested object. `Router<C[K], never>` is oRPC's own "implements" check
- * for one procedure — same schemas — and `never` as the initial context
+ * is a nested object — or, for a mounted child feature, `() => child.router`,
+ * the child's whole router under the key the contract gives it.
+ * `Router<C[K], never>` is oRPC's own "implements" check for one procedure
+ * (or one subtree) — same schemas — and `never` as the initial context
  * accepts whatever context the app's implementer settled on.
  */
 export type ProcedureFactories<C, O> = {
   readonly [K in keyof C]: C[K] extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
     ? (implementer: O) => Router<C[K], never>
-    : ProcedureFactories<C[K], O>;
+    : ProcedureFactories<C[K], O> | (C[K] extends ContractRouter<Meta> ? (implementer: O) => Router<C[K], never> : never);
 };
 
 /** The router the factories build: each factory's return under its key. */
@@ -122,7 +136,10 @@ export type ContractKeysGuard<C, F> = [ExtraKeys<C, F>] extends [never]
  * `.router` are read from this descriptor, so `routerFor(rpcContract,
  * features)` finds the feature by its contract. Its actions (one per
  * procedure, `<feature>.<path>`) are named when the feature compiles, through
- * `actionsOf`.
+ * `actionsOf`. A subtree whose built router IS a declared child's router is
+ * the child's: the child names those actions itself, so they are skipped
+ * here. An inline group (`admin: impl => ({ … })`) has no child owner and
+ * keeps its actions.
  *
  * A usecase need not have a procedure (a cron, a webhook or a `provides`
  * handle may call it), and a procedure need not have a usecase: `rpc` checks
@@ -142,12 +159,28 @@ export function rpc<C extends ContractRouter<Meta>, O, const F extends Procedure
     kind: 'rpc',
     key: 'rpc',
     actions: [],
-    actionsOf: feature => procedures.map(procedure => rpcAction(feature, procedure)),
+    actionsOf: (feature, children = []) => {
+      const mounted = mountedPaths(router, new Set(children.map(child => child.router)));
+      return procedures
+        .filter(procedure => !mounted.some(prefix => procedure.path === prefix || procedure.path.startsWith(`${prefix}.`)))
+        .map(procedure => rpcAction(feature, procedure));
+    },
     contract,
     router,
     // The router is static: it is the same object before boot and after, so `resolve` just hands it back.
     resolve: () => router,
   };
+}
+
+/** The dotted paths in the built router whose value is a declared child's router — the child declares those actions. */
+function mountedPaths(router: object, childRouters: ReadonlySet<unknown>, path: readonly string[] = []): readonly string[] {
+  return Object.entries(router).flatMap(([key, value]: [string, unknown]) => {
+    const here = [...path, key];
+    if (childRouters.has(value)) return [here.join('.')];
+    // A procedure carries `~orpc`; only plain groups are walked.
+    if (typeof value === 'object' && value !== null && !('~orpc' in value)) return mountedPaths(value, childRouters, here);
+    return [];
+  });
 }
 
 /** Call every leaf factory with the implementer; a group (a plain object) recurses. */

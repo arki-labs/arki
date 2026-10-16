@@ -133,7 +133,8 @@ describe('http() plugin', () => {
       needs: { ordersDb: service<OrdersDb>() },
       provides: { store: ({ ordersDb }) => ({ all: () => ordersDb.list() }) },
     });
-    const base = defineFeature('orders').infra(store);
+    // The store needs `ordersDb` unbound; the feature names the handle once, in `.needs()`.
+    const base = defineFeature('orders').needs({ ordersDb: ordersDbPlugin.provides.ordersDb }).infra(store);
     const core = base.usecases({ list: ({ store }: DepsOf<typeof base>) => () => store.all() });
     const orderRoutes = (c: typeof core) =>
       coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });

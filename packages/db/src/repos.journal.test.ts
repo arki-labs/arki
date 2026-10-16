@@ -59,9 +59,9 @@ let handle: Db;
 let client: PGlite;
 const database = plugin({ name: 'database', provides: { db: (): Db => handle } });
 
-const repository = repos(database.provides.db, { accounts: (d: Database) => new AccountRepository(d) });
+const repository = repos({ accounts: (d: Database) => new AccountRepository(d) });
 
-const accountsBase = defineFeature('accounts').infra(repository);
+const accountsBase = defineFeature('accounts').needs({ db: database.provides.db }).infra(repository);
 type Deps = DepsOf<typeof accountsBase>;
 
 /** Open an account, then read it back through the repositories — inside the same transaction. */

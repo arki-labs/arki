@@ -11,7 +11,7 @@ import { authed } from '../orpc.js';
 export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
     impl.preview.use(authed).handler(({ context }) => {
-      // @ts-expect-error -- `db` is the store's need, not the feature's: it never reaches a handler
+      // `db` is entrypoint-only: a procedure may open a transaction with it; usecases never see it.
       void context.db;
       return context.usecases.preview(context.session.user.id);
     }),
