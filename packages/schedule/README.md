@@ -70,32 +70,61 @@ Cron still decides _when_; the core decides _with what_.
 ### One replica at a time: `lock`
 
 ```ts
-defineFeature('clustering')
-  .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' })) // from @arki/db/dot
-  .usecases({ assign });
+import { locks } from '@arki/lock/dot';
+import { pgLease } from '@arki/lock/pg/lease';
+
+// Once, in the app: the `locks` service that locked schedules read.
+defineApp('avocabo').use(
+  locks({
+    namespace: 'avocabo',
+    needs: { db: database.provides.db },
+    store: ({ db }) => pgLease(db, { ttl: '30s' }),
+  }),
+);
+
+// The feature needs `locks`, like any other service.
+const core = defineFeature('clustering').needs({ locks: service<Locker>() }).usecases({ assign });
 
 schedules(core, [
   { name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler: ({ usecases }) => usecases.assign() },
-  { name: 'cluster-batch', cron: '0 */4 * * *', lock: 'clusters', handler: ({ usecases }) => usecases.recluster() },
+  {
+    name: 'cluster-batch',
+    cron: '0 */4 * * *',
+    lock: { key: 'clusters', holdAtLeast: '5s' },
+    handler: ({ usecases }, run) => usecases.recluster({ signal: run.lock?.signal }),
+  },
 ]);
 ```
 
-- `lock: true` locks on the schedule name; `lock: 'key'` on that key (give
-  two jobs the same key to make them exclude each other).
-- The lock comes from the feature's `locks` service, typed by the tiny
-  `Locker` port: `{ tryRun(key, fn) → { ran: true, value } | { ran: false } }`.
-  `advisoryLocks` from `@arki/db/dot` implements it with a PostgreSQL advisory
-  lock held for as long as the handler runs; any other lock library can too. A schedule with
-  `lock` and no `locks` service is a compile error (and `ARKI_SCHEDULE_E009`
-  at boot for code that skips the types).
+- `lock` takes `true | string | { key?, holdAtLeast? }`. `true` locks on the
+  schedule name. A string, or `key`, locks on that key (give two jobs the same
+  key to make them exclude each other).
+- The lock comes from the feature's `locks` service, typed by the small
+  `Locker` port: `mutex(key).tryRun(fn, { holdAtLeast })` returns
+  `{ ran: true, value }` or `{ ran: false }`. `locks()` from `@arki/lock/dot`
+  provides it, and so does the `Locks` that `createLocks` returns. A schedule
+  with `lock` and no `locks` service is a compile error (and
+  `ARKI_SCHEDULE_E009` at boot for code that skips the types).
+- The lock is held while the handler runs, not for a fixed time. There is no
+  key-value lease any more: that path is gone.
+- `holdAtLeast` defaults to `1s`. The lock stays held at least that long after
+  the job started, so a replica with a slow clock cannot start a sub-second
+  job again. `holdAtLeast: 0` turns it off. `trigger()` and the shutdown drain
+  wait for the release, so a locked run takes at least 1 s.
+- The handler's second argument has `run.lock`: `{ signal, fence }`. `signal`
+  aborts when the lock is known lost, so a long job can stop. `fence` is the
+  store's fencing token, or `undefined` when the store has none.
 - A run that finds the lock held reports `skipped-lock` and the handler never
-  starts; a lock that cannot be taken reports `lock-failed`; a handler that
-  throws inside the lock is still `handler-failed`.
-- These schedules skip the driver's KV lease (`schedule({ lock })`): a lease
-  expires after a fixed time, which a long job outlives.
-- The policy is in the manifest: the schedule's action meta carries
-  `locked: true` and `lock: '<key>'`, so `dot explain` shows which jobs
-  exclude each other. `overlap: 'skip'` still guards the process itself.
+  starts. A lock that cannot be taken reports `lock-failed`. A handler that
+  throws inside the lock is still `handler-failed`. A lock lost after the
+  handler finished (during the hold) keeps the handler's result, counts in
+  `lockLost` and logs a warning.
+- A failed release after a good run is not a schedule result. `@arki/lock`
+  logs it and counts it in `Locks.counters.releaseErrors`.
+- The policy is in the manifest. `dot explain` shows `lock <key>`, or
+  `NO LOCK` for an unlocked schedule. After boot, `dot doctor` shows the full
+  line: `lock <ns>:<key>  [<store> · <kind> · <scope> · crash→<bound> · fence <level> · hold≥1s]`.
+  `overlap: 'skip'` still guards the process itself.
 
 ### Feature-owned schedules: `schedules(needs, defs)`
 
@@ -213,10 +242,10 @@ No `node:` import, no auth, no logging: it runs on every runtime.
 
 ## In-process schedules
 
-Use these for single-replica processes by default. For multi-replica
-deployments, pass a KV lock handle that supports `setIfNotExists`; each
-fire takes a short TTL lock and skips when another replica already ran the
-same schedule tick.
+Use these for single-replica processes by default. For several replicas, give
+each job a `lock` (see "One replica at a time"). Without one, every replica
+runs every tick. `dot explain` prints `NO LOCK — runs on every replica` for
+such a schedule.
 
 ## Durable schedules
 
@@ -308,9 +337,9 @@ Checked against BullMQ 6.3 (`node_modules/bullmq/dist/esm`):
 
 ### Overlap and locks
 
-Durable runs never take the KV lock: BullMQ gives each tick's job to one
-worker. Feature schedules with `lock:` never take it either: they run under
-their own lock for the whole handler (see "One replica at a time" above). Each process runs at most one tick of a schedule at a time. A run
+Durable runs take no lock: BullMQ gives each tick's job to one worker.
+Feature schedules with `lock:` run under their own lock for the whole handler
+(see "One replica at a time" above). Each process runs at most one tick of a schedule at a time. A run
 that outlasts its interval can still overlap the next tick on another
 replica, because the next tick is queued when the current one starts.
 
@@ -323,6 +352,6 @@ Each run reports a `ScheduleRunResult` with one status:
 | `ran`             | The handler finished. `value` holds what it resolved to.                                                                                         |
 | `handler-failed`  | The handler threw. `cause` holds the error. Counted in `handlerFailures` and logged as an error. A durable run also marks its BullMQ job failed. |
 | `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process.                                                                      |
-| `skipped-lock`    | In process only: another replica holds the lock for this tick. Counted in `lockSkips`.                                                           |
-| `lock-failed`     | In process only: the lock store threw. `cause` holds the error. Counted in `lockErrors` and logged as an error; the tick is skipped.             |
+| `skipped-lock`    | In process only: another replica holds the lock for this tick. Counted in `lockContention`.                                                      |
+| `lock-failed`     | In process only: the lock store threw, or the lock was lost while the handler ran. `cause` holds the error. Counted in `lockFailures` (or `lockLost`) and logged as an error. |
 | `unavailable`     | The runtime was already stopped; nothing ran.                                                                                                    |
