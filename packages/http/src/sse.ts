@@ -18,10 +18,20 @@ const SSE_HEADERS = {
   'x-accel-buffering': 'no',
 } as const;
 
+/**
+ * Let the process exit while the heartbeat waits. Node and Bun return a timer
+ * object with `unref`; browsers, Deno's web API and Hermes return a number,
+ * which never holds a process open, so there is nothing to do.
+ */
+function unrefTimer(timer: unknown): void {
+  if (typeof timer === 'object' && timer !== null && 'unref' in timer && typeof timer.unref === 'function')
+    timer.unref();
+}
+
 export function sseResponse(iterable: AsyncIterable<unknown>, contract: ContractLike, signal: AbortSignal): Response {
   const encoder = new TextEncoder();
   const iterator = iterable[Symbol.asyncIterator]();
-  let heartbeat: NodeJS.Timeout | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   let finished = false;
 
   const cleanup = (): void => {
@@ -46,7 +56,7 @@ export function sseResponse(iterable: AsyncIterable<unknown>, contract: Contract
             controller.enqueue(encoder.encode(':keepalive\n\n'));
           }
         }, contract.heartbeatMs);
-        heartbeat.unref();
+        unrefTimer(heartbeat);
       }
       signal.addEventListener(
         'abort',

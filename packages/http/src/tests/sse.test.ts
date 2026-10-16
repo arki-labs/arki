@@ -122,4 +122,49 @@ describe('sse bindings', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(cleaned).toBe(true);
   });
+
+  // Browsers, Deno's web API and Hermes return a number from setInterval, not a
+  // Node timer object. The heartbeat must work there too, or every SSE route
+  // with `heartbeatMs` fails to open outside Node and Bun.
+  it('sends heartbeats where setInterval returns a number (browser, Deno, Hermes)', async () => {
+    const realSetInterval = globalThis.setInterval;
+    const realClearInterval = globalThis.clearInterval;
+    const running = new Map<number, ReturnType<typeof realSetInterval>>();
+    let nextId = 0;
+    Object.defineProperty(globalThis, 'setInterval', {
+      configurable: true,
+      value: (callback: () => void, ms: number): number => {
+        nextId += 1;
+        running.set(nextId, realSetInterval(callback, ms));
+        return nextId;
+      },
+    });
+    Object.defineProperty(globalThis, 'clearInterval', {
+      configurable: true,
+      value: (id: number): void => {
+        realClearInterval(running.get(id));
+        running.delete(id);
+      },
+    });
+
+    try {
+      const feed = route.sse('/beats', { id: 'beats', event: z.object({ n: z.number() }), heartbeatMs: 5 });
+      const engine = buildEngine([
+        routes().bind(feed, async function* () {
+          await new Promise(resolve => setTimeout(resolve, 40));
+          yield { n: 1 };
+        }),
+      ]);
+
+      const res = await engine.fetch(new Request(`${BASE}/beats`));
+      const text = await readAll(res);
+
+      expect(text).toContain(':keepalive\n\n');
+      expect(text.endsWith('data: {"n":1}\n\n')).toBe(true);
+      expect(running.size).toBe(0);
+    } finally {
+      Object.defineProperty(globalThis, 'setInterval', { configurable: true, writable: true, value: realSetInterval });
+      Object.defineProperty(globalThis, 'clearInterval', { configurable: true, writable: true, value: realClearInterval });
+    }
+  });
 });
