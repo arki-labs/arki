@@ -14,6 +14,7 @@ import { and, eq, gt, lte, sql } from 'drizzle-orm';
 
 import type { BeginResult, ResponseCache } from '@arki/http/idempotency';
 import { storedResponse } from '@arki/http/idempotency';
+import { parse } from '@arki/schema';
 
 import type { JournalTables } from './pg.js';
 import type { DbHandle } from './types.js';
@@ -74,7 +75,7 @@ export function responseCache(db: DbHandle, tables: Pick<JournalTables, 'receipt
         if (held === undefined) continue;
         if (held.input !== fingerprint) return 'conflict';
         if (held.response === null) return 'in-progress';
-        return { replay: storedResponse.parse(held.response) };
+        return { replay: parse(storedResponse, held.response) };
       }
       throw new Error(`journal: response cache key ${JSON.stringify(key)} kept changing while it was being claimed`);
     },

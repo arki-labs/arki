@@ -4,10 +4,11 @@
  * May import `api`, `fold`, `history`, `storage`, `transaction-guard` and leaf files.
  * Must not import `journal`, `command` or `worker`.
  */
-import type { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isUniqueViolation } from '@arki/db/errors';
+import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
 import type { History } from './history.js';
@@ -80,22 +81,28 @@ export function sortedByVersion<Row extends { readonly version: number }>(rows: 
 }
 
 /** What a write needs from the journal. */
-export type WriteDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = {
+export type WriteDeps<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+> = {
   readonly metaSchema: Meta;
   readonly tables: JournalTables;
   /** Inline projections only: they run inside the write. */
-  readonly projections: readonly Projection<z.output<Meta>, Tx>[];
+  readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   /** Async projections: the write only wakes the worker when a recorded event matches one. */
   readonly asyncProjections: readonly Pick<Projection, 'types' | 'entities'>[];
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
-  readonly effects: readonly Pick<Effect<z.output<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
+  readonly effects: readonly Pick<Effect<SchemaOutput<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'highestVersion' | 'assertLogSaysGone'>;
   /** Notified at commit with the seq range of every nonempty append. */
   readonly wakeChannel: string;
 };
 
-export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(deps: WriteDeps<Meta, Tx>) {
-  type MetaOut = z.output<Meta>;
+export function createWriter<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+>(deps: WriteDeps<Meta, Tx>) {
+  type MetaOut = SchemaOutput<Meta>;
   const { metaSchema, projections, asyncProjections, effects } = deps;
   const { events: eventsTable, jobs: jobsTable } = deps.tables;
   const { decodeStoredEvent, highestVersion, assertLogSaysGone } = deps.history;
@@ -192,7 +199,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
               id,
               `event "${event.type}" at version ${baseVersion + index + 1}`,
             );
-          const data: unknown = def.schema.parse(event.data);
+          const data: unknown = parse(def.schema, event.data);
           assertRoundTrips(def.schema, data, entity.kind, id, `event "${event.type}"`);
           return { data, schemaVersion: def.version };
         });
@@ -382,7 +389,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       entity,
       id,
       () => {
-        const meta = metaSchema.parse(input.meta);
+        const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
         assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
         return meta;
       },
@@ -405,7 +412,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       entity,
       id,
       () => {
-        const meta = metaSchema.parse(input.meta);
+        const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
         assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
         return meta;
       },
@@ -418,6 +425,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
   return { write, adopt, writeWithValidatedMeta };
 }
 
-export type Writer<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = ReturnType<
-  typeof createWriter<Meta, Tx>
->;
+export type Writer<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+> = ReturnType<typeof createWriter<Meta, Tx>>;

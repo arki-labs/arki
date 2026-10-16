@@ -6,6 +6,8 @@ import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { SchemaError } from '@arki/schema';
+
 import type { DbHandle, PendingOf } from './types.js';
 import { isJournalError, JournalError } from './errors.js';
 import { initJournal } from './journal.js';
@@ -347,7 +349,7 @@ describe('write', () => {
     const handBuilt: PendingOf<typeof OrderPaid> = { type: 'OrderPaid', data: { amount: -1 } };
     await expect(
       db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [handBuilt] })),
-    ).rejects.toBeInstanceOf(z.ZodError);
+    ).rejects.toBeInstanceOf(SchemaError);
     expect(await versions(id)).toEqual([1]);
   });
 

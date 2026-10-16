@@ -6,7 +6,8 @@
  */
 import { getTableColumns, getTableName, is, lt } from 'drizzle-orm';
 import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
-import { z } from 'zod';
+
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
 import type { EntityBuilder } from './entity.js';
@@ -34,6 +35,7 @@ import { defineEvent } from './event.js';
 import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
+import { isPlainObject } from './storage.js';
 import {
   createAdmin,
   createCatchUp,
@@ -44,13 +46,26 @@ import {
 } from './worker.js';
 import { createWriter } from './write.js';
 
-const emptyMeta = z.object({});
+/**
+ * The meta schema when `initJournal` gets none: a plain object in, `{}` out. Other
+ * keys are dropped, so nothing unchecked reaches the stored meta.
+ */
+const emptyMeta: StandardSchemaV1<Record<string, never>, Record<string, never>> = {
+  '~standard': {
+    version: 1,
+    vendor: 'arki',
+    validate: value =>
+      isPlainObject(value) ? { value: {} } : { issues: [{ message: 'meta must be a plain object' }] },
+  },
+};
 type EmptyMeta = typeof emptyMeta;
 
 function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
   function init(): JournalDefinitions<EmptyMeta, Tx, AppDb>;
-  function init<Meta extends z.ZodObject>(options: { readonly meta: Meta }): JournalDefinitions<Meta, Tx, AppDb>;
-  function init<Meta extends z.ZodObject>(options?: {
+  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
+    readonly meta: Meta;
+  }): JournalDefinitions<Meta, Tx, AppDb>;
+  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options?: {
     readonly meta?: Meta;
   }): JournalDefinitions<Meta, Tx, AppDb> | JournalDefinitions<EmptyMeta, Tx, AppDb> {
     return options?.meta === undefined
@@ -85,10 +100,12 @@ function hasIdColumn<Tbl extends EntityTable>(table: Tbl): table is Tbl & IdTabl
   return is(columns.id, PgColumn);
 }
 
-function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  metaSchema: Meta,
-): JournalDefinitions<Meta, Tx, AppDb> {
-  type MetaOut = z.output<Meta>;
+function createInit<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(metaSchema: Meta): JournalDefinitions<Meta, Tx, AppDb> {
+  type MetaOut = SchemaOutput<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
     table: Tbl,
@@ -147,18 +164,22 @@ function assertUniqueNames(
   }
 }
 
-function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
+function createJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(
   metaSchema: Meta,
   tables: JournalTables,
-  projections: readonly Projection<z.output<Meta>, Tx>[],
+  projections: readonly Projection<SchemaOutput<Meta>, Tx>[],
   /** An effect or a tap may still have needs (`services: 'worker'`): only the worker runs them, with its `services`. */
-  effects: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
-  taps: readonly Tap<z.output<Meta>, AppDb, Needs>[] = [],
+  effects: readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
+  taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = [],
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
   const eventsSchema = getTableConfig(tables.events).schema;
   const wakeChannel = eventsSchema === undefined ? 'journal_wake' : `${eventsSchema}_journal_wake`;
-  type MetaOut = z.output<Meta>;
+  type MetaOut = SchemaOutput<Meta>;
 
   assertUniqueNames('effect', effects);
   assertUniqueNames('projection', projections);
@@ -181,8 +202,8 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     history,
     wakeChannel,
   });
-  const commandHooks = createHookPoint<CommandHookContext<z.output<Meta>>>('command');
-  const effectHooks = createHookPoint<EffectHookContext<z.output<Meta>>>('effect');
+  const commandHooks = createHookPoint<CommandHookContext<SchemaOutput<Meta>>>('command');
+  const effectHooks = createHookPoint<EffectHookContext<SchemaOutput<Meta>>>('effect');
   const run = createCommandRunner<Meta, Tx>({
     metaSchema,
     writeWithValidatedMeta,

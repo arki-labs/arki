@@ -213,7 +213,7 @@ Rules:
 
 ### Find out why a write failed
 
-1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. A `ZodError`: input, event data or `meta` failed its schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
+1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. A `SchemaError` (from `@arki/schema`): input, event data or `meta` failed its schema; read its `issues`. A `SchemaRunError`: a schema could not run (async where the journal parses sync, or its `validate` threw); fix the schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
 2. Read `error.code`, `error.kind` and `error.entityId`. Match on the code, for example `isJournalError(error, 'CONFLICT')`. Never match on the message. The message reads `CODE: what happened (kind id): detail. What to do next.`
 3. Find the code in the [error table](#errors). To see the exact check, search for the code in the file the table names.
 4. Run again with `DEBUG=arki:journal:*`. It prints commands, writes, replays, drains and worker ticks.
@@ -326,7 +326,11 @@ In feature mode the journal is built before the features, from their `journalHan
 This is the pattern to follow. No code in this repo uses it yet. A package that ships journal pieces exports a factory. The factory takes the app's `j` and the tables. It returns entities, commands, projections and effects. An effect that needs a service lists it with `need<T>()`, and the app gives the service in its own `j.compose({ services })`. The package never owns a database, a composed journal or a worker. The app adds the tables to its schema. It calls `billingJournal(j, billingTables())` and lists the returned handlers in its own `j.compose(...)`. `billingTables()` is the package's own table factory, shaped like `journalTables()`: it returns `{ invoices }`, a table with a string `id` and a `version` column.
 
 ```ts
-export function billingJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
+export function billingJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(
   j: JournalDefinitions<Meta, Tx, AppDb>,
   tables: ReturnType<typeof billingTables>,
 ) {

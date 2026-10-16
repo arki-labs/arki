@@ -5,9 +5,9 @@
  * May import `fold`, `history`, `storage` and leaf files.
  * Must not import `journal`, `api`, `write` or `command`.
  */
-import type { z } from 'zod';
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
@@ -64,18 +64,20 @@ const scheduledJob = (job: JobRow): ScheduledJob => {
 };
 
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
-export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
+export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
   /** The effect hooks. Frozen by the first drain. */
-  readonly hooks: HookPointInternal<EffectHookContext<z.output<Meta>>>;
+  readonly hooks: HookPointInternal<EffectHookContext<SchemaOutput<Meta>>>;
   /** As composed: an effect may still have needs. Each drain binds them from its `services`. */
-  readonly effects: readonly Effect<z.output<Meta>, AppDb, Run, Needs>[];
+  readonly effects: readonly Effect<SchemaOutput<Meta>, AppDb, Run, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
   readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
 };
 
-export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>(deps: DrainDeps<Meta, AppDb, Run>) {
+export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run>(
+  deps: DrainDeps<Meta, AppDb, Run>,
+) {
   const { events: eventsTable, jobs: jobsTable } = deps.tables;
   const { decodeStoredEvent } = deps.history;
   const known = deps.effects.map(effect => effect.name);
@@ -171,7 +173,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
   const runEffect = async (
     db: AppDb & RootDb,
     job: JobRow,
-    effect: Effect<z.output<Meta>, AppDb, Run> | undefined,
+    effect: Effect<SchemaOutput<Meta>, AppDb, Run> | undefined,
     signal: AbortSignal,
   ): Promise<unknown> => {
     // The check constraint sets both on every effect row; this narrows them once.
@@ -196,7 +198,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     job: JobRow,
     signal: AbortSignal,
     leaseSeconds: number,
-    effectsByName: ReadonlyMap<string, Effect<z.output<Meta>, AppDb, Run>>,
+    effectsByName: ReadonlyMap<string, Effect<SchemaOutput<Meta>, AppDb, Run>>,
     runner: JobRunner<AppDb> | undefined,
   ): Promise<void> => {
     const effect = job.effect === null ? undefined : effectsByName.get(job.effect);
@@ -404,15 +406,21 @@ export type WorkerDeps<AppDb extends RootDb> = {
 };
 
 /** What the async lane of projections needs from the journal. */
-export type CatchUpDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = {
+export type CatchUpDeps<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+> = {
   readonly tables: JournalTables;
-  readonly projections: readonly Projection<z.output<Meta>, Tx>[];
+  readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
 };
 
 const DEFAULT_CATCH_UP_BATCH = 100;
 
-export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(deps: CatchUpDeps<Meta, Tx>) {
+export function createCatchUp<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+>(deps: CatchUpDeps<Meta, Tx>) {
   const { events: eventsTable, cursors: cursorsTable } = deps.tables;
   const { decodeStoredEvent } = deps.history;
   const byName = new Map(deps.projections.map(projection => [projection.name, projection]));
@@ -435,7 +443,11 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
    * cursor is global scan progress, so lag reaches zero and two workers cannot apply
    * one batch twice: the second waits on the row lock and starts after the first moved it.
    */
-  const batchFor = async (db: TransactionSource<Tx>, projection: Projection<z.output<Meta>, Tx>, batchSize: number) =>
+  const batchFor = async (
+    db: TransactionSource<Tx>,
+    projection: Projection<SchemaOutput<Meta>, Tx>,
+    batchSize: number,
+  ) =>
     db.transaction(async tx => {
       const from = await lockCursor(tx, projection.name);
       const rows = await tx
@@ -484,7 +496,7 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
 
   const reset = async (
     db: RootDb & TransactionSource<Tx>,
-    projection: Projection<z.output<Meta>, Tx>,
+    projection: Projection<SchemaOutput<Meta>, Tx>,
     clear?: (tx: Tx) => Promise<void>,
   ): Promise<void> => {
     assertRootDb(db, 'reset');
@@ -523,10 +535,10 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
 }
 
 /** What tap dispatch needs from the journal. */
-export type TapDispatchDeps<Meta extends z.ZodObject, AppDb extends RootDb> = {
+export type TapDispatchDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb> = {
   readonly tables: Pick<JournalTables, 'events'>;
   /** As composed: a tap may still have needs. Each dispatch binds them from its `services`. */
-  readonly taps: readonly Tap<z.output<Meta>, AppDb, Needs>[];
+  readonly taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
 };
 
@@ -544,7 +556,10 @@ const parseRange = (payload: string): { readonly from: number; readonly to: numb
   }
 };
 
-export function createTapDispatch<Meta extends z.ZodObject, AppDb extends RootDb>(deps: TapDispatchDeps<Meta, AppDb>) {
+export function createTapDispatch<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  AppDb extends RootDb,
+>(deps: TapDispatchDeps<Meta, AppDb>) {
   const eventsTable = deps.tables.events;
   const kinds = [...new Set(deps.taps.flatMap(tap => tap.entities.map(entity => entity.kind)))];
   const types = [...new Set(deps.taps.flatMap(tap => [...tap.types]))];

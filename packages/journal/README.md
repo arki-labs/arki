@@ -126,7 +126,7 @@ await worker.start();
 - `write(entity, id, events)`: `journal.write` bound to `tx` and `meta`. `events` is `(row, { tx }) => pending events`, sync or async.
 - `run(child, input)`: run another command in a savepoint of the same transaction, with the same `meta`.
 
-`journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a `ZodError` passes through) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
+`journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a `SchemaError` passes through) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
 
 `journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`, so a request context or a job fixes the database and the actor once, and every call site passes only the command and its input. The caller still gives `meta`: the library never picks an actor. `source` follows the rules of `run`: a root database commits and wakes, a transaction joins and leaves the commit to the caller. `meta` is parsed on every call, not once at bind time. A bound runner is then exactly `journal.run`: a default in the meta schema is new for each command, and a bad `meta` rejects the call. The runner has the type `CommandRunner`, the type of a command context's `run`, so it can be passed to code that takes one.
 
@@ -278,13 +278,15 @@ A reducer must produce each value in the form the database stores. If the databa
 
 Database defaults are not journal state. `write` folds from the stored row, where a default-filled column has its value. `replay` folds from nothing, where that column is `undefined`. That is why such columns are optional in the `.on` row type unless a create sets them. The rule: a reducer must set every column that any reducer later reads. In a `.create` result, a key set to `undefined` is stripped and the default applies. `verify` compares only the columns reducers set.
 
+Every schema the journal takes is a Standard Schema: zod, valibot, arktype or a hand-written `~standard` object. Command input and a command's `meta` are parsed async (`parseAsync`). Everything else is parsed sync (`parse`): the event constructor, `write`'s event data and `meta`, replay and upcasters; an async schema there is a `SchemaRunError`. `initJournal()` without `meta` accepts a plain object and records `{}`.
+
 `write` parses every event's data with its schema, even for a hand-built `{ type, data }`. The schema must accept its own stored output unchanged, because replay parses stored data again; otherwise `write` throws `UNSTABLE_SCHEMA`. The same rule applies to `meta`. An optional key holding `undefined` in event data is not stored: JSON drops it, so the stored event, the reducers and replay all see the key as absent. The check allows this, because absent and `undefined` read the same way. Leaving the key out is the same thing.
 
 An error about one entity's row or history is a `JournalError` with a `code`. Match on the code, never on the message. The message names the entity kind and id, adds the event type and version when the journal knows them, and ends with the next step.
 
 The twelve codes, the usual cause of each and what to do are in one table: [agent guide, Errors](docs/agent-guide.md#errors).
 
-Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `ZodError`. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
+Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `SchemaError` from `@arki/schema`, with the schema's `issues`. A schema that cannot run (async where the journal parses sync, or a `validate` that throws) is a `SchemaRunError`: a bug, not bad data. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
 
 ### Rejected rules
 

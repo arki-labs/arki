@@ -25,10 +25,9 @@
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
-import type { z } from 'zod';
-
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
 import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
+import type { StandardSchemaV1 } from '@arki/schema';
 import { driven, driver, entrypointsOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
@@ -252,12 +251,20 @@ export function journalEffects<
 }
 
 /** Direct mode: the app composed the journal itself. */
-export type JournalDirectOptions<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = {
+export type JournalDirectOptions<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = {
   readonly journal: Journal<Meta, Tx, AppDb>;
 };
 
 /** Feature mode: the journal is composed from the features' `journalHandlers` declarations. */
-export type JournalFeatureOptions<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = {
+export type JournalFeatureOptions<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = {
   readonly j: Pick<JournalDefinitions<Meta, Tx, AppDb>, 'compose'>;
   readonly tables: JournalTables;
 };
@@ -270,16 +277,18 @@ type JournalNeeds<Tx extends TransactionSource<Tx>, AppDb extends RootDb> = {
   db: AppDb & RootDb & TransactionSource<Tx>;
 };
 
-export type JournalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = Plugin<
-  JournalNeeds<Tx, AppDb>,
-  { journal: Journal<Meta, Tx, AppDb> }
->;
+export type JournalPlugin<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = Plugin<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
 
 /** Feature mode: bound to the app's features when the app is built. */
-export type JournalDriven<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = Driven<
-  JournalNeeds<Tx, AppDb>,
-  { journal: Journal<Meta, Tx, AppDb> }
->;
+export type JournalDriven<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = Driven<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
 
 const isHandler = (value: unknown): boolean =>
   typeof value === 'object' &&
@@ -394,9 +403,11 @@ function readDeclarations(features: readonly MountedFeature[]): {
   return { declarations: { projections, effects, taps }, owners };
 }
 
-function journalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  build: () => Journal<Meta, Tx, AppDb>,
-): JournalPlugin<Meta, Tx, AppDb> {
+function journalPlugin<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(build: () => Journal<Meta, Tx, AppDb>): JournalPlugin<Meta, Tx, AppDb> {
   const needs: { readonly db: Service<AppDb & RootDb & TransactionSource<Tx>> } = {
     db: service<AppDb & RootDb & TransactionSource<Tx>>(),
   };
@@ -421,13 +432,21 @@ function journalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
  * - `journal({ j, tables })`: the journal composed from the `journalHandlers` slices of
  *   the features the app mounts. Effects and taps get their services from `journalWorker()`.
  */
-export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  options: JournalDirectOptions<Meta, Tx, AppDb>,
-): JournalPlugin<Meta, Tx, AppDb>;
-export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  options: JournalFeatureOptions<Meta, Tx, AppDb>,
-): JournalDriven<Meta, Tx, AppDb>;
-export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
+export function journal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(options: JournalDirectOptions<Meta, Tx, AppDb>): JournalPlugin<Meta, Tx, AppDb>;
+export function journal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(options: JournalFeatureOptions<Meta, Tx, AppDb>): JournalDriven<Meta, Tx, AppDb>;
+export function journal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(
   options: JournalDirectOptions<Meta, Tx, AppDb> | JournalFeatureOptions<Meta, Tx, AppDb>,
 ): JournalPlugin<Meta, Tx, AppDb> | JournalDriven<Meta, Tx, AppDb> {
   if ('journal' in options) {

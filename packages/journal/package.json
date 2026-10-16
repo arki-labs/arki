@@ -102,6 +102,7 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@paralleldrive/cuid2": "catalog:utilities",
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"

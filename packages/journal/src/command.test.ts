@@ -11,6 +11,8 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { SchemaError } from '@arki/schema';
+
 import type { OrderId } from './test-support.js';
 import type { DbHandle, Row } from './types.js';
 import { CommandError } from './errors.js';
@@ -267,7 +269,7 @@ describe('journal.run', () => {
     // Why: jobs, webhooks and scripts rely on `run` as the one validation gate.
     const id = orderId(++next);
     await expect(journal.run(db, placeOrder, { orderId: id, customerId: '', total: 1 }, meta)).rejects.toBeInstanceOf(
-      z.ZodError,
+      SchemaError,
     );
     expect(await rowsOf(id)).toEqual([]);
     expect(await eventsOf(id)).toEqual([]);

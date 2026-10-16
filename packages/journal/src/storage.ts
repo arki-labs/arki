@@ -4,9 +4,11 @@
  * Imports only leaf files (`types`, `errors`). Must not import `journal`, `api`,
  * `write`, `command`, `history` or `worker`.
  */
-import type { z } from 'zod';
 import { eq, getTableColumns, is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
+
+import type { StandardSchemaV1 } from '@arki/schema';
+import { parse, SchemaError } from '@arki/schema';
 
 import type {
   AnyEntity,
@@ -169,7 +171,7 @@ function sameKeys(
 }
 
 /** An object literal shape: prototype `Object.prototype` or `null`. A `Set`, `Map`, `Date` or class instance is not one. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const proto: unknown = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
@@ -242,24 +244,46 @@ function sameJson(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Sync parse that reports bad data instead of throwing it: replay and the round-trip
+ * check branch on the result. Only a `SchemaError` is caught. A schema that cannot run
+ * (an async schema, or a `validate` that throws) is a bug, so its `SchemaRunError` propagates.
+ */
+export function safeParse<Output>(
+  schema: StandardSchemaV1<unknown, Output>,
+  value: unknown,
+): { readonly success: true; readonly data: Output } | { readonly success: false; readonly error: SchemaError } {
+  try {
+    return { success: true, data: parse(schema, value) };
+  } catch (error) {
+    if (error instanceof SchemaError) return { success: false, error };
+    throw error;
+  }
+}
+
+/**
  * Throws `UNSTABLE_SCHEMA` unless the value survives JSON storage and a second parse
  * unchanged. Replay depends on this. A value JSON cannot encode (a `bigint`, a cycle)
  * is the same failure, with the serializer's error as `cause`.
  */
-export function assertRoundTrips(schema: z.ZodType, value: unknown, kind: string, id: string, what: string): void {
-  let stable: boolean;
+export function assertRoundTrips(
+  schema: StandardSchemaV1,
+  value: unknown,
+  kind: string,
+  id: string,
+  what: string,
+): void {
+  let stored: unknown;
   try {
     // Not structuredClone: the point is what JSON storage does to the value (Dates become strings).
     const text = JSON.stringify(value);
-    const stored: unknown = JSON.parse(text);
-    const again = schema.safeParse(stored);
-    stable = again.success && sameJson(again.data, value);
+    stored = JSON.parse(text);
   } catch (error) {
     throw new JournalError('UNSTABLE_SCHEMA', kind, id, `${what}: the value cannot be stored as JSON`, {
       cause: error,
     });
   }
-  if (!stable)
+  const again = safeParse(schema, stored);
+  if (!(again.success && sameJson(again.data, value)))
     throw new JournalError(
       'UNSTABLE_SCHEMA',
       kind,

@@ -1,8 +1,8 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { AnyPgColumn, PgAsyncDatabase, PgQueryResultHKT, PgTableWithColumns } from 'drizzle-orm/pg-core';
-import type { z } from 'zod';
 
 import type { Backoff } from '@arki/resilience';
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 /**
  * A function type whose parameters are checked bivariantly.
@@ -158,9 +158,9 @@ export type Recorded<T extends string = string, Data = unknown, Meta = unknown, 
  * An event definition. Calling it validates the data and returns a pending
  * event. `type` and `schema` are read by the entity builder and by replay.
  */
-export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
-  [data: z.input<S>],
-  Pending<T, z.output<S>>
+export type EventDef<T extends string, S extends StandardSchemaV1> = BivariantFn<
+  [data: SchemaInput<S>],
+  Pending<T, SchemaOutput<S>>
 > & {
   readonly type: T;
   readonly schema: S;
@@ -169,7 +169,7 @@ export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
    * removed. It must still fit `schema`. Absent on an event that holds no personal data.
    * A method signature, so every `EventDef` is an `AnyEventDef`; see `BivariantFn`.
    */
-  erased?(data: z.output<S>): z.input<S>;
+  erased?(data: SchemaOutput<S>): SchemaInput<S>;
   /**
    * The schema version new events are stored at: one more than the number of upcasters.
    * Rows record it in `schema_version`; a row at an older version is upcast on read.
@@ -185,19 +185,19 @@ export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
  * `up` is a method signature, so a typed step is an `Upcaster`; see `BivariantFn`.
  */
 export type Upcaster = {
-  readonly from: z.ZodType;
+  readonly from: StandardSchemaV1;
   up(data: unknown): unknown;
 };
 
 /** Typed upcaster steps: each `up` receives the output of its own `from`. */
-export type UpcasterSteps<U extends readonly z.ZodType[]> = {
-  readonly [K in keyof U]: { readonly from: U[K]; readonly up: (data: z.output<U[K]>) => unknown };
+export type UpcasterSteps<U extends readonly StandardSchemaV1[]> = {
+  readonly [K in keyof U]: { readonly from: U[K]; readonly up: (data: SchemaOutput<U[K]>) => unknown };
 };
 
 /** The third argument of `j.event`. */
-export type EventOptions<S extends z.ZodType, U extends readonly z.ZodType[] = readonly []> = {
+export type EventOptions<S extends StandardSchemaV1, U extends readonly StandardSchemaV1[] = readonly []> = {
   /** See `EventDef.erased`. */
-  readonly erased?: (data: z.output<S>) => z.input<S>;
+  readonly erased?: (data: SchemaOutput<S>) => SchemaInput<S>;
   /**
    * Older shapes of this event, oldest first: `{ from: schemaV1, up: v1 => v2 }`, then
    * `{ from: schemaV2, up: v2 => v3 }`. The last step's result must fit the current schema.
@@ -205,10 +205,10 @@ export type EventOptions<S extends z.ZodType, U extends readonly z.ZodType[] = r
    */
   readonly upcasters?: UpcasterSteps<U>;
 };
-export type AnyEventDef = EventDef<string, z.ZodType>;
+export type AnyEventDef = EventDef<string, StandardSchemaV1>;
 
 /** The pending form of one or more event definitions. Distributes over unions. */
-export type PendingOf<D> = D extends AnyEventDef ? Pending<D['type'], z.output<D['schema']>> : never;
+export type PendingOf<D> = D extends AnyEventDef ? Pending<D['type'], SchemaOutput<D['schema']>> : never;
 /** The recorded form of one or more event definitions. */
 export type RecordedOf<D, Meta, Id extends string = string> = PendingOf<D> & RecordedStamp<Meta, Id>;
 

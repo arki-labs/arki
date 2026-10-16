@@ -73,7 +73,9 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   declaration runs (a bad name, a bad key column, a duplicate reducer or handler name).
  * - A misuse at run time is a plain `Error` whose message starts with `journal:` (two
  *   operations at once on one transaction, `drain` inside a transaction).
- * - Command input, event data or `meta` that fails its schema is a `ZodError`.
+ * - Command input, event data or `meta` that fails its schema is a `SchemaError` from
+ *   `@arki/schema`, with the schema's `issues`. A schema that cannot run (async where
+ *   the journal parses sync, or a `validate` that throws) is a `SchemaRunError`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
  *   projection passes through unchanged. A rejected business rule is one of
  *   these: a `CommandError`, below.

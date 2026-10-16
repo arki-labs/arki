@@ -4,8 +4,9 @@
  * May import `fold`, `storage`, leaf files, and result types from `api`.
  * Must not import `journal`, `write`, `command` or `worker`.
  */
-import type { z } from 'zod';
 import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
+
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
 import type { JournalTables } from './pg.js';
@@ -30,13 +31,14 @@ import {
   deepFreeze,
   isRowOf,
   loadRow,
+  safeParse,
   sameValue,
   saveReplayed,
   toRecord,
 } from './storage.js';
 
 /** What the log functions need from the journal: the meta schema and the journal tables. */
-export type HistoryDeps<Meta extends z.ZodObject> = {
+export type HistoryDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = {
   readonly metaSchema: Meta;
   readonly tables: JournalTables;
 };
@@ -78,8 +80,10 @@ function assertRowNotAhead(kind: string, id: string, folded: object | null, top:
   }
 }
 
-export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>) {
-  type MetaOut = z.output<Meta>;
+export function createHistory<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
+  deps: HistoryDeps<Meta>,
+) {
+  type MetaOut = SchemaOutput<Meta>;
   const { metaSchema } = deps;
   const eventsTable = deps.tables.events;
 
@@ -103,7 +107,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
     for (let version = row.schemaVersion; version < def.version; version += 1) {
       const step = def.upcasters[version - 1];
       if (step === undefined) return fail(`no upcaster for schema version ${version}`);
-      const old = step.from.safeParse(value);
+      const old = safeParse(step.from, value);
       if (!old.success) return fail(`the data does not fit schema version ${version}: ${old.error.message}`);
       try {
         value = step.up(old.data);
@@ -130,7 +134,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
         `${at}: the entity declares no event of this type`,
       );
     }
-    const data = def.schema.safeParse(upcast(row, def, at));
+    const data = safeParse(def.schema, upcast(row, def, at));
     if (!data.success) {
       const after = row.schemaVersion < def.version ? ` after upcasting from version ${row.schemaVersion}` : '';
       throw new JournalError(
@@ -140,7 +144,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
         `${at}: the data does not fit the current schema${after}: ${data.error.message}`,
       );
     }
-    const meta = metaSchema.safeParse(row.meta);
+    const meta = safeParse<SchemaOutput<Meta>>(metaSchema, row.meta);
     if (!meta.success) {
       throw new JournalError(
         'REPLAY_FAILED',
@@ -318,7 +322,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
         if (def?.erased === undefined) continue;
         // Decode as replay does, so the erased form starts from data the schema accepts.
         const event = decodeStoredEvent(row, def, id);
-        const form = def.schema.safeParse(def.erased(event.data));
+        const form = safeParse(def.schema, def.erased(event.data));
         if (!form.success) {
           throw new JournalError(
             'BAD_DEFINITION',
@@ -387,4 +391,6 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
   return { decodeStoredEvent, highestVersion, assertLogSaysGone, replay, verify, repair, forget, rerun };
 }
 
-export type History<Meta extends z.ZodObject> = ReturnType<typeof createHistory<Meta>>;
+export type History<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = ReturnType<
+  typeof createHistory<Meta>
+>;

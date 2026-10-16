@@ -10,7 +10,9 @@ import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { z, ZodError } from 'zod';
+import { z } from 'zod';
+
+import { SchemaError } from '@arki/schema';
 
 import type { CommandRunner } from './api.js';
 import type { CommandErrorCode } from './errors.js';
@@ -161,7 +163,7 @@ describe('journal.bind', () => {
     // Binding does not throw: the request context can always be built.
     const run = journal.bind(db, { actorId: '' });
 
-    await expect(run(placeOrder, { id })).rejects.toBeInstanceOf(ZodError);
+    await expect(run(placeOrder, { id })).rejects.toBeInstanceOf(SchemaError);
     expect(await rowsOf(id)).toHaveLength(0);
   });
 

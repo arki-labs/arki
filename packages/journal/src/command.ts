@@ -4,9 +4,11 @@
  * May import `api`, `write` (types), `storage`, `transaction-guard` and leaf files.
  * Must not import `journal`, `history` or `worker`.
  */
-import type { z } from 'zod';
 import { eq, is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
+
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, RunOptions } from './api.js';
 import type { HookPointInternal } from './hooks.js';
@@ -25,20 +27,24 @@ const throughJson = (value: unknown): unknown =>
   value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 /** What command execution needs from the journal. */
-export type CommandDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = {
+export type CommandDeps<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+> = {
   readonly metaSchema: Meta;
   readonly writeWithValidatedMeta: Writer<Meta, Tx>['writeWithValidatedMeta'];
   /** Wakes this journal's workers. Called after a root-database run that queued a job. */
   readonly wake: () => void;
   /** The command hooks. Frozen by the first run. */
-  readonly hooks: HookPointInternal<CommandHookContext<z.output<Meta>>>;
+  readonly hooks: HookPointInternal<CommandHookContext<SchemaOutput<Meta>>>;
   readonly tables: Pick<JournalTables, 'receipts'>;
 };
 
-export function createCommandRunner<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(
-  deps: CommandDeps<Meta, Tx>,
-) {
-  type MetaOut = z.output<Meta>;
+export function createCommandRunner<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+>(deps: CommandDeps<Meta, Tx>) {
+  type MetaOut = SchemaOutput<Meta>;
   const { metaSchema, writeWithValidatedMeta, hooks } = deps;
   const receipts = deps.tables.receipts;
 
@@ -109,10 +115,10 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
    * `parent` is the trace this run continues: the chain's correlation id and cause are
    * inherited, the command id is this run's own.
    */
-  const runCommand = <S extends z.ZodType, R>(
+  const runCommand = <S extends StandardSchemaV1, R>(
     source: TransactionSource<Tx>,
     command: Command<S, R, MetaOut, Tx>,
-    input: z.input<S>,
+    input: SchemaInput<S>,
     getValidatedMeta: () => Promise<MetaOut>,
     onJobs: (count: number) => void,
     parent: Omit<Trace, 'commandId'>,
@@ -121,7 +127,7 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
     oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R>> => {
       hooks.freeze();
       const meta = await getValidatedMeta();
-      const parsed = await command.input.parseAsync(input);
+      const parsed = await parseAsync<SchemaOutput<S>>(command.input, input);
       const own = commandId();
       const trace: Trace = { ...parent, commandId: own };
       debugCommand.debug('{commandName}: input ok ({own}, {correlationId})', {
@@ -206,11 +212,11 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
    * effect's `ctx.run`: the event the job was for. Its correlation id carries over unless
    * `opts.correlationId` says otherwise; with neither, the run starts a new chain.
    */
-  const run = <S extends z.ZodType, R>(
+  const run = <S extends StandardSchemaV1, R>(
     source: TransactionSource<Tx>,
     command: Command<S, R, MetaOut, Tx>,
-    input: NoInfer<z.input<S>>,
-    meta: z.input<Meta>,
+    input: NoInfer<SchemaInput<S>>,
+    meta: SchemaInput<Meta>,
     opts?: RunOptions,
     cause?: { readonly seq: number; readonly correlationId: string | null },
   ): Promise<Awaited<R>> => {
@@ -220,7 +226,7 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
       command,
       input,
       async () => {
-        const parsed = await metaSchema.parseAsync(meta);
+        const parsed = await parseAsync<SchemaOutput<Meta>>(metaSchema, meta);
         // No entity yet: the error names the command instead.
         assertRoundTrips(metaSchema, parsed, 'command', command.name, 'meta');
         return parsed;

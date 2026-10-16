@@ -3,7 +3,7 @@
  * definition helpers `initJournal` returns, and the input, option and result types.
  * Types only, no runtime code. May import `entity`, `types` and `pg`; nothing else.
  */
-import type { z } from 'zod';
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
 import type { HookPoint } from './hooks.js';
@@ -67,10 +67,10 @@ export type WriteOptions = {
 export type WriteInput<
   Tbl extends EntityTable,
   E extends AnyEventDef,
-  Meta extends z.ZodObject,
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx = DbHandle,
 > = WriteOptions & {
-  readonly meta: z.input<Meta>;
+  readonly meta: SchemaInput<Meta>;
   readonly events: NextEvents<Tbl, E, Tx>;
 };
 
@@ -79,12 +79,12 @@ export type WriteInput<
  * `journal.run` runs it. `name` and `input` are for the app (an oRPC procedure
  * can reuse or `.pick` the schema). The handler is for `journal.run` only.
  */
-export type Command<S extends z.ZodType, R, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle> = {
+export type Command<S extends StandardSchemaV1, R, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle> = {
   readonly name: string;
   readonly input: S;
-  readonly handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R;
+  readonly handler: (input: SchemaOutput<S>, context: CommandContext<MetaOut, Tx>) => R;
   /** The command's `authorize` option, when it has one. See {@link CommandOptions}. */
-  readonly authorize?: CommandAuthorize<z.output<S>, MetaOut, Tx>;
+  readonly authorize?: CommandAuthorize<SchemaOutput<S>, MetaOut, Tx>;
 };
 /**
  * Decides whether the caller may run a command. It runs inside the command's transaction,
@@ -154,9 +154,9 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     opts?: WriteOptions,
   ) => Promise<WriteResult<Tbl, E, MetaOut, Key>>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
-  readonly run: <S extends z.ZodType, R>(
+  readonly run: <S extends StandardSchemaV1, R>(
     command: Command<S, R, MetaOut, Tx>,
-    input: NoInfer<z.input<S>>,
+    input: NoInfer<SchemaInput<S>>,
     opts?: CallOptions,
   ) => Promise<Awaited<R>>;
 };
@@ -170,13 +170,13 @@ export type CommandRunner<MetaOut, Tx extends TransactionSource<Tx> = DbHandle> 
  * root database the worker or `drain` was given, in its own transaction. `meta`
  * is required, as in `journal.run`: the library never picks an actor.
  */
-export type RootCommandRunner<Meta extends z.ZodObject, Tx extends TransactionSource<Tx> = DbHandle> = <
-  S extends z.ZodType,
-  R,
->(
-  command: Command<S, R, z.output<Meta>, Tx>,
-  input: NoInfer<z.input<S>>,
-  meta: z.input<Meta>,
+export type RootCommandRunner<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx> = DbHandle,
+> = <S extends StandardSchemaV1, R>(
+  command: Command<S, R, SchemaOutput<Meta>, Tx>,
+  input: NoInfer<SchemaInput<S>>,
+  meta: SchemaInput<Meta>,
   opts?: CallOptions,
 ) => Promise<Awaited<R>>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
@@ -198,28 +198,28 @@ export type VerifyResult<Tbl extends EntityTable, Key extends string = 'id'> =
   | { readonly ok: false; readonly expected: ReducerRow<Tbl, Key> | null; readonly actual: Row<Tbl> | null };
 
 export type Journal<
-  Meta extends z.ZodObject,
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx> = DbHandle,
   AppDb extends RootDb = RootDb,
 > = {
   /** Append events, run reducers, save the row, run projections, queue jobs. All inside `tx`. */
   write<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     tx: Tx,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, z.output<Meta>, Key>>;
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key>>;
   /**
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
    * opens a savepoint. Returns what the handler returns. Errors pass through.
    * On a root database, a run that queued a job calls `wake()` after the commit.
    */
-  run<S extends z.ZodType, R>(
+  run<S extends StandardSchemaV1, R>(
     source: TransactionSource<Tx>,
-    command: Command<S, R, z.output<Meta>, Tx>,
-    input: NoInfer<z.input<S>>,
-    meta: z.input<Meta>,
+    command: Command<S, R, SchemaOutput<Meta>, Tx>,
+    input: NoInfer<SchemaInput<S>>,
+    meta: SchemaInput<Meta>,
     opts?: RunOptions,
   ): Promise<Awaited<R>>;
   /**
@@ -233,7 +233,11 @@ export type Journal<
    * `run`: a default in the meta schema gives each command its own value, and
    * a bad `meta` rejects the call, inside the transaction guard, as `run` does.
    */
-  bind(source: TransactionSource<Tx>, meta: z.input<Meta>, opts?: RunOptions): CommandRunner<z.output<Meta>, Tx>;
+  bind(
+    source: TransactionSource<Tx>,
+    meta: SchemaInput<Meta>,
+    opts?: RunOptions,
+  ): CommandRunner<SchemaOutput<Meta>, Tx>;
   /**
    * Bring a row that existed before the journal into it. The row must be at version 0
    * with no history, or `CONFLICT`. `events` builds exactly one create event from the
@@ -245,21 +249,21 @@ export type Journal<
    */
   adopt<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     tx: Tx,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, z.output<Meta>, Key>>;
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key>>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     opts?: { readonly throughVersion?: number },
-  ): Promise<ReplayResult<Tbl, E, z.output<Meta>, Key>>;
+  ): Promise<ReplayResult<Tbl, E, SchemaOutput<Meta>, Key>>;
   /** Replay and compare with the stored row on the columns the reducers produce. */
   verify<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<VerifyResult<Tbl, Key>>;
   /**
@@ -273,7 +277,7 @@ export type Journal<
    */
   forget<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<ForgetResult<Tbl>>;
   /**
@@ -285,7 +289,7 @@ export type Journal<
   /** Lock the row, replay, save the result. Writes no event, runs no projection, creates no job. */
   repair<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
-    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<Row<Tbl> | null>;
   /**
@@ -307,7 +311,7 @@ export type Journal<
    */
   reset(
     db: RootDb & TransactionSource<Tx>,
-    projection: Projection<z.output<Meta>, Tx>,
+    projection: Projection<SchemaOutput<Meta>, Tx>,
     clear?: (tx: Tx) => Promise<void>,
   ): Promise<void>;
   /** Per async projection: its cursor and how far behind the newest event it is, in seqs. */
@@ -315,7 +319,7 @@ export type Journal<
   /** Walk the log after sequence number `afterSeq` and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
   rerun(
     db: TransactionSource<Tx>,
-    projection: Projection<z.output<Meta>, Tx>,
+    projection: Projection<SchemaOutput<Meta>, Tx>,
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
   ): Promise<{ readonly events: number }>;
   /**
@@ -418,8 +422,8 @@ export type Journal<
    * throws `BAD_DEFINITION`.
    */
   readonly hooks: {
-    readonly command: HookPoint<CommandHookContext<z.output<Meta>>>;
-    readonly effect: HookPoint<EffectHookContext<z.output<Meta>>>;
+    readonly command: HookPoint<CommandHookContext<SchemaOutput<Meta>>>;
+    readonly effect: HookPoint<EffectHookContext<SchemaOutput<Meta>>>;
   };
   readonly catalog: {
     /**
@@ -434,11 +438,15 @@ export type Journal<
 };
 
 export type JournalDefinitions<
-  Meta extends z.ZodObject,
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx> = DbHandle,
   AppDb extends RootDb = RootDb,
 > = {
-  event<T extends string, S extends z.ZodType, const U extends readonly z.ZodType[] = readonly []>(
+  /**
+   * An event. `schema` and each upcaster's `from` are Standard Schemas, parsed sync
+   * (`parse`) by the constructor, `write` and replay.
+   */
+  event<T extends string, S extends StandardSchemaV1, const U extends readonly StandardSchemaV1[] = readonly []>(
     type: T,
     schema: S,
     opts?: EventOptions<S, U>,
@@ -447,7 +455,7 @@ export type JournalDefinitions<
   entity<K extends string, Tbl extends IdTable>(
     kind: K,
     table: Tbl,
-  ): EntityBuilder<K, Tbl, never, z.output<Meta>, 'id'>;
+  ): EntityBuilder<K, Tbl, never, SchemaOutput<Meta>, 'id'>;
   /**
    * The key column is the one `table` holds under the property name `options.key`:
    * a non-null string column that is the primary key or unique.
@@ -456,64 +464,65 @@ export type JournalDefinitions<
     kind: K,
     table: Tbl,
     options: { readonly key: Key & SingleKey<Key> },
-  ): EntityBuilder<K, Tbl, never, z.output<Meta>, Key>;
+  ): EntityBuilder<K, Tbl, never, SchemaOutput<Meta>, Key>;
   /**
-   * A command: `input` is parsed before the handler runs; the handler's
+   * A command: `input` (any Standard Schema) is parsed async (`parseAsync`) before
+   * the handler runs, like the command's `meta`; the handler's
    * `write` and `run` are bound to one transaction and one parsed `meta`.
    * Needs only `j`, entities and events, never the finished journal.
    */
-  command<S extends z.ZodType, R>(
+  command<S extends StandardSchemaV1, R>(
     name: string,
     input: S,
-    handler: (input: z.output<S>, context: CommandContext<z.output<Meta>, Tx>) => R,
-    options?: CommandOptions<z.output<S>, z.output<Meta>, Tx>,
-  ): Command<S, R, z.output<Meta>, Tx>;
+    handler: (input: SchemaOutput<S>, context: CommandContext<SchemaOutput<Meta>, Tx>) => R,
+    options?: CommandOptions<SchemaOutput<S>, SchemaOutput<Meta>, Tx>,
+  ): Command<S, R, SchemaOutput<Meta>, Tx>;
   /** `on` is `NoInfer` so `E` comes from `entity`; handlers are then contextually typed. */
-  projection<E extends AnyEntity<z.output<Meta>>>(
+  projection<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<ProjectionHandlers<E, z.output<Meta>, Tx>>,
+    on: NoInfer<ProjectionHandlers<E, SchemaOutput<Meta>, Tx>>,
     opts?: ProjectionOptions,
-  ): Projection<z.output<Meta>, Tx>;
-  effect<E extends AnyEntity<z.output<Meta>>>(
+  ): Projection<SchemaOutput<Meta>, Tx>;
+  effect<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>>,
-  ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>;
+    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>>>,
+  ): Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>>;
   /**
    * An effect that needs a service: `needs` is `{ mailer: need<Mailer>() }`, and each
    * handler then gets `mailer` in its context, next to `jobId`, `signal`, `db` and `run`.
    */
-  effect<E extends AnyEntity<z.output<Meta>>, N extends Needs>(
+  effect<E extends AnyEntity<SchemaOutput<Meta>>, N extends Needs>(
     name: string,
     entity: E | readonly E[],
     needs: N,
-    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>>,
-  ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
+    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>>,
+  ): Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
   /**
    * Build the runtime journal from the tables and the handlers. `services` holds one
    * value for every need of every listed effect, by name. A need without a value throws here, unless `services` is `'worker'`.
    * `const`: the list is read as a tuple, so an effect with needs keeps them next to one without.
    */
   /** A tap: in-process, after commit, lossy. See `Tap`. Same shapes as `effect`. */
-  tap<E extends AnyEntity<z.output<Meta>>>(
+  tap<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<TapHandlers<E, z.output<Meta>, AppDb>>,
-  ): Tap<z.output<Meta>, AppDb>;
-  tap<E extends AnyEntity<z.output<Meta>>, N extends Needs>(
+    on: NoInfer<TapHandlers<E, SchemaOutput<Meta>, AppDb>>,
+  ): Tap<SchemaOutput<Meta>, AppDb>;
+  tap<E extends AnyEntity<SchemaOutput<Meta>>, N extends Needs>(
     name: string,
     entity: E | readonly E[],
     needs: N,
-    on: NoInfer<TapHandlers<E, z.output<Meta>, AppDb, N>>,
-  ): Tap<z.output<Meta>, AppDb, N>;
+    on: NoInfer<TapHandlers<E, SchemaOutput<Meta>, AppDb, N>>,
+  ): Tap<SchemaOutput<Meta>, AppDb, N>;
   compose<
-    const E extends readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
-    const T extends readonly Tap<z.output<Meta>, AppDb, Needs>[] = readonly [],
+    const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
+    const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
   >(
     config: {
       readonly tables: JournalTables;
-      readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
+      readonly projections?: readonly Projection<SchemaOutput<Meta>, Tx>[];
       readonly effects?: E;
       readonly taps?: T;
     } & ServicesOption<ServicesFor<E> & ServicesFor<T>>,
