@@ -48,7 +48,7 @@
  * ```
  */
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type {
   ScheduleBuilderChain,
@@ -131,7 +131,7 @@ type ScheduleBuilderState<TInput> = {
   scheduleValue: string | number;
   scheduleOptions?: { timezone?: string };
   name?: string;
-  inputSchema?: z.ZodType<TInput>;
+  inputSchema?: StandardSchemaV1<unknown, TInput>;
 };
 
 /**
@@ -255,7 +255,7 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
       return scheduleJob(state, job);
     },
 
-    input<TNewInput>(schema: z.ZodType<TNewInput>) {
+    input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>) {
       debugBuilder.debug('[{value1}] Setting input schema for schedule', { value1: state.name ?? 'unnamed' });
 
       return createScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
@@ -264,12 +264,7 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
       });
     },
 
-    handler<THandlerInput = TInput, THandlerOutput = TOutput>(
-      handler: (
-        data: THandlerInput extends never ? TInput : THandlerInput,
-        ctx: TContextOut,
-      ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-    ): ScheduleDefinition {
+    handler<TResult>(handler: (data: TInput, ctx: TContextOut) => Promise<TResult>): ScheduleDefinition {
       if (!state.name) {
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.missingName,
@@ -304,7 +299,7 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
       })
         .name(state.name)
         .input(state.inputSchema)
-        .handler<THandlerInput, unknown>(handler);
+        .handler(handler);
 
       const internal: InternalScheduleDefinition<AnyJobDefinition> = {
         type: state.scheduleType,

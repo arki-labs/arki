@@ -1,9 +1,10 @@
 /**
  * Validation middleware
- * Validates job input data with Zod schemas
+ * Validates job input data with any Standard Schema validator
  */
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { SchemaError, parseAsync } from '@arki/schema';
 
 import type { MiddlewareFunction } from '../types/middleware.ts';
 import type { QueueMeta } from '../types/queue.ts';
@@ -58,29 +59,25 @@ export function validationMiddleware<TContext>(): MiddlewareFunction<TContext, T
  * ```
  */
 export function customValidationMiddleware<TContext, TInput>(options: {
-  schema: z.ZodType<TInput>;
-  onError?: (error: z.ZodError, jobName: string) => void;
+  schema: StandardSchemaV1<unknown, TInput>;
+  onError?: (error: SchemaError, jobName: string) => void;
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
   return async ({ next, data, job }) => {
     try {
-      // Validate input data
-      options.schema.parse(data);
-      return await next();
+      // Async: the middleware already awaits. A SchemaRunError (broken schema) is a bug and propagates.
+      await parseAsync(options.schema, data);
     } catch (error) {
-      if (error instanceof Error && 'issues' in error) {
-        const zodError = error as z.ZodError;
+      if (!(error instanceof SchemaError)) throw error;
 
-        // Custom error handler
-        if (options.onError) {
-          options.onError(zodError, job.name);
-        }
-
-        // Throw validation error
-        throw new JobValidationError(`Validation failed for job ${job.name}`, job.name, zodError.issues);
+      // Custom error handler
+      if (options.onError) {
+        options.onError(error, job.name);
       }
 
-      throw error;
+      // Throw validation error
+      throw new JobValidationError(`Validation failed for job ${job.name}`, job.name, error.issues);
     }
+    return await next();
   };
 }
 
@@ -101,8 +98,8 @@ export function customValidationMiddleware<TContext, TInput>(options: {
  * ```
  */
 export function outputValidationMiddleware<TContext, TOutput>(_options: {
-  schema: z.ZodType<TOutput>;
-  onError?: (error: z.ZodError, jobName: string, output: unknown) => void;
+  schema: StandardSchemaV1<unknown, TOutput>;
+  onError?: (error: SchemaError, jobName: string, output: unknown) => void;
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
   return async ({ next }) => {
     const result = await next();

@@ -8,6 +8,7 @@ import { and, eq, is, isNull, sql } from 'drizzle-orm';
 import { getTableConfig, PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
 import { jobId } from '@arki/journal';
+import { parseAsync, SchemaError } from '@arki/schema';
 
 import type { AnyJobDefinition, JobDefinition, QueuePriority } from '../types/job.ts';
 import { QUEUE_PRIORITIES } from '../types/job.ts';
@@ -136,9 +137,12 @@ export function outbox(options: OutboxOptions): Outbox {
       );
     // Validated now, so a bad call rolls back the business write. The parsed value is dropped:
     // the raw args are stored and the worker parses them, so a transform runs once.
-    const parsed = await job._internal.inputSchema.safeParseAsync(args);
-    if (!parsed.success)
-      throw outboxError(OUTBOX_ERROR_CODES.badArgs, `outbox: "${name}" args fail the job's input schema`, parsed.error);
+    try {
+      await parseAsync(job._internal.inputSchema, args);
+    } catch (error) {
+      if (!(error instanceof SchemaError)) throw error;
+      throw outboxError(OUTBOX_ERROR_CODES.badArgs, `outbox: "${name}" args fail the job's input schema`, error);
+    }
     assertJsonArgs(args, maxArgsBytes, name);
 
     const key = scheduleOptions?.key;

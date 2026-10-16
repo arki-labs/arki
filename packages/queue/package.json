@@ -64,6 +64,7 @@
     "@arki/journal": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "@electric-sql/pglite": "catalog:",

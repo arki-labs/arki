@@ -25,8 +25,10 @@ Version 2.0 is a complete architectural rewrite inspired by tRPC. The new API fo
 ## Installation
 
 ```bash
-pnpm add @arki/queue bullmq ioredis zod superjson
+pnpm add @arki/queue bullmq ioredis superjson
 ```
+
+Job and flow input accepts any Standard Schema validator (Zod, Valibot, ArkType, or your own); the examples use Zod. Bad input surfaces as `SchemaError` from `@arki/schema`.
 
 Entry points: `@arki/queue` (the core), `/types`, `/runtime-local`, `/dot`, `/projection`, `/foreman` and `/outbox`. `/outbox` needs `@arki/journal` and `drizzle-orm`, not `bullmq` or `ioredis`.
 

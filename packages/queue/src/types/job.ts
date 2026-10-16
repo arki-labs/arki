@@ -4,7 +4,7 @@
 
 import type { JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 import type { Backoff } from '@arki/resilience';
 
 import type { JobMiddleware } from './middleware.ts';
@@ -76,7 +76,7 @@ export type JobOptions = {
  */
 export type InternalJobDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
   name: string;
-  inputSchema: z.ZodType<TInput>;
+  inputSchema: StandardSchemaV1<unknown, TInput>;
   handler: JobHandler<TInput, TOutput, TDeps>;
   options?: JobOptions;
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];

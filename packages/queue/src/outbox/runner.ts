@@ -5,6 +5,7 @@
  */
 import type { JobRunner, ScheduledJob } from '@arki/journal';
 import { getLogger } from '@arki/log';
+import { parseAsync, SchemaError } from '@arki/schema';
 
 import type { JobLike } from '../types/job.ts';
 import type { QueueRegistry } from './registry.ts';
@@ -61,22 +62,23 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
       if (definition === undefined)
         throw outboxError(OUTBOX_ERROR_CODES.unknownJob, `outbox: no job named "${job.name}" in the registry`);
       const internal = definition._internal;
-      const parsed = await internal.inputSchema.safeParseAsync(job.args);
-      if (!parsed.success)
+      const parsed = await parseAsync(internal.inputSchema, job.args).catch((error: unknown) => {
+        if (!(error instanceof SchemaError)) throw error;
         throw outboxError(
           OUTBOX_ERROR_CODES.badStoredArgs,
           `outbox: the stored args of ${job.id} ("${job.name}") fail the job's input schema`,
-          parsed.error,
+          error,
         );
+      });
       const jobLike = jobLikeOf(job);
       const jobContext = createJobContext(await contextOnce(), jobLike);
       const result = await executeMiddlewareChain<typeof jobContext, typeof jobContext, unknown>(
         internal.middlewares,
         jobContext,
-        parsed.data,
+        parsed,
         jobLike,
         {},
-        ctx => internal.handler(parsed.data, ctx),
+        ctx => internal.handler(parsed, ctx),
       );
       // A returned failure fails the job, as on the BullMQ lane; the backoff decides whether it runs again.
       throwIfReturnedFailure(result);

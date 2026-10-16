@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 /**
  * Queue instance implementation for v2.0
  *
@@ -11,6 +10,8 @@
 
 import type { Job as BullMQJob, QueueOptions, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
+
+import { parseAsync } from '@arki/schema';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
@@ -122,7 +123,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
         // Validate input
         debugJob.debug('[{internalName}] Job {jobId} validating input', { internalName: internal.name, jobId: job.id });
-        const validatedData = internal.inputSchema.parse(job.data);
+        const validatedData = await parseAsync(internal.inputSchema, job.data);
         debugJob.debug('[{internalName}] Job {jobId} input validated', { internalName: internal.name, jobId: job.id });
 
         // Create base context

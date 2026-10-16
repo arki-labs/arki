@@ -5,7 +5,7 @@
 
 import type { JobsOptions, Queue } from 'bullmq';
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { QueueConnection } from '../redis-connection.ts';
 import type { JobContext, JobDefinition, JobOptions, TriggerOptions } from './job.ts';
@@ -101,7 +101,7 @@ export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta>
   /**
    * Set input schema (unlocks `.handler()`)
    */
-  input<TNewInput>(schema: z.ZodType<TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
+  input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 
   /**
    * Set job options
@@ -122,7 +122,7 @@ export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInp
   /**
    * Set input schema
    */
-  input<TNewInput>(schema: z.ZodType<TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
+  input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
 
   /**
    * Set job options
@@ -132,16 +132,9 @@ export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInp
   /**
    * Set handler function (completes the builder)
    */
-  handler<THandlerInput = TInput, THandlerOutput = TOutput>(
-    handler: (
-      data: THandlerInput extends never ? TInput : THandlerInput,
-      ctx: TContextOut,
-    ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-  ): JobDefinition<
-    THandlerInput extends never ? TInput : THandlerInput,
-    THandlerOutput extends never ? TOutput : THandlerOutput,
-    TContextOut
-  >;
+  handler<TResult>(
+    handler: (data: TInput, ctx: TContextOut) => Promise<TResult>,
+  ): JobDefinition<TInput, TResult, TContextOut>;
 };
 
 /**
@@ -349,7 +342,7 @@ export type ScheduleBuilderNamed<TContext, TContextOut, TMeta extends QueueMeta>
    * Set input schema (unlocks `.handler()`)
    */
   input<TNewInput>(
-    schema: z.ZodType<TNewInput>,
+    schema: StandardSchemaV1<unknown, TNewInput>,
   ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 };
 
@@ -362,7 +355,7 @@ export type ScheduleBuilderNeedsInput<TContext, TContextOut, TMeta extends Queue
    * Set input schema (unlocks `.handler()`)
    */
   input<TNewInput>(
-    schema: z.ZodType<TNewInput>,
+    schema: StandardSchemaV1<unknown, TNewInput>,
   ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 };
 
@@ -384,18 +377,13 @@ export type ScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMeta,
    * Set input schema
    */
   input<TNewInput>(
-    schema: z.ZodType<TNewInput>,
+    schema: StandardSchemaV1<unknown, TNewInput>,
   ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
 
   /**
    * Set handler function (completes the builder)
    */
-  handler<THandlerInput = TInput, THandlerOutput = TOutput>(
-    handler: (
-      data: THandlerInput extends never ? TInput : THandlerInput,
-      ctx: TContextOut,
-    ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-  ): ScheduleDefinition;
+  handler<TResult>(handler: (data: TInput, ctx: TContextOut) => Promise<TResult>): ScheduleDefinition;
 };
 
 /**
@@ -423,7 +411,7 @@ export type FlowBuilderStart<TContext, TMeta extends QueueMeta> = {
   /**
    * Set input schema
    */
-  input<TInput>(schema: z.ZodType<TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput>;
+  input<TInput>(schema: StandardSchemaV1<unknown, TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput>;
 };
 
 /**

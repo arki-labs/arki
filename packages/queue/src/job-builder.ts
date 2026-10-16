@@ -3,10 +3,10 @@
  * Provides chainable API for creating jobs with middleware
  */
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
-import type { JobDefinition, JobHandler, JobOptions } from './types/job.ts';
+import type { JobDefinition, JobOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder } from './debug.ts';
@@ -20,7 +20,7 @@ type JobBuilderState<TInput> = {
   config: QueueConfig;
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
   name?: string;
-  inputSchema?: z.ZodType<TInput>;
+  inputSchema?: StandardSchemaV1<unknown, TInput>;
   options?: JobOptions;
 };
 
@@ -70,7 +70,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
   state: JobBuilderState<TInput>,
 ): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> {
   return {
-    input<TNewInput>(schema: z.ZodType<TNewInput>) {
+    input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>) {
       debugBuilder.debug('[{value1}] Setting input schema', { value1: state.name ?? 'unnamed' });
 
       return createJobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
@@ -96,16 +96,9 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
       });
     },
 
-    handler<THandlerInput = TInput, THandlerOutput = TOutput>(
-      handler: (
-        data: THandlerInput extends never ? TInput : THandlerInput,
-        ctx: TContextOut,
-      ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-    ): JobDefinition<
-      THandlerInput extends never ? TInput : THandlerInput,
-      THandlerOutput extends never ? TOutput : THandlerOutput,
-      TContextOut
-    > {
+    handler<TResult>(
+      handler: (data: TInput, ctx: TContextOut) => Promise<TResult>,
+    ): JobDefinition<TInput, TResult, TContextOut> {
       if (!state.name) {
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.missingName,
@@ -127,17 +120,14 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
         middlewaresLength: state.middlewares.length,
       });
 
-      type ActualInput = THandlerInput extends never ? TInput : THandlerInput;
-      type ActualOutput = THandlerOutput extends never ? TOutput : THandlerOutput;
-
       const jobName = state.name;
 
-      const definition: JobDefinition<ActualInput, ActualOutput, TContextOut> = {
+      const definition: JobDefinition<TInput, TResult, TContextOut> = {
         _type: 'job',
         _internal: {
           name: jobName,
-          inputSchema: state.inputSchema as z.ZodType<ActualInput>,
-          handler: handler as JobHandler<ActualInput, ActualOutput, TContextOut>,
+          inputSchema: state.inputSchema,
+          handler,
           options: state.options,
           // Middleware array stored for runtime execution
           middlewares: state.middlewares,

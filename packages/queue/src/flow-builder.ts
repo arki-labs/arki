@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type {
   FlowBuilderNeedsStep,
@@ -69,7 +69,7 @@ export type InternalFlowDefinition<TInput = unknown, TJob = JobDefinition<unknow
   /**
    * Input schema for the flow
    */
-  inputSchema: z.ZodType<TInput>;
+  inputSchema: StandardSchemaV1<unknown, TInput>;
 
   /**
    * Steps in the flow
@@ -88,7 +88,7 @@ export type InternalFlowDefinition<TInput = unknown, TJob = JobDefinition<unknow
 type FlowBuilderState<TInput> = {
   config: QueueConfig;
   name: string;
-  inputSchema?: z.ZodType<TInput>;
+  inputSchema?: StandardSchemaV1<unknown, TInput>;
   steps: FlowStepInternal<AnyJobDefinition>[];
 };
 
@@ -221,7 +221,7 @@ export function createFlowBuilder<TContext, TMeta extends QueueMeta>(
   debugBuilder.debug('[{name}] Creating flow builder', { name });
 
   return {
-    input<TInput>(schema: z.ZodType<TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput> {
+    input<TInput>(schema: StandardSchemaV1<unknown, TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput> {
       debugBuilder.debug('[{name}] Setting input schema for flow', { name });
 
       // One runtime object serves both typestates: the FlowBuilderNeedsStep
