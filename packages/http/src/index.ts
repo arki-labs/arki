@@ -16,16 +16,24 @@ export { route } from './contract.js';
 export type {
   ContractLike,
   FailureDefinitionLike,
+  HeaderSchema,
   HttpMethod,
+  ParamSchema,
   ParamsOf,
   PathParams,
+  ResponseSchemas,
   RouteContract,
+  RouteDef,
   RouteFailure,
   SchemaLike,
   SseContract,
+  SseDef,
 } from './contract.js';
 
-export { endpoints, routes, rpcMount } from './bundle.js';
+export { raw } from './raw.js';
+export type { RawOutput } from './raw.js';
+
+export { endpoints, reply, routes, rpcMount } from './bundle.js';
 export type {
   EndpointsFeatureSlice,
   HandlerResult,
@@ -33,6 +41,7 @@ export type {
   MountMeta,
   MountPath,
   MountTransport,
+  Reply,
   RouteBinding,
   RouteBundle,
   RouteBundleBuilder,

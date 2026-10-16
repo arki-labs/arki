@@ -10,9 +10,11 @@ import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { derive } from '../derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from '../error.js';
+import { raw } from '../raw.js';
 
 const ping = route.get('/ping', { id: 'ping', output: z.object({ ok: z.boolean() }) });
 const bare = route.get('/bare', { id: 'bare' });
+const download = route.get('/download', { id: 'download', output: raw() });
 
 describe('routes() builder', () => {
   it('accumulates immutably — earlier builders are unchanged', () => {
@@ -78,9 +80,18 @@ describe('routes() builder', () => {
     });
   });
 
-  it('requires a Response when the contract declares no output schema', () => {
-    routes().bind(bare, () => new Response('fine'));
+  it('requires a Response only when the contract declares output: raw()', () => {
+    routes().bind(download, () => new Response('fine'));
+    // @ts-expect-error — a raw route returns a Response, not a plain value
+    routes().bind(download, () => ({ ok: true }));
+  });
+
+  it('returns nothing when the contract declares no output (it answers 204)', () => {
+    // eslint-disable-next-line unicorn/no-useless-undefined -- the handler returns nothing on purpose: the route answers 204
+    routes().bind(bare, () => undefined);
     // @ts-expect-error — plain values need an output schema to serialize against
     routes().bind(bare, () => ({ ok: true }));
+    // @ts-expect-error — a Response needs output: raw()
+    routes().bind(bare, () => new Response('fine'));
   });
 });

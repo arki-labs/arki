@@ -19,7 +19,7 @@ describe('route factories', () => {
     expect(contract.id).toBe('orders.get');
     expect(contract.summary).toBe('one order');
     expect(contract.output).toBe(output);
-    expect(contract.query).toBeUndefined();
+    expect('query' in contract).toBe(false);
   });
 
   it('covers all five methods', () => {

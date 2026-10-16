@@ -38,12 +38,56 @@ export const createOrder = route.post('/orders', {
 });
 ```
 
-Input validation (query/body) happens before your handler runs; output is
-validated against the contract on the way out. Input is decoded and output
+Input validation (params/headers/query/body) happens before your handler runs;
+output is validated against the contract on the way out. Input is decoded and output
 (and every SSE event) is encoded, so a zod codec works both ways: with
 `z.codec(z.iso.datetime(), z.date(), …)` your handler gets and returns a
 `Date`, and the wire carries the ISO string. Failures serialize as a
 coded envelope: `{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }`.
+
+### Params, headers and responses
+
+The contract describes the whole request and response. Path `params` and
+`headers` are zod objects, and `responses` lists the other statuses a handler
+may answer with.
+
+```ts
+export const getOrder = route.get('/orders/:id', {
+  id: 'orders.get',
+  params: z.object({ id: OrderId }), // keys must match the :placeholders
+  headers: z.object({ 'x-tenant': z.string() }), // lower-case names
+  output: Order,
+  responses: { 409: Conflict },
+});
+
+routes().bind(getOrder, async ({ params, headers }) => {
+  const order = await db.orders.find(headers['x-tenant'], params.id); // params.id is an OrderId
+  return order ?? reply(409, { reason: 'moved' }, { headers: { 'retry-after': '1' } });
+});
+```
+
+- `params` must have exactly one key per placeholder. Without `params` you get
+  `Record<name, string>`. One optional placeholder is allowed, as the last
+  segment (`/orders/:id?`): its schema must accept a missing value, the route
+  serves both `/orders` and `/orders/x`, and OpenAPI lists both paths.
+- `headers` names are lower-case. Only the declared names are read from the
+  request, so a strict schema works next to `host` and `accept`. A missing
+  header is left out of the object. (`z.coerce.number()` turns a missing or
+  empty value into `0`; write the schema to refuse that.)
+- `params`, `headers`, `query` and `body` are decoded, in that order; the first
+  failure answers `400` and the handler does not run. SSE routes take `params`
+  and `headers` too.
+- `reply(status, body, { headers? })` answers with a status listed in
+  `responses`. The body is encoded with that status's schema. `responses` keys
+  are integers from 200 to 599, never 204 or 304, and never 200 next to a schema
+  `output`.
+- **No `output` means 204.** The handler returns nothing and the route answers
+  `204` with an empty body. Returning a value from such a handler is `E511`.
+- **`output: raw()` is the only way to return a `Response`** (a redirect, a file,
+  a stream, a handler that owns its error formats). The engine passes it
+  through and never validates it. `raw({ contentType })` feeds OpenAPI, and
+  `responses` may document the payload; both are documentation only. A
+  `Response` without `raw()`, or a plain value from a `raw()` route, is `E510`.
 
 ### Returning failures
 
@@ -254,7 +298,11 @@ const document = toOpenApi([listOrders, createOrder, progress], {
 });
 ```
 
-Deterministic — same contracts, byte-identical output. Inside a DOT app,
+Deterministic — same contracts, byte-identical output. Path and header
+parameters are typed from `params` and `headers`, every status in `responses`
+is listed, a no-output route documents `204`, and a `raw()` route is marked
+`x-arki-raw: true`. Schemas describe the wire form (`io: 'input'`), so a codec
+shows its string side. Inside a DOT app,
 contract actions put the JSON Schemas into the manifest, so
 `dot explain --as openapi` renders the document from the static manifest
 without booting anything.
@@ -273,10 +321,12 @@ const open = await orders.listOrders({ query: { status: 'open' } });
 const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { authorization } });
 ```
 
-- Input (`params`, `query`, `body`) and output are typed from the contract.
-  A wrong input does not compile.
-- Query and body are encoded with their schemas and the output is decoded,
-  exactly mirroring the server, so codecs round-trip.
+- Input (`params`, `query`, `headers`, `body`) and output are typed from the
+  contract. A wrong input does not compile.
+- Params, headers, query and body are encoded with their schemas and the output
+  is decoded, exactly mirroring the server, so codecs round-trip. A missing
+  optional path segment is dropped from the URL.
+- A status listed in `responses` resolves to that schema's decoded body.
 - A non-2xx answer whose code is one of the contract's `failures` resolves to
   that failure, revived with `revive` from `@arki/failure`, so the call's type
   is `Output | the listed failures` and you can `match` on it. Data its
@@ -286,7 +336,7 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
   else `E500`). A body that breaks the output schema throws `E500`.
 - A path param that is empty, `.` or `..` throws `E400` before sending: it
   would change which endpoint the URL points at.
-- A contract with no output schema resolves to the raw `Response`.
+- A contract with no `output` resolves `undefined` (it answers 204). One with `output: raw()` resolves the `Response`.
 - It only needs `fetch`, so it runs in browsers, React Native, Deno, Bun and
   Node. Pass `fetch` to add auth or retries. SSE contracts are not supported.
 
@@ -316,13 +366,17 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E006` | malformed mount path |
 | `ARKI_HTTP_E007` | deriver key duplicates an earlier deriver or a base context key |
 | `ARKI_HTTP_E008` | a bundle token's service was missing at boot (erased composition only) |
-| `ARKI_HTTP_E400` | request validation failed (query/body) or body is not valid JSON |
+| `ARKI_HTTP_E011` | a route contract is inconsistent (params vs path, headers, responses). Thrown by `route.*()` |
+| `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |
 | `ARKI_HTTP_E500` | handler crash or output-schema violation |
+| `ARKI_HTTP_E510` | a `Response` without `output: raw()`, or a plain value from a `raw()` route (answers 500) |
+| `ARKI_HTTP_E511` | a result that does not fit the contract: undeclared `reply` status, or a value on a no-output route (answers 500) |
 
 `E0NN` codes surface through the DOT lifecycle into `app.diagnostics`;
-`E4xx`/`E5xx` codes surface on the wire in the error envelope. Unexpected
+`E4xx`/`E5xx` codes surface on the wire in the error envelope (`E510` and
+`E511` answer 500). Unexpected
 error messages are redacted when `NODE_ENV=production`.
 
 <!-- bench:start -->

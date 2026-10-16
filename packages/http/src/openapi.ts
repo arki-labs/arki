@@ -10,8 +10,10 @@
 
 import { z } from 'zod';
 
-import type { ContractLike } from './contract.js';
+import type { ContractLike, SchemaLike } from './contract.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
+import { openApiPaths, pathPlaceholders } from './path.js';
+import { isRawOutput } from './raw.js';
 
 export type OpenApiInfo = {
   readonly title: string;
@@ -26,12 +28,15 @@ export const HTTP_ACTION_META_SCHEMA = '@arki/http/action-meta@1';
 
 /**
  * Convert a contract schema to JSON Schema. Schema erasure seam:
- * {@link ContractLike} types schemas as `parse`-only, but contracts built
- * via `route.*` always hold zod schemas (see `SchemaLike` docs) — the
+ * {@link ContractLike} types schemas as `parse`/`encode` only, but contracts
+ * built via `route.*` always hold zod schemas (see `SchemaLike` docs) — the
  * cast re-attaches what the erased view dropped.
+ *
+ * `io: 'input'` describes the wire form: every schema here either decodes
+ * what arrives or encodes what leaves, and a codec's wire side is its input.
  */
-function toJsonSchema(schema: { parse(input: unknown): unknown }): JsonObject {
-  const json = z.toJSONSchema(schema as z.ZodType) as Record<string, unknown>;
+function toJsonSchema(schema: SchemaLike): JsonObject {
+  const json = z.toJSONSchema(schema as z.ZodType, { io: 'input' }) as Record<string, unknown>;
   // The dialect header is noise when embedding into OpenAPI 3.1.
   const { $schema: _dialect, ...rest } = json;
   return toJsonObject(rest);
@@ -89,89 +94,93 @@ function jsonDeepEqual(left: unknown, right: unknown): boolean {
   return true;
 }
 
-function pathParamNames(path: string): readonly string[] {
-  return [...path.matchAll(/:(\w+)/g)]
-    .map(match => match[1])
-    .filter((name): name is string => name !== undefined);
+/** Replace `#/$defs/X` references with the definitions they name; a reference to itself becomes `{}`. */
+function inlineRefs(value: JsonValue, defs: JsonObject, seen: readonly string[]): JsonValue {
+  if (Array.isArray(value)) return value.map(item => inlineRefs(item, defs, seen));
+  if (typeof value !== 'object' || value === null) return value;
+  const ref = value['$ref'];
+  if (typeof ref === 'string' && ref.startsWith('#/$defs/')) {
+    const name = ref.slice('#/$defs/'.length);
+    const target = defs[name];
+    if (target === undefined || seen.includes(name)) return {};
+    return inlineRefs(target, defs, [...seen, name]);
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, inlineRefs(item, defs, seen)]));
 }
 
-function openApiPath(path: string): string {
-  return path.replaceAll(/:(\w+)/g, '{$1}');
-}
-
-function queryParametersFromSchemaObject(json: JsonObject): JsonObject[] {
+/**
+ * The properties of an object schema, ready to stand alone as parameters.
+ * A property that points into the root's `$defs` would dangle once lifted
+ * out of it, so those references are inlined.
+ */
+function propertiesOf(json: JsonObject): { readonly properties: JsonObject; readonly required: ReadonlySet<string> } {
+  const defs = isJsonObject(json['$defs']) ? json['$defs'] : {};
   const properties = isJsonObject(json['properties']) ? json['properties'] : {};
   const required = Array.isArray(json['required'])
     ? new Set(json['required'].filter((value): value is string => typeof value === 'string'))
     : new Set<string>();
-  return Object.entries(properties).map(([name, propertySchema]) => ({
+  const lifted: JsonObject = {};
+  for (const [name, schema] of Object.entries(properties)) lifted[name] = inlineRefs(schema, defs, []);
+  return { properties: lifted, required };
+}
+
+function parametersFromSchemaObject(location: 'query' | 'header', json: JsonObject): JsonObject[] {
+  const { properties, required } = propertiesOf(json);
+  return Object.entries(properties).map(([name, schema]) => ({
     name,
-    in: 'query',
+    in: location,
     required: required.has(name),
-    schema: propertySchema,
+    schema,
   }));
 }
 
-function queryParameters(schema: { parse(input: unknown): unknown }): JsonObject[] {
-  return queryParametersFromSchemaObject(toJsonSchema(schema));
-}
-
-function buildOperation(contract: ContractLike): JsonObject {
-  const parameters: JsonObject[] = pathParamNames(contract.path).map(name => ({
-    name,
-    in: 'path',
-    required: true,
-    schema: { type: 'string' },
-  }));
-  if (contract.query !== undefined) parameters.push(...queryParameters(contract.query));
-
-  const operation: JsonObject = { operationId: contract.id };
-  if (contract.summary !== undefined) operation['summary'] = contract.summary;
-  if (parameters.length > 0) operation['parameters'] = parameters;
-  if (contract.body !== undefined) {
-    operation['requestBody'] = {
-      required: true,
-      content: { 'application/json': { schema: toJsonSchema(contract.body) } },
-    };
-  }
-
-  if (contract.kind === 'sse') {
-    operation['responses'] = {
+function buildResponses(action: HttpActionForProjection): JsonObject {
+  if (action.streaming === true) {
+    return {
       '200': {
         description: 'event stream',
-        content: {
-          'text/event-stream':
-            contract.event === undefined ? {} : { schema: toJsonSchema(contract.event) },
-        },
-      },
-    };
-  } else if (contract.output === undefined) {
-    operation['responses'] = { '200': { description: 'success' } };
-  } else {
-    operation['responses'] = {
-      '200': {
-        description: 'success',
-        content: { 'application/json': { schema: toJsonSchema(contract.output) } },
+        content: { 'text/event-stream': action.output === undefined ? {} : { schema: action.output } },
       },
     };
   }
-
-  return operation;
+  const responses: JsonObject = {};
+  // A raw route documents its body only; the engine never checks it.
+  const contentType = action.raw === undefined ? 'application/json' : (action.raw.contentType ?? '*/*');
+  if (action.raw === undefined) {
+    if (action.output === undefined) {
+      responses['204'] = { description: 'no content' };
+    } else {
+      responses['200'] = { description: 'success', content: { 'application/json': { schema: action.output } } };
+    }
+  } else {
+    responses['200'] = { description: 'success', content: { [contentType]: {} } };
+  }
+  for (const [status, schema] of Object.entries(action.responses ?? {})) {
+    responses[status] = {
+      description: Number(status) < 400 ? 'success' : 'error',
+      content: { [contentType]: { schema } },
+    };
+  }
+  return responses;
 }
 
-function buildOperationFromAction(action: HttpActionForProjection): JsonObject {
-  const parameters: JsonObject[] = pathParamNames(action.path).map(name => ({
-    name,
-    in: 'path',
-    required: true,
-    schema: { type: 'string' },
-  }));
-  if (action.input?.query !== undefined) parameters.push(...queryParametersFromSchemaObject(action.input.query));
+/** One operation, for one concrete path of the route (`omitted` is the optional placeholder this variant leaves out). */
+function buildOperation(action: HttpActionForProjection, omitted: string | undefined): JsonObject {
+  const parameters: JsonObject[] = pathPlaceholders(action.path)
+    .filter(({ name }) => name !== omitted)
+    .map(({ name }) => ({
+      name,
+      in: 'path',
+      required: true,
+      schema: action.input?.params === undefined ? { type: 'string' } : (propertiesOf(action.input.params).properties[name] ?? { type: 'string' }),
+    }));
+  if (action.input?.query !== undefined) parameters.push(...parametersFromSchemaObject('query', action.input.query));
+  if (action.input?.headers !== undefined) parameters.push(...parametersFromSchemaObject('header', action.input.headers));
 
   const operation: JsonObject = {
-    operationId: action.id,
-    tags: [action.plugin],
+    operationId: omitted === undefined ? action.id : `${action.id}.without-${omitted}`,
   };
+  if (action.plugin !== undefined) operation['tags'] = [action.plugin];
   if (action.summary !== undefined) operation['summary'] = action.summary;
   if (parameters.length > 0) operation['parameters'] = parameters;
   if (action.input?.body !== undefined) {
@@ -180,28 +189,32 @@ function buildOperationFromAction(action: HttpActionForProjection): JsonObject {
       content: { 'application/json': { schema: action.input.body } },
     };
   }
-
-  if (action.streaming === true) {
-    operation['responses'] = {
-      '200': {
-        description: 'event stream',
-        content: {
-          'text/event-stream': action.output === undefined ? {} : { schema: action.output },
-        },
-      },
-    };
-  } else if (action.output === undefined) {
-    operation['responses'] = { '200': { description: 'success' } };
-  } else {
-    operation['responses'] = {
-      '200': {
-        description: 'success',
-        content: { 'application/json': { schema: action.output } },
-      },
-    };
-  }
-
+  operation['responses'] = buildResponses(action);
+  if (action.raw !== undefined) operation['x-arki-raw'] = true;
   return operation;
+}
+
+/**
+ * Paths and operations in action order. Duplicate method+path pairs fail
+ * loudly with `ARKI_HTTP_E002`, optional-placeholder variants included.
+ */
+function renderPaths(actions: Iterable<HttpActionForProjection>, collidesWith: 'contract' | 'action'): Record<string, JsonObject> {
+  const paths: Record<string, JsonObject> = {};
+  for (const action of actions) {
+    const method = action.method.toLowerCase();
+    for (const { path, omitted } of openApiPaths(action.path)) {
+      const entry = (paths[path] ??= {});
+      if (entry[method] !== undefined) {
+        throw new HttpConfigError({
+          code: HTTP_ERROR_CODES.duplicateRoute,
+          message: `[http] duplicate route ${action.method} ${action.path}: "${action.id}" collides with an earlier ${collidesWith}.`,
+          remediation: `Two ${collidesWith}s claim the same method and path. Change one path, or drop the duplicate.`,
+        });
+      }
+      entry[method] = buildOperation(action, omitted);
+    }
+  }
+  return paths;
 }
 
 /**
@@ -210,20 +223,10 @@ function buildOperationFromAction(action: HttpActionForProjection): JsonObject {
  * `ARKI_HTTP_E002` (the same collision `buildEngine` rejects at boot).
  */
 export function toOpenApi(contracts: readonly ContractLike[], info: OpenApiInfo): JsonObject {
-  const paths: Record<string, JsonObject> = {};
-  for (const contract of contracts) {
-    const path = openApiPath(contract.path);
-    const entry = (paths[path] ??= {});
-    const method = contract.method.toLowerCase();
-    if (entry[method] !== undefined) {
-      throw new HttpConfigError({
-        code: HTTP_ERROR_CODES.duplicateRoute,
-        message: `[http] duplicate route ${contract.method} ${contract.path}: "${contract.id}" collides with an earlier contract.`,
-        remediation: 'Two contracts claim the same method and path. Change one path, or drop the duplicate.',
-      });
-    }
-    entry[method] = buildOperation(contract);
-  }
+  const actions = contracts.map(contract => {
+    const { id, summary, meta } = contractMeta(contract);
+    return httpActionFromMeta({ id, plugin: undefined, summary, meta });
+  });
   return {
     openapi: '3.1.0',
     info: {
@@ -231,7 +234,7 @@ export function toOpenApi(contracts: readonly ContractLike[], info: OpenApiInfo)
       version: info.version,
       ...(info.description === undefined ? {} : { description: info.description }),
     },
-    paths,
+    paths: renderPaths(actions, 'contract'),
   };
 }
 
@@ -253,12 +256,20 @@ type DotManifestLike = {
 
 type HttpActionForProjection = {
   readonly id: string;
-  readonly plugin: string;
+  /** The owning plugin; absent when rendering contracts directly, so no `tags`. */
+  readonly plugin: string | undefined;
   readonly method: string;
   readonly path: string;
   readonly summary?: string;
-  readonly input?: { readonly query?: JsonObject; readonly body?: JsonObject };
+  readonly input?: {
+    readonly params?: JsonObject;
+    readonly query?: JsonObject;
+    readonly headers?: JsonObject;
+    readonly body?: JsonObject;
+  };
   readonly output?: JsonObject;
+  readonly raw?: { readonly contentType?: string };
+  readonly responses?: Readonly<Record<string, JsonObject>>;
   readonly streaming?: boolean;
 };
 
@@ -277,21 +288,34 @@ export type RouteMeta = {
  * Manifest metadata for a contract — what contract `toDotAction()` returns
  * for DOT plugins and what `registerRoutes` feeds into `ctx.registerAction`
  * during the shim window. SSE contracts mark `streaming` and carry the
- * per-event schema as `output`.
+ * per-event schema as `output`. A `raw()` route carries `raw` instead of
+ * `output`, and `responses` holds one JSON Schema per declared status.
  */
 export function contractMeta(contract: ContractLike): RouteMeta {
   const input: JsonObject = {};
-  if (contract.query !== undefined) input.query = toJsonSchema(contract.query);
-  if (contract.body !== undefined) input.body = toJsonSchema(contract.body);
+  if (contract.params !== undefined) input['params'] = toJsonSchema(contract.params);
+  if (contract.query !== undefined) input['query'] = toJsonSchema(contract.query);
+  if (contract.headers !== undefined) input['headers'] = toJsonSchema(contract.headers);
+  if (contract.body !== undefined) input['body'] = toJsonSchema(contract.body);
 
-  const outputSchema = contract.kind === 'sse' ? contract.event : contract.output;
   const meta: JsonObject = {
     method: contract.method,
     path: contract.path,
   };
   if (Object.keys(input).length > 0) meta['input'] = input;
-  if (outputSchema !== undefined) meta['output'] = toJsonSchema(outputSchema);
-  if (contract.kind === 'sse') meta['streaming'] = true;
+  if (contract.kind === 'sse') {
+    if (contract.event !== undefined) meta['output'] = toJsonSchema(contract.event);
+    meta['streaming'] = true;
+  } else if (isRawOutput(contract.output)) {
+    meta['raw'] = contract.output.contentType === undefined ? {} : { contentType: contract.output.contentType };
+  } else if (contract.output !== undefined) {
+    meta['output'] = toJsonSchema(contract.output);
+  }
+  if (contract.responses !== undefined && Object.keys(contract.responses).length > 0) {
+    const responses: JsonObject = {};
+    for (const [status, schema] of Object.entries(contract.responses)) responses[status] = toJsonSchema(schema);
+    meta['responses'] = responses;
+  }
 
   return {
     id: contract.id,
@@ -304,15 +328,13 @@ export function contractMeta(contract: ContractLike): RouteMeta {
   };
 }
 
-function httpActionFromManifestAction(action: DotActionLike): HttpActionForProjection | null {
-  if (action.binding !== 'http') return null;
-  if (action.metaSchema !== undefined && action.metaSchema !== HTTP_ACTION_META_SCHEMA) {
-    throw new HttpConfigError({
-      code: HTTP_ERROR_CODES.invalidActionMeta,
-      message: `[http] action "${action.id}" uses unsupported meta schema "${action.metaSchema}".`,
-      remediation: `HTTP projections require ${HTTP_ACTION_META_SCHEMA}; omit metaSchema only for legacy registerRoute shim output during the DOT 0.4 migration window.`,
-    });
-  }
+/** Read an action's metadata back into the shape the renderer takes. */
+function httpActionFromMeta(action: {
+  readonly id: string;
+  readonly plugin: string | undefined;
+  readonly summary?: string;
+  readonly meta?: JsonObject;
+}): HttpActionForProjection {
   const meta = action.meta;
   if (meta === undefined) {
     throw new HttpConfigError({
@@ -334,13 +356,23 @@ function httpActionFromManifestAction(action: DotActionLike): HttpActionForProje
   const inputValue = meta['input'];
   const outputValue = meta['output'];
   const streamingValue = meta['streaming'];
-  const input =
-    isJsonObject(inputValue)
-      ? {
-          ...(isJsonObject(inputValue['query']) ? { query: inputValue['query'] } : {}),
-          ...(isJsonObject(inputValue['body']) ? { body: inputValue['body'] } : {}),
-        }
-      : undefined;
+  const rawValue = meta['raw'];
+  const responsesValue = meta['responses'];
+  const input = isJsonObject(inputValue)
+    ? {
+        ...(isJsonObject(inputValue['params']) ? { params: inputValue['params'] } : {}),
+        ...(isJsonObject(inputValue['query']) ? { query: inputValue['query'] } : {}),
+        ...(isJsonObject(inputValue['headers']) ? { headers: inputValue['headers'] } : {}),
+        ...(isJsonObject(inputValue['body']) ? { body: inputValue['body'] } : {}),
+      }
+    : undefined;
+  const contentType = isJsonObject(rawValue) ? rawValue['contentType'] : undefined;
+  const responses: Record<string, JsonObject> = {};
+  if (isJsonObject(responsesValue)) {
+    for (const [status, schema] of Object.entries(responsesValue)) {
+      if (isJsonObject(schema)) responses[status] = schema;
+    }
+  }
 
   return {
     id: action.id,
@@ -350,34 +382,34 @@ function httpActionFromManifestAction(action: DotActionLike): HttpActionForProje
     ...(action.summary === undefined ? {} : { summary: action.summary }),
     ...(input === undefined || Object.keys(input).length === 0 ? {} : { input }),
     ...(isJsonObject(outputValue) ? { output: outputValue } : {}),
+    ...(isJsonObject(rawValue) ? { raw: typeof contentType === 'string' ? { contentType } : {} } : {}),
+    ...(Object.keys(responses).length > 0 ? { responses } : {}),
     ...(typeof streamingValue === 'boolean' ? { streaming: streamingValue } : {}),
   };
 }
 
-export function toOpenApiFromManifest(manifest: DotManifestLike): JsonObject {
-  const paths: Record<string, JsonObject> = {};
-  for (const manifestAction of manifest.actions) {
-    const action = httpActionFromManifestAction(manifestAction);
-    if (action === null) continue;
-    const path = openApiPath(action.path);
-    const entry = (paths[path] ??= {});
-    const method = action.method.toLowerCase();
-    if (entry[method] !== undefined) {
-      throw new HttpConfigError({
-        code: HTTP_ERROR_CODES.duplicateRoute,
-        message: `[http] duplicate route ${action.method} ${action.path}: "${action.id}" collides with an earlier action.`,
-        remediation: 'Two HTTP actions claim the same method and path. Change one path, or drop the duplicate.',
-      });
-    }
-    entry[method] = buildOperationFromAction(action);
+function httpActionFromManifestAction(action: DotActionLike): HttpActionForProjection | null {
+  if (action.binding !== 'http') return null;
+  if (action.metaSchema !== undefined && action.metaSchema !== HTTP_ACTION_META_SCHEMA) {
+    throw new HttpConfigError({
+      code: HTTP_ERROR_CODES.invalidActionMeta,
+      message: `[http] action "${action.id}" uses unsupported meta schema "${action.metaSchema}".`,
+      remediation: `HTTP projections require ${HTTP_ACTION_META_SCHEMA}; omit metaSchema only for legacy registerRoute shim output during the DOT 0.4 migration window.`,
+    });
   }
+  return httpActionFromMeta(action);
+}
 
+export function toOpenApiFromManifest(manifest: DotManifestLike): JsonObject {
+  const actions = manifest.actions
+    .map(action => httpActionFromManifestAction(action))
+    .filter((action): action is HttpActionForProjection => action !== null);
   return {
     openapi: '3.1.0',
     info: {
       title: manifest.app.name,
       version: manifest.app.version ?? '0.0.0',
     },
-    paths,
+    paths: renderPaths(actions, 'action'),
   };
 }

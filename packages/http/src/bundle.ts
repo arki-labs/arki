@@ -26,42 +26,96 @@
  * typed. Same accumulation idiom as `defineApp().use()`.
  */
 
-import type { ContractLike, FailureDefinitionLike, ParamsOf, RouteContract, SseContract } from './contract.js';
+import type { z } from 'zod';
+
+import type {
+  ContractLike,
+  ParamsOf,
+  ResponseSchemas,
+  RouteContract,
+  RouteDef,
+  RouteFailure,
+  SseContract,
+  SseDef,
+} from './contract.js';
 import type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
 import { BASE_CTX_KEYS } from './derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { HTTP_ACTION_META_SCHEMA } from './openapi.js';
+import type { RawOutput } from './raw.js';
 
 type MaybePromise<T> = T | Promise<T>;
 
-/** The validated inputs a bound handler receives. */
-export type RouteInput<TPath extends string, TQuery, TBody> = {
-  readonly params: ParamsOf<TPath>;
-  readonly query: TQuery;
+export const REPLY: unique symbol = Symbol.for('@arki/http/reply');
+
+/** A handler's answer with a chosen status. Create with {@link reply}. */
+export type Reply<TStatus extends number, TBody> = {
+  readonly [REPLY]: true;
+  readonly status: TStatus;
   readonly body: TBody;
+  readonly headers?: Readonly<Record<string, string>>;
 };
 
 /**
- * What a JSON handler may return: the contract's output type (serialized
- * and validated), one of the contract's listed failures (answered with its
- * status and the error envelope), or a raw `Response` as the escape hatch —
- * redirects, files, custom streams. Contracts without an output schema must
- * return a `Response` or a listed failure. A failure the contract does not
- * list is a compile error.
+ * Answer with one of the contract's `responses`: `reply(404, { reason })`.
+ * The status must be a key of `responses` and the body must fit its schema.
+ * Extra `headers` ride along on the response.
  */
-export type HandlerResult<TOutput, TFailure = never> = [TOutput] extends [undefined]
-  ? Response | TFailure
-  : TOutput | Response | TFailure;
+export function reply<const TStatus extends number, TBody>(
+  status: TStatus,
+  body: TBody,
+  init: { readonly headers?: Readonly<Record<string, string>> } = {},
+): Reply<TStatus, TBody> {
+  return { [REPLY]: true, status, body, ...(init.headers === undefined ? {} : { headers: init.headers }) };
+}
+
+export function isReply(value: unknown): value is Reply<number, unknown> {
+  return typeof value === 'object' && value !== null && REPLY in value;
+}
+
+/** The decoded value of one schema field of a def, or `Fallback` when the def leaves it out. */
+export type Decoded<TDef, K extends string, Fallback> = TDef extends Readonly<Record<K, infer S extends z.ZodType>>
+  ? z.output<S>
+  : Fallback;
+
+/** The validated inputs a bound handler receives. */
+export type RouteInput<TPath extends string, TDef> = {
+  readonly params: Decoded<TDef, 'params', ParamsOf<TPath>>;
+  readonly query: Decoded<TDef, 'query', undefined>;
+  readonly headers: Decoded<TDef, 'headers', undefined>;
+  readonly body: Decoded<TDef, 'body', undefined>;
+};
+
+type PlainResult<TDef> = TDef extends { readonly output: infer TOutput }
+  ? TOutput extends RawOutput
+    ? Response
+    : TOutput extends z.ZodType
+      ? z.output<TOutput>
+      : never
+  : void;
+
+type ReplyResult<TDef> = TDef extends { readonly responses: infer TResponses extends ResponseSchemas }
+  ? { [S in keyof TResponses & number]: Reply<S, z.output<TResponses[S]>> }[keyof TResponses & number]
+  : never;
+
+/**
+ * What a JSON handler may return, read from the contract:
+ *
+ *  - `output` schema: its output type, sent as 200 JSON;
+ *  - `output: raw()`: a `Response`, passed through untouched;
+ *  - no `output`: nothing, answered 204;
+ *  - `reply(status, body)` for any status in `responses`;
+ *  - one of the contract's listed `failures`, answered with its status and
+ *    the error envelope. A failure the contract does not list is a compile
+ *    error.
+ */
+export type HandlerResult<TDef> = PlainResult<TDef> | ReplyResult<TDef> | RouteFailure<TDef>;
 
 /** Handler signature inferred from a {@link RouteContract}. */
-export type RouteHandler<
-  TPath extends string,
-  TQuery,
-  TBody,
-  TOutput,
-  TCtx extends BaseRequestCtx,
-  TFailure = never,
-> = (input: RouteInput<TPath, TQuery, TBody>, ctx: TCtx) => MaybePromise<HandlerResult<TOutput, TFailure>>;
+export type RouteHandler<TPath extends string, TDef, TCtx extends BaseRequestCtx> = (
+  input: RouteInput<TPath, TDef>,
+  ctx: TCtx,
+) => MaybePromise<HandlerResult<TDef>>;
 
 /**
  * Handler signature inferred from an {@link SseContract}: an async
@@ -70,10 +124,10 @@ export type RouteHandler<
  * `data:` message. Client disconnect aborts `ctx.signal` and terminates
  * the iterator.
  */
-export type SseHandler<TPath extends string, TQuery, TEvent, TCtx extends BaseRequestCtx> = (
-  input: RouteInput<TPath, TQuery, undefined>,
+export type SseHandler<TPath extends string, TDef extends SseDef<TPath>, TCtx extends BaseRequestCtx> = (
+  input: RouteInput<TPath, TDef>,
   ctx: TCtx,
-) => AsyncIterable<TEvent>;
+) => AsyncIterable<z.output<TDef['event']>>;
 
 /** Non-HTTP transports a {@link RouteBundleBuilder.mount} can declare. */
 export type MountTransport = 'orpc' | 'trpc' | 'rpc' | 'custom';
@@ -215,25 +269,18 @@ export type RouteBundleBuilder<TCtx extends BaseRequestCtx = BaseRequestCtx> = R
     fn: (req: Request, ctx: TCtx) => V | Promise<V>,
   ): RouteBundleBuilder<TCtx & Readonly<Record<K, V>>>;
   /**
-   * Bind a JSON contract to its handler. `NoInfer` pins the input/output
-   * generics to the contract — without it, a handler returning the wrong
-   * shape would silently widen `TOutput` instead of failing to compile.
+   * Bind a JSON contract to its handler. `NoInfer` pins the input/result
+   * types to the contract — without it, a handler returning the wrong
+   * shape would silently widen `TDef` instead of failing to compile.
    */
-  bind<TPath extends string, TQuery, TBody, TOutput, TFailures extends readonly FailureDefinitionLike[]>(
-    contract: RouteContract<TPath, TQuery, TBody, TOutput, TFailures>,
-    handler: RouteHandler<
-      TPath,
-      NoInfer<TQuery>,
-      NoInfer<TBody>,
-      NoInfer<TOutput>,
-      TCtx,
-      ReturnType<NoInfer<TFailures>[number]>
-    >,
+  bind<TPath extends string, TDef extends RouteDef<TPath>>(
+    contract: RouteContract<TPath, TDef>,
+    handler: RouteHandler<TPath, NoInfer<TDef>, TCtx>,
   ): RouteBundleBuilder<TCtx>;
   /** Bind an SSE contract to its event generator. */
-  bind<TPath extends string, TQuery, TEvent>(
-    contract: SseContract<TPath, TQuery, TEvent>,
-    handler: SseHandler<TPath, NoInfer<TQuery>, NoInfer<TEvent>, TCtx>,
+  bind<TPath extends string, TDef extends SseDef<TPath>>(
+    contract: SseContract<TPath, TDef>,
+    handler: SseHandler<TPath, NoInfer<TDef>, TCtx>,
   ): RouteBundleBuilder<TCtx>;
   /**
    * Mount a foreign fetch handler under a path prefix — an oRPC router, a

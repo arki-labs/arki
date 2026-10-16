@@ -11,7 +11,7 @@
  * path (TanStack Start routes etc.).
  */
 import type { RouteBundle } from '@arki/http';
-import { route, routes } from '@arki/http';
+import { raw, route, routes } from '@arki/http';
 
 import type { CreateFleetHandlerOptions } from './server';
 import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
@@ -19,14 +19,15 @@ import { createFleetHandler } from './server';
 
 /**
  * The STATIC half — list this in the fleet plugin's `actions:` so the
- * endpoint attributes to the feature in `dot explain`. The output
- * schema documents the payload; enforcement stays in the handler
- * (which owns its 401/502 error formats and returns a raw `Response`).
+ * endpoint attributes to the feature in `dot explain`. The handler owns
+ * its 401/502 error formats and returns a raw `Response`, so the route is
+ * `raw()`; `responses` documents the payload and enforces nothing.
  */
 export const fleetSnapshotRoute = route.get(FLEET_ENDPOINT_PATH, {
   id: 'fleet.snapshot',
   summary: 'Foreman fleet snapshot (token-gated)',
-  output: fleetSnapshotSchema,
+  output: raw({ contentType: 'application/json' }),
+  responses: { 200: fleetSnapshotSchema },
 });
 
 /**

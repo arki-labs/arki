@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { ClientInput } from '../client.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
+import { raw } from '../raw.js';
 
 const isoDate = z.codec(z.iso.datetime(), z.date(), {
   decode: text => new Date(text),
@@ -25,7 +26,7 @@ const listOrders = route.get('/orders', {
   output: z.array(Order),
 });
 const placeOrder = route.post('/orders', { id: 'orders.place', body: z.object({ total: z.number() }), output: Order });
-const download = route.get('/orders/:id/pdf', { id: 'orders.pdf' });
+const download = route.get('/orders/:id/pdf', { id: 'orders.pdf', output: raw() });
 
 const orders = createClient(
   { getOrder, listOrders, placeOrder, download },

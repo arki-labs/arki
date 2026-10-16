@@ -12,6 +12,7 @@ import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
+import { raw } from '../raw.js';
 
 const BASE = 'http://test.local';
 
@@ -34,7 +35,7 @@ const moveEvent = route.post('/events/:id/move', {
 
 const lockedEvent = route.delete('/events/:id', { id: 'events.delete', output: z.object({ ok: z.boolean() }) });
 
-const rawEvent = route.get('/events/:id/raw', { id: 'events.raw' });
+const rawEvent = route.get('/events/:id/raw', { id: 'events.raw', output: raw() });
 
 const engine = buildEngine([
   routes()
@@ -141,7 +142,7 @@ describe('createClient', () => {
     ).rejects.toMatchObject({ status: 500, code: HTTP_ERROR_CODES.internal });
   });
 
-  it('hands back the raw Response when the contract has no output schema', async () => {
+  it('hands back the raw Response when the contract declares output: raw()', async () => {
     const raw = createClient(rawEvent, { baseUrl: BASE, fetch: recordingFetch(engine.fetch).fetch });
     const res = await raw({ params: { id: 'e1' } });
     expect(res).toBeInstanceOf(Response);

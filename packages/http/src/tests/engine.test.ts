@@ -13,6 +13,7 @@ import { requestContext } from '../context.js';
 import { route } from '../contract.js';
 import { buildEngine, composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
+import { raw } from '../raw.js';
 
 const BASE = 'http://test.local';
 
@@ -112,7 +113,7 @@ describe('buildEngine', () => {
   });
 
   it('passes raw Responses through untouched', async () => {
-    const redirect = route.get('/old', { id: 'old' });
+    const redirect = route.get('/old', { id: 'old', output: raw() });
     const engine = buildEngine([routes().bind(redirect, () => Response.redirect(`${BASE}/new`, 308))]);
     const res = await engine.fetch(new Request(`${BASE}/old`));
     expect(res.status).toBe(308);
@@ -181,8 +182,8 @@ describe('buildEngine', () => {
   });
 
   it('rejects duplicate method+path across bundles at build time', () => {
-    const a = route.get('/dup', { id: 'a' });
-    const b = route.get('/dup', { id: 'b' });
+    const a = route.get('/dup', { id: 'a', output: raw() });
+    const b = route.get('/dup', { id: 'b', output: raw() });
     try {
       buildEngine([routes().bind(a, () => new Response('a')), routes().bind(b, () => new Response('b'))]);
       expect.unreachable('duplicate route must throw');

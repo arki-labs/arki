@@ -15,33 +15,53 @@ import type { z } from 'zod';
 
 import type { Failure, StandardSchemaV1 } from '@arki/failure';
 
+import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import type { RouteMeta } from './openapi.js';
 import { contractMeta } from './openapi.js';
+import { pathPlaceholders } from './path.js';
+import type { RawOutput } from './raw.js';
+import { isRawOutput } from './raw.js';
 
 /** Methods a {@link RouteContract} can declare. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-/**
- * Path-parameter names extracted from a path literal at the type level:
- * `'/orders/:id/items/:itemId'` → `'id' | 'itemId'`.
- */
-export type PathParams<TPath extends string> = TPath extends `${string}:${infer Rest}`
+/** Placeholder names as written: `'/a/:id/:slug?'` → `'id' | 'slug?'`. */
+type RawParams<TPath extends string> = TPath extends `${string}:${infer Rest}`
   ? Rest extends `${infer Param}/${infer Tail}`
-    ? Param | PathParams<`/${Tail}`>
+    ? Param | RawParams<`/${Tail}`>
     : Rest
   : never;
 
-/** Typed view of a path's parameters: every value is a string. */
-export type ParamsOf<TPath extends string> = Readonly<Record<PathParams<TPath>, string>>;
+/**
+ * Path-parameter names extracted from a path literal at the type level:
+ * `'/orders/:id/items/:itemId'` → `'id' | 'itemId'`. An optional
+ * placeholder (`:itemId?`) counts under its plain name.
+ */
+export type PathParams<TPath extends string> = RawParams<TPath> extends infer P extends string
+  ? P extends `${infer Name}?`
+    ? Name
+    : P
+  : never;
+
+type OptionalParams<TPath extends string> = RawParams<TPath> extends infer P extends string
+  ? P extends `${infer Name}?`
+    ? Name
+    : never
+  : never;
+
+/** Typed view of a path's parameters: every value is a string, an optional one may be missing. */
+export type ParamsOf<TPath extends string> = Readonly<
+  Record<Exclude<PathParams<TPath>, OptionalParams<TPath>>, string> & Partial<Record<OptionalParams<TPath>, string>>
+>;
 
 /**
  * The minimal schema surface the engine needs: `parse` decodes what comes
- * in (query, body), `encode` turns what goes out (output, SSE events) into
- * its wire form — so a zod codec (say ISO string <-> `Date`) works in both
- * directions. Every zod schema satisfies it structurally, which lets
- * mixed-generic contracts live in one array without variance fights.
- * Values MUST be zod schemas — `toOpenApi` converts them via
- * `z.toJSONSchema`.
+ * in (params, headers, query, body), `encode` turns what goes out (output,
+ * `responses`, SSE events) into its wire form — so a zod codec (say ISO
+ * string <-> `Date`) works in both directions. Every zod schema satisfies
+ * it structurally, which lets mixed-generic contracts live in one array
+ * without variance fights. Values MUST be zod schemas — `toOpenApi` converts
+ * them via `z.toJSONSchema`.
  */
 export type SchemaLike = {
   parse(input: unknown): unknown;
@@ -60,39 +80,70 @@ export type FailureDefinitionLike = {
 };
 
 /** The failure values a contract lists: `RouteFailure<typeof getPost>`. */
-export type RouteFailure<TContract> =
-  TContract extends RouteContract<string, unknown, unknown, unknown, infer TFailures>
-    ? ReturnType<TFailures[number]>
-    : never;
+export type RouteFailure<TContract> = TContract extends {
+  readonly failures: infer TFailures extends readonly FailureDefinitionLike[];
+}
+  ? ReturnType<TFailures[number]>
+  : never;
 
 /**
- * A JSON route contract. Create via {@link route}. The generics carry the
- * validated input/output types into the bound handler's signature, and the
- * listed failures into what the handler may return and the client resolves to.
+ * Status code to body schema, for the statuses a handler may answer with
+ * `reply(status, body)`. Integer keys 200-599. Never 204 or 304 (they carry
+ * no body: a route without `output` answers 204), and never 200 next to a
+ * schema `output`. On a `raw()` route the schemas only document.
  */
-export type RouteContract<
-  TPath extends string = string,
-  TQuery = undefined,
-  TBody = undefined,
-  TOutput = undefined,
-  TFailures extends readonly FailureDefinitionLike[] = readonly [],
-> = {
-  readonly kind: 'http';
+export type ResponseSchemas = Readonly<Record<number, z.ZodType>>;
+
+/** A zod object whose keys are the lower-case header names the route reads. */
+export type HeaderSchema = z.ZodType & { readonly shape: Readonly<Record<string, z.ZodType>> };
+
+/** A zod object with one key per path placeholder. A missing key fails to compile; an extra key throws at declaration. */
+export type ParamSchema<TPath extends string> = z.ZodType & {
+  readonly shape: Readonly<Record<PathParams<TPath>, z.ZodType>>;
+};
+
+/** What a JSON route declares. The generic `TDef` of {@link RouteContract} is the literal def. */
+export type RouteDef<TPath extends string> = {
   /** Stable identifier — lands in the manifest and OpenAPI `operationId`. */
   readonly id: string;
-  readonly method: HttpMethod;
-  readonly path: TPath;
   readonly summary?: string;
-  readonly query?: z.ZodType<TQuery>;
-  readonly body?: z.ZodType<TBody>;
-  readonly output?: z.ZodType<TOutput>;
+  readonly params?: ParamSchema<TPath>;
+  readonly query?: z.ZodType;
+  readonly headers?: HeaderSchema;
+  readonly body?: z.ZodType;
+  /**
+   * The success body. A schema: the handler returns its output type, sent as
+   * 200 JSON. `raw()`: the handler returns a `Response`. Absent: the handler
+   * returns nothing and the route answers 204.
+   */
+  readonly output?: z.ZodType | RawOutput;
+  readonly responses?: ResponseSchemas;
   /**
    * The failures the handler may return, as `defineFailure` definitions. A
    * returned failure answers with its status and the error envelope; the
    * client resolves to it instead of throwing.
    */
-  readonly failures?: TFailures;
+  readonly failures?: readonly FailureDefinitionLike[];
+};
+
+/**
+ * A JSON route contract. Create via {@link route}. `TDef` is the literal
+ * def, so the bound handler's input and result types, and the client's, are
+ * read straight from the declared schemas.
+ */
+export type RouteContract<TPath extends string = string, TDef extends RouteDef<TPath> = RouteDef<TPath>> = TDef & {
+  readonly kind: 'http';
+  readonly method: HttpMethod;
+  readonly path: TPath;
   toDotAction(): RouteMeta;
+};
+
+/** What a typed SSE route declares. */
+export type SseDef<TPath extends string> = Pick<RouteDef<TPath>, 'id' | 'summary' | 'params' | 'query' | 'headers'> & {
+  /** Schema every yielded event is validated against. */
+  readonly event: z.ZodType;
+  /** Emit `:keepalive` comments at this interval. Off when omitted. */
+  readonly heartbeatMs?: number;
 };
 
 /**
@@ -100,17 +151,10 @@ export type RouteContract<
  * bound handler is an async generator; every yielded value is validated
  * against `event` and framed as an SSE `data:` message.
  */
-export type SseContract<TPath extends string = string, TQuery = undefined, TEvent = unknown> = {
+export type SseContract<TPath extends string = string, TDef extends SseDef<TPath> = SseDef<TPath>> = TDef & {
   readonly kind: 'sse';
-  readonly id: string;
   readonly method: 'GET';
   readonly path: TPath;
-  readonly summary?: string;
-  readonly query?: z.ZodType<TQuery>;
-  /** Schema every yielded event is validated against. */
-  readonly event: z.ZodType<TEvent>;
-  /** Emit `:keepalive` comments at this interval. Off when omitted. */
-  readonly heartbeatMs?: number;
   toDotAction(): RouteMeta;
 };
 
@@ -125,41 +169,140 @@ export type ContractLike = {
   readonly method: HttpMethod;
   readonly path: string;
   readonly summary?: string;
+  readonly params?: SchemaLike;
   readonly query?: SchemaLike;
+  readonly headers?: SchemaLike;
   readonly body?: SchemaLike;
-  readonly output?: SchemaLike;
+  readonly output?: SchemaLike | RawOutput;
+  readonly responses?: Readonly<Record<number, SchemaLike>>;
   readonly failures?: readonly FailureDefinitionLike[];
   readonly event?: SchemaLike;
   readonly heartbeatMs?: number;
   toDotAction(): RouteMeta;
 };
 
-type RouteDef<TQuery, TBody, TOutput, TFailures> = {
+function isShape(value: unknown): value is Readonly<Record<string, z.ZodType>> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** The fields of a zod object schema, or `undefined` for any other schema. */
+export function shapeOf(schema: unknown): Readonly<Record<string, z.ZodType>> | undefined {
+  if (typeof schema !== 'object' || schema === null || !('shape' in schema)) return undefined;
+  return isShape(schema.shape) ? schema.shape : undefined;
+}
+
+type ContractParts = {
   readonly id: string;
-  readonly summary?: string;
-  readonly query?: z.ZodType<TQuery>;
-  readonly body?: z.ZodType<TBody>;
-  readonly output?: z.ZodType<TOutput>;
-  readonly failures?: TFailures;
+  readonly params?: unknown;
+  readonly headers?: unknown;
+  readonly output?: unknown;
+  readonly responses?: unknown;
 };
+
+/** What an optional placeholder's schema must accept: the value of a segment that was left out. */
+const missing: unknown = undefined;
+
+function invalid(id: string, problem: string, remediation: string): never {
+  throw new HttpConfigError({
+    code: HTTP_ERROR_CODES.invalidContract,
+    message: `[http] route "${id}" is invalid: ${problem}`,
+    remediation,
+  });
+}
+
+/**
+ * Declaration-time checks. A contract that cannot work fails here, with the
+ * contract id and the bad key, instead of on the first request.
+ */
+function assertContract(path: string, def: ContractParts): void {
+  const placeholders = pathPlaceholders(path);
+  const optional = placeholders.filter(placeholder => placeholder.optional);
+  if (optional.length > 1 || (optional[0] !== undefined && !path.endsWith(`:${optional[0].name}?`))) {
+    invalid(
+      def.id,
+      `path "${path}" has an optional placeholder that is not the only, last segment.`,
+      'The router supports one optional placeholder, as the last segment: "/orders/:id?".',
+    );
+  }
+
+  if (def.params !== undefined) {
+    const shape = shapeOf(def.params);
+    if (shape === undefined) {
+      invalid(def.id, 'params must be a z.object.', 'Declare params as z.object({ <placeholder>: schema }).');
+    }
+    const names = new Set(placeholders.map(placeholder => placeholder.name));
+    for (const name of names) {
+      if (!(name in shape)) {
+        invalid(def.id, `params has no key for the placeholder ":${name}".`, `Add "${name}" to params.`);
+      }
+    }
+    for (const key of Object.keys(shape)) {
+      if (!names.has(key)) {
+        invalid(
+          def.id,
+          `params key "${key}" is not a placeholder of "${path}".`,
+          'Remove the key, or add the placeholder to the path.',
+        );
+      }
+    }
+    for (const placeholder of optional) {
+      if (!shape[placeholder.name]?.safeParse(missing).success) {
+        invalid(
+          def.id,
+          `params key "${placeholder.name}" is optional in the path but its schema rejects a missing value.`,
+          'Make the schema optional: z.string().optional().',
+        );
+      }
+    }
+  }
+
+  if (def.headers !== undefined) {
+    const shape = shapeOf(def.headers);
+    if (shape === undefined) {
+      invalid(def.id, 'headers must be a z.object.', 'Declare headers as z.object({ "x-name": schema }).');
+    }
+    for (const key of Object.keys(shape)) {
+      if (key !== key.toLowerCase()) {
+        invalid(
+          def.id,
+          `header key "${key}" is not lower-case.`,
+          `Use "${key.toLowerCase()}": the Fetch API lower-cases every header name.`,
+        );
+      }
+    }
+  }
+
+  if (def.responses !== undefined && typeof def.responses === 'object' && def.responses !== null) {
+    for (const key of Object.keys(def.responses)) {
+      const status = Number(key);
+      if (!Number.isInteger(status) || status < 200 || status > 599) {
+        invalid(def.id, `responses key "${key}" is not a status from 200 to 599.`, 'Use integer status codes.');
+      }
+      if (status === 204 || status === 304) {
+        invalid(
+          def.id,
+          `responses cannot declare ${status}: it has no body.`,
+          status === 204
+            ? 'Leave out "output" and return nothing to answer 204.'
+            : 'Return a Response from a route declared with output: raw().',
+        );
+      }
+      if (status === 200 && def.output !== undefined && !isRawOutput(def.output)) {
+        invalid(def.id, 'responses declares 200 next to output.', 'Declare the 200 body once, as "output".');
+      }
+    }
+  }
+}
 
 const makeRoute =
   <TMethod extends HttpMethod>(method: TMethod) =>
-  <
-    TPath extends string,
-    TQuery = undefined,
-    TBody = undefined,
-    TOutput = undefined,
-    const TFailures extends readonly FailureDefinitionLike[] = readonly [],
-  >(
-    path: TPath,
-    def: RouteDef<TQuery, TBody, TOutput, TFailures>,
-  ): RouteContract<TPath, TQuery, TBody, TOutput, TFailures> => {
-    const contract: RouteContract<TPath, TQuery, TBody, TOutput, TFailures> = {
+  <TPath extends string, TDef extends RouteDef<TPath>>(path: TPath, def: TDef): RouteContract<TPath, TDef> => {
+    assertContract(path, def);
+    const contract: RouteContract<TPath, TDef> = {
+      ...def,
       kind: 'http',
       method,
       path,
-      ...def,
       toDotAction: () => contractMeta(contract),
     };
     return contract;
@@ -178,7 +321,10 @@ const makeRoute =
  *
  * export const getOrder = route.get('/orders/:id', {
  *   id: 'orders.get',
+ *   params: z.object({ id: OrderId }),
+ *   headers: z.object({ 'x-tenant': z.string() }),
  *   output: Order,
+ *   responses: { 409: Conflict }, // handler: return reply(409, { ... })
  *   failures: [OrderNotFound], // defineFailure definitions the handler may return
  * });
  *
@@ -194,21 +340,13 @@ export const route = {
   put: makeRoute('PUT'),
   patch: makeRoute('PATCH'),
   delete: makeRoute('DELETE'),
-  sse: <TPath extends string, TEvent, TQuery = undefined>(
-    path: TPath,
-    def: {
-      readonly id: string;
-      readonly summary?: string;
-      readonly query?: z.ZodType<TQuery>;
-      readonly event: z.ZodType<TEvent>;
-      readonly heartbeatMs?: number;
-    },
-  ): SseContract<TPath, TQuery, TEvent> => {
-    const contract: SseContract<TPath, TQuery, TEvent> = {
+  sse: <TPath extends string, TDef extends SseDef<TPath>>(path: TPath, def: TDef): SseContract<TPath, TDef> => {
+    assertContract(path, def);
+    const contract: SseContract<TPath, TDef> = {
+      ...def,
       kind: 'sse',
       method: 'GET',
       path,
-      ...def,
       toDotAction: () => contractMeta(contract),
     };
     return contract;

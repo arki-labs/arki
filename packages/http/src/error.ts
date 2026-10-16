@@ -21,7 +21,9 @@ import type { z } from 'zod';
 /**
  * Stable error codes for `@arki/http`. `E0NN` codes surface through the
  * DOT lifecycle (boot/start/stop failures); `E4xx`/`E5xx` codes surface
- * on the wire in the error envelope.
+ * on the wire in the error envelope. The digits of a wire code name the
+ * kind of failure; they are not always the HTTP status (`E510` and `E511`
+ * answer 500).
  */
 export const HTTP_ERROR_CODES = {
   /** `start` could not bind the port. */
@@ -36,7 +38,9 @@ export const HTTP_ERROR_CODES = {
   duplicateDeriverKey: 'ARKI_HTTP_E007',
   /** A DOT HTTP action carries missing or incompatible projection metadata. */
   invalidActionMeta: 'ARKI_HTTP_E009',
-  /** Request validation failed (query/body) or the body is not valid JSON. */
+  /** A route contract is inconsistent: params, headers, or responses do not fit its path or each other. Thrown at declaration. */
+  invalidContract: 'ARKI_HTTP_E011',
+  /** Request validation failed (params/headers/query/body) or the body is not valid JSON. */
   badRequest: 'ARKI_HTTP_E400',
   /** A deriver rejected the request's credentials. */
   unauthorized: 'ARKI_HTTP_E401',
@@ -46,6 +50,10 @@ export const HTTP_ERROR_CODES = {
   notFound: 'ARKI_HTTP_E404',
   /** Handler crash or output-schema violation. */
   internal: 'ARKI_HTTP_E500',
+  /** A handler returned a `Response` without `output: raw()`, or a value from a `raw()` route. Answers 500. */
+  rawResponseMismatch: 'ARKI_HTTP_E510',
+  /** A handler's result does not fit its contract: undeclared status, malformed `reply`, or a value on a no-output route. Answers 500. */
+  invalidResponse: 'ARKI_HTTP_E511',
 } as const;
 
 const docsUrlFor = (code: string): string => `https://arki.dev/http/errors/${code.toLowerCase().replaceAll('_', '-')}`;

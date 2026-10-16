@@ -13,7 +13,9 @@ import { z } from 'zod';
 import { isFailure } from '@arki/failure';
 
 import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
-import type { ContractLike } from './contract.js';
+import { isReply } from './bundle.js';
+import type { ContractLike, SchemaLike } from './contract.js';
+import { shapeOf } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
 import { runWithRequestContext } from './context.js';
 import {
@@ -25,6 +27,8 @@ import {
   HttpError,
   toErrorResponse,
 } from './error.js';
+import { openApiPaths } from './path.js';
+import { isRawOutput } from './raw.js';
 import { sseResponse } from './sse.js';
 
 /** A built engine: the composed fetch handler plus its route inventory. */
@@ -143,17 +147,20 @@ async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): P
 
 function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteBundle, binding: RouteBinding): void {
   const { contract } = binding;
-  const key = `${contract.method} ${contract.path}`;
-  const prior = claimed.get(key);
-  if (prior !== undefined) {
-    throw new HttpConfigError({
-      code: HTTP_ERROR_CODES.duplicateRoute,
-      message: `[http] duplicate route ${key}: "${contract.id}" collides with "${prior}".`,
-      remediation:
-        'Two bindings (possibly from different bundles) claim the same method and path. Change one path, or drop the duplicate binding.',
-    });
+  // An optional placeholder ("/a/:x?") serves two paths and claims both.
+  const keys = openApiPaths(contract.path).map(({ path }) => `${contract.method} ${path}`);
+  for (const key of keys) {
+    const prior = claimed.get(key);
+    if (prior !== undefined) {
+      throw new HttpConfigError({
+        code: HTTP_ERROR_CODES.duplicateRoute,
+        message: `[http] duplicate route ${contract.method} ${contract.path}: "${contract.id}" collides with "${prior}".`,
+        remediation:
+          'Two bindings (possibly from different bundles) claim the same method and path. Change one path, or drop the duplicate binding.',
+      });
+    }
   }
-  claimed.set(key, contract.id);
+  for (const key of keys) claimed.set(key, contract.id);
   app.on(contract.method, contract.path, c => executeBinding(bundle, binding, c.req.raw, c.req.param()));
 }
 
@@ -244,13 +251,59 @@ function toResponse(contract: ContractLike, result: unknown): Response {
       ...(result.data === undefined ? {} : { data: result.data }),
     });
   }
-  if (result instanceof Response) return result;
-  return serializeOutput(contract, result);
+  // `raw()` is the only way to send a Response, and the only way to skip the
+  // schemas: in raw mode the handler owns the bytes, so nothing is checked.
+  const rawMode = isRawOutput(contract.output);
+  if (result instanceof Response) {
+    if (rawMode) return result;
+    throw new HttpError(
+      500,
+      HTTP_ERROR_CODES.rawResponseMismatch,
+      `handler for "${contract.id}" returned a Response but the contract does not declare output: raw()`,
+      { remediation: 'Declare output: raw() on the contract, or return the output value.' },
+    );
+  }
+  if (rawMode) {
+    throw new HttpError(
+      500,
+      HTTP_ERROR_CODES.rawResponseMismatch,
+      `handler for "${contract.id}" declares output: raw() but did not return a Response`,
+      { remediation: 'Return a Response from the handler, or declare an output schema.' },
+    );
+  }
+  if (isReply(result)) return serializeReply(contract, result);
+  if (contract.output === undefined) {
+    if (result === undefined) return new Response(null, { status: 204 });
+    throw new HttpError(
+      500,
+      HTTP_ERROR_CODES.invalidResponse,
+      `handler for "${contract.id}" returned a value but the contract declares no output schema`,
+      { remediation: 'Declare an output schema on the contract, or return nothing to answer 204.' },
+    );
+  }
+  return serializeOutput(contract, contract.output, result);
+}
+
+function serializeReply(
+  contract: ContractLike,
+  result: { readonly status: number; readonly body: unknown; readonly headers?: Readonly<Record<string, string>> },
+): Response {
+  const schema = contract.responses?.[result.status];
+  if (schema === undefined) {
+    throw new HttpError(
+      500,
+      HTTP_ERROR_CODES.invalidResponse,
+      `handler for "${contract.id}" replied ${result.status}, which the contract does not declare in responses`,
+      { remediation: 'Add the status to "responses" on the contract, or reply with a declared status.' },
+    );
+  }
+  return jsonResponse(encodeOutput(contract, schema, result.body), result.status, result.headers);
 }
 
 type ValidatedInput = {
-  readonly params: Record<string, string>;
+  readonly params: unknown;
   readonly query: unknown;
+  readonly headers: unknown;
   readonly body: unknown;
 };
 
@@ -261,13 +314,33 @@ function parseQuery(contract: ContractLike, base: BaseRequestCtx): unknown {
   return parseWith(contract.query, Object.fromEntries(base.url.searchParams), 'query');
 }
 
-/** Params and query only: for contracts without a body. */
+/**
+ * Only the declared header names go to the schema, so a strict schema
+ * coexists with transport headers (`host`, `accept`). A missing header is
+ * left out of the object, not passed as `undefined`.
+ */
+function parseHeaders(contract: ContractLike, base: BaseRequestCtx): unknown {
+  if (contract.headers === undefined) return undefined;
+  const picked: Record<string, string> = {};
+  for (const name of Object.keys(shapeOf(contract.headers) ?? {})) {
+    const value = base.req.headers.get(name);
+    if (value !== null) picked[name] = value;
+  }
+  return parseWith(contract.headers, picked, 'headers');
+}
+
+/** Params, headers and query: everything but the body, which needs an await. */
 function validateInputSync(
   contract: ContractLike,
   params: Record<string, string>,
   base: BaseRequestCtx,
 ): ValidatedInput {
-  return { params, query: parseQuery(contract, base), body: undefined };
+  return {
+    params: contract.params === undefined ? params : parseWith(contract.params, params, 'params'),
+    headers: parseHeaders(contract, base),
+    query: parseQuery(contract, base),
+    body: undefined,
+  };
 }
 
 async function validateInput(
@@ -276,7 +349,7 @@ async function validateInput(
   base: BaseRequestCtx,
   req: Request,
 ): Promise<ValidatedInput> {
-  const query = parseQuery(contract, base);
+  const input = validateInputSync(contract, params, base);
 
   let body: unknown;
   if (contract.body !== undefined) {
@@ -291,10 +364,14 @@ async function validateInput(
     body = parseWith(contract.body, raw, 'body');
   }
 
-  return { params, query, body };
+  return { ...input, body };
 }
 
-function parseWith(schema: { parse(input: unknown): unknown }, value: unknown, where: 'query' | 'body'): unknown {
+function parseWith(
+  schema: { parse(input: unknown): unknown },
+  value: unknown,
+  where: 'params' | 'headers' | 'query' | 'body',
+): unknown {
   try {
     return schema.parse(value);
   } catch (error) {
@@ -309,20 +386,15 @@ function zodMessage(error: unknown): string {
   return describeInternalError(error);
 }
 
-function serializeOutput(contract: ContractLike, result: unknown): Response {
-  if (contract.output === undefined) {
-    throw new HttpError(
-      500,
-      HTTP_ERROR_CODES.internal,
-      `handler for "${contract.id}" returned a value but the contract declares no output schema`,
-      { remediation: 'Return a Response, or declare an output schema on the contract.' },
-    );
-  }
-  let validated: unknown;
+function serializeOutput(contract: ContractLike, output: SchemaLike, result: unknown): Response {
+  return jsonResponse(encodeOutput(contract, output, result));
+}
+
+function encodeOutput(contract: ContractLike, schema: SchemaLike, result: unknown): unknown {
   try {
     // Encode, not parse: output leaves the server, so a codec runs in its
     // wire direction (a `Date` goes out as an ISO string).
-    validated = contract.output.encode(result);
+    return schema.encode(result);
   } catch (error) {
     throw new HttpError(
       500,
@@ -331,7 +403,6 @@ function serializeOutput(contract: ContractLike, result: unknown): Response {
       { cause: error },
     );
   }
-  return jsonResponse(validated);
 }
 
 /**
@@ -339,11 +410,14 @@ function serializeOutput(contract: ContractLike, result: unknown): Response {
  * and the content type `application/json` — built from a string body, which
  * costs less per request than `Response.json` in undici.
  */
-function jsonResponse(value: unknown): Response {
+function jsonResponse(value: unknown, status = 200, headers?: Readonly<Record<string, string>>): Response {
   const text = JSON.stringify(value);
   // `Response.json` refuses a value with no JSON form (undefined, a function).
   if (text === undefined) throw new TypeError('Value is not JSON serializable');
-  return new Response(text, { headers: { 'content-type': 'application/json' } });
+  return new Response(text, {
+    status,
+    headers: headers === undefined ? { 'content-type': 'application/json' } : { ...headers, 'content-type': 'application/json' },
+  });
 }
 
 /**

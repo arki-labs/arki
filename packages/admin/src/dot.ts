@@ -26,7 +26,7 @@
  * `@arki/http` is an optional peer: this entry only makes sense in a DOT http app.
  */
 import type { RouteBundle } from '@arki/http';
-import { route, routes } from '@arki/http';
+import { raw, route, routes } from '@arki/http';
 
 import type { ForemanAppOptions } from './foreman-app';
 import { createForemanHandlerFromEnv } from './foreman-app';
@@ -38,18 +38,22 @@ import { FOREMAN_BASE_PATH } from './protocol';
 const manifestRoute = route.get(`${FOREMAN_BASE_PATH}/manifest`, {
   id: 'foreman.manifest',
   summary: 'Foreman manifest (signed)',
+  output: raw(),
 });
 const readRoute = route.post(`${FOREMAN_BASE_PATH}/reads/:id`, {
   id: 'foreman.read',
   summary: 'Run one module read (signed)',
+  output: raw(),
 });
 const previewRoute = route.post(`${FOREMAN_BASE_PATH}/actions/:id/preview`, {
   id: 'foreman.preview',
   summary: 'Preview one module action (signed)',
+  output: raw(),
 });
 const executeRoute = route.post(`${FOREMAN_BASE_PATH}/actions/:id/execute`, {
   id: 'foreman.execute',
   summary: 'Execute one approved module action (signed, execute key)',
+  output: raw(),
 });
 
 const ROUTE_CONTRACTS = [manifestRoute, readRoute, previewRoute, executeRoute] as const;
