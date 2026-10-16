@@ -286,115 +286,194 @@ Recurrence rules (RRULE), natural-language parsing, a holiday database, non-ISO 
 <!-- bench:start -->
 ## Benchmarks
 
-Compares @arki/date with the three date libraries people most often pick in JavaScript: date-fns, Day.js and Luxon. Native `Date` and `Intl` are included where they solve the same task.
+> **Not publishable.** Do not quote these numbers:
+>
+> - The machine was busy: 1-minute load 3.9 at the start and 11.2 at the end, above half of its 12 cores. Other programs competed for the CPU, so timings are noisier. Close them and run again.
+> - "arki" in "parse-iso" varies 127.7% across blocks (limit 5%). Close other programs or run again.
+> - "dateFns" in "parse-iso" varies 83.6% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "parse-iso" varies 49.9% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "parse-iso" varies 62.3% across blocks (limit 5%). Close other programs or run again.
+> - "native" in "parse-iso" varies 39.7% across blocks (limit 5%). Close other programs or run again.
+> - "arki" in "add-month" varies 26.8% across blocks (limit 5%). Close other programs or run again.
+> - "dateFns" in "add-month" varies 52.7% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "add-month" varies 32.0% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "add-month" varies 28.0% across blocks (limit 5%). Close other programs or run again.
+> - "native" in "add-month" varies 27.3% across blocks (limit 5%). Close other programs or run again.
+> - "arki" in "start-of-month" varies 67.8% across blocks (limit 5%). Close other programs or run again.
+> - "dateFns" in "start-of-month" varies 22.8% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "start-of-month" varies 20.9% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "start-of-month" varies 19.4% across blocks (limit 5%). Close other programs or run again.
+> - "native" in "start-of-month" varies 20.1% across blocks (limit 5%). Close other programs or run again.
+> - "arki" in "format" varies 15.0% across blocks (limit 5%). Close other programs or run again.
+> - "arkiZoned" in "format" varies 10.9% across blocks (limit 5%). Close other programs or run again.
+> - "dateFns" in "format" varies 27.1% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "format" varies 16.1% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "format" varies 14.3% across blocks (limit 5%). Close other programs or run again.
+> - "arki" in "diff-days" varies 11.5% across blocks (limit 5%). Close other programs or run again.
+> - "dateFns" in "diff-days" varies 9.0% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "diff-days" varies 14.9% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "diff-days" varies 16.5% across blocks (limit 5%). Close other programs or run again.
+> - "arki" in "zone-hour" varies 14.2% across blocks (limit 5%). Close other programs or run again.
+> - "arkiInstant" in "zone-hour" varies 9.8% across blocks (limit 5%). Close other programs or run again.
+> - "dayjs" in "zone-hour" varies 12.2% across blocks (limit 5%). Close other programs or run again.
+> - "luxon" in "zone-hour" varies 24.0% across blocks (limit 5%). Close other programs or run again.
+> - "native" in "zone-hour" varies 12.7% across blocks (limit 5%). Close other programs or run again.
+> - "zonedFromDate" in "only-arki" varies 74.8% across blocks (limit 5%). Close other programs or run again.
+> - "instantFromDate" in "only-arki" varies 33.7% across blocks (limit 5%). Close other programs or run again.
+> - "plainDate" in "only-arki" varies 15.1% across blocks (limit 5%). Close other programs or run again.
+> - "addMonthPlain" in "only-arki" varies 19.3% across blocks (limit 5%). Close other programs or run again.
+> - "startOfMonthPlain" in "only-arki" varies 183.8% across blocks (limit 5%). Close other programs or run again.
+> - "addDayZoned" in "only-arki" varies 219.0% across blocks (limit 5%). Close other programs or run again.
+> - "startOfHour" in "only-arki" varies 200.7% across blocks (limit 5%). Close other programs or run again.
+> - "endOfMonth" in "only-arki" varies 180.4% across blocks (limit 5%). Close other programs or run again.
+> - "isSameDay" in "only-arki" varies 202.4% across blocks (limit 5%). Close other programs or run again.
+> - "formatZoned" in "only-arki" varies 98.7% across blocks (limit 5%). Close other programs or run again.
+> - "formatWords" in "only-arki" varies 10.4% across blocks (limit 5%). Close other programs or run again.
+> - "formatPreset" in "only-arki" varies 27.9% across blocks (limit 5%). Close other programs or run again.
+> - "formatIntl" in "only-arki" varies 146.2% across blocks (limit 5%). Close other programs or run again.
+> - "relative" in "only-arki" varies 78.1% across blocks (limit 5%). Close other programs or run again.
+> - "relativeToNow" in "only-arki" varies 99.2% across blocks (limit 5%). Close other programs or run again.
+> - "isToday" in "only-arki" varies 143.0% across blocks (limit 5%). Close other programs or run again.
+> - "isoWeek" in "only-arki" varies 372.9% across blocks (limit 5%). Close other programs or run again.
+> - "addBusinessDays" in "only-arki" varies 113.1% across blocks (limit 5%). Close other programs or run again.
+> - "eachMonth" in "only-arki" varies 38.3% across blocks (limit 5%). Close other programs or run again.
+> - "splitDays" in "only-arki" varies 37.5% across blocks (limit 5%). Close other programs or run again.
+> - "fluent" in "only-arki" varies 100.9% across blocks (limit 5%). Close other programs or run again.
+> - "humanize" in "only-arki" varies 61.6% across blocks (limit 5%). Close other programs or run again.
+> - "toDate" in "only-arki" varies 118.9% across blocks (limit 5%). Close other programs or run again.
+> - "systemTimeZone" in "only-arki" varies 196.8% across blocks (limit 5%). Close other programs or run again.
 
-Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+Speed of `@arki/date` against the three date libraries people most often pick in JavaScript: date-fns, Day.js and Luxon, with native `Date` and `Intl` where they do the same job. Each table only ranks libraries that returned the same result on every checked input.
 
-### Parse an ISO 8601 instant
+Measured on Node 26.11.0 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.0.2 (mitata 1.0.34) · publish · 5 processes × 10 blocks, seed 1592639052 · commit 3ca82e6736 · 2026-10-16.
 
-Input: `2026-10-09T12:37:48.123Z`. @arki/date returns an `Instant`; the others return a `Date`, a Day.js, or a Luxon `DateTime`.
+Versions: @arki/bench 0.0.2 · @arki/date 0.2.0 · date-fns 4.4.0 · dayjs 1.11.23 · luxon 3.7.2 · mitata 1.0.34.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date parseISO | 18.03 µs | 35.52× |
-| date-fns parseISO | 2.86 µs | 5.64× |
-| Day.js dayjs(string) | 594.1 ns | 1.17× |
-| Luxon DateTime.fromISO | 7.80 µs | 15.36× |
-| native Date.parse | 507.7 ns | fastest |
+### Parse ISO 8601 text to an instant
 
-### Add one month
+Every ranked row returns the epoch milliseconds of ISO 8601 text; text with an offset is exact, text without one is local wall time (a skipped time moves forward, a repeated time takes the earlier offset); checked on 8 inputs. Rows marked *different contract* do other work: they are measured and shown, never ranked.
 
-Calendar date 2026-01-31 plus one month (the end-of-month clamping case).
+| Library | Version | Time / op | 95% interval | vs @arki/date parseISO |
+| --- | --- | --: | --- | --- |
+| **@arki/date parseISO** | 0.2.0 | 233 ns | 206–307 ns | baseline · ⚠ unstable |
+| date-fns parseISO | 4.4.0 | 1.34 µs | 1.11–1.93 µs | 5.7× slower [4.1–8.6] · ⚠ unstable |
+| Day.js dayjs(text) | 1.11.23 | 1 µs | 880 ns–1.33 µs | 4.3× slower [3.2–6.0] · ⚠ unstable |
+| Luxon DateTime.fromISO | 3.7.2 | 2.06 µs | 1.67–2.86 µs | different contract: resolves the repeated autumn hour by the current season, not always to the earlier occurrence · ⚠ unstable |
+| native Date.parse | — | 175 ns | 159–217 ns | different contract: reads a date without a time as UTC midnight, not local · ⚠ unstable |
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date add(plainDate, { months: 1 }) | 5.17 µs | 3.95× |
-| date-fns addMonths | 1.31 µs | fastest |
-| Day.js add(1, "month") | 9.39 µs | 7.18× |
-| Luxon plus({ months: 1 }) | 6.15 µs | 4.70× |
+### Add one month to a local date-time
 
-### Start of month
+Every ranked row returns the same wall-clock time one month later in America/New_York, the day clamped to the month end (Jan 31 → Feb 28), as epoch milliseconds; checked on 7 inputs. Rows marked *different contract* do other work: they are measured and shown, never ranked.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date startOf(plainDate, "month") | 3.55 µs | 3.61× |
-| date-fns startOfMonth | 983.3 ns | fastest |
-| Day.js startOf("month") | 1.68 µs | 1.71× |
-| Luxon startOf("month") | 1.75 µs | 1.78× |
+| Library | Version | Time / op | 95% interval | vs @arki/date add(zoned, { months: 1 }) |
+| --- | --- | --: | --- | --- |
+| **@arki/date add(zoned, { months: 1 })** | 0.2.0 | 656 ns | 614–764 ns | baseline · ⚠ unstable |
+| date-fns addMonths | 4.4.0 | 466 ns | 432–538 ns | 1.4× faster [1.2–1.7] · ⚠ unstable |
+| Day.js add(1, "month") | 1.11.23 | 3.52 µs | 3.12–4.41 µs | 5.4× slower [4.4–7.0] · ⚠ unstable |
+| Luxon plus({ months: 1 }) | 3.7.2 | 10.9 µs | 9.51–13.5 µs | 17× slower [13–21] · ⚠ unstable |
+| native Date setMonth(+1) | — | 254 ns | 238–295 ns | different contract: rolls over the month end (Jan 31 → Mar 3) · ⚠ unstable |
 
-### Format as `yyyy-MM-dd HH:mm`
+### Start of the month of a local date-time
 
-All libraries format the same `Date` in the machine time zone. The pattern is parsed on every call; none of these libraries offers a precompiled formatter.
+Every ranked row returns local midnight on the first day of the month in America/New_York, with that day’s own UTC offset, as epoch milliseconds; checked on 5 inputs.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date format(Date, pattern) | 21.56 µs | 3.58× |
-| date-fns format | 7.16 µs | 1.19× |
-| Day.js format | 10.00 µs | 1.66× |
-| Luxon toFormat | 6.03 µs | fastest |
+| Library | Version | Time / op | 95% interval | vs @arki/date startOf(zoned, "month") |
+| --- | --- | --: | --- | --- |
+| **@arki/date startOf(zoned, "month")** | 0.2.0 | 862 ns | 787–981 ns | baseline · ⚠ unstable |
+| date-fns startOfMonth | 4.4.0 | 372 ns | 348–409 ns | 2.3× faster [2.0–2.7] · ⚠ unstable |
+| Day.js startOf("month") | 1.11.23 | 422 ns | 396–466 ns | 2.0× faster [1.8–2.4] · ⚠ unstable |
+| Luxon startOf("month") | 3.7.2 | 8.77 µs | 7.9–10 µs | 10× slower [9–12] · ⚠ unstable |
+| native new Date(year, month, 1) | — | 211 ns | 199–238 ns | 4.1× faster [3.5–4.8] · ⚠ unstable |
+
+### Format a Date as `yyyy-MM-dd HH:mm`
+
+Every ranked row returns the text `yyyy-MM-dd HH:mm` of a `Date` in America/New_York (24-hour clock); checked on 6 inputs.
+
+| Library | Version | Time / op | 95% interval | vs @arki/date format(Date, pattern) |
+| --- | --- | --: | --- | --- |
+| **@arki/date format(Date, pattern)** | 0.2.0 | 307 ns | 288–335 ns | baseline · ⚠ unstable |
+| @arki/date format(zoned, pattern), zoned value prepared (variant) | — | 410 ns | 391–441 ns | 1.3× slower [1.2–1.5] · ⚠ unstable |
+| date-fns format | 4.4.0 | 1.46 µs | 1.34–1.64 µs | 4.8× slower [4.2–5.4] · ⚠ unstable |
+| Day.js dayjs(date).format | 1.11.23 | 1.65 µs | 1.53–1.83 µs | 5.4× slower [4.8–6.1] · ⚠ unstable |
+| Luxon fromJSDate(date).toFormat | 3.7.2 | 1.43 µs | 1.34–1.58 µs | 4.7× slower [4.2–5.3] · ⚠ unstable |
 
 ### Difference in calendar days
 
-2026-01-31 to 2026-12-31 (334 days).
+Every ranked row returns whole calendar days from the first date to the second (negative when it is earlier), for dates without a time; checked on 6 inputs.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date diff(plainDate, plainDate, "day") | 1.27 µs | fastest |
-| date-fns differenceInCalendarDays | 15.52 µs | 12.19× |
-| Day.js diff(…, "day") | 1.84 µs | 1.45× |
-| Luxon diff(…, "days") | 11.35 µs | 8.92× |
+| Library | Version | Time / op | 95% interval | vs @arki/date diff(plainDate, plainDate, "day") |
+| --- | --- | --: | --- | --- |
+| **@arki/date diff(plainDate, plainDate, "day")** | 0.2.0 | 63.3 ns | 60.8–68 ns | baseline · ⚠ unstable |
+| date-fns differenceInCalendarDays | 4.4.0 | 1.33 µs | 1.28–1.42 µs | 21× slower [19–23] · ⚠ unstable |
+| Day.js diff(…, "day") | 1.11.23 | 417 ns | 400–449 ns | 6.6× slower [6.1–7.2] · ⚠ unstable |
+| Luxon diff(…, "days").days | 3.7.2 | 12.9 µs | 11.8–14.6 µs | 204× slower [181–234] · ⚠ unstable |
 
-### Convert an instant to a time zone and read the hour
+### Convert a Date to a time zone and read the hour
 
-Europe/Bucharest. The native row uses one prepared `Intl.DateTimeFormat`, which is the fastest native route but returns a string, not a date object.
+Every ranked row returns the hour (0–23) that a `Date` shows in a given IANA zone; checked on 6 inputs.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/date inZone(instant, zone).hour | 10.86 µs | 9.63× |
-| Day.js tz(zone).hour() (utc + timezone plugins) | 110.09 µs | 97.68× |
-| Luxon fromJSDate(date, { zone }).hour | 13.91 µs | 12.34× |
-| native Intl.DateTimeFormat (prepared) | 1.13 µs | fastest |
+| Library | Version | Time / op | 95% interval | vs @arki/date inZone(date, zone).hour |
+| --- | --- | --: | --- | --- |
+| **@arki/date inZone(date, zone).hour** | 0.2.0 | 583 ns | 555–621 ns | baseline · ⚠ unstable |
+| @arki/date inZone(instant, zone).hour, instant prepared (variant) | — | 553 ns | 528–583 ns | inconclusive [0.88–1.02×] · ⚠ unstable |
+| Day.js dayjs(date).tz(zone).hour() (utc + timezone plugins) | 1.11.23 | 41.1 µs | 38.1–44.8 µs | 70× slower [64–78] · ⚠ unstable |
+| Luxon fromJSDate(date, { zone }).hour | 3.7.2 | 5.07 µs | 4.73–5.45 µs | 8.7× slower [7.9–9.5] · ⚠ unstable |
+| native Intl.DateTimeFormat (formatter cached per zone) | — | 530 ns | 504–563 ns | inconclusive [0.84–0.99×] · ⚠ unstable |
+
+date-fns has no row: time zones need `@date-fns/tz`, which is not installed.
 
 ### Other @arki/date operations (no direct competitor)
 
-These rows are for tracking regressions in this package. They are not a comparison, so ignore the "vs fastest" column.
+Each row measures different work; rows are not ranked.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| zoned(Date, tz) | 17.95 µs | 188.09× |
-| instant(Date) | 2.82 µs | 29.58× |
-| plainDate(string) | 6.53 µs | 68.45× |
-| add(zoned, { days: 1 }) | 71.97 µs | 753.96× |
-| startOf(zoned, "month") | 51.91 µs | 543.82× |
-| startOf(zoned, "hour") | 9.17 µs | 96.12× |
-| endOf(plainDate, "month") | 25.33 µs | 265.37× |
-| isSameDay(zoned, zoned) | 3.62 µs | 37.92× |
-| format(zoned, "yyyy-MM-dd") | 13.71 µs | 143.60× |
-| format(Date, "MMM d, yyyy") | 22.63 µs | 237.02× |
-| format(zoned, "PPPP") | 14.72 µs | 154.17× |
-| formatIntl(zoned, medium) | 11.63 µs | 121.83× |
-| relative(instant, ref) | 3.53 µs | 36.98× |
-| relativeToNow(instant) | 54.00 µs | 565.72× |
-| isToday(plainDate) | 21.98 µs | 230.24× |
-| isoWeek(plainDate) | 17.86 µs | 187.08× |
-| addBusinessDays(plainDate, 10) | 4.55 µs | 47.65× |
-| each month x12 | 73.39 µs | 768.78× |
-| splitByUnit day x31 | 160.73 µs | 1683.76× |
-| date(Date).add.startOf.format | 74.14 µs | 776.68× |
-| humanizeDuration(P1DT2H) | 142.93 µs | 1497.28× |
-| toDate(zoned) | 261.0 ns | 2.73× |
-| systemTimeZone() | 95.5 ns | fastest |
+| Case | Version | Time / op | 95% interval |
+| --- | --- | --: | --- |
+| zoned(Date, zone) | — | 576 ns | 543–637 ns |
+| instant(Date) | — | 102 ns | 96–113 ns |
+| plainDate(string) | — | 166 ns | 160–174 ns |
+| add(plainDate, { months: 1 }) | — | 258 ns | 245–278 ns |
+| startOf(plainDate, "month") | — | 151 ns | 143–169 ns |
+| add(zoned, { days: 1 }) | — | 701 ns | 593–927 ns |
+| startOf(zoned, "hour") | — | 382 ns | 354–434 ns |
+| endOf(plainDate, "month") | — | 167 ns | 152–192 ns |
+| isSameDay(zoned, zoned) | — | 491 ns | 462–556 ns |
+| format(zoned, "yyyy-MM-dd") | — | 336 ns | 311–378 ns |
+| format(Date, "MMM d, yyyy") | — | 303 ns | 291–321 ns |
+| format(zoned, "PPPP") | — | 521 ns | 494–569 ns |
+| formatIntl(zoned, medium) | — | 1.26 µs | 1.04–1.59 µs |
+| relative(instant, ref) | — | 540 ns | 501–612 ns |
+| relativeToNow(instant) | — | 3.42 µs | 2.81–4.42 µs |
+| isToday(plainDate) | — | 318 ns | 293–356 ns |
+| isoWeek(plainDate) | — | 140 ns | 127–171 ns |
+| addBusinessDays(plainDate, 10) | — | 511 ns | 463–609 ns |
+| each month ×12 | — | 15.3 µs | 13.1–19.1 µs |
+| splitByUnit day ×31 | — | 48.6 µs | 43.3–57.4 µs |
+| date(Date).add.startOf.format | — | 3.77 µs | 2.98–5.1 µs |
+| humanizeDuration(P1DT2H) | — | 3.07 µs | 2.77–3.52 µs |
+| toDate(zoned) | — | 56.3 ns | 52.8–61.8 ns |
+| systemTimeZone() | — | 39.8 ns | 37.2–43.7 ns |
 
-Read the rows with the contracts in mind:
+Different operations: compare each row with its own history, not with the others.
 
-- @arki/date is built on Temporal values: immutable, nanosecond precision, and time zones come from the IANA database, not from the host machine. Day.js and date-fns work on `Date`, which has millisecond precision and a local-time bias. Luxon is also immutable and zone-aware.
-- @arki/date rejects impossible input (such as 2026-02-31) instead of rolling it over, and it adds months by clamping to the last valid day (Jan 31 + 1 month = Feb 28). date-fns, Day.js and Luxon clamp too; native `Date` does not, so it is left out of the month group.
-- Day.js `diff(…, "day")` counts whole 24-hour spans. date-fns `differenceInCalendarDays`, Luxon `diff` and @arki/date `diff` on plain dates count calendar days. The inputs here are midnight local dates, so the answers agree.
-- date-fns has no time-zone conversion without the extra `@date-fns/tz` package, so it is not in the zone group. Day.js needs its `utc` and `timezone` plugins, which are loaded here.
-- The @arki/date numbers include input validation and building a Temporal object, which is what you pay for correctness. The extra cases at the end have no direct competitor and exist to catch regressions.
+**Notes**
 
-Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+- All rows run with the machine zone set to America/New_York, so the inputs cross real DST changes (a skipped hour in March, a repeated hour in November) under a negative UTC offset. date-fns, Day.js and native `Date` always work in that machine zone; @arki/date and Luxon take the zone as data.
+- @arki/date is built on Temporal values: immutable, nanosecond precision, IANA zones. date-fns and Day.js work on `Date` (millisecond precision, local time). Luxon is immutable and zone-aware. The @arki/date numbers include input validation and building a Temporal object.
+- All four libraries clamp month ends (Jan 31 + 1 month = Feb 28). Native `Date.setMonth` rolls over (Jan 31 + 1 month = Mar 3), so it is shown as a different contract.
+- The calendar-day group uses dates without a time of day. On such dates Day.js `diff(…, "day")` agrees with the others, but it counts whole 24-hour spans: 23:00 to 01:00 the next day is 0 for Day.js and 1 calendar day for date-fns, Luxon (after `startOf("day")`) and @arki/date.
+- Time-zone conversion has no date-fns row: date-fns needs the extra `@date-fns/tz` package, which is not installed here. Day.js needs its `utc` and `timezone` plugins, which are loaded.
+- Day.js and Luxon cannot format or convert a `Date` directly, so their timed work includes wrapping the `Date` (`dayjs(date)`, `DateTime.fromJSDate(date)`). @arki/date and date-fns accept a `Date` as is.
+
+Run `bun run bench` in `packages/date` (set `ARKI_BENCH_NODE` to a Node 26 binary).
+
+<!-- bench:meta {"schema":1,"suite":"@arki/date","specHash":"51605787dba240ab","profile":"publish","date":"2026-10-16T08:01:26.045Z","harness":"0.0.2"} -->
 <!-- bench:end -->
+
+### Why zoned `add` and `startOf` trail date-fns
+
+These functions return a `Temporal.ZonedDateTime`. On Node 26 the native Temporal constructor alone takes about 500 ns for a named zone, which is more than date-fns needs for the whole operation on a `Date`. The date math in `@arki/date` takes about 150–200 ns. The constructor sets the floor, so faster math cannot close the gap. Work on a `PlainDate` (no zone) when you need speed.
+
+Runtimes without native Temporal (Node 22, some browsers) use `temporal-polyfill`. There the same constructor takes about 3 µs, so every operation that builds a Temporal value is several times slower than on Node 26. Parsing, formatting and differences mostly avoid building Temporal values and stay fast on both.
 
 ## License
 
