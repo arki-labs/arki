@@ -84,6 +84,12 @@ export type SignedUrlOptions = {
   disposition?: 'inline' | 'attachment';
   /** Filename to suggest in the `Content-Disposition` header. */
   filename?: string;
+  /** `put` only. Signed, so the store rejects an upload with another `Content-Type`. */
+  contentType?: string;
+  /** `put` only. Signed, so the store rejects a body of another length. */
+  contentLength?: number;
+  /** `put` only. Signed `If-None-Match: *`: the URL can create the object but never replace it. */
+  ifNoneMatch?: '*';
 };
 
 /**
@@ -140,3 +146,10 @@ export type StorageAdapter = {
    */
   list(prefix: string): Promise<string[]>;
 };
+
+/**
+ * A {@link StorageAdapter} whose `put` URLs are signed and enforce the `put`
+ * fields of {@link SignedUrlOptions}. The S3 and R2 adapters return this; the
+ * local adapter does not, so passing it where uploads are signed is a compile error.
+ */
+export type SignedUploadAdapter = StorageAdapter & { readonly capabilities: { readonly signedPut: true } };

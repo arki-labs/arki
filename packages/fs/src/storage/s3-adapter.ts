@@ -8,15 +8,17 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
 import { getSignedUrl as presign } from '@aws-sdk/s3-request-presigner';
 import { AwsS3StorageAdapter } from '@flystorage/aws-s3';
 import { FileStorage } from '@flystorage/file-storage';
-import { env } from '../env';
+
 import type {
   S3StorageConfig,
+  SignedUploadAdapter,
   SignedUrlOptions,
-  StorageAdapter,
   StoredFile,
   StoredFileMetadata,
   StoreOptions,
 } from './types';
+import { env } from '../env';
+import { FILE_ERROR_CODES, FileStorageError } from '../files/errors.js';
 
 function isNotFoundError(error: unknown): boolean {
   if (error && typeof error === 'object' && 'name' in error) {
@@ -26,7 +28,9 @@ function isNotFoundError(error: unknown): boolean {
   return false;
 }
 
-export class S3StorageAdapter implements StorageAdapter {
+export class S3StorageAdapter implements SignedUploadAdapter {
+  /** `put` URLs sign `Content-Type`, `Content-Length` and `If-None-Match`, so the store enforces them. */
+  readonly capabilities = { signedPut: true } as const;
   private storage: FileStorage;
   private config: S3StorageConfig;
   private client: S3Client;
@@ -49,11 +53,17 @@ export class S3StorageAdapter implements StorageAdapter {
             }
           : undefined,
       ...(endpoint && { endpoint }),
+      // The SDK default ('WHEN_SUPPORTED') puts the CRC32 of an EMPTY body into every
+      // presigned PUT URL, so a real upload would fail the checksum. Checksums only where
+      // an operation requires one.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
     });
 
+    // `getFullKey` is the one owner of the key prefix. Flystorage gets none, or every
+    // write through it would land at `prefix/prefix/key` while URLs and HEAD use `prefix/key`.
     const adapter = new AwsS3StorageAdapter(this.client, {
       bucket: config.bucket,
-      prefix: config.prefix ?? '',
+      prefix: '',
       region: config.region ?? env.AWS_REGION,
     });
 
@@ -123,7 +133,7 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 
   async deleteMany(keys: string[]): Promise<void> {
-    await Promise.all(keys.map((key) => this.delete(key)));
+    await Promise.all(keys.map(key => this.delete(key)));
   }
 
   async exists(key: string): Promise<boolean> {
@@ -144,8 +154,15 @@ export class S3StorageAdapter implements StorageAdapter {
     const expiresIn = options?.expiresIn ?? 3600;
 
     if (options?.operation === 'put') {
-      const command = new PutObjectCommand({ Bucket: this.config.bucket, Key });
-      return presign(this.client, command, { expiresIn });
+      const command = new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key,
+        ContentType: options.contentType,
+        ContentLength: options.contentLength,
+        IfNoneMatch: options.ifNoneMatch,
+      });
+      // The presigner leaves content-type unsigned by default; sign it so the store rejects another type.
+      return presign(this.client, command, { expiresIn, signableHeaders: new Set(['content-type']) });
     }
 
     const command = new GetObjectCommand({
@@ -164,10 +181,17 @@ export class S3StorageAdapter implements StorageAdapter {
         new HeadObjectCommand({ Bucket: this.config.bucket, Key: this.getFullKey(key) }),
       );
 
+      // Never invent a size or type: the files table compares them against its row.
+      if (response.ContentLength === undefined || response.ContentType === undefined) {
+        throw new FileStorageError(
+          FILE_ERROR_CODES.storage,
+          `HEAD of "${key}" returned no Content-Length or Content-Type`,
+        );
+      }
       return {
         key,
-        size: response.ContentLength ?? 0,
-        contentType: response.ContentType ?? 'application/octet-stream',
+        size: response.ContentLength,
+        contentType: response.ContentType,
         lastModified: response.LastModified ?? new Date(),
         etag: response.ETag ?? '',
       };
@@ -186,9 +210,7 @@ export class S3StorageAdapter implements StorageAdapter {
     for await (const item of this.storage.list(fullPrefix)) {
       if (item.isFile) {
         // Remove the adapter's prefix if it exists
-        const key = this.config.prefix
-          ? item.path.replace(`${this.config.prefix}/`, '')
-          : item.path;
+        const key = this.config.prefix ? item.path.replace(`${this.config.prefix}/`, '') : item.path;
         files.push(key);
       }
     }
@@ -207,6 +229,6 @@ export class S3StorageAdapter implements StorageAdapter {
 /**
  * Create an S3 storage adapter
  */
-export function createS3StorageAdapter(config: S3StorageConfig): StorageAdapter {
+export function createS3StorageAdapter(config: S3StorageConfig): SignedUploadAdapter {
   return new S3StorageAdapter(config);
 }

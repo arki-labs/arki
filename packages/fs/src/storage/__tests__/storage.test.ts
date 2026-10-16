@@ -1,10 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import { createR2Storage } from '../r2';
+import type { SignedUploadAdapter } from '../types';
 import { createLocalStorageAdapter } from '../local-adapter';
+import { createR2Storage } from '../r2';
 
 describe('createR2Storage', () => {
   const storage = createR2Storage({
@@ -16,7 +17,17 @@ describe('createR2Storage', () => {
   });
 
   it('exposes the full StorageAdapter interface, including signed URLs and metadata', () => {
-    for (const method of ['put', 'get', 'delete', 'deleteMany', 'exists', 'getUrl', 'getSignedUrl', 'getMetadata', 'list']) {
+    for (const method of [
+      'put',
+      'get',
+      'delete',
+      'deleteMany',
+      'exists',
+      'getUrl',
+      'getSignedUrl',
+      'getMetadata',
+      'list',
+    ]) {
       expect(typeof (storage as unknown as Record<string, unknown>)[method]).toBe('function');
     }
   });
@@ -40,6 +51,34 @@ describe('createR2Storage', () => {
     const url = await storage.getSignedUrl('uploads/new.png', { operation: 'put' });
     expect(url).toContain('X-Amz-Signature=');
     expect(url).toContain('uploads/new.png');
+  });
+
+  // The store rejects an upload only for what the signature covers. Without these three,
+  // a leaked PUT URL could store any type, any size, or overwrite a confirmed object.
+  it('signs Content-Type, Content-Length and If-None-Match into a PUT URL', async () => {
+    const url = new URL(
+      await storage.getSignedUrl('uploads/new.png', {
+        operation: 'put',
+        contentType: 'image/png',
+        contentLength: 1234,
+        ifNoneMatch: '*',
+      }),
+    );
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host;if-none-match');
+  });
+
+  // SDK 3.1147 defaults to computing a checksum for every request. For a presigned PUT that is
+  // the CRC32 of an EMPTY body, so a real upload would fail the check on the store.
+  it('puts no empty-body checksum into PUT URLs', async () => {
+    const url = await storage.getSignedUrl('uploads/new.png', { operation: 'put', contentType: 'image/png' });
+    const names = [...new URL(url).searchParams.keys()].map(name => name.toLowerCase());
+    expect(names.filter(name => name.includes('checksum'))).toEqual([]);
+  });
+
+  it('is a SignedUploadAdapter; the local adapter is not', () => {
+    expect(storage.capabilities.signedPut).toBe(true);
+    expectTypeOf(storage).toExtend<SignedUploadAdapter>();
+    expectTypeOf(createLocalStorageAdapter).returns.not.toExtend<SignedUploadAdapter>();
   });
 });
 

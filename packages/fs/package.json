@@ -1,7 +1,8 @@
 {
   "name": "@arki/fs",
-  "private": true,
   "version": "0.1.3",
+  "private": true,
+  "sideEffects": false,
   "type": "module",
   "exports": {
     "./env": {
@@ -74,12 +75,35 @@
       "import": "./src/storage/types.ts",
       "node": "./src/storage/types.ts"
     },
+    "./files": {
+      "types": "./dist/src/files/index.d.ts",
+      "import": "./src/files/index.ts",
+      "node": "./src/files/index.ts"
+    },
+    "./orpc": {
+      "types": "./dist/src/orpc.d.ts",
+      "import": "./src/orpc.ts",
+      "node": "./src/orpc.ts"
+    },
+    "./pg": {
+      "types": "./dist/src/pg/index.d.ts",
+      "import": "./src/pg/index.ts",
+      "node": "./src/pg/index.ts"
+    },
+    "./testing": {
+      "types": "./dist/src/testing.d.ts",
+      "import": "./src/testing.ts",
+      "node": "./src/testing.ts"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "env": [
         "src/env.ts"
+      ],
+      "files": [
+        "src/files/index.ts"
       ],
       "local/delete": [
         "src/local/delete.ts"
@@ -98,6 +122,12 @@
       ],
       "local/write": [
         "src/local/write.ts"
+      ],
+      "orpc": [
+        "src/orpc.ts"
+      ],
+      "pg": [
+        "src/pg/index.ts"
       ],
       "s3": [
         "src/s3.ts"
@@ -119,22 +149,30 @@
       ],
       "storage/types": [
         "src/storage/types.ts"
+      ],
+      "testing": [
+        "src/testing.ts"
       ]
     }
   },
   "scripts": {
+    "bench": "arki-bench",
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "test:pg": "vitest run --config vitest.pg.config.ts",
+    "test:runtimes": "tsc -p tsconfig.runtimes.json && arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/log": "workspace:*",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@flystorage/aws-s3": "catalog:",
@@ -148,10 +186,41 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/db": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/schedule": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/pg": "catalog:drizzle",
+    "drizzle-kit": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle"
   },
-  "sideEffects": false
+  "peerDependencies": {
+    "@arki/db": "workspace:*",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "drizzle-orm": "catalog:drizzle"
+  },
+  "peerDependenciesMeta": {
+    "@arki/db": {
+      "optional": true
+    },
+    "@orpc/contract": {
+      "optional": true
+    },
+    "@orpc/server": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    }
+  }
 }
