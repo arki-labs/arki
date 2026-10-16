@@ -89,6 +89,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@paralleldrive/cuid2": "catalog:utilities",

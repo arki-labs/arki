@@ -101,7 +101,7 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
           throw new Error(
             `effect "${name}" has no handler for "${event.type}", but a job was queued for it; add a handler for this event to the effect, or delete the job if the event is no longer handled`,
           );
-        await handler(event, ctx);
+        return await handler(event, ctx);
       },
     },
     {},

@@ -369,7 +369,8 @@ export type EffectSchedule<Meta = unknown> = {
   readonly delaySeconds?: number;
   /**
    * When a failed job runs again, and how long it waits first: a `backoff` from
-   * `@arki/resilience` (re-exported here). A job the backoff stops is dead. Default:
+   * `@arki/resilience` (re-exported here). A job the backoff stops is dead. A handler that
+   * returns a failure dies at once, unless the backoff's `while` accepts that failure. Default:
    * `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`, so 8 tries.
    */
   readonly retry?: Backoff;
@@ -386,9 +387,10 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
   readonly schedule: EffectSchedule<Meta>;
   /** The same effect with this schedule. `j.effect('mail', order, handlers).withSchedule({ priority: 5 })`. */
   withSchedule(schedule: EffectSchedule<Meta>): Effect<Meta, AppDb, Run, N>;
+  /** Resolves with what the handler returned. A returned failure (`@arki/failure`) fails the job. */
   readonly run: BivariantFn<
     [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>],
-    Promise<void>
+    Promise<unknown>
   >;
 };
 

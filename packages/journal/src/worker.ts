@@ -8,6 +8,7 @@
 import type { z } from 'zod';
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
+import { isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { History } from './history.js';
@@ -42,7 +43,9 @@ const DEFAULT_LEASE_SECONDS = 60;
 const defaultEffectRetry = backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7);
 const DEFAULT_POLL_MS = 1000;
 
+/** A returned failure is stored as its JSON, so `lastError` keeps its code, message, status and data. */
 function errorText(error: unknown): string {
+  if (isFailure(error)) return JSON.stringify(error);
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
@@ -164,13 +167,13 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     };
   };
 
-  /** An effect row: load its event, run the effect inside the effect hooks. */
+  /** An effect row: load its event, run the effect inside the effect hooks. Resolves with what the handler returned. */
   const runEffect = async (
     db: AppDb & RootDb,
     job: JobRow,
     effect: Effect<z.output<Meta>, AppDb, Run> | undefined,
     signal: AbortSignal,
-  ): Promise<void> => {
+  ): Promise<unknown> => {
     // The check constraint sets both on every effect row; this narrows them once.
     if (job.effect === null || job.eventSeq === null)
       throw new Error(`journal: effect job ${job.id} has no effect or event`);
@@ -183,7 +186,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
       eventRow.entityId,
     );
     // Inside the lease: a hook that throws fails the job like a handler failure.
-    await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
+    return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
       effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) }),
     );
   };
@@ -199,28 +202,18 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     const effect = job.effect === null ? undefined : effectsByName.get(job.effect);
     const lost = new AbortController();
     const stopRenewing = renewWhile(db, job, leaseSeconds, lost);
-    try {
-      const ownSignal = AbortSignal.any([signal, lost.signal]);
-      // A queue row runs in the runner, which wraps it in its own middleware: effect hooks do not.
-      if (job.kind === 'queue') {
-        if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
-        await runner.run(scheduledJob(job), { db, signal: ownSignal });
-      } else {
-        await runEffect(db, job, effect, ownSignal);
-      }
-      await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-      debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
-    } catch (error) {
+    // A failed try: the error the job threw, or the failure its effect returned.
+    const recordFailure = async (reason: unknown): Promise<void> => {
       // `attempts` counts the tries so far, which is the number of the retry that would come next.
       const delayMs =
         job.kind === 'queue'
-          ? runner?.retryDelay(scheduledJob(job), error)
-          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, error);
+          ? runner?.retryDelay(scheduledJob(job), reason)
+          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, reason);
       const dead = delayMs === undefined;
       await db
         .update(jobsTable)
         .set({
-          lastError: errorText(error),
+          lastError: errorText(reason),
           leaseToken: null,
           leaseUntil: null,
           ...(delayMs === undefined ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(delayMs / 1000) }),
@@ -231,8 +224,28 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         jobId: job.id,
         attempts: job.attempts,
         value4: dead ? ', dead' : '',
-        value5: errorText(error),
+        value5: errorText(reason),
       });
+    };
+    try {
+      const ownSignal = AbortSignal.any([signal, lost.signal]);
+      // A queue row runs in the runner, which wraps it in its own middleware: effect hooks do not.
+      // The runner turns a returned failure into a throw itself, so it reaches the catch below.
+      if (job.kind === 'queue') {
+        if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
+        await runner.run(scheduledJob(job), { db, signal: ownSignal });
+      } else {
+        const outcome = await runEffect(db, job, effect, ownSignal);
+        // An expected failure fails the job; by default the backoff does not retry it.
+        if (isFailure(outcome)) {
+          await recordFailure(outcome);
+          return;
+        }
+      }
+      await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
+      debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
+    } catch (error) {
+      await recordFailure(error);
     } finally {
       stopRenewing();
     }
