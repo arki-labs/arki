@@ -9,8 +9,10 @@ export type {
   MailTransport,
   RecipientOutcome,
   RenderContext,
+  SendFailure,
   SendOptions,
   SentMail,
+  TransportFailure,
 } from './types.js';
 export type { MailErrorCode } from './errors.js';
 export { isMailError, MAIL_ERROR_CODES, MailError } from './errors.js';

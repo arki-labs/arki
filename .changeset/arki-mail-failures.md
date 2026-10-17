@@ -18,3 +18,4 @@ Breaking:
 - `mailSink().failNext(failure?)` takes a failure value, such as `MailRejected({ transport: 'sink', retryable: true })`; the default is a `MailRejected` that is not retryable.
 - `mailOutbox().enqueue` returns `MailInvalidInput` for bad input and queues nothing, instead of throwing `E003`. The runner retries only `MailUncertain` and a `MailRejected` with `data.retryable`; every other failure, and every `MailError`, is dead on its first try.
 - `zod` is now a dependency (the failures' data schemas).
+- `SendFailure` (what `send` can return in place of a sent mail) and `TransportFailure` (what a transport can return) are exported from `@arki/mail`.
