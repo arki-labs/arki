@@ -13,12 +13,12 @@ import { z } from 'zod';
 import { getLogger } from '@arki/log';
 
 import type { JournalTables } from './pg.js';
-import type { ArchiveOutcome, ResolvedKeep, ResolvedRetention } from './retention.js';
+import type { ArchivedJob, ArchiveOutcome, EffectRetention, ResolvedKeep, ResolvedRetention } from './retention.js';
 import type { DbHandle } from './types.js';
 import type { JobRow } from './worker.js';
 import { JournalError } from './errors.js';
 import { jobId as newJobId, operationId as newOperationId } from './id.js';
-import { keepFor, keepUntil } from './retention.js';
+import { keepFor, keepUntil, retryableForMs } from './retention.js';
 
 const debug = getLogger('arki:journal');
 
@@ -49,12 +49,6 @@ export type JobOperationInput = {
   /** The Foreman execution that asked for it. */
   readonly executionId?: string;
 };
-
-/**
- * Where the next page starts: the last row of the previous page. `at` is the row's sort time (`availableAt`;
- * `deadAt` for dead jobs; `archivedAt` for the archive; `at` for operations), `id` its id.
- */
-export type JobCursor = { readonly at: Date; readonly id: string };
 
 export type JobAttempt = JournalTables['jobAttempts']['$inferSelect'];
 export type JobOperation = JournalTables['jobOperations']['$inferSelect'];
@@ -93,7 +87,8 @@ export type JobCount = {
   readonly oldestDeadAt: Date | null;
 };
 
-type PageOptions = { readonly limit?: number; readonly after?: JobCursor };
+/** `after` is the `next` of the previous page, passed back untouched. */
+type PageOptions = { readonly limit?: number; readonly after?: string };
 
 const LIST_LIMIT = { default: 100, max: 200 } as const;
 const RETRY_DEAD_LIMIT = { default: 100, max: 500 } as const;
@@ -105,11 +100,13 @@ export type JobOpsDeps = {
   readonly retention: ResolvedRetention;
   /** Wakes this process's workers. */
   readonly wake: () => void;
+  /** The per-effect retention override of a job row (the worker's lookup, shared). Default: none. */
+  readonly overrideFor?: (job: { readonly effect: string | null }) => EffectRetention | undefined;
 };
 
 const idRows = z.object({ id: z.string() }).array();
 /** The ids a raw statement returned. `execute` hands back the driver's result: `{ rows }` (pg, PGlite) or the rows themselves (postgres-js). */
-const archivedIds = (result: unknown): string[] => {
+const rowIds = (result: unknown): string[] => {
   const parsed = z.union([idRows, z.object({ rows: idRows })]).parse(result);
   return (Array.isArray(parsed) ? parsed : parsed.rows).map(row => row.id);
 };
@@ -128,9 +125,63 @@ function assertOperation(op: JobOperationInput): void {
   if (op.actor.trim() === '') throw argument('actor', 'every operation names who did it; `actor` must not be empty');
 }
 
-/** Postgres keeps microseconds, a JS `Date` milliseconds. Sorting and paging on the truncated value makes the cursor exact. */
-const ms = (column: SQL | { readonly name: string }) => sql`date_trunc('milliseconds', ${column})`;
 const iso = (date: Date) => sql`${date.toISOString()}::timestamptz`;
+
+/*
+ * The cursor. Postgres keeps microseconds and a JS `Date` only milliseconds, so the sort time travels as text from
+ * the database, exact to the microsecond, and goes back into a row comparison on the raw column: the table's
+ * indexes serve the sort and no row repeats or goes missing at a page edge. Opaque on purpose: the caller never
+ * builds one, so the encoding can change without breaking anyone.
+ */
+const CURSOR_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}$/;
+const cursorShape = z.tuple([z.string().regex(CURSOR_TIME), z.string().min(1)]);
+
+/** The column as microsecond-exact UTC text, selected next to each paged row. */
+const cursorText = (column: SQL | { readonly name: string }) =>
+  sql<string>`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')`;
+
+// `btoa` rather than `Buffer`: the package runs in the browser and Hermes too. The payload is ASCII (a timestamp and a generated id).
+const encodeCursor = (at: string, id: string): string =>
+  btoa(JSON.stringify([at, id]))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+
+function decodeCursor(after: string): { readonly at: string; readonly id: string } {
+  try {
+    const [at, id] = cursorShape.parse(JSON.parse(atob(after.replaceAll('-', '+').replaceAll('_', '/'))));
+    return { at, id };
+  } catch {
+    throw argument('after', 'not a cursor this journal gave out; pass the `next` of a previous page unchanged');
+  }
+}
+
+/** The row comparison for the page after `after`: `(column, id)` strictly past the cursor in the sort direction. */
+function pastCursor(
+  after: string | undefined,
+  column: SQL | { readonly name: string },
+  id: SQL | { readonly name: string },
+  newestFirst: boolean,
+) {
+  if (after === undefined) return;
+  const cursor = decodeCursor(after);
+  const past = sql.raw(newestFirst ? '<' : '>');
+  return sql`(${column}, ${id}) ${past} (${cursor.at}::timestamp AT TIME ZONE 'UTC', ${cursor.id}::varchar)`;
+}
+
+/** Cut a `limit + 1` fetch into a page and the cursor of its last row. */
+function pageOf<Row extends { readonly id: string; readonly cursorAt: string }>(rows: readonly Row[], limit: number) {
+  const items: Omit<Row, 'cursorAt'>[] = [];
+  let next: string | null = null;
+  for (const [index, row] of rows.slice(0, limit).entries()) {
+    const { cursorAt, ...item } = row;
+    items.push(item);
+    if (index === limit - 1 && rows.length > limit) next = encodeCursor(cursorAt, row.id);
+  }
+  return { items, next };
+}
+
+const noOverride = (): EffectRetention | undefined => void 0;
 
 export function createJobOps(deps: JobOpsDeps) {
   const { events: eventsTable, jobs: jobsTable, jobAttempts, jobArchive, jobOperations } = deps.tables;
@@ -160,25 +211,32 @@ export function createJobOps(deps: JobOpsDeps) {
 
   // ---- reads --------------------------------------------------------------------------------------------------
 
-  /** Pending jobs by `(available_at, id)` ascending; dead jobs by `(dead_at, id)` descending. `limit` 1 to 200, default 100. */
-  const jobs = async (db: DbHandle, opts?: JobFilter & PageOptions): Promise<JobWithState[]> => {
+  /**
+   * Pending jobs by `(available_at, id)` ascending; dead jobs by `(dead_at, id)` descending. `limit` 1 to 200,
+   * default 100. `next` is the cursor of the following page, null on the last one.
+   */
+  const jobs = async (
+    db: DbHandle,
+    opts?: JobFilter & PageOptions,
+  ): Promise<{ readonly jobs: JobWithState[]; readonly next: string | null }> => {
     const status = opts?.status ?? 'pending';
     const limit = bounded('jobs', opts?.limit, LIST_LIMIT);
     const newestFirst = status === 'dead';
-    const key = ms(newestFirst ? jobsTable.deadAt : jobsTable.availableAt);
-    const after = opts?.after;
-    const cursor =
-      after === undefined
-        ? undefined
-        : newestFirst
-          ? sql`(${key}, ${jobsTable.id}) < (${iso(after.at)}, ${after.id}::varchar)`
-          : sql`(${key}, ${jobsTable.id}) > (${iso(after.at)}, ${after.id}::varchar)`;
-    return db
-      .select(withState)
+    const key = newestFirst ? jobsTable.deadAt : jobsTable.availableAt;
+    const rows = await db
+      .select({ ...withState, cursorAt: cursorText(key) })
       .from(jobsTable)
-      .where(and(status === 'all' ? undefined : where[status], ...nameFilter(opts ?? {}), cursor))
+      .where(
+        and(
+          status === 'all' ? undefined : where[status],
+          ...nameFilter(opts ?? {}),
+          pastCursor(opts?.after, key, jobsTable.id, newestFirst),
+        ),
+      )
       .orderBy(...(newestFirst ? [desc(key), desc(jobsTable.id)] : [asc(key), asc(jobsTable.id)]))
-      .limit(limit);
+      .limit(limit + 1);
+    const page = pageOf(rows, limit);
+    return { jobs: page.items, next: page.next };
   };
 
   const job = async (db: DbHandle, id: string): Promise<JobDetail | undefined> => {
@@ -233,25 +291,23 @@ export function createJobOps(deps: JobOpsDeps) {
   const jobOperationsList = async (
     db: DbHandle,
     opts?: PageOptions & { readonly jobId?: string },
-  ): Promise<JobOperation[]> => {
+  ): Promise<{ readonly operations: JobOperation[]; readonly next: string | null }> => {
     const limit = bounded('jobOperations', opts?.limit, LIST_LIMIT);
-    const key = ms(jobOperations.at);
-    const after = opts?.after;
-    return db
-      .select()
+    const rows = await db
+      .select({ ...getTableColumns(jobOperations), cursorAt: cursorText(jobOperations.at) })
       .from(jobOperations)
       .where(
         and(
           opts?.jobId === undefined
             ? undefined
             : sql`${jobOperations.jobIds} @> ${JSON.stringify([opts.jobId])}::jsonb`,
-          after === undefined
-            ? undefined
-            : sql`(${key}, ${jobOperations.id}) < (${iso(after.at)}, ${after.id}::varchar)`,
+          pastCursor(opts?.after, jobOperations.at, jobOperations.id, true),
         ),
       )
-      .orderBy(desc(key), desc(jobOperations.id))
-      .limit(limit);
+      .orderBy(desc(jobOperations.at), desc(jobOperations.id))
+      .limit(limit + 1);
+    const page = pageOf(rows, limit);
+    return { operations: page.items, next: page.next };
   };
 
   /** Newest first by `(archived_at, id)`. */
@@ -262,23 +318,23 @@ export function createJobOps(deps: JobOpsDeps) {
       readonly effect?: string;
       readonly job?: string;
     },
-  ) => {
+  ): Promise<{ readonly jobs: ArchivedJob[]; readonly next: string | null }> => {
     const limit = bounded('archivedJobs', opts?.limit, LIST_LIMIT);
-    const key = ms(jobArchive.archivedAt);
-    const after = opts?.after;
-    return db
-      .select()
+    const rows = await db
+      .select({ ...getTableColumns(jobArchive), cursorAt: cursorText(jobArchive.archivedAt) })
       .from(jobArchive)
       .where(
         and(
           opts?.outcome === undefined ? undefined : eq(jobArchive.outcome, opts.outcome),
           opts?.effect === undefined ? undefined : eq(jobArchive.effect, opts.effect),
           opts?.job === undefined ? undefined : eq(jobArchive.jobName, opts.job),
-          after === undefined ? undefined : sql`(${key}, ${jobArchive.id}) < (${iso(after.at)}, ${after.id}::varchar)`,
+          pastCursor(opts?.after, jobArchive.archivedAt, jobArchive.id, true),
         ),
       )
-      .orderBy(desc(key), desc(jobArchive.id))
-      .limit(limit);
+      .orderBy(desc(jobArchive.archivedAt), desc(jobArchive.id))
+      .limit(limit + 1);
+    const page = pageOf(rows, limit);
+    return { jobs: page.items, next: page.next };
   };
 
   /** One archived job with its `attemptLog`: the attempts the job had when it left the hot table, oldest first. */
@@ -303,8 +359,12 @@ export function createJobOps(deps: JobOpsDeps) {
     return row ?? { rows: 0, unexported: 0, oldestUnexportedAt: null, pastKeepUntil: 0 };
   };
 
-  // eslint-disable-next-line unicorn/no-useless-undefined -- no per-effect override yet: the effect and runner overrides are wired where the verbs are exposed
-  const keepForOutcome = (outcome: ArchiveOutcome) => keepFor(policy, outcome, undefined);
+  const overrideOf = deps.overrideFor ?? noOverride;
+  /** The keep rule for a job row going out with this outcome: its effect's override, else the journal's. */
+  const keepOf =
+    (outcome: ArchiveOutcome) =>
+    (row: { readonly effect: string | null }): ResolvedKeep =>
+      keepFor(policy, outcome, overrideOf(row));
 
   // ---- writes -------------------------------------------------------------------------------------------------
 
@@ -337,50 +397,76 @@ export function createJobOps(deps: JobOpsDeps) {
   };
 
   /**
-   * Remove jobs from the hot table in one statement and, when `keep` stores, write their archive rows in the same
+   * Remove jobs from the hot table and, for each job whose keep rule stores, write its archive row in the same
    * statement with the attempt log folded in (the attempts are read from the pre-delete snapshot, before the
-   * cascade removes them). `where` is the whole guard: a row it does not match is neither deleted nor archived.
+   * cascade removes them). The rows `where` matches are locked first and grouped by effect, because one call can
+   * hold effects with different keep rules; each group is then one statement. `limit` takes the oldest dead first
+   * and skips rows another transaction holds. `eligible` drops candidates after the lock (a per-effect horizon).
    */
   const removeJobs = async (
     tx: DbHandle,
     args: {
       readonly where: SQL | undefined;
+      readonly limit?: number;
+      readonly eligible?: (row: { readonly effect: string | null; readonly deadAt: Date | null }) => boolean;
       readonly outcome: Exclude<ArchiveOutcome, 'completed'>;
       /** What the archive row stores as `finished_at`. */
       readonly finishedAt: SQL;
-      readonly keep: ResolvedKeep;
+      readonly keepOf: (row: { readonly effect: string | null }) => ResolvedKeep;
     },
-  ): Promise<{ readonly ids: readonly string[]; readonly archived: boolean }> => {
-    if (!args.keep.store) {
-      const rows = await tx.delete(jobsTable).where(args.where).returning({ id: jobsTable.id });
-      return { ids: rows.map(row => row.id), archived: false };
+  ): Promise<{ readonly archivedIds: readonly string[]; readonly deletedIds: readonly string[] }> => {
+    const query = tx
+      .select({ id: jobsTable.id, effect: jobsTable.effect, deadAt: jobsTable.deadAt })
+      .from(jobsTable)
+      .where(args.where)
+      .orderBy(asc(jobsTable.deadAt), asc(jobsTable.id));
+    const found =
+      args.limit === undefined
+        ? await query.for('update')
+        : await query.limit(args.limit).for('update', { skipLocked: true });
+    const groups = new Map<string, { keep: ResolvedKeep; ids: string[] }>();
+    for (const row of found) {
+      if (args.eligible?.(row) === false) continue;
+      const group = groups.get(row.effect ?? '') ?? { keep: args.keepOf(row), ids: [] };
+      group.ids.push(row.id);
+      groups.set(row.effect ?? '', group);
     }
-    // Retention is a horizon of days, so the worker's clock is good enough for keep_until.
-    const until = keepUntil(args.keep, new Date())?.toISOString() ?? null;
-    const result: unknown = await tx.execute(sql`
-      WITH gone AS (
-        DELETE FROM ${jobsTable} WHERE ${args.where ?? sql`true`} RETURNING *
-      ), log AS (
-        SELECT a.job_id, jsonb_agg(jsonb_build_object(
-          'attempt', a.attempt,
-          'startedAt', a.started_at,
-          'finishedAt', coalesce(a.finished_at, now()),
-          'outcome', coalesce(a.outcome, 'superseded'),
-          'error', a.error
-        ) ORDER BY a.started_at, a.attempt) AS entries
-        FROM ${jobAttempts} a WHERE a.job_id IN (SELECT id FROM gone) GROUP BY a.job_id
-      )
-      INSERT INTO ${jobArchive} (
-        id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
-        last_error, outcome, attempt_log, replay_of, finished_at, keep_until
-      )
-      SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
-        g.last_error, ${args.outcome}::varchar, coalesce(log.entries, '[]'::jsonb), g.replay_of, ${args.finishedAt},
-        ${until}::timestamptz
-      FROM gone g LEFT JOIN log ON log.job_id = g.id
-      RETURNING id
-    `);
-    return { ids: archivedIds(result), archived: true };
+    const archivedIds: string[] = [];
+    const deletedIds: string[] = [];
+    for (const { keep, ids } of groups.values()) {
+      if (!keep.store) {
+        const rows = await tx.delete(jobsTable).where(inArray(jobsTable.id, ids)).returning({ id: jobsTable.id });
+        deletedIds.push(...rows.map(row => row.id));
+        continue;
+      }
+      // Retention is a horizon of days, so the worker's clock is good enough for keep_until.
+      const until = keepUntil(keep, new Date())?.toISOString() ?? null;
+      const result: unknown = await tx.execute(sql`
+        WITH gone AS (
+          DELETE FROM ${jobsTable} WHERE ${inArray(jobsTable.id, ids)} RETURNING *
+        ), log AS (
+          SELECT a.job_id, jsonb_agg(jsonb_build_object(
+            'attempt', a.attempt,
+            'startedAt', a.started_at,
+            'finishedAt', coalesce(a.finished_at, now()),
+            'outcome', coalesce(a.outcome, 'superseded'),
+            'error', a.error
+          ) ORDER BY a.started_at, a.attempt) AS entries
+          FROM ${jobAttempts} a WHERE a.job_id IN (SELECT id FROM gone) GROUP BY a.job_id
+        )
+        INSERT INTO ${jobArchive} (
+          id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
+          last_error, outcome, attempt_log, replay_of, finished_at, keep_until
+        )
+        SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
+          g.last_error, ${args.outcome}::varchar, coalesce(log.entries, '[]'::jsonb), g.replay_of, ${args.finishedAt},
+          ${until}::timestamptz
+        FROM gone g LEFT JOIN log ON log.job_id = g.id
+        RETURNING id
+      `);
+      archivedIds.push(...rowIds(result));
+    }
+    return { archivedIds, deletedIds };
   };
 
   const retryPatch = {
@@ -423,15 +509,16 @@ export function createJobOps(deps: JobOpsDeps) {
           where: and(eq(jobsTable.id, id), isNotNull(jobsTable.deadAt)),
           outcome: 'discarded',
           finishedAt: sql`now()`,
-          keep: keepForOutcome('discarded'),
+          keepOf: keepOf('discarded'),
         });
-        if (removed.ids.length === 0)
+        const gone = [...removed.archivedIds, ...removed.deletedIds];
+        if (gone.length === 0)
           throw new JournalError('JOB_NOT_DEAD', 'job', id, 'not a dead job; only a dead job is discarded');
-        const operationId = await record(tx, 'discard', op, removed.ids);
+        const operationId = await record(tx, 'discard', op, gone);
         debug.debug('discard {jobId}: {operationId}, archived {archived}', {
           jobId: id,
           operationId,
-          archived: removed.archived,
+          archived: removed.archivedIds.length > 0,
         });
         return { operationId };
       },
@@ -453,9 +540,10 @@ export function createJobOps(deps: JobOpsDeps) {
           ),
           outcome: 'cancelled',
           finishedAt: sql`now()`,
-          keep: keepForOutcome('cancelled'),
+          keepOf: keepOf('cancelled'),
         });
-        if (removed.ids.length === 0) {
+        const gone = [...removed.archivedIds, ...removed.deletedIds];
+        if (gone.length === 0) {
           const [row] = await tx.select({ state: stateOf }).from(jobsTable).where(eq(jobsTable.id, id)).limit(1);
           if (row?.state === 'running')
             throw new JournalError('JOB_RUNNING', 'job', id, 'a worker holds the lease; cancel after it finishes');
@@ -466,11 +554,11 @@ export function createJobOps(deps: JobOpsDeps) {
             'not a waiting job; only a ready or delayed job is cancelled',
           );
         }
-        const operationId = await record(tx, 'cancel', op, removed.ids);
+        const operationId = await record(tx, 'cancel', op, gone);
         debug.debug('cancel {jobId}: {operationId}, archived {archived}', {
           jobId: id,
           operationId,
-          archived: removed.archived,
+          archived: removed.archivedIds.length > 0,
         });
         return { operationId };
       },
@@ -547,24 +635,25 @@ export function createJobOps(deps: JobOpsDeps) {
     return inTransaction(
       db,
       async tx => {
+        // A per-effect `retryableFor` longer than the journal's keeps its dead jobs retryable past `olderThan`.
         const removed = await removeJobs(tx, {
-          where: sql`${jobsTable.id} IN (SELECT ${jobsTable.id} FROM ${jobsTable} WHERE ${jobsTable.deadAt} IS NOT NULL AND ${jobsTable.deadAt} < ${iso(opts.olderThan)} ORDER BY ${jobsTable.deadAt}, ${jobsTable.id} LIMIT ${limit} FOR UPDATE SKIP LOCKED)`,
+          where: and(isNotNull(jobsTable.deadAt), sql`${jobsTable.deadAt} < ${iso(opts.olderThan)}`),
+          limit,
+          eligible: row =>
+            row.deadAt !== null && row.deadAt.getTime() <= Date.now() - retryableForMs(policy, overrideOf(row)),
           outcome: 'dead',
           finishedAt: sql`coalesce(g.dead_at, now())`,
-          keep: keepForOutcome('dead'),
+          keepOf: keepOf('dead'),
         });
-        const count = removed.ids.length;
-        const operationId = count === 0 ? null : await record(tx, 'purgeDead', op, removed.ids);
+        const count = removed.archivedIds.length + removed.deletedIds.length;
+        const operationId =
+          count === 0 ? null : await record(tx, 'purgeDead', op, [...removed.archivedIds, ...removed.deletedIds]);
         debug.debug('purgeDead: {count} jobs, archived {archived}, {operationId}', {
           count,
-          archived: removed.archived,
+          archived: removed.archivedIds.length,
           operationId,
         });
-        return {
-          archived: removed.archived ? count : 0,
-          deleted: removed.archived ? 0 : count,
-          operationId,
-        };
+        return { archived: removed.archivedIds.length, deleted: removed.deletedIds.length, operationId };
       },
       false,
     );
@@ -625,6 +714,9 @@ export function createJobOps(deps: JobOpsDeps) {
     cancel,
     retryDead,
     purgeDead,
-    replay,
+    replayJob: replay,
   };
 }
+
+/** The job verbs and reads, as `createJobOps` builds them. */
+export type JobOps = ReturnType<typeof createJobOps>;

@@ -22,6 +22,7 @@ const mail = j.effect('order-mail', order, {
 });
 
 const journal = j.compose({ tables, effects: [mail] });
+const op = { actor: 'drain-test' } as const;
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -232,28 +233,28 @@ describe('drain', () => {
     // Why: the founder operating a failed payment effect needs to see it, run it again after the
     // fix, or drop it on purpose, without SQL and without touching a job that is still alive.
     const job = await placeAndPay();
-    const pending = await journal.jobs(db, { effect: 'order-mail' });
+    const { jobs: pending } = await journal.jobs(db, { effect: 'order-mail' });
     expect(pending.map(j => j.id)).toContain(job.id);
-    await expect(journal.retry(db, job.id)).rejects.toThrow('not a dead job');
-    await expect(journal.discard(db, job.id)).rejects.toThrow('not a dead job');
+    await expect(journal.retry(db, job.id, op)).rejects.toThrow('not a dead job');
+    await expect(journal.discard(db, job.id, op)).rejects.toThrow('not a dead job');
     await db
       .update(tables.jobs)
       .set({ deadAt: new Date(), attempts: 8, lastError: 'smtp down' })
       .where(eq(tables.jobs.id, job.id));
-    const dead = await journal.jobs(db, { status: 'dead', effect: 'order-mail' });
+    const { jobs: dead } = await journal.jobs(db, { status: 'dead', effect: 'order-mail' });
     expect(dead.map(j => j.id)).toContain(job.id);
-    const stillPending = await journal.jobs(db, { effect: 'order-mail' });
+    const { jobs: stillPending } = await journal.jobs(db, { effect: 'order-mail' });
     expect(stillPending.map(j => j.id)).not.toContain(job.id);
-    await journal.retry(db, job.id);
+    await journal.retry(db, job.id, op);
     expect(await jobById(job.id)).toMatchObject({ deadAt: null, attempts: 0, lastError: null, leaseToken: null });
     expect(await journal.drain(db)).toBeGreaterThanOrEqual(1);
     expect(await jobById(job.id), 'ran and was acknowledged').toBeNull();
 
     const other = await placeAndPay();
     await db.update(tables.jobs).set({ deadAt: new Date() }).where(eq(tables.jobs.id, other.id));
-    await journal.discard(db, other.id);
+    await journal.discard(db, other.id, op);
     expect(await jobById(other.id)).toBeNull();
-    const everything = await journal.jobs(db, { status: 'all', effect: 'order-mail' });
+    const { jobs: everything } = await journal.jobs(db, { status: 'all', effect: 'order-mail' });
     expect(everything.map(j => j.id)).not.toContain(other.id);
   });
 

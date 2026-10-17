@@ -303,7 +303,7 @@ describe('outboxRunner on the journal worker', () => {
     expect(dead).toMatchObject({ id, attempts: 2 });
     expect(dead?.deadAt).toBeInstanceOf(Date);
     failures = 0;
-    await journal.retry(db, id);
+    await journal.retry(db, id, { actor: 'outbox-spec' });
     await journal.drain(db, { jobs: runner });
     expect(handled.map(job => job.jobId)).toEqual([id, id, id]);
     expect(await rows()).toEqual([]);

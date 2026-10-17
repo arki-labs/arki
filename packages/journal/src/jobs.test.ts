@@ -120,7 +120,10 @@ describe('drain with a job runner', () => {
     expect(between?.lastError).toContain('smtp down');
     expect(between?.availableAt.getTime()).toBeGreaterThan(Date.now() + 30_000);
     expect(await bare.drain(db, { jobs }), 'held back until the delay passes').toBe(0);
-    await db.update(tables.jobs).set({ availableAt: new Date(0) }).where(eq(tables.jobs.id, id));
+    await db
+      .update(tables.jobs)
+      .set({ availableAt: new Date(0) })
+      .where(eq(tables.jobs.id, id));
     expect(await bare.drain(db, { jobs })).toBe(1);
     expect(calls).toBe(2);
     expect(await rowOf(id)).toBeNull();
@@ -142,10 +145,10 @@ describe('drain with a job runner', () => {
     expect(await rowOf(id)).toMatchObject({ attempts: 2, leaseToken: null });
     expect((await rowOf(id))?.deadAt).toBeInstanceOf(Date);
     expect(await bare.drain(db, { jobs })).toBe(0);
-    expect(await bare.jobs(db, { status: 'dead', job: 'demo' })).toHaveLength(1);
+    expect((await bare.jobs(db, { status: 'dead', job: 'demo' })).jobs).toHaveLength(1);
 
     fail = false;
-    await bare.retry(db, id);
+    await bare.retry(db, id, { actor: 'jobs-test' });
     expect(await bare.drain(db, { jobs })).toBe(1);
     expect(attempts).toEqual([1, 2, 1]);
     expect(await rowOf(id)).toBeNull();
@@ -229,7 +232,10 @@ describe('drain with a job runner', () => {
     const first = bare.drain(db, { jobs, leaseSeconds: 1 });
     await sleep(150);
     // The first worker stalled: its lease ran out before the next renewal.
-    await db.update(tables.jobs).set({ leaseUntil: sql`now() - interval '1 second'` }).where(eq(tables.jobs.id, id));
+    await db
+      .update(tables.jobs)
+      .set({ leaseUntil: sql`now() - interval '1 second'` })
+      .where(eq(tables.jobs.id, id));
     const other = bare.drain(db, { jobs, leaseSeconds: 1 });
     expect(await first).toBe(1);
     expect(seen).toEqual(['first:aborted']);

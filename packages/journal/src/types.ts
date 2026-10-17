@@ -376,6 +376,11 @@ export type EffectSchedule<Meta = unknown> = {
    * `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`, so 8 tries.
    */
   readonly retry?: Backoff;
+  /**
+   * How long this effect's finished jobs are kept in the archive, overriding the journal's `retention`
+   * for this effect only. `{ completed: false }` keeps no record of its successes.
+   */
+  readonly retention?: EffectRetention;
   /** A method signature, so an effect of one meta type is still an `Effect<unknown>`; see `BivariantFn`. */
   runAt?(event: Recorded<string, unknown, Meta>): Date;
 };

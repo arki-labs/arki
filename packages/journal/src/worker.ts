@@ -5,7 +5,7 @@
  * May import `fold`, `history`, `storage` and leaf files.
  * Must not import `journal`, `api`, `write` or `command`.
  */
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
@@ -14,6 +14,7 @@ import { backoff } from '@arki/resilience';
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
+import type { EffectRetention, ResolvedRetention } from './retention.js';
 import type {
   DbHandle,
   Effect,
@@ -36,8 +37,7 @@ import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
 import { bindHandlers } from './handlers.js';
 import { attemptId, leaseToken } from './id.js';
-import type { EffectRetention, ResolvedRetention } from './retention.js';
-import { keepFor, keepUntil, resolveRetention } from './retention.js';
+import { effectOverrides, keepFor, keepUntil, resolveRetention } from './retention.js';
 import { assertRootDb } from './storage.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
@@ -75,7 +75,7 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
   readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
-  /** The journal-wide archive policy. Internal until `journal.ts` passes the journal's `retention`; the default keeps completed jobs 7 days. */
+  /** The journal's resolved archive policy. Default: completed jobs kept 7 days. */
   readonly retention?: ResolvedRetention;
 };
 
@@ -84,17 +84,14 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
 ) {
   const { events: eventsTable, jobs: jobsTable, jobAttempts: attemptsTable, jobArchive: archiveTable } = deps.tables;
   const policy = deps.retention ?? resolveRetention(undefined);
+  const effectOverride = effectOverrides(deps.effects);
   const { decodeStoredEvent } = deps.history;
   const known = deps.effects.map(effect => effect.name);
 
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
   // An empty list leaves its lane out of the claim; `drain` never claims with both empty.
-  const claimOne = (
-    db: AppDb & RootDb,
-    leaseSeconds: number,
-    queued: readonly string[],
-  ): Promise<JobRow | undefined> =>
+  const claimOne = (db: AppDb & RootDb, leaseSeconds: number, queued: readonly string[]): Promise<JobRow | undefined> =>
     db.transaction(async (tx): Promise<JobRow | undefined> => {
       const due = await tx
         .select({ id: jobsTable.id })
@@ -206,12 +203,9 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     );
   };
 
-  /**
-   * The per-job retention override. A queue job's comes from its runner; an effect's is not wired yet
-   * (the effect schedule gains `retention` in the next step), so this is the one place to add it.
-   */
+  /** The per-job retention override: a queue job's comes from its runner, an effect's from its schedule. */
   const overrideFor = (job: JobRow, runner: JobRunner<AppDb> | undefined): EffectRetention | undefined =>
-    job.kind === 'queue' ? runner?.retention?.(scheduledJob(job)) : undefined;
+    job.kind === 'queue' ? runner?.retention?.(scheduledJob(job)) : effectOverride(job);
 
   /**
    * The ack. One fenced statement: delete the job and, when the policy keeps completed jobs, insert its archive
@@ -392,59 +386,6 @@ export function createStrandedJobs(deps: { readonly tables: JournalTables; reado
       .groupBy(jobsTable.kind, name)
       .orderBy(asc(jobsTable.kind), asc(name));
   };
-}
-
-/** The job verbs an operator uses: list, retry a dead job, discard a dead job. */
-export function createAdmin(deps: { readonly tables: JournalTables; readonly wake: () => void }) {
-  const { jobs: jobsTable } = deps.tables;
-
-  const jobs = (
-    db: DbHandle,
-    opts?: {
-      readonly status?: 'pending' | 'dead' | 'all';
-      readonly effect?: string;
-      readonly job?: string;
-      readonly limit?: number;
-    },
-  ): Promise<JobRow[]> => {
-    const status = opts?.status ?? 'pending';
-    return db
-      .select()
-      .from(jobsTable)
-      .where(
-        and(
-          status === 'pending' ? isNull(jobsTable.deadAt) : status === 'dead' ? isNotNull(jobsTable.deadAt) : undefined,
-          opts?.effect === undefined ? undefined : eq(jobsTable.effect, opts.effect),
-          opts?.job === undefined ? undefined : eq(jobsTable.jobName, opts.job),
-        ),
-      )
-      .orderBy(asc(jobsTable.availableAt))
-      .limit(opts?.limit ?? 100);
-  };
-
-  /** Dead to pending, in one statement: attempts and lease cleared, due now. Wakes the workers. */
-  const retry = async (db: DbHandle, jobId: string): Promise<void> => {
-    const rows = await db
-      .update(jobsTable)
-      .set({ deadAt: null, attempts: 0, lastError: null, leaseToken: null, leaseUntil: null, availableAt: sql`now()` })
-      .where(and(eq(jobsTable.id, jobId), isNotNull(jobsTable.deadAt)))
-      .returning({ id: jobsTable.id });
-    if (rows.length === 0)
-      throw new Error(`journal: job ${JSON.stringify(jobId)} is not a dead job; only a dead job is retried`);
-    deps.wake();
-  };
-
-  /** Delete a dead job. A live one is never deleted here: that would not stop its work, only lose the record of it. */
-  const discard = async (db: DbHandle, jobId: string): Promise<void> => {
-    const rows = await db
-      .delete(jobsTable)
-      .where(and(eq(jobsTable.id, jobId), isNotNull(jobsTable.deadAt)))
-      .returning({ id: jobsTable.id });
-    if (rows.length === 0)
-      throw new Error(`journal: job ${JSON.stringify(jobId)} is not a dead job; only a dead job is discarded`);
-  };
-
-  return { jobs, retry, discard };
 }
 
 /** What the worker loop needs from the journal. */

@@ -193,3 +193,50 @@ export function retryableForMs(policy: ResolvedRetention, override: EffectRetent
 export function keepUntil(keep: Extract<ResolvedKeep, { store: true }>, now: Date): Date | null {
   return keep.ageMs === null ? null : new Date(now.getTime() + keep.ageMs);
 }
+
+/** An effect as retention sees it: its name and the override on its schedule. */
+type RetentionSource = { readonly name: string; readonly schedule: { readonly retention?: EffectRetention } };
+
+/**
+ * The override for a job row's effect, by name. The one lookup the worker's ack and the operator verbs share, so a
+ * job is archived under the same rule whoever removes it. Queue rows have none here: a queue job's override comes
+ * from its runner, which only a worker holds.
+ */
+export function effectOverrides(
+  effects: readonly RetentionSource[],
+): (job: { readonly effect: string | null }) => EffectRetention | undefined {
+  const byName = new Map(effects.map(effect => [effect.name, effect.schedule.retention]));
+  return job => (job.effect === null ? undefined : byName.get(job.effect));
+}
+
+const needsSink = (keep: ResolvedKeep): boolean => keep.store && keep.untilExported;
+
+/**
+ * Boot check. `'untilExported'` means "keep only until the sink has it", so it needs a sink; effects are defined
+ * before the runtime journal exists, so the type cannot say this and the journal checks it once, at init.
+ * Also parses every effect override, so a bad age fails at init instead of at the first ack.
+ */
+export function assertRetention(policy: ResolvedRetention, effects: readonly RetentionSource[]): void {
+  if (policy.sink === undefined && (needsSink(policy.completed) || needsSink(policy.dead))) {
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'retention',
+      'journal',
+      "journal: retention 'untilExported' needs `retention.archive.sink`; without one nothing is ever exported",
+    );
+  }
+  for (const effect of effects) {
+    const override = effect.schedule.retention;
+    if (override === undefined) continue;
+    const parsed = [override.completed, override.dead].flatMap(keep => (keep === undefined ? [] : [parseKeep(keep)]));
+    if (override.retryableFor !== undefined) parseAge(override.retryableFor);
+    if (policy.sink === undefined && parsed.some(keep => needsSink(keep))) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'effect',
+        effect.name,
+        `journal: effect "${effect.name}": retention 'untilExported' needs \`retention.archive.sink\`; without one nothing is ever exported`,
+      );
+    }
+  }
+}

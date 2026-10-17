@@ -124,7 +124,7 @@ describe('the T13 migration on an app with old job rows', () => {
 describe('the new verbs on old rows', () => {
   it('an app on the pre-T13 schema migrates and its old dead rows stay retryable', async () => {
     const ops = createJobOps({ tables, retention: resolveRetention(undefined), wake: () => {} });
-    expect((await ops.jobs(db, { status: 'dead' })).map(row => [row.id, row.state])).toEqual([[deadId, 'dead']]);
+    expect((await ops.jobs(db, { status: 'dead' })).jobs.map(row => [row.id, row.state])).toEqual([[deadId, 'dead']]);
 
     const { operationId } = await ops.retry(db, deadId, { actor: 'upgrade-test' });
 

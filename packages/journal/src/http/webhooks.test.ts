@@ -176,7 +176,7 @@ describe('delivery', () => {
       { status: 'failed', attempt: 1, response: 500 },
       { status: 'dead', attempt: 2, response: 503 },
     ]);
-    expect(await journal.jobs(db, { status: 'dead' })).toHaveLength(1);
+    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
     expect(await subscriptionRow(id)).toMatchObject({ status: 'active', deadLetters: 1 });
   });
 
@@ -194,7 +194,7 @@ describe('delivery', () => {
     await drainAll(webhooks.runner);
 
     expect(await attemptsOf(id)).toEqual([{ status: 'dead', attempt: 1, response: null }]);
-    expect(await journal.jobs(db, { status: 'dead' })).toHaveLength(1);
+    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
     expect(await subscriptionRow(id)).toMatchObject({ deadLetters: 1 });
   });
 
@@ -349,7 +349,7 @@ describe('secrets', () => {
     await db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-seal', event: 'other.event', payload: {} }));
     await drainAll(webhooks.runner);
     expect(target.received).toEqual([]);
-    expect(await journal.jobs(db, { status: 'dead' })).toHaveLength(1);
+    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
   });
 
   it('a wrong encryption key is refused when the sender is built', () => {

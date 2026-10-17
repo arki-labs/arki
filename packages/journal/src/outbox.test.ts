@@ -7,7 +7,6 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { JobCursor } from './outbox.js';
 import { attemptId, jobId } from './id.js';
 import { createJobOps } from './outbox.js';
 import { resolveRetention } from './retention.js';
@@ -73,7 +72,7 @@ describe('job states and reads', () => {
     const expiredLease = await queueRow({ leaseToken: 'old', leaseUntil: new Date(Date.now() - 60_000) });
     const dead = await deadRow();
 
-    const all = await ops.jobs(db, { status: 'all' });
+    const { jobs: all } = await ops.jobs(db, { status: 'all' });
     expect(Object.fromEntries(all.map(row => [row.id, row.state]))).toEqual({
       [ready]: 'ready',
       [delayed]: 'delayed',
@@ -82,13 +81,13 @@ describe('job states and reads', () => {
       [dead]: 'dead',
     });
     const idsOf = async (status: 'pending' | 'ready' | 'delayed' | 'running' | 'dead') =>
-      (await ops.jobs(db, { status })).map(row => row.id).sort();
+      (await ops.jobs(db, { status })).jobs.map(row => row.id).sort();
     expect(await idsOf('pending')).toEqual([ready, delayed, running, expiredLease].sort());
     expect(await idsOf('ready')).toEqual([ready, expiredLease].sort());
     expect(await idsOf('delayed')).toEqual([delayed]);
     expect(await idsOf('running')).toEqual([running]);
     expect(await idsOf('dead')).toEqual([dead]);
-    expect((await ops.jobs(db)).map(row => row.state)).not.toContain('dead');
+    expect((await ops.jobs(db)).jobs.map(row => row.state)).not.toContain('dead');
   });
 
   it('jobCounts groups by name and counts each state once', async () => {
@@ -142,17 +141,25 @@ describe('job states and reads', () => {
       );
     }
     const seen: string[] = [];
-    let after: JobCursor | undefined;
-    for (;;) {
+    let after: string | undefined;
+    do {
       const page = await ops.jobs(db, { status: 'all', limit: 2, after });
-      if (page.length === 0) break;
-      seen.push(...page.map(row => row.id));
-      const last = page[page.length - 1];
-      if (last === undefined) break;
-      after = { at: last.availableAt, id: last.id };
-    }
+      seen.push(...page.jobs.map(row => row.id));
+      after = page.next ?? undefined;
+    } while (after !== undefined);
     expect([...seen].sort()).toEqual([...ids].sort());
     expect(new Set(seen).size).toBe(7);
+  });
+
+  it('a bad cursor is BAD_ARGUMENT, on every paged read', async () => {
+    const notBase64Json = 'not-a-cursor';
+    const wrongShape = Buffer.from(JSON.stringify({ at: 1 })).toString('base64url');
+    const badTime = Buffer.from(JSON.stringify(['yesterday', 'job_x'])).toString('base64url');
+    for (const after of [notBase64Json, wrongShape, badTime, '']) {
+      await expect(ops.jobs(db, { after })).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+      await expect(ops.archivedJobs(db, { after })).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+      await expect(ops.jobOperations(db, { after })).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+    }
   });
 
   it('dead jobs page newest first by dead_at', async () => {
@@ -160,14 +167,11 @@ describe('job states and reads', () => {
     const mid = await deadRow({ deadAt: new Date(Date.now() - 45 * DAY) });
     const fresh = await deadRow({ deadAt: new Date(Date.now() - 40 * DAY) });
     const first = await ops.jobs(db, { status: 'dead', limit: 2 });
-    expect(first.map(row => row.id)).toEqual([fresh, mid]);
-    const last = first[1];
-    const second = await ops.jobs(db, {
-      status: 'dead',
-      limit: 2,
-      after: last?.deadAt ? { at: last.deadAt, id: last.id } : undefined,
-    });
-    expect(second.map(row => row.id)).toEqual([old]);
+    expect(first.jobs.map(row => row.id)).toEqual([fresh, mid]);
+    expect(first.next).not.toBeNull();
+    const second = await ops.jobs(db, { status: 'dead', limit: 2, after: first.next ?? undefined });
+    expect(second.jobs.map(row => row.id)).toEqual([old]);
+    expect(second.next, 'the last page has no cursor').toBeNull();
   });
 });
 
@@ -210,7 +214,7 @@ describe('discard and cancel', () => {
     expect(await rowOf(dead)).toBeUndefined();
     expect(await rowOf(waiting)).toBeUndefined();
     expect(await attemptsOf(dead)).toEqual([]);
-    const archive = await ops.archivedJobs(db);
+    const { jobs: archive } = await ops.archivedJobs(db);
     expect(archive.map(row => [row.id, row.outcome])).toEqual(
       expect.arrayContaining([
         [dead, 'discarded'],
@@ -363,7 +367,7 @@ describe('replay', () => {
     const original = await deadRow({ dedupeKey: 'k1', priority: 3, args: { n: 9 } });
     await ops.discard(db, original, alice);
 
-    const { jobId: replayId, operationId } = await ops.replay(db, original, { actor: 'carol', reason: 'again' });
+    const { jobId: replayId, operationId } = await ops.replayJob(db, original, { actor: 'carol', reason: 'again' });
     expect(replayId).not.toBe(original);
     expect(await rowOf(replayId)).toMatchObject({
       kind: 'queue',
@@ -380,13 +384,13 @@ describe('replay', () => {
     expect(row).toMatchObject({ action: 'replay', actor: 'carol', reason: 'again', count: 1 });
     expect(row?.jobIds).toEqual([original, replayId]);
 
-    await expect(ops.replay(db, original, alice)).rejects.toMatchObject({ code: 'JOB_EXISTS' });
-    expect((await ops.jobs(db, { status: 'all' })).length).toBe(1);
+    await expect(ops.replayJob(db, original, alice)).rejects.toMatchObject({ code: 'JOB_EXISTS' });
+    expect((await ops.jobs(db, { status: 'all' })).jobs.length).toBe(1);
     expect(await operations()).toHaveLength(2);
   });
 
   it('an unknown archived id is BAD_ARGUMENT', async () => {
-    await expect(ops.replay(db, 'job_missing', alice)).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+    await expect(ops.replayJob(db, 'job_missing', alice)).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
   });
 });
 
@@ -401,15 +405,11 @@ describe('the archive reads', () => {
       ids.push(id);
     }
     const first = await ops.archivedJobs(db, { limit: 2 });
-    expect(first.map(row => row.id)).toEqual([ids[2], ids[1]]);
-    const last = first[1];
-    const rest = await ops.archivedJobs(db, {
-      limit: 2,
-      after: last ? { at: last.archivedAt, id: last.id } : undefined,
-    });
-    expect(rest.map(row => row.id)).toEqual([ids[0]]);
-    expect((await ops.archivedJobs(db, { job: 'other' })).map(row => row.id)).toEqual([ids[1]]);
-    expect(await ops.archivedJobs(db, { outcome: 'completed' })).toEqual([]);
+    expect(first.jobs.map(row => row.id)).toEqual([ids[2], ids[1]]);
+    const rest = await ops.archivedJobs(db, { limit: 2, after: first.next ?? undefined });
+    expect(rest.jobs.map(row => row.id)).toEqual([ids[0]]);
+    expect((await ops.archivedJobs(db, { job: 'other' })).jobs.map(row => row.id)).toEqual([ids[1]]);
+    expect((await ops.archivedJobs(db, { outcome: 'completed' })).jobs).toEqual([]);
 
     const archived = await ops.archivedJob(db, ids[0] ?? '');
     expect(archived?.attemptLog).toMatchObject([
@@ -432,9 +432,9 @@ describe('the archive reads', () => {
     const b = await deadRow();
     await ops.retry(db, a, alice);
     await ops.discard(db, b, alice);
-    const all = await ops.jobOperations(db);
+    const all = (await ops.jobOperations(db)).operations;
     expect(all.map(o => o.action)).toEqual(['discard', 'retry']);
-    expect((await ops.jobOperations(db, { jobId: a })).map(o => o.action)).toEqual(['retry']);
+    expect((await ops.jobOperations(db, { jobId: a })).operations.map(o => o.action)).toEqual(['retry']);
   });
 });
 
@@ -453,7 +453,7 @@ describe('operation rows', () => {
       ['cancel', () => ops.cancel(db, waiting, alice)],
       ['retryDead', () => ops.retryDead(db, { ids: [batchA, batchB] }, alice)],
       ['purgeDead', () => ops.purgeDead(db, { olderThan: new Date(Date.now() - 31 * DAY), limit: 1 }, alice)],
-      ['replay', () => ops.replay(db, discarded, alice)],
+      ['replay', () => ops.replayJob(db, discarded, alice)],
     ];
     expect(purged).toBeDefined();
     for (const [action, run] of steps) {

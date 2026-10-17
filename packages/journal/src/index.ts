@@ -88,6 +88,18 @@ export type {
   ScheduledJob,
   StrandedJobs,
 } from './types.js';
+export type {
+  ArchivedJob,
+  JobAttempt,
+  JobCount,
+  JobDetail,
+  JobFilter,
+  JobOperation,
+  JobOperationInput,
+  JobSelection,
+  JobState,
+} from './outbox.js';
+export type { ArchiveSink, EffectRetention, JobRetention, Keep, RetentionAge } from './retention.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';

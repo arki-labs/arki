@@ -14,6 +14,7 @@ import { isFailure } from '@arki/failure';
 import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
 import type { EntityBuilder } from './entity.js';
 import type { JournalTables } from './pg.js';
+import type { JobRetention } from './retention.js';
 import type {
   AnyEntity,
   CommandHookContext,
@@ -38,10 +39,11 @@ import { defineEvent } from './event.js';
 import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
+import { createJobOps } from './outbox.js';
+import { assertRetention, effectOverrides, resolveRetention } from './retention.js';
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
 import {
-  createAdmin,
   createCatchUp,
   createDrain,
   createStrandedJobs,
@@ -156,7 +158,7 @@ function createInit<
         services === undefined ? effect : bindEffect(effect, services),
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
-      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects, taps);
+      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects, taps, config.retention);
     },
   };
 }
@@ -185,8 +187,12 @@ function createJournal<
   /** An effect or a tap may still have needs (`services: 'worker'`): only the worker runs them, with its `services`. */
   effects: readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
   taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = [],
+  retentionOption?: JobRetention,
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
+  const retention = resolveRetention(retentionOption);
+  assertRetention(retention, effects);
+  const effectOverride = effectOverrides(effects);
   const eventsSchema = getTableConfig(tables.events).schema;
   const wakeChannel = eventsSchema === undefined ? 'journal_wake' : `${eventsSchema}_journal_wake`;
   type MetaOut = SchemaOutput<Meta>;
@@ -258,6 +264,7 @@ function createJournal<
     tables,
     hooks: effectHooks,
     effects: effects.map(effect => failWhenIgnored(effect)),
+    retention,
     history,
     runOn: (db, cause) => (command, input, meta, call) => run(db, command, input, meta, call, cause),
   });
@@ -271,7 +278,7 @@ function createJournal<
     tapNames: taps.map(tap => tap.name),
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
-  const admin = createAdmin({ tables, wake: () => journal.wake() });
+  const jobOps = createJobOps({ tables, retention, wake: () => journal.wake(), overrideFor: effectOverride });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
@@ -314,9 +321,8 @@ function createJournal<
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
     strandedJobs: (db, opts) => strandedJobs(db, opts),
-    jobs: (db, opts) => admin.jobs(db, opts),
-    retry: (db, jobId) => admin.retry(db, jobId),
-    discard: (db, jobId) => admin.discard(db, jobId),
+    retention,
+    ...jobOps,
     wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point },
     catalog: {

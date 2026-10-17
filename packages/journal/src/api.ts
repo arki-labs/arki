@@ -1,14 +1,16 @@
 /**
  * The public declarations: the `Journal` object, commands and their context, the
  * definition helpers `initJournal` returns, and the input, option and result types.
- * Types only, no runtime code. May import `entity`, `types` and `pg`; nothing else.
+ * Types only, no runtime code. May import `entity`, `types`, `pg`, `outbox` and `retention` (types); nothing else.
  */
 import type { Failure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
 import type { HookPoint } from './hooks.js';
+import type { JobOps } from './outbox.js';
 import type { JournalTables } from './pg.js';
+import type { JobRetention, ResolvedRetention } from './retention.js';
 import type {
   AnyEntity,
   AnyEventDef,
@@ -428,23 +430,40 @@ export type Journal<
    */
   strandedJobs(db: DbHandle, opts?: { readonly jobs?: Pick<JobRunner, 'names'> }): Promise<readonly StrandedJobs[]>;
   /**
-   * List job rows. `pending` (the default) is everything not dead: due, delayed and leased
-   * alike. `dead` is what the worker gave up on. Oldest due first, `limit` 100.
-   * `effect` filters effect rows by effect name; `job` filters queue rows by job name.
+   * The resolved archive policy: the `retention` option with its defaults filled in. The one source the
+   * worker, the verbs and the sweeper read.
    */
-  jobs(
-    db: DbHandle,
-    opts?: {
-      readonly status?: 'pending' | 'dead' | 'all';
-      readonly effect?: string;
-      readonly job?: string;
-      readonly limit?: number;
-    },
-  ): Promise<JournalTables['jobs']['$inferSelect'][]>;
-  /** A dead job back to pending: attempts and lease cleared, due now, workers woken. A job that is not dead throws. */
-  retry(db: DbHandle, jobId: string): Promise<void>;
-  /** Delete a dead job. A job that is not dead throws: deleting a live one would not stop its work. */
-  discard(db: DbHandle, jobId: string): Promise<void>;
+  readonly retention: ResolvedRetention;
+  /**
+   * List jobs: `pending` (the default) is everything not dead, oldest due first; `dead` is what the worker
+   * gave up on, newest first. `state` says where each is now. `limit` 1 to 200, default 100. `next` is the cursor
+   * of the following page (pass it as `after`), null on the last. `effect` filters effect rows, `job` queue rows.
+   */
+  jobs: JobOps['jobs'];
+  /** One job with its event header, its attempts (`attemptLog`) and the latest operations that touched it. */
+  job: JobOps['job'];
+  /** Per effect and queue job name: how many jobs are ready, delayed, running and dead. */
+  jobCounts: JobOps['jobCounts'];
+  /** Who did what to the jobs, newest first. `jobId` keeps the operations that touched one job. */
+  jobOperations: JobOps['jobOperations'];
+  /** Finished jobs, newest first, with `outcome`, `effect` and `job` filters. */
+  archivedJobs: JobOps['archivedJobs'];
+  /** One finished job with its attempt log, or undefined. */
+  archivedJob: JobOps['archivedJob'];
+  /** How many archive rows there are, how many wait for the sink, and how many are past `keepUntil`. */
+  archiveStatus: JobOps['archiveStatus'];
+  /** A dead job back to pending: attempts and lease cleared, due now, workers woken. `JOB_NOT_DEAD` otherwise. */
+  retry: JobOps['retry'];
+  /** A dead job leaves the hot table, archived as `discarded`. `JOB_NOT_DEAD` otherwise. */
+  discard: JobOps['discard'];
+  /** A ready or delayed job leaves the hot table, archived as `cancelled`. `JOB_RUNNING` or `JOB_NOT_PENDING` otherwise. */
+  cancel: JobOps['cancel'];
+  /** Retry many dead jobs by ids or by filter, all or none by ids. `operationId` is null when nothing matched. */
+  retryDead: JobOps['retryDead'];
+  /** Dead jobs older than `olderThan` leave the hot table, archived or deleted by the retention policy. */
+  purgeDead: JobOps['purgeDead'];
+  /** A new job from an archived one. Not a retry: it gets a new id. `JOB_EXISTS` when a live job holds the dedupe key. Not `replay`, which rebuilds an entity from its events. */
+  replayJob: JobOps['replayJob'];
   /**
    * The one way to extend a run from outside: a wrapper that receives the context and
    * `next`. Command hooks run inside the transaction, around the handler; effect hooks run
@@ -555,6 +574,8 @@ export type JournalDefinitions<
   >(
     config: {
       readonly tables: JournalTables;
+      /** How long finished jobs are kept, where they go, how often the sweeper runs. Defaults: completed 7 days, dead 90 days. */
+      readonly retention?: JobRetention;
       readonly projections?: readonly Projection<SchemaOutput<Meta>, Tx>[];
       readonly effects?: E;
       readonly taps?: T;
