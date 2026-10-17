@@ -1022,14 +1022,16 @@ function parentOf(name: string): string | undefined {
 }
 
 /**
- * The instance segment of a feature name: `reports#eu` → `eu`, `reports#eu.audit` → `eu`, `reports` → `undefined`.
+ * The instance segment of a feature or unit name: `reports#eu`, `reports#eu.audit` and `reports#eu/store` → `eu`;
+ * `reports` → `undefined`.
  * Adapters qualify what they register by it (`send-digest#eu`), so a plain feature's names never change.
  */
 export function instanceOf(name: string): string | undefined {
   const at = name.indexOf('#');
   if (at === -1) return undefined;
-  const dot = name.indexOf('.', at);
-  return name.slice(at + 1, dot === -1 ? undefined : dot);
+  // The segment ends at the next `.` (a nested child) or `/` (an infra unit, `reports#eu/store`).
+  const end = name.slice(at + 1).search(/[./]/);
+  return end === -1 ? name.slice(at + 1) : name.slice(at + 1, at + 1 + end);
 }
 
 type Ownership = { readonly scope?: string | undefined; readonly internal?: boolean };

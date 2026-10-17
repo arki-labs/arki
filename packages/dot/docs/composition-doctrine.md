@@ -183,6 +183,13 @@ App `.infra()` is shared (every feature names it by handle, it owns process
 resources); feature `.infra()` is private (it wraps the app's handles or owns
 a client nobody else shares — never a second Postgres pool).
 
+Three ways to have two of something: `rename(plugin, …)` for a second plugin
+instance (keys renamed, same declaration); nesting for a feature that belongs to
+another (`digest.compile`, scoped keys); `feature.instance('eu', rebind)` for the
+same feature twice (`reports#eu`, qualified keys, needs rebound to another
+provider, children re-derived). An instance is not a child: it is public,
+top-level, and owns its own infra units.
+
 ### The app spine is a hexagon (object form — removed when the migration to `defineFeature` ends)
 
 `app.ts` wires the units in three steps, and the builder types enforce the

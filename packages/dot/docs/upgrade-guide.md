@@ -56,6 +56,16 @@ Other changes in the same release:
 - `.usecases()` infers inline factories (`({ repos }) => …`); `.infra()`
   refuses two plugins that provide the same key; a list of more than 1024
   units is refused.
+- New `feature.instance(name, rebind?)`: a second copy of a finished feature,
+  named `<feature>#<instance>`, publishing under `<feature>#<instance>.<key>`;
+  `rebind` points a need at another provider's handle of the same type, and
+  children follow by handle identity. `#` is now reserved in a declared
+  feature name. `instanceOf(name)` is exported for adapters.
+- `@arki/schedule`, `@arki/queue`, `@arki/http` and `@arki/journal` register
+  an instance's schedules, jobs, routes (`/<instance>/…`) and effects under
+  instance-qualified names; a plain feature's names are unchanged.
+- `WireNeeds` reads a need's wire key from the handle's `key` alone: a handle
+  whose key holds `#` has one wire key (it used to split into two candidates).
 - Removed: the `InferredProvides` type. `provide(token, value)` is only a
   record helper now.
 - `@arki/db/dot` `db()` takes `url?: () => string | undefined`, read at boot

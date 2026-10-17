@@ -387,3 +387,17 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
     await expect(defineApp('peek').use(peeking).features([orders]).boot()).rejects.toThrow(/FEATURE_E004|slice record/);
   });
 });
+
+describe('plug(): a slice names its actions after the mounting feature', () => {
+  it("reads `actionsOf(feature)` next to the static `actions`, as the chain form's compile does", () => {
+    const named = {
+      key: 'named',
+      actions: [],
+      actionsOf: (owner: string) => [{ id: `${owner}.ping`, binding: 'x', direction: 'in' as const, address: 'ping' }],
+      resolve: () => ({}),
+    };
+    expect(plug(feature('obj', { use: [named] })).actions.map(a => ('id' in a ? a.id : undefined))).toEqual([
+      'obj.ping',
+    ]);
+  });
+});

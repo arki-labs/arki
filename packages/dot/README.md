@@ -654,6 +654,55 @@ checks see the final keys. `rename` also rebuilds the handles: with
 use `reportsDb.provides.reportsDb`. A handle taken before the rename keeps the
 old key and fails the builder guard.
 
+### Two copies of a feature: `instance`
+
+`rename` is for plugins. A _feature_ is mounted twice with `instance`:
+`reports.instance('eu', { db: databaseEu.provides.dbEu })` is a second copy named
+`reports#eu` — its own infra units (`reports#eu/store`), usecases, services and
+entrypoints, publishing under `reports#eu.<key>`, so the copy mounts next to the
+original or next to another copy. The `rebind` record swaps a need's handle for
+another provider's handle of the same service type. A nested child is re-derived
+under the copy (`reports#eu.audit`), and a child need on the same handle follows,
+lazy form included.
+
+```ts
+import { defineApp, plugin, rename, service } from '@arki/dot';
+import { defineFeature, routerFor } from '@arki/dot/feature';
+import { rpc } from '@arki/dot/orpc';
+
+type Region = { readonly region: string };
+const regionDb = (region: string) => plugin({ name: 'database', provides: { db: (): Region => ({ region }) } });
+const database = regionDb('us');
+const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'database-eu');
+
+const store = plugin({
+  name: 'store',
+  needs: { db: service<Region>() },
+  provides: { repos: ({ db }) => ({ region: () => db.region }) },
+});
+const reports = defineFeature('reports')
+  .needs({ db: database.provides.db })
+  .infra(store)
+  .usecases({ region: ({ repos }) => () => repos.region() })
+  .provides({ summary: ({ usecases }) => ({ region: usecases.region() }) })
+  .entrypoints(rpc({}, {}, {}));
+
+const eu = reports.instance('eu', { db: databaseEu.provides.dbEu }); // `reports#eu`, on the EU database
+const us = reports.instance('us'); // `reports#us`, on the primary
+
+const app = await defineApp('shop').use(database).use(databaseEu).features([eu, us]).boot();
+app.services['reports#eu.summary'].region; // 'eu'
+app.services['reports#us.summary'].region; // 'us'
+routerFor({ eu: eu.contract, us: us.contract }, [eu, us]); // each copy has its own contract identity
+await app.dispose();
+```
+
+Each copy's `rpc` entrypoint has its own contract identity, so the app contract
+mounts `eu.contract` and `us.contract` under their own keys. Adapters register a
+copy's schedules, jobs, routes and effects under instance-qualified names
+(`send-digest#eu`, `/eu/...`); a plain feature's names never change. `#` is
+reserved: define the feature without it and call `.instance()`.
+
 ### Lazy services
 
 `lazy(init, { dispose })` publishes a **handle** instead of an open

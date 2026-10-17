@@ -99,16 +99,12 @@ guards). `tsc` clean, dot suite 364/364, `typecheck-budget` within its ceilings 
 926,548 instantiations — below HEAD). Changeset `dot-feature-instance.md`. Action ids of an instance's rpc procedures
 are `reports#eu.<path>` by construction (`actionsOf(state.name, …)` runs in `compile`), not pinned by a test.
 
-## Phase 1 — Object form `feature(name, {...})`
+## Phase 1 — Object form `feature(name, {...})` — DROPPED (2026-10-16)
 
-**Modify** `src/feature.ts`: the `Feature<TName, TNeeds, TProvides, TUse, TRouter, TRepos>` value gains
-`instance(name, rebind?)` returning `Feature<`${TName}#${I}`, RebindNeeds<TNeeds, R>, …>`; `handles` are rebuilt for
-the new name; `plug()` publishes `${name}.${key}` when `instanceOf(name)` is set and `PluginOf<F>` types the keys the
-same way (`F['name'] extends `${string}#${string}`?`${F['name']}.${K}` : K`); router fragments keyed
-`<mount>#<instance>` (decision c). `feature('a#b', …)` refused like `defineFeature`.
-
-**Add** tests in `src/tests/feature.test.ts`: two instances mount; keys qualified; rebind typed; slices under
-`feature.<name>#<instance>`.
+The RFC (`docs/rfcs/2026-10-15-dot-feature-builder.md`, step 12) deletes `feature()`, `plug`, `composeRouter` and
+`composeRepos` at the end of the migration series, not aliased; novelette (19 files) and lottomato (1) still use the
+object form. `instance()` stays chain-only; those apps get it when they move to `defineFeature`. Decision (c) above is
+moot.
 
 ## Phase 2 — Adapters qualify by instance
 
@@ -133,6 +129,37 @@ Rule, in each adapter: `const instance = instanceOf(f.name); const qualify = (na
 
 Each adapter: a changeset `minor` (new behavior for instances, nothing changes for plain features).
 
+### Phase 2 result (2026-10-16) — DONE (queue redesigned, see below)
+
+Rule applied in all four adapters: `instanceOf(f.name)` set → names qualified `<name>#<instance>`; unset → byte-identical.
+
+- **schedule** (`packages/schedule/src/dot.ts`): `collectFeatureSchedules` qualifies `def.name` (one choke point for the
+  trigger map, overlap counter, croner job); a default lock (`lock: true` / no key) follows the name via a `byName`
+  flag on the bound lock, a custom `lock.key` stays shared; `composeSchedules` types an instance's trigger names as
+  `${name}#${instance}` (`InstanceSegmentOf`, `RegisteredName`). Manifest action ids stay `send-digest.fire` under the
+  instance's plugin name (unique per plugin). 6 new tests, package 92/92.
+- **http** (`packages/http/src/dot.ts`): an instance's bundle goes through `placeBundle` with
+  `options.instancePath ?? ((instance, path) => `/${instance}${path}`)` (`/` → `/eu`); routes, mounts and rpc paths
+  move together; `placeRpc` strips the prefix from the request URL before the oRPC/tRPC handler. `engine.ts` untouched;
+  its duplicate-route check now passes for two instances. 4 new tests, package 193/193.
+- **journal** (`packages/journal/src/dot.ts`): `qualifyBy(feature.name)` renames effects and taps in `readDeclarations`
+  (duplicate check, owners, catalog, job rows, worker dispatch all see the qualified name); effect action ids come
+  through the slice's `actionsOf(feature)` hook. Projections are not qualified (cursor-keyed; two instances declaring a
+  projection still collide). 4 new tests, package 358/358.
+- **queue** — redesign (founder decision, 2026-10-16). Finding: producers enqueued by the imported definition
+  (`queue.enqueue(def)` reads `_internal.name`), a usecase did not know its instance, and job handlers ran with one
+  app-wide context — jobs were not feature-scoped at all. Design (adapter-only, no Dot core change): (1) `jobs(...)`'s
+  `resolve(services)` returns a per-feature registry copy — qualified names, handlers run with `ctx.services` = that
+  feature copy's services (`FeatureJobContext<TServices>`), which also ends the shared `_queue`/`_worker` overwrite;
+  (2) feature-private producer plugins `jobProducers({...})` / `outboxProducers({...})` (needs the app `queue` /
+  `schedule` handle, provides `jobs.<name>.enqueue/runAfter`) qualify by `instanceOf($plugin)` — both sides derive the
+  name from the feature name, so they cannot drift; plain features keep `queue.enqueue(def)`; (3) `declaredRegistry`
+  and producer action ids qualify per feature through `actionsOf`; (4) outbox rows carry the qualified name. Flows are
+  renamed on the worker side but have no producer plugin yet. Tests with a Redis test container.
+- **dot follow-ups for Phase 2**: `instanceOf` stops at `/` too (`reports#eu/store` → `eu`, an infra unit reads its own
+  `$plugin` name); `FeatureSlice.actionsOf?` and the object-form `plug()` reads it, so an adapter can name actions
+  after the mounting feature in both forms (test in `feature.test.ts`).
+
 ## Phase 3 — Docs and release
 
 - `README.md`: a "Two copies of a feature" paragraph in the composition section (instance, rebind, qualified keys,
@@ -144,6 +171,15 @@ Each adapter: a changeset `minor` (new behavior for instances, nothing changes f
   whose key holds `#` now has one wire key).
 - Changesets: `dot-feature-instance.md` (`@arki/dot` minor), one per adapter.
 - Template sync: no template file declares a feature instance; nothing to mirror.
+
+### Phase 3 result (2026-10-16) — DONE
+
+README "Two copies of a feature: `instance`" (compiled example: two copies on two databases, `routerFor` with both
+contracts); composition-doctrine: `rename` vs nesting vs `instance`; plugin-authoring: the rebind; adapter-authoring:
+"qualify what you register by the feature's instance" with `instanceOf`; upgrade-guide: the new API, `#` reserved,
+adapters, `WireNeeds` key-only inference. `arki-doc-examples`: 26 examples, 0 failures. Changesets: `dot-feature-instance`
+(minor), `schedule-feature-instance`, `http-feature-instance`, `journal-feature-instance`, `queue-feature-instance` (all
+minor). Template: nothing to mirror.
 
 ## Self-check
 

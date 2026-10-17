@@ -134,6 +134,8 @@ export type RepoFactories = Record<string, (database: never) => unknown>;
 export type FeatureSlice<K extends string = string, P = unknown, TServices = never> = {
   readonly key: K;
   readonly actions: readonly ActionSource[];
+  /** Actions named after the mounting feature (an instance's ids carry its name); `plug()` and the chain form both read it. */
+  readonly actionsOf?: (feature: string, children: readonly AnyDefinedFeature[]) => readonly ActionSource[];
   readonly resolve: (services: TServices) => P;
 };
 
@@ -448,7 +450,10 @@ export function tokenOf<F extends AnyFeature>(f: F): FeatureTokenOf<F> {
  */
 export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
   const sliceKey = tokenOf(f).key;
-  const actions: ActionSource[] = [...f.actions, ...f.use.flatMap(slice => slice.actions)];
+  const actions: ActionSource[] = [
+    ...f.actions,
+    ...f.use.flatMap(slice => [...slice.actions, ...(slice.actionsOf?.(f.name, []) ?? [])]),
+  ];
   const slices = (ctx: CtxOf<NeedsShape> & KernelCtx): Readonly<Record<string, unknown>> => {
     const payloads: Record<string, unknown> = {};
     for (const slice of f.use) {

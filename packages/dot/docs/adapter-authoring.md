@@ -286,6 +286,14 @@ Rules an adapter's `features:` option must follow:
 - **Resolve feature-derived context/config ONCE inside your guarded
   start**, never per execution: assembly failure must degrade boot, not
   every later dispatch.
+- **Qualify what you register by the feature's instance.** A feature
+  mounted twice (`reports.instance('eu')`) is two features named `reports#eu`
+  and `reports#us` with the SAME slice objects. Where you read the slice, read
+  `instanceOf(f.name)` (`@arki/dot/feature`; `'eu'`, or `undefined` for a plain
+  feature) and register names as `` `${name}#${instance}` `` (schedules, jobs,
+  effects) or under a `/${instance}` path (routes). A plain feature's names
+  must stay byte-identical — they are persisted (lock hashes, queue names,
+  job rows).
 
 ## Diagnostics — stable codes and remediation
 

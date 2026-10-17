@@ -162,6 +162,8 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     expect(instanceOf('reports#eu')).toBe('eu');
     expect(instanceOf('reports#eu.audit')).toBe('eu');
     expect(instanceOf('reports#eu.audit.deep')).toBe('eu');
+    expect(instanceOf('reports#eu/store')).toBe('eu');
+    expect(instanceOf('reports#eu.audit/store')).toBe('eu');
     expect(instanceOf('reports')).toBeUndefined();
     expect(instanceOf('reports.audit')).toBeUndefined();
   });

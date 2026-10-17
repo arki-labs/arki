@@ -174,6 +174,12 @@ const reportsDb = rename(db({ driver: 'pglite', memory: true, relations }), { db
 
 A handle taken before the rename keeps the old key and fails the builder guard.
 
+A _feature_ mounted twice is `feature.instance(name, rebind)` — see the README,
+"Two copies of a feature". The rebind takes any handle of the same service type:
+`{ db: databaseEu.provides.dbEu }` binds the copy's `db` to the EU database
+(another provider, another key); a child feature that needs the same handle
+follows, lazy form included.
+
 ## Lazy services
 
 When opening a resource is expensive and not every process needs it, wrap
