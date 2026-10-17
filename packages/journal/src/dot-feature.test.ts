@@ -13,12 +13,12 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin, service } from '@arki/dot/plugin';
+import { plugin, rename, service } from '@arki/dot/plugin';
 
 import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
@@ -251,7 +251,11 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
     const seen = { features: [] as string[] };
     const app = track(
       await defineApp('jobs-worker')
-        .infra(dbPlugin(), journal({ j, tables }), mailerPlugin(sent, () => done()))
+        .infra(
+          dbPlugin(),
+          journal({ j, tables }),
+          mailerPlugin(sent, () => done()),
+        )
         .features([ordersFeature([])])
         .entrypoints(journalWorker({ pollMs: POLL_MS, jobs: mailerSource(seen) }))
         .boot(),
@@ -277,12 +281,88 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
 
   it("adds the source's consumer actions to the worker's manifest", () => {
     const configured = defineApp('jobs-explain')
-      .infra(dbPlugin(), journal({ j, tables }), mailerPlugin([], () => undefined))
+      .infra(
+        dbPlugin(),
+        journal({ j, tables }),
+        mailerPlugin([], () => undefined),
+      )
       .features([ordersFeature([])])
       .entrypoints(journalWorker({ jobs: mailerSource({ features: [] }) }))
       .configure();
     expect(configured.manifest.actions).toContainEqual(
       expect.objectContaining({ id: 'welcome.consume', plugin: 'journal-worker' }),
     );
+  });
+});
+
+describe('feature.instance(): effect names, action ids and job dispatch follow the instance', () => {
+  // Why: one declared feature mounted twice would register the same effect name twice. The journal
+  // keys jobs, services and dispatch by effect name, so an instance's names carry `#<instance>`
+  // while a plain feature's stay exactly as stored.
+  const mailerFor = (label: string, sent: string[]) =>
+    plugin({ name: 'mailer', provides: { mailer: (): Mailer => ({ send: id => void sent.push(`${label}:${id}`) }) } });
+
+  function reportsFeature(sent: string[]) {
+    const us = mailerFor('us', sent);
+    const eu = rename(mailerFor('eu', sent), { mailer: 'mailerEu' }, 'mailerEu');
+    const core = defineFeature('reports').needs({ mailer: us.provides.mailer }).usecases({});
+    const reports = core.entrypoints(journalEffects(core, { effects: [mail('send-on-request')] }));
+    return { reports, us, eu };
+  }
+
+  it('qualifies the effects of two instances and runs each on its own rebound need', async () => {
+    const sent: string[] = [];
+    const { reports, us, eu } = reportsFeature(sent);
+    const app = track(
+      await defineApp('instance-effects')
+        .infra(dbPlugin(), journal({ j, tables }), us, eu)
+        .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
+    );
+    await app.start();
+    expect(app.services.journal.catalog.effects).toEqual(['send-on-request#eu', 'send-on-request#us']);
+
+    const id = orderId(++next);
+    await app.services.journal.run(db, placeOrder, { id, customerId: 'instances' }, meta);
+    await vi.waitFor(() => expect(sent.toSorted()).toEqual([`eu:${id}`, `us:${id}`]));
+  });
+
+  it('names the action of an instance effect after the instance', () => {
+    const { reports, us, eu } = reportsFeature([]);
+    const configured = defineApp('instance-actions')
+      .infra(dbPlugin(), journal({ j, tables }), us, eu)
+      .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
+      .configure();
+    const ids = configured.manifest.actions.filter(action => action.binding === 'journal').map(action => action.id);
+    expect(ids.toSorted()).toEqual(['send-on-request#eu.run', 'send-on-request#us.run']);
+  });
+
+  it('keeps refusing two plain features that share an effect name, but not two instances', async () => {
+    const { reports, us, eu } = reportsFeature([]);
+    const rival = defineFeature('rival').needs({ mailer: us.provides.mailer }).usecases({});
+    const clash = rival.entrypoints(journalEffects(rival, { effects: [mail('send-on-request')] }));
+    await expect(
+      defineApp('plain-duplicate').infra(dbPlugin(), journal({ j, tables }), us).features([reports, clash]).boot(),
+    ).rejects.toThrow('duplicate effect name "send-on-request" (features "reports" and "rival")');
+    const instances = defineApp('instances-ok')
+      .infra(dbPlugin(), journal({ j, tables }), us, eu)
+      .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')]);
+    await expect(instances.boot().then(app => track(app))).resolves.toBeDefined();
+  });
+
+  it('leaves a plain feature byte-identical: same effect name, same action id', async () => {
+    const { reports, us } = reportsFeature([]);
+    const app = track(
+      await defineApp('plain-names')
+        .infra(dbPlugin(), journal({ j, tables }), us)
+        .features([reports])
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
+    );
+    expect(app.services.journal.catalog.effects).toEqual(['send-on-request']);
+    expect(app.manifest.actions.filter(action => action.binding === 'journal').map(action => action.id)).toEqual([
+      'send-on-request.run',
+    ]);
   });
 });

@@ -28,7 +28,7 @@
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
 import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { driven, driver, entrypointsOf, ownUnits, sliceOf } from '@arki/dot/feature';
+import { driven, driver, entrypointsOf, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { Journal, JournalDefinitions } from './api.js';
@@ -90,16 +90,31 @@ export type JournalFeatureSlice<Meta = unknown, Tx = DbHandle, AppDb = RootDb, T
   readonly resolve: (services: TServices) => JournalSlicePayload;
 };
 
-function effectAction(effect: {
-  readonly name: string;
-  readonly entities: readonly { readonly kind: string }[];
-  readonly types: ReadonlySet<string>;
-}): JournalDotAction {
+/**
+ * A name made unique per instance of a feature (`send-on-request` -> `send-on-request#eu`).
+ * A plain feature has no instance, so its names stay exactly as written: stored job rows keep resolving.
+ */
+const qualifyBy =
+  (featureName: string) =>
+  (name: string): string => {
+    const instance = instanceOf(featureName);
+    return instance === undefined ? name : `${name}#${instance}`;
+  };
+
+function effectAction(
+  effect: {
+    readonly name: string;
+    readonly entities: readonly { readonly kind: string }[];
+    readonly types: ReadonlySet<string>;
+  },
+  qualify: (name: string) => string = name => name,
+): JournalDotAction {
+  const name = qualify(effect.name);
   return {
-    id: `${effect.name}.run`,
+    id: `${name}.run`,
     binding: 'journal',
     direction: 'in',
-    address: effect.name,
+    address: name,
     metaSchema: JOURNAL_ACTION_META_SCHEMA,
     meta: { entities: effect.entities.map(entity => entity.kind), events: [...effect.types] },
   };
@@ -206,7 +221,11 @@ export type JournalEffectsEntrypoint<Meta = unknown, AppDb = RootDb, TServices =
   DbHandle,
   AppDb,
   TServices
-> & { readonly kind: 'journal' };
+> & {
+  readonly kind: 'journal';
+  /** The effects' actions, named after the feature: an instance's ids carry its instance (`send#eu.run`). */
+  readonly actionsOf: (feature: string) => readonly JournalDotAction[];
+};
 
 /** A named compile error when the feature lacks a service its effects or taps need. */
 type CoversNeeds<TDeps, TNeeded> = [TDeps] extends [TNeeded]
@@ -249,7 +268,8 @@ export function journalEffects<
   return {
     kind: 'journal',
     key: 'journal',
-    actions: effects.map(effect => effectAction(effect)),
+    actions: [],
+    actionsOf: feature => effects.map(effect => effectAction(effect, qualifyBy(feature))),
     handlers: { projections: [], effects, taps },
     resolve: resolveServices(effects, taps),
   };
@@ -387,6 +407,7 @@ function readDeclarations(features: readonly MountedFeature[]): {
   const taps: Tap<unknown, RootDb, Needs>[] = [];
   const owners = new Map<string, MountedFeature>();
   for (const feature of features) {
+    const qualify = qualifyBy(feature.name);
     const all = declaredBy(feature);
     if (all.length === 0) {
       debugWorker.debug('[journal] feature "{featureName}" did not contribute journal handlers', {
@@ -398,11 +419,15 @@ function readDeclarations(features: readonly MountedFeature[]): {
       if (!isJournalDeclarations(declared))
         throw badSlice(feature, 'handlers are not lists of projections, effects and taps');
       for (const { name } of declared.projections) claimName('projection', owners, name, feature);
-      for (const { name } of declared.effects) claimName('effect', owners, name, feature);
-      for (const { name } of declared.taps) claimName('tap', owners, name, feature);
+      // An instance's effects and taps are renamed here, so the duplicate check, the services lookup,
+      // the stored job rows and the worker's dispatch all see the qualified name.
+      const ownEffects = declared.effects.map(effect => ({ ...effect, name: qualify(effect.name) }));
+      const ownTaps = declared.taps.map(tap => ({ ...tap, name: qualify(tap.name) }));
+      for (const { name } of ownEffects) claimName('effect', owners, name, feature);
+      for (const { name } of ownTaps) claimName('tap', owners, name, feature);
       projections.push(...declared.projections);
-      effects.push(...declared.effects);
-      taps.push(...declared.taps);
+      effects.push(...ownEffects);
+      taps.push(...ownTaps);
     }
   }
   return { declarations: { projections, effects, taps }, owners };
