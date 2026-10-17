@@ -16,6 +16,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { readmeSectionProblem } from '@arki/library-tooling/src/docs';
 import { z } from 'zod';
 
 import type { ReleaseConfig, ReleaseError, ScorecardDimensionResult } from './types';
@@ -64,31 +65,8 @@ export function isLeafLibrary(config: TierSource, manifest: LeafManifest): boole
 }
 
 // ---------------------------------------------------------------------------
-// README H2 order — defined once; T2.1 reuses it.
+// README H2 order — the section list lives in @arki/library-tooling (README_SECTIONS).
 // ---------------------------------------------------------------------------
-
-export type ReadmeSection = {
-  readonly id: string;
-  /** Matches a heading's text (case-insensitive, trimmed). */
-  readonly match: RegExp;
-  readonly tiers: readonly ReadinessTier[];
-};
-
-/**
- * Canonical H2 order. Other H2s may sit between these; the listed ones must
- * all exist and appear in this relative order. Derived from what `dot` and
- * `mail` READMEs already do: install and quick start first, then the feature
- * sections, then Testing, Errors, Runtimes, Documentation, License last.
- */
-export const README_H2_ORDER: readonly ReadmeSection[] = [
-  { id: 'Installation', match: /^install(ation)?$/i, tiers: [1, 2] },
-  { id: 'Quick start', match: /^quick ?start$/i, tiers: [1, 2] },
-  { id: 'Testing', match: /^testing\b/i, tiers: [1] },
-  { id: 'Errors', match: /^errors?$/i, tiers: [1, 2] },
-  { id: 'Runtimes', match: /^runtimes?( support)?$/i, tiers: [1, 2] },
-  { id: 'Documentation', match: /^(documentation|docs)$/i, tiers: [1, 2] },
-  { id: 'License', match: /^licen[sc]e$/i, tiers: [1, 2] },
-];
 
 /** H2 texts of a markdown file, ignoring fenced code blocks. */
 export function readmeH2s(markdown: string): string[] {
@@ -242,24 +220,11 @@ function shipsDistAndDocs(files: readonly string[] | undefined): Check {
   };
 }
 
-function readmeOrder(dir: string, tier: ReadinessTier): Check {
+function readmeOrder(dir: string): Check {
   const file = path.join(dir, 'README.md');
   if (!existsSync(file)) return { ok: false, detail: 'README.md missing' };
-  const h2s = readmeH2s(readFileSync(file, 'utf8'));
-  let cursor = -1;
-  for (const section of README_H2_ORDER) {
-    if (!section.tiers.includes(tier)) continue;
-    const at = h2s.findIndex((h, i) => i > cursor && section.match.test(h));
-    if (at === -1) {
-      const present = h2s.some((h) => section.match.test(h));
-      return {
-        ok: false,
-        detail: present ? `"${section.id}" is out of order` : `"${section.id}" section missing`,
-      };
-    }
-    cursor = at;
-  }
-  return { ok: true, detail: 'H2 order matches' };
+  const problem = readmeSectionProblem(readmeH2s(readFileSync(file, 'utf8')));
+  return problem === undefined ? { ok: true, detail: 'H2 order matches' } : { ok: false, detail: problem };
 }
 
 function repoDirectory(manifest: Manifest, dir: string): Check {
@@ -269,7 +234,7 @@ function repoDirectory(manifest: Manifest, dir: string): Check {
   return { ok: actual === expected, detail: `repository.directory is ${actual ?? 'missing'}, want ${expected}` };
 }
 
-function diskChecks(dir: string, manifest: Manifest, tier: ReadinessTier): Record<(typeof DISK_ITEM_IDS)[number], Check> {
+function diskChecks(dir: string, manifest: Manifest): Record<(typeof DISK_ITEM_IDS)[number], Check> {
   return {
     'file-readme': hasFile(dir, 'README.md'),
     'file-changelog': hasFile(dir, 'CHANGELOG.md'),
@@ -277,7 +242,7 @@ function diskChecks(dir: string, manifest: Manifest, tier: ReadinessTier): Recor
     'file-llms-txt': hasFile(dir, 'llms.txt'),
     'file-agents-md': hasFile(dir, 'AGENTS.md'),
     'file-agent-guide': hasFile(dir, 'docs/agent-guide.md'),
-    'readme-h2-order': readmeOrder(dir, tier),
+    'readme-h2-order': readmeOrder(dir),
     'pkg-description': nonEmpty(manifest.description, 'description'),
     'pkg-keywords': {
       ok: (manifest.keywords?.length ?? 0) > 0,
@@ -325,7 +290,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
     return { name, tier, items: [], dimension: { status: 'pass', details: 'untiered: readiness not evaluated', evidence: [] } };
   }
 
-  const checks = diskChecks(input.dir, raw.manifest, tier);
+  const checks = diskChecks(input.dir, raw.manifest);
   const items: ReadinessItem[] = READINESS_ITEM_IDS.map((id) => {
     const base = isDisk(id)
       ? { status: (checks[id].ok ? 'pass' : 'fail') as ItemStatus, detail: checks[id].detail }

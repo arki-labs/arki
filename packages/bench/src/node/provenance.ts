@@ -7,7 +7,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { arch, availableParallelism, cpus, loadavg, release, type } from 'node:os';
+import { arch, availableParallelism, cpus, loadavg, release, totalmem, type } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -184,6 +184,7 @@ export async function collectProvenance(result: BenchResult, options: { cwd: str
     arch: arch(),
     ...(model === undefined ? {} : { cpu: model.trim() }),
     cores: cores(),
+    memory: totalmem(),
     flags: [...process.execArgv],
     harness,
     ...(git === undefined ? {} : { git }),

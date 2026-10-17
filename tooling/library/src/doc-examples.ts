@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * `arki-doc-examples`: every `ts`/`tsx`/`js` block in the package's
- * `README.md` and `docs/agent-guide.md` must typecheck against the built
+ * `README.md` and every Markdown file under `docs/` the package ships must typecheck against the built
  * package, and every `run` block must exit 0 on Bun. Runs as the package
  * script `test:docs` (turbo task `test:docs`, after `build`).
  *
@@ -9,6 +9,9 @@
  *
  *   ```ts                            typecheck as its own module
  *   ```ts run                        typecheck, then `bun` runs it; a throw or non-zero exit fails
+ *   ```ts run expect                 as `run`; the next fence must be ```text and equal stdout (trimmed)
+ *   ```ts from="examples/x.ts#name"  not compiled; must equal the `// #region name` ... `// #endregion`
+ *                                    lines of that file, dedented (`--write` refreshes it)
  *   ```ts continue                   appended to the previous block of this file (tutorial steps)
  *   ```ts skip="needs Stripe keys"   not compiled; the quoted reason is required and counted
  *
@@ -17,10 +20,19 @@
  * dependencies and `node:` builtins. Generated files go to `.cache/doc-examples/`
  * and nowhere else.
  *
- *   arki-doc-examples [--no-run] [--json]
+ *   arki-doc-examples [--no-run] [--write] [--json]
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import ts from 'typescript';
@@ -39,6 +51,10 @@ export const DOCX_RULES = {
   DOCX_E006: 'forbidden construct (any, @ts-ignore, @ts-expect-error, @ts-nocheck, as unknown as)',
   DOCX_E007: 'import of a package not declared in package.json, or a relative import',
   DOCX_E008: 'no build output: run build first',
+  DOCX_E009: 'expect without a ```text block right after the example',
+  DOCX_E010: 'printed output differs from the ```text block',
+  DOCX_E011: 'block differs from its from= source region (bun run test:docs -- --write refreshes it)',
+  DOCX_E012: 'from= names a file or region that does not exist, or a path outside the package',
 } as const;
 export type DocxRule = keyof typeof DOCX_RULES;
 
@@ -53,8 +69,47 @@ const LANG_ALIASES = {
   javascript: 'js',
 } as const satisfies Record<(typeof EXAMPLE_LANGS)[number], string>;
 
-/** The files whose blocks are examples, relative to the package. */
-export const DOC_FILES = ['README.md', 'docs/agent-guide.md'] as const;
+/** Does one `files` pattern (a path, a directory or a glob such as `docs/**`) cover `file`? */
+function covers(pattern: string, file: string): boolean {
+  const clean = pattern.replace(/^\.\//, '').replace(/\/+$/, '');
+  if (file === clean || file.startsWith(`${clean}/`)) return true;
+  const glob = clean
+    .replaceAll(/[.+^${}()|[\]\\]/g, String.raw`\$&`)
+    .replaceAll('**', '\u0000')
+    .replaceAll('*', '[^/]*')
+    .replaceAll('\u0000', '.*');
+  return new RegExp(`^${glob}$`).test(file);
+}
+
+/** Does the `files` allow-list ship `file`? A `!pattern` entry removes what an earlier entry added. */
+function shipped(files: readonly string[] | undefined, file: string): boolean {
+  if (files === undefined || file === 'README.md') return true;
+  return files.reduce((on, entry) => {
+    if (entry.startsWith('!')) return on && !covers(entry.slice(1), file);
+    return on || covers(entry, file);
+  }, false);
+}
+
+function markdownUnder(dir: string, prefix: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .toSorted()
+    .flatMap(name => {
+      const full = path.join(dir, name);
+      const relative = `${prefix}/${name}`;
+      if (statSync(full).isDirectory()) return markdownUnder(full, relative);
+      return name.toLowerCase().endsWith('.md') ? [relative] : [];
+    });
+}
+
+/**
+ * The files whose blocks are examples, relative to the package: the README and
+ * every `docs/**\/*.md` the `files` allow-list ships. `llms.txt` has no code.
+ */
+export function docFiles(dir: string, manifest: Manifest): string[] {
+  const readme = existsSync(path.join(dir, 'README.md')) ? ['README.md'] : [];
+  return [...readme, ...markdownUnder(path.join(dir, 'docs'), 'docs').filter(file => shipped(manifest.files, file))];
+}
 const OUT = '.cache/doc-examples';
 const RUN_TIMEOUT_MS = 30_000;
 
@@ -69,7 +124,13 @@ export type Example = {
   readonly continues: boolean;
   /** The reason, when the block is not compiled. */
   readonly skip?: string;
+  /** `from="path#region"`: the block mirrors a region of a tested source file; it is not compiled. */
+  readonly from?: { readonly path: string; readonly region: string };
+  /** `run expect`: the ```text block right after this one, which stdout must equal. */
+  readonly expect?: { readonly text: string; readonly line: number };
   readonly code: string;
+  /** Body lines between the fences (an empty block has none). */
+  readonly bodyLines: number;
 };
 
 /** One compiled file: a block plus the `continue` blocks after it. */
@@ -78,6 +139,7 @@ export type ExampleModule = {
   readonly code: string;
   readonly lang: Example['lang'];
   readonly run: boolean;
+  readonly expect?: Example['expect'];
 };
 
 export type ExampleFailure = {
@@ -95,17 +157,32 @@ function isExampleLang(word: string): word is keyof typeof LANG_ALIASES {
   return Object.hasOwn(LANG_ALIASES, word);
 }
 
-/** `run`, `continue`, `skip="reason"` (or `'reason'`); anything else is an unknown word. */
+/** `run`, `expect`, `continue`, `skip="reason"`, `from="path#region"`; anything else is an unknown word. */
 const FENCE_WORD = /([^\s=]+)(?:=("[^"]*"|'[^']*'|\S*))?/g;
 
-type FenceWords = { run: boolean; continues: boolean; skip?: string; problem?: { rule: DocxRule; detail: string } };
+type FenceWords = {
+  run: boolean;
+  expect: boolean;
+  continues: boolean;
+  skip?: string;
+  from?: { path: string; region: string };
+  problem?: { rule: DocxRule; detail: string };
+};
 
 function parseFenceWords(words: string): FenceWords {
-  const parsed: FenceWords = { run: false, continues: false };
+  const parsed: FenceWords = { run: false, expect: false, continues: false };
   for (const [word, key, value] of words.matchAll(FENCE_WORD)) {
     if (key === 'run' && value === undefined) parsed.run = true;
+    else if (key === 'expect' && value === undefined) parsed.expect = true;
     else if (key === 'continue' && value === undefined) parsed.continues = true;
-    else if (key === 'skip') {
+    else if (key === 'from') {
+      const target = value !== undefined && /^(["']).*\1$/.test(value) ? value.slice(1, -1).trim() : '';
+      const [file = '', region = ''] = target.split('#');
+      if (file === '' || region === '' || target.split('#').length !== 2) {
+        return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': write from="path/to/file.ts#region"' } };
+      }
+      parsed.from = { path: file, region };
+    } else if (key === 'skip') {
       const reason = value !== undefined && /^(["']).*\1$/.test(value) ? value.slice(1, -1).trim() : '';
       if (reason === '') return { ...parsed, problem: { rule: 'DOCX_E003', detail: ': write skip="<why>"' } };
       parsed.skip = reason;
@@ -113,6 +190,15 @@ function parseFenceWords(words: string): FenceWords {
   }
   if (parsed.skip !== undefined && (parsed.run || parsed.continues)) {
     return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': skip cannot be combined with run or continue' } };
+  }
+  if (parsed.from !== undefined && (parsed.run || parsed.expect || parsed.continues || parsed.skip !== undefined)) {
+    return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': from cannot be combined with other words' } };
+  }
+  if (parsed.expect && !parsed.run) {
+    return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': expect needs run (write "ts run expect")' } };
+  }
+  if (parsed.expect && parsed.continues) {
+    return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': put expect on the first block of the chain' } };
   }
   if (parsed.run && parsed.continues) {
     return { ...parsed, problem: { rule: 'DOCX_E005', detail: ': put run on the first block of the chain' } };
@@ -131,7 +217,8 @@ export function extractExamples(file: string, markdown: string): { examples: Exa
   const failures: ExampleFailure[] = [];
   let previous: Example | undefined;
   let previousFailed = false;
-  for (const fence of scanFences(markdown).fences) {
+  const fences = scanFences(markdown).fences;
+  for (const [index, fence] of fences.entries()) {
     if (!fence.closed) {
       failures.push(failure('DOCX_E005', file, fence.line, ': unclosed fence'));
       continue;
@@ -152,6 +239,13 @@ export function extractExamples(file: string, markdown: string): { examples: Exa
       continue;
     }
     const skip = words.skip ?? (words.continues ? previous?.skip : undefined);
+    let expected: Example['expect'];
+    if (words.expect) {
+      const next = fences[index + 1];
+      if (next?.closed === true && next.info.split(/\s+/)[0]?.toLowerCase() === 'text') {
+        expected = { text: next.body.join('\n'), line: next.line };
+      } else failures.push(failure('DOCX_E009', file, fence.line));
+    }
     const example: Example = {
       file,
       line: fence.line,
@@ -159,10 +253,14 @@ export function extractExamples(file: string, markdown: string): { examples: Exa
       run: words.run,
       continues: words.continues,
       ...(skip === undefined ? {} : { skip }),
+      ...(words.from === undefined ? {} : { from: words.from }),
+      ...(expected === undefined ? {} : { expect: expected }),
       code: fence.body.join('\n'),
+      bodyLines: fence.body.length,
     };
     examples.push(example);
-    previous = example;
+    // A `from` block is a mirror, not part of a tutorial chain: a `continue` cannot hang off it.
+    if (words.from === undefined) previous = example;
     previousFailed = false;
   }
   return { examples, failures };
@@ -176,11 +274,11 @@ function chainLang(examples: readonly Example[]): Example['lang'] {
   return jsx ? 'jsx' : 'js';
 }
 
-/** Joins each `continue` block onto the module before it. Skipped blocks are left out. */
+/** Joins each `continue` block onto the module before it. Skipped and `from` blocks are left out. */
 export function stitch(examples: readonly Example[]): ExampleModule[] {
   const chains: Example[][] = [];
   for (const example of examples) {
-    if (example.skip !== undefined) continue;
+    if (example.skip !== undefined || example.from !== undefined) continue;
     const last = chains.at(-1);
     if (example.continues && last?.[0]?.file === example.file) last.push(example);
     else chains.push([example]);
@@ -190,6 +288,7 @@ export function stitch(examples: readonly Example[]): ExampleModule[] {
     code: chain.map(example => example.code).join('\n'),
     lang: chainLang(chain),
     run: chain[0]?.run ?? false,
+    ...(chain[0]?.expect === undefined ? {} : { expect: chain[0].expect }),
   }));
 }
 
@@ -416,20 +515,30 @@ export function runExamples(
       const output = lastLines(result.stderr || result.stdout, 20);
       return [failure('DOCX_E002', at.file, at.line, `: exit ${String(result.status)}\n${output}`)];
     }
+    if (module.expect !== undefined && result.stdout.trim() !== module.expect.text.trim()) {
+      const shown = `expected:\n${module.expect.text.trim()}\nprinted:\n${result.stdout.trim()}`;
+      return [failure('DOCX_E010', at.file, module.expect.line, `\n${shown}`)];
+    }
     return [];
   });
 }
 
+export type SkippedBlock = { readonly file: string; readonly line: number; readonly reason: string };
+
 export type ExamplesReport = {
   readonly examples: number;
   readonly modules: number;
+  /** Modules that went through the TypeScript check (0 when the build output is missing). */
+  readonly compiled: number;
   readonly ran: number;
+  /** Count of `skip=` blocks; the list is `skippedBlocks`. */
   readonly skipped: number;
+  readonly skippedBlocks: readonly SkippedBlock[];
   readonly failures: readonly ExampleFailure[];
 };
 
 /** The Markdown lines a module covers: each block's fences and body. */
-function covers(module: ExampleModule, failure: ExampleFailure): boolean {
+function moduleCovers(module: ExampleModule, failure: ExampleFailure): boolean {
   return module.examples.some(
     example =>
       example.file === failure.file &&
@@ -438,44 +547,131 @@ function covers(module: ExampleModule, failure: ExampleFailure): boolean {
   );
 }
 
+/**
+ * The lines between `// #region <name>` and its `// #endregion`, markers left
+ * out, common indent removed. Regions may nest; `undefined` when the region is
+ * missing or never closed.
+ */
+export function extractRegion(source: string, region: string): string | undefined {
+  const lines = splitLines(source);
+  const start = lines.findIndex(line => line.trim() === `// #region ${region}`);
+  if (start === -1) return undefined;
+  let depth = 1;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const text = (lines[index] ?? '').trim();
+    if (text.startsWith('// #region ')) depth += 1;
+    else if (text === '// #endregion' || text.startsWith('// #endregion ')) depth -= 1;
+    if (depth > 0) continue;
+    const body = lines.slice(start + 1, index);
+    const indent = Math.min(
+      ...body.filter(line => line.trim() !== '').map(line => /^[ \t]*/.exec(line)?.[0].length ?? 0),
+      Number.POSITIVE_INFINITY,
+    );
+    const cut = Number.isFinite(indent) ? indent : 0;
+    return body.map(line => line.slice(Math.min(cut, /^[ \t]*/.exec(line)?.[0].length ?? 0))).join('\n');
+  }
+  return undefined;
+}
+
+/**
+ * Checks every `from=` block of one Markdown file against its source region.
+ * With `write`, a block that differs is rewritten (the fence's indent kept) and
+ * the new file text is returned; a missing file or region is always a failure.
+ */
+function checkFromBlocks(
+  root: string,
+  examples: readonly Example[],
+  markdown: string,
+  write: boolean,
+): { failures: ExampleFailure[]; markdown: string | undefined } {
+  const failures: ExampleFailure[] = [];
+  const edits: { example: Example; region: string }[] = [];
+  for (const example of examples) {
+    if (example.from === undefined) continue;
+    const source = path.resolve(root, example.from.path);
+    const inside = source.startsWith(`${root}${path.sep}`);
+    const region =
+      inside && existsSync(source) ? extractRegion(readFileSync(source, 'utf8'), example.from.region) : undefined;
+    if (region === undefined) {
+      const detail = inside
+        ? `: ${example.from.path}#${example.from.region}`
+        : `: ${example.from.path} is outside the package`;
+      failures.push(failure('DOCX_E012', example.file, example.line, detail));
+    } else if (region.trimEnd() !== example.code.trimEnd()) {
+      if (write) edits.push({ example, region });
+      else
+        failures.push(
+          failure('DOCX_E011', example.file, example.line, `: ${example.from.path}#${example.from.region}`),
+        );
+    }
+  }
+  if (edits.length === 0) return { failures, markdown: undefined };
+  const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+  const lines = markdown.split(/\r?\n/);
+  // Bottom-up, so an earlier edit never moves a later block.
+  for (const { example, region } of edits.toSorted((a, b) => b.example.line - a.example.line)) {
+    const indent = /^ */.exec(lines[example.line - 1] ?? '')?.[0] ?? '';
+    const body = region === '' ? [] : region.split('\n').map(line => (line === '' ? line : indent + line));
+    lines.splice(example.line, example.bodyLines, ...body);
+  }
+  return { failures, markdown: lines.join(eol) };
+}
+
 /** Extract, compile and (unless `run` is false) run every example of the package in `dir`. */
-export function checkExamples(dir: string, options: { readonly run: boolean }): ExamplesReport {
+export function checkExamples(
+  dir: string,
+  options: { readonly run: boolean; readonly write?: boolean },
+): ExamplesReport {
   const root = realpathSync(dir);
   const manifest = readManifest(root);
   const examples: Example[] = [];
   const failures: ExampleFailure[] = [];
-  for (const file of DOC_FILES) {
+  for (const file of docFiles(root, manifest)) {
     const full = path.join(root, file);
-    if (!existsSync(full)) continue;
-    const extracted = extractExamples(file, readFileSync(full, 'utf8'));
+    const markdown = readFileSync(full, 'utf8');
+    const extracted = extractExamples(file, markdown);
     examples.push(...extracted.examples);
     failures.push(...extracted.failures);
+    const mirrored = checkFromBlocks(root, extracted.examples, markdown, options.write === true);
+    failures.push(...mirrored.failures);
+    if (mirrored.markdown !== undefined) writeFileSync(full, mirrored.markdown);
   }
   const modules = stitch(examples);
   const compiled = compileExamples(root, manifest, modules);
   failures.push(...compiled);
   const built = !compiled.some(item => item.rule === 'DOCX_E008');
   const runnable =
-    options.run && built ? modules.filter(module => module.run && !compiled.some(item => covers(module, item))) : [];
+    options.run && built
+      ? modules.filter(module => module.run && !compiled.some(item => moduleCovers(module, item)))
+      : [];
   failures.push(...runExamples(root, runnable));
+  const skippedBlocks = examples.flatMap(({ file, line, skip }) =>
+    skip === undefined ? [] : [{ file, line, reason: skip }],
+  );
   return {
     examples: examples.length,
     modules: modules.length,
+    compiled: built ? modules.length : 0,
     ran: runnable.length,
-    skipped: examples.filter(example => example.skip !== undefined).length,
+    skipped: skippedBlocks.length,
+    skippedBlocks,
     failures: failures.toSorted((a, b) => a.file.localeCompare(b.file) || a.line - b.line),
   };
 }
 
 function main(): number {
   const { values } = parseArgs({
-    options: { 'no-run': { type: 'boolean', default: false }, json: { type: 'boolean', default: false } },
+    options: {
+      'no-run': { type: 'boolean', default: false },
+      write: { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+    },
   });
-  const report = checkExamples(process.cwd(), { run: !values['no-run'] });
+  const report = checkExamples(process.cwd(), { run: !values['no-run'], write: values.write });
   if (values.json) {
-    const { examples, modules, skipped, failures } = report;
-    say(JSON.stringify({ examples, modules, skipped, failures }, null, 2));
-    return failures.length > 0 ? 1 : 0;
+    // Printed as is: `docExamplesReportSchema` (arki-release) reads exactly these keys, checked by its test-d.
+    say(JSON.stringify(report, null, 2));
+    return report.failures.length > 0 ? 1 : 0;
   }
   for (const item of report.failures) complain(`${item.file}:${String(item.line)}  ${item.rule}  ${item.message}`);
   const summary = `arki-doc-examples: ${String(report.examples)} example(s), ${String(report.modules)} module(s), ${String(report.ran)} run, ${String(report.skipped)} skipped, ${String(report.failures.length)} failure(s)`;

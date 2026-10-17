@@ -7,6 +7,7 @@
 import type { BenchResult, CaseResult, GroupResult } from '../types.js';
 import type { Section } from './format.js';
 import {
+  allGroups,
   baselineLabel,
   cpuLabel,
   flagText,
@@ -32,6 +33,8 @@ export type MarkdownOptions = {
    * Pass an empty string to leave it out.
    */
   reproduce?: string;
+  /** The command that produced the result, shown in the provenance block. Default: `arki-bench run --profile <profile>`. */
+  command?: string;
 };
 
 export const DEFAULT_REPRODUCE = 'Reproduce: `bunx arki-bench run --profile publish` in the package directory.';
@@ -217,6 +220,34 @@ function environmentLine(result: BenchResult): string {
     .join(' · ')}.`;
 }
 
+/**
+ * How the numbers were made, so a reader can tell whether they still apply.
+ * The `provenance: <sha>` line is the one the release gate reads (`parseBenchProvenance`
+ * in arki-release): it must stay at line start with a lowercase hex sha. It is left
+ * out when the run had no git revision, so the gate fails instead of trusting a guess.
+ */
+function provenanceBlock(result: BenchResult, options: MarkdownOptions): string[] {
+  const env = result.environment;
+  const inputs = allGroups(result)
+    .filter(group => group.check !== undefined)
+    .map(group => `${group.id} ${group.check?.inputs ?? 0}`);
+  const memory = env.memory === undefined ? undefined : `${Math.round(env.memory / 1024 ** 3)} GB RAM`;
+  const machine = [hostLabel(result), cpuLabel(result), memory].filter(Boolean).join(', ');
+  const packages = Object.entries(result.packages)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, version]) => `${name} ${version}`);
+  const items = [
+    `- command: \`${options.command ?? `arki-bench run --profile ${result.profile}`}\``,
+    `- profile: ${result.profile}`,
+    `- packages: ${[`@arki/bench ${env.harness.version}`, ...packages].map(escapeCell).join(', ')}`,
+    machine ? `- machine: ${escapeCell(machine)}` : undefined,
+    inputs.length > 0 ? `- inputs: ${inputs.map(escapeCell).join(', ')}` : undefined,
+    env.git ? `- source commit: ${env.git.revision}${env.git.dirty ? ' (uncommitted changes)' : ''}` : undefined,
+  ].filter((line): line is string => line !== undefined);
+  const sha = env.git?.revision.toLowerCase();
+  return ['**Provenance**', '', ...items, ...(sha && /^[0-9a-f]{7,40}$/.test(sha) ? ['', `provenance: ${sha}`] : [])];
+}
+
 function versionsLine(result: BenchResult): string | undefined {
   const entries = Object.entries(result.packages).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return undefined;
@@ -270,6 +301,7 @@ export function renderMarkdown(result: BenchResult, options: MarkdownOptions = {
   if (result.suite.notes.length > 0) {
     lines.push('', '**Notes**', '', ...result.suite.notes.map(note => `- ${prose(note)}`));
   }
+  lines.push('', ...provenanceBlock(result, options));
   const reproduce = options.reproduce ?? DEFAULT_REPRODUCE;
   if (reproduce) lines.push('', prose(reproduce));
   lines.push('', metaComment(result));

@@ -15,6 +15,8 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
+import { buildApiIndex } from '@arki/library-tooling/src/api-index';
+import { buildErrorIndex } from '@arki/library-tooling/src/error-index';
 import debugFactory from 'debug';
 import { z } from 'zod';
 
@@ -257,7 +259,8 @@ export interface CandidateSummary {
 
 export type CandidateEnvelope = ReleaseCommandEnvelope<CandidatePackage, CandidateSummary>;
 
-const packOutput = z.array(z.object({ filename: z.string() })).min(1);
+/** What `npm pack --json` prints: one object per tarball. */
+export const npmPackOutputSchema = z.array(z.object({ filename: z.string() })).min(1);
 
 function failure(wave: string, message: string, errors: ReleaseError[], commit = ''): CandidateEnvelope {
   return createEnvelope<CandidatePackage, CandidateSummary>({
@@ -342,6 +345,15 @@ export async function runCandidate(options: RunCandidateOptions): Promise<Candid
   }
   if (errors.length > 0) return failure(label, `${errors.length.toString()} packages are not built.`, errors, sourceCommit);
 
+  // 3b. Write the indexes every tarball carries, from the exported bytes.
+  for (const item of order.items) {
+    const problem = await writeIndexes(path.join(treeDir, 'packages', item.name.replace(/^@arki\//, '')));
+    if (problem !== null) {
+      errors.push(buildError(`${item.name}: writing ${INDEX_FILES.join(' and ')} failed: ${problem}`, item.name, 'Fix the package build (its dist/ types and package.json), then run candidate again.'));
+    }
+  }
+  if (errors.length > 0) return failure(label, `${errors.length.toString()} packages have no indexes.`, errors, sourceCommit);
+
   // 4. Pack each package and hash the tarball.
   const packages: CandidatePackage[] = [];
   for (const item of order.items) {
@@ -423,6 +435,43 @@ async function pickSeeds(
   return { seeds };
 }
 
+/**
+ * Shipped in every tarball: `dist/api.json` (the public surface; the next
+ * minor's upgrade guide diffs against it) and `dist/errors.json` (the error codes).
+ */
+export const INDEX_FILES = ['dist/api.json', 'dist/errors.json'] as const;
+
+const DIST_WHOLE = /^(?:\.\/)?dist(?:\/|\/\*\*)?$/;
+
+/**
+ * The exported manifest's `files`, with the index files added when no entry
+ * ships `dist/` whole. Only the exported copy changes; `packages/*` stays as it is.
+ */
+export function withIndexFiles(files: readonly string[]): readonly string[] {
+  if (files.some(entry => DIST_WHOLE.test(entry))) return files;
+  return [...files, ...INDEX_FILES.filter(file => !files.includes(file))];
+}
+
+const filesFieldSchema = z.object({ files: z.array(z.string()).optional() }).loose();
+
+/** Writes both indexes into one exported package folder; returns the problem, or null. */
+async function writeIndexes(folder: string): Promise<string | null> {
+  try {
+    const { index } = buildApiIndex(folder);
+    await writeFile(path.join(folder, INDEX_FILES[0]), `${JSON.stringify(index, null, 2)}\n`);
+    await writeFile(path.join(folder, INDEX_FILES[1]), `${JSON.stringify(buildErrorIndex(folder), null, 2)}\n`);
+    const manifestFile = path.join(folder, 'package.json');
+    const manifest = filesFieldSchema.parse(JSON.parse(await readFile(manifestFile, 'utf8')));
+    if (manifest.files !== undefined) {
+      const files = withIndexFiles(manifest.files);
+      if (files !== manifest.files) await writeFile(manifestFile, `${JSON.stringify({ ...manifest, files }, null, 2)}\n`);
+    }
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function packOne(
   npm: NpmRunner,
   item: OrderItem,
@@ -439,7 +488,7 @@ async function packOne(
   } catch {
     return { error: buildError(`npm pack printed invalid JSON for ${item.name}.`, item.name) };
   }
-  const parsed = packOutput.safeParse(json);
+  const parsed = npmPackOutputSchema.safeParse(json);
   const filename = parsed.success ? path.basename(parsed.data[0]?.filename ?? '') : '';
   if (filename.length === 0) return { error: buildError(`npm pack output for ${item.name} has no filename.`, item.name) };
   const sha512 = await sha512OfFile(path.join(tarballsDir, filename)).catch(() => null);
@@ -484,16 +533,8 @@ function paxPath(body: Buffer): string | null {
   return null;
 }
 
-/**
- * Lists a `.tgz` the way `npm pack --json` does (paths without the
- * `package/` prefix) without unpacking it to disk or re-packing. The scorecard
- * audits these bytes, which are the ones the founder publishes.
- */
-export async function readTarball(file: string): Promise<TarballContents> {
-  const packed = await readFile(file);
-  const tar = gunzipSync(packed);
-  const files: NpmPackFileEntry[] = [];
-  let manifest: unknown = null;
+/** Each regular file of an uncompressed tar, with its path without the `package/` prefix. */
+function* tarFiles(tar: Buffer): Generator<{ readonly path: string; readonly size: number; readonly mode: number; readonly body: Buffer }> {
   let nextPath: string | null = null;
   for (let offset = 0; offset + BLOCK <= tar.length; ) {
     const header = tar.subarray(offset, offset + BLOCK);
@@ -510,17 +551,38 @@ export async function readTarball(file: string): Promise<TarballContents> {
     const name = nextPath ?? (prefix === '' ? tarString(header, 0, 100) : `${prefix}/${tarString(header, 0, 100)}`);
     nextPath = null;
     if (type !== '0' && type !== '') continue;
-    const relative = name.replace(/^package\//, '');
-    files.push({ path: relative, size, mode: tarOctal(header, 100, 8) });
-    if (relative === 'package.json') {
+    yield { path: name.replace(/^package\//, ''), size, mode: tarOctal(header, 100, 8), body };
+  }
+}
+
+/**
+ * Lists a `.tgz` the way `npm pack --json` does (paths without the
+ * `package/` prefix) without unpacking it to disk or re-packing. The scorecard
+ * audits these bytes, which are the ones the founder publishes.
+ */
+export async function readTarball(file: string): Promise<TarballContents> {
+  const packed = await readFile(file);
+  const files: NpmPackFileEntry[] = [];
+  let manifest: unknown = null;
+  for (const entry of tarFiles(gunzipSync(packed))) {
+    files.push({ path: entry.path, size: entry.size, mode: entry.mode });
+    if (entry.path === 'package.json') {
       try {
-        manifest = JSON.parse(body.toString('utf8')) as unknown;
+        manifest = JSON.parse(entry.body.toString('utf8')) as unknown;
       } catch {
         manifest = null;
       }
     }
   }
   return { files, manifest, packedSize: packed.length };
+}
+
+/** The text of one file in a `.tgz` (path without `package/`), or null when it is not there. */
+export async function readTarballText(file: string, relative: string): Promise<string | null> {
+  for (const entry of tarFiles(gunzipSync(await readFile(file)))) {
+    if (entry.path === relative) return entry.body.toString('utf8');
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

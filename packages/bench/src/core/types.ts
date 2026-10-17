@@ -378,6 +378,8 @@ export type Environment = {
   arch?: string;
   cpu?: string;
   cores?: number;
+  /** Installed RAM in bytes. */
+  memory?: number;
   /** Runtime flags, e.g. --expose-gc. */
   flags: readonly string[];
   harness: { version: string; mitata: string };

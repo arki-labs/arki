@@ -26,6 +26,7 @@ import {
   SCORECARD_ERROR_CODES,
   type ScorecardOptions,
 } from './scorecard';
+import { seedRootFiles } from './seed-root-files';
 import type { DotProbeOk, ReleaseConfig } from './types';
 import type { ProcessResult, ProcessRunner } from './fixture';
 
@@ -85,6 +86,7 @@ function writeRoot(root: string): void {
     'package.json',
     `${JSON.stringify({ name: 'arki', version: '0.0.0', private: true, packageManager: 'bun@1.4.2' }, null, 2)}\n`,
   );
+  seedRootFiles(root);
 }
 
 /**
@@ -224,7 +226,7 @@ function releaseReady(root: string): Pick<ScorecardOptions, 'npmRunner' | 'gitRu
     if (args[0] === 'diff') return { stdout: 'packages/assert/README.md\n', stderr: '', code: 0 };
     return { stdout: '', stderr: 'unexpected git call', code: 1 };
   };
-  return { npmRunner, gitRunner, docExamples: { '@arki/assert': { examples: 1, modules: 1, skipped: 0, failures: [] } } };
+  return { npmRunner, gitRunner, docExamples: { '@arki/assert': { examples: 1, modules: 1, compiled: 1, ran: 1, skipped: 0, skippedBlocks: [], failures: [] } } };
 }
 
 /**

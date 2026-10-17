@@ -14,7 +14,7 @@ const good: DocsFreshInput = {
   pkg: '@arki/math',
   packageVersion: '0.4.1',
   libraryCheckErrors: [],
-  docExamples: { examples: 3, modules: 1, skipped: 0, failures: [] },
+  docExamples: { examples: 3, modules: 1, compiled: 1, ran: 1, skipped: 0, skippedBlocks: [], failures: [] },
   changelogVersion: '0.4.1',
   versionRefs: [],
   knownVersions: new Set(),
@@ -35,7 +35,7 @@ describe('docs-fresh', () => {
 
   it('fails when doc examples fail or were not run', () => {
     // Why: a broken README example is the first thing a user copies.
-    const failing = { examples: 1, modules: 1, skipped: 0, failures: [{ file: 'README.md', line: 4, rule: 'DOCX_E001', message: 'x' }] };
+    const failing = { examples: 1, modules: 1, compiled: 1, ran: 1, skipped: 0, skippedBlocks: [], failures: [{ file: 'README.md', line: 4, rule: 'DOCX_E001', message: 'x' }] };
     expect(evaluateDocsFresh({ ...good, docExamples: failing }).status).toBe('fail');
     expect(evaluateDocsFresh({ ...good, docExamples: null }).status).toBe('fail');
   });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -90,13 +91,14 @@ function deps(overrides: Partial<ShipDeps> = {}): Partial<ShipDeps> {
     exec: async (command, args, opts) => {
       calls.push({ via: 'exec', command: [command, ...args].join(' ') });
       if (args[1] === 'version') {
-        // What `changeset version` does: bump @arki/a, consume its changeset.
-        writePackage('a', '0.2.0', { 'test:docs': 'arki-doc-examples' });
+        // What `changeset version` does: bump @arki/a's version (keeping its other fields), consume its changeset.
+        const manifestFile = path.join(root, 'packages', 'a', 'package.json');
+        writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(readFileSync(manifestFile, 'utf8')), version: '0.2.0' }));
         rmSync(path.join(root, '.changeset', 'a-feature.md'));
       }
       if (args.includes('test:docs')) {
         expect(opts.cwd).toBe(path.join(root, 'packages', 'a'));
-        return ok(JSON.stringify({ examples: 3, modules: 1, skipped: 0, failures: [] }));
+        return ok(JSON.stringify({ examples: 3, modules: 1, compiled: 1, ran: 1, skipped: 1, skippedBlocks: [{ file: 'README.md', line: 9, reason: 'needs Stripe keys' }], failures: [] }));
       }
       return ok();
     },
@@ -303,6 +305,92 @@ describe('ship --finish', () => {
     expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.notPublished]);
     expect(envelope.errors[0]?.remediation).toContain('npm publish --access public');
     expect(calls.filter(forbidden)).toEqual([]);
+  });
+});
+
+describe('ship upgrade guide', () => {
+  const stackConfig: ReleaseConfig = { ...config, tiers: { stack: ['@arki/a'], libraries: [] } };
+  const shipStack = (dryRun: boolean, overrides: Partial<ShipDeps> = {}) =>
+    runShip({ cwd: root, config: stackConfig, mode: { kind: 'start', wave: 'foundation', dryRun }, deps: deps(overrides) });
+  const guideFile = () => path.join(root, 'packages', 'a', 'docs', 'upgrades', '0.1.0-to-0.2.0.md');
+  const writeGuide = (text: string) => {
+    mkdirSync(path.dirname(guideFile()), { recursive: true });
+    writeFileSync(guideFile(), text);
+  };
+
+  it('fails GUIDE_E001 on a Stack minor bump without a guide, with the exact command', async () => {
+    // Why: users upgrade a Stack package by its guide; shipping a minor with
+    // none leaves them to read a changelog and guess.
+    const dry = await shipStack(true);
+    expect(dry.status).toBe('failure');
+    expect(dry.errors.map(e => e.code)).toEqual(['GUIDE_E001']);
+    expect(dry.errors[0]?.remediation).toContain('bun release:arki upgrade-guide --package @arki/a --from 0.1.0 --to 0.2.0 --write');
+    const real = await shipStack(false);
+    expect(real.errors.map(e => e.code)).toEqual(['GUIDE_E001']);
+    // The real run writes the skeleton; npm has no 0.1.0 tarball here, so the API section keeps its marker.
+    expect(real.errors[0]?.message).toContain('markers');
+    expect(readFileSync(guideFile(), 'utf8')).toContain('<!-- upgrade:todo no api diff was available');
+  });
+
+  it('writes the skeleton with the API diff from the published tarball when it has api.json', async () => {
+    // Why: removed and changed names are what users must act on; once the package
+    // is built ship knows them, so nobody diffs the API by hand.
+    const pkgDir = path.join(root, 'packages', 'a');
+    const manifest = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+    writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ ...manifest, exports: { '.': { types: './dist/index.d.ts' } } }));
+    mkdirSync(path.join(pkgDir, 'dist'));
+    writeFileSync(path.join(pkgDir, 'dist', 'index.d.ts'), 'export declare function keep(): void;\nexport declare const added: 1;\n');
+    const previous = {
+      package: '@arki/a',
+      version: '0.1.0',
+      entries: [
+        { subpath: '.', name: 'keep', kind: 'function', signature: 'export declare function keep(): void;', jsdocSummary: '' },
+        { subpath: '.', name: 'old', kind: 'variable', signature: 'old: 1', jsdocSummary: '' },
+      ],
+      errorCodes: [],
+    };
+    const packed = path.join(root, 'prev', 'package');
+    mkdirSync(path.join(packed, 'dist'), { recursive: true });
+    writeFileSync(path.join(packed, 'package.json'), JSON.stringify({ name: '@arki/a', version: '0.1.0' }));
+    writeFileSync(path.join(packed, 'dist', 'api.json'), JSON.stringify(previous));
+    const tgz = path.join(root, 'prev', 'arki-a-0.1.0.tgz');
+    execFileSync('tar', ['-czf', tgz, '-C', path.join(root, 'prev'), 'package'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+    const npm: ShipDeps['npm'] = async args => {
+      calls.push({ via: 'npm', command: ['npm', ...args].join(' ') });
+      if (args[0] !== 'pack' || args[1] !== '@arki/a@0.1.0') return { code: 1, stdout: '', stderr: 'npm error code E404' };
+      copyFileSync(tgz, path.join(args[args.indexOf('--pack-destination') + 1] ?? '', 'arki-a-0.1.0.tgz'));
+      return ok(JSON.stringify([{ filename: 'arki-a-0.1.0.tgz' }]));
+    };
+    const real = await shipStack(false, { npm });
+    expect(real.errors.map(e => e.code)).toEqual(['GUIDE_E001']);
+    const guide = readFileSync(guideFile(), 'utf8');
+    expect(guide).toContain('Removed:\n- `old` from `@arki/a` (variable)');
+    expect(guide).toContain('Added:\n- `added` from `@arki/a` (variable)');
+    expect(guide).not.toContain('no api diff was available');
+  });
+
+  it('fails GUIDE_E001 while a skeleton marker is left, and passes once the guide is finished', async () => {
+    // Why: a skeleton that ships unwritten is worse than no guide, because it
+    // looks like documentation.
+    writeGuide('# Upgrade\n\n<!-- upgrade:todo write the steps -->\n');
+    const unfinished = await shipStack(true);
+    expect(unfinished.errors.map(e => e.code)).toEqual(['GUIDE_E001']);
+    expect(unfinished.errors[0]?.message).toContain('markers');
+    writeGuide('# Upgrade @arki/a 0.1.0 to 0.2.0\n\nRename `x` to `y`.\n');
+    const finished = await shipStack(true);
+    expect(finished.status).toBe('success');
+    expect(finished.items.find(i => i.id === 'upgrade-guide')?.status).toBe('done');
+    const real = await shipStack(false);
+    expect(real.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.commitNeeded]);
+  });
+
+  it('does not ask for a guide for a patch bump or a package outside the Stack', async () => {
+    // Why: guides are for Tier 1 minors only; demanding them elsewhere is noise.
+    rmSync(path.join(root, '.changeset', 'a-feature.md'));
+    writeChangeset('a-fix.md', { '@arki/a': 'patch' });
+    const patch = await shipStack(true);
+    expect(patch.status).toBe('success');
+    expect(patch.items.find(i => i.id === 'upgrade-guide')?.status).toBe('skipped');
   });
 });
 

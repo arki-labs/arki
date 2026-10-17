@@ -45,6 +45,7 @@ import { runOrder } from './order';
 import { defaultGitRunner, defaultNpmRunner, execRunner, type ExecRunner, type GitRunner, type NpmRunner } from './runners';
 import { runScorecard } from './scorecard';
 import { runSmoke } from './smoke';
+import { checkGuide, guideError, nextMinor, runUpgradeGuide } from './upgrade-guide';
 import type { ReleaseCommandEnvelope, ReleaseConfig, ReleaseError, ReleaseStatus } from './types';
 
 const debug = debugFactory('arki:release:ship');
@@ -328,7 +329,11 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
 
   const turboBin = path.join(cwd, 'node_modules', '.bin', 'turbo');
   const buildArgs = ['run', 'build', ...[...publishSet].map(name => `--filter=${name}`)];
+  const needGuide = stackMinors(config, publishSet, ours);
   if (dryRun) {
+    // Dry run predicts the new version as the next minor.
+    const predicted = new Map(needGuide.map(name => [name, { from: versionOf[name] ?? '', to: nextMinor(versionOf[name] ?? '') }]));
+    const missing = await guideErrors(cwd, manifests, predicted);
     steps.push(
       {
         id: 'version',
@@ -336,10 +341,11 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
         detail: `bun ${path.relative(cwd, changesetBin)} version --ignore <${String(ignored.length)} packages outside the set>`,
       },
       { id: 'build', status: 'planned', detail: `${turboBin} ${buildArgs.join(' ')}` },
-      { id: 'upgrade-guide', status: 'deferred', detail: 'the upgrade guide check for Stack minor bumps lands in T2.11' },
+      guideStep(needGuide, missing),
       { id: 'commit', status: 'planned', detail: 'orchestrator commits the bumps by pathspec (SHIP_E001 prints the line)' },
       { id: 'resume', status: 'planned', detail: `bun release:arki ship --wave ${wave} --resume` },
     );
+    if (missing.length > 0) return fail('A Stack minor bump has no finished upgrade guide.', missing);
     return result(missingBin === null ? 'success' : 'warning', 'start', wave, steps, {
       message: `Dry run: ${String(publishSet.size)} package(s) would be versioned and built: ${[...publishSet].join(', ')}.`,
       errors: missingBin === null ? [] : [{ ...missingBin, severity: 'warning' }],
@@ -383,10 +389,16 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
       shipError(SHIP_ERROR_CODES.stepFailed, `turbo build exited ${String(build.code)}.`, `Fix the build, then run \`${turboBin} ${buildArgs.join(' ')}\` and the commit line.`),
     ]);
   }
-  steps.push(
-    { id: 'build', status: 'done', detail: [...publishSet].join(', ') },
-    { id: 'upgrade-guide', status: 'deferred', detail: 'the upgrade guide check for Stack minor bumps lands in T2.11' },
+  steps.push({ id: 'build', status: 'done', detail: [...publishSet].join(', ') });
+  const actual = new Map(
+    needGuide.map(name => [name, { from: versionOf[name] ?? '', to: after.manifests.find(m => m.name === name)?.version ?? null }]),
   );
+  // The package is built now, so ship writes a missing guide's skeleton itself,
+  // with the API diff against the published version when that tarball has api.json.
+  await writeMissingGuides(cwd, after.manifests, actual, deps.npm);
+  const missingGuides = await guideErrors(cwd, after.manifests, actual);
+  steps.push(guideStep(needGuide, missingGuides));
+  if (missingGuides.length > 0) return fail('A Stack minor bump has no finished upgrade guide.', missingGuides);
 
   // 5. Stop: committing is the orchestrator's job.
   const paths = [
@@ -405,6 +417,62 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
     ],
     next: line,
   });
+}
+
+function guideStep(needGuide: readonly string[], missing: readonly ReleaseError[]): ShipStep {
+  if (missing.length > 0) return { id: 'upgrade-guide', status: 'failed', detail: missing.map(e => e.target ?? e.message).join(', ') };
+  return needGuide.length === 0
+    ? { id: 'upgrade-guide', status: 'skipped', detail: 'no Tier 1 Stack package bumps minor' }
+    : { id: 'upgrade-guide', status: 'done', detail: `guide finished for ${needGuide.join(', ')}` };
+}
+
+/**
+ * Tier 1 Stack packages in the set whose highest pending bump is `minor`.
+ * Each needs a finished upgrade guide (GUIDE_E001).
+ */
+function stackMinors(config: ReleaseConfig, publishSet: ReadonlySet<string>, ours: readonly { readonly bumps: Readonly<Record<string, string>> }[]): string[] {
+  const stack = new Set(config.tiers?.stack ?? []);
+  return [...publishSet].filter(name => {
+    if (!stack.has(name)) return false;
+    const bumps = ours.map(c => c.bumps[name]).filter((b): b is string => b !== undefined);
+    return bumps.includes('minor') && !bumps.includes('major');
+  });
+}
+
+/** Writes the skeleton (with `publishedApiDiff`) for each guide that does not exist yet. */
+async function writeMissingGuides(
+  cwd: string,
+  manifests: readonly { readonly name: string; readonly manifestPath: string }[],
+  versions: ReadonlyMap<string, { readonly from: string; readonly to: string | null }>,
+  npm: NpmRunner,
+): Promise<void> {
+  for (const [name, { from, to }] of versions) {
+    const manifest = manifests.find(m => m.name === name);
+    if (to === null || manifest === undefined) continue;
+    if ((await checkGuide(cwd, relativeDir(cwd, manifest.manifestPath), from, to)) !== 'missing') continue;
+    await runUpgradeGuide({ root: cwd, pkg: name, from, to, write: true, npm });
+  }
+}
+
+/** Check each guide; `versions` gives the from/to pair per package. */
+async function guideErrors(
+  cwd: string,
+  manifests: readonly { readonly name: string; readonly manifestPath: string }[],
+  versions: ReadonlyMap<string, { readonly from: string; readonly to: string | null }>,
+): Promise<ReleaseError[]> {
+  const errors: ReleaseError[] = [];
+  for (const [name, { from, to }] of versions) {
+    if (to === null) {
+      errors.push(shipError(SHIP_ERROR_CODES.usage, `${name}@${from} is not plain semver, so its next minor cannot be predicted.`, 'Run ship without --dry-run, which checks the real new version.', name));
+      continue;
+    }
+    const manifest = manifests.find(m => m.name === name);
+    if (manifest === undefined) continue;
+    const dir = relativeDir(cwd, manifest.manifestPath);
+    const state = await checkGuide(cwd, dir, from, to);
+    if (state !== 'ok') errors.push(guideError(name, dir, from, to, state));
+  }
+  return errors;
 }
 
 function relativeDir(cwd: string, manifestPath: string): string {

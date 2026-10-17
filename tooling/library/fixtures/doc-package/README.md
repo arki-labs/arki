@@ -53,3 +53,39 @@ import { z } from 'zod';
 
 export const schema = z.string();
 ```
+
+## Install
+
+Add `@arki/doc-package` with your package manager.
+
+## Quick start
+
+Call `greet` with a name.
+
+## When not to use this
+
+When you need more than a greeting.
+
+## Runtime support
+
+Node, Bun, Deno and the browser.
+
+## Public imports
+
+`@arki/doc-package` and `@arki/doc-package/pg`.
+
+## Failure behaviour
+
+Nothing throws.
+
+## Limits
+
+None.
+
+## Documentation
+
+See `docs/agent-guide.md`.
+
+## Support
+
+Open an issue.

@@ -376,6 +376,23 @@ describe('arki-bench run --json', () => {
   }, 30_000);
 });
 
+describe('arki-bench run --profile quick --write-readme', () => {
+  it('never writes the README, because quick numbers are smoke tests and must not be quoted', async () => {
+    // Why: a README must only ever carry publishable numbers with provenance.
+    const root = tempPackage();
+    writeFileSync(
+      path.join(root, 'bench', 'sum.bench.mjs'),
+      SUITE_SOURCE('let s = 0; for (const x of xs) s += x; return s;'),
+    );
+    const page = `# demo\n\n${START_MARKER}\nold\n${END_MARKER}\n`;
+    writeFileSync(path.join(root, 'README.md'), page);
+    const { io, err } = capture(root);
+    expect(await main(['run', '--profile', 'quick', '--write-readme'], io)).toBe(1);
+    expect(err()).toContain('Not writing README.md');
+    expect(readFileSync(path.join(root, 'README.md'), 'utf8')).toBe(page);
+  }, 30_000);
+});
+
 describe('arki-bench compare --ci', () => {
   it('fails CI only when asked and only on a regression', async () => {
     const root = tempPackage();

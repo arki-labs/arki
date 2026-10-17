@@ -82,6 +82,8 @@ Words go after the language, space separated. `ts`, `tsx`, `typescript`, `js`, `
 `````md
 ````ts ← default: typecheck as its own module
 ```ts run                      ← typecheck, then `bun` runs it; a throw or non-zero exit fails
+```ts run expect               ← as `run`; the next fence must be ```text and equal stdout (trimmed)
+```ts from="examples/x.ts#name" ← not compiled; must equal that `// #region name` of a tested file
 ```ts continue                 ← appended to the previous block of this file (tutorial steps)
 ```ts skip="needs Stripe keys" ← not compiled; reason required, counted in the summary
 ````
@@ -90,6 +92,8 @@ Words go after the language, space separated. `ts`, `tsx`, `typescript`, `js`, `
 ````
 
 - `run` goes on the first block of a chain and applies to the whole chain. A good `run` block asserts its outcome: `if (got !== want) throw new Error(...)`. An import that only loads proves nothing.
+- `run expect`: the ```` ```text ```` fence right after the block is the expected stdout. A mismatch fails the block.
+- `from="path#region"`: the block mirrors the lines between `// #region name` and `// #endregion` in that file, dedented. The file is tested elsewhere, so the block is not compiled. `--write` refreshes the block from the file.
 - A `continue` after a skipped block is skipped too, with the same reason.
 - Fences may be indented (blocks in list items); the indent is stripped. Tilde fences and CRLF files work. A fence inside a longer outer fence is text.
 - Banned in blocks: `any`, `as unknown as`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`. A negative claim ("this must not compile") goes in the package's `*.test-d.ts`.
@@ -101,13 +105,81 @@ How it works: blocks are written to `.cache/doc-examples/<file>-<line>.ts` (firs
 ```sh
 bun run test:docs                 # in a package: arki-doc-examples
 arki-doc-examples --no-run        # typecheck only
-arki-doc-examples --json          # { examples, modules, skipped, failures }
+arki-doc-examples --write         # refresh every from= block from its region
+arki-doc-examples --json          # { examples, modules, compiled, ran, skipped, skippedBlocks, failures }
 bun run test:docs                 # at the root: turbo run test:docs --continue
+```
+
+## Generated files
+
+Each tool writes one file from the package's own sources. Run them in a package folder.
+
+### `arki-llms`
+
+Writes the `## Import paths` section of `llms.txt` from `package.json` `exports`, so DOC_E006 cannot drift.
+
+- One bullet per export key (not `./package.json`, not wildcards): the specifier, the first line of the entry module's top comment, and up to 12 exported names (values first, then `types ...`).
+- The section lives between `<!-- llms:start -->` and `<!-- llms:end -->`. Text outside the markers stays as written. A section without markers is replaced whole and gets them.
+- The entry module is the source behind the export (`dist/x.js` reads `src/x.ts`), so no build is needed.
+- It stops with an error when the result would pass 80 lines or 8 KiB (the DOC_E007 limits, `LLMS_MAX_LINES` and `LLMS_MAX_BYTES` in `docs.ts`).
+
+```sh
+arki-llms            # print the generated bullets
+arki-llms --write    # update llms.txt
+arki-llms --check    # exit 1 with a diff when llms.txt is stale
+```
+
+### `arki-api-index`
+
+Lists every public export of a built package as `api.json`: subpath, name, kind, signature and the first JSDoc paragraph. `errorCodes` holds the codes of `arki-error-index`.
+
+- It reads `exports`, takes each subpath's `types` file, and asks the TypeScript compiler for its exports. Run it after `build`.
+- Wildcard subpaths and `package.json` are skipped. A subpath whose types are not built is skipped and named on stderr.
+- `candidate` writes `dist/api.json` into every tarball, so each published version carries its API.
+
+```sh
+arki-api-index [--dir <packageDir>] [--out <file>]   # JSON to stdout without --out
+```
+
+### `arki-api-diff`
+
+Compares two `api.json` files. An entry is subpath plus name. It is added or removed when only one side has it, and changed when its signature differs.
+
+- `--docs <packageDir>` searches `README.md`, `docs/**/*.md` and `llms.txt` for each removed or changed name, as a whole word, and prints `file:line`. A rename then cannot leave stale pages.
+- `--json` prints `{ added, removed, changed, docMentions }`. `apiDiffSchema` reads it back; the upgrade guide uses it.
+
+```sh
+arki-api-diff --from old/api.json --to dist/api.json [--docs .] [--json]
+```
+
+### `arki-error-index`
+
+Reads every error code under `src/` and writes `dist/errors.json`, the data behind `https://arki.dev/errors/<code>`.
+
+- Thrown codes: a string property of an object named `*_ERROR_CODES` or `*ErrorCode(s)`. The property's JSDoc is the entry.
+- Failure codes: a `defineFailure('<pkg>.<code>', ...)` call. The JSDoc of its declaration is the entry.
+- In the JSDoc, the summary says what happened, `@fix` says what to do, and `@verify` gives the command that proves the fix.
+- `arki-library-check` reports ERR_E001 for each code without `@fix` or `@verify`.
+- Not indexed: a `code:` string inside `new XError(...)`.
+
+```sh
+arki-error-index [--out dist/errors.json]
+```
+
+### `arki-runtimes --write-readme`
+
+Runs the package's runtime tests and writes one row per engine (result, version tested, UTC date) between `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in `README.md`.
+
+- An engine not run this time (`--only`) keeps its row.
+- Run it on the Node version CI uses; the row records the version it ran.
+
+```sh
+arki-runtimes --write-readme [--only node,bun] [--require-all]
 ```
 
 ## Rules and repairs
 
-`arki-library-check` (DOC rules: public packages only, and DOC_E004 to DOC_E012 on a file fire only when that file exists; TYPES rules: every `packages/*` library, private ones too):
+`arki-library-check` (DOC and SRC rules: public packages only, and DOC_E004 to DOC_E012 on a file fire only when that file exists; TYPES rules: every `packages/*` library, private ones too):
 
 | Rule     | Meaning                                                              | Repair                                                                                                                               |
 | -------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -124,6 +196,13 @@ bun run test:docs                 # at the root: turbo run test:docs --continue
 | DOC_E011 | agent guide "Verify" lacks dot explain --json and dot doctor --json  | Add both commands, each piped to `jq` with a path under `.data`.                                                                     |
 | DOC_E012 | package.json "files" does not ship a doc file                        | Add `llms.txt` and `docs/**` (or the linked files) to `files`.                                                                       |
 | DOC_E013 | no "test:docs" script                                                | Add `"test:docs": "arki-doc-examples"` and the devDependency `"@arki/library-tooling": "workspace:*"`.                               |
+| DOC_E014 | no CHANGELOG.md                                                      | Add one; the release tooling appends to it.                                                                                          |
+| DOC_E015 | no LICENSE                                                           | Add the MIT `LICENSE` file.                                                                                                          |
+| DOC_E016 | no AGENTS.md                                                         | Add one; see DOC_E018 for its shape.                                                                                                 |
+| DOC_E017 | README H2s missing or misordered                                     | The first four H2s are `Install`, `Quick start`, `When not to use this`, `Runtime support`; `Public imports`, `Failure behaviour`, `Limits`, `Documentation`, `Support` follow anywhere. Body text is free. The list is `README_SECTIONS` in `docs.ts`, shared with the release readiness table. |
+| DOC_E018 | AGENTS.md lacks the role line or a required section                  | Line 1 is `AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.`; add H2s `Laws`, `Changing this package`, `Verify`.       |
+| DOC_E019 | banned word in README, docs or llms.txt                              | Drop simply, just, easy, powerful, blazing, seamless, robust, leverage, might, should probably. Fenced and inline code are skipped.  |
+| SRC_E001 | string literal equals the package version                            | Read the version from `package.json` or a generated `src/version.ts` (that file is skipped). Applies to `src/**` of public packages. |
 | DOC_W001 | forward-looking language                                             | Say what exists today. Plans go in an RFC.                                                                                           |
 | DOC_W002 | llms.txt over 60 lines                                               | Group bullets.                                                                                                                       |
 | TYPES_E001 | export entry exposes Zod types (`./zod` entries and `@arki/contracts` are exempt) | Take a Standard Schema (`@arki/schema`) in the entry, or move the Zod helper to a `./zod` subpath.                                   |

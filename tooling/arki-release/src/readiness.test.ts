@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { README_SECTIONS } from '@arki/library-tooling/src/docs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  README_H2_ORDER,
   evaluateReadiness,
   generateReadinessBaseline,
   readmeH2s,
@@ -22,7 +22,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 /** `@arki/math` is Tier 2, as in arki.release.config.ts. */
 const config = { tiers: { stack: ['@arki/dot'], libraries: ['@arki/math'] } };
 
-const README = README_H2_ORDER.map((s) => `## ${s.id}\n\ntext\n`).join('\n');
+const README = README_SECTIONS.map((s) => `## ${s}\n\ntext\n`).join('\n');
 
 /** A tier 2 leaf package ("math") that passes every disk item. */
 function makePackage(mutate: (pkg: Record<string, unknown>) => void = () => {}): string {
@@ -104,7 +104,7 @@ describe('evaluateReadiness', () => {
   it('flags README sections that are missing or out of order', () => {
     // Why: agents and readers rely on the same section order in every package.
     const dir = makePackage();
-    writeFileSync(path.join(dir, 'README.md'), '## Quick start\n\n## Installation\n');
+    writeFileSync(path.join(dir, 'README.md'), '## Quick start\n\n## Install\n');
     const r = evaluateReadiness({ config, dir });
     expect(status(r, 'readme-h2-order')).toBe('fail');
   });

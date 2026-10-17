@@ -38,7 +38,7 @@
  * `generatedAt` lives in the envelope only.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import debugFactory from 'debug';
 
@@ -244,6 +244,7 @@ export async function exportPublicTree(
 
   // 7. Root tree scaffolding.
   await writeRootScaffolding(outputPath, options.skipWorkspacesRoot ?? false, await readPinnedBunVersion(rootCwd));
+  await copyCommunityFiles(sourceRoot, outputPath);
   await writeRootLlmsTxt(rootCwd, outputPath, exportItems);
 
   const status: 'success' | 'failure' = failed > 0 ? 'failure' : 'success';
@@ -696,6 +697,26 @@ async function writeRootLlmsTxt(rootCwd: string, outputPath: string, items: read
     }
   }
   await writeTextFile(path.join(outputPath, 'llms.txt'), `${lines.join('\n')}\n`);
+}
+
+/**
+ * Contribution, security and support files. They are authored once in the
+ * workspace root and copied byte for byte, so the public repo and the package
+ * mirrors (which read the same `SECURITY.md`) cannot drift. A missing file
+ * throws: a public tree without a security policy must not ship quietly.
+ */
+export const COMMUNITY_FILES = ['SECURITY.md', 'CONTRIBUTING.md'] as const;
+export const ISSUE_TEMPLATE_DIR = path.join('.github', 'ISSUE_TEMPLATE');
+
+async function copyCommunityFiles(sourceRoot: string, outputPath: string): Promise<void> {
+  for (const file of COMMUNITY_FILES) {
+    await writeTextFile(path.join(outputPath, file), await readFile(path.join(sourceRoot, file), 'utf8'));
+  }
+  const templates = (await readdir(path.join(sourceRoot, ISSUE_TEMPLATE_DIR))).sort();
+  for (const name of templates) {
+    const contents = await readFile(path.join(sourceRoot, ISSUE_TEMPLATE_DIR, name), 'utf8');
+    await writeTextFile(path.join(outputPath, ISSUE_TEMPLATE_DIR, name), contents);
+  }
 }
 
 /** A file's text, or `undefined` when it does not exist. */

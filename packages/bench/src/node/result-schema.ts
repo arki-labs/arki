@@ -129,6 +129,7 @@ const environment = z.object({
   arch: z.string().optional(),
   cpu: z.string().optional(),
   cores: z.number().int().positive().optional(),
+  memory: z.number().positive().optional(),
   flags: z.array(z.string()),
   harness: z.object({ version: z.string(), mitata: z.string() }),
   git: z.object({ revision: z.string(), dirty: z.boolean() }).optional(),

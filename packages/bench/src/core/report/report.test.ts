@@ -139,6 +139,7 @@ function fixture(overrides: Partial<BenchResult> = {}): BenchResult {
       arch: 'arm64',
       cpu: 'Apple M3 Max',
       cores: 14,
+      memory: 36 * 1024 ** 3,
       flags: [],
       harness: { version: '0.1.0', mitata: '1.0.34' },
       git: { revision: '355df1909cabcdef', dirty: false },
@@ -342,6 +343,28 @@ describe('renderMarkdown', () => {
     expect(last.indexOf('-->')).toBe(last.length - 3);
     const json = /^<!-- bench:meta (\{.*\}) -->$/.exec(last)?.[1] ?? '{}';
     expect(JSON.parse(json)).toMatchObject({ date: '2026-10-13 --> <b>x</b>' });
+  });
+
+  it('records provenance, and the sha line matches what the release gate parses', () => {
+    // Why: the release gate refuses stale numbers by reading `provenance: <sha>`; a reader needs the rest to judge whether they apply.
+    const output = renderMarkdown(fixture(), { command: 'arki-bench run --profile publish --write-readme' });
+    expect(/^provenance: ([0-9a-f]{7,40})\s*$/m.exec(output)?.[1]).toBe('355df1909cabcdef');
+    expect(output).toContain('- command: `arki-bench run --profile publish --write-readme`');
+    expect(output).toContain('- profile: publish');
+    expect(output).toContain('@arki/bench 0.1.0, @arki/money 1.2.0, big.js 6.2.1');
+    expect(output).toContain('- machine: darwin arm64, Apple M3 Max (14 cores), 36 GB RAM');
+    expect(output).toMatch(/- inputs: .* 12/);
+    expect(output).toContain('- source commit: 355df1909cabcdef');
+    // Only the sha line starts with `provenance:`; the other fields cannot be mistaken for it.
+    expect(output.split('\n').filter(line => line.startsWith('provenance:'))).toHaveLength(1);
+  });
+
+  it('leaves the sha line out when the run had no git revision, so the gate fails instead of trusting a guess', () => {
+    // Why: a made-up sha would let stale numbers pass the freshness gate.
+    const base = fixture();
+    const output = renderMarkdown({ ...base, environment: { ...base.environment, git: undefined } });
+    expect(output).not.toMatch(/^provenance:/m);
+    expect(output).toContain('**Provenance**');
   });
 
   it('ends with a reproduce line that callers can change or drop', () => {

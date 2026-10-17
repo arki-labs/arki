@@ -13,7 +13,6 @@ import {
   mirrorReadmeHeader,
   runSyncApply,
   runSyncPrepare,
-  SECURITY_MD,
   SYNC_ERROR_CODES,
   SYNC_PLAN_PATH,
   syncPlanSchema,
@@ -119,10 +118,14 @@ function prepareOptions(candidateDir: string, git: GitRunner = defaultGitRunner,
   };
 }
 
+// Why: sync copies the root SECURITY.md into each mirror; the test pins that it does not invent its own text.
+const SECURITY_TEXT = '# Security policy\n\nReport privately.\n';
+
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'sync-'));
   remotes = path.join(root, 'remotes');
   await mkdir(remotes, { recursive: true });
+  await writeFile(path.join(root, 'SECURITY.md'), SECURITY_TEXT);
   await seedRemote('arki');
 });
 
@@ -173,7 +176,7 @@ describe('runSyncPrepare', () => {
 
     const readme = await readFile(path.join(root, '.release/package-mirrors/assert/README.md'), 'utf8');
     expect(readme.startsWith('Read-only mirror of `@arki/assert` v1.2.0.')).toBe(true);
-    expect(await readFile(path.join(root, '.release/package-mirrors/assert/SECURITY.md'), 'utf8')).toBe(SECURITY_MD);
+    expect(await readFile(path.join(root, '.release/package-mirrors/assert/SECURITY.md'), 'utf8')).toBe(SECURITY_TEXT);
     expect(await readFile(path.join(root, pkg?.notesFile ?? ''), 'utf8')).toBe('- Added `ensure`.\n');
     // The arki tag is annotated and local; the remote has none.
     expect(await ok('git', ['cat-file', '-t', 'vfoundation-2026-10-17'], path.join(root, '.release/arki-mirror'))).toBe('tag\n');

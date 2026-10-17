@@ -38,6 +38,7 @@ export type ReleaseCommand =
   | 'order'
   | 'smoke'
   | 'impact'
+  | 'upgrade-guide'
   | 'ship';
 
 /**

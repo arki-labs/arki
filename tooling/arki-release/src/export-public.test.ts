@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ReleaseConfig } from './types';
 import { exportPublicTree } from './export-public';
+import { seedRootFiles } from './seed-root-files';
 
 /** Shared metadata defaults used by every fixture. */
 const defaults: ReleaseConfig['publicMetadataDefaults'] = {
@@ -64,6 +65,7 @@ function writeRoot(root: string, catalog: Record<string, string> = {}): void {
     'package.json',
     JSON.stringify({ name: 'arki', version: '0.0.0', private: true, packageManager: 'bun@1.4.2', catalog }, null, 2),
   );
+  seedRootFiles(root);
 }
 
 /** Recursively list every relative file path under a directory, sorted. */
@@ -445,6 +447,23 @@ describe('exportPublicTree', () => {
     expect(workflow).toMatch(/name: Verify/);
     expect(workflow).toMatch(/npm pack/);
     expect(workflow).toMatch(/actions\/upload-artifact@v4/);
+  });
+
+  it('copies SECURITY.md, CONTRIBUTING.md and the issue forms from the workspace root', async () => {
+    // Why: users reporting a bug or a vulnerability on the public repo must find the same policy the maintainers wrote.
+    writeRoot(tmp);
+    writeFixtureFile(tmp, 'SECURITY.md', '# Security policy\n\nUse the Security tab.\n');
+    writePkg(tmp, 'assert', { name: '@arki/assert', version: '1.0.0', description: 'Test assertions.' });
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const tree = listTreeRelative(outDir);
+
+    expect(readFileSync(path.join(outDir, 'SECURITY.md'), 'utf8')).toBe('# Security policy\n\nUse the Security tab.\n');
+    expect(tree).toContain('CONTRIBUTING.md');
+    expect(tree).toContain('.github/ISSUE_TEMPLATE/bug.yml');
+    expect(tree).toContain('.github/ISSUE_TEMPLATE/feature.yml');
+    expect(tree).toContain('.github/ISSUE_TEMPLATE/config.yml');
   });
 
   it('regenerates the public scaffolding byte-identically across runs', async () => {

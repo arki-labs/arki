@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "bin": {
+    "arki-api-diff": "./src/api-diff.ts",
+    "arki-api-index": "./src/api-index.ts",
     "arki-doc-examples": "./src/doc-examples.ts",
+    "arki-error-index": "./src/error-index.ts",
     "arki-layers": "./src/layers.ts",
     "arki-library-check": "./src/library-check.ts",
+    "arki-llms": "./src/llms.ts",
     "arki-runtimes": "./src/runtimes.ts"
   },
   "scripts": {

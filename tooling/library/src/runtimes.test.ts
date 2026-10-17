@@ -4,9 +4,16 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
+import type { RuntimeRow } from './runtimes';
 import { HERMES_FAILURE_MARKER, hermesScript } from './hermes-host';
 import { readManifest, RUNTIMES } from './manifest';
-import { HERMES_BUNDLE_ARGS, isLegInScope } from './runtimes';
+import {
+  HERMES_BUNDLE_ARGS,
+  isLegInScope,
+  parseRuntimesTable,
+  renderRuntimesTable,
+  updateRuntimesSection,
+} from './runtimes';
 
 function manifestWith(extra: object): ReturnType<typeof readManifest> {
   const dir = mkdtempSync(path.join(tmpdir(), 'arki-runtimes-'));
@@ -15,12 +22,20 @@ function manifestWith(extra: object): ReturnType<typeof readManifest> {
 }
 
 /** Runs a Hermes script the way the CLI does: only `print` and the JS built-ins exist. */
-async function runLikeHermes(script: string, setup = '', settleMs = 20): Promise<string[]> {
+/**
+ * `untilLines`: for scripts that print after their own timers, wait until that
+ * many lines arrived (up to 2 s) instead of trusting `settleMs`. Under a loaded
+ * machine the script's timers can fire after a fixed settle, which failed the
+ * test with no output although the behavior was right.
+ */
+async function runLikeHermes(script: string, setup = '', settleMs = 20, untilLines = 0): Promise<string[]> {
   const lines: string[] = [];
   const context = vm.createContext({ print: (...args: unknown[]) => lines.push(args.map(String).join(' ')) });
   if (setup) vm.runInContext(setup, context);
   vm.runInContext(script, context);
   await new Promise(resolve => setTimeout(resolve, settleMs));
+  const deadline = Date.now() + 2000;
+  while (lines.length < untilLines && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
   return lines;
 }
 
@@ -99,6 +114,9 @@ describe('hermesScript', () => {
         await new Promise(resolve => setTimeout(resolve, 5));
         console.log(order.join());
       `),
+      '',
+      20,
+      1,
     );
     expect(lines).toEqual(['microtask,timer']);
   });
@@ -152,5 +170,61 @@ describe('hermesScript', () => {
       hermesScript('try { new AbortSignal(); } catch (error) { console.log(error.name); }'),
     );
     expect(lines).toEqual(['TypeError']);
+  });
+});
+
+describe('runtimes table in the README', () => {
+  const order = ['node', 'bun', 'deno', 'browser', 'hermes'];
+  const row = (runtime: string, result: RuntimeRow['result'], version: string, date = '2026-10-17'): RuntimeRow => ({
+    runtime,
+    result,
+    version,
+    date,
+  });
+  const page = (inside: string): string =>
+    `# demo\n\n<!-- runtimes:start -->\n${inside}<!-- runtimes:end -->\n\n## License\n`;
+
+  it('writes runtime, result, version and UTC date, and keeps the text around the markers', () => {
+    // Why: the README claim "runs on Node, Bun, Deno..." must be backed by a dated, versioned proof, not prose.
+    const next = updateRuntimesSection(
+      page('old\n'),
+      [row('node', 'pass', 'v26.1.0'), row('bun', 'fail', '1.4.2')],
+      order,
+    );
+    expect(next).toContain('| node | pass | v26.1.0 | 2026-10-17 |');
+    expect(next).toContain('| bun | fail | 1.4.2 | 2026-10-17 |');
+    expect(next.startsWith('# demo\n\n<!-- runtimes:start -->\n| Runtime')).toBe(true);
+    expect(next.endsWith('<!-- runtimes:end -->\n\n## License\n')).toBe(true);
+    expect(updateRuntimesSection(next, [row('node', 'pass', 'v26.1.0'), row('bun', 'fail', '1.4.2')], order)).toBe(
+      next,
+    );
+  });
+
+  it('keeps the rows of engines this run did not touch, so --only does not erase proof', () => {
+    // Why: running one engine must not delete the dated evidence for the others.
+    const first = updateRuntimesSection(
+      page(''),
+      [row('node', 'pass', 'v26', '2026-10-01'), row('deno', 'pass', '2.1', '2026-10-01')],
+      order,
+    );
+    const second = updateRuntimesSection(first, [row('node', 'pass', 'v26.2', '2026-10-17')], order);
+    expect(parseRuntimesTable(second)).toEqual([
+      row('node', 'pass', 'v26.2', '2026-10-17'),
+      row('deno', 'pass', '2.1', '2026-10-01'),
+    ]);
+  });
+
+  it('round-trips through render and parse', () => {
+    const rows = [row('node', 'pass', 'v26'), row('hermes', 'not run', '-'), row('browser', 'n/a', '-')];
+    expect(parseRuntimesTable(renderRuntimesTable(rows))).toEqual(rows);
+  });
+
+  it('refuses a README without exactly one ordered marker pair, so a typo cannot skip the update silently', () => {
+    // Why: a silently unwritten table would leave stale proof in the README.
+    expect(() => updateRuntimesSection('# demo\n', [], order)).toThrow(/exactly one/);
+    expect(() => updateRuntimesSection(page('') + page(''), [], order)).toThrow(/exactly one/);
+    expect(() => updateRuntimesSection('<!-- runtimes:end -->\n<!-- runtimes:start -->\n', [], order)).toThrow(
+      /exactly one/,
+    );
   });
 });

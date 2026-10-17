@@ -10,6 +10,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import type { ApiDiff } from '@arki/library-tooling/src/api-diff';
+import { apiDiffSchema } from '@arki/library-tooling/src/api-diff';
 import debugFactory from 'debug';
 
 import { CANDIDATES_DIR, lastShippedCommits, readCandidate, runCandidate, type CandidateTarget } from './candidate';
@@ -34,6 +36,7 @@ import { renderScorecardText, runScorecard } from './scorecard';
 import { runShip, type ShipMode } from './ship';
 import { runSmoke } from './smoke';
 import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
+import { runUpgradeGuide } from './upgrade-guide';
 import { runSyncApply, runSyncPrepare } from './sync';
 import type {
   ExportItem,
@@ -127,6 +130,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'impact',
     task: 'T1.4',
     description: 'docs-impact + demo-impact for a wave\'s pending changesets: --wave <id> [--candidate <dir>].',
+  },
+  {
+    name: 'upgrade-guide',
+    task: 'T2.11',
+    description: 'Upgrade guide skeleton for a minor: --package <name> --from <v> --to <v> [--write] [--api-diff <file>].',
   },
   {
     name: 'ship',
@@ -356,6 +364,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
 
   if (args.command === 'impact') {
     return runImpactHandler(args);
+  }
+
+  if (args.command === 'upgrade-guide') {
+    return runUpgradeGuideHandler(args);
   }
 
   if (args.command === 'ship') {
@@ -620,6 +632,36 @@ async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
     emitEnvelope(merged, { json: args.json });
     return merged.errors.some(e => e.severity === 'error') ? 1 : 0;
   });
+}
+
+/**
+ * `upgrade-guide --package <name> --from <v> --to <v> [--write] [--api-diff <file>]`:
+ * the skeleton for one minor. Without `--write` it only prints.
+ */
+async function runUpgradeGuideHandler(args: ParsedCliArgs): Promise<number> {
+  const pkg = extractOption(args.rest, 'package');
+  const from = extractOption(args.rest, 'from');
+  const to = extractOption(args.rest, 'to');
+  if (pkg === null || from === null || to === null) {
+    return usageError('upgrade-guide', 'upgrade-guide needs `--package <name> --from <v> --to <v>`.', args.json);
+  }
+  const diffFile = extractOption(args.rest, 'api-diff');
+  let apiDiff: ApiDiff | undefined;
+  if (diffFile !== null) {
+    const parsed = apiDiffSchema.safeParse(JSON.parse(await readFile(path.resolve(process.cwd(), diffFile), 'utf8')));
+    if (!parsed.success) return usageError('upgrade-guide', `--api-diff ${diffFile} is not an api diff: ${parsed.error.message}`, args.json);
+    apiDiff = parsed.data;
+  }
+  const envelope = await runUpgradeGuide({
+    root: process.cwd(),
+    pkg,
+    from,
+    to,
+    write: args.rest.includes('--write'),
+    ...(apiDiff === undefined ? { npm: defaultNpmRunner } : { apiDiff }),
+  });
+  emitEnvelope(envelope, { json: args.json });
+  return envelope.status === 'failure' ? 1 : 0;
 }
 
 /**

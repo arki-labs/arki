@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { checkExamples, compileExamples, extractExamples, runExamples, stitch } from './doc-examples';
+import { checkExamples, compileExamples, docFiles, extractExamples, extractRegion, runExamples, stitch } from './doc-examples';
 import { readManifest } from './manifest';
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'doc-package');
@@ -221,5 +221,163 @@ describe('runExamples', () => {
     expect(runExamples(dir, modules, { env: { PATH: '/nonexistent' } })).toMatchObject([
       { rule: 'DOCX_E002', message: expect.stringContaining('bun') },
     ]);
+  });
+});
+
+/** The fixture has no Node types, so a printing example declares `console` itself. */
+const LOG = 'declare const console: { log(text: string): void };';
+
+const REGION_SOURCE = [
+  'import { greet } from "@arki/doc-package";',
+  '// #region hello',
+  'export function hello() {',
+  '  return greet("a");',
+  '}',
+  '// #endregion',
+  '',
+].join('\n');
+
+/** A fixture whose README is `readme` and which ships `examples/x.ts`. */
+function withExample(readme: string, source = REGION_SOURCE): string {
+  const dir = fixture(readme);
+  mkdirSync(path.join(dir, 'examples'));
+  writeFileSync(path.join(dir, 'examples', 'x.ts'), source);
+  return dir;
+}
+
+describe('docFiles', () => {
+  it('scans nested docs the package ships and ignores the rest, so a docs/ page cannot hide a broken example', () => {
+    // Why: only shipped Markdown reaches readers; nested guides need the same proof as the README.
+    const dir = fixture();
+    mkdirSync(path.join(dir, 'docs', 'guides'), { recursive: true });
+    writeFileSync(path.join(dir, 'docs', 'guides', 'deep.md'), '# Deep\n');
+    writeFileSync(path.join(dir, 'notes.md'), '# Not shipped\n');
+    expect(docFiles(dir, readManifest(dir))).toEqual(['README.md', 'docs/agent-guide.md', 'docs/guides/deep.md']);
+  });
+
+  it('reports a broken example in a nested docs page at its own file and line', () => {
+    // Why: the release gate names the page to fix.
+    const dir = fixture(fence('ts', 'export const ok = 1;'));
+    mkdirSync(path.join(dir, 'docs', 'guides'), { recursive: true });
+    writeFileSync(path.join(dir, 'docs', 'guides', 'deep.md'), '# Deep\n\n' + fence('ts', 'export const n: number = "x";'));
+    const failures = checkExamples(dir, { run: false }).failures.filter(item => item.file === 'docs/guides/deep.md');
+    expect(failures).toMatchObject([{ rule: 'DOCX_E001', line: 4 }]);
+  });
+});
+
+describe('ts run expect', () => {
+  it('passes when stdout equals the next text block, trimmed', () => {
+    // Why: a README that shows output must show what the code really prints.
+    const readme = [fence('ts run expect', LOG, 'console.log("hi");'), fence('text', 'hi')].join('\n\n');
+    expect(checkExamples(fixture(readme), { run: true }).failures).toEqual([]);
+  });
+
+  it('fails with both outputs when they differ, at the text block', () => {
+    // Why: stale output is the most common doc drift; the message must show the gap.
+    const readme = [fence('ts run expect', LOG, 'console.log("hi");'), fence('text', 'bye')].join('\n\n');
+    const failures = checkExamples(fixture(readme), { run: true }).failures;
+    expect(failures).toMatchObject([
+      { rule: 'DOCX_E010', line: 6, message: expect.stringMatching(/expected:\nbye\nprinted:\nhi/) },
+    ]);
+  });
+
+  it('fails when no text block follows, so expect cannot be silently dropped', () => {
+    // Why: an expect with nothing to compare would pass for the wrong reason.
+    const readme = [fence('ts run expect', LOG, 'console.log("hi");'), fence('sh', 'echo hi')].join('\n\n');
+    expect(checkExamples(fixture(readme), { run: true }).failures.map(item => item.rule)).toEqual(['DOCX_E009']);
+  });
+
+  it('rejects expect without run and expect on a continue block', () => {
+    // Why: output can only be compared for code that runs, and a chain has one output.
+    const lone = extractExamples('README.md', fence('ts expect', 'a();')).failures;
+    const chained = extractExamples('README.md', [fence('ts run', 'a();'), fence('ts continue expect', 'b();')].join('\n')).failures;
+    expect([...lone, ...chained].map(item => item.rule)).toEqual(['DOCX_E005', 'DOCX_E005']);
+  });
+
+  it('does not compare when --no-run, because nothing printed', () => {
+    // Why: --no-run is the fast typecheck-only mode.
+    const readme = [fence('ts run expect', LOG, 'console.log("hi");'), fence('text', 'bye')].join('\n\n');
+    expect(checkExamples(fixture(readme), { run: false }).failures).toEqual([]);
+  });
+});
+
+describe('extractRegion', () => {
+  it('returns the lines between the markers, dedented', () => {
+    // Why: docs show the snippet as written for a reader, not with the file's nesting.
+    const source = ['function f() {', '  // #region body', '  const a = 1;', '    const b = 2;', '  // #endregion', '}'].join('\n');
+    expect(extractRegion(source, 'body')).toBe('const a = 1;\n  const b = 2;');
+  });
+
+  it('keeps a nested region inside the outer one and returns undefined for a missing or unclosed region', () => {
+    // Why: a wrong region must fail loudly, not publish a truncated snippet.
+    const nested = ['// #region a', 'x;', '// #region b', 'y;', '// #endregion', 'z;', '// #endregion'].join('\n');
+    expect(extractRegion(nested, 'a')).toBe('x;\n// #region b\ny;\n// #endregion\nz;');
+    expect(extractRegion(nested, 'missing')).toBeUndefined();
+    expect(extractRegion('// #region open\nx;', 'open')).toBeUndefined();
+  });
+});
+
+describe('ts from=', () => {
+  const body = 'export function hello() {\n  return greet("a");\n}';
+
+  it('passes when the block equals the region and is not compiled itself', () => {
+    // Why: the snippet comes from tested source, so the doc cannot drift from it.
+    const dir = withExample(fence('ts from="examples/x.ts#hello"', ...body.split('\n')));
+    const report = checkExamples(dir, { run: true });
+    expect(report).toMatchObject({ examples: 3, failures: [] });
+    expect(existsSync(path.join(dir, '.cache/doc-examples/readme-1.ts'))).toBe(false);
+  });
+
+  it('fails a stale block, and --write refreshes it in place', () => {
+    // Why: one command repairs drift; a plain run only reports it.
+    const dir = withExample(['Intro', '', fence('ts from="examples/x.ts#hello"', 'old();'), '', 'Outro'].join('\n'));
+    expect(checkExamples(dir, { run: false }).failures).toMatchObject([{ rule: 'DOCX_E011', line: 3 }]);
+    expect(checkExamples(dir, { run: false, write: true }).failures).toEqual([]);
+    expect(readFileSync(path.join(dir, 'README.md'), 'utf8')).toBe(
+      ['Intro', '', fence('ts from="examples/x.ts#hello"', ...body.split('\n')), '', 'Outro'].join('\n'),
+    );
+    expect(checkExamples(dir, { run: false }).failures).toEqual([]);
+  });
+
+  it('keeps the indent of a fence inside a list item when it refreshes', () => {
+    // Why: rewriting must not break the list the block sits in.
+    const dir = withExample('1. Step\n\n   ```ts from="examples/x.ts#hello"\n   old();\n   ```\n');
+    checkExamples(dir, { run: false, write: true });
+    expect(readFileSync(path.join(dir, 'README.md'), 'utf8')).toBe(
+      '1. Step\n\n   ```ts from="examples/x.ts#hello"\n   export function hello() {\n     return greet("a");\n   }\n   ```\n',
+    );
+  });
+
+  it('fails a missing file, a missing region and a path outside the package, even with --write', () => {
+    // Why: --write must never invent content or read files outside the package.
+    const readme = [
+      fence('ts from="examples/none.ts#hello"', 'a();'),
+      fence('ts from="examples/x.ts#nope"', 'a();'),
+      fence('ts from="../outside.ts#hello"', 'a();'),
+    ].join('\n');
+    const failures = checkExamples(withExample(readme), { run: false, write: true }).failures;
+    expect(failures.map(item => item.rule)).toEqual(['DOCX_E012', 'DOCX_E012', 'DOCX_E012']);
+  });
+
+  it('rejects a malformed from and from combined with run', () => {
+    // Why: a from block is a mirror; a half-written word must fail, not pass as plain code.
+    const rules = ['ts from="x.ts"', 'ts from=x.ts#a', 'ts run from="x.ts#a"'].flatMap(info =>
+      extractExamples('README.md', fence(info, 'a();')).failures.map(item => item.rule),
+    );
+    expect(rules).toEqual(['DOCX_E005', 'DOCX_E005', 'DOCX_E005']);
+  });
+});
+
+describe('report summary', () => {
+  it('lists skipped blocks with file, line and reason, and counts compiled and run modules', () => {
+    // Why: the release tooling shows what a package chose not to prove.
+    const readme = [fence('ts skip="needs Stripe keys"', 'pay();'), fence('ts run', 'export const a = 1;')].join('\n');
+    const report = checkExamples(fixture(readme), { run: true });
+    expect(report).toMatchObject({
+      skipped: 1,
+      skippedBlocks: [{ file: 'README.md', line: 1, reason: 'needs Stripe keys' }],
+      compiled: 2,
+      ran: 2,
+    });
   });
 });

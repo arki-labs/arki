@@ -16,7 +16,12 @@
  * DOC_E004-E007 (llms.txt shape, "Import paths" equals `exports`, 80 lines /
  * 8 KiB), DOC_E008-E009 (links resolve inside the package), DOC_E010-E011
  * (guide sections; `dot explain/doctor --json` for a `./dot` export),
- * DOC_E012 (`files` ships the docs), DOC_E013 (a `test:docs` script).
+ * DOC_E012 (`files` ships the docs), DOC_E013 (a `test:docs` script),
+ * DOC_E014-E016 (CHANGELOG.md, LICENSE, AGENTS.md exist), DOC_E017 (README H2s,
+ * `README_SECTIONS`), DOC_E018 (AGENTS.md role line and sections), DOC_E019
+ * (banned words in README, docs and llms.txt), SRC_E001 (the package's own
+ * version as a string literal in `src/**`), ERR_E001 (an error code of
+ * `error-index.ts` without `@fix` or `@verify`).
  * Warnings: DOC_W001 forward-looking words, DOC_W002 llms.txt over 60 lines.
  *
  * Every library, private or public, also gets `public-types.ts`: TYPES_E001 (an
@@ -38,7 +43,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
-import { checkDocs } from './docs';
+import { checkDocs, checkSource } from './docs';
+import { checkErrorDocs } from './error-index';
 import { leaves, readManifest } from './manifest';
 import { checkPublicTypes } from './public-types';
 import { complain, say } from './report';
@@ -128,6 +134,7 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
     const docs = checkDocs(dir, manifest);
     errors.push(...docs.errors);
     warnings.push(...docs.warnings);
+    errors.push(...checkSource(dir).errors, ...checkErrorDocs(dir));
   }
 
   // Private packages too: wave-1 Zod targets such as ai, queue and testing are private.

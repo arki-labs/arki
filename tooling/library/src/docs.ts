@@ -10,8 +10,9 @@
  * sit in `library-check-baseline.json` as an exact string. Rules E004-E012 on a
  * file fire only when that file exists, so a missing file is one baseline line.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 
 import type { CheckResult } from './library-check';
 import type { Manifest } from './manifest';
@@ -31,10 +32,59 @@ export const DOC_RULES = {
   DOC_E011: 'agent guide "Verify" lacks dot explain --json and dot doctor --json',
   DOC_E012: 'package.json "files" does not ship a doc file',
   DOC_E013: 'no "test:docs" script',
+  DOC_E014: 'no CHANGELOG.md',
+  DOC_E015: 'no LICENSE',
+  DOC_E016: 'no AGENTS.md',
+  DOC_E017: 'README H2s missing or misordered',
+  DOC_E018: 'AGENTS.md lacks the role line or a required section',
+  DOC_E019: 'banned word in README, docs or llms.txt',
   DOC_W001: 'forward-looking language',
   DOC_W002: 'llms.txt over 60 lines',
 } as const;
 export type DocRule = keyof typeof DOC_RULES;
+
+export const SRC_RULES = {
+  SRC_E001: 'string literal equals the package version; read it from package.json or a generated src/version.ts',
+} as const;
+export type SrcRule = keyof typeof SRC_RULES;
+
+/**
+ * The README H2s every public package has, defined once for the whole repo
+ * (library-check and the release readiness table both read this array). The
+ * first four must be the first four H2s, in this order; the rest may sit
+ * anywhere. Body text is free: this is a minimum, not a template.
+ */
+export const README_SECTIONS = [
+  'Install',
+  'Quick start',
+  'When not to use this',
+  'Runtime support',
+  'Public imports',
+  'Failure behaviour',
+  'Limits',
+  'Documentation',
+  'Support',
+] as const;
+/** How many of `README_SECTIONS` must open the README, in order. */
+const README_LEAD = 4;
+
+/** Why a README's H2 list breaks the standard, or `undefined` when it keeps it. */
+export function readmeSectionProblem(h2s: readonly string[]): string | undefined {
+  const lower = h2s.map(text => text.trim().toLowerCase());
+  const wanted = README_SECTIONS.map(name => name.toLowerCase());
+  const missing = README_SECTIONS.filter((_, index) => !lower.includes(wanted[index] ?? ''));
+  if (missing.length > 0) return `missing ${missing.join(', ')}`;
+  const lead = wanted.slice(0, README_LEAD);
+  if (lead.some((name, index) => lower[index] !== name)) {
+    return `the first H2s are ${h2s.slice(0, README_LEAD).join(', ')}, want ${README_SECTIONS.slice(0, README_LEAD).join(', ')}`;
+  }
+  return undefined;
+}
+
+const AGENTS_ROLE_LINE = 'AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.';
+const AGENTS_SECTIONS = ['Laws', 'Changing this package', 'Verify'] as const;
+/** Words that promise or hedge instead of stating; matched whole, any case. */
+const BANNED_WORDS = /\b(?:simply|just|easy|powerful|blazing|seamless|robust|leverage|might|should probably)\b/gi;
 
 /** The H2s of `llms.txt`, in order. `## Optional` may follow them; nothing else may. */
 export const LLMS_SECTIONS = ['Import paths', 'Start here', 'By task', 'Rules that bite'] as const;
@@ -44,9 +94,9 @@ export const GUIDE_SECTIONS = ['The model', 'Task map', 'Rules that bite', 'Erro
 const LLMS = 'llms.txt';
 const GUIDE = 'docs/agent-guide.md';
 const OPTIONAL = 'Optional';
-const LLMS_MAX_LINES = 80;
+export const LLMS_MAX_LINES = 80;
 const LLMS_WARN_LINES = 60;
-const LLMS_MAX_BYTES = 8192;
+export const LLMS_MAX_BYTES = 8192;
 /** A heuristic for promises the code does not keep yet; a warning only. */
 const FORWARD_LOOKING = /\b(?:future|will land|v1\.1|coming soon|deferred|not yet)\b/gi;
 
@@ -294,19 +344,68 @@ function readIfExists(file: string): string | undefined {
   return existsSync(file) ? readFileSync(file, 'utf8') : undefined;
 }
 
+/** Text outside fences and inline code, with line numbers. */
+function proseOutsideCode(markdown: string): { text: string; line: number }[] {
+  return scanFences(markdown).prose.map(({ text, line }) => ({ text: text.replaceAll(/(`+)[^`]*\1/g, ''), line }));
+}
+
+function bannedWords(file: string, markdown: string): string[] {
+  const hits = proseOutsideCode(markdown).flatMap(({ text, line }) =>
+    [...text.matchAll(BANNED_WORDS)].map(match => `${String(line)} "${match[0].toLowerCase()}"`),
+  );
+  return hits.length === 0 ? [] : [message('DOC_E019', `: ${file} line ${hits.join(', line ')}`)];
+}
+
+/** Every `.md` and `.txt` file under `docs/`, package-relative with `/`. */
+function docsFiles(dir: string): string[] {
+  const root = path.join(dir, 'docs');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile() && /\.(?:md|txt)$/.test(entry.name))
+    .map(entry => path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
+    .toSorted();
+}
+
+function checkAgents(text: string): string[] {
+  const errors: string[] = [];
+  const first = splitLines(text).find(line => line.trim() !== '');
+  if (first?.trim() !== AGENTS_ROLE_LINE) errors.push(message('DOC_E018', `: line 1 is not "${AGENTS_ROLE_LINE}"`));
+  const sections = h2Sections(text);
+  const missing = AGENTS_SECTIONS.filter(name => !sections.has(name));
+  if (missing.length > 0) errors.push(message('DOC_E018', `: missing ${missing.join(', ')}`));
+  return errors;
+}
+
 export function checkDocs(dir: string, manifest: Manifest): CheckResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const shipped: string[] = [];
 
-  if (!existsSync(path.join(dir, 'README.md'))) errors.push(message('DOC_E001'));
+  const readme = readIfExists(path.join(dir, 'README.md'));
+  if (readme === undefined) {
+    errors.push(message('DOC_E001'));
+  } else {
+    const problem = readmeSectionProblem(
+      headings(readme)
+        .filter(heading => heading.level === 2)
+        .map(heading => heading.text),
+    );
+    if (problem !== undefined) errors.push(message('DOC_E017', `: ${problem}`));
+    errors.push(...bannedWords('README.md', readme));
+  }
+  if (!existsSync(path.join(dir, 'CHANGELOG.md'))) errors.push(message('DOC_E014'));
+  if (!existsSync(path.join(dir, 'LICENSE'))) errors.push(message('DOC_E015'));
+  const agents = readIfExists(path.join(dir, 'AGENTS.md'));
+  if (agents === undefined) errors.push(message('DOC_E016'));
+  else errors.push(...checkAgents(agents));
+  for (const file of docsFiles(dir)) errors.push(...bannedWords(file, readFileSync(path.join(dir, file), 'utf8')));
 
   const llms = readIfExists(path.join(dir, LLMS));
   if (llms === undefined) {
     errors.push(message('DOC_E002'));
   } else {
     const result = checkLlms(dir, manifest, llms);
-    errors.push(...result.errors);
+    errors.push(...result.errors, ...bannedWords(LLMS, llms));
     warnings.push(...result.warnings);
     shipped.push(LLMS, ...result.targets);
   }
@@ -332,4 +431,37 @@ export function checkDocs(dir: string, manifest: Manifest): CheckResult {
   else if (!script.startsWith('arki-doc-examples')) errors.push(message('DOC_E013', ': it must run arki-doc-examples'));
 
   return { errors: [...new Set(errors)], warnings };
+}
+
+const versionSchema = z.object({ version: z.string().min(1) });
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+
+/** Package-relative `src/**` code files, `/`-separated. */
+function sourceFiles(dir: string): string[] {
+  const root = path.join(dir, 'src');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile() && SOURCE_FILE.test(entry.name))
+    .map(entry => path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
+    .toSorted();
+}
+
+/**
+ * SRC_E001: a string literal equal to the package's own version. It goes stale
+ * on the next release. `src/version.ts` is the generated place for it.
+ */
+export function checkSource(dir: string): CheckResult {
+  const version = versionSchema.safeParse(JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')));
+  if (!version.success) return { errors: [], warnings: [] };
+  const literal = new RegExp(
+    String.raw`(['"\x60])${version.data.version.replaceAll(/[.+^${}()|[\]\\]/g, String.raw`\$&`)}\1`,
+  );
+  const errors = sourceFiles(dir)
+    .filter(file => file !== 'src/version.ts')
+    .flatMap(file => {
+      const lines = splitLines(readFileSync(path.join(dir, file), 'utf8'));
+      const hits = lines.flatMap((text, index) => (literal.test(text) ? [String(index + 1)] : []));
+      return hits.length === 0 ? [] : [`SRC_E001 ${SRC_RULES.SRC_E001}: ${file} line ${hits.join(', line ')}`];
+    });
+  return { errors, warnings: [] };
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { checkDocs, headingAnchors, isShipped, localLinks, parseLlmsTxt } from './docs';
+import { checkDocs, checkSource, headingAnchors, isShipped, localLinks, parseLlmsTxt } from './docs';
 import { checkAll, checkLibrary } from './library-check';
 import { readManifest } from './manifest';
 
@@ -218,7 +218,17 @@ describe('library-check scope', () => {
   it('checks docs on public packages only', () => {
     const root = repo();
     expect(checkLibrary(path.join(root, 'packages', 'closed')).errors).toEqual([]);
-    expect(checkAll(root, []).errors.map(item => item.package)).toEqual(['@arki/open', '@arki/open', '@arki/open']);
+    const open = checkAll(root, []).errors;
+    expect(new Set(open.map(item => item.package))).toEqual(new Set(['@arki/open']));
+    expect(open.map(item => item.error.split(' ')[0])).toEqual([
+      'DOC_E017',
+      'DOC_E014',
+      'DOC_E015',
+      'DOC_E016',
+      'DOC_E002',
+      'DOC_E003',
+      'DOC_E013',
+    ]);
   });
 
   it('lets a baselined doc error pass and fails once it is fixed, so the baseline only shrinks', () => {
@@ -227,5 +237,60 @@ describe('library-check scope', () => {
     expect(checkAll(root, [entry]).stale).toEqual([]);
     writeFileSync(path.join(root, 'packages', 'open', 'llms.txt'), '# @arki/open\n');
     expect(checkAll(root, [entry]).stale).toEqual([entry]);
+  });
+});
+
+describe('Now-tier doc rules', () => {
+  const problems = (edit: Record<string, string | null>): string[] => errorsOf(docPackage(edit));
+  const readme = readFileSync(path.join(FIXTURE, 'README.md'), 'utf8');
+
+  it('asks for CHANGELOG.md, LICENSE and AGENTS.md by name', () => {
+    // Why: npm shows these files first; a package that lacks one looks abandoned.
+    expect(problems({ 'CHANGELOG.md': null, LICENSE: null, 'AGENTS.md': null })).toEqual([
+      'DOC_E014 no CHANGELOG.md',
+      'DOC_E015 no LICENSE',
+      'DOC_E016 no AGENTS.md',
+    ]);
+  });
+
+  it('wants the four lead H2s first, in order, and the rest anywhere', () => {
+    // Why: every README answers the same questions in the same order, for people and agents alike.
+    const body = readme.replace('## Install\n', '## Intro\n\nText.\n\n## Install\n');
+    expect(problems({ 'README.md': body }).join('\n')).toContain(
+      'DOC_E017 README H2s missing or misordered: the first H2s are Intro',
+    );
+    const gone = readme.replace('## Support', '## Help');
+    expect(problems({ 'README.md': gone })).toEqual(['DOC_E017 README H2s missing or misordered: missing Support']);
+    const late = readme.replace('## Limits', '## Zzz').replace('## Support', '## Limits\n\nx\n\n## Support');
+    expect(problems({ 'README.md': late })).toEqual([]);
+  });
+
+  it('wants the AGENTS.md role line and its three sections', () => {
+    // Why: an agent reads AGENTS.md first and must learn where laws, tasks and the map live.
+    const result = problems({ 'AGENTS.md': '# Agents\n\n## Laws\n' });
+    expect(result).toEqual([
+      'DOC_E018 AGENTS.md lacks the role line or a required section: line 1 is not "AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map."',
+      'DOC_E018 AGENTS.md lacks the role line or a required section: missing Changing this package, Verify',
+    ]);
+  });
+
+  it('bans soft words in prose but not in code', () => {
+    // Why: claims like "just" and "easy" promise what the code does not prove.
+    const body = `${readme}\nIt is simply easy. Use \`just\` here.\n\n\`\`\`ts\nconst might = 1;\n\`\`\`\n`;
+    expect(problems({ 'README.md': body }).map(line => line.replaceAll(/ line \d+/g, ' line N'))).toEqual([
+      'DOC_E019 banned word in README, docs or llms.txt: README.md line N "simply", line N "easy"',
+    ]);
+    expect(problems({ 'docs/agent-guide.md': `${guide}\nThis is robust.\n` })).toEqual([
+      expect.stringContaining('DOC_E019 banned word in README, docs or llms.txt: docs/agent-guide.md'),
+    ]);
+  });
+
+  it('finds the own version as a string literal in src, except src/version.ts', () => {
+    // Why: a hard-coded version goes stale at the next release and lies to users.
+    const dir = docPackage({}, { version: '1.2.3' });
+    mkdirSync(path.join(dir, 'src'));
+    writeFileSync(path.join(dir, 'src/index.ts'), "export const a = '1.2.3';\nexport const b = '1.2.30';\n");
+    writeFileSync(path.join(dir, 'src/version.ts'), "export const version = '1.2.3';\n");
+    expect(checkSource(dir).errors).toEqual([expect.stringMatching(/^SRC_E001 .*: src\/index\.ts line 1$/)]);
   });
 });

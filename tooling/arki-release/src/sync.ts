@@ -72,14 +72,6 @@ const STAGING_DIR = path.join('.release', 'sync');
 const FOUNDER = { name: 'Alexandru Furculita', email: 'alex@furculita.net' } as const;
 const RELEASE_BOT = { name: 'ARKI Release Bot', email: 'bot@arki-labs.org' } as const;
 
-/** Shipped in every package mirror. T2.10 replaces the text; keep it one value. */
-export const SECURITY_MD = `# Security policy
-
-Report vulnerabilities through GitHub private vulnerability reporting on
-https://github.com/arki-labs/arki (Security tab, "Report a vulnerability").
-Do not open a public issue for a security problem.
-`;
-
 // Plan
 // ---------------------------------------------------------------------------
 
@@ -448,6 +440,9 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
   }
   const wave = collected.wave;
 
+  // The text is written once, in the root SECURITY.md that the public tree also ships.
+  const securityMd = await readFile(path.join(cwd, 'SECURITY.md'), 'utf8');
+
   // 2. Per-package trees and notes. Built before the arki mirror so a bad tarball stops early.
   const packages: SyncPlanPackage[] = [];
   const noteSections: string[] = [];
@@ -465,7 +460,7 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
     }
     const readme = await readFile(path.join(tree, 'README.md'), 'utf8').catch(() => '');
     await writeFile(path.join(tree, 'README.md'), `${mirrorReadmeHeader({ name: tarball.name, version: tarball.version, date })}\n\n${readme}`);
-    await writeFile(path.join(tree, 'SECURITY.md'), SECURITY_MD);
+    await writeFile(path.join(tree, 'SECURITY.md'), securityMd);
 
     const changelog = await readFile(path.join(tree, 'CHANGELOG.md'), 'utf8').catch(() => '');
     const entry = extractChangelogEntry(changelog, tarball.version) ?? `Release ${tarball.name} v${tarball.version}.`;

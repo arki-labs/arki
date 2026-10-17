@@ -18,7 +18,11 @@
  * A package can narrow its engines with `"arki": { "runtimes": [...] }` in package.json;
  * a leg outside that list prints `out of scope` and passes.
  *
- *   arki-runtimes [--only node,bun] [--require-all]
+ *   arki-runtimes [--only node,bun] [--require-all] [--write-readme]
+ *
+ * `--write-readme` writes one row per engine (result, version tested, UTC date) between
+ * `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in README.md. Engines not run
+ * in this invocation (`--only`) keep their existing row.
  *
  * To get a Hermes binary matching React Native 0.86 (Hermes V1):
  *   git clone --depth 1 --branch hermes-v250829098.0.17 https://github.com/facebook/hermes
@@ -44,6 +48,69 @@ type Leg = (typeof LEGS)[number];
 /** True when the package claims the engine behind `leg`. `purity` has no engine and always runs. */
 export function isLegInScope(leg: Leg, runtimes: ReadonlySet<Runtime>): boolean {
   return leg === 'purity' || runtimes.has(leg);
+}
+
+export const RUNTIMES_START = '<!-- runtimes:start -->';
+export const RUNTIMES_END = '<!-- runtimes:end -->';
+
+/** What a README row says about one engine. `not run` = engine missing here; `n/a` = package does not claim it. */
+export type RuntimeOutcome = 'pass' | 'fail' | 'not run' | 'n/a';
+
+export type RuntimeRow = {
+  readonly runtime: string;
+  readonly result: RuntimeOutcome;
+  readonly version: string;
+  /** UTC day, `YYYY-MM-DD`. */
+  readonly date: string;
+};
+
+const TABLE_HEADER = ['Runtime', 'Result', 'Version tested', 'Date (UTC)'] as const;
+const rowLine = (cells: readonly string[]): string => `| ${cells.join(' | ')} |`;
+
+/** The table between the runtimes markers, one line per row. */
+export function renderRuntimesTable(rows: readonly RuntimeRow[]): string {
+  return [
+    rowLine(TABLE_HEADER),
+    rowLine(TABLE_HEADER.map(() => '---')),
+    ...rows.map(row => rowLine([row.runtime, row.result, row.version, row.date])),
+  ].join('\n');
+}
+
+/** Reads the rows back out of a table `renderRuntimesTable` wrote, so a partial run can keep the other engines. */
+export function parseRuntimesTable(table: string): RuntimeRow[] {
+  const rows: RuntimeRow[] = [];
+  for (const line of table.split('\n')) {
+    const cells = line
+      .trim()
+      .replace(/^\||\|$/g, '')
+      .split('|')
+      .map(cell => cell.trim());
+    const [runtime, result, version, date] = cells;
+    if (cells.length !== 4 || !runtime || !version || !date) continue;
+    if (result !== 'pass' && result !== 'fail' && result !== 'not run' && result !== 'n/a') continue;
+    rows.push({ runtime, result, version, date });
+  }
+  return rows;
+}
+
+/**
+ * Puts `fresh` rows into the marked section of a README. A row for an engine
+ * not in `fresh` stays as it was; new engines are appended in `order`.
+ * Throws when the markers are missing, repeated or out of order, so a typo
+ * never silently skips the update.
+ */
+export function updateRuntimesSection(readme: string, fresh: readonly RuntimeRow[], order: readonly string[]): string {
+  const starts = readme.split(RUNTIMES_START).length - 1;
+  const ends = readme.split(RUNTIMES_END).length - 1;
+  const start = readme.indexOf(RUNTIMES_START);
+  const end = readme.indexOf(RUNTIMES_END);
+  if (starts !== 1 || ends !== 1 || end < start) {
+    throw new Error(`README.md needs exactly one ${RUNTIMES_START} ... ${RUNTIMES_END} pair, in that order`);
+  }
+  const kept = parseRuntimesTable(readme.slice(start + RUNTIMES_START.length, end));
+  const byRuntime = new Map([...kept, ...fresh].map(row => [row.runtime, row]));
+  const rows = [...byRuntime.values()].toSorted((a, b) => order.indexOf(a.runtime) - order.indexOf(b.runtime));
+  return `${readme.slice(0, start + RUNTIMES_START.length)}\n${renderRuntimesTable(rows)}\n${readme.slice(end)}`;
 }
 
 /** The leg could not run because its engine is missing. */
@@ -160,6 +227,7 @@ async function browser(context: Context): Promise<void> {
       `Chromium cannot start: ${error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error)}`,
     );
   }
+  chromiumVersion = session.version();
   const logs: string[] = [];
   try {
     const page = await session.newPage();
@@ -197,6 +265,28 @@ function hermes(context: Context): void {
   smoke(binary, [script], context.cwd, HERMES_FAILURE_MARKER);
 }
 
+/** The engine's own version string, or `unknown` when it cannot be asked. */
+function engineVersion(leg: Leg, cwd: string): string {
+  const command: Record<Leg, readonly [string, readonly string[]] | undefined> = {
+    purity: undefined,
+    node: ['node', ['--version']],
+    bun: ['bun', ['--version']],
+    deno: ['deno', ['--version']],
+    browser: undefined,
+    hermes: [process.env['HERMES_BIN'] ?? 'hermes', ['-version']],
+  };
+  const entry = command[leg];
+  if (!entry) return 'unknown';
+  const result = spawnSync(entry[0], entry[1], { cwd, encoding: 'utf8' });
+  const first = `${result.stdout}${result.stderr}`
+    .split('\n')
+    .map(line => line.trim())
+    .find(Boolean);
+  // `deno 2.9.7 (stable, release, ...)`: keep the number only.
+  const cleaned = first?.replace(/^(?:Hermes|deno)\s+/i, '').replace(/\s+\(.*$/, '');
+  return result.status === 0 && cleaned ? cleaned : 'unknown';
+}
+
 const legRunners: Record<Leg, (context: Context) => void | Promise<void>> = {
   purity,
   node: ({ cwd }) => smoke('node', [SMOKE], cwd),
@@ -205,6 +295,9 @@ const legRunners: Record<Leg, (context: Context) => void | Promise<void>> = {
   browser,
   hermes,
 };
+
+/** Chromium's version, read while the browser leg has it open. */
+let chromiumVersion: string | undefined;
 
 function selectLegs(only: string | undefined): readonly Leg[] {
   if (!only) return LEGS;
@@ -217,7 +310,11 @@ function selectLegs(only: string | undefined): readonly Leg[] {
 
 async function main(): Promise<number> {
   const { values } = parseArgs({
-    options: { only: { type: 'string' }, 'require-all': { type: 'boolean', default: false } },
+    options: {
+      only: { type: 'string' },
+      'require-all': { type: 'boolean', default: false },
+      'write-readme': { type: 'boolean', default: false },
+    },
   });
   const cwd = process.cwd();
   const context: Context = { cwd, manifest: readManifest(cwd) };
@@ -226,23 +323,39 @@ async function main(): Promise<number> {
 
   const failed: Leg[] = [];
   const incomplete: Leg[] = [];
+  const rows: RuntimeRow[] = [];
+  const date = new Date().toISOString().slice(0, 10);
   for (const leg of selectLegs(values.only)) {
     say(`${context.manifest.name} ${leg}`);
     if (!isLegInScope(leg, context.manifest.runtimes)) {
       say(`  out of scope: package.json "arki.runtimes" does not list ${leg}`);
+      if (leg !== 'purity') rows.push({ runtime: leg, result: 'n/a', version: '-', date });
       continue;
     }
     try {
       await legRunners[leg](context);
+      if (leg !== 'purity') {
+        const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
+        rows.push({ runtime: leg, result: 'pass', version, date });
+      }
     } catch (error) {
       if (error instanceof Incomplete) {
         say(`INCOMPLETE: ${leg} (${error.message})`);
         incomplete.push(leg);
+        rows.push({ runtime: leg, result: 'not run', version: '-', date });
       } else {
         complain(`FAILED: ${leg}\n${error instanceof Error ? error.message : String(error)}`);
         failed.push(leg);
+        const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
+        rows.push({ runtime: leg, result: 'fail', version, date });
       }
     }
+  }
+
+  if (values['write-readme']) {
+    const readme = path.join(cwd, 'README.md');
+    writeFileSync(readme, updateRuntimesSection(readFileSync(readme, 'utf8'), rows, LEGS));
+    say(`arki-runtimes: wrote the runtimes table to README.md`);
   }
 
   if (failed.length > 0) {
