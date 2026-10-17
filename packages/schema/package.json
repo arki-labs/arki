@@ -43,6 +43,7 @@
     "!src/**/__fixtures__/**",
     "docs/**",
     "llms.txt",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "package.json"
@@ -57,7 +58,7 @@
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false && tsc -p examples/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

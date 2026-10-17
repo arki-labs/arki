@@ -1,5 +1,5 @@
 /**
- * `@arki/live/dot` (peer `@arki/dot`): `liveQueries`, the Dot plugin that runs
+ * The Dot plugin (peer `@arki/dot`): `liveQueries`, the Dot plugin that runs
  * live queries for an app.
  *
  * - Declaration: the manifest is read from the contract once (E001 on bad meta).

@@ -1,5 +1,5 @@
 /**
- * `@arki/live/pg`: the Postgres side. The trigger migration, the boot check,
+ * The Postgres side. The trigger migration, the boot check,
  * `touch` for what no trigger sees, and the hub's source on a `pg` pool.
  * Peers: `@arki/db`, `drizzle-orm`.
  */

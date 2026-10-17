@@ -1,5 +1,5 @@
 /**
- * `@arki/live/react` (peers `react`, `@tanstack/react-query`): one stream per
+ * The React provider (peers `react`, `@tanstack/react-query`): one stream per
  * tab that tells TanStack Query which queries to refetch.
  *
  * - `LiveProvider` opens the stream (in an effect, so never on the server) and

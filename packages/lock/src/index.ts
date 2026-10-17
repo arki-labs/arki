@@ -1,3 +1,4 @@
+/** `@arki/lock`: distributed locks and semaphores over any store; a busy lock is a returned failure. */
 export { LOCK_ERROR_CODES, LockError, LockHeld } from './errors.js';
 export type { LockErrorCode, LockErrorInit, LockMethod } from './errors.js';
 export type { Scheduler, SchedulerHandle } from './scheduler.js';

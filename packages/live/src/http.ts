@@ -1,5 +1,5 @@
 /**
- * `@arki/live/http` (peer `@arki/http`): the SSE stream, `GET /api/live`.
+ * The SSE stream, `GET /api/live` (peer `@arki/http`).
  *
  * What a request goes through, in this order, all before any stream header:
  *

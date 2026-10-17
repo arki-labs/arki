@@ -75,6 +75,7 @@
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
     "!src/tests/**",
+    "CHANGELOG.md",
     "README.md",
     "llms.txt",
     "docs/agent-guide.md",

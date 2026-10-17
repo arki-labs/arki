@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "..",
+    "types": ["vitest/globals"],
+    "paths": {
+      "@arki/lock": ["../src/index.ts"],
+      "@arki/lock/memory": ["../src/memory.ts"]
+    }
+  },
+  "include": ["./*.ts"]
+}

@@ -10,7 +10,7 @@ Two errors, kept apart on purpose: `SchemaError` means the **data** is wrong. `S
 bun add @arki/schema
 ```
 
-## Parse a value
+## Quick start
 
 `parse` returns the schema's output type, not its input type.
 
@@ -23,6 +23,55 @@ const Age = z.string().transform(text => Number(text));
 const age: number = parse(Age, '42');
 if (age !== 42) throw new Error(`unexpected age: ${age}`);
 ```
+
+For bad form input, turn the error into one message per field:
+
+```ts from="examples/signup.ts#field-errors"
+import * as v from 'valibot';
+
+import { parse, pathOf, SchemaError } from '@arki/schema';
+
+const Signup = v.object({ name: v.string(), age: v.number() });
+
+/** Turn bad form input into one message per field. A broken schema is not bad data, so it passes through. */
+export function fieldErrors(input: unknown): Record<string, string> {
+  try {
+    parse(Signup, input);
+    return {};
+  } catch (error) {
+    if (!(error instanceof SchemaError)) throw error;
+    const errors: Record<string, string> = {};
+    for (const issue of error.issues) errors[pathOf(issue).map(String).join('.')] = issue.message;
+    return errors;
+  }
+}
+```
+
+## When not to use this
+
+- **To validate.** This package runs a schema; it does not define one. Bring Zod, Valibot, ArkType or your own.
+- **When one validator is enough.** If your code only ever uses Zod, `schema.parse` is shorter. This package pays off when a library must accept any validator.
+- **For JSON Schema other than draft 2020-12.** The bridge answers that one target only.
+
+## Runtime support
+
+The package uses no Node or Bun built-ins. It runs in Node, Bun, Deno and browsers, checked by `test:runtimes`. Hermes needs `HERMES_BIN` and has no row until a run records one.
+
+<!-- runtimes:start -->
+
+| Runtime | Result  | Version tested        | Date (UTC) |
+| ------- | ------- | --------------------- | ---------- |
+| node    | pass    | v26.11.1              | 2026-10-17 |
+| bun     | pass    | 1.4.2                 | 2026-10-17 |
+| deno    | pass    | 2.9.7                 | 2026-10-17 |
+| browser | pass    | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes  | not run | -                     | 2026-10-17 |
+
+<!-- runtimes:end -->
+
+## Public imports
+
+- `@arki/schema`: the only entry. Everything in the API table below.
 
 ## Parse with an async schema
 
@@ -102,10 +151,52 @@ if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
 | `hasJsonSchema(schema)`                                      | True when the schema can describe itself as JSON Schema.                                                |
 | `withJsonSchema(schema, input, output?)`                     | A new schema with a draft-2020-12 JSON Schema.                                                          |
 
-## Errors
+## Failure behaviour
+
+The package never returns a failure value. It returns the schema's output or throws one of two errors.
+
+- **`SchemaError`**: the data is wrong. It has no code. `issues` says what is wrong, and the message is `formatIssues(issues)`. Handle it: show the user the message.
+- **`SchemaRunError`**: the schema could not be run. It has a stable `code` and a `remediation`. Do not handle it as bad data. Fix the schema or the call.
+- **`parseAsync` rejects** with the same two errors. It never throws before it returns the promise.
 
 | Code               | Meaning                                                                         | What to do                                   |
 | ------------------ | ------------------------------------------------------------------------------- | -------------------------------------------- |
 | `ARKI_SCHEMA_E001` | `parse` got an async result from `validate`.                                    | Use `parseAsync`.                            |
 | `ARKI_SCHEMA_E002` | The schema's `validate` threw or rejected. The thrown value is the `cause`.     | Fix the schema. This is a bug, not bad data. |
 | `ARKI_SCHEMA_E003` | A `withJsonSchema` converter was asked for a target other than `draft-2020-12`. | Ask for `draft-2020-12`.                     |
+
+## Limits
+
+- **`parse` takes sync schemas only.** An async check makes it throw `ARKI_SCHEMA_E001`. Use `parseAsync`.
+- **One JSON Schema target.** `withJsonSchema` answers `draft-2020-12`. Any other target throws `ARKI_SCHEMA_E003`.
+- **The wrapper is a new object.** The result of `withJsonSchema` validates like the original but does not have its other methods, such as Zod's `.parse`.
+- **Two copies break `instanceof`.** `error instanceof SchemaError` fails across two installed copies of the package. Keep one copy.
+- **Paths are keys, not strings.** `pathOf` returns plain keys, so a key with a dot in it stays one segment.
+
+The `parse` limit as code:
+
+```ts run
+import { z } from 'zod';
+
+import { parse, SCHEMA_ERROR_CODES, SchemaRunError } from '@arki/schema';
+
+try {
+  parse(
+    z.string().refine(value => Promise.resolve(value.length > 0)),
+    'a',
+  );
+  throw new Error('expected an async schema to be refused');
+} catch (error) {
+  if (!(error instanceof SchemaRunError) || error.code !== SCHEMA_ERROR_CODES.asyncResult) throw error;
+}
+```
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): tasks, step by step.
+- [llms.txt](llms.txt): the map for agents.
+- [CHANGELOG](CHANGELOG.md).
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.

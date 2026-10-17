@@ -75,6 +75,9 @@
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
     "!src/**/__tests__/**",
+    "docs/**",
+    "llms.txt",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "package.json"
@@ -87,17 +90,9 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
-  },
-  "arki": {
-    "runtimes": [
-      "node",
-      "bun",
-      "deno",
-      "browser",
-      "hermes"
-    ]
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false && tsc -p examples/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -105,30 +100,6 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "zod": "catalog:"
-  },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*",
-    "drizzle-orm": "catalog:drizzle",
-    "fast-check": "catalog:",
-    "ioredis": "catalog:",
-    "vitest": "catalog:"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    },
-    "drizzle-orm": {
-      "optional": true
-    },
-    "fast-check": {
-      "optional": true
-    },
-    "ioredis": {
-      "optional": true
-    },
-    "vitest": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",
@@ -158,7 +129,40 @@
     "testcontainers": "catalog:testing",
     "vitest": "catalog:"
   },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*",
+    "drizzle-orm": "catalog:drizzle",
+    "fast-check": "catalog:",
+    "ioredis": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "fast-check": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
   "publishConfig": {
     "access": "public"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
   }
 }

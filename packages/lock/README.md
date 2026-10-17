@@ -2,20 +2,6 @@
 
 Distributed locks and semaphores for TypeScript. One API over memory, Postgres, Redis and file stores.
 
-```ts
-import { createLocks } from '@arki/lock';
-import { memoryStore } from '@arki/lock/memory';
-
-const locks = createLocks({ store: memoryStore(), namespace: 'billing' });
-
-const result = await locks.mutex('send-invoices').tryRun(async ({ signal }) => {
-  // Only one caller gets here at a time. `signal` aborts if the lock is lost.
-  signal.throwIfAborted();
-  return 'sent';
-});
-// 'sent', or the LockHeld failure when someone else holds the lock
-```
-
 - **Four verbs, three lock types.** `tryRun`, `run`, `tryAcquire` and `acquire` work on a mutex, a semaphore and a read/write lock.
 - **Contention is a value.** A lock that someone else holds is the `LockHeld` failure (`lock.held`, from `@arki/failure`), returned, not thrown.
 - **Every store says what it promises.** Each store has a `guarantees` object. The handle types follow it, so a method a store cannot back does not exist on the handle.
@@ -23,23 +9,6 @@ const result = await locks.mutex('send-invoices').tryRun(async ({ signal }) => {
 - **Runs where your code runs.** Node, Bun and Deno. The memory store also runs in the browser and on Hermes.
 
 An honest note up front: a lock keeps jobs apart. It does not make a write safe by itself. Read [Which lock do I need](#which-lock-do-i-need) and the [production checklist](#production-checklist).
-
-## Contents
-
-- [Install](#install)
-- [Which lock do I need](#which-lock-do-i-need)
-- [The verbs](#the-verbs)
-- [Stores and guarantees](#stores-and-guarantees)
-- [Failure semantics](#failure-semantics)
-- [Dot integration](#dot-integration)
-- [Rolling deploy: `legacyKeys`](#rolling-deploy-legacykeys)
-- [Key encoding](#key-encoding)
-- [Production checklist](#production-checklist)
-- [Writing a store](#writing-a-store)
-- [Testing a multi-replica job](#testing-a-multi-replica-job)
-- [Not building](#not-building)
-- [Deliberate differences from `@nestjs/locks`](#deliberate-differences-from-nestjslocks)
-- [Benchmarks](#benchmarks)
 
 ## Install
 
@@ -49,16 +18,66 @@ bun add @arki/lock
 
 The root package has no database code. Each store lives on its own entry point, and you install only the client it needs.
 
-| Entry point | What it has | Optional peer you install |
-| --- | --- | --- |
-| `@arki/lock` | `createLocks`, `LockError`, types | none |
-| `@arki/lock/memory` | `memoryStore` | none |
-| `@arki/lock/pg` | `pgSession`, `pgTransaction` | `drizzle-orm` |
-| `@arki/lock/pg/lease` | `pgLease`, `ensureLockTable` | `drizzle-orm` |
-| `@arki/lock/redis` | `redisStore` | `ioredis` |
-| `@arki/lock/file` | `fileStore` | none |
-| `@arki/lock/dot` | `locks()` plugin for `@arki/dot` | `@arki/dot` |
-| `@arki/lock/testing` | manual scheduler, `testStore`, store conformance suite, replica property | `vitest`, `fast-check` |
+Peers are optional. Each entry point lists the client it needs in the Public imports table.
+
+## Quick start
+
+```ts from="examples/nightly.ts#run-once"
+import { createLocks, LockHeld } from '@arki/lock';
+import { memoryStore } from '@arki/lock/memory';
+
+const locks = createLocks({ store: memoryStore(), namespace: 'billing' });
+
+/** Send invoices unless another caller is already doing it. */
+export async function sendInvoices(send: () => Promise<number>): Promise<string> {
+  const result = await locks.mutex('send-invoices').tryRun(async ({ signal }) => {
+    signal.throwIfAborted(); // aborts if the lock is lost
+    return send();
+  });
+  if (LockHeld.is(result)) return 'skipped: another caller holds the lock';
+  return `sent ${result}`;
+}
+```
+
+`tryRun` runs the callback when the lock is free and returns `LockHeld` when it is not. With two callers at once, one runs and the other is told:
+
+```ts from="examples/nightly.ts#overlap"
+/** Two callers at once: one runs, the other is told the lock is busy. */
+export async function overlap(): Promise<[string, string]> {
+  const first = sendInvoices(async () => {
+    await new Promise(resolve => setTimeout(resolve, 20)); // the first caller is slow
+    return 3;
+  });
+  await Promise.resolve();
+  const second = await sendInvoices(async () => 3);
+  return [await first, second];
+}
+```
+
+## When not to use this
+
+- **To protect a database invariant.** Use a constraint, a conditional write or a transaction. A lock decides who starts; the database decides what commits.
+- **For a write you cannot undo and cannot fence.** A lock keeps jobs apart. A paused process can still write after its lease ended unless the resource checks a fence.
+- **For rate limits or throttles.** A limiter is not a lock.
+- **For a queue's unique jobs.** That belongs to the queue, built on `tryAcquire`.
+- **For quorum across independent Redis nodes.** Redlock is not built. See Not building.
+
+## Runtime support
+
+Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Postgres, Redis and file stores need their client and a server runtime.
+
+## Public imports
+
+| Entry point           | What it has                                                              | Optional peer you install |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------- |
+| `@arki/lock`          | `createLocks`, `LockError`, types                                        | none                      |
+| `@arki/lock/memory`   | `memoryStore`                                                            | none                      |
+| `@arki/lock/pg`       | `pgSession`, `pgTransaction`                                             | `drizzle-orm`             |
+| `@arki/lock/pg/lease` | `pgLease`, `ensureLockTable`                                             | `drizzle-orm`             |
+| `@arki/lock/redis`    | `redisStore`                                                             | `ioredis`                 |
+| `@arki/lock/file`     | `fileStore`                                                              | none                      |
+| `@arki/lock/dot`      | `locks()` plugin for `@arki/dot`                                         | `@arki/dot`               |
+| `@arki/lock/testing`  | manual scheduler, `testStore`, store conformance suite, replica property | `vitest`, `fast-check`    |
 
 ## Which lock do I need
 
@@ -90,33 +109,34 @@ Rules of thumb:
 
 Every lock handle has the same four verbs. `mutex`, `semaphore` and `readWrite` differ only in what they exclude.
 
-| Verb | What it does | Result |
-| --- | --- | --- |
-| `tryRun(fn, opts?)` | One attempt. Runs `fn` if the lock is free, releases after. | the value of `fn`, or `LockHeld` |
-| `run(fn, opts?)` | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after. | the value of `fn`, or `LockHeld` when still busy after `wait`; throws `aborted` |
-| `tryAcquire(opts?)` | One attempt. You release yourself. | a `Guard`, or `LockHeld` |
-| `acquire(opts?)` | Waits like `run`. You release yourself. | a `Guard`, or `LockHeld` when still busy after `wait`; throws `aborted` |
-| `lead(fn, { signal })` | Campaigns until `signal` aborts. Runs `fn` while leader. Lease stores only. | settles when `signal` aborts |
+| Verb                   | What it does                                                                | Result                                                                          |
+| ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `tryRun(fn, opts?)`    | One attempt. Runs `fn` if the lock is free, releases after.                 | the value of `fn`, or `LockHeld`                                                |
+| `run(fn, opts?)`       | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after.    | the value of `fn`, or `LockHeld` when still busy after `wait`; throws `aborted` |
+| `tryAcquire(opts?)`    | One attempt. You release yourself.                                          | a `Guard`, or `LockHeld`                                                        |
+| `acquire(opts?)`       | Waits like `run`. You release yourself.                                     | a `Guard`, or `LockHeld` when still busy after `wait`; throws `aborted`         |
+| `lead(fn, { signal })` | Campaigns until `signal` aborts. Runs `fn` while leader. Lease stores only. | settles when `signal` aborts                                                    |
 
 Call options:
 
-| Option | Applies to | Meaning |
-| --- | --- | --- |
-| `wait` | `run`, `acquire` | How long to wait. Optional on a process-scope store, where no `wait` means wait forever. On any other scope you must pass `wait` or `signal` (the types enforce it). |
-| `signal` | all | Aborts the wait. On `tryRun` and `tryAcquire` it aborts the attempt, and they throw `aborted` if the signal is already aborted or aborts during the store call. A caller's signal also aborts `ctx.signal`, with the caller's reason (not a `LockError`). |
-| `holdAtLeast` | all | Keep the lock at least this long after it was taken, even if `fn` is quicker. Closes the gap where a replica with a slow clock reruns a sub-second job. `run` resolves after the release, so after the hold. |
-| `onLost` | all | `'abort'` (default) or `'ignore'`. What `run` does when the lock was lost but `fn` returned. See [failure semantics](#failure-semantics). |
-| `weight` | semaphore only | Permits to take. A positive integer up to the limit. Default 1. |
+| Option        | Applies to       | Meaning                                                                                                                                                                                                                                                   |
+| ------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait`        | `run`, `acquire` | How long to wait. Optional on a process-scope store, where no `wait` means wait forever. On any other scope you must pass `wait` or `signal` (the types enforce it).                                                                                      |
+| `signal`      | all              | Aborts the wait. On `tryRun` and `tryAcquire` it aborts the attempt, and they throw `aborted` if the signal is already aborted or aborts during the store call. A caller's signal also aborts `ctx.signal`, with the caller's reason (not a `LockError`). |
+| `holdAtLeast` | all              | Keep the lock at least this long after it was taken, even if `fn` is quicker. Closes the gap where a replica with a slow clock reruns a sub-second job. `run` resolves after the release, so after the hold.                                              |
+| `onLost`      | all              | `'abort'` (default) or `'ignore'`. What `run` does when the lock was lost but `fn` returned. See [failure behaviour](#failure-behaviour).                                                                                                                 |
+| `weight`      | semaphore only   | Permits to take. A positive integer up to the limit. Default 1.                                                                                                                                                                                           |
 
 A duration is a number of milliseconds, or a string with the unit `ms`, `s`, `m` or `h`: `'250ms'`, `'5s'`, `'2m'`, `'1h'`. There are no days or weeks on purpose.
 
 ### Mutex
 
 ```ts
-import { createLocks, LockHeld } from '@arki/lock';
-import { pgSession } from '@arki/lock/pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+
+import { createLocks, LockHeld } from '@arki/lock';
+import { pgSession } from '@arki/lock/pg';
 
 const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
 const db = drizzle({ client: pool });
@@ -193,8 +213,8 @@ console.info(hits);
 `lead` exists only on handles of a lease store. It runs `fn` while this process is the leader.
 
 ```ts
-import { createLocks } from '@arki/lock';
 import type { LeaseDb } from '@arki/lock/pg/lease';
+import { createLocks } from '@arki/lock';
 import { ensureLockTable, pgLease } from '@arki/lock/pg/lease';
 
 declare const db: LeaseDb;
@@ -225,30 +245,30 @@ void locks.mutex('leader').lead(
 
 A store is a small object with `acquire`, `release` and, for leases, `extend`. It also declares a `guarantees` object. The types of every handle come from it.
 
-| Field | Values | Meaning |
-| --- | --- | --- |
-| `kind` | `hold`, `lease` | A **hold** lasts as long as a connection or a transaction. A **lease** lasts until it expires, so the manager renews it every `ttl / 3`. |
-| `scope` | `process`, `host`, `cluster` | Who is kept apart: callers in this process, processes on this machine, or processes anywhere. |
-| `wait` | `native`, `wake`, `poll`, `none` | How a blocked caller waits: inside the store, woken by a signal, by polling, or `none` (the store cannot wait; callers only try once). |
-| `shared` | boolean | `readWrite()` exists. |
-| `permits` | boolean | `semaphore()` exists. |
-| `fence` | `durable`, `best-effort`, `process`, `false` | How reliable the fencing token is. `false` means none, and `fence` is `undefined`. |
-| `releasedOnCrash` | `immediate`, `after-ttl` | How long a crashed holder keeps the lock. |
-| `clock` | `store`, `host`, `none` | Whose clock decides expiry. |
-| `poolerSafe` | boolean | Works behind a connection pooler. |
-| `releasedBy` | `'transaction'` or absent | The lock ends with the caller's transaction, so a guard has no `release`. |
-| `writerPreference` | boolean or absent | A waiting writer stops new readers. |
+| Field              | Values                                       | Meaning                                                                                                                                  |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`             | `hold`, `lease`                              | A **hold** lasts as long as a connection or a transaction. A **lease** lasts until it expires, so the manager renews it every `ttl / 3`. |
+| `scope`            | `process`, `host`, `cluster`                 | Who is kept apart: callers in this process, processes on this machine, or processes anywhere.                                            |
+| `wait`             | `native`, `wake`, `poll`, `none`             | How a blocked caller waits: inside the store, woken by a signal, by polling, or `none` (the store cannot wait; callers only try once).   |
+| `shared`           | boolean                                      | `readWrite()` exists.                                                                                                                    |
+| `permits`          | boolean                                      | `semaphore()` exists.                                                                                                                    |
+| `fence`            | `durable`, `best-effort`, `process`, `false` | How reliable the fencing token is. `false` means none, and `fence` is `undefined`.                                                       |
+| `releasedOnCrash`  | `immediate`, `after-ttl`                     | How long a crashed holder keeps the lock.                                                                                                |
+| `clock`            | `store`, `host`, `none`                      | Whose clock decides expiry.                                                                                                              |
+| `poolerSafe`       | boolean                                      | Works behind a connection pooler.                                                                                                        |
+| `releasedBy`       | `'transaction'` or absent                    | The lock ends with the caller's transaction, so a guard has no `release`.                                                                |
+| `writerPreference` | boolean or absent                            | A waiting writer stops new readers.                                                                                                      |
 
 The values each store declares today:
 
-| Factory | kind | scope | wait | readWrite | semaphore | fence | released on crash | clock | runtimes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `memoryStore()` | hold | process | wake | yes (writer preference) | yes | process | immediate | none | node, bun, deno, browser, hermes |
-| `pgSession(db)` | hold | cluster | native | yes | no | none | immediate | none | node, bun, deno |
-| `pgTransaction(tx)` | hold | cluster | native | yes | no | none | immediate (on rollback) | none | node, bun, deno |
-| `pgLease(db, { ttl })` | lease | cluster | poll, or wake with `listen` | no | yes | durable | after ttl | store | node, bun, deno |
-| `redisStore(client, { ttl })` | lease | cluster | wake, or poll | yes | yes | best-effort | after ttl | store | node, bun, deno |
-| `fileStore(dir)` | lease | host | poll | no | no | none | after `stale` | host | node, bun, deno |
+| Factory                       | kind  | scope   | wait                        | readWrite               | semaphore | fence       | released on crash       | clock | runtimes                         |
+| ----------------------------- | ----- | ------- | --------------------------- | ----------------------- | --------- | ----------- | ----------------------- | ----- | -------------------------------- |
+| `memoryStore()`               | hold  | process | wake                        | yes (writer preference) | yes       | process     | immediate               | none  | node, bun, deno, browser, hermes |
+| `pgSession(db)`               | hold  | cluster | native                      | yes                     | no        | none        | immediate               | none  | node, bun, deno                  |
+| `pgTransaction(tx)`           | hold  | cluster | native                      | yes                     | no        | none        | immediate (on rollback) | none  | node, bun, deno                  |
+| `pgLease(db, { ttl })`        | lease | cluster | poll, or wake with `listen` | no                      | yes       | durable     | after ttl               | store | node, bun, deno                  |
+| `redisStore(client, { ttl })` | lease | cluster | wake, or poll               | yes                     | yes       | best-effort | after ttl               | store | node, bun, deno                  |
+| `fileStore(dir)`              | lease | host    | poll                        | no                      | no        | none        | after `stale`           | host  | node, bun, deno                  |
 
 `pgTransaction` also declares `releasedBy: 'transaction'`. `redisStore` reports `wait: 'poll'` once its pub/sub channel has failed or was switched off.
 
@@ -299,8 +319,8 @@ Both use Postgres advisory locks. A key becomes two signed 32-bit integers (see 
 A lease row in a table, with a fence that never goes backwards. Time comes from the database clock (`clock_timestamp()`, never `now()`, which is the start of your transaction).
 
 ```ts
-import { createLocks } from '@arki/lock';
 import type { LeaseDb } from '@arki/lock/pg/lease';
+import { createLocks } from '@arki/lock';
 import { ensureLockTable, pgLease } from '@arki/lock/pg/lease';
 
 declare const db: LeaseDb;
@@ -318,9 +338,10 @@ console.info(locks.store.guarantees.fence); // 'durable'
 ### `redisStore`
 
 ```ts
+import { Redis } from 'ioredis';
+
 import { createLocks } from '@arki/lock';
 import { redisStore } from '@arki/lock/redis';
-import { Redis } from 'ioredis';
 
 const client = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
 const locks = createLocks({ store: redisStore(client, { ttl: '30s' }), namespace: 'billing' });
@@ -356,28 +377,28 @@ console.info(locks.store.guarantees.scope); // 'host'
 - Leftover `.tmp-*`, `.dead-*` and stepped-past guard directories from crashed processes are never swept. Their names are unique, so they never block anyone. They only pile up.
 - There is no fence. A renewal that lands about two thirds of a lease late can touch a successor's lock: the old owner's lease ran out, a new owner took the directory, and the late touch refreshes the new owner's file.
 
-## Failure semantics
+## Failure behaviour
 
-A busy lock is not an error. `tryRun`, `run`, `tryAcquire` and `acquire` return the `LockHeld` failure (from `@arki/failure`) when the lock is busy:
+Locks return a failure for contention and throw for everything else. A busy lock is not an error. `tryRun`, `run`, `tryAcquire` and `acquire` return the `LockHeld` failure (from `@arki/failure`) when the lock is busy:
 
-| Code | Status | Data | Returned by |
-| --- | --- | --- | --- |
-| `lock.held` | 409 | `waitedMs` (0 for `tryRun` and `tryAcquire`), and `key` (the full key) only when `createLocks` got `logKeys: true` | `tryRun`, `tryAcquire`, and `run`, `acquire` when still busy after `wait` |
+| Code        | Status | Data                                                                                                               | Returned by                                                               |
+| ----------- | ------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `lock.held` | 409    | `waitedMs` (0 for `tryRun` and `tryAcquire`), and `key` (the full key) only when `createLocks` got `logKeys: true` | `tryRun`, `tryAcquire`, and `run`, `acquire` when still busy after `wait` |
 
 Check it with `LockHeld.is(result)`, or handle it with `match` from `@arki/failure`.
 
 Every other failure on purpose is a thrown `LockError` with a stable `code`. Match on `code`, never on the message. `errorCode` is the stable id, and `remediation` is one sentence on what to do. `ARKI_LOCK_E001` was `held`; it is not reused.
 
-| `code` | `errorCode` | When | Thrown by |
-| --- | --- | --- | --- |
-| `aborted` | `ARKI_LOCK_E002` | Your `signal` aborted the wait or the attempt. The callback never ran. | `run`, `acquire`, `tryRun`, `tryAcquire` |
-| `lost` | `ARKI_LOCK_E003` | Ownership was lost while the callback ran. The callback may have had side effects. Nothing retries it. | `run`, `tryRun` |
-| `store` | `ARKI_LOCK_E004` | The backend failed. It is never read as free or as held. | any |
-| `release` | `ARKI_LOCK_E005` | `guard.release()` failed or answered `unknown`. | `guard.release()` only |
-| `config` | `ARKI_LOCK_E006` | Bad input or setup: empty key, bad duration, ttl below 1 s, conflicting semaphore limit, a transaction handle given to `pgLease`. | any |
-| `unsupported` | `ARKI_LOCK_E007` | Reserved: a store lacks a capability the types could not see. Nothing throws it today. | any |
+| `code`        | `errorCode`      | When                                                                                                                              | Thrown by                                |
+| ------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `aborted`     | `ARKI_LOCK_E002` | Your `signal` aborted the wait or the attempt. The callback never ran.                                                            | `run`, `acquire`, `tryRun`, `tryAcquire` |
+| `lost`        | `ARKI_LOCK_E003` | Ownership was lost while the callback ran. The callback may have had side effects. Nothing retries it.                            | `run`, `tryRun`                          |
+| `store`       | `ARKI_LOCK_E004` | The backend failed. It is never read as free or as held.                                                                          | any                                      |
+| `release`     | `ARKI_LOCK_E005` | `guard.release()` failed or answered `unknown`.                                                                                   | `guard.release()` only                   |
+| `config`      | `ARKI_LOCK_E006` | Bad input or setup: empty key, bad duration, ttl below 1 s, conflicting semaphore limit, a transaction handle given to `pgLease`. | any                                      |
+| `unsupported` | `ARKI_LOCK_E007` | Reserved: a store lacks a capability the types could not see. Nothing throws it today.                                            | any                                      |
 
-Extra fields: `outcome` on `store` (`'not-acquired'` or `'unknown'`, meaning ownership might exist remotely), `detectedBy` on `lost` (`'renewal'`, `'deadline'` or `'connection'`), `method` (which store call failed), `timeoutMs`, and `suppressed`.
+Extra fields: `outcome` on `store` (`'not-acquired'` or `'unknown'`, meaning ownership may exist remotely), `detectedBy` on `lost` (`'renewal'`, `'deadline'` or `'connection'`), `method` (which store call failed), `timeoutMs`, and `suppressed`.
 
 The rules:
 
@@ -422,10 +443,11 @@ console.info(locks.counters.releaseErrors);
 A fence is a number that only grows. Hand it to the thing you protect, and let that thing refuse an older number. Then a paused process that wakes up after its lease expired cannot overwrite newer work.
 
 ```ts
-import { createLocks } from '@arki/lock';
-import type { LeaseDb } from '@arki/lock/pg/lease';
-import { pgLease } from '@arki/lock/pg/lease';
 import { sql } from 'drizzle-orm';
+
+import type { LeaseDb } from '@arki/lock/pg/lease';
+import { createLocks } from '@arki/lock';
+import { pgLease } from '@arki/lock/pg/lease';
 
 declare const db: LeaseDb;
 const locks = createLocks({ store: pgLease(db, { ttl: '30s' }), namespace: 'billing' });
@@ -447,16 +469,17 @@ await locks.mutex('report').run(
 
 `@arki/lock/dot` is a plugin for [`@arki/dot`](https://www.npmjs.com/package/@arki/dot). It builds the store at boot, hands the typed `Locks` to features, and closes the store when the app stops.
 
-```ts
+```ts skip="needs @arki/schedule, a Postgres pool and DATABASE_URL"
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+
+import type { LeaseDb } from '@arki/lock/pg/lease';
+import type { Locker } from '@arki/schedule';
 import { feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
 import { locks } from '@arki/lock/dot';
-import type { LeaseDb } from '@arki/lock/pg/lease';
 import { pgLease } from '@arki/lock/pg/lease';
-import type { Locker } from '@arki/schedule';
 import { schedule, schedules } from '@arki/schedule/dot';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
 
 // Your database, as a Dot service named `db`.
 const database = plugin({
@@ -508,8 +531,8 @@ export const app = defineApp('billing')
 `legacyKeys: true` makes `@arki/lock` lock `hashtext('<namespace>:<name>')` too, so old and new replicas keep excluding each other while you roll out.
 
 ```ts
-import { createLocks } from '@arki/lock';
 import type { LockableDb } from '@arki/lock/pg';
+import { createLocks } from '@arki/lock';
 import { pgSession } from '@arki/lock/pg';
 
 declare const db: LockableDb;
@@ -543,19 +566,19 @@ readWrite  1rw:<len>:<namespace>:<len>:<name>
 
 **These values are published and will not change.** If one moved, two replicas on different versions would stop excluding each other. They come from `src/key.test.ts`.
 
-| Kind | Namespace | Name | Encoded | Digest (hex) | `hi` | `lo` |
-| --- | --- | --- | --- | --- | --- | --- |
-| mutex | `a` | `b` | `1:1:a:1:b` | `27e5fb35a8202ebd` | 669383477 | -1474285891 |
-| mutex | `a:b` | `c` | `1:3:a:b:1:c` | `740048a6956bced8` | 1946175654 | -1788096808 |
-| mutex | `a` | `b:c` | `1:1:a:3:b:c` | `97e26ae3cf85e34c` | -1746769181 | -813309108 |
-| mutex | `avocabo` | `send-digest` | `1:7:avocabo:11:send-digest` | `2f5bc307f17b9f09` | 794542855 | -243556599 |
-| mutex | `kapodopera` | `tracking:usr_1:cnt_2` | `1:10:kapodopera:20:tracking:usr_1:cnt_2` | `659787ce2c15fbf2` | 1704429518 | 739638258 |
-| mutex | `ns` | `héllo wörld` | `1:2:ns:13:héllo wörld` | `eaac57ef151cc82e` | -357804049 | 354207790 |
-| mutex | `ns` | `日本語🔒` | `1:2:ns:13:日本語🔒` | `3df2654d8d0ea9f0` | 1039295821 | -1928418832 |
-| semaphore | `a` | `b` | `1s:1:a:1:b` | `cf03467b858898fc` | -821868933 | -2054645508 |
-| semaphore | `avocabo` | `send-digest` | `1s:7:avocabo:11:send-digest` | `b2f5d6d605248d52` | -1292511530 | 86281554 |
-| readWrite | `a` | `b` | `1rw:1:a:1:b` | `fd3d1d9f7a5ca1b2` | -46326369 | 2052891058 |
-| readWrite | `avocabo` | `send-digest` | `1rw:7:avocabo:11:send-digest` | `74be357e07e03548` | 1958622590 | 132134216 |
+| Kind      | Namespace    | Name                   | Encoded                                   | Digest (hex)       | `hi`        | `lo`        |
+| --------- | ------------ | ---------------------- | ----------------------------------------- | ------------------ | ----------- | ----------- |
+| mutex     | `a`          | `b`                    | `1:1:a:1:b`                               | `27e5fb35a8202ebd` | 669383477   | -1474285891 |
+| mutex     | `a:b`        | `c`                    | `1:3:a:b:1:c`                             | `740048a6956bced8` | 1946175654  | -1788096808 |
+| mutex     | `a`          | `b:c`                  | `1:1:a:3:b:c`                             | `97e26ae3cf85e34c` | -1746769181 | -813309108  |
+| mutex     | `avocabo`    | `send-digest`          | `1:7:avocabo:11:send-digest`              | `2f5bc307f17b9f09` | 794542855   | -243556599  |
+| mutex     | `kapodopera` | `tracking:usr_1:cnt_2` | `1:10:kapodopera:20:tracking:usr_1:cnt_2` | `659787ce2c15fbf2` | 1704429518  | 739638258   |
+| mutex     | `ns`         | `héllo wörld`          | `1:2:ns:13:héllo wörld`                   | `eaac57ef151cc82e` | -357804049  | 354207790   |
+| mutex     | `ns`         | `日本語🔒`             | `1:2:ns:13:日本語🔒`                      | `3df2654d8d0ea9f0` | 1039295821  | -1928418832 |
+| semaphore | `a`          | `b`                    | `1s:1:a:1:b`                              | `cf03467b858898fc` | -821868933  | -2054645508 |
+| semaphore | `avocabo`    | `send-digest`          | `1s:7:avocabo:11:send-digest`             | `b2f5d6d605248d52` | -1292511530 | 86281554    |
+| readWrite | `a`          | `b`                    | `1rw:1:a:1:b`                             | `fd3d1d9f7a5ca1b2` | -46326369   | 2052891058  |
+| readWrite | `avocabo`    | `send-digest`          | `1rw:7:avocabo:11:send-digest`            | `74be357e07e03548` | 1958622590  | 132134216   |
 
 Redis uses the encoded text inside a hash tag, as `{1:1:a:1:b}`. `fileStore` names its lock directory from a readable part of the name plus a SHA-256 of the encoded key.
 
@@ -620,16 +643,16 @@ export function toyStore(): Store<typeof guarantees> {
 
 The port:
 
-| Member | Required | Meaning |
-| --- | --- | --- |
-| `name`, `guarantees` | yes | Shown in logs and in `dot explain`. The handle types derive from `guarantees`. |
-| `acquire(key, req)` | yes | One atomic attempt. `undefined` means held by someone else. `req.token` is fresh for each attempt. |
-| `release(grant)` | yes | Owner-checked. Answers `released`, `not-owner` or `unknown`. |
-| `ttlMs` | lease stores | The lease length. Configured once on the store. The manager reads it. |
-| `extend(grant, ttlMs)` | lease stores | `false` means the lease is gone. It is never revived. |
-| `waitFor(key, signal)`, `waiter(key)` | no | A wake-up hook. Without it, the manager waits with full-jitter backoff from 50 ms to 1 s. |
-| `permits`, `shared` | when `guarantees` say so | The semaphore and read/write protocols. |
-| `dispose()` | no | Closes connections. |
+| Member                                | Required                 | Meaning                                                                                            |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `name`, `guarantees`                  | yes                      | Shown in logs and in `dot explain`. The handle types derive from `guarantees`.                     |
+| `acquire(key, req)`                   | yes                      | One atomic attempt. `undefined` means held by someone else. `req.token` is fresh for each attempt. |
+| `release(grant)`                      | yes                      | Owner-checked. Answers `released`, `not-owner` or `unknown`.                                       |
+| `ttlMs`                               | lease stores             | The lease length. Configured once on the store. The manager reads it.                              |
+| `extend(grant, ttlMs)`                | lease stores             | `false` means the lease is gone. It is never revived.                                              |
+| `waitFor(key, signal)`, `waiter(key)` | no                       | A wake-up hook. Without it, the manager waits with full-jitter backoff from 50 ms to 1 s.          |
+| `permits`, `shared`                   | when `guarantees` say so | The semaphore and read/write protocols.                                                            |
+| `dispose()`                           | no                       | Closes connections.                                                                                |
 
 ### The three atomicity rules
 
@@ -639,22 +662,22 @@ The port:
 
 Each case of the conformance suite exists to catch one race:
 
-| Contract case | The race it prevents |
-| --- | --- |
-| mutual exclusion under many concurrent `tryRun` | two holders after a lost update |
-| a crashed holder frees the key within the declared bound | a lock stuck forever |
-| fence strictly increases across release and re-acquire | a fence that repeats or goes down |
-| release by another owner reports `not-owner` and keeps the lock | a stale owner freeing a live lock |
-| extend of an expired lease never revives it | a lease that expired, then came back |
-| a stale owner after takeover can neither extend nor release | an old owner damaging its successor |
-| acquire racing release and extend never gives two holders | the check-then-write gap |
-| rounds of races give one winner and growing fences | rare interleavings |
-| an outage surfaces as `LockError{code:'store'}` | a failed store read as free or held |
-| keys are case-sensitive, Unicode-exact, up to 512 bytes | two names sharing one lock |
-| permits never exceed the limit with mixed weights | oversubscription |
-| a conflicting limit while held is a `config` error | two callers disagreeing on the size |
+| Contract case                                                                               | The race it prevents                 |
+| ------------------------------------------------------------------------------------------- | ------------------------------------ |
+| mutual exclusion under many concurrent `tryRun`                                             | two holders after a lost update      |
+| a crashed holder frees the key within the declared bound                                    | a lock stuck forever                 |
+| fence strictly increases across release and re-acquire                                      | a fence that repeats or goes down    |
+| release by another owner reports `not-owner` and keeps the lock                             | a stale owner freeing a live lock    |
+| extend of an expired lease never revives it                                                 | a lease that expired, then came back |
+| a stale owner after takeover can neither extend nor release                                 | an old owner damaging its successor  |
+| acquire racing release and extend never gives two holders                                   | the check-then-write gap             |
+| rounds of races give one winner and growing fences                                          | rare interleavings                   |
+| an outage surfaces as `LockError{code:'store'}`                                             | a failed store read as free or held  |
+| keys are case-sensitive, Unicode-exact, up to 512 bytes                                     | two names sharing one lock           |
+| permits never exceed the limit with mixed weights                                           | oversubscription                     |
+| a conflicting limit while held is a `config` error                                          | two callers disagreeing on the size  |
 | readers overlap; a writer excludes all; a waiting writer stops new readers (where declared) | a writer sneaking in beside a reader |
-| a mutex, a semaphore and a readWrite with one name do not block each other | key families that collide |
+| a mutex, a semaphore and a readWrite with one name do not block each other                  | key families that collide            |
 
 ```ts
 import { memoryStore } from '@arki/lock/memory';
@@ -670,8 +693,14 @@ For a lease store, pass `advanceTime` (it must move the store's clock and the sc
 import { memoryStore } from '@arki/lock/memory';
 import { chaos, describeCases, replicaCases } from '@arki/lock/testing';
 
-describeCases('memory replicas', replicaCases(() => memoryStore()));
-describeCases('memory chaos', chaos(() => memoryStore(), {})); // no hooks: every case skips, with a reason
+describeCases(
+  'memory replicas',
+  replicaCases(() => memoryStore()),
+);
+describeCases(
+  'memory chaos',
+  chaos(() => memoryStore(), {}),
+); // no hooks: every case skips, with a reason
 ```
 
 A lease store with a permits or read/write protocol must give it an `extend`, or `createLocks` throws `config`.
@@ -690,10 +719,11 @@ You do not need three processes to test three replicas. Make three managers on o
 - `memoryStore().peek(key)` shows the current holder, for assertions.
 
 ```ts
+import { expect, it } from 'vitest';
+
 import { createLocks } from '@arki/lock';
 import { memoryStore } from '@arki/lock/memory';
 import { manualScheduler } from '@arki/lock/testing';
-import { expect, it } from 'vitest';
 
 it('keeps two replicas apart, and frees the key when the first one finishes', async () => {
   const store = memoryStore();
@@ -725,10 +755,11 @@ To test that a lease survives a long run, use a lease store that takes its clock
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import nodePath from 'node:path';
-import { createLocks } from '@arki/lock';
+import { expect, it } from 'vitest';
+
+import { createLocks, LockHeld } from '@arki/lock';
 import { fileStore } from '@arki/lock/file';
 import { manualScheduler } from '@arki/lock/testing';
-import { expect, it } from 'vitest';
 
 it('renews through a five minute run', async () => {
   const dir = await mkdtemp(nodePath.join(tmpdir(), 'locks-'));
@@ -739,6 +770,7 @@ it('renews through a five minute run', async () => {
   const b = createLocks({ store: store(), namespace: 'jobs', scheduler: clock });
 
   const guard = await a.mutex('long').acquire({ wait: '1s' });
+  if (LockHeld.is(guard)) throw new Error('the lock was busy');
   await clock.advance('5m'); // the renewal timer fires every second of fake time
   expect(guard.held).toBe(true);
   expect(await b.mutex('long').tryRun(() => 'b')).toMatchObject({ code: 'lock.held' });
@@ -756,7 +788,7 @@ The `locks()` plugin types its service by the store's guarantees: `LocksFor<G>`,
 - On a lease (`kind: 'lease'`), each hold expires `ttl` after it was taken (default `'30s'`), on the scheduler's clock, unless it is renewed. `lead` exists, as on the real store.
 - `wait: 'native'` is not simulated: an attempt answers at once and the manager waits for the release. `releasedBy: 'transaction'` frees the key on release, as if each run were its own transaction.
 
-```ts
+```ts skip="imports ./locks, the reader's own locks() plugin"
 import { expect, it } from 'vitest';
 
 import { fake } from '@arki/dot';
@@ -793,56 +825,84 @@ it('runs the job once while another run holds the key', async () => {
 
 For a `pgLease` service, pass `pgLeasePollGuarantees` (and the same `ttl`): the fake then has `lead` and `semaphore`, and its leases run out when you `advance` the clock past the ttl without renewing.
 
+## Limits
+
+- **A lock keeps jobs apart; it does not make a write safe.** Take a lease of 30 s and pause the process for 40 s. The lease has ended, another process holds the lock, and your late write still lands unless the resource checks the fence.
+- **Memory locks are per process.** `memoryStore` does not coordinate two replicas.
+- **`pgTransaction` acquire has no timer.** A silent connection can hang it. The other stores are bounded by `storeTimeout` (default `'10s'`).
+- **Leases last at least 1 s.** A `ttl` below `'1s'` throws `config` (`ARKI_LOCK_E006`).
+- **Families do not share a key space.** `mutex('a')`, `semaphore('a', ...)` and `readWrite('a')` never block each other.
+- **A key is never empty.** The empty key is the smallest bad input:
+
+```ts run expect
+import { createLocks, LOCK_ERROR_CODES, LockError } from '@arki/lock';
+import { memoryStore } from '@arki/lock/memory';
+
+const locks = createLocks({ store: memoryStore(), namespace: 'billing' });
+
+try {
+  locks.mutex('');
+  throw new Error('expected an empty key to be refused');
+} catch (error) {
+  if (!(error instanceof LockError) || error.code !== 'config') throw error;
+  console.log(error.errorCode === LOCK_ERROR_CODES.config);
+}
+```
+
+```text
+true
+```
+
 ## Not building
 
-| Not building | Why |
-| --- | --- |
-| Redlock, quorum or multi-node Redis | The safety of Redlock is contested. A fence plus one node covers the need. |
-| Reentrant locks | There is no portable async owner identity. A Postgres session lock taken twice must be released twice, so a missed release leaks the lock. |
-| Fair distributed locks | They break under clock skew. The memory store is first-in first-out already. |
-| A manual renewal mode | It is a footgun other libraries have. `extend()` stretches a lease, but renewal is always automatic. |
-| Automatic read-to-write upgrade | Two upgraders deadlock. Release the read, then take the write. |
-| Throttles and rate limits | A limiter is not a lock. |
-| Unique-job policies | They belong to a queue or journal, built on `tryAcquire`. |
-| Row-lock helpers | Your database layer owns `FOR UPDATE SKIP LOCKED`. |
-| Handing a token to another process | Real but rare. A lease store can add `resume(key, token)` later. |
-| A generic key-value store adapter | Without compare-token-and-delete, release is unsafe. |
-| A native file-lock binding | It breaks "install only what you use" on Bun. The file store is a lease, and says so. |
-| etcd, ZooKeeper, Consul, DynamoDB adapters | The store port is public, and the conformance suite makes third-party adapters cheap. |
-| A hosted coordinator | Out of scope for a library. |
+| Not building                               | Why                                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Redlock, quorum or multi-node Redis        | The safety of Redlock is contested. A fence plus one node covers the need.                                                                 |
+| Reentrant locks                            | There is no portable async owner identity. A Postgres session lock taken twice must be released twice, so a missed release leaks the lock. |
+| Fair distributed locks                     | They break under clock skew. The memory store is first-in first-out already.                                                               |
+| A manual renewal mode                      | It is a footgun other libraries have. `extend()` stretches a lease, but renewal is always automatic.                                       |
+| Automatic read-to-write upgrade            | Two upgraders deadlock. Release the read, then take the write.                                                                             |
+| Throttles and rate limits                  | A limiter is not a lock.                                                                                                                   |
+| Unique-job policies                        | They belong to a queue or journal, built on `tryAcquire`.                                                                                  |
+| Row-lock helpers                           | Your database layer owns `FOR UPDATE SKIP LOCKED`.                                                                                         |
+| Handing a token to another process         | Real but rare. A lease store can add `resume(key, token)` later.                                                                           |
+| A generic key-value store adapter          | Without compare-token-and-delete, release is unsafe.                                                                                       |
+| A native file-lock binding                 | It breaks "install only what you use" on Bun. The file store is a lease, and says so.                                                      |
+| etcd, ZooKeeper, Consul, DynamoDB adapters | The store port is public, and the conformance suite makes third-party adapters cheap.                                                      |
+| A hosted coordinator                       | Out of scope for a library.                                                                                                                |
 
 ## Deliberate differences from `@nestjs/locks`
 
 [`@nestjs/locks`](https://www.npmjs.com/package/@nestjs/locks) is a NestJS package. We read it closely. Some of its choices are good and we kept them: automatic renewal at one third of the ttl, fencing tokens, and a `signal` for each run. Where we chose differently, it is on purpose.
 
-| `@nestjs/locks` does | `@arki/lock` does | Why |
-| --- | --- | --- |
-| Hands you an `AsyncLocalStorage` context. | Passes `{ signal, fence, key }` to your callback. | `AsyncLocalStorage` is Node-only and hides a dependency. |
-| Decorators: `@OnOneInstance`, `@WithoutOverlapping`, `@LeaderElection`. | `lock: true` on a Dot schedule, and the `lead` verb. | Dot has no decorators. |
-| Default key is `ClassName.methodName`. | Explicit, namespaced keys. | Their own docs warn that a rename or a minifier breaks it. |
-| `ttl` per call. | `ttl` once, on the store. | One lease length per store keeps replicas consistent. |
-| `withLock` resolves after the lock was lost ("fn decides"). | `run` throws `lost`. | A result you cannot trust should not look like success. `onLost: 'ignore'` opts out. |
-| `acquire()` returns `null` on contention. | Every verb returns the `LockHeld` failure. | One answer for contention, with a code, a status and a remediation. |
-| `fencingToken` is a `number`. | `fence` is a `bigint`. | It matches the Postgres column. |
-| A store registers itself by a constructor side effect. | Dot `needs` and a store factory. | Explicit, and easy to review. |
-| rxjs `events$` and `node:diagnostics_channel`. | `@arki/log` logs and counters. | Cross-runtime, and the same as the rest of the Arki libraries. |
-| Duration units include `d` and `w`. | `ms`, `s`, `m`, `h`. | A lock measured in days is a smell. |
-| Sticky per-job ownership. | A lock for each tick, with `holdAtLeast` of 1 s by default. | Sticky ownership on a hold store pins a connection forever. |
+| `@nestjs/locks` does                                                    | `@arki/lock` does                                           | Why                                                                                  |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Hands you an `AsyncLocalStorage` context.                               | Passes `{ signal, fence, key }` to your callback.           | `AsyncLocalStorage` is Node-only and hides a dependency.                             |
+| Decorators: `@OnOneInstance`, `@WithoutOverlapping`, `@LeaderElection`. | `lock: true` on a Dot schedule, and the `lead` verb.        | Dot has no decorators.                                                               |
+| Default key is `ClassName.methodName`.                                  | Explicit, namespaced keys.                                  | Their own docs warn that a rename or a minifier breaks it.                           |
+| `ttl` per call.                                                         | `ttl` once, on the store.                                   | One lease length per store keeps replicas consistent.                                |
+| `withLock` resolves after the lock was lost ("fn decides").             | `run` throws `lost`.                                        | A result you cannot trust should not look like success. `onLost: 'ignore'` opts out. |
+| `acquire()` returns `null` on contention.                               | Every verb returns the `LockHeld` failure.                  | One answer for contention, with a code, a status and a remediation.                  |
+| `fencingToken` is a `number`.                                           | `fence` is a `bigint`.                                      | It matches the Postgres column.                                                      |
+| A store registers itself by a constructor side effect.                  | Dot `needs` and a store factory.                            | Explicit, and quick to review.                                                       |
+| rxjs `events$` and `node:diagnostics_channel`.                          | `@arki/log` logs and counters.                              | Cross-runtime, and the same as the rest of the Arki libraries.                       |
+| Duration units include `d` and `w`.                                     | `ms`, `s`, `m`, `h`.                                        | A lock measured in days is a smell.                                                  |
+| Sticky per-job ownership.                                               | A lock for each tick, with `holdAtLeast` of 1 s by default. | Sticky ownership on a hold store pins a connection forever.                          |
 
 ### vs `@nestjs/locks` 0.0.3
 
 A fact table, taken from the 0.0.3 package and its docs. Both packages are young, and theirs may have changed since.
 
-| | `@arki/lock` | `@nestjs/locks` 0.0.3 |
-| --- | --- | --- |
-| Lock types | mutex, semaphore with weights, read/write, leader election | one: an exclusive lease with an owner id, a fence and auto-renewal every `ttl / 3` |
-| Stores shipped | memory, Postgres (advisory session, advisory transaction, lease table), Redis, file | in-memory only. Postgres (Drizzle, TypeORM) and Redis are recipes you copy into your app |
-| Test helpers | `@arki/lock/testing`: conformance suite, chaos hooks, replica property | a `./testing` entry point |
-| Runtime | Node, Bun, Deno. The memory store also runs in browsers and on Hermes. | Node 20.19 or newer, ESM only |
-| Framework | none required. A Dot plugin is optional. | NestJS 11 or 12, with `reflect-metadata` and `rxjs` as peers |
-| Fence | `bigint`; `durable` on `pgLease` | `number` |
-| Store call time limit | `storeTimeout`, default 10 s | `storeTimeout` is in their docs for the next release, and is not in the 0.0.3 package |
-| Decorators and Nest module | no | yes |
+|                            | `@arki/lock`                                                                        | `@nestjs/locks` 0.0.3                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Lock types                 | mutex, semaphore with weights, read/write, leader election                          | one: an exclusive lease with an owner id, a fence and auto-renewal every `ttl / 3`       |
+| Stores shipped             | memory, Postgres (advisory session, advisory transaction, lease table), Redis, file | in-memory only. Postgres (Drizzle, TypeORM) and Redis are recipes you copy into your app |
+| Test helpers               | `@arki/lock/testing`: conformance suite, chaos hooks, replica property              | a `./testing` entry point                                                                |
+| Runtime                    | Node, Bun, Deno. The memory store also runs in browsers and on Hermes.              | Node 20.19 or newer, ESM only                                                            |
+| Framework                  | none required. A Dot plugin is optional.                                            | NestJS 11 or 12, with `reflect-metadata` and `rxjs` as peers                             |
+| Fence                      | `bigint`; `durable` on `pgLease`                                                    | `number`                                                                                 |
+| Store call time limit      | `storeTimeout`, default 10 s                                                        | `storeTimeout` is in their docs for the next release, and is not in the 0.0.3 package    |
+| Decorators and Nest module | no                                                                                  | yes                                                                                      |
 
 If you build on NestJS and need one in-memory exclusive lock, theirs fits well. If you need several lock types, more than one runtime, or stores you do not have to write, this package covers that.
 
@@ -857,6 +917,16 @@ bun run bench --profile publish --write-readme
 ```
 
 Do not run benchmarks in parallel, and do not quote a run from a loaded machine.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): tasks, step by step.
+- [llms.txt](llms.txt): the map for agents.
+- [CHANGELOG](CHANGELOG.md).
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
 
 ## License
 

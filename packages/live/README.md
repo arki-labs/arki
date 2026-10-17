@@ -4,7 +4,7 @@ Live queries on your own Postgres. A procedure declares the tables it reads in i
 
 This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot plugin, the stream client and the React provider, proven by a failure matrix on Postgres 16 and 18, a browser run on a TanStack Start app, and contract-checked benchmarks.
 
-## Installation
+## Install
 
 ```sh
 bun add @arki/live
@@ -34,6 +34,29 @@ On the server you also need Postgres (tested on 16 and 18) and three things set 
 3. Start a hub on Postgres: `createLiveHub({ source: pgSource({ pool: listenPool, app }), receipts })`, then `await hub.start()` ([The hub](#the-hub)).
 4. Serve the stream: `liveEndpoint({ hub, manifest: liveManifest(contract), authorize })` on `GET /api/live` ([Serve the stream](#serve-the-stream)). In a Dot app, `liveQueries` from `@arki/live/dot` does steps 3 and 4.
 5. In the browser, wrap the app in `LiveProvider` and read with `useLiveQuery` ([Use it in React](#use-it-in-react)). Without React, `createLiveClient` reads the stream.
+
+## When not to use this
+
+- **For a data sync engine.** `@arki/live` refetches. It does not replicate rows to the client. See [When to use Electric, Zero or PowerSync instead](#when-to-use-electric-zero-or-powersync-instead).
+- **When many clients watch the same hot table.** A hint names a table, so every live query that reads it asks again. The cost grows with clients times queries times writes.
+- **When your database is not Postgres 14 or later.** The hints come from statement triggers and `LISTEN`.
+- **When reads can go to a lagging replica.** A replica can be behind the hint that made the client refetch.
+- **For exact event delivery.** Hints can repeat and carry no row data. Use a queue for events that must arrive exactly once.
+
+## Runtime support
+
+`bun run test:runtimes -- --require-all` loads every entry on Node, Bun, Deno, a browser and Hermes (React Native; set `HERMES_BIN`). The client and React entries need `fetch` with a streaming body: in React Native pass `expo/fetch` as `fetch`. The hub and `liveReceipts` need WebCrypto (`crypto.subtle`). The `pg`, `drizzle`, `orpc`, `http` and `dot` entries are for the server.
+
+## Public imports
+
+- `@arki/live`: the portable core. `createLiveHub`, `createLiveClient`, `liveReceipts`, `live`, the wire schemas and `LIVE_ERROR_CODES`.
+- `@arki/live/drizzle`: `live` for Drizzle tables, `liveScopes`, `tableTag`, `snapshot`.
+- `@arki/live/orpc`: `liveRead`, `liveManifest`.
+- `@arki/live/pg`: `liveMigration`, `verifyLiveTriggers`, `pgSource`, `touch`.
+- `@arki/live/http`: `liveEndpoint`, the `GET /api/live` stream.
+- `@arki/live/dot`: `liveQueries`, the Dot plugin.
+- `@arki/live/react`: `LiveProvider`, `useLiveQuery`, `useLiveStatus`.
+- `@arki/live/testing`: `fakeSource`, `waitForInvalidation`.
 
 ## The guarantees
 
@@ -474,7 +497,43 @@ Every write that commits through Postgres publishes: a journal command, a reposi
 
 ## Limits
 
+### Sizes
+
 `batchMs` 20, `replayMs` 120 000 (the age up to which a cursor resumes), `replayEnvelopes` 262 144 and `replayBytes` 64 MiB (the overload caps), `subscriberFrames` 256, 256 tags, 1024 keys and 256 txids per frame (a window that reaches 256 transactions flushes at once), `maxKeys` 65 536 distinct keys per statement, keys of at most 512 bytes, 4 096 granted keys per dimension, identifiers of at most 63 bytes. A stream that receives no byte for 35 s is dropped by the client.
+
+### Update ordering
+
+What a client can rely on, and what it cannot.
+
+- **Hints follow commit order.** The hub numbers one envelope per transaction in the order Postgres delivers the commits, not the order the transactions started. Two transactions that start in one order and commit in the other both reach the client, in commit order.
+- **Frames arrive in hub order on one stream.** A cursor moves only forward inside an epoch. A reconnect replays every missed hint through the stream's grant, or resets.
+- **There is no order inside a frame.** The tables of one `batchMs` window (default 20 ms) are merged into one frame. A write to `posts` and a write to `comments` 5 ms apart arrive as one frame that names both tables. The client cannot tell which came first, and refetches both.
+- **A hint can repeat, but not go missing while connected.** A frame that was split and then cut off by a disconnect is replayed whole, so a table can arrive twice. A hint can also be a false positive; the guarantees allow it.
+- **Queries do not agree with each other.** Each live query refetches on its own. For a moment two queries can show different commits. Reads through one `liveRead()` call do agree: they share one snapshot.
+- **A reset replaces ordering.** After a gap, an overload, an expired cursor or a key overflow, the client refetches everything. It sees no history, only the current state.
+- **Writes you may not see change nothing you can see.** The grant filters hints before the window, so a hidden write does not move your frames, their timing or your cursor.
+
+## Failure behaviour
+
+`@arki/live` throws. It returns no failure values, because a live update has no caller to hand one to.
+
+- **A thrown `LiveError`** has a stable `code` from `LIVE_ERROR_CODES` and a one-sentence `remediation`. Match on the code, never on the message.
+- **A dropped connection is not an error.** The client reconnects with backoff and resumes from its cursor, or resets. `useLiveStatus` shows the state.
+- **A reset is not an error.** A gap, an overload, an expired cursor or a key overflow makes the client refetch every live query. Nothing is thrown.
+- **The client stops** on `ARKI_LIVE_E005` (401/403 on the stream) and `ARKI_LIVE_E004` when `fetch` has no streaming body. It does not retry them. Sign the user in again, or pass a `fetch` that streams.
+- **Setup errors throw at boot.** Missing triggers (`ARKI_LIVE_E002`) and bad options (`ARKI_LIVE_E001`) are found when the app starts, not on the first request.
+- **`awaitTxId` and `waitForInvalidation`** reject with `ARKI_LIVE_E006` on timeout. Catch it where you wait.
+
+| Code             | Meaning                                                                                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARKI_LIVE_E001` | Bad meta or options; `liveRead()` on a procedure without live meta; `snapshot()` given a transaction; a hub without WebCrypto; a hook outside `LiveProvider`, a second provider, or a hook path not in the manifest. |
+| `ARKI_LIVE_E002` | Missing, disabled or incompatible triggers.                                                                                                                                                                          |
+| `ARKI_LIVE_E003` | The hub is not ready (its listener is unavailable or it stopped).                                                                                                                                                    |
+| `ARKI_LIVE_E004` | A malformed cursor, frame or payload; a `fetch` with no streaming body (the client stops).                                                                                                                           |
+| `ARKI_LIVE_E005` | 401/403 on the stream.                                                                                                                                                                                               |
+| `ARKI_LIVE_E006` | A bounded resource was reached; `awaitTxId` or `waitForInvalidation` timed out.                                                                                                                                      |
+
+Every error has `code` and `remediation`.
 
 ## Testing
 
@@ -506,27 +565,15 @@ Not measured: an Electric collection (it needs logical replication and the Elect
 - Plan § 5 step 8: the `bye` at `maxAgeMs` comes from `liveEndpoint`, and a slow subscriber's `bye` from the hub; an overload ends streams with `gap`, not `bye`. The client also closes a connection that sent nothing for 35 s.
 - Plan § 3 lists `applyLiveTriggers` in `/testing`; it is not shipped (see Testing).
 
-## Errors
-
-| Code             | Meaning                                                                                                                                                                                                              |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ARKI_LIVE_E001` | Bad meta or options; `liveRead()` on a procedure without live meta; `snapshot()` given a transaction; a hub without WebCrypto; a hook outside `LiveProvider`, a second provider, or a hook path not in the manifest. |
-| `ARKI_LIVE_E002` | Missing, disabled or incompatible triggers.                                                                                                                                                                          |
-| `ARKI_LIVE_E003` | The hub is not ready (its listener is unavailable or it stopped).                                                                                                                                                    |
-| `ARKI_LIVE_E004` | A malformed cursor, frame or payload; a `fetch` with no streaming body (the client stops).                                                                                                                           |
-| `ARKI_LIVE_E005` | 401/403 on the stream.                                                                                                                                                                                               |
-| `ARKI_LIVE_E006` | A bounded resource was reached; `awaitTxId` or `waitForInvalidation` timed out.                                                                                                                                      |
-
-Every error has `code` and `remediation`.
-
-## Runtimes
-
-`bun run test:runtimes -- --require-all` loads every entry on Node, Bun, Deno, a browser and Hermes (React Native; set `HERMES_BIN`). The client and React entries need `fetch` with a streaming body: in React Native pass `expo/fetch` as `fetch`. The hub and `liveReceipts` need WebCrypto (`crypto.subtle`). The `pg`, `drizzle`, `orpc`, `http` and `dot` entries are for the server.
-
 ## Documentation
 
-- [docs/agent-guide.md](./docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
-- [llms.txt](./llms.txt): the short form for agents.
+- [Agent guide](docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
+- [llms.txt](llms.txt): the short form for agents.
+- [CHANGELOG](CHANGELOG.md).
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
 
 ## License
 

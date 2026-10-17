@@ -10,11 +10,26 @@ import { formatIssues } from './issues.js';
 
 /** Stable error codes of `@arki/schema`. */
 export const SCHEMA_ERROR_CODES = {
-  /** `parse` got a Promise from `validate`: the schema is asynchronous. */
+  /**
+   * `parse` got a Promise from `validate`: the schema is asynchronous.
+   *
+   * @fix Call `parseAsync` and await it.
+   * @verify bun run test -- src/parse.test.ts
+   */
   asyncResult: 'ARKI_SCHEMA_E001',
-  /** The schema's `validate` threw or rejected. The thrown value is the `cause`. */
+  /**
+   * The schema's `validate` threw or rejected. The thrown value is the `cause`.
+   *
+   * @fix Fix the schema or its custom check. This is a bug in the validator, not bad data, so never answer it with a 400.
+   * @verify bun run test -- src/parse.test.ts
+   */
   validatorThrew: 'ARKI_SCHEMA_E002',
-  /** A `withJsonSchema` converter was asked for a target other than draft-2020-12. */
+  /**
+   * A `withJsonSchema` converter was asked for a target other than draft-2020-12.
+   *
+   * @fix Ask for the `draft-2020-12` target.
+   * @verify bun run test -- src/vendors.test.ts
+   */
   unsupportedTarget: 'ARKI_SCHEMA_E003',
 } as const;
 

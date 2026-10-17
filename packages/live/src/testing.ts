@@ -1,5 +1,5 @@
 /**
- * `@arki/live/testing`: test helpers. Portable at runtime; `waitForInvalidation`
+ * Test helpers. Portable at runtime; `waitForInvalidation`
  * takes a TanStack `QueryClient` (a type-only import of the optional peer).
  */
 import type { QueryClient } from '@tanstack/react-query';

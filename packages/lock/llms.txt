@@ -1,0 +1,35 @@
+# @arki/lock
+
+> Distributed locks and semaphores for TypeScript. One API over memory, Postgres, Redis and file stores. A busy lock is a returned failure, not a throw. It keeps jobs apart; it does not make a write safe on its own.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/lock`: @arki/lock: distributed locks and semaphores over any store; a busy lock is a returned failure. `LOCK_COUNTER_NAMES`, `LOCK_ERROR_CODES`, `LockError`, `LockHeld`, `createLocks`; types `AcquireRequest`, `CreateLocksOptions`, `Duration`, `FenceOf`, `Grant`, `Guarantees`, `Guard`; and 28 more.
+- `@arki/lock/memory`: In-process hold store: mutex, counting semaphore and read/write locks. `memoryGuarantees`, `memoryStore`; types `MemoryEntry`, `MemoryGuarantees`, `MemoryStore`.
+- `@arki/lock/pg`: Postgres advisory locks as a hold store: `pgSession(db)` owns a pinned transaction for the whole life of a lock; `pgTransaction(tx)` takes the lock inside a transaction the caller already has, and the caller's COMMIT or ROLLBACK ends it. `HOLD_BEAT_SECONDS`, `HOLD_BEAT_TIMEOUT_MS`, `HOLD_FIRST_BEAT_SECONDS`, `WAIT_SLICE_MS`, `pgSession`, `pgSessionGuarantees`, `pgTransaction`, `pgTransactionGuarantees`; types `LockableDb`, `PgExecutor`, `PgLockOptions`, `PgSessionGuarantees`; and 2 more.
+- `@arki/lock/pg/lease`: `pgLease`: a lease in a Postgres table, with a durable fence. `DEFAULT_LEASE_TABLE`, `LEASE_TABLE_SQL`, `ensureLockTable`, `leaseTableSql`, `leaseUpgradeSql`, `pgLease`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`; types `LeaseDb`, `ListenClient`, `PgLeaseListenOptions`, `PgLeaseOptions`; and 3 more.
+- `@arki/lock/redis`: @arki/lock/redis: a lease store on one Redis (ioredis). `redisGuarantees`, `redisKeys`, `redisStore`; types `RedisGuarantees`, `RedisStore`, `RedisStoreOptions`.
+- `@arki/lock/file`: Lock files for processes on one host. `fileGuarantees`, `fileStore`; types `FileGuarantees`, `FileStore`, `FileStoreOptions`.
+- `@arki/lock/dot`: `locks(...)` — the lock manager as a Dot plugin. `describeLocks`, `locks`; types `LocksDescription`, `LocksPluginOptions`.
+- `@arki/lock/testing`: @arki/lock/testing: a manual scheduler, an in-memory store with any store's guarantees, the store conformance suite, chaos hooks and the replica property. `ContractSkip`, `chaos`, `describeCases`, `describeStoreContract`, `manualScheduler`, `memoryStore`, `replicaCases`, `storeContract`, `testStore`; types `CaseStore`, `ChaosHooks`, `ContractCase`; and 9 more.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Run a job once at a time](docs/agent-guide.md#run-a-job-once-at-a-time)
+- [Wait for the lock](docs/agent-guide.md#wait-for-the-lock)
+- [Limit concurrency](docs/agent-guide.md#limit-concurrency)
+- [Protect a write that cannot be undone](docs/agent-guide.md#protect-a-write-that-cannot-be-undone)
+- [Elect a leader](docs/agent-guide.md#elect-a-leader)
+- [Wire it into a Dot app](docs/agent-guide.md#wire-it-into-a-dot-app)
+- [Test a multi-replica job](docs/agent-guide.md#test-a-multi-replica-job)
+
+## Rules that bite
+- A busy lock is the returned `LockHeld` failure. Check `LockHeld.is(result)`.
+- Other problems throw `LockError`. Match on `code`.
+- Pass `ctx.signal` to your work. Loss of the lock aborts it.
+- Fence irreversible writes. The lock alone does not stop a late write.

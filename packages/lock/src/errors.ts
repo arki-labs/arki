@@ -13,6 +13,9 @@ import { defineFailure } from '@arki/failure';
  * lock still held. `key` is the full key, present only when the manager was
  * made with `logKeys: true` (raw keys stay out of logs by default).
  * `waitedMs` is 0 for `tryRun` and `tryAcquire`.
+ *
+ * @fix Skip the work, or retry later. Pass a longer `wait` to `run` or `acquire` when the holder is usually quick.
+ * @verify bun run test -- src/locks.test.ts
  */
 export const LockHeld = defineFailure('lock.held', {
   status: 409,
@@ -27,17 +30,47 @@ export type LockHeld = ReturnType<typeof LockHeld>;
 
 /** Stable ids, one per `LockError.code`. Never renumber. `ARKI_LOCK_E001` was `held`, now the {@link LockHeld} failure. */
 export const LOCK_ERROR_CODES = {
-  /** The caller's signal aborted the wait; the callback never ran. */
+  /**
+   * The caller's signal aborted the wait; the callback never ran.
+   *
+   * @fix Stop. The caller asked to cancel, so do not retry with the same signal.
+   * @verify bun run test -- src/wait.test.ts
+   */
   aborted: 'ARKI_LOCK_E002',
-  /** Ownership was lost while the callback ran. The callback may have had side effects; nothing retries it. */
+  /**
+   * Ownership was lost while the callback ran. The callback may have had side effects; nothing retries it.
+   *
+   * @fix Check what the callback finished before running it again. Pass the lock's `signal` to the work so it stops early, and use the fence for writes.
+   * @verify bun run test -- src/locks.test.ts
+   */
   lost: 'ARKI_LOCK_E003',
-  /** Backend failure. Never treated as free or held. */
+  /**
+   * Backend failure. Never treated as free or held.
+   *
+   * @fix Check the store (database, Redis or file system). When `outcome` is `unknown`, ownership may exist remotely, so wait for the lease to expire before you assume the key is free.
+   * @verify bun run test -- src/locks.test.ts
+   */
   store: 'ARKI_LOCK_E004',
-  /** `guard.release()` failed or reported `unknown`. `run` and `tryRun` never throw this after a successful callback. */
+  /**
+   * `guard.release()` failed or reported `unknown`. `run` and `tryRun` never throw this after a successful callback.
+   *
+   * @fix Check the store. On a lease store the key frees itself after `ttl`. Count these with `locks.counters.releaseErrors`.
+   * @verify bun run test -- src/locks.test.ts
+   */
   release: 'ARKI_LOCK_E005',
-  /** Bad input or setup: empty key, bad duration, conflicting semaphore limit, session store on a pooled shape. */
+  /**
+   * Bad input or setup: empty key, bad duration, conflicting semaphore limit, session store on a pooled shape.
+   *
+   * @fix Fix the call named in the message: pass a non-empty key, a valid duration, one limit per semaphore key, and a single connection to a session store.
+   * @verify bun run test -- src/key.test.ts
+   */
   config: 'ARKI_LOCK_E006',
-  /** A store lacks a capability the types could not see. */
+  /**
+   * A store lacks a capability the types could not see. Nothing throws this today.
+   *
+   * @fix Use a store that declares the capability in its `guarantees`.
+   * @verify bun run test -- src/locks.test.ts
+   */
   unsupported: 'ARKI_LOCK_E007',
 } as const;
 

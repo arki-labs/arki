@@ -1,5 +1,5 @@
 /**
- * `@arki/live`: the portable core. The types of the wire and the meta, their
+ * The portable core of live queries. It holds the types of the wire and the meta, their
  * runtime checks (`parseLiveEvent`, `parseLiveCursor`), `live()` meta from
  * tags, `affectedPaths`, `liveTables`, the hub, receipts (`liveReceipts`),
  * the stream client, and the error codes.

@@ -3,14 +3,17 @@
 > Live queries on your own Postgres: procedures declare the tables they read in oRPC contract meta, a statement trigger publishes a hint at commit, and a hub feeds one stream per tab so clients refetch what a commit touched. A table scoped by a tenant key hints its changed keys too, and a client gets only its granted keys. Only table names and keys travel.
 
 ## Import paths
-- `@arki/live`: the portable core. `createLiveHub` (`hub.cursor()` for server rendering, `hub.open({ view })`, `hub.onChange` for server-side watchers only), `liveReceipts` (HMAC receipts instead of raw txids), `createLiveClient` (the stream reader with reconnects), `live` (meta from tags), `affectedPaths`, `liveTables`, `parseLiveEvent` and `parseLiveCursor` (shape checks for what arrives from outside; cursors are opaque), `LIVE_ERROR_CODES` and the plain types.
-- `@arki/live/drizzle`: `live` (meta from Drizzle tables, `scope: { org: 'input.orgId' | 'session' }`), `liveScopes` (which tables are scoped, by which NOT NULL key column), `tableTag`, `snapshot` (one read-only repeatable-read transaction per call).
-- `@arki/live/orpc`: `liveRead`, the middleware that runs a live procedure inside one snapshot; `liveManifest`, the live procedures of a contract.
-- `@arki/live/http`: `liveEndpoint`, the `GET /api/live` SSE stream (400/401/503 before headers, grant → view with keys per dimension, `reauthorize` tables, `bye` at `maxAgeMs`).
-- `@arki/live/dot`: `liveQueries`, the Dot plugin: trigger check at boot (E002), `LISTEN` at start, publishes `live` and `liveRoutes`.
-- `@arki/live/pg`: `liveMigration` (the trigger SQL), `liveChannel`, `verifyLiveTriggers` (the boot check), `touch` (publish a tag by hand), `pgSource` (the hub's source on a `pg` pool).
-- `@arki/live/react`: `LiveProvider` (one stream per tab), `useLiveQuery(orpc.x.queryOptions({ input }))`, `useLiveStatus`, `setLiveCursor` (dehydrate the hub cursor), `awaitTxId(queryClient, receipt)` (the mutation returns `receipts.of(txid)`).
-- `@arki/live/testing`: `fakeSource`, a source a test drives; `waitForInvalidation(queryClient, path)`.
+
+<!-- llms:start -->
+- `@arki/live`: The portable core of live queries. `LIVE_ERROR_CODES`, `affectedPaths`, `createLiveClient`, `createLiveHub`, `live`, `liveReceipts`, `liveTables`, `parseLiveCursor`, `parseLiveEvent`; types `LiveClient`, `LiveClientOptions`, `LiveCursor`; and 18 more.
+- `@arki/live/drizzle`: Live queries on Drizzle tables (peer `drizzle-orm`): `live()` meta from Drizzle tables, `tableTag`, `liveScopes()` (which tables are scoped, by which key column), and `snapshot()` — one read-only snapshot per live query. `live`, `liveScopes`, `snapshot`, `tableTag`; types `SnapshotDatabase`, `SnapshotRunner`.
+- `@arki/live/dot`: The Dot plugin (peer `@arki/dot`): `liveQueries`, the Dot plugin that runs live queries for an app. `liveQueries`.
+- `@arki/live/http`: The SSE stream, `GET /api/live` (peer `@arki/http`). `liveEndpoint`; types `LiveEndpoint`, `LiveGrant`.
+- `@arki/live/orpc`: oRPC middleware (peers `@orpc/server`, `@orpc/contract`): `liveRead()`, the middleware that gives a live procedure one snapshot, and `liveManifest()`, which reads the live procedures out of a contract. `liveManifest`, `liveRead`; types `LiveReadContext`, `LiveReadMiddleware`.
+- `@arki/live/pg`: The Postgres side. `liveChannel`, `liveMigration`, `pgSource`, `touch`, `verifyLiveTriggers`; types `LiveMigration`, `LiveTriggerProblem`.
+- `@arki/live/react`: The React provider (peers `react`, `@tanstack/react-query`): one stream per tab that tells TanStack Query which queries to refetch. `LiveProvider`, `awaitTxId`, `setLiveCursor`, `useLiveQuery`, `useLiveStatus`; types `LiveProviderProps`.
+- `@arki/live/testing`: Test helpers. `fakeSource`, `waitForInvalidation`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.

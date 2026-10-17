@@ -1,5 +1,5 @@
 /**
- * `@arki/live/drizzle` (peer `drizzle-orm`): `live()` meta from Drizzle tables,
+ * Live queries on Drizzle tables (peer `drizzle-orm`): `live()` meta from Drizzle tables,
  * `tableTag`, `liveScopes()` (which tables are scoped, by which key column),
  * and `snapshot()` — one read-only snapshot per live query.
  */

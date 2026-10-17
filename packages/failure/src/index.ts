@@ -1,3 +1,4 @@
+/** `@arki/failure`: typed expected failures returned as plain values, with no wrapper. */
 export { attempt } from './attempt.js';
 export { findCause } from './cause.js';
 export { collect, partition } from './collect.js';

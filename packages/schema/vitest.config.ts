@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'examples/**/*.test.ts'],
+    alias: [{ find: /^@arki\/schema$/, replacement: new URL('./src/index.ts', import.meta.url).pathname }],
   },
 });
