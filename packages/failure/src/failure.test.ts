@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import type { DataOf, Failure, FailureOf, Stoppable, SuccessOf } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
-import { defineFailure, isFailure, orThrow, UnexpectedFailure } from './failure.js';
+import { defineFailure, isFailure, orThrow, stoppable, UnexpectedFailure } from './failure.js';
 
 const PostNotFound = defineFailure('post.not_found', {
   status: 404,
@@ -219,5 +219,40 @@ describe('Stoppable', () => {
 
   it('is the value itself, not a wrapper', () => {
     expectTypeOf<Stoppable<{ delivered: string[] }, Failure>>().toExtend<{ delivered: string[] }>();
+  });
+});
+
+// WHY: a partial-success function should not restate its own return type. If `stoppable` did not
+// carry the failure into the type, each such function would need a hand-written
+// `Promise<Stoppable<...>>` annotation that drifts from the failures it really returns.
+describe('stoppable', () => {
+  const ExportUnauthorized = defineFailure('export.unauthorized', { status: 422 });
+  const exportAll = async (refused: boolean) => {
+    await Promise.resolve(); // stands in for the network
+    if (refused) return stoppable({ delivered: 3 }, ExportUnauthorized());
+    return stoppable({ delivered: 3 });
+  };
+
+  it('infers the Stoppable from its branches, with no annotation', () => {
+    expectTypeOf(exportAll).returns.resolves.toEqualTypeOf<
+      Stoppable<{ delivered: number }, Failure<'export.unauthorized', undefined>>
+    >();
+    expectTypeOf(stoppable({ delivered: 3 })).toEqualTypeOf<Stoppable<{ delivered: number }, never>>();
+  });
+
+  it('puts the failure in stoppedBy, and adds no stoppedBy key when there is none', async () => {
+    const stopped = await exportAll(true);
+    expect(stopped.delivered).toBe(3);
+    expect(ExportUnauthorized.is(stopped.stoppedBy)).toBe(true);
+    const finished = await exportAll(false);
+    expect(finished).toEqual({ delivered: 3 });
+    expect(Object.hasOwn(finished, 'stoppedBy')).toBe(false);
+  });
+
+  it('copies the value, so the caller can change the result without touching what it passed', () => {
+    const value = { delivered: 3 };
+    const result = stoppable(value);
+    expect(result).not.toBe(value);
+    expect(result).toEqual(value);
   });
 });

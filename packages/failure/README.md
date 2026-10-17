@@ -107,23 +107,25 @@ if (isFailure(removed)) return removed;
 
 ### Partial success
 
-When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away. `Stoppable<Value, Failures>` is that shape: `Value & { readonly stoppedBy?: Failures }`.
+When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away. `Stoppable<Value, Failures>` is that shape: `Value & { readonly stoppedBy?: Failures }`. Build it with `stoppable(value, stoppedBy?)`, and the return type is inferred, so you write no annotation.
 
 ```ts
-async function exportAll(items: Item[]): Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>> {
+async function exportAll(items: Item[]) {
   const delivered: Item[] = [];
   for (const item of items) {
     const sent = await send(item);
-    if (isFailure(sent)) return { delivered, stoppedBy: sent }; // 40 items out, then the token was refused
+    if (isFailure(sent)) return stoppable({ delivered }, sent); // 40 items out, then the token was refused
     delivered.push(item);
   }
-  return { delivered };
-}
+  return stoppable({ delivered });
+} // Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>>
 
 const result = await exportAll(items);
 save(result.delivered); // keep what was already sent
 if (result.stoppedBy) return result.stoppedBy; // typed, with no `'stoppedBy' in result` check
 ```
+
+`stoppable` returns a shallow copy of `value`. It adds the `stoppedBy` key only when you pass a failure, so a finished result has no `stoppedBy` key at all.
 
 This is not "data that is itself a failure" (see Pitfalls): here the failure is a field of the result, not the result.
 

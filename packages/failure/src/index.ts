@@ -3,7 +3,7 @@ export { findCause } from './cause.js';
 export { collect, partition } from './collect.js';
 export { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 export type { FailureErrorCode } from './errors.js';
-export { defineFailure, isFailure, orThrow, UnexpectedFailure } from './failure.js';
+export { defineFailure, isFailure, orThrow, stoppable, UnexpectedFailure } from './failure.js';
 export type {
   AwaitFirst,
   DataOf,

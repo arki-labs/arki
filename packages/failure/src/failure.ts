@@ -259,6 +259,30 @@ export type Result<Value, Failures extends Failure = never> = Value | Failures;
  */
 export type Stoppable<Value, Failures extends Failure> = Value & { readonly stoppedBy?: Failures };
 
+/**
+ * Builds a {@link Stoppable}, so a partial-success function's return type is inferred and needs
+ * no annotation: return `stoppable(value)` when the work finished, and
+ * `stoppable(value, failure)` when a failure stopped it. Returns a shallow copy of `value`; the
+ * `stoppedBy` key is present only when a failure is given, so a finished result has no such key.
+ *
+ * @example
+ * async function exportAll(items: Item[]) {
+ *   const delivered: Item[] = [];
+ *   for (const item of items) {
+ *     const sent = await send(item);
+ *     if (isFailure(sent)) return stoppable({ delivered }, sent);
+ *     delivered.push(item);
+ *   }
+ *   return stoppable({ delivered });
+ * } // Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>>
+ */
+export function stoppable<Value extends object, Failures extends Failure = never>(
+  value: Value,
+  stoppedBy?: Failures,
+): Stoppable<Value, Failures> {
+  return stoppedBy === undefined ? { ...value } : { ...value, stoppedBy };
+}
+
 /** The failures a function can return, for sync and async functions: `FailureOf<typeof findPost>`. */
 export type FailureOf<Fn extends (...args: never[]) => unknown> = Extract<Awaited<ReturnType<Fn>>, Failure>;
 

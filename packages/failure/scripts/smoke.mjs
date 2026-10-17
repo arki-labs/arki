@@ -17,6 +17,7 @@ import {
   partition,
   recover,
   revive,
+  stoppable,
   UnexpectedFailure,
 } from '../dist/index.js';
 import { orThrowRpc } from '../dist/orpc.js';
@@ -78,6 +79,9 @@ async function main() {
     error => error.message,
   );
 
+  const stopped = stoppable({ delivered: 2 }, Timeout());
+  const finished = stoppable({ delivered: 3 });
+
   const checks = [
     ['success is the plain value', isFailure(found) ? 'failure' : found.name, 'one'],
     ['failure is recognised', isFailure(missing) && missing.code, 'item.not_found'],
@@ -100,6 +104,8 @@ async function main() {
     ['findCause walks the chain', findCause(chain, Timeout)?.code, 'db.timeout'],
     ['orThrowRpc answers success for nothing', answered, 'success'],
     ['orThrowRpc still throws the failure', rpcThrown, 'no item 2'],
+    ['stoppable keeps the value and the failure', `${stopped.delivered} ${stopped.stoppedBy.code}`, '2 db.timeout'],
+    ['stoppable adds no stoppedBy key when finished', Object.keys(finished).join(','), 'delivered'],
   ];
 
   let failedChecks = 0;
