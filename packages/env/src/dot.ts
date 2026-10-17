@@ -85,7 +85,6 @@ export function env<TSchema extends Record<string, StandardSchemaV1>>(
 ): Plugin<EmptyShape, EnvServices<TSchema>, EmptyShape, 'env'> {
   return plugin({
     name: 'env',
-    version: '0.1.0',
     configure(ctx) {
       ctx.registerService('env', 'env');
     },

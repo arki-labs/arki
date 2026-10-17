@@ -794,7 +794,6 @@ export class DotAppImpl {
           {
             appName: this.#appName,
             pluginName: plugin.name,
-            pluginVersion: plugin.version,
             hook: 'configure',
             order: record.order,
           },
@@ -1167,7 +1166,6 @@ export class DotAppImpl {
             {
               appName: this.#appName,
               pluginName: plugin.name,
-              pluginVersion: plugin.version,
               hook: 'boot',
               order: record.order,
             },
@@ -1331,7 +1329,6 @@ export class DotAppImpl {
             {
               appName: this.#appName,
               pluginName: plugin.name,
-              pluginVersion: plugin.version,
               hook: 'start',
               order: record.order,
             },
@@ -1479,7 +1476,6 @@ export class DotAppImpl {
             {
               appName: this.#appName,
               pluginName: record.plugin.name,
-              pluginVersion: record.plugin.version,
               hook: 'stop',
               order: record.order,
             },
@@ -1709,7 +1705,6 @@ export class DotAppImpl {
           {
             appName: this.#appName,
             pluginName: record.plugin.name,
-            pluginVersion: record.plugin.version,
             hook: 'dispose',
             order: record.order,
           },
@@ -1786,7 +1781,6 @@ export class DotAppImpl {
       const needWireKeys = Object.entries(plugin.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
       plugins.push({
         name: plugin.name,
-        version: plugin.version,
         ...(plugin.role === undefined ? {} : { role: plugin.role }),
         dependencies: needWireKeys,
         provides: [...record.provides],

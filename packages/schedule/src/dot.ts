@@ -579,7 +579,6 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
     let runtime: ScheduleRuntime | undefined;
     return plugin({
       name: 'schedule',
-      version: '0.0.1',
       needs,
       // App-level schedules only: feature schedules already joined each
       // feature's manifest through their `schedules(...)` slice.

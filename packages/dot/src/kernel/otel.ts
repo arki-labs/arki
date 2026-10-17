@@ -28,8 +28,8 @@ import { nowMs } from './now.js';
  *     name, so backends can aggregate by hook across plugins.
  *   - Usecase span: `feature.<feature>.<usecase>` — one active span per call
  *     of a `defineFeature(...).usecases(...)` function (see {@link traceUsecase}).
- *   - Attributes (`dot.app.name`, `dot.plugin.name`, `dot.plugin.version`,
- *     `dot.hook`, `dot.plugin.order`) follow the OTel convention of
+ *   - Attributes (`dot.app.name`, `dot.plugin.name`, `dot.hook`,
+ *     `dot.plugin.order`) follow the OTel convention of
  *     namespacing under the library's prefix.
  *
  * @see packages/dot/docs/principles.md — principle 3 (deterministic) +
@@ -117,7 +117,6 @@ export function withPluginHookSpan<R>(
   opts: {
     readonly appName: string;
     readonly pluginName: string;
-    readonly pluginVersion?: string;
     readonly hook: DotLifecycleHook;
     readonly order: number;
   },
@@ -127,7 +126,6 @@ export function withPluginHookSpan<R>(
     attributes: attrs({
       'dot.app.name': opts.appName,
       'dot.plugin.name': opts.pluginName,
-      'dot.plugin.version': opts.pluginVersion,
       'dot.hook': opts.hook,
       'dot.plugin.order': opts.order,
     }),

@@ -165,7 +165,6 @@ export function db<TRelations extends AnyRelations>(
     let pgliteHandle: { close: () => Promise<void> } | undefined;
     return plugin({
       name: 'db',
-      version: '0.1.0',
       configure(ctx) {
         ctx.registerService('db', 'db');
       },
@@ -200,7 +199,6 @@ export function db<TRelations extends AnyRelations>(
   // path that node-postgres exposes through Drizzle's handle.
   return plugin({
     name: 'db',
-    version: '0.1.0',
     configure(ctx) {
       ctx.registerService('db', 'db');
     },
@@ -251,7 +249,6 @@ export function db<TRelations extends AnyRelations>(
 export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(options: MigrateDbOptions) {
   return plugin({
     name: 'db-migrations',
-    version: '0.1.0',
     needs: { db: service<MigratableDb<TRelations>>() },
     provides: {
       // Factories run before `boot`, so this reads the database before any migration is applied.

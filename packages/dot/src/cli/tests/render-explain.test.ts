@@ -15,7 +15,6 @@ import { textUi } from './text-ui.js';
 function syntheticApp() {
   const db = plugin({
     name: 'db',
-    version: '1.0.0',
     configure: ctx => {
       ctx.registerService('db', 'db');
     },
@@ -23,7 +22,6 @@ function syntheticApp() {
   });
   const api = plugin({
     name: 'api',
-    version: '1.0.0',
     needs: { db: service<{ name: string }>() },
     configure: ctx => {
       ctx.registerAction({
@@ -91,7 +89,6 @@ describe('renderExplainText', () => {
   it('prints the summary line right after an action row, and nothing for an action without one', () => {
     const api = plugin({
       name: 'api',
-      version: '1.0.0',
       configure: ctx => {
         ctx.registerAction({ id: 'api.plain', binding: 'http', direction: 'in', address: 'GET /plain' });
         ctx.registerAction({

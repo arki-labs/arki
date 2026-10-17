@@ -110,7 +110,6 @@ export function resilience<N extends string>(
 ): Plugin<EmptyShape, { readonly resilience: ResilienceService<N> }, EmptyShape, 'resilience'> {
   return plugin({
     name: 'resilience',
-    version: '0.1.0',
     configure(ctx) {
       ctx.registerService('resilience', 'custom');
     },

@@ -90,7 +90,6 @@ average?" needs all plugins' `dot.plugin.boot` spans to share a name.
 | `dot.app.phase`        | phase  | string | `configure`/`boot`/`start`/`stop`/`dispose` |
 | `dot.app.plugin.count` | phase  | int    | How many plugins this app composes          |
 | `dot.plugin.name`      | plugin | string | The plugin's `name`                         |
-| `dot.plugin.version`   | plugin | string | The plugin's `version`                      |
 | `dot.hook`             | plugin | string | Which hook (same set as `dot.app.phase`)    |
 | `dot.plugin.order`     | plugin | int    | Topological order (0-based, deterministic)  |
 

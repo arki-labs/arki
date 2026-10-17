@@ -51,7 +51,6 @@ import type { DotAppManifest, DotLifecycleHook, JsonObject } from '@arki/dot';
 
 type PluginManifest = {
   name: string;
-  version?: string;
   role?: 'feature' | 'driving'; // the hexagon role the app builder gave the plugin
   dependencies: readonly string[];
   provides: readonly string[];

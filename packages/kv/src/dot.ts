@@ -159,7 +159,6 @@ function open(url: string, config: KvDotOptions): KV | Promise<KV> {
 export function kv(options: Lazy<KvDotOptions> = {}) {
   return plugin({
     name: 'kv',
-    version: '0.1.0',
     configure(ctx) {
       ctx.registerService('kv', 'kv');
     },
@@ -199,7 +198,6 @@ export function kv(options: Lazy<KvDotOptions> = {}) {
 kv.optional = function optional(options: Lazy<KvDotOptions> = {}) {
   return plugin({
     name: 'kv',
-    version: '0.1.0',
     configure(ctx) {
       ctx.registerService('kv', 'kv');
     },

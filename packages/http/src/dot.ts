@@ -315,7 +315,6 @@ function bindHttp(
 
   return plugin<EmptyShape, HttpServices>({
     name: 'http',
-    version: '0.0.1',
     // Compile-time/runtime seam: the precise needs shape is derived from
     // `options.bundles` in http()'s return-type cast; here the runtime
     // record rides in under the EmptyShape default. The kernel re-checks

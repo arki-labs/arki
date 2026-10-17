@@ -731,11 +731,6 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/resilience",
-      "error": "SRC_E001 string literal equals the package version; read it from package.json or a generated src/version.ts: src/dot.ts line 113",
-      "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
       "package": "@arki/scraping",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."

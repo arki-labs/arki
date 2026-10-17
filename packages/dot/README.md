@@ -46,7 +46,6 @@ const dbPlugin = plugin({
 
 const billingPlugin = plugin({
   name: 'billing',
-  version: '1.0.0',
   needs: { db: dbPlugin.provides.db }, // typed handle — destructure in hooks
   configure(ctx) {
     // Validate config, register schemas, no I/O.

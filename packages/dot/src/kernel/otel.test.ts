@@ -8,7 +8,7 @@
  *     (`configure`, `boot`, `start`, `stop`, `dispose`).
  *   - Each plugin with a hook emits exactly one matching `dot.plugin.<hook>`
  *     child span with stable attributes (`dot.app.name`, `dot.plugin.name`,
- *     `dot.plugin.version`, `dot.hook`, `dot.plugin.order`).
+ *     `dot.hook`, `dot.plugin.order`).
  *   - On a failed boot, the failing plugin's span is marked ERROR and an
  *     `exception` event is recorded; the parent phase span is also ERROR.
  *
@@ -80,14 +80,12 @@ describe('@arki/dot OTel instrumentation', () => {
   it('emits a dot.app.configure root span and per-plugin dot.plugin.configure children', async () => {
     const envPlugin = plugin({
       name: 'env',
-      version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
     });
     const dbPlugin = plugin({
       name: 'db',
-      version: '0.1.0',
       configure(ctx) {
         ctx.registerService('db', 'db');
       },
@@ -117,7 +115,6 @@ describe('@arki/dot OTel instrumentation', () => {
   it('emits a dot.app.boot root span and per-plugin dot.plugin.boot children', async () => {
     const envPlugin = plugin({
       name: 'env',
-      version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
@@ -137,7 +134,6 @@ describe('@arki/dot OTel instrumentation', () => {
     const envSpan = bootPluginSpans[0]!;
     expect(envSpan.attributes['dot.plugin.name']).toBe('env');
     expect(envSpan.attributes['dot.hook']).toBe('boot');
-    expect(envSpan.attributes['dot.plugin.version']).toBe('0.1.0');
     // Note: parent-context linkage across async/await boundaries requires
     // AsyncLocalStorageContextManager from @opentelemetry/context-async-hooks.
     // Without it, child spans in async paths are root spans rather than
@@ -149,7 +145,6 @@ describe('@arki/dot OTel instrumentation', () => {
     type Svc = { web: { listening: boolean } };
     const envPlugin = plugin({
       name: 'env',
-      version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
@@ -159,7 +154,6 @@ describe('@arki/dot OTel instrumentation', () => {
     });
     const webPlugin = plugin({
       name: 'web',
-      version: '0.2.0',
       needs: { env: service<{ PORT: number }>() },
       configure(ctx) {
         ctx.registerService('web', 'custom');
@@ -199,7 +193,6 @@ describe('@arki/dot OTel instrumentation', () => {
 
     const webStart = spansByName('dot.plugin.start')[0]!;
     expect(webStart.attributes['dot.plugin.name']).toBe('web');
-    expect(webStart.attributes['dot.plugin.version']).toBe('0.2.0');
     expect(webStart.attributes['dot.hook']).toBe('start');
     expect(webStart.attributes['dot.plugin.order']).toBe(1);
     expect(webStart.status.code).toBe(1); // OK
@@ -263,14 +256,12 @@ describe('@arki/dot OTel instrumentation', () => {
   it('marks the failing plugin span ERROR when boot throws', async () => {
     const goodPlugin = plugin({
       name: 'good',
-      version: '0.1.0',
       boot() {
         /* side effects only */
       },
     });
     const badPlugin = plugin({
       name: 'bad',
-      version: '0.1.0',
       boot() {
         throw new Error('intentional boot failure');
       },

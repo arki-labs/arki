@@ -35,7 +35,6 @@ function countedApp() {
   const app = defineApp('counted').use(
     plugin({
       name: 'probe',
-      version: '0.0.0',
       provides: {
         probe: () => {
           counts.live += 1;
@@ -59,7 +58,6 @@ describe('createAppRuntime', () => {
     const app = defineApp('flaky').use(
       plugin({
         name: 'flaky',
-        version: '0.0.0',
         provides: {
           flaky: () => {
             if (failNext) {

@@ -19,8 +19,6 @@ import type { Auth } from './pg/index.js';
 import type { AuthBindings, AuthDb, AuthTables, SessionValues } from './pg/types.js';
 import { createAuth } from './pg/index.js';
 
-const AUTH_PLUGIN_VERSION = '0.2.0';
-
 /** The auth as a Dot service named `auth`. Needs `db` and `mail`. */
 export function auth<D extends AuthDefinition, T extends AuthTables, S extends SessionValues<T> = SessionValues<T>>(
   definition: D,
@@ -28,7 +26,6 @@ export function auth<D extends AuthDefinition, T extends AuthTables, S extends S
 ) {
   return plugin({
     name: 'auth',
-    version: AUTH_PLUGIN_VERSION,
     needs: { db: service<AuthDb>(), mail: service<Mailer>() },
     configure(ctx) {
       ctx.registerService('auth', 'auth');

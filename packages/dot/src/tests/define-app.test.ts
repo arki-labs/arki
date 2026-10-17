@@ -166,7 +166,6 @@ describe('defineApp', () => {
   it('synthetic two-plugin app surfaces manifest + diagnostics shape', async () => {
     const db = plugin({
       name: 'db',
-      version: '1.0.0',
       configure: ctx => {
         ctx.registerService('db', 'db');
       },
@@ -175,7 +174,6 @@ describe('defineApp', () => {
     const api = plugin({
       name: 'api',
       needs: { db: service<{ name: string }>() },
-      version: '1.0.0',
       configure: ctx => {
         ctx.registerAction({ id: 'api.health', binding: 'http', direction: 'in', address: 'GET /health' });
       },

@@ -74,7 +74,6 @@ export type MyPkgServices = {
 export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgServices> {
   return plugin({
     name: 'my-pkg',
-    version: '1.0.0',
 
     configure(ctx) {
       ctx.registerService('myClient', 'custom');

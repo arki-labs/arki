@@ -31,11 +31,10 @@ function renderTextManifest(manifest: DotAppManifest): string {
     lines.push('  (none)');
   } else {
     const widthName = Math.max(6, ...manifest.plugins.map(p => p.name.length));
-    lines.push(`  ${pad('NAME', widthName)}  VERSION  DEPENDENCIES`);
+    lines.push(`  ${pad('NAME', widthName)}  DEPENDENCIES`);
     for (const p of manifest.plugins) {
-      const version = p.version ?? '-';
       const deps = p.dependencies.length > 0 ? p.dependencies.join(', ') : '-';
-      lines.push(`  ${pad(p.name, widthName)}  ${pad(version, 7)}  ${deps}`);
+      lines.push(`  ${pad(p.name, widthName)}  ${deps}`);
     }
   }
   lines.push('', `Services (${manifest.services.length})`);

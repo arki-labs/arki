@@ -42,7 +42,6 @@ type CheckedFactories<TCtx, TServices extends object, TProvides extends ServiceR
 
 type CommonPluginDefinition = {
   readonly name: string;
-  readonly version?: string;
   readonly actions?: readonly ActionSource[];
   readonly configure?: (ctx: DotConfigureContext) => void;
 };
@@ -121,7 +120,6 @@ function createPluginFactory<TServices extends object>(): InitPluginsFactory<TSe
       // witness record that the kernel already understands.
       const kernelDef: KernelPluginDefinition = {
         name: def.name,
-        ...(def.version === undefined ? {} : { version: def.version }),
         ...(needs === undefined ? {} : { needs }),
         ...(def.actions === undefined ? {} : { actions: def.actions }),
         ...(def.configure === undefined ? {} : { configure: def.configure }),

@@ -174,7 +174,6 @@ export type DotAppManifest = {
 /** Single plugin's declarative metadata. */
 export type PluginManifest = {
   name: string;
-  version?: string;
   /** Hexagon role from the app builder — see `Plugin.role`. */
   role?: DotPluginRole;
   dependencies: readonly string[];

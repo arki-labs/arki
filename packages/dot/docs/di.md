@@ -28,7 +28,7 @@ decorator and no reflection.
 A **plugin** is the unit a DOT app is built from — one self-describing,
 lifecycle-aware piece of an application. Each plugin:
 
-- declares a **name**, **version**, and the services it **needs** as a shape
+- declares a **name** and the services it **needs** as a shape
   of type witnesses;
 - **provides** services through `provides`: one factory per key — the type
   is _inferred from the factory_, never declared separately;

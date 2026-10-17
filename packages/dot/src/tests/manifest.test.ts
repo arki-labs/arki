@@ -32,7 +32,6 @@ describe('DOT manifest', () => {
   it('reflects plugin contributions: services, actions, and projections registered in configure', async () => {
     const billing = plugin({
       name: 'billing',
-      version: '2.3.4',
       configure: ctx => {
         ctx.registerService('stripe', 'custom');
         ctx.registerAction({
@@ -58,7 +57,7 @@ describe('DOT manifest', () => {
 
     const app = await defineApp('test').use(billing).boot();
     const m = app.manifest;
-    expect(m.plugins).toEqual([{ name: 'billing', version: '2.3.4', dependencies: [], provides: ['payments'] }]);
+    expect(m.plugins).toEqual([{ name: 'billing', dependencies: [], provides: ['payments'] }]);
     expect(m.actions).toEqual([
       {
         id: 'billing.charge',

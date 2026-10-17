@@ -463,8 +463,6 @@ export type Plugin<
 > = {
   /** Unique identifier for this plugin within the app. */
   readonly name: string;
-  /** Optional semantic version string. */
-  readonly version?: string;
   /** Runtime needs shape (local alias → witness). */
   readonly needs: NeedsShape;
   readonly actions: readonly ActionSource[];
@@ -554,7 +552,6 @@ export function plugin<
   const TName extends string = string,
 >(def: {
   readonly name: TName;
-  readonly version?: string;
   readonly needs?: TShape;
   readonly actions?: readonly ActionSource[];
   /** Fill the logging slot (see {@link Plugin.logging}). Called by the kernel, never at import. */
@@ -573,7 +570,6 @@ export function plugin<
   for (const key of Object.keys(factories)) handles[key] = handleOf(key, def.name);
   return {
     name: def.name,
-    ...(def.version === undefined ? {} : { version: def.version }),
     needs: def.needs ?? {},
     actions: def.actions ?? [],
     renames: {},

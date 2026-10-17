@@ -47,7 +47,6 @@ export const QUEUE_PLUGIN_ERROR_CODES = {
   clientMissing: 'ARKI_QUEUE_E006',
 } as const;
 
-const QUEUE_PLUGIN_VERSION = '3.0.0';
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
@@ -388,7 +387,6 @@ export function durableScheduler<N extends string>(
 export function durableScheduler(options: DurableSchedulerPluginOptions) {
   return plugin({
     name: options.name ?? 'durable-scheduler',
-    version: QUEUE_PLUGIN_VERSION,
     configure(ctx) {
       ctx.declareProvides('durable-scheduler');
     },
@@ -421,7 +419,6 @@ export function queue(options: QueuePluginOptions) {
   let handle: QueueClientHandle | undefined;
   return plugin({
     name: options.name ?? 'queue',
-    version: QUEUE_PLUGIN_VERSION,
     configure(ctx) {
       ctx.registerProjection({
         format: 'queue-topology',
@@ -535,7 +532,6 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
 
     return plugin<WorkerShape<TNeeds>, EmptyShape>({
       name: pluginName,
-      version: QUEUE_PLUGIN_VERSION,
       needs,
       actions: queueConsumerActions(declaredRegistry(features)),
       configure(ctx) {
@@ -617,7 +613,6 @@ export function outboxPlugin<N extends string>(
 export function outboxPlugin(options: OutboxPluginOptions) {
   return plugin({
     name: options.name ?? 'outbox',
-    version: QUEUE_PLUGIN_VERSION,
     configure(ctx) {
       ctx.declareProvides('outbox');
     },
@@ -707,7 +702,6 @@ function producersOf<TProducer>(
 export function jobProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
   return plugin({
     name: 'job-producers',
-    version: QUEUE_PLUGIN_VERSION,
     needs: { queue: service<QueueClient>() },
     provides: {
       jobs: ({ queue: client, $plugin }): JobProducers<TJobs> =>
@@ -729,7 +723,6 @@ export function jobProducers<const TJobs extends JobsRecord>(jobsToProduce: TJob
 export function outboxProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
   return plugin({
     name: 'outbox-producers',
-    version: QUEUE_PLUGIN_VERSION,
     needs: { schedule: service<Outbox>() },
     provides: {
       jobs: ({ schedule, $plugin }): OutboxProducers<TJobs> =>

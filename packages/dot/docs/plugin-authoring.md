@@ -31,7 +31,6 @@ const database = plugin({
 
 export const billing = plugin({
   name: 'billing',
-  version: '1.0.0',
   needs: { db: database.provides.db, log: service<Logger>() },
 
   configure(ctx) {
@@ -70,7 +69,6 @@ Returning a value from `boot` is a compile error.
 | Field       | Required | Meaning                                                                   |
 | ----------- | -------- | ------------------------------------------------------------------------- |
 | `name`      | yes      | Unique identifier inside an app.                                          |
-| `version`   | no       | Semver string. Surfaces in `PluginManifest.version`.                      |
 | `needs`     | no       | Shape of service witnesses this plugin consumes (see below).              |
 | `configure` | no       | Sync hook. Registers metadata. No I/O.                                    |
 | `provides`  | no       | One factory per key. Gets the needs; may be async (awaited in key order). |

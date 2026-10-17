@@ -22,13 +22,10 @@ import type { MailOutbox } from './pg/index.js';
 import { mailer } from './mailer.js';
 import { mailOutbox } from './pg/index.js';
 
-const MAIL_PLUGIN_VERSION = '0.2.0';
-
 /** The mailer as a Dot service named `mail`. */
 export function mail(options: MailerOptions | (() => MailerOptions)): Plugin<EmptyShape, { readonly mail: Mailer }> {
   return plugin({
     name: 'mail',
-    version: MAIL_PLUGIN_VERSION,
     configure(ctx) {
       ctx.registerService('mail', 'email');
       ctx.declareProvides('mail');
@@ -49,7 +46,6 @@ export type MailOutboxPluginOptions = {
 export function mailOutboxPlugin(options: MailOutboxPluginOptions) {
   return plugin({
     name: 'mail-outbox',
-    version: MAIL_PLUGIN_VERSION,
     needs: { mail: service<Mailer>() },
     configure(ctx) {
       ctx.registerService('mailOutbox', 'queue');

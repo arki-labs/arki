@@ -10,7 +10,6 @@ import { defineApp, plugin } from '../../../index.js';
 
 const logger = plugin({
   name: 'logger',
-  version: '1.0.0',
   configure: ctx => {
     ctx.registerService('logger', 'logger');
   },

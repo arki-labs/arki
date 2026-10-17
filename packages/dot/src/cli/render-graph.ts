@@ -46,8 +46,7 @@ export function buildMermaidGraph(manifest: DotAppManifest): string {
     const id = `p${index.toString()}`;
     idByPlugin.set(plugin.name, id);
     const order = (index + 1).toString();
-    const version = plugin.version === undefined ? '' : `@${plugin.version}`;
-    return { role: plugin.role, line: `${id}["${order} · ${escapeLabel(plugin.name)}${escapeLabel(version)}"]` };
+    return { role: plugin.role, line: `${id}["${order} · ${escapeLabel(plugin.name)}"]` };
   });
 
   if (nodes.some(node => node.role !== undefined)) {

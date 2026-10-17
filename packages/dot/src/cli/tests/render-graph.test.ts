@@ -33,7 +33,7 @@ describe('buildMermaidGraph', () => {
   it('renders declaration-ordered nodes and kind-labelled edges', () => {
     const manifest = manifestOf({
       plugins: [
-        { name: 'db', version: '1.2.0', dependencies: [], provides: ['db'] },
+        { name: 'db', dependencies: [], provides: ['db'] },
         { name: 'billing', dependencies: ['db'], provides: [] },
       ],
       dependencies: [{ from: 'billing', to: 'db', kind: 'requires' }],
@@ -43,7 +43,7 @@ describe('buildMermaidGraph', () => {
       [
         'flowchart TD',
         '  %% numbers = boot order',
-        '  p0["1 · db@1.2.0"]',
+        '  p0["1 · db"]',
         '  p1["2 · billing"]',
         '  p1 -->|requires| p0',
         '',
