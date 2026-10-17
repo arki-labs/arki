@@ -1,7 +1,7 @@
 {
   "name": "@arki/log",
   "version": "0.1.0",
-  "description": "Zero-dependency structured logging for every JavaScript runtime — message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
+  "description": "Zero-dependency structured logging for every JavaScript runtime \u2014 message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -59,6 +59,9 @@
     "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
+    "CHANGELOG.md",
+    "llms.txt",
+    "docs/**",
     "package.json"
   ],
   "scripts": {
@@ -69,8 +72,9 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p examples/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "devDependencies": {

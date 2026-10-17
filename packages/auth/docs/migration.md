@@ -62,7 +62,7 @@ Open the app's auth tables file (often `backend/src/features/auth/model/tables.t
 
 Create `shared/auth.ts` (or the app's shared folder) with `defineAuth`:
 
-```ts
+```ts skip="before and after fragment of a migration"
 import { defineAuth } from '@arki/auth';
 
 export const authDefinition = defineAuth({
@@ -86,7 +86,7 @@ Choices to make per app, from the old config:
 
 Replace the old auth module (`backend/src/core/auth.ts`, `backend/src/infra/auth/*`, or `core/auth/config.ts`) with the Dot plugin:
 
-```ts
+```ts skip="before and after fragment of a migration"
 import { auth } from '@arki/auth/dot';
 import { tanstackStart } from '@arki/auth/tanstack-start';
 

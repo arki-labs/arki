@@ -6,7 +6,12 @@
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
-/** No refund has this id. */
+/**
+ * No refund has this id.
+ *
+ * @fix Check the refund id.
+ * @verify bun run test -- src/refunds
+ */
 export const RefundNotFound = defineFailure('payments.refund_not_found', {
   status: 404,
   data: z.object({ refundId: z.string() }),
@@ -14,7 +19,12 @@ export const RefundNotFound = defineFailure('payments.refund_not_found', {
   remediation: 'Check the refund id.',
 });
 
-/** The payment to refund does not exist. Nothing was written. */
+/**
+ * The payment to refund does not exist. Nothing was written.
+ *
+ * @fix Check the payment id.
+ * @verify bun run test -- src/refunds
+ */
 export const TransactionNotFound = defineFailure('payments.transaction_not_found', {
   status: 404,
   data: z.object({ paymentId: z.string() }),
@@ -22,7 +32,12 @@ export const TransactionNotFound = defineFailure('payments.transaction_not_found
   remediation: 'Check the payment id.',
 });
 
-/** The payment already has a refund waiting for a decision. Nothing was written. */
+/**
+ * The payment already has a refund waiting for a decision. Nothing was written.
+ *
+ * @fix Approve or reject the pending refund first.
+ * @verify bun run test -- src/refunds
+ */
 export const DuplicatePendingRefund = defineFailure('payments.duplicate_pending_refund', {
   status: 409,
   data: z.object({ paymentId: z.string() }),
@@ -30,7 +45,12 @@ export const DuplicatePendingRefund = defineFailure('payments.duplicate_pending_
   remediation: 'Approve or reject the pending refund first.',
 });
 
-/** The refund was already decided, so it can no longer be approved or rejected. Nothing was written. */
+/**
+ * The refund was already decided, so it can no longer be approved or rejected. Nothing was written.
+ *
+ * @fix Read the refund again to see its decision. Only a pending refund can be approved or rejected.
+ * @verify bun run test -- src/refunds
+ */
 export const RefundInvalidState = defineFailure('payments.refund_invalid_state', {
   status: 409,
   data: z.object({ refundId: z.string(), status: z.string().nullable() }),
@@ -41,6 +61,9 @@ export const RefundInvalidState = defineFailure('payments.refund_invalid_state',
 /**
  * The refund and what the payment already gives back add up to more than was paid. Amounts are
  * decimal text in `currency`, such as `'12.50'`. Nothing was written.
+ *
+ * @fix Ask for at most the refundable amount.
+ * @verify bun run test -- src/refunds
  */
 export const RefundAmountExceeded = defineFailure('payments.refund_amount_exceeded', {
   status: 422,
@@ -49,7 +72,12 @@ export const RefundAmountExceeded = defineFailure('payments.refund_amount_exceed
   remediation: 'Ask for at most the refundable amount.',
 });
 
-/** The payment is older than the refund window. Nothing was written. */
+/**
+ * The payment is older than the refund window. Nothing was written.
+ *
+ * @fix Refund it outside this workflow, or not at all. The default window is 90 days (`refundWindowMs`).
+ * @verify bun run test -- src/refunds
+ */
 export const RefundWindowExceeded = defineFailure('payments.refund_window_exceeded', {
   status: 422,
   data: z.object({ paymentId: z.string() }),

@@ -4,10 +4,40 @@
  */
 
 export const LOG_ERROR_CODES = {
+  /**
+   * `configure()` ran a second time on the same logging instance.
+   *
+   * @fix Call `configure()` once at the app entry. Use `reconfigure()` on its handle to change the setup.
+   * @verify bun run test -- src/core/logging.test.ts
+   */
   alreadyConfigured: 'ARKI_LOG_E001',
+  /**
+   * A category rule or `to()` names a channel that `configure({ channels })` does not define.
+   *
+   * @fix Add the channel to `configure({ channels })`, or use one of the defined names.
+   * @verify bun run test -- src/core/logging.test.ts
+   */
   unknownChannel: 'ARKI_LOG_E002',
+  /**
+   * A level is neither one of the six names nor a severity number from 1 to 24.
+   *
+   * @fix Use `trace`, `debug`, `info`, `warn`, `error` or `fatal`, or a number from 1 to 24.
+   * @verify bun run test -- src/core/logging.test.ts
+   */
   invalidLevel: 'ARKI_LOG_E003',
+  /**
+   * `fakeLog()` ran while another fake was active, or `configure()` ran while a fake owns the instance.
+   *
+   * @fix Restore the active fake first with `restore()` or `using`. Keep one fake at a time.
+   * @verify bun run test -- src/testing/fake.test.ts
+   */
   fakeActive: 'ARKI_LOG_E004',
+  /**
+   * `reconfigure()` was called on a handle that no longer owns the configuration.
+   *
+   * @fix Use the handle returned by the latest `configure()` call.
+   * @verify bun run test -- src/core/logging.test.ts
+   */
   staleHandle: 'ARKI_LOG_E005',
 } as const;
 

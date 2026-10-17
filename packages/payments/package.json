@@ -392,6 +392,9 @@
     "!src/**/*test-support.ts",
     "README.md",
     "LICENSE",
+    "CHANGELOG.md",
+    "llms.txt",
+    "docs/agent-guide.md",
     "package.json"
   ],
   "scripts": {
@@ -401,6 +404,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",

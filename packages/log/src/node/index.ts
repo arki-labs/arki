@@ -1,3 +1,4 @@
+/** Node, Bun and Deno sinks (`stdout`, `stderr`, `file`), `fromEnv()` and `asyncContext()` for `@arki/log`. */
 // @arki/log/node: sinks, env and async context for Node, Bun and Deno.
 // Importing does nothing: every factory does its work when called.
 

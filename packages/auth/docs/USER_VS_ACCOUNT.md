@@ -17,7 +17,7 @@ The **User** table represents the canonical identity of a person in your system.
 
 ### Schema
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // Simplified user schema
 {
   id: string;              // Unique user ID (e.g., "usr_abc123")
@@ -39,7 +39,7 @@ The **User** table represents the canonical identity of a person in your system.
 
 ### Example
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // User record
 {
   id: "usr_abc123",
@@ -58,7 +58,7 @@ The **Account** table represents a specific authentication method linked to a Us
 
 ### Schema
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // Simplified account schema
 {
   id: string;                    // Unique account ID
@@ -83,7 +83,7 @@ The **Account** table represents a specific authentication method linked to a Us
 
 ### Example
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // User with multiple accounts
 // User: usr_abc123
 
@@ -129,7 +129,7 @@ The **Account** table represents a specific authentication method linked to a Us
 
 Users can authenticate through different providers while maintaining a single identity:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // Same user, three sign-in options:
 // 1. Email: alex@example.com + password
 // 2. Google: "Sign in with Google"
@@ -142,7 +142,7 @@ Users can authenticate through different providers while maintaining a single id
 
 Users can add authentication methods to their existing account:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // Sign-up flow:
 1. User signs up with email/password
    → Creates User (usr_abc123)
@@ -158,7 +158,7 @@ Users can add authentication methods to their existing account:
 
 OAuth providers require storing provider-specific data:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // Google Account stores Google-specific tokens
 {
   providerId: "google",
@@ -176,7 +176,7 @@ OAuth providers require storing provider-specific data:
 
 Separating accounts provides security benefits:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // If one account is compromised (e.g., password leaked)
 // User can still sign in with other accounts
 // Compromised account can be removed without affecting user identity
@@ -188,7 +188,7 @@ Separating accounts provides security benefits:
 
 When building features, **always reference User ID**, not Account ID:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // ✅ CORRECT: Reference User ID
 // features/player-profile/tables.ts
 export const playerProfiles = pgTable('player_profiles', {
@@ -213,7 +213,7 @@ export const playerProfiles = pgTable('player_profiles', {
 
 Sessions contain User ID, not Account ID:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // When user signs in, session references User
 {
   sessionToken: "ses_xyz...",
@@ -237,7 +237,7 @@ Sessions contain User ID, not Account ID:
 
 In your procedures and repositories, work with User ID:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // tRPC procedure
 export const getPlayerProfile = protectedProcedure
   .input(z.object({ userId: userIdSchema }))
@@ -260,7 +260,7 @@ async findByUserId(userId: UserId) {
 
 ### Sign-Up Flow
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // 1. User signs up with Google
 POST /api/auth/sign-up/social
 {
@@ -299,7 +299,7 @@ POST /api/auth/sign-up/social
 
 ### Sign-In Flow
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // 1. User signs in with GitHub
 POST /api/auth/sign-in/social
 {
@@ -325,7 +325,7 @@ const profile = await ctx.repo.playerProfile.findByUserId(ctx.session.user.id);
 
 ### Account Linking Flow
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // User already exists with email/password
 // User: usr_abc123
 // Account 1: Credentials provider
@@ -357,7 +357,7 @@ POST /api/auth/link-account
 
 ### 1. Always Reference User ID in Features
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // ✅ CORRECT
 export const gameSessions = pgTable('game_sessions', {
   userId: varchar('user_id', { length: 256 })
@@ -383,7 +383,7 @@ Your application code should rarely interact with the Account table directly. be
 
 ### 3. Use User Table for Profile Data
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // ✅ CORRECT: User-related data on User or related tables
 {
   users: {
@@ -413,7 +413,7 @@ Your application code should rarely interact with the Account table directly. be
 
 Enable users to add multiple sign-in methods:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // In your auth configuration
 export const auth = betterAuth({
   // ... other config
@@ -428,7 +428,7 @@ export const auth = betterAuth({
 
 When displaying user authentication methods:
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // tRPC procedure to get user's linked accounts
 export const getLinkedAccounts = protectedProcedure
   .query(async ({ ctx }) => {
@@ -447,7 +447,7 @@ export const getLinkedAccounts = protectedProcedure
 
 ### ❌ Storing User Data on Account
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // WRONG: Profile data on Account
 {
   accounts: {
@@ -463,7 +463,7 @@ export const getLinkedAccounts = protectedProcedure
 
 ### ❌ Referencing Account ID in Features
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // WRONG: Feature tables referencing Account
 export const achievements = pgTable('achievements', {
   accountId: varchar('account_id', { length: 256 })
@@ -476,7 +476,7 @@ export const achievements = pgTable('achievements', {
 
 ### ❌ Querying by Account ID
 
-```typescript
+```typescript skip="concept sketch of engine rows, not a program"
 // WRONG: Looking up data by Account ID
 async getPlayerStats(accountId: AccountId) {
   // This breaks if user has multiple accounts

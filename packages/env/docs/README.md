@@ -165,7 +165,7 @@ import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
 - `@arki/env/nextjs` → Next.js-specific (wraps `@t3-oss/env-nextjs`)
 - `@arki/env/nextjs/client` → Browser-safe exports only
 - `@arki/env/core` → Framework-agnostic (wraps `@t3-oss/env-core`)
-- `@arki/env/contracts` → Just the contracts library
+- `@arki/env/contracts` → The contracts library only
 
 ### 4. Enhanced Error Messages & Validation
 

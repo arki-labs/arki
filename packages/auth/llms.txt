@@ -5,25 +5,33 @@
 The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is still exported while apps move. New code uses only the entries in the first group below. See [the migration guide](docs/migration.md).
 
 ## Import paths
-- `@arki/auth`: `defineAuth`, `definePolicies`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`, and the types `AuthDefinition`, `AuthMethod`, `SocialMethod`, `Principal`, `PrincipalOf`, `AuthContext`, `Policies`, `PolicyName`.
-- `@arki/auth/pg`: `createAuth`, `createAuthTables`, `auth*Columns`, `*IdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, and the types `Auth`, `AuthBindings`, `AuthDb`, `AuthEvents`.
-- `@arki/auth/pg/workspaces`: `createWorkspaceTables` and the scoping kernel (`workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`).
-- `@arki/auth/dot`: `auth`, `AuthOf`.
-- `@arki/auth/orpc`: `guards` (`authed`, `verified`, `role`, `can`), `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`.
-- `@arki/auth/http`: `withPrincipal`, `withOptionalPrincipal`, `authorize`.
-- `@arki/auth/ids`: id types and `create*Id` (browser-safe).
-- `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
-- `@arki/auth/password`: `hashPassword`, `verifyPassword`.
-- `@arki/auth/workspaces`: `WorkspaceRole`, `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`; types `WorkspaceContext`, `Scope`, `OrganizationId`, `TeamId`.
-- `@arki/auth/testing`: `testAuth`, `actingAs`, `lastLink`, `lastMagicLink`.
-- `@arki/auth/testing/tanstack-start`: `createE2EHandler`. `@arki/auth/testing/production-boot`: `assertAuthBoots`. `@arki/auth/testing/playwright`: browser test helpers.
-- `@arki/auth/tanstack-start`: `tanstackStart`, `createRequireAuth`, `ArkiAuthProvider`, `TanStackAuthProvider`. `@arki/auth/react`: `createAuthClient`, `SignInForm`, `createSignInHandlers`, `resolveAuthClientBaseUrl`. `@arki/auth/react/templates`: page templates.
-- `@arki/auth/env`, `@arki/auth/tweaks-column`: unchanged helpers.
+
+<!-- llms:start -->
+- `@arki/auth`: the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the constants and the principal and definition types. `AUTH_ERROR_CODES`, `AUTH_SECRET_MIN_LENGTH`, `AuthError`, `PASSWORD_MIN_LENGTH`, `defineAuth`, `definePolicies`, `isAuthError`; types `AccountOptions`, `AnyPolicies`, `AnyPrincipal`, `AuthContext`, `AuthDefinition`; and 24 more.
+- `@arki/auth/ids`: the auth id types and their generators. `createAccountId`, `createSessionId`, `createUserId`, `createVerificationId`; types `AccountId`, `SessionId`, `UserId`, `VerificationId`.
+- `@arki/auth/zod`: Zod schemas for the auth ids and an email address, for apps that validate input with Zod. `accountIdSchema`, `emailSchema`, `organizationIdSchema`, `sessionIdSchema`, `teamIdSchema`, `userIdSchema`, `verificationIdSchema`.
+- `@arki/auth/password`: Password hashing with scrypt, in pure JavaScript (`@noble/hashes`), so it runs in every runtime without a native module. `hashPassword`, `verifyPassword`.
+- `@arki/auth/workspaces`: the workspace vocabulary with no database in it: roles, the active workspace context, row scopes and the scope error. `WorkspaceScopeError`, `rankRole`, `roleAtLeast`, `scopeLevel`; types `OrganizationId`, `RowScope`, `Scope`, `ScopeLevel`, `TeamId`, `WorkspaceContext`, `WorkspaceRole`.
+- `@arki/auth/pg`: the runtime: one factory that turns a definition and its bindings into a working auth on Postgres (node-postgres or PGlite). `accountIdColumns`, `additionalFieldsFromColumns`, `assertAuthSecret`, `authAccountColumns`, `authLinkInput`, `authSessionColumns`, `authUserColumns`, `authVerificationColumns`, `createAuth`, `createAuthTables`, `sessionIdColumns`, `userIdColumns`; and 38 more.
+- `@arki/auth/pg/workspaces`: the workspace tables and the scoping kernel. `canSeeRow`, `createWorkspaceForeignKeys`, `createWorkspaceTables`, `getWorkspaceResource`, `reassignScope`, `registerWorkspaceResource`, `resetWorkspaceRegistry`, `resolveWriteScope`, `workspaceReadFilter`; types `CreateWorkspaceTablesOptions`, `OrganizationId`, `TeamId`; and 1 more.
+- `@arki/auth/dot`: @arki/auth in a Dot app. `auth`; types `AuthOf`.
+- `@arki/auth/orpc`: ownership checks for oRPC procedures. `assertFound`, `assertOwnedOrForbidden`, `assertOwnedOrNotFound`, `guards`; types `Owned`, `PolicyGuard`, `PolicyLoader`, `PrincipalGuard`.
+- `@arki/auth/http`: the principal as an `@arki/http` deriver, and policy checks as a handler wrapper. `authorize`, `withOptionalPrincipal`, `withPrincipal`; types `PrincipalSource`, `WithPrincipalOptions`.
+- `@arki/auth/react`: Auth UI: the auth client, the sign-in form (with its handler factory). `SignInForm`, `createAuthClient`, `createSignInHandlers`, `resolveAuthClientBaseUrl`; types `AuthCapabilities`, `AuthClient`, `AuthClientOptions`, `SignInCapableAuthClient`, `SignInFormProps`, `SignInFormSource`, `SignInHandlerOptions`, `SignInHandlers`; and 1 more.
+- `@arki/auth/react/templates`: Auth page templates. `AuthErrorPageTemplate`, `LoginTemplate1`, `SignOutTemplate`, `VerifyRequestTemplate`.
+- `@arki/auth/tanstack-start`: `ArkiAuthProvider`, `TanStackAuthProvider`, `createRequireAuth`, `tanstackStart`; types `ImageComponentProps`, `LinkComponentProps`, `SignInRedirect`, `TanStackAuthProviderProps`.
+- `@arki/auth/testing`: a real auth on an in-memory PGlite, with every mail kept in a sink. `TEST_AUTH_SECRET`, `actingAs`, `lastLink`, `lastMagicLink`, `testAuth`; types `TestAuth`, `TestAuthBindings`.
+- `@arki/auth/testing/tanstack-start`: a POST route that hands Playwright a signed-in session. `createE2EHandler`; types `CreateE2EHandlerOptions`, `E2EAuth`.
+- `@arki/auth/testing/playwright`: `createAuthGlobalSetup`, `createAuthenticatedTest`, `createTwoAccountGlobalSetup`, `createTwoAccountTest`, `resolveAuthStatePath`; types `AuthenticatedFixtures`, `CreateAuthGlobalSetupOptions`, `CreateAuthenticatedTestOptions`, `CreateTwoAccountGlobalSetupOptions`, `CreateTwoAccountTestOptions`, `TwoAccountEmails`, `TwoAccountFixtures`; and 1 more.
+- `@arki/auth/testing/production-boot`: Production-boot checks for app test suites (the C1 regression class: a sign-in method that silently disappears in production). `applyProductionBootEnv`, `assertAuthBoots`, `emailModuleMock`; types `BootableAuth`.
+- `@arki/auth/env`: `env`.
+- `@arki/auth/tweaks-column`: `EMPTY_TWEAKS`, `tweaksColumn`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.
 - [Verify](docs/agent-guide.md#verify): the commands to run after a change.
-- [README](README.md): the long overview, with the 15-minute recipe.
+- [README](README.md): the install, quick start and five recipes.
 
 ## By task
 - [Add sign-in to an app](docs/agent-guide.md#add-sign-in-to-an-app)

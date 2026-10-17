@@ -1,3 +1,4 @@
+/** An OpenTelemetry trace source and log sink for `@arki/log`. */
 // @arki/log/otel: a trace source and a sink for OpenTelemetry (RFC §10).
 // `@opentelemetry/api` and `@opentelemetry/api-logs` are optional peers.
 // Importing does nothing: both functions do their work when called.

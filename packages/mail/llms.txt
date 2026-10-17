@@ -3,19 +3,23 @@
 > Typed mail for TypeScript: templates typed by any Standard Schema, transports that never throw or invent ids, quota-aware failover that never sends twice after a timeout, and mail queued in the caller's transaction on `@arki/journal`.
 
 ## Import paths
-- `@arki/mail`: `mailer`, `defineTemplate`, `renderTemplate`, `failover`, `logTransport`, `inMemoryQuotaStore`, `kvQuotaStore`, the failures (`MailInvalidInput`, `MailQuotaExhausted`, `MailRejected`, `MailUncertain`, `MailExpired`), `MailError`, `isMailError`, `MAIL_ERROR_CODES`, and the types (`Mailer`, `MailTemplate`, `MailTransport`, `MailMessage`, `SentMail`, `SendOptions`).
-- `@arki/mail/templates/auth`: `magicLink`, `verifyEmail`, `resetPassword`, `signInCode`.
-- `@arki/mail/http/resend`: `resend`.
-- `@arki/mail/http/unosend`: `unosend`.
-- `@arki/mail/http/cloudflare`: `cloudflare`.
-- `@arki/mail/node/ses`: `ses` (needs `@aws-sdk/client-sesv2`).
-- `@arki/mail/react`: `renderReact`.
-- `@arki/mail/react/templates/magic-link`: `MagicLinkEmail`.
-- `@arki/mail/react/templates/magic-link-minimal`: `MagicLinkMinimalEmail`.
-- `@arki/mail/pg`: `mailOutbox`, `MAIL_JOB`, `MailTx`.
-- `@arki/mail/pg/testing`: `mailQueueAssertions`.
-- `@arki/mail/dot`: `mail`, `mailOutboxPlugin`, `mailJobs`.
-- `@arki/mail/testing`: `mailSink`, `transportContract`.
+
+<!-- llms:start -->
+- `@arki/mail`: `MAIL_ERROR_CODES`, `MailError`, `MailExpired`, `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected`, `MailUncertain`, `defineTemplate`, `failover`, `inMemoryQuotaStore`, `isMailError`, `kvQuotaStore`; and 24 more.
+- `@arki/mail/templates/auth`: Mails for sign-in flows: magic link, email verification, password reset, sign-in code. `magicLink`, `resetPassword`, `signInCode`, `verifyEmail`; types `AuthLinkData`, `AuthLinkInput`, `SignInCodeInput`.
+- `@arki/mail/http/resend`: Resend over its REST API with plain `fetch` (no SDK). `resend`; types `ResendOptions`.
+- `@arki/mail/http/mailpit`: Mailpit over its HTTP JSON API with plain `fetch`. `mailpit`; types `MailpitOptions`.
+- `@arki/mail/http/unosend`: Unosend over its REST API with plain `fetch`. `unosend`; types `UnosendOptions`.
+- `@arki/mail/http/cloudflare`: Cloudflare Email Service (Email Sending REST API) with plain `fetch`. `cloudflare`; types `CloudflareOptions`.
+- `@arki/mail/node/ses`: Amazon SES (v2 API) through `@aws-sdk/client-sesv2`, an optional peer loaded on the first send. `ses`; types `SesOptions`.
+- `@arki/mail/react`: Renders a React Email component to the HTML and plain-text parts of a mail. `renderReact`.
+- `@arki/mail/react/templates/magic-link`: `MagicLinkEmail`, `default`.
+- `@arki/mail/react/templates/magic-link-minimal`: `MinimalMagicLinkEmail`, `default`.
+- `@arki/mail/pg`: Mail that commits with the business write. `MAIL_JOB`, `mailOutbox`; types `EnqueueOptions`, `MailOutbox`, `MailOutboxOptions`, `MailTx`.
+- `@arki/mail/pg/testing`: Assertions on queued mail, for tests. `mailQueueAssertions`; types `QueuedMail`.
+- `@arki/mail/dot`: @arki/mail in a Dot app. `mail`, `mailJobs`, `mailOutboxPlugin`; types `MailOutboxPluginOptions`.
+- `@arki/mail/testing`: Test helpers. `mailSink`, `transportContract`; types `MailSink`, `SentRecord`, `TransportHarness`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.

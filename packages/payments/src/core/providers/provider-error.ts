@@ -7,6 +7,9 @@ import { defineFailure } from '@arki/failure';
  * The card or payment method was refused. Ask for another one. Returned, not thrown, by the
  * provider calls that charge or check a card. `providerCode` is the provider's own code, such as
  * Stripe's `card_declined` or `expired_card`; `declineCode` is the bank's reason when it gave one.
+ *
+ * @fix Ask the customer for another card or payment method. The same one is likely refused again.
+ * @verify bun run test -- src/core/providers
  */
 export const CardDeclined = defineFailure('payments.card_declined', {
   status: 402,
@@ -16,7 +19,12 @@ export const CardDeclined = defineFailure('payments.card_declined', {
   remediation: 'Ask the customer for another card or payment method; the same one is likely refused again.',
 });
 
-/** The same idempotency key was used with different parameters. Returned by the calls that take an `idempotencyKey`. */
+/**
+ * The same idempotency key was used with different parameters. Returned by the calls that take an `idempotencyKey`.
+ *
+ * @fix Use a new idempotency key for a different request, or resend the first request unchanged.
+ * @verify bun run test -- src/core/providers
+ */
 export const IdempotencyConflict = defineFailure('payments.idempotency_conflict', {
   status: 409,
   message: 'The idempotency key was already used with different parameters',
@@ -27,6 +35,9 @@ export const IdempotencyConflict = defineFailure('payments.idempotency_conflict'
  * A customer, plan, payment or subscription id has no row (`missing: 'row'`), or the row has no
  * provider id (`missing: 'provider_id'`, such as a plan without a Stripe price). Returned before any
  * provider request is made.
+ *
+ * @fix Check the id, or create the row with the provider first.
+ * @verify bun run test -- src/core/providers
  */
 export const ReferenceNotFound = defineFailure('payments.reference_not_found', {
   status: 404,

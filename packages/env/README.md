@@ -1,110 +1,160 @@
 # @arki/env
 
-Type-safe environment variable parsing for ARKI. `defineEnv()` is a thin wrapper around [`@t3-oss/env-core`](https://env.t3.gg/) with Zod contracts for common variable shapes — ports, URLs, comma-separated lists, JSON, and more.
+Type-safe environment variables for ARKI. `defineEnv()` wraps [`@t3-oss/env-core`](https://env.t3.gg/). It validates on the first read and returns a typed object. Any [Standard Schema](https://standardschema.dev) works: Zod, Valibot, ArkType or a hand-written `~standard` object.
 
-## Installation
+## Install
 
 ```sh
-npm install @arki/env
-# or
 bun add @arki/env
-# or
-pnpm add @arki/env
 ```
 
-## Usage
+## Quick start
 
-### `defineEnv`
+Declare the variables once. Read them anywhere. A bad value throws on the first read, never at import.
 
-```ts
+```ts run expect
 import { contracts } from '@arki/env/contracts';
 import { defineEnv } from '@arki/env/core';
 
-export const env = defineEnv({
-  server: {
-    NODE_ENV: contracts.nodeEnv(),
-    PORT: contracts.port(3000),
-    DATABASE_URL: contracts.url(),
-    LOG_LEVEL: contracts.string('info'),
-  },
-});
-
-console.log(env.PORT); // number
-console.log(env.DATABASE_URL); // string (validated URL)
-```
-
-`defineEnv` reads from `process.env`, validates against the schemas in `server`, and returns a fully typed object. A schema is any [Standard Schema](https://standardschema.dev): Zod, Valibot, ArkType, or a hand-written `~standard` object. Each value is typed as its schema's output, so defaults and coercions apply. Validation must be synchronous. Validation is lazy: it runs on the first read, so importing an env never fails.
-
-Validation runs everywhere the app runs, production included, in CI and in tests. `CI`, `lint` and `NODE_ENV` never skip it. The only opt-out is `SKIP_ENV_VALIDATION=1` (exactly `1`), meant for Docker build stages that prerender without secrets. `options.skipValidation` overrides it in code. The Dot plugin (`@arki/env/dot`) validates at boot and fails with `ARKI_ENV_PLUGIN_E001`; `dot explain` never validates.
-
-### Secrets: `secret`, `reveal`, `Redacted`
-
-Wrap a secret's schema (any Standard Schema: zod, valibot, arktype) in `secret(...)`. For an optional secret call `.optional()` on the result; a missing variable stays `undefined`. The variable becomes a `Redacted` value that prints as `[redacted]` in logs, JSON, template strings and `console.log`, and that the compiler will not pass where a string is expected. Read it with `reveal(...)` at the one place that needs it.
-
-```ts
-import { defineEnv, reveal, secret } from '@arki/env/core';
-
-export const env = defineEnv({
-  server: {
-    STRIPE_KEY: secret(z.string().min(1)),
-    WEBHOOK_SECRET: secret(z.string()).optional(),
-  },
-});
-
-logger.info('config {env}', { env }); // STRIPE_KEY: "[redacted]"
-const stripe = new Stripe(reveal(env.STRIPE_KEY));
-```
-
-`reveal` also accepts the raw string, because schemas do not run when validation is skipped. Redaction guards against accidents; it is not encryption.
-
-### Contracts
-
-The `contracts` namespace bundles common variable shapes so you do not have to assemble them by hand. The categories:
-
-- **Common**: `string`, `number`, `boolean`, `port`, `nodeEnv`.
-- **URLs**: `url`, `httpsUrl`, `postgresUrl`, `redisUrl`.
-- **Parsing**: `csv`, `json`, `keyValue`.
-
-```ts
-import { contracts } from '@arki/env/contracts';
-
 const env = defineEnv({
   server: {
-    ALLOWED_ORIGINS: contracts.csv(), // 'a,b,c' → ['a', 'b', 'c']
-    FEATURE_FLAGS: contracts.json(), // JSON-parsed
-    SERVICE_TAGS: contracts.keyValue(), // 'a=1,b=2' → { a: '1', b: '2' }
+    PORT: contracts.port(3000),
+    DATABASE_URL: contracts.url(),
   },
+  runtimeEnv: { PORT: '8080', DATABASE_URL: 'https://db.example.com' },
 });
+
+console.log(env.PORT, typeof env.PORT);
+console.log(env.DATABASE_URL);
 ```
 
-## API
+```text
+8080 number
+https://db.example.com
+```
 
-- `@arki/env/core`
-  - `defineEnv(config)` — validate `process.env` and return a typed object.
-- `@arki/env/contracts`
-  - `contracts` — flattened namespace of all built-in Zod contracts.
-  - `commonContracts`, `urlContracts`, `parseContracts` — per-category namespaces.
-- `@arki/env`
-  - Re-exports `contracts` from `@arki/env/contracts`.
+Leave out `runtimeEnv` in a server app. `defineEnv` then reads `globalThis.process?.env` on the first access.
 
-## Errors
+## When not to use this
 
-`@arki/env` raises no errors of its own. A bad environment throws the `Error` built from the validation issues (one `path: message` line per issue, headed by your `name`), or whatever your `onValidationError` throws. There are no `ARKI_ENV_*` codes.
+- You need a config file, layered sources or hot reload. This package reads environment variables only.
+- Your validator is asynchronous. Validation is synchronous.
+- You need the secret to stay hidden from code in the same process. `secret()` stops accidents in logs. It is not encryption.
 
 ## Runtime support
 
-`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. Without `runtimeEnv`, `defineEnv` reads `globalThis.process?.env` on the first access; on an engine with no `process` it sees no values, so pass `runtimeEnv` there. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. `@arki/env/dot` needs `@arki/dot`. `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
+`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. `@arki/env/dot` needs `@arki/dot`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
+
+## Public imports
+
+- `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`.
+- `@arki/env/contracts`: `contracts` and the per-category namespaces `commonContracts`, `urlContracts`, `parseContracts`.
+- `@arki/env`: re-exports `contracts`.
+- `@arki/env/dot`: `env()` plugin, `ENV_PLUGIN_ERROR_CODES`, `EnvDotOptions`, `EnvServices`.
+
+## Secrets
+
+Wrap a secret's schema in `secret(...)`. The variable becomes a `Redacted` value. It prints as `[redacted]` in logs, JSON, template strings and `console.log`. The compiler will not pass it where a string is expected. Read it with `reveal(...)` at the one place that needs it. For an optional secret, call `.optional()` on the result. A missing variable then stays `undefined`.
+
+```ts run expect
+import { z } from 'zod';
+
+import { defineEnv, reveal, secret } from '@arki/env/core';
+
+const env = defineEnv({
+  server: { STRIPE_KEY: secret(z.string().min(1)) },
+  runtimeEnv: { STRIPE_KEY: 'sk_live_123' },
+});
+
+console.log(String(env.STRIPE_KEY));
+console.log(reveal(env.STRIPE_KEY));
+```
+
+```text
+[redacted]
+sk_live_123
+```
+
+`reveal` also accepts the raw string, because schemas do not run when validation is skipped.
+
+## Contracts
+
+The `contracts` namespace holds common variable shapes:
+
+- Common: `string`, `number`, `boolean`, `port`, `nodeEnv`, `logLevel`.
+- URLs: `url`, `databaseUrl`, `redisUrl`.
+- Parsing: `json(schema)`, `csvArray(itemSchema)`, `csvSet(itemSchema)`.
+
+```ts run expect
+import { z } from 'zod';
+
+import { contracts } from '@arki/env/contracts';
+import { defineEnv } from '@arki/env/core';
+
+const env = defineEnv({
+  server: {
+    ALLOWED_ORIGINS: contracts.csvArray(z.string()),
+    FEATURES: contracts.json(z.object({ beta: z.boolean() })),
+  },
+  runtimeEnv: { ALLOWED_ORIGINS: 'a,b,c', FEATURES: '{"beta":true}' },
+});
+
+console.log(env.ALLOWED_ORIGINS);
+console.log(env.FEATURES);
+```
+
+```text
+[ "a", "b", "c" ]
+{
+  beta: true,
+}
+```
+
+## Failure behaviour
+
+`defineEnv` throws an `Error` on the first read of a bad environment. The message starts with your `name` and lists one `path: message` line per issue. Set `options.onValidationError` to throw something else.
+
+```ts run expect
+import { contracts } from '@arki/env/contracts';
+import { defineEnv } from '@arki/env/core';
+
+const env = defineEnv({
+  server: { PORT: contracts.port(), DATABASE_URL: contracts.url() },
+  runtimeEnv: { PORT: 'abc' },
+});
+
+try {
+  console.log(env.PORT);
+} catch (error) {
+  console.log(error instanceof Error ? 'invalid environment' : 'unknown');
+}
+```
+
+```text
+invalid environment
+```
+
+The Dot plugin (`@arki/env/dot`) validates at boot. A bad environment stops `boot()` with `ARKI_ENV_PLUGIN_E001`. Its `remediation` tells you to set the listed variables. `dot explain` never validates.
+
+Handle it by fixing the variables. Do not catch the error and continue with defaults.
+
+## Limits
+
+- Validation runs in every environment, production, CI and tests included. `NODE_ENV`, `CI` and `lint` never skip it.
+- The only implicit opt-out is `SKIP_ENV_VALIDATION=1`, exactly `1`. Use it only in build stages that run without secrets. `SKIP_ENV_VALIDATION=true` does not skip.
+- `options.skipValidation` overrides the variable in code.
+- Validation is synchronous. Validation is lazy, so a bad value shows at the first read, not at import.
+- With validation skipped, schemas do not run. Values are raw strings. `reveal` still works on them.
 
 ## Documentation
 
-`@arki/env` ships an optional `@arki/env/dot` adapter for the
-[`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
+- [Agent guide](docs/agent-guide.md): tasks and rules for agents.
+- [Upgrade 0.0.11 to 0.1.0](docs/upgrades/0.0.11-to-0.1.0.md): what broke and how to migrate.
+- The `@arki/env/dot` plugin publishes `env` through `provides`. Consumers write `needs: { env: envPlugin.provides.env }`. See the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) package for plugin authoring and lifecycle.
 
-- The plugin publishes `env` through `provides`. Consumers write
-  `needs: { env: envPlugin.provides.env }`.
-- See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-  package for plugin authoring, lifecycle, diagnostics, and the
-  [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+## Support
+
+Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues).
 
 <!-- bench:start -->
 
@@ -159,4 +209,4 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).

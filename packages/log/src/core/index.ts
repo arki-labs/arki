@@ -1,3 +1,4 @@
+/** The core of `@arki/log`: loggers, `configure()`, templates, processors, formatters, core sinks and wrappers. */
 // @arki/log core: zero dependencies, web-standard globals only. Importing does nothing.
 
 export { configure, getLogger, shareContext, withContext } from './default.js';

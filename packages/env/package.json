@@ -1,7 +1,7 @@
 {
   "name": "@arki/env",
   "version": "0.0.11",
-  "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
+  "description": "Type-safe environment variable parsing for ARKI \u2014 defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -59,6 +59,10 @@
     "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
+    "CHANGELOG.md",
+    "llms.txt",
+    "docs/agent-guide.md",
+    "docs/upgrades/**",
     "package.json"
   ],
   "scripts": {
@@ -69,6 +73,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },

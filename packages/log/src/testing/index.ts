@@ -1,3 +1,4 @@
+/** `fakeLog()`, a test double that captures every log record and asserts on it. */
 // @arki/log/testing: a fake that takes over the default logging instance (RFC §11).
 
 import type { LevelName } from '../core/levels.js';

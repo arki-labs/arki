@@ -1,0 +1,32 @@
+# @arki/payments
+
+> Payments for ARKI apps: a Stripe provider, plans, customers, subscriptions, payments, refunds, dunning and tax, with Drizzle tables, repositories and journal commands. Routers stay in each app.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/payments`: `billingIntervalValues`, `createCustomerId`, `createPaymentId`, `createPlanId`, `createSubscriptionId`, `createWebhookId`, `customerIdFactory`, `customerIdSchema`, `paymentIdFactory`, `paymentIdSchema`, `paymentMethodTypeValues`, `paymentProviderValues`; and 23 more.
+- core/* (30 paths): `@arki/payments/core`, `@arki/payments/core/contracts`, `@arki/payments/core/derived-schemas`, `@arki/payments/core/index`, `@arki/payments/core/journal`, `@arki/payments/core/journal/payment`, `@arki/payments/core/journal/subscription`, `@arki/payments/core/journal/support`, `@arki/payments/core/money`, `@arki/payments/core/monitoring/payment-monitor`, `@arki/payments/core/notifications/service`, `@arki/payments/core/primitives`, `@arki/payments/core/providers/base-provider`, `@arki/payments/core/providers/provider-error`, `@arki/payments/core/providers/stripe-event-types`, `@arki/payments/core/providers/stripe-provider`, `@arki/payments/core/repository`, `@arki/payments/core/security/webhook-security`, `@arki/payments/core/services/dunning-service`, `@arki/payments/core/services/payment-retry-service`, `@arki/payments/core/services/proration-service`, `@arki/payments/core/services/subscription-manager`, `@arki/payments/core/services/webhook-analytics-service`, `@arki/payments/core/services/webhook-event-payloads`, `@arki/payments/core/services/webhook-handler`, `@arki/payments/core/services/webhook-security`, `@arki/payments/core/tables`, `@arki/payments/core/types`, `@arki/payments/core/user-id`, `@arki/payments/core/webhook-claims`.
+- presets/* (4 paths): High-level "preset" flows — opinionated assemblies of the core provider + repository for the common case, so a consuming app wires a few routes instead of re-implementing the provider dance. `@arki/payments/presets`, `@arki/payments/presets/index`, `@arki/payments/presets/revenuecat`, `@arki/payments/presets/subscription`.
+- dunning/* (14 paths): `@arki/payments/dunning`, `@arki/payments/dunning/analytics-money`, `@arki/payments/dunning/contracts`, `@arki/payments/dunning/index`, `@arki/payments/dunning/primitives`, `@arki/payments/dunning/repository`, `@arki/payments/dunning/services/campaign-service`, `@arki/payments/dunning/services/communication-service`, `@arki/payments/dunning/services/integration-service`, `@arki/payments/dunning/services/segmentation-service`, `@arki/payments/dunning/sql-list`, `@arki/payments/dunning/stored-risk-profile`, `@arki/payments/dunning/tables`, `@arki/payments/dunning/types`.
+- tax/* (10 paths): `@arki/payments/tax`, `@arki/payments/tax/contracts`, `@arki/payments/tax/index`, `@arki/payments/tax/primitives`, `@arki/payments/tax/reporting`, `@arki/payments/tax/repository`, `@arki/payments/tax/service`, `@arki/payments/tax/tables`, `@arki/payments/tax/tax-id`, `@arki/payments/tax/types`.
+- refunds/* (9 paths): `@arki/payments/refunds`, `@arki/payments/refunds/contracts`, `@arki/payments/refunds/index`, `@arki/payments/refunds/journal`, `@arki/payments/refunds/primitives`, `@arki/payments/refunds/repository`, `@arki/payments/refunds/service`, `@arki/payments/refunds/tables`, `@arki/payments/refunds/types`.
+- one path each: `@arki/payments/env`, `@arki/payments/repositories`, `@arki/payments/index`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Charge or check a card](docs/agent-guide.md#charge-or-check-a-card)
+- [Request and decide a refund](docs/agent-guide.md#request-and-decide-a-refund)
+- [Wire the package into an app](docs/agent-guide.md#wire-the-package-into-an-app)
+
+## Rules that bite
+- Expected answers are returned failures (`payments.*`). Check with `isFailure`. Bugs and provider faults throw.
+- Routers stay in the app. The app owns its RPC context and authorization.
+- A refund after 90 days or over the refundable amount returns a failure and writes nothing.
+- Every owner column is a `UserId` (`usr_...`).
+- Tables need the app's `pgSchema` and its user id column.

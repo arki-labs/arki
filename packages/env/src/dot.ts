@@ -43,7 +43,12 @@ import { DotPluginError, plugin } from '@arki/dot/plugin';
 import { defineEnv, formatIssues } from './core/define-env.js';
 
 export const ENV_PLUGIN_ERROR_CODES = {
-  /** The env failed its schema at boot. The message lists every bad key. */
+  /**
+   * The env failed its schema at boot. The message lists every bad key.
+   *
+   * @fix Set the listed variables, or fix their values, before booting the app.
+   * @verify dot doctor --json | jq '.data'
+   */
   invalidEnv: 'ARKI_ENV_PLUGIN_E001',
 } as const;
 

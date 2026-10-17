@@ -1,35 +1,37 @@
 # @arki/log
 
-Zero-dependency structured logging for every JavaScript runtime. Libraries log; apps configure. Message templates keep their values as fields, channels are set in one config, and records map onto the OpenTelemetry log data model. Runs on Node, Bun, Deno, browsers and React Native (Hermes). Importing it does nothing: no env read, no output, no listener.
+Zero-dependency structured logging for every JavaScript runtime. Libraries log; apps configure. Message templates keep their values as fields, channels are set in one config, and records map onto the OpenTelemetry log data model. Importing it does nothing: no env read, no output, no listener.
 
-## Installation
+## Install
 
 ```sh
-npm install @arki/log
-# or
 bun add @arki/log
-# or
-pnpm add @arki/log
 ```
 
-## Tour
+## Quick start
 
-A library logs and configures nothing:
+A library logs and configures nothing. An app configures once, in its entry file. This file is tested: a password in the fields is censored before any sink sees it.
 
-```ts
-import { getLogger } from '@arki/log';
+```ts from="examples/redact-checkout.ts#redact-checkout"
+const logging = createLogging();
+export const sink = memorySink();
 
-const log = getLogger('arki:kv'); // module scope is fine
+logging.configure({
+  channels: { memory: sink },
+  default: { level: 'info', channels: ['memory'] },
+  processors: [redact(['password'])],
+});
 
-export async function connect(url: string) {
-  log.debug('connecting to {host}', { host: new URL(url).host });
+/** Logs a sign-in. The password never reaches the sink. */
+export function signIn(userId: string, password: string): void {
+  logging.getLogger('app:auth').info('user {userId} signed in', { userId, password });
 }
 ```
 
-An app configures once, in its entry file:
+A real app uses the default instance and a Node sink:
 
 ```ts
-import { configure, redact } from '@arki/log';
+import { configure, getLogger, redact } from '@arki/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 export const logging = configure({
@@ -41,9 +43,65 @@ export const logging = configure({
   categories: { arki: { level: 'warn' } },
   processors: [redact(['password', 'headers.authorization'])],
 });
+
+getLogger('arki:kv').debug('connecting to {host}', { host: 'db.example.com' });
 ```
 
 Before `configure()` runs, only `warn` and above are kept (the first 64 records), and they are written when `configure()` runs. **An app that never configures logging writes nothing else.** A Dot app uses `log()` from `@arki/dot/log` instead (see [Dot](#dot)).
+
+## When not to use this
+
+- You need log shipping, rotation or retention. Use a sink that hands records to your platform, or a log agent.
+- You need a logger that ends the process. `fatal` only writes.
+- You want console output with no setup. An unconfigured app writes nothing below `warn`.
+
+## Runtime support
+
+Runs on Node, Bun, Deno, browsers and React Native (Hermes). The core uses web-standard globals only. `@arki/log/node` needs Node-compatible `node:` modules. `@arki/log/otel` needs the optional `@opentelemetry/api` and `@opentelemetry/api-logs` peers.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v26.11.1 | 2026-10-17 |
+| bun | pass | 1.4.2 | 2026-10-17 |
+| deno | pass | 2.9.7 | 2026-10-17 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes | not run | - | 2026-10-17 |
+<!-- runtimes:end -->
+
+## Public imports
+
+| Entry | Holds |
+| --- | --- |
+| `@arki/log` | `getLogger`, `configure`, `createLogging`, `withContext`, `shareContext`, `Level`, `serializeFailure`, `LogError`, `LOG_ERROR_CODES`, processors, formatters, core sinks, wrappers, types |
+| `@arki/log/node` | `stdout`, `stderr`, `file`, `fromEnv`, `asyncContext` |
+| `@arki/log/otel` | `otelTrace`, `otelSink` |
+| `@arki/log/testing` | `fakeLog` |
+
+## Failure behaviour
+
+Logging never throws into the code that logs. A failing sink loses only its own copy of the record. The failure is reported once on `console.error`.
+
+A setup mistake throws `LogError` with a code and a `remediation`:
+
+| Code | Cause | Fix |
+| --- | --- | --- |
+| `ARKI_LOG_E001` | `configure()` ran twice | Call it once; use `reconfigure()` on the handle |
+| `ARKI_LOG_E002` | A rule or `to()` names an undefined channel | Add the channel to `configure({ channels })` |
+| `ARKI_LOG_E003` | A level that does not exist | Use one of the six names or a number from 1 to 24 |
+| `ARKI_LOG_E004` | `fakeLog()` while another fake is active | Restore the first fake |
+| `ARKI_LOG_E005` | `reconfigure()` on a stale handle | Use the handle from the latest `configure()` |
+
+Fix the setup. Do not catch a `LogError` and carry on: the next call fails the same way.
+
+## Limits
+
+- Before `configure()`, only `warn` and above are kept, and only the first 64 records. The 65th early `warn` is lost.
+- `configure()` runs once per instance. A second call throws `ARKI_LOG_E001`.
+- A failure value logged as a field prints at most 64 links of its cause chain, then `[MaxDepth]`. A cycle prints `[Circular]`.
+- Async code keeps `withContext` fields only when `asyncContext()` from `@arki/log/node` is in `configure()`.
+- `fatal` writes a record. It never ends the process.
+- A processor changes a record. It cannot change the template text after formatters render it, so redact fields, not messages.
 
 ## Loggers and categories
 
@@ -61,17 +119,26 @@ Six levels with OpenTelemetry severity numbers: `trace` 1, `debug` 5, `info` 9, 
 ## Templates and fields
 
 ```ts
-log.info('user {userId} signed in', { userId: 'usr_1' }); // ok
-log.info('user {userId} signed in', { user: 'usr_1' }); // compile error: userId is missing
+import { inspect } from 'node:util';
+
+import { getLogger } from '@arki/log';
+
+const log = getLogger('app:orders');
+const err = new Error('card declined');
+const big = { items: [1, 2, 3] };
+
+log.info('user {userId} signed in', { userId: 'usr_1' });
 
 const order = log.with({ orderId: 'ord_1' });
-order.info('charged {orderId}', { amount: 42 }); // ok: orderId is bound
+order.info('charged {orderId}', { amount: 42 }); // orderId is bound
 
 log.error('payment failed', { error: err }); // `error`, `err` or `cause` becomes record.error
 log.error(err); // the template is the error's message
 log.debug('state {state}', () => ({ state: inspect(big) })); // runs only when debug is on
 log.emit({ level: 'info', eventName: 'payment.accepted', body: { amount: 42 } });
 ```
+
+A template field with no value is a compile error: `log.info('user {userId} signed in', { user: 'usr_1' })` does not compile because `userId` is missing.
 
 A failure value from [`@arki/failure`](../failure) is a field like any other: `log.warn('lookup failed', { failure })`. It prints `code`, `message`, `status`, `data` and `remediation`, plus `causes`: the cause chain, nearest first, through nested failures and thrown errors. The list stops at a cycle or after 64 links, the same limit as `findCause`. `@arki/log` knows a failure by its `'~failure'` brand, so it still has no dependencies. `serializeFailure(failure)` returns the same plain fields.
 
@@ -100,10 +167,13 @@ The template is never turned into a string on the hot path. Formatters render it
 ## The handle
 
 ```ts
-const logging = configure(config);
+import { configure, memorySink } from '@arki/log';
+
+const sink = memorySink();
+const logging = configure({ channels: { memory: sink }, default: { level: 'info', channels: ['memory'] } });
 await logging.flush();
+await logging.reconfigure({ channels: { memory: sink }, default: { level: 'debug', channels: ['memory'] } });
 await logging.close({ timeoutMs: 5000 }); // flush, close every sink, unconfigured again
-await logging.reconfigure(nextConfig);
 ```
 
 A second `configure()` throws `ARKI_LOG_E001`; use `reconfigure`. `createLogging()` returns a private instance. Declare `interface Register { logging: typeof logging }` in `declare module '@arki/log'` to type-check channel names in `to()`.
@@ -126,7 +196,14 @@ Nothing reads the environment on import. `fromEnv()` from `@arki/log/node` reads
 ## Testing (`@arki/log/testing`)
 
 ```ts
+import { test } from 'vitest';
+
+import { getLogger } from '@arki/log';
 import { fakeLog } from '@arki/log/testing';
+
+async function refund(input: { amount: number }): Promise<void> {
+  getLogger('app:refunds').error('refund over limit {amount}', { amount: input.amount });
+}
 
 test('refund over limit alerts', async () => {
   using log = fakeLog(); // captures every category at trace, restores on dispose
@@ -142,7 +219,7 @@ test('refund over limit alerts', async () => {
 
 A Dot app switches logging on with `log()` from `@arki/dot/log`, as its first `.use(...)`. The kernel activates it before its first lifecycle record and closes it after its last one, also on a failed boot. `resource['service.name']` defaults to the app name.
 
-```ts
+```ts skip="@arki/dot is not a dependency of @arki/log"
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
@@ -152,21 +229,15 @@ const app = await defineApp('checkout')
   .boot();
 ```
 
-## Entry points
-
-| Entry | Holds |
-| --- | --- |
-| `@arki/log` | `getLogger`, `configure`, `createLogging`, `withContext`, `shareContext`, `Level`, `serializeFailure`, processors, formatters, core sinks, wrappers, types |
-| `@arki/log/node` | `stdout`, `stderr`, `file`, `fromEnv`, `asyncContext` |
-| `@arki/log/otel` | `otelTrace`, `otelSink` |
-| `@arki/log/testing` | `fakeLog` |
-
 ## Documentation
 
-`@arki/log` is framework-agnostic and works on its own. When you compose
-it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-application framework, see `packages/dot/docs/` for plugin authoring,
-lifecycle, and diagnostics.
+- [Agent guide](docs/agent-guide.md): tasks and rules for agents.
+- [Upgrade 0.1.0 to 0.2.0](docs/upgrades/0.1.0-to-0.2.0.md): what broke and how to migrate.
+- Composing with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework: see its `docs/` for plugin authoring, lifecycle and diagnostics.
+
+## Support
+
+Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues).
 
 <!-- bench:start -->
 ## Benchmarks
@@ -226,4 +297,4 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).

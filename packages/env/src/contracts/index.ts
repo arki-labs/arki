@@ -1,3 +1,4 @@
+/** Ready-made Zod contracts for ports, URLs, lists, JSON and other common variable shapes. */
 import { commonContracts } from './common.js';
 import { parseContracts } from './parsing.js';
 import { urlContracts } from './urls.js';

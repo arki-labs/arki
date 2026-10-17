@@ -8,7 +8,12 @@ import { z } from 'zod';
 
 import { defineFailure } from '@arki/failure';
 
-/** The template's schema refused the input. Nothing was sent. */
+/**
+ * The template's schema refused the input. Nothing was sent.
+ *
+ * @fix Fix the input to match the template's schema. The same input fails again.
+ * @verify bun run test -- src/template.spec.ts
+ */
 export const MailInvalidInput = defineFailure('mail.invalid_input', {
   status: 422,
   data: z.object({
@@ -23,7 +28,12 @@ export const MailInvalidInput = defineFailure('mail.invalid_input', {
   remediation: "Fix the input to match the template's schema; the same input fails again.",
 });
 
-/** Every transport is over its monthly quota. Nothing was sent. */
+/**
+ * Every transport is over its monthly quota. Nothing was sent.
+ *
+ * @fix Add a transport without a quota as a fallback, or raise a quota.
+ * @verify bun run test -- src/failover.spec.ts
+ */
 export const MailQuotaExhausted = defineFailure('mail.quota_exhausted', {
   status: 429,
   data: z.object({ month: z.string() }),
@@ -34,6 +44,9 @@ export const MailQuotaExhausted = defineFailure('mail.quota_exhausted', {
 /**
  * The service refused the mail, so it surely did not take it. `retryable` is true for HTTP 429
  * and 5xx, when trying later can help. `upstreamStatus` is the service's HTTP status.
+ *
+ * @fix Retry later when `data.retryable` is true. Otherwise fix the mail or the account settings.
+ * @verify bun run test -- src/failover.spec.ts
  */
 export const MailRejected = defineFailure('mail.rejected', {
   status: 422,
@@ -56,6 +69,9 @@ export const MailRejected = defineFailure('mail.rejected', {
 /**
  * No readable answer: a timeout, a network failure, or an answer that could not be read. The
  * service may have taken the mail, so trying another service could deliver it twice.
+ *
+ * @fix Send it again later with the same idempotency key. The service may already have taken it.
+ * @verify bun run test -- src/failover.spec.ts
  */
 export const MailUncertain = defineFailure('mail.uncertain', {
   status: 503,
@@ -70,7 +86,12 @@ export const MailUncertain = defineFailure('mail.uncertain', {
   remediation: 'Send it again later with the same idempotency key; the service may already have taken it.',
 });
 
-/** A queued mail's `expiresAt` passed before it could be sent. Nothing was sent. */
+/**
+ * A queued mail's `expiresAt` passed before it could be sent. Nothing was sent.
+ *
+ * @fix Queue a new mail, such as a fresh sign-in link.
+ * @verify bun run test -- src/mailer.spec.ts
+ */
 export const MailExpired = defineFailure('mail.expired', {
   status: 410,
   data: z.object({ expiresAt: z.string() }),

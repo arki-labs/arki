@@ -94,7 +94,9 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 - Set `expiresAt` on queued sign-in links, so a late retry does not send a stale link.
 - `SentMail.id` is `null` when the service returns no id.
 
-## Failures (returned)
+## Errors
+
+### Failures (returned)
 
 | Definition           | Code                   | Status | Meaning                                                    | Retryable                 |
 | -------------------- | ---------------------- | ------ | ---------------------------------------------------------- | ------------------------- |
@@ -104,7 +106,7 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 | `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent.           | yes, never on another one |
 | `MailExpired`        | `mail.expired`         | 410    | A queued mail expired before it was sent.                  | no                        |
 
-## Errors (thrown)
+### Errors (thrown)
 
 | Code             | Meaning                                                 |
 | ---------------- | ------------------------------------------------------- |

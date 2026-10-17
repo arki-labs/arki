@@ -2,17 +2,15 @@
 
 Typed mail for TypeScript. Templates are plain objects typed by any Standard Schema. Transports never throw and never make up a message id. `failover` keeps to your quotas and never sends a mail twice to dodge a timeout. And `@arki/mail/pg` queues a mail in the same transaction as the write it belongs to.
 
-- [Send a mail](#send-a-mail)
-- [Templates](#templates)
-- [Transports](#transports)
-- [Failover and quotas](#failover-and-quotas)
-- [Mail that commits with your write](#mail-that-commits-with-your-write)
-- [Dot](#dot)
-- [Testing](#testing)
-- [Errors](#errors)
-- [Runtimes](#runtimes)
+## Install
 
-## Send a mail
+```sh
+bun add @arki/mail @arki/failure
+```
+
+`@arki/failure` gives you `isFailure`. A template's input schema comes from any Standard Schema library; the examples use `zod`.
+
+## Quick start
 
 ```ts
 import { z } from 'zod';
@@ -38,7 +36,7 @@ if (isFailure(sent)) console.error(sent.code, sent.message);
 else console.info(sent.id);
 ```
 
-`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](../failure/README.md): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected` or `MailUncertain` (see [Errors](#errors)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
+`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](https://www.npmjs.com/package/@arki/failure): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected` or `MailUncertain` (see [Failure behaviour](#failure-behaviour)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
 
 The sender comes from the call, then the template's `defaults.from`, then the mailer's `from`.
 
@@ -48,6 +46,88 @@ Two options guard non-production setups:
 - `redirectTo: 'staging@acme.dev'` sends every mail there instead, drops Cc and Bcc, and keeps the original To in `X-Original-To`.
 
 `onEvent` observes `sending`, `sent` and `failed`. An observer that throws is logged; it never fails or repeats a send.
+
+## When not to use this
+
+- Bulk or marketing sends with lists, unsubscribes and open tracking. This package sends transactional mail.
+- Reading or parsing inbound mail.
+- A guarantee that a mail arrives exactly once. A send that times out may or may not have been delivered (see [Limits](#limits)).
+
+## Runtime support
+
+The core, `templates/auth` and the `http/*` transports use only `fetch` and run on Node, Bun and Deno. `node/ses` needs Node or Bun. `react` needs the `react`, `react-email` and `@react-email/render` peers. `pg` and `dot` need `@arki/journal`, `drizzle-orm` and `@arki/dot`.
+
+Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
+
+## Public imports
+
+- `@arki/mail`: `mailer`, `defineTemplate`, `renderTemplate`, `failover`, `logTransport`, quota stores, the failures, `MailError`, `MAIL_ERROR_CODES` and the types.
+- `@arki/mail/templates/auth`: `magicLink`, `verifyEmail`, `resetPassword`, `signInCode`.
+- `@arki/mail/http/resend`, `/http/unosend`, `/http/cloudflare`, `/http/mailpit`: HTTP transports.
+- `@arki/mail/node/ses`: the SES transport.
+- `@arki/mail/react`: `renderReact`.
+- `@arki/mail/pg`: `mailOutbox`. `@arki/mail/pg/testing`: `mailQueueAssertions`.
+- `@arki/mail/dot`: `mail`, `mailOutboxPlugin`, `mailJobs`.
+- `@arki/mail/testing`: `mailSink`, `transportContract`.
+
+## Failure behaviour
+
+`send` does not throw for a mail that was not sent. It returns a failure value, defined with `@arki/failure` and exported from `@arki/mail`. A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
+
+| Failure              | Code                   | Status | When                                                                              |
+| -------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------- |
+| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.            |
+| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                 |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`. |
+| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`.   |
+| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.      |
+
+A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
+
+| Code             | Name               | When                                                                   |
+| ---------------- | ------------------ | ---------------------------------------------------------------------- |
+| `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender, no SES SDK. |
+| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header.  |
+| `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Thrown before any request.         |
+| `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database.                                       |
+| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.            |
+
+Handle the failures by what you know about delivery:
+
+- `MailInvalidInput`, `MailQuotaExhausted`, `MailExpired`: nothing was sent. Fix the input, add a transport, or queue a new mail.
+- `MailRejected`: the service surely did not take it. Retry later only when `data.retryable` is true.
+- `MailUncertain`: the mail may have been delivered. See [Limits](#limits).
+
+## Limits
+
+- **Delivery is uncertain after a timeout.** When a request times out, the network drops, or the answer cannot be read, the service may already have the mail. `send` returns `MailUncertain`, not success and not a clean failure. `failover` does not try a second provider then, because it could deliver a duplicate. Retry with the same idempotency key, or accept the risk.
+- Only a `MailRejected` proves the mail was not taken.
+- Delivery through `@arki/mail/pg` is at least once. Resend drops a repeat within 24 hours. Other services may deliver a retry twice.
+- Quota counts are advisory. Two replicas can both send the last mail of a quota.
+- A queued mail has exactly one `to` recipient and at most 256 KiB (`maxBytes`).
+- `text` is required on every template.
+
+The boundary, in a test:
+
+```ts run expect
+import { z } from 'zod';
+
+import { defineTemplate, mailer, MailUncertain } from '@arki/mail';
+import { mailSink } from '@arki/mail/testing';
+
+const sink = mailSink();
+const mail = mailer({ transport: sink, from: 'hi@acme.dev' });
+const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Ping', text: () => 'pong' });
+
+sink.failNext(MailUncertain({ transport: 'sink', detail: 'request timed out' }));
+const result = await mail.send(ping, {}, { to: 'ada@example.com' });
+
+if (MailUncertain.is(result)) console.log('may have been delivered:', result.data.detail);
+```
+
+```text
+may have been delivered: request timed out
+```
 
 ## Templates
 
@@ -208,30 +288,11 @@ sink.failNext(MailRejected({ transport: 'sink', retryable: false })); // the nex
 - `@arki/mail/pg/testing` has `mailQueueAssertions(db, tables)`: `queued(template?)` and `dead()` read committed rows, so a mail queued in a rolled-back transaction is not there.
 - `transportContract(harness)` from `@arki/mail/testing` runs the shared transport tests against your own transport.
 
-## Errors
+## Documentation
 
-A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
+- [Agent guide](docs/agent-guide.md): tasks and rules for agents.
+- [llms.txt](llms.txt): the import map.
 
-| Failure              | Code                   | Status | When                                                                              |
-| -------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------- |
-| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.            |
-| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                 |
-| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`. |
-| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`.   |
-| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.      |
+## Support
 
-A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
-
-| Code             | Name               | When                                                                   |
-| ---------------- | ------------------ | ---------------------------------------------------------------------- |
-| `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender, no SES SDK. |
-| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header.  |
-| `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Thrown before any request.         |
-| `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database.                                       |
-| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.            |
-
-## Runtimes
-
-The core, `templates/auth` and the `http/*` transports use only `fetch` and run on Node, Bun and Deno. `node/ses` needs Node or Bun. `react` needs the `react`, `react-email` and `@react-email/render` peers. `pg` and `dot` need `@arki/journal`, `drizzle-orm` and `@arki/dot`.
-
-Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
+Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues).
