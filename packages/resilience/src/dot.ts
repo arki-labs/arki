@@ -37,7 +37,12 @@ import { describe } from './events.js';
  * Stable error codes thrown by the resilience plugin. Match on these, never on the message.
  */
 export const RESILIENCE_PLUGIN_ERROR_CODES = {
-  /** `for` or `run` got a name that is not in the presets (only reachable from untyped JS). */
+  /**
+   * `for` or `run` got a name that is not in the presets (only reachable from untyped JS).
+   *
+   * @fix Use a name you passed to `definePresets(...)`. Types catch this in TypeScript.
+   * @verify cd packages/resilience && bun run test
+   */
   unknownPreset: 'ARKI_RESILIENCE_PLUGIN_E001',
 } as const;
 

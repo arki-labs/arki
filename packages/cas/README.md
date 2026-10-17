@@ -1,14 +1,30 @@
 # @arki/cas
 
-A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 to 4 of the RFC (polynomial core; conditions, the sign oracle and `simplify`; `derivative` and the rule-by-rule `derivation`; `factor` over ℚ).
+A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Version `0.0.x`; build steps 1 to 4 of the RFC (polynomial core; conditions, the sign oracle and `simplify`; `derivative` and the rule-by-rule `derivation`; `factor` over ℚ).
 
-## The ℚ[π, e] assumption
+## Install
 
-Coefficients live in ℚ[π, e] (ℚ(π, e) for division), with π and e as **independent transcendentals**. A value is treated as zero exactly when all its rational coefficients are zero. That is the standard CAS convention (SymPy's `QQ[pi,E]`, Mathematica's `Together`, Maple's `normal`), and it is **not a theorem**: whether π and e are algebraically independent is an open problem; it is not even known whether π + e is irrational. No relation between them is known. `polynomialIn`, `expand`, `collect`, `rationalize`, `gcd`, `exactRoots` and `simplify` all zero-test under this assumption.
+```sh
+bun add @arki/cas @arki/expr @arki/math
+```
 
-Signs of non-zero constants (a discriminant such as `e^2 + 4*pi`) are decided rigorously: π and e are enclosed in rational intervals from `@arki/math` `PI`/`E`, the value is evaluated in exact interval arithmetic, and the precision doubles up to the `digits` budget. If the sign is still unknown, the answer is "unknown", never a guess (`exactRoots` then returns that part as `numeric`).
+## Quick start
 
-## Example
+Simplify a formula, differentiate it, and read the conditions that the result needs.
+
+```ts run
+import { derivative } from '@arki/cas/derivative';
+import { simplify } from '@arki/cas/simplify';
+
+const simplified = simplify('x/x');
+if (simplified.result.source !== '1') throw new Error('x/x did not simplify to 1');
+if (simplified.conditions.length !== 1) throw new Error('the lost restriction x != 0 must come back as a condition');
+
+const slope = derivative('x^3', 'x');
+if (slope.result.source !== '3 * x^2') throw new Error(`unexpected derivative: ${slope.result.source}`);
+```
+
+### Polynomials
 
 ```ts
 import { exactRoots, expand, polynomialIn } from '@arki/cas/polynomial';
@@ -25,6 +41,75 @@ polynomialIn('pi*x - 1', 'x'); // linear, coefficient `pi`; exactRoots → '1 / 
 polynomialIn('x^4 - 5*x^2 + 4', 'x'); // exactRoots → ['-2', '-1', '1', '2'], by factoring over ℚ
 polynomialIn('sin(x) - 1', 'x'); // { kind: 'other', reason: 'transcendental', span: { start: 0, end: 6 } }
 ```
+
+## When not to use this
+
+- You need full symbolic integration, limits, series or equation systems. Version 0.0.x has none of them.
+- You need complex-valued algebra. Every variable ranges over the reals.
+- You need factoring of multivariate polynomials. Only univariate polynomials over ℚ factor completely.
+- You only evaluate numbers. Use `@arki/expr` with `@arki/math`.
+- You must prove that two expressions with both π and e are equal. The zero test relies on an unproven assumption (see below).
+
+## Runtime support
+
+Pure TypeScript on `@arki/expr` and `@arki/math`, with no Node built-ins. It runs where those two run: Node, Bun, Deno and browsers.
+
+## Public imports
+
+| Import                 | What it gives you                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `@arki/cas`            | Shared types, `CasError`, `CasLimitError`, `conditionToLatex`                     |
+| `@arki/cas/polynomial` | `expand`, `collect`, `rationalize`, `polynomialIn`, `gcd`, `exactRoots`, `factor` |
+| `@arki/cas/simplify`   | `simplify`                                                                        |
+| `@arki/cas/derivative` | `derivative`                                                                      |
+| `@arki/cas/derivation` | `derivation`: the result plus the rule-by-rule steps                              |
+
+## Failure behaviour
+
+Every verb returns a result or throws. A result never holds `NaN`.
+
+- **Input outside what the verb handles:** `CasError` with a `code` (`unsupported-function`, `not-differentiable`, `not-in-domain`, `bad-variable`, `not-rational`, `not-polynomial`, `unsupported-constant`), a one-sentence `remediation` and a `span` into the input. Show the span and the remediation.
+- **Over a budget:** `CasLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.
+- **A rewrite that widened the domain:** not a failure. The result lists `conditions`. Show them next to the answer.
+- **A sign that cannot be decided:** `exactRoots` returns that part as `numeric` with `exact: false`. It never guesses.
+- **Parse errors:** text that is not an expression throws `ParseError` from `@arki/expr`.
+
+## Limits
+
+Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). `factor` checks `factorDegree` (128) and `factorDigits` (300 digits in a coefficient) on each square-free part, `liftDigits` (2 000 digits in the Hensel modulus) before lifting and `recombination` (65 536 candidate products) while recombining; bigint arithmetic spends fuel by size, so hostile inputs throw within a second. A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
+
+Boundary example: the default `degree` budget is 1 000. `expand('x^500')` works. `expand('x^1001')` throws `CasLimitError` with `budget: 'degree'`, `limit: 1000` and `actual: 1001`, before any work.
+
+```ts run
+import { CasLimitError } from '@arki/cas';
+import { expand } from '@arki/cas/polynomial';
+
+expand('x^500');
+let caught: CasLimitError | undefined;
+try {
+  expand('x^1001');
+} catch (error) {
+  if (error instanceof CasLimitError) caught = error;
+}
+if (caught?.budget !== 'degree' || caught.limit !== 1000) throw new Error('the degree budget did not trip at 1001');
+```
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map and the rules.
+- [llms.txt](llms.txt): the short index for agents.
+- [CHANGELOG](CHANGELOG.md): what changed in each version.
+- Design: `docs/rfcs/2026-10-15-arki-cas.md` in the Arki workspace.
+
+## Support
+
+Report a bug or ask a question in the [Arki issue tracker](https://github.com/arki-labs/arki/issues). Include the input, the verb and the error `code`.
+
+## The ℚ[π, e] assumption
+
+Coefficients live in ℚ[π, e] (ℚ(π, e) for division), with π and e as **independent transcendentals**. A value is treated as zero exactly when all its rational coefficients are zero. That is the standard CAS convention (SymPy's `QQ[pi,E]`, Mathematica's `Together`, Maple's `normal`), and it is **not a theorem**: whether π and e are algebraically independent is an open problem; it is not even known whether π + e is irrational. No relation between them is known. `polynomialIn`, `expand`, `collect`, `rationalize`, `gcd`, `exactRoots` and `simplify` all zero-test under this assumption.
+
+Signs of non-zero constants (a discriminant such as `e^2 + 4*pi`) are decided rigorously: π and e are enclosed in rational intervals from `@arki/math` `PI`/`E`, the value is evaluated in exact interval arithmetic, and the precision doubles up to the `digits` budget. If the sign is still unknown, the answer is "unknown", never a guess (`exactRoots` then returns that part as `numeric`).
 
 ## Guarantees
 
@@ -195,7 +280,3 @@ factor('x^2 - y', 'x'); // content 1, factor x^2 - y, complete: false
 Univariate polynomials with rational coefficients are factored completely into irreducibles over ℚ by Zassenhaus's algorithm: content and Yun's square-free split, the best of 5 small primes, distinct-degree and Cantor–Zassenhaus splitting mod p (fixed seed, so a run is reproducible), quadratic Hensel lifting over a factor tree to the Landau–Mignotte bound, then recombination of subsets. Other names, π and e may sit in the content. Constants cas cannot zero-test (`sqrt(2)`, `ln(2)`, `exp(1/2)`) throw `CasError` `unsupported-constant` with their span, from `factor` and `gcd` alike: as a free symbol, `sqrt(2)^2 - 2` would not be 0 and `gcd(x - sqrt(2), x^2 - 2)` would be 1, as `polynomialIn` already reports. `expand`, `collect` and `rationalize` keep accepting them: their results are identities for any value. A square-free part whose coefficients involve them is returned whole and sets `complete: false`, unless it has degree 1 in the variable (then it is irreducible: `x^2 + 2xy + y^2` is `(x + y)^2`, complete); multivariate factoring is out of v1. The results match SymPy on 45 reference cases (cyclotomics, Swinnerton-Dyer, Mignotte, random products up to degree 40 with 30-digit coefficients).
 
 `exactRoots` uses the same factoring for rational polynomials of degree 3 and up: every linear and quadratic factor gives exact roots, other factors are `numeric`. When a factoring budget is reached it falls back to the square-free split instead of throwing.
-
-## Budgets
-
-Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). `factor` checks `factorDegree` (128) and `factorDigits` (300 digits in a coefficient) on each square-free part, `liftDigits` (2 000 digits in the Hensel modulus) before lifting and `recombination` (65 536 candidate products) while recombining; bigint arithmetic spends fuel by size, so hostile inputs throw within a second. A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.

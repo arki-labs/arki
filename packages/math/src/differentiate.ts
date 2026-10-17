@@ -1,6 +1,6 @@
 /**
- * Numerical derivatives and limits of a function of one real variable,
- * `f: (x: number) => number`, by Richardson extrapolation on float64.
+ * Numerical derivatives and limits of a one-variable function. The function is
+ * `f: (x: number) => number`, and the method is Richardson extrapolation on float64.
  *
  * Both functions return **numerical estimates with an error estimate**, never
  * proofs. They sample `f` at a shrinking sequence of steps and extrapolate the

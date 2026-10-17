@@ -1,6 +1,6 @@
 /**
- * Every failure this package raises on purpose extends `MathError`, so callers
- * can catch the whole family with one `instanceof`. Each concrete class carries
+ * Every failure this package raises extends `MathError`. Callers can catch the whole family with one
+ * `instanceof`. Each concrete class carries
  * a stable `code` and a one-sentence `remediation`: match on the code, never on
  * the message. Wrong runtime types (a string where a number was required, or
  * `decimal('2') + 1`) throw the built-in `TypeError` instead. Nothing in this
@@ -9,27 +9,82 @@
 
 /** Stable error codes of `@arki/math`. */
 export const MATH_ERROR_CODES = {
-  /** A string is not a number in the accepted syntax. */
+  /**
+   * A string is not a number in the accepted syntax.
+   *
+   * @fix Pass a plain ASCII decimal string such as `'12.5'` or `'1e3'`, or parse locale text with `@arki/math/parse`.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   numberFormat: 'ARKI_MATH_E001',
-  /** An argument is outside what the function accepts. */
+  /**
+   * An argument is outside what the function accepts.
+   *
+   * @fix Read the message for the argument and fix its value: bounds in order, a positive step, a probability from 0 to 1.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   invalidArgument: 'ARKI_MATH_E002',
-  /** Division by zero, or zero raised to a negative power. */
+  /**
+   * Division by zero, or zero raised to a negative power.
+   *
+   * @fix Check the divisor before the call, or choose a result for the zero case in your own code.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   divisionByZero: 'ARKI_MATH_E003',
-  /** The exact result needs rounding and no rounding mode was given. */
+  /**
+   * The exact result needs rounding and no rounding mode was given.
+   *
+   * @fix Pass a scale and a rounding mode, for example `{ scale: 4, rounding: 'halfEven' }`.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   roundingNecessary: 'ARKI_MATH_E004',
-  /** A value cannot be represented in the target type. */
+  /**
+   * A value cannot be represented in the target type.
+   *
+   * @fix Use a `bigint` or `Decimal` input, or keep the value inside the safe integer and finite float range.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   numericRange: 'ARKI_MATH_E005',
-  /** A statistic was asked of an empty or too small data set. */
+  /**
+   * A statistic was asked of an empty or too small data set.
+   *
+   * @fix Check the data length first. Most statistics need one value; variance and regression need more.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   emptyData: 'ARKI_MATH_E006',
-  /** An input or result exceeds the documented digit limits. */
+  /**
+   * An input or result exceeds the documented digit limits.
+   *
+   * @fix Keep values within 10 000 digits and an exponent of 10 000. These limits guard against hostile input.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   resourceLimit: 'ARKI_MATH_E007',
-  /** The runtime lacks an `Intl` feature this call depends on. */
+  /**
+   * The runtime lacks an `Intl` feature this call depends on.
+   *
+   * @fix Pass `symbols` to parse without `Intl`, or use a runtime with the feature (Hermes on iOS lacks `formatToParts`).
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   unsupportedFeature: 'ARKI_MATH_E008',
-  /** A matrix is singular to working precision. */
+  /**
+   * A matrix is singular to working precision.
+   *
+   * @fix Check the matrix with `conditionNumber` or `rank`, or use `leastSquares` or `pseudoInverse`.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   singularMatrix: 'ARKI_MATH_E009',
-  /** An iterative method did not reach its tolerance. */
+  /**
+   * An iterative method did not reach its tolerance.
+   *
+   * @fix Read `.best` for the best estimate, widen the tolerance or iteration limit, or give a better starting bracket.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   convergence: 'ARKI_MATH_E010',
-  /** A matrix that must be symmetric positive definite is not. */
+  /**
+   * A matrix that must be symmetric positive definite is not.
+   *
+   * @fix Pass a symmetric positive definite matrix, or use LU or QR decomposition instead of Cholesky.
+   * @verify cd packages/math && bun run vitest run src/errors.test.ts
+   */
   notPositiveDefinite: 'ARKI_MATH_E011',
 } as const;
 

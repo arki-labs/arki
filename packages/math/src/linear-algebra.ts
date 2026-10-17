@@ -1,8 +1,7 @@
 /**
- * Lean dense linear algebra over plain JS numbers (float64): vectors, small to
- * medium matrices, LU with partial pivoting, QR with column pivoting,
- * Cholesky, the singular value decomposition, least squares, eigenvalues and
- * eigenvectors. For symbolic algebra or sparse storage, reach for a full CAS
+ * Dense linear algebra over plain float64 numbers. It has vectors, small to medium matrices, LU with
+ * partial pivoting, QR with column pivoting, Cholesky, the singular value decomposition, least squares,
+ * eigenvalues and eigenvectors. For symbolic algebra or sparse storage, reach for a full CAS
  * such as mathjs.
  *
  * **Representation.** Vectors are `readonly number[]` and matrices are

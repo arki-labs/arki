@@ -2,15 +2,19 @@
 
 Benchmarks you can publish. You declare what a library and its competitors must return, and `@arki/bench` checks that every case does the same work before it times anything. It then measures with [mitata](https://github.com/evanwashere/mitata) in interleaved, randomized blocks across fresh processes, reports every number with a 95% interval, records the exact versions and machine, and writes the table into your README from a saved result. CI can compare two runs, fail on regressions and size budgets, and fail when the README no longer matches the suite.
 
+## Install
+
 ```sh
 bun add -D @arki/bench    # or: npm i -D @arki/bench
 ```
 
-## Quickstart
+`@arki/bench` is a dev-time tool. Install it as a dev dependency and run it in development and CI, never in production code.
+
+## Quick start
 
 `bench/sum.bench.ts`:
 
-```ts
+```ts from="examples/sum.bench.ts#suite"
 import { compare, defineSuite } from '@arki/bench';
 
 export default defineSuite({
@@ -59,6 +63,60 @@ With no arguments, `arki-bench` finds `bench/**/*.bench.{ts,mts,js,mjs}` under t
 
 `arki-bench` needs Node 22.10 or later (`engines.node` is `>=22.10`), Bun, or Deno. TypeScript suites run natively under Bun and Deno. Under Node older than 22.18, `arki-bench` adds `--experimental-strip-types` for you.
 
+## When not to use this
+
+- **Instruction counts in CI** — [CodSpeed](https://codspeed.io) runs benchmarks under simulation, so results do not depend on the runner's noise. Use it when shared-runner timings are too noisy for your thresholds.
+- **Whole commands** (CLI startup, builds) — [hyperfine](https://github.com/sharkdp/hyperfine) measures processes, with warm-ups and preparation commands.
+- **History across commits** — [Bencher](https://bencher.dev) stores results over time and alerts on trends. `arki-bench` compares two runs; it keeps no history.
+- **A quick loop in a test file** — `vitest bench` or plain mitata, when you do not need contracts, provenance or a README table.
+- **Production code paths.** `arki-bench` is a dev-time tool. Do not import it into code that serves requests.
+
+## Runtime support
+
+`@arki/bench` is a dev-time tool. It supports Node (`engines.node` is `>=22.10`) and Bun. It does not ship in application bundles.
+
+`--runtime` can also measure a suite under another installed runtime such as Deno. That is a measurement target for the suite you wrote, not a support claim for `arki-bench` itself. See [Runtime matrix](#runtime-matrix).
+
+## Public imports
+
+| Import             | What it gives you                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `@arki/bench`      | Suite helpers for bench files: `defineSuite`, `compare`, `scenario`, `size`, `metric`, `collectLosses`, `renderLosses` |
+| `@arki/bench/core` | Portable engine and reports: `runSuite`, `renderText`, `renderMarkdown`, `compareRuns`                                 |
+| `@arki/bench/node` | Files, processes, bundling and README writing: `runFile`, `writeReadme`, `checkReadme`                                 |
+| `arki-bench` (bin) | The command line. See [Commands](#commands).                                                                           |
+
+## Failure behaviour
+
+The command line and the API fail in different ways.
+
+- **A bad suite:** `validateSuite` throws `SpecError` with every problem in `problems`. Fix them all in one pass.
+- **A failed contract:** the group is not timed. The result records the failing inputs. Fix the case, or the contract.
+- **A rough measurement:** `runSuite` returns a result with `publishable: false` and `warnings` that say why (`unstable`, `optimized out`, `node-version-mismatch`, `runtime-missing`). It does not throw. Re-run with `--profile publish` on a quiet machine.
+- **A missing runtime or Node path:** a `runtime-missing` warning, never a silent run on another runtime.
+- **Exit codes:** 0 ok, 1 a check failed (`check`, `--ci`, a regression, a publishable loss), 2 bad command line. See [Commands](#commands).
+
+## Limits
+
+- Only a `publish` profile run can be publishable. It uses 5 fresh processes and 10 rounds. `quick` and `explore` never are.
+- A repeated metric or a timed case is flagged `unstable` when its spread is above 10% (`explore`) or 5% (`publish`).
+- A sampled comparison needs at least `MIN_COMPARISON_BLOCKS` (2) blocks on each side before it gives a verdict.
+- An async case times out after `timeoutMs` (default 10 000 ms).
+- A ratio between runtimes is not defined. Ratios compare libraries within one runtime.
+
+Boundary example: with one block per side, `compareRuns` reports `inconclusive`. With two or more it can report `regressed` or `improved`.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map and the rules.
+- [llms.txt](llms.txt): the short index for agents.
+- [CHANGELOG](CHANGELOG.md): what changed in each version.
+- [Core concepts](#core-concepts), [CI recipe](#ci-recipe) and [Commands](#commands) below.
+
+## Support
+
+Report a bug or ask a question in the [Arki issue tracker](https://github.com/arki-labs/arki/issues). Include the command, the profile and the `warnings` of the result.
+
 ## Core concepts
 
 ### Contracts and equal work
@@ -73,7 +131,7 @@ Include the inputs that tell implementations apart: rounding ties, negative numb
 
 A case that does similar but not equal work declares it:
 
-```ts
+```ts skip="fragment: one entry of a compare() cases object"
 naive: { run: x => Math.round(x * 100) / 100, differs: 'rounds half-up only' },
 ```
 
@@ -90,7 +148,7 @@ Change the contract id (`sum/v1` → `sum/v2`) when the work changes. `compare` 
 
 `setup` runs untimed and turns an input into the state `run` receives. `run` is timed and must return its result: the result goes to mitata's sink so the work cannot be optimized away. Use the builder form when you want `setup`'s return type to flow into `run`:
 
-```ts
+```ts skip="fragment: the cases option of a compare() group"
 cases: c => ({
   parse: c({ setup: (s: string) => s.trim(), run: s => JSON.parse(s) }),
 }),
@@ -145,6 +203,7 @@ Put two markers in your README where the section goes:
 
 ```md
 <!-- bench:start -->
+
 ## Benchmarks
 
 What the portable core adds to a browser bundle (minified, then compressed file by file), next to the timing libraries people reach for. Timing itself is mitata: `@arki/bench` calls its `measure`, so per-operation overhead is the same.
@@ -155,13 +214,13 @@ Versions: @arki/bench 0.0.2 · mitata 1.0.34 · tinybench 6.2.1.
 
 ### Define, run and render a suite
 
-Rows marked *different contract* do other work: they are measured and shown, never ranked.
+Rows marked _different contract_ do other work: they are measured and shown, never ranked.
 
-| Library | Version | JS+CSS gzip | brotli | raw | Budget (gzip) | vs @arki/bench/core |
-| --- | --- | --: | --: | --: | --- | --- |
-| **@arki/bench/core** | 0.0.2 | 19.1 kB | 17.1 kB | 55.4 kB | 21 kB | baseline |
-| mitata (bench, run) | 1.0.34 | 13 kB | 11.7 kB | 41.6 kB | — | different contract: timing and console output only |
-| tinybench (Bench) | 6.2.1 | 6.42 kB | 5.77 kB | 20.5 kB | — | different contract: timing and a results table only |
+| Library              | Version | JS+CSS gzip |  brotli |     raw | Budget (gzip) | vs @arki/bench/core                                 |
+| -------------------- | ------- | ----------: | ------: | ------: | ------------- | --------------------------------------------------- |
+| **@arki/bench/core** | 0.0.2   |     19.1 kB | 17.1 kB | 55.4 kB | 21 kB         | baseline                                            |
+| mitata (bench, run)  | 1.0.34  |       13 kB | 11.7 kB | 41.6 kB | —             | different contract: timing and console output only  |
+| tinybench (Bench)    | 6.2.1   |     6.42 kB | 5.77 kB | 20.5 kB | —             | different contract: timing and a results table only |
 
 **Notes**
 
@@ -308,6 +367,8 @@ Anything you can count or time yourself:
 ```ts
 import { metric } from '@arki/bench';
 
+declare function countInstantiations(file: string): number;
+
 metric({
   id: 'types',
   title: 'Type instantiations',
@@ -367,18 +428,22 @@ Every command has `--help` with examples. Unknown options are rejected with a su
 Three entry points. A suite file only needs the first.
 
 ```ts
-// @arki/bench — declare suites
-import { compare, defineSuite, metric, scenario, size } from '@arki/bench';
-// @arki/bench/core — portable (Node, Bun, Deno, browsers, Hermes): run and report
-import { compareRuns, renderComparison, renderMarkdown, renderText, runSuite } from '@arki/bench/core';
-// @arki/bench/node — files, processes, bundling, README
-import { checkReadme, createSizeRunner, runFile, writeReadme } from '@arki/bench/node';
+// @arki/bench: declare suites
+import { type SuiteSpec } from '@arki/bench';
+// @arki/bench/core: portable run and report
+import { renderMarkdown, renderText, runSuite } from '@arki/bench/core';
+// @arki/bench/node: files, processes, bundling, README
+import { runFile, writeReadme } from '@arki/bench/node';
 
-const result = await runSuite(suite, { profile: 'explore', seed: 1 });
-console.log(renderText(result));
+export async function explore(suite: SuiteSpec): Promise<string> {
+  const result = await runSuite(suite, { profile: 'explore', seed: 1 });
+  return renderText(result);
+}
 
-const published = await runFile('bench/money.bench.ts', { profile: 'publish', processes: 5 });
-writeReadme('README.md', renderMarkdown(published));
+export async function publishReadme(): Promise<void> {
+  const published = await runFile('bench/money.bench.ts', { profile: 'publish', processes: 5 });
+  writeReadme('README.md', renderMarkdown(published));
+}
 ```
 
 `@arki/bench` exports `defineSuite`, `compare`, `scenario`, `size`, `metric`, `collectLosses`, `renderLosses` and every type below.
@@ -446,13 +511,6 @@ mitata does the timing: its `measure()` generates a timed loop per benchmark, ba
 5. **An empty-function floor** measured like a case, to catch work that was optimized away.
 6. **Fresh processes** for `publish`, merged with a two-stage bootstrap into one interval.
 7. **Provenance**: versions, runtime flags, git revision, CPU and load go into every result.
-
-## When to use something else
-
-- **Instruction counts in CI** — [CodSpeed](https://codspeed.io) runs benchmarks under simulation, so results do not depend on the runner's noise. Use it when shared-runner timings are too noisy for your thresholds.
-- **Whole commands** (CLI startup, builds) — [hyperfine](https://github.com/sharkdp/hyperfine) measures processes, with warm-ups and preparation commands.
-- **History across commits** — [Bencher](https://bencher.dev) stores results over time and alerts on trends. `arki-bench` compares two runs; it keeps no history.
-- **A quick loop in a test file** — `vitest bench` or plain mitata, when you do not need contracts, provenance or a README table.
 
 ## License
 

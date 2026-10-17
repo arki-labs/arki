@@ -1,6 +1,6 @@
 /**
- * Definite integrals of a function of one real variable,
- * `f: (x: number) => number`, over finite or infinite intervals, on float64.
+ * Definite integrals of a one-variable function. The function is `f: (x: number) => number`, the
+ * interval finite or infinite, and the arithmetic float64.
  *
  * **Methods.** `integrate(f, [a, b])` picks one with `{ method }`:
  * - `'gaussKronrod'` (the default) is globally adaptive Gauss–Kronrod

@@ -1,0 +1,46 @@
+# @arki/money
+
+> Exact money for every JavaScript runtime: whole-unit amounts, no default rounding, ISO 4217 table shipped, strict parsing, exact conversion, Stripe units, Zod and Drizzle. It is not a ledger and not a float calculator.
+
+Never pass a float. Build amounts from strings and pass a rounding mode to every step that may be inexact.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/money`: `Currency`, `CurrencyMismatchError`, `DivisionByZeroError`, `EmptyDataError`, `ExchangeRateError`, `Factor`, `ISO_4217_VERSION`, `InvalidArgumentError`, `MONEY_ERROR_CODES`, `MathError`, `Money`, `MoneyError`; and 27 more.
+- `@arki/money/currency`: Currencies. `Currency`, `ISO_4217_VERSION`, `assertSameCurrency`, `resolveCurrency`, `toCurrency`; types `CurrencyDefinition`, `CurrencyLike`.
+- `@arki/money/errors`: Every failure this package raises on purpose extends `MathError` from `@arki/math`, so one `instanceof MathError` catches both libraries. `CurrencyMismatchError`, `DivisionByZeroError`, `EmptyDataError`, `ExchangeRateError`, `InvalidArgumentError`, `MONEY_ERROR_CODES`, `MathError`, `MoneyError`, `NumberFormatError`, `NumericRangeError`, `ProviderAmountError`, `ResourceLimitError`; and 4 more.
+- `@arki/money/exact`: Bridges to `@arki/math`'s exact types, for multi-step math that should round only once at the end:. `toDecimal`, `toRational`.
+- `@arki/money/format`: Localized display through `Intl.NumberFormat`. `createMoneyFormatter`, `formatMoney`, `formatMoneyToParts`; types `FormatOptions`, `MoneyFormatter`.
+- `@arki/money/parse`: Strict parsing of money typed by people: `'1.234,56 €'` in German, `'$1,234.56'` in English, `'₹1,23,456.78'` in Indian English. `createMoneyParser`, `parseMoney`; types `MoneyParser`, `ParseOptions`, `ParseSymbols`.
+- `@arki/money/exchange`: Currency conversion with exact rates. `Converter`, `ExchangeRate`, `convert`, `createConverter`, `exchangeRate`, `ratesFrom`; types `ConverterOptions`, `RateTable`.
+- `@arki/money/provider`: Payment providers count amounts in their own units, which are not always ISO's. `fromProviderUnits`, `toProviderUnits`; types `ProviderUnitRule`.
+- `@arki/money/stripe`: Stripe amounts. `STRIPE_RULES_VERSION`, `fromStripeAmount`, `stripeRule`, `toStripe`, `toStripeAmount`; types `StripeOperation`.
+- `@arki/money/rational`: Exact in-between money. `RationalMoney`, `isRationalMoney`; types `ExactMoney`.
+- `@arki/money/bag`: A wallet of several currencies: `10 EUR + 5 USD` stays two balances. `MoneyBag`.
+- `@arki/money/zod`: Zod 4 schemas that turn input into `Money`. `anyMoneySchema`, `currencyCodeSchema`, `moneyInputSchema`, `moneySchema`; types `AnyMoneySchemaOptions`, `MoneySchemaOptions`.
+- `@arki/money/drizzle/pg`: Drizzle columns for Postgres that read and write `Money`. `moneyDecimal`, `moneyJson`, `moneyMinor`; types `MoneyDecimalConfig`, `MoneyJsonConfig`, `MoneyMinorConfig`.
+- `@arki/money/drizzle/mysql`: Drizzle columns for MySQL and MariaDB that read and write `Money`. `moneyDecimal`, `moneyJson`, `moneyMinor`; types `MoneyDecimalConfig`, `MoneyJsonConfig`, `MoneyMinorConfig`.
+- `@arki/money/drizzle/sqlite`: Drizzle columns for SQLite (libSQL, Turso, better-sqlite3, Bun SQLite, Cloudflare D1, Expo SQLite) that read and write `Money`. `moneyDecimal`, `moneyJson`, `moneyMinor`; types `MoneyDecimalConfig`, `MoneyJsonConfig`, `MoneyMinorConfig`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Do arithmetic without losing a cent](docs/agent-guide.md#do-arithmetic-without-losing-a-cent)
+- [Read and show money](docs/agent-guide.md#read-and-show-money)
+- [Convert currencies](docs/agent-guide.md#convert-currencies)
+- [Charge through Stripe](docs/agent-guide.md#charge-through-stripe)
+- [Store money](docs/agent-guide.md#store-money)
+
+## Rules that bite
+
+- There is no default rounding; an inexact step throws `RoundingNecessaryError`.
+- Units are a `number` while safe and a `bigint` beyond 2^53. Both are exact.
+- `Money<'EUR'>` and `Money<'USD'>` never mix; convert first.
+- Currency decimals come from the shipped table, never from `Intl`.

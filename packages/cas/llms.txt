@@ -1,0 +1,34 @@
+# @arki/cas
+
+> A bounded computer algebra package: exact polynomials and rational functions, simplify, derivative with steps, factor over the rationals, and closed-form roots. It is not a general CAS: real-only, no integrals, no limits.
+
+Always render `conditions` next to a result. The zero test treats π and e as independent; that is a convention, not a proof.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/cas`: @arki/cas: a bounded computer algebra package on `@arki/expr` (RFC `docs/rfcs/2026-10-15-arki-cas.md`). `CasError`, `CasLimitError`, `DEFAULT_LIMITS`, `conditionToLatex`; types `AbortSignalLike`, `Assumption`, `Assumptions`, `CasBudget`, `CasErrorCode`, `CasInput`, `CasLimits`, `CasOptions`; and 3 more.
+- `@arki/cas/derivation`: @arki/cas/derivation (RFC §9.2–§9.3): `derivative`'s result plus the rule-by-rule derivation tree. `TEMPLATE_KEYS`, `derivation`, `ruleFormula`; types `CasInput`, `CasOptions`, `CasResult`, `Condition`, `Derivation`, `DerivationOptions`, `DerivationStep`, `DerivativeRule`, `NormalPhase`; and 3 more.
+- `@arki/cas/derivative`: @arki/cas/derivative (RFC §9): symbolic derivatives of any order, with conditions. `derivative`; types `CasInput`, `CasOptions`, `CasResult`, `Condition`, `DerivativeOptions`.
+- `@arki/cas/polynomial`: @arki/cas/polynomial (RFC §8.1): polynomial and rational-function verbs. `collect`, `exactRoots`, `expand`, `factor`, `gcd`, `polynomialIn`, `rationalize`; types `Coefficient`, `ExactRoots`, `Factored`, `PolynomialForm`, `PolynomialIn`.
+- `@arki/cas/simplify`: @arki/cas/simplify (RFC §7): the rational-function normal form plus the kernel rules of the rule table, applied bottom-up to a fixed point, printed in the readable normal form (RFC §5.4). `simplify`; types `Assumption`, `Assumptions`, `CasInput`, `CasOptions`, `CasResult`, `Condition`, `SimplifyResult`, `SimplifyRule`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Simplify an expression](docs/agent-guide.md#simplify-an-expression)
+- [Differentiate and show the steps](docs/agent-guide.md#differentiate-and-show-the-steps)
+- [Expand, collect, factor or find roots](docs/agent-guide.md#expand-collect-factor-or-find-roots)
+
+## Rules that bite
+
+- Every verb returns `conditions`; a result without them can be wrong where the input was undefined.
+- Everything ranges over the reals.
+- Hostile input throws `CasLimitError`; bad shape throws `CasError`.
+- Import verbs from their subpath, not the root.

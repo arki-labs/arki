@@ -2,17 +2,114 @@
 
 Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets. Circuit breaker, timeout and bulkhead are built on the [`cockatiel`](https://github.com/connor4312/cockatiel) engine; retry is its own loop, so a `Clock` can drive its delay. It comes with ergonomic factories, ready-made policies for common workloads, and its own public types and errors, so a new cockatiel release never changes this package's API.
 
-## Installation
+## Install
 
 ```sh
-npm install @arki/resilience
-# or
 bun add @arki/resilience
-# or
-pnpm add @arki/resilience
+# or: npm install @arki/resilience
 ```
 
-## Usage
+`@arki/clock`, `@arki/failure` and `@arki/log` come with it. `@arki/dot` is an optional peer, used only by `@arki/resilience/dot`.
+
+## Quick start
+
+Wrap a call to a third-party API with a preset: retry plus a timeout, tuned for HTTP.
+
+```ts
+import { externalApiPolicy, withResilience } from '@arki/resilience';
+
+const data = await withResilience(
+  () => fetch('https://api.example.com/billing').then(r => r.json()),
+  externalApiPolicy,
+);
+```
+
+A thrown error is retried by the schedule and then thrown again unchanged. A returned failure from `@arki/failure` is an answer, not a fault: it is not retried unless `.while(Definition)` names it. See [Failure behaviour](#failure-behaviour).
+
+## When not to use this
+
+- The call is local and cheap, in a hot loop. A policy adds microseconds. Wrap the loop, not each iteration. See [When does the overhead matter?](#when-does-the-overhead-matter).
+- You need retries that survive a restart or run on a schedule. Use `@arki/queue` for jobs and `@arki/journal` for effects. They share the same `backoff` values.
+- You need rate limiting across processes. A bulkhead limits concurrency inside one process only.
+- You need to hide a bug. A retry repeats a bug; it does not fix it. Return a failure for expected outcomes and let bugs throw.
+
+## Runtime support
+
+Node, Bun, Deno, modern browsers and React Native (Hermes). Pure ESM. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time, with no `node:*` imports and no `process` or `Buffer`. `bun run test:runtimes` runs a smoke test of the built package on every runtime; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
+
+## Public imports
+
+| Import                 | What it gives you                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `@arki/resilience`     | Policies, `backoff`, presets, `withFallback`, `wrap`, `attachPolicyLogger`, typed errors and their codes |
+| `@arki/resilience/dot` | `resilience(presets)` plugin for `@arki/dot`, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`       |
+
+The full list of exports is in [API](#api).
+
+## Failure behaviour
+
+A policy call has three kinds of outcome. Know which one you are handling.
+
+1. **A value.** Your function's own result. A policy with `withFallback` or `onThrow` can also resolve to what they return, typed as `T | F`.
+2. **A returned failure.** A function may return a failure from `@arki/failure` for an expected outcome such as "card declined". The failure goes back to you as the result. It is not retried, and it never opens a breaker. A retry happens only when `.while(Definition)` names that failure, or a predicate accepts it. When the retries run out on a returned failure, you get the last failure as a value. Nothing is thrown.
+3. **A throw.** A thrown error is retried by the backoff, then thrown again **unchanged** when the retries run out. Your own errors reach you as they were. The policies add their own errors, all extending `ResilienceError`: `CircuitOpenError`, `TimeoutError`, `CancelledError` and `BulkheadRejectedError`.
+
+How to handle them:
+
+- Check `isFailure(result)` after every call whose function can return a failure.
+- Catch `ResilienceError` by `error.code`, never by message. A `CancelledError` means your own signal aborted: do not count it as an outage.
+- Use `onThrow` when you want one error path with no `try/catch`. It maps what is still thrown to a value, except a cancel, which is always thrown.
+- Use `withFallback` for a last answer when the policy gives up. It does not run on a cancel.
+- A bad `backoff` option throws `InvalidBackoffError` where the backoff is built, not later.
+
+`RetriesExhaustedError` is exported for hosts that want to wrap a final failure. The retry policy itself rethrows the last error as it was.
+
+## Limits
+
+- **Retries are bounded only if you bound them.** A backoff without `.upTo(n)` retries forever. `upTo(0)` never retries.
+- **Wait cap.** A single wait is at most `MAX_TIMER_MS` from `@arki/clock`, about 24.8 days. `backoff.exponential({ base, max })` caps the wait at `max`.
+- **Jitter** is between 0 and 1. Any other value throws `InvalidBackoffError` (`ARKI_RESILIENCE_E006`).
+- **Policies with a fallback or `onThrow` cannot go inside `wrap`.** It is a compile error, because inside a retry they would hide the errors the retry needs. Put them outermost.
+- **A bulkhead limits one process.** One logical call holds one slot.
+- **A breaker is per policy.** Two apps that share a `presets` object share its breakers. Build the breaker once and reuse it.
+- **Retry delays use a `Clock`.** A fake clock only moves time when you advance it.
+
+Boundary example: `.upTo(2)` means two retries, so the function is called three times in all.
+
+```ts run
+import { MockClock } from '@arki/clock';
+import { backoff, createRetryPolicy } from '@arki/resilience';
+
+let calls = 0;
+const clock = new MockClock();
+const policy = createRetryPolicy({ backoff: backoff.constant(10).upTo(2), clock });
+
+const outcome = policy.execute(() => {
+  calls++;
+  throw new Error('down');
+});
+const settled = outcome.then(
+  () => 'resolved',
+  (error: unknown) => (error instanceof Error ? error.message : 'unknown'),
+);
+await clock.advanceAsync(100);
+if ((await settled) !== 'down') throw new Error('the last error must be thrown unchanged');
+if (calls !== 3) throw new Error(`upTo(2) must call the function 3 times, got ${calls}`);
+```
+
+## Documentation
+
+`@arki/resilience` is framework-agnostic and works on its own. When you compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) application framework, see `packages/dot/docs/` for plugin authoring, lifecycle, and diagnostics.
+
+- [Agent guide](docs/agent-guide.md): the model, the task map and the rules.
+- [llms.txt](llms.txt): the short index for agents.
+- [CHANGELOG](CHANGELOG.md): what changed in each version.
+
+## Support
+
+Report a bug or ask a question in the [Arki issue tracker](https://github.com/arki-labs/arki/issues). Include the policy options and the error `code`.
+
+## Guide
 
 ### Pre-configured presets
 
@@ -36,6 +133,8 @@ Three curated presets ship out of the box:
 ```ts
 import { createResiliencePolicy, withFallback } from '@arki/resilience';
 
+declare function fetchQuote(): Promise<{ price: number }>;
+
 const quotes = withFallback(createResiliencePolicy(), () => null);
 const quote = await quotes.execute(() => fetchQuote()); // Quote | null
 ```
@@ -49,17 +148,26 @@ const quote = await quotes.execute(() => fetchQuote()); // Quote | null
 ### Throws as failures: `onThrow`
 
 ```ts
+import { defineFailure, isFailure } from '@arki/failure';
 import { backoff, createResiliencePolicy } from '@arki/resilience';
 
-const push = createResiliencePolicy({
-  retry: backoff.exponential({ base: 500 }).upTo(3).while(ExportUnavailable),
-  onThrow: cause => ExportUnavailable({ cause }), // the network, a deadline, an open circuit
-});
+const ExportUnavailable = defineFailure('export.unavailable', { status: 503 });
+declare function send(batch: string): Promise<string>;
+const batches = ['a', 'b'];
 
-for (const batch of batches) {
-  const sent = await push.execute(() => send(batch)); // Sent | the failures send returns | ExportUnavailable
-  if (isFailure(sent)) return { delivered, stoppedBy: sent }; // one error path, no try/catch
-  delivered.push(batch);
+export async function pushAll() {
+  const push = createResiliencePolicy({
+    retry: backoff.exponential({ base: 500 }).upTo(3).while(ExportUnavailable),
+    onThrow: cause => ExportUnavailable({ cause }), // the network, a deadline, an open circuit
+  });
+
+  const delivered: string[] = [];
+  for (const batch of batches) {
+    const sent = await push.execute(() => send(batch)); // Sent | the failures send returns | ExportUnavailable
+    if (isFailure(sent)) return { delivered, stoppedBy: sent }; // one error path, no try/catch
+    delivered.push(sent);
+  }
+  return { delivered, stoppedBy: undefined };
 }
 ```
 
@@ -76,6 +184,8 @@ for (const batch of batches) {
 ```ts
 import { backoff, definePresets } from '@arki/resilience';
 
+declare function callCarrier(): Promise<string>;
+
 const presets = definePresets({
   carrier: { retry: backoff.exponential({ base: 200, max: 5000 }).upTo(3), timeout: { timeoutMs: 10_000 } },
   search: { bulkhead: { maxConcurrent: 20 } },
@@ -91,6 +201,8 @@ Each name gets its own composed policy, so its own breaker. A typo in a name or 
 ```ts
 import { backoff, createResiliencePolicy, withResilience } from '@arki/resilience';
 
+declare function doWork(signal: AbortSignal): Promise<string>;
+
 const policy = createResiliencePolicy({
   retry: backoff.exponential({ base: 200, max: 5_000, jitter: 0.25 }).upTo(3),
   timeout: { timeoutMs: 5_000 },
@@ -104,6 +216,10 @@ Every policy has the same shape, the `Policy` type:
 
 ```ts
 import type { Policy, PolicyContext } from '@arki/resilience';
+import { createResiliencePolicy } from '@arki/resilience';
+
+declare function fetchPage(signal: AbortSignal): Promise<string>;
+declare const parentSignal: AbortSignal;
 
 const policy: Policy = createResiliencePolicy();
 
@@ -119,6 +235,8 @@ A `Backoff` says how long to wait before each retry, and when to stop. The same 
 ```ts
 import { defineFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
+
+declare class NetworkError extends Error {}
 
 const DbTimeout = defineFailure('db.timeout', { status: 503 });
 
@@ -159,6 +277,8 @@ Retry delays wait on a `Clock` from `@arki/clock`. Pass a `MockClock` and a retr
 import { MockClock } from '@arki/clock';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
+declare function callFlakyApi(): Promise<string>;
+
 const clock = new MockClock();
 const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1_000 }).upTo(3), clock });
 
@@ -176,6 +296,9 @@ For one-off calls without a long-lived policy:
 ```ts
 import { backoff, withRetry, withTimeout } from '@arki/resilience';
 
+declare function sendEmail(to: string): Promise<void>;
+declare function slowOperation(): Promise<void>;
+
 await withRetry(() => sendEmail('support@example.com'), { backoff: backoff.exponential({ base: 200 }).upTo(3) });
 await withTimeout(() => slowOperation(), { timeoutMs: 1_000 });
 ```
@@ -183,6 +306,9 @@ await withTimeout(() => slowOperation(), { timeoutMs: 1_000 });
 A circuit breaker must remember past failures, so build it once and reuse it:
 
 ```ts
+import { createCircuitBreakerPolicy, withResilience } from '@arki/resilience';
+
+declare function callDownstream(): Promise<string>;
 const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 2 });
 
 await withResilience(() => callDownstream(), breaker); // opens after 2 failures in a row
@@ -198,22 +324,35 @@ Errors thrown by your function reach you unchanged. Errors raised by the policie
 - `BulkheadRejectedError` — every slot and queue place of a bulkhead was taken.
 
 ```ts
-import { isBrokenCircuitError, isResilienceError } from '@arki/resilience';
+import { createResiliencePolicy, isBrokenCircuitError, isResilienceError, withResilience } from '@arki/resilience';
 
-try {
-  await withResilience(() => callDownstream(), policy);
-} catch (error) {
-  if (isBrokenCircuitError(error)) return cachedAnswer;
-  if (isResilienceError(error)) throw new ServiceUnavailable(error);
-  throw error;
+declare function callDownstream(): Promise<string>;
+class ServiceUnavailable extends Error {}
+
+const policy = createResiliencePolicy();
+
+export async function callWithCache(cachedAnswer: string): Promise<string> {
+  try {
+    return await withResilience(() => callDownstream(), policy);
+  } catch (error) {
+    if (isBrokenCircuitError(error)) return cachedAnswer;
+    if (isResilienceError(error)) throw new ServiceUnavailable('downstream is unavailable', { cause: error });
+    throw error;
+  }
 }
 ```
 
 ### Observability
 
 ```ts
-import { attachPolicyLogger } from '@arki/resilience';
+import { attachPolicyLogger, createResiliencePolicy } from '@arki/resilience';
 
+const policy = createResiliencePolicy();
+const logger = {
+  info: (message: string) => message,
+  warn: (message: string) => message,
+  error: (message: string) => message,
+};
 const detach = attachPolicyLogger(policy, logger, 'billing');
 ```
 
@@ -223,7 +362,14 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 ```ts
 import { defineApp } from '@arki/dot';
+import { backoff, definePresets } from '@arki/resilience';
 import { resilience } from '@arki/resilience/dot';
+
+declare function callCarrier(): Promise<string>;
+
+const presets = definePresets({
+  carrier: { retry: backoff.exponential({ base: 200, max: 5000 }).upTo(3), timeout: { timeoutMs: 10_000 } },
+});
 
 const app = await defineApp('my-app').use(resilience(presets)).boot();
 await app.services.resilience.run('carrier', () => callCarrier());
@@ -266,20 +412,9 @@ The Dot plugin has one code of its own, exported as `RESILIENCE_PLUGIN_ERROR_COD
 | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `ARKI_RESILIENCE_PLUGIN_E001` | `for` or `run` got a name that is not in the presets (untyped JS only). Use a name from `definePresets`. |
 
-## Runtime support
-
-Node, Bun, Deno, modern browsers and React Native (Hermes). Pure ESM. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time, with no `node:*` imports and no `process` or `Buffer`. `bun run test:runtimes` runs a smoke test of the built package on every runtime; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
-
 ## When does the overhead matter?
 
 Almost never. A policy adds a few microseconds to a call: the benchmarks below measure that on a call that returns at once, and on a call that waits 1 ms. The calls these policies guard, to a network service, an AI provider or a database, take milliseconds to seconds, so the policy costs well under one percent of the call it protects. The one case to think about is a hot loop over an in-memory function, where the policy can cost more than the work. There, wrap the loop, not each iteration.
-
-## Documentation
-
-`@arki/resilience` is framework-agnostic and works on its own. When you
-compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-application framework, see `packages/dot/docs/` for plugin authoring,
-lifecycle, and diagnostics.
 
 <!-- bench:start -->
 

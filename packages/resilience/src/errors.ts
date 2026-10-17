@@ -1,16 +1,46 @@
 /** Stable error codes of `@arki/resilience`. Match on the code, never on the message. */
 export const RESILIENCE_ERROR_CODES = {
-  /** The circuit breaker is open and rejected the call. */
+  /**
+   * The circuit breaker is open and rejected the call.
+   *
+   * @fix Wait for the breaker to half-open and call again, or serve a fallback with `withFallback` while it is open.
+   * @verify cd packages/resilience && bun run test
+   */
   circuitOpen: 'ARKI_RESILIENCE_E001',
-  /** A timeout policy reached its deadline. */
+  /**
+   * A timeout policy reached its deadline.
+   *
+   * @fix Raise `timeoutMs`, or make the operation faster. Pass the policy's `signal` to the work so it stops.
+   * @verify cd packages/resilience && bun run test
+   */
   timeout: 'ARKI_RESILIENCE_E002',
-  /** The caller's own signal aborted the call. */
+  /**
+   * The caller's own signal aborted the call.
+   *
+   * @fix Check `signal.aborted` before you start, or catch `CancelledError` where you abort. It is not an outage.
+   * @verify cd packages/resilience && bun run test
+   */
   cancelled: 'ARKI_RESILIENCE_E003',
-  /** A bulkhead had no free execution or queue slot. */
+  /**
+   * A bulkhead had no free execution or queue slot.
+   *
+   * @fix Retry later, raise `maxConcurrent` or the queue size, or shed load before the call.
+   * @verify cd packages/resilience && bun run test
+   */
   bulkheadRejected: 'ARKI_RESILIENCE_E004',
-  /** Every retry attempt failed. */
+  /**
+   * Every retry attempt failed.
+   *
+   * @fix Read `lastError` for the real cause, or raise the `upTo` limit.
+   * @verify cd packages/resilience && bun run test
+   */
   retriesExhausted: 'ARKI_RESILIENCE_E005',
-  /** A `backoff` builder got an option or an attempt number it cannot use. */
+  /**
+   * A `backoff` builder got an option or an attempt number it cannot use.
+   *
+   * @fix Pass finite, non-negative numbers: `jitter` from 0 to 1, a whole number to `upTo`, attempts from 1.
+   * @verify cd packages/resilience && bun run test
+   */
   invalidBackoff: 'ARKI_RESILIENCE_E006',
 } as const;
 

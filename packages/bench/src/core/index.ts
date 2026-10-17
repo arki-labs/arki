@@ -1,3 +1,7 @@
+/**
+ * `@arki/bench/core`: the portable engine. Run a suite, assess the result, compare runs and render reports
+ * without touching files or processes.
+ */
 export * from './types.js';
 export {
   compare,

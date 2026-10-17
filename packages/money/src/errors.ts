@@ -26,13 +26,33 @@ export {
 
 /** Stable error codes of the failures that only `@arki/money` raises. */
 export const MONEY_ERROR_CODES = {
-  /** Two amounts in different currencies were combined or compared. */
+  /**
+   * Two amounts in different currencies were combined or compared.
+   *
+   * @fix Convert both amounts to one currency first with `@arki/money/exchange`, then combine them.
+   * @verify cd packages/money && bun run vitest run src/errors.test.ts
+   */
   currencyMismatch: 'ARKI_MONEY_E001',
-  /** The currency code is not in the ISO 4217 table and no custom currency was given. */
+  /**
+   * The currency code is not in the ISO 4217 table and no custom currency was given.
+   *
+   * @fix Use an ISO 4217 code, or pass a `Currency.custom({ code, scale })` object instead of a code.
+   * @verify cd packages/money && bun run vitest run src/errors.test.ts
+   */
   unknownCurrency: 'ARKI_MONEY_E002',
-  /** No exchange rate is known for the pair, or a rate is invalid. */
+  /**
+   * No exchange rate is known for the pair, or a rate is invalid.
+   *
+   * @fix Pass a rate for the pair, or opt in to `inverse` or `via` on the converter. Rates must be positive.
+   * @verify cd packages/money && bun run vitest run src/exchange.test.ts
+   */
   exchangeRate: 'ARKI_MONEY_E003',
-  /** An amount cannot be expressed in a payment provider's units. */
+  /**
+   * An amount cannot be expressed in a payment provider's units.
+   *
+   * @fix Round the amount to the provider's step first, or choose a currency the provider documents.
+   * @verify cd packages/money && bun run vitest run src/stripe.test.ts
+   */
   providerAmount: 'ARKI_MONEY_E004',
 } as const;
 

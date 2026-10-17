@@ -1,3 +1,7 @@
+/**
+ * `@arki/math`: the whole numeric toolkit from one import, except `linear-algebra`, whose short
+ * names would clash. Prefer the subpaths so a bundle pays only for what it uses.
+ */
 export * from './errors.js';
 export * from './rounding.js';
 export * from './number.js';

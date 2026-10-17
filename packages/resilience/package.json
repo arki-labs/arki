@@ -46,6 +46,8 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "README.md",
+    "docs/**",
+    "llms.txt",
     "LICENSE",
     "package.json"
   ],
@@ -57,6 +59,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
@@ -66,14 +69,6 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "cockatiel": "catalog:"
-  },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",
@@ -87,6 +82,14 @@
     "p-retry": "^8.0.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

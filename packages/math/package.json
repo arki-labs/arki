@@ -183,6 +183,8 @@
     "!src/**/*.spec.*",
     "!src/**/__tests__/**",
     "README.md",
+    "docs/**",
+    "llms.txt",
     "LICENSE",
     "package.json"
   ],
@@ -194,6 +196,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },

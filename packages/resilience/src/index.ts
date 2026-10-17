@@ -1,3 +1,8 @@
+/**
+ * `@arki/resilience`: retry, circuit breaker, timeout, bulkhead and curated presets, with typed errors
+ * and a `backoff` schedule shared with `@arki/queue` and `@arki/journal`.
+ */
+
 // Errors
 export {
   ResilienceError,

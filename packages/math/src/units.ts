@@ -1,5 +1,5 @@
 /**
- * Unit conversion across twenty-two categories: length, mass, area, volume,
+ * Unit conversion across twenty-two categories. The categories are length, mass, area, volume,
  * temperature, time, speed, data, energy, pressure, angle, solid angle, power,
  * frequency, force, torque, fuel economy, data rate, electric current,
  * illuminance, radioactivity, dynamic viscosity and kinematic viscosity.

@@ -1,6 +1,8 @@
-// What a benchmark file needs: define suites and groups. Running, reporting
-// and comparing live in `@arki/bench/core` (portable) and `@arki/bench/node`
-// (files, processes, bundling, README writing, CLI).
+/**
+ * `@arki/bench`: what a benchmark file needs, to define suites and groups.
+ * Running, reporting and comparing live in `@arki/bench/core` (portable) and
+ * `@arki/bench/node` (files, processes, bundling, README writing, CLI).
+ */
 export { compare, defineSuite, metric, scenario, size } from './core/spec.js';
 // Losses read saved results only: no engine, no mitata.
 export { collectLosses } from './core/losses.js';

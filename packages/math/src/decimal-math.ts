@@ -1,6 +1,6 @@
 /**
- * Roots, logarithms, exponentials and the constants π and e on `Decimal`,
- * to any number of fraction digits up to the package limits.
+ * Roots, logarithms and exponentials on `Decimal`. It also has the constants π and e, to any number of
+ * fraction digits up to the package limits.
  *
  * Every result is *correctly rounded*: the returned digits are exactly what
  * you get by rounding the true mathematical value to `scale` fraction digits

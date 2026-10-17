@@ -2,11 +2,30 @@
 
 A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`, `@arki/expr/decimal`, `@arki/expr/rational`, `@arki/expr/complex`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
 
-## Security model
+## Install
 
-The language can only do what the host registered. The grammar has no member access, indexing, strings, assignment or imports; function and constant names resolve through private `Map`s, so `constructor`, `__proto__` or `toString` are just names that are not there. The lexer is a single hand-written pass with no regular expressions, and every input is bounded before the expensive work: length before lexing, tokens while lexing, tree depth and node count while parsing (a 100 000-paren input throws `ExprLimitError`, never `RangeError`). Stored ASTs are re-validated by `fromJSON`, field by field and against the same budgets. There is no `eval` and no `new Function`.
+```sh
+bun add @arki/expr @arki/math
+```
 
-## Example
+## Quick start
+
+Parse a formula a user typed, print it in the form you store, then evaluate it in the domain you pick.
+
+```ts run
+import { parse, print } from '@arki/expr';
+import { evaluate } from '@arki/expr/decimal';
+
+const stored = print(parse('2x^2 + sin(x)'));
+if (stored !== '2 * x^2 + sin(x)') throw new Error(`unexpected canonical form: ${stored}`);
+
+const sum = evaluate('0.1 + 0.2').toString();
+if (sum !== '0.3') throw new Error(`decimal sum drifted: ${sum}`); // not 0.30000000000000004
+```
+
+The longer example below shows names, warnings, other syntaxes and errors.
+
+### More parsing
 
 ```ts
 import { decimalComma, names, parse, print } from '@arki/expr';
@@ -19,10 +38,87 @@ names(expr); // { variables: ['x'], constants: [], functions: ['sin'] }
 parse('1/2x').warnings[0]?.hint; // 'write (1/2)x or 1/(2x)'
 print(parse('log(0,5; 2)', { syntax: decimalComma })); // 'log(0.5, 2)'
 
-parse('foo(x)'); // throws ParseError { code: 'not-a-function', span: { start: 0, end: 3 } }
+// parse('foo(x)') throws ParseError { code: 'not-a-function', span: { start: 0, end: 3 } }
 ```
 
 A name followed by `(` is a call only when the language registers it as a function. To read a variable before `(` as a product (`x(y+1)`), pass the variables: `parse('x(y+1)', { variables: ['x', 'y'] })`.
+
+## When not to use this
+
+- You need symbolic algebra (simplify, differentiate, factor). Use `@arki/cas`, which builds on this package.
+- You need a full programming language: member access, strings, assignment or imports. This grammar has none of them, by design.
+- You evaluate trusted numeric code in a hot loop and do not take user text. Write a plain function.
+- You need matrices or units inside the expression. The language has numbers, names and functions only.
+
+## Runtime support
+
+Pure TypeScript with no `eval`, no `new Function`, and no Node built-ins. It runs wherever `@arki/math` runs: Node, Bun, Deno, browsers and Hermes. The depending `@arki/math` package carries the cross-engine results table.
+
+## Public imports
+
+| Import                | What it gives you                                                         |
+| --------------------- | ------------------------------------------------------------------------- |
+| `@arki/expr`          | `parse`, `parseEquation`, `print`, `names`, `fromJSON`, languages, errors |
+| `@arki/expr/float`    | `compile`, `compileEquation`, `evaluate` on `number`                      |
+| `@arki/expr/decimal`  | The same verbs on `Decimal`, with `scale` and `rounding`                  |
+| `@arki/expr/rational` | The same verbs on `Rational`, never rounding                              |
+| `@arki/expr/complex`  | The same verbs on `Complex`                                               |
+| `@arki/expr/latex`    | `toLatex`                                                                 |
+
+## Failure behaviour
+
+Every failure throws. Nothing returns `NaN`, `Infinity` or a half-built value.
+
+- **Bad text or a bad stored AST:** `ParseError`. Read `code` (`unexpected-token`, `unknown-name`, `arity`, `not-in-domain`, and the others in `ParseErrorCode`), `span` for the caret, and `expected` for what would fit. Show the user the span; do not retry the same text.
+- **Over a budget:** `ExprLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.
+- **A value with no result** (`sqrt(-1)`, `x/0`, overflow): the typed errors of `@arki/math` (`InvalidArgumentError`, `DivisionByZeroError`, `NumericRangeError`). In the Decimal and Rational domains a step that would round throws `RoundingNecessaryError` until you pass a rounding mode.
+- **Plot gaps:** `f.sample` is the one call that returns `NaN`, and only to mark a point with no value.
+
+Catch `ParseError` at the edge where users type. Let the other errors reach your error boundary.
+
+## Limits
+
+Every input has a budget. A text, an AST or a call that goes over one throws `ExprLimitError` before the costly work starts.
+
+| Budget                               | Default                   | Checked                                                                                                                                                                       |
+| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `length`, `tokens`, `depth`, `nodes` | 10 000, 5 000, 256, 5 000 | while parsing, in `fromJSON`, and `depth` again in `compile`, `print` and `toLatex`                                                                                           |
+| `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample`                                                                         |
+| `digits` (exact domains)             | 1 000                     | literal digits at compile; a power (≈ exponent × digits of the base) or factorial (log-gamma) result before computing it: `9^9^9` and `10000!` throw `ExprLimitError` at once |
+
+`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal, root + rational and root + complex ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational, ≈ 13 kB complex).
+
+Boundary example: a text of 10 001 characters throws `ExprLimitError` with `budget: 'length'`, `limit: 10000` and `actual: 10001`. A text of 10 000 characters parses.
+
+```ts run
+import { ExprLimitError, parse } from '@arki/expr';
+
+parse('x'.repeat(10_000)); // parses
+let caught: ExprLimitError | undefined;
+try {
+  parse('x'.repeat(10_001));
+} catch (error) {
+  if (error instanceof ExprLimitError) caught = error;
+}
+if (caught?.budget !== 'length' || caught.limit !== 10_000 || caught.actual !== 10_001) {
+  throw new Error('the length budget did not trip at 10 001');
+}
+```
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map and the rules.
+- [llms.txt](llms.txt): the short index for agents.
+- [CHANGELOG](CHANGELOG.md): what changed in each version.
+- Design: `docs/rfcs/2026-10-14-arki-expr.md` in the Arki workspace.
+
+## Support
+
+Report a bug or ask a question in the [Arki issue tracker](https://github.com/arki-labs/arki/issues). Include the expression text, the domain and the error `code`.
+
+## Security model
+
+The language can only do what the host registered. The grammar has no member access, indexing, strings, assignment or imports; function and constant names resolve through private `Map`s, so `constructor`, `__proto__` or `toString` are names that are not there. The lexer is a single hand-written pass with no regular expressions, and every input is bounded before the expensive work: length before lexing, tokens while lexing, tree depth and node count while parsing (a 100 000-paren input throws `ExprLimitError`, never `RangeError`). Stored ASTs are re-validated by `fromJSON`, field by field and against the same budgets. There is no `eval` and no `new Function`.
 
 ## Float (`@arki/expr/float`)
 
@@ -33,6 +129,8 @@ import { compile, compileEquation, evaluate } from '@arki/expr/float';
 evaluate('2^10 - 1'); // 1023, for the keypad
 evaluate('sin(90)', { angle: 'deg' }); // 1
 
+const xs = new Float64Array([0, 0.5, 1]);
+const out = new Float64Array(xs.length);
 const f = compile(parse('2x^2 + sin(x)'), { variables: ['x'] });
 f({ x: 1.5 }); // typed errors, never NaN or Infinity
 f.at(1.5); // one variable, no scope object
@@ -49,6 +147,7 @@ const { left, right, difference } = compileEquation(parseEquation('x^2 = 2x'), {
 ## Decimal (`@arki/expr/decimal`)
 
 ```ts
+import { parse } from '@arki/expr';
 import { compile, evaluate } from '@arki/expr/decimal';
 
 evaluate('0.1 + 0.2').toString(); // '0.3' — literals are read from their text
@@ -82,6 +181,7 @@ Both exact domains fold constant subtrees at compile and take `{ signal }` per c
 ## Complex (`@arki/expr/complex`)
 
 ```ts
+import { parse } from '@arki/expr';
 import { compile, evaluate } from '@arki/expr/complex';
 
 evaluate('sqrt(-4)').toString(); // '2i'
@@ -102,19 +202,10 @@ Values are `Complex` from `@arki/math/complex`: float64 parts, never exact, so `
 ## LaTeX (`@arki/expr/latex`)
 
 ```ts
+import { parse } from '@arki/expr';
 import { toLatex } from '@arki/expr/latex';
 
 toLatex(parse('sqrt(x)/2 + |x|')); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
 ```
 
 `\frac` for `/`, `^{}`, `\sqrt[n]{}`, `\sin`-style commands, `\pi`, `n!`, `\cdot` for an explicit `*` and juxtaposition for an implicit one. Host functions use their language `latex` command, otherwise `\operatorname{name}`.
-
-## Limits
-
-| Budget                               | Default                   | Checked                                                                                                                                                                       |
-| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `length`, `tokens`, `depth`, `nodes` | 10 000, 5 000, 256, 5 000 | while parsing, in `fromJSON`, and `depth` again in `compile`, `print` and `toLatex`                                                                                           |
-| `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample`                                                                         |
-| `digits` (exact domains)             | 1 000                     | literal digits at compile; a power (≈ exponent × digits of the base) or factorial (log-gamma) result before computing it: `9^9^9` and `10000!` throw `ExprLimitError` at once |
-
-`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal, root + rational and root + complex ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational, ≈ 13 kB complex).

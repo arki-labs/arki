@@ -1,0 +1,32 @@
+# @arki/bench
+
+> A dev-time tool for benchmarks you can publish: executable contracts, honest statistics, provenance, size budgets and README tables from saved results. It is not a runtime dependency and not a profiler.
+
+Never write benchmark numbers by hand and never run a publish profile on a busy machine.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/bench`: @arki/bench: what a benchmark file needs, to define suites and groups. `collectLosses`, `compare`, `defineSuite`, `metric`, `renderLosses`, `scenario`, `size`; types `BenchResult`, `Block`, `Budget`, `CaseBuilder`, `CaseResult`; and 27 more.
+- `@arki/bench/core`: @arki/bench/core: the portable engine. `BLOCKING_WARNINGS`, `DEFAULT_SEED`, `MIN_COMPARISON_BLOCKS`, `PROFILE_BUDGETS`, `SpecError`, `assessResult`, `collectLosses`, `compare`, `compareBlocks`, `compareMedians`, `compareRuns`, `createRandom`; and 47 more.
+- `@arki/bench/node`: @arki/bench/node: the host side. `checkReadme`, `collectProvenance`, `createSizeRunner`, `runFile`, `writeReadme`; types `RunFileOptions`, `Runtime`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Add a benchmark for a library](docs/agent-guide.md#add-a-benchmark-for-a-library)
+- [Publish numbers in the README](docs/agent-guide.md#publish-numbers-in-the-readme)
+- [Gate a pull request](docs/agent-guide.md#gate-a-pull-request)
+
+## Rules that bite
+
+- A failed contract means the group is not timed.
+- Only a `publish` run is publishable; rough results are labelled, never cleaned.
+- Change the contract id when the work changes.
+- It supports Node and Bun and is a dev dependency only.
