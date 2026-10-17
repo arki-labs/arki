@@ -86,6 +86,15 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
 }
 
 /**
+ * The base context a feature's job runs with: the worker's context plus `services`, the
+ * services of the feature that registered the job (see `FeatureJobContext` in `@arki/queue/dot`).
+ * A job registered outside a feature (`services` undefined) keeps the worker's context as is.
+ */
+export function withFeatureServices<TContext>(baseContext: TContext, services: object | undefined): TContext {
+  return services === undefined ? baseContext : { ...baseContext, services };
+}
+
+/**
  * Create a job context with utility methods
  * Wraps the base context with updateProgress, log, and job instance
  *

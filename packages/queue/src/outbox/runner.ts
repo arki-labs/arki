@@ -10,7 +10,7 @@ import { parseAsync, SchemaError } from '@arki/schema';
 import type { JobLike } from '../types/job.ts';
 import type { QueueRegistry } from './registry.ts';
 import { defaultJobRetry, ReturnedFailureError, throwIfReturnedFailure } from '../job-retry.ts';
-import { createJobContext, executeMiddlewareChain } from '../middleware.ts';
+import { createJobContext, executeMiddlewareChain, withFeatureServices } from '../middleware.ts';
 import { isOutboxError, outboxError, OUTBOX_ERROR_CODES } from './errors.ts';
 import { jobsByName } from './registry.ts';
 
@@ -21,6 +21,8 @@ export type OutboxRunnerOptions<TContext> = {
   readonly registry: QueueRegistry;
   /** Built once, on the first run, then cached (same rule as `queueWorker`'s `context`). A failure is not cached. */
   readonly context: () => TContext | Promise<TContext>;
+  /** The services each top-level branch of the registry runs with, by its key (`RegisterOptions.services`). */
+  readonly services?: Readonly<Record<string, object>>;
 };
 
 /** What a handler sees as `ctx.job`: the row's id and stored args. Progress and logs go to debug output. */
@@ -43,6 +45,14 @@ function jobLikeOf(job: ScheduledJob): JobLike {
 
 export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): JobRunner {
   const byName = jobsByName(options.registry);
+  // A job's feature services: those of the first top-level branch that lists it, as on the BullMQ lane
+  const servicesByName = new Map<string, object>();
+  for (const [key, branch] of Object.entries(options.registry)) {
+    const services = options.services?.[key];
+    if (services === undefined) continue;
+    for (const name of jobsByName({ [key]: branch }).keys())
+      if (!servicesByName.has(name)) servicesByName.set(name, services);
+  }
   let context: Promise<TContext> | undefined;
   const contextOnce = (): Promise<TContext> => {
     context ??= Promise.resolve()
@@ -71,7 +81,10 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
         );
       });
       const jobLike = jobLikeOf(job);
-      const jobContext = createJobContext(await contextOnce(), jobLike);
+      const jobContext = createJobContext(
+        withFeatureServices(await contextOnce(), servicesByName.get(job.name)),
+        jobLike,
+      );
       const result = await executeMiddlewareChain<typeof jobContext, typeof jobContext, unknown>(
         internal.middlewares,
         jobContext,

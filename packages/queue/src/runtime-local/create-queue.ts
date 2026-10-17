@@ -18,11 +18,11 @@ import { parseAsync } from '@arki/schema';
 import { getConstructionPlans, PgBoss } from 'pg-boss';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
-import type { QueueInstance, ScheduleDefinition } from '../types/builder.ts';
+import type { QueueInstance, RegisterOptions, ScheduleDefinition } from '../types/builder.ts';
 import type { JobContext, JobDefinition, JobLike } from '../types/job.ts';
 import { debugJob, debugRegister, debugSchedule, debugWorker } from '../debug.ts';
 import { duplicateScheduleError } from '../errors.ts';
-import { createJobContext, executeMiddlewareChain } from '../middleware.ts';
+import { createJobContext, executeMiddlewareChain, withFeatureServices } from '../middleware.ts';
 import { buildPgBossAdapter } from './adapter.ts';
 
 const POLL_INTERVAL_SECONDS = 0.5;
@@ -61,6 +61,8 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
   // Job definitions keyed by name — populated at register() time
   const jobDefs = new Map<string, JobDefinition<unknown, unknown, unknown>>();
+  // The services of the feature that registered each job (`RegisterOptions.services`), by job name
+  const jobServices = new Map<string, object>();
   // Schedule definitions — populated at register() time
   const scheduleDefs = new Map<string, InternalScheduleDefinition>();
 
@@ -84,9 +86,10 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
   // ── Registry traversal ─────────────────────────────────────────────────
 
-  function registerJobDef(def: JobDefinition<unknown, unknown, unknown>): void {
+  function registerJobDef(def: JobDefinition<unknown, unknown, unknown>, services: object | undefined): void {
     const name = def._internal.name;
     if (jobDefs.has(name)) return;
+    if (services !== undefined) jobServices.set(name, services);
 
     // Wire the shim so trigger() routes through pg-boss.
     // Cast matches what trigger() needs: a Queue with an .add() method.
@@ -96,7 +99,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
     debugRegister.debug('[runtime-local] registered job: {job}', { job: name });
   }
 
-  function registerScheduleDef(def: ScheduleDefinition): void {
+  function registerScheduleDef(def: ScheduleDefinition, services: object | undefined): void {
     const internal = def._internal as InternalScheduleDefinition;
     if (scheduleDefs.has(internal.name)) throw duplicateScheduleError(internal.name);
 
@@ -120,7 +123,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
     // A schedule sends to its job's own queue (an inline schedule's job is
     // anonymous, named after the schedule); ensure that job has a worker.
-    registerJobDef(internal.job);
+    registerJobDef(internal.job, services);
 
     scheduleDefs.set(internal.name, internal);
     debugSchedule.debug('[runtime-local] registered schedule: {schedule} ({internalValue})', {
@@ -129,19 +132,19 @@ export function createRuntimeLocalQueueInstance<TContext>(
     });
   }
 
-  async function traverseRegistry(registry: Registry): Promise<void> {
+  async function traverseRegistry(registry: Registry, services: object | undefined): Promise<void> {
     for (const value of Object.values(registry)) {
       if (typeof value === 'object' && value !== null) {
         if ('_type' in value) {
           if ((value as { _type: string })._type === 'job') {
-            registerJobDef(value as JobDefinition<unknown, unknown, unknown>);
+            registerJobDef(value as JobDefinition<unknown, unknown, unknown>, services);
           } else if ((value as { _type: string })._type === 'schedule') {
-            registerScheduleDef(value as ScheduleDefinition);
+            registerScheduleDef(value as ScheduleDefinition, services);
           } else if ((value as { _type: string })._type === 'flow') {
             debugRegister.warn('[runtime-local] flow definitions are not supported — skipping');
           }
         } else if (!Array.isArray(value)) {
-          await traverseRegistry(value as Registry);
+          await traverseRegistry(value as Registry, services);
         }
       }
     }
@@ -155,7 +158,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
   ): Promise<void> {
     const internal = def._internal;
     const validatedData = await parseAsync(internal.inputSchema, pgBossJob.data);
-    const baseContext = await createContext();
+    const baseContext = withFeatureServices(await createContext(), jobServices.get(internal.name));
 
     const shim = makeJobShim(pgBossJob.id, pgBossJob.name, pgBossJob.data, pgBossJob.retrycount ?? 0);
 
@@ -182,9 +185,12 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
   // ── Public QueueInstance ───────────────────────────────────────────────
 
-  async function register(registry: Registry): Promise<void> {
+  async function register(registry: Registry, options?: RegisterOptions): Promise<void> {
     debugRegister.debug('[runtime-local] traversing registry');
-    await traverseRegistry(registry);
+    // Each top-level branch runs with its own services (a feature's, keyed by its name), if any
+    for (const [key, value] of Object.entries(registry)) {
+      await traverseRegistry({ [key]: value }, options?.services?.[key]);
+    }
   }
 
   async function start(): Promise<void> {

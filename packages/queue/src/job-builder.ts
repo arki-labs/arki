@@ -6,7 +6,7 @@
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
-import type { JobDefinition, JobOptions } from './types/job.ts';
+import type { InternalJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder } from './debug.ts';
@@ -132,32 +132,44 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
           // Middleware array stored for runtime execution
           middlewares: state.middlewares,
         },
-        trigger: async (data, options) => {
-          const queue = definition._internal._queue;
-          if (!queue) {
-            throw new Error(
-              `Job "${jobName}" is not registered with a queue. ` + `Call queue.register() before calling trigger().`,
-            );
-          }
-
-          debugBuilder.debug('[{jobName}] Triggering job with options: {options}', () => ({
-            jobName,
-            options: JSON.stringify(options),
-          }));
-
-          const job = await queue.add(jobName, data, {
-            priority: options?.priority,
-            delay: options?.delay,
-            jobId: options?.jobId,
-            ...options?.bullmqOptions,
-          });
-
-          debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id });
-          return job.id ?? '';
-        },
+        trigger: (data, options) => triggerJob(definition._internal, data, options),
       };
 
       return definition;
     },
   };
+}
+
+/**
+ * A job's `trigger()`: add to the queue `register()` stored on the definition. A renamed copy
+ * of a job (a feature instance's, `send-mail#eu`) triggers through its own queue the same way.
+ * @internal
+ */
+export async function triggerJob<TInput, TOutput, TDeps>(
+  internal: InternalJobDefinition<TInput, TOutput, TDeps>,
+  data: TInput,
+  options?: TriggerOptions,
+): Promise<string> {
+  const jobName = internal.name;
+  const queue = internal._queue;
+  if (!queue) {
+    throw new Error(
+      `Job "${jobName}" is not registered with a queue. ` + `Call queue.register() before calling trigger().`,
+    );
+  }
+
+  debugBuilder.debug('[{jobName}] Triggering job with options: {options}', () => ({
+    jobName,
+    options: JSON.stringify(options),
+  }));
+
+  const job = await queue.add(jobName, data, {
+    priority: options?.priority,
+    delay: options?.delay,
+    jobId: options?.jobId,
+    ...options?.bullmqOptions,
+  });
+
+  debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id });
+  return job.id ?? '';
 }

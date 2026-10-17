@@ -16,14 +16,20 @@ import { parseAsync } from '@arki/schema';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
-import type { BullMQQueueInstance, FlowDefinition, FlowEnqueueResult, ScheduleDefinition } from './types/builder.ts';
+import type {
+  BullMQQueueInstance,
+  FlowDefinition,
+  FlowEnqueueResult,
+  RegisterOptions,
+  ScheduleDefinition,
+} from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
 import { addFlow } from './flow-jobs.ts';
 import { jobDefaultOptions } from './job-options.ts';
 import { defaultJobRetry, jobAttempts, throwIfReturnedFailure, workerBackoffStrategy } from './job-retry.ts';
-import { createJobContext, executeMiddlewareChain } from './middleware.ts';
+import { createJobContext, executeMiddlewareChain, withFeatureServices } from './middleware.ts';
 import { parseRedisConnection } from './redis-connection.ts';
 
 /**
@@ -53,6 +59,12 @@ export function jobQueueOptions(
 
 /** Job scheduler ids of schedules: `schedule:<schedule name>` on the job's queue */
 const SCHEDULER_ID_PREFIX = 'schedule:';
+
+/**
+ * The services of the feature that registered a job (`RegisterOptions.services`), undefined
+ * outside a feature. A job registered twice keeps its first registration's, like the job itself.
+ */
+type FeatureServices = object | undefined;
 
 /**
  * Queue instance options
@@ -90,7 +102,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Register a single job definition
    */
-  function registerJobDefinition<TInput, TOutput>(definition: JobDefinition<TInput, TOutput, TContext>): Queue {
+  function registerJobDefinition<TInput, TOutput>(
+    definition: JobDefinition<TInput, TOutput, TContext>,
+    services: FeatureServices,
+  ): Queue {
     const internal = definition._internal;
 
     debugRegister.debug('[{internalName}] Registering job definition', { internalName: internal.name });
@@ -126,8 +141,8 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
         const validatedData = await parseAsync(internal.inputSchema, job.data);
         debugJob.debug('[{internalName}] Job {jobId} input validated', { internalName: internal.name, jobId: job.id });
 
-        // Create base context
-        const baseContext = await createContext();
+        // Create base context: the worker's, plus the services of the feature that registered the job
+        const baseContext = withFeatureServices(await createContext(), services);
         const jobContext = createJobContext(baseContext, job);
 
         // Execute middleware chain around the handler (onion)
@@ -194,7 +209,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    * BullMQ job scheduler (or one delayed job for a timeout), and the job's own
    * worker runs it. It creates no queue or worker of its own.
    */
-  async function registerScheduleDefinition(definition: ScheduleDefinition): Promise<void> {
+  async function registerScheduleDefinition(definition: ScheduleDefinition, services: FeatureServices): Promise<void> {
     const internal = definition._internal as InternalScheduleDefinition;
     const jobName = internal.job._internal.name;
 
@@ -209,7 +224,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     }
 
     // Ensure the job is registered, so its worker runs what the schedule adds
-    const queue = registeredJobs.get(jobName)?.queue ?? registerJobDefinition(internal.job);
+    const queue = registeredJobs.get(jobName)?.queue ?? registerJobDefinition(internal.job, services);
 
     if (internal.type === 'timeout') {
       // Timeout: one-time execution after delay
@@ -303,7 +318,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Register a flow definition
    */
-  function registerFlowDefinition(definition: FlowDefinition): void {
+  function registerFlowDefinition(definition: FlowDefinition, services: FeatureServices): void {
     const internal = definition._internal as InternalFlowDefinition;
 
     debugFlow.debug('[{internalName}] Registering flow definition with {stepsLength} steps', {
@@ -327,7 +342,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           internalName: internal.name,
           step: step.job._internal.name,
         });
-        registerJobDefinition(step.job);
+        registerJobDefinition(step.job, services);
       }
     }
 
@@ -339,7 +354,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Traverse registry and register all items
    */
-  async function traverseRegistry(registry: Registry): Promise<void> {
+  async function traverseRegistry(registry: Registry, services: FeatureServices): Promise<void> {
     for (const [_key, value] of Object.entries(registry)) {
       // Check if it's a definition
       if (typeof value === 'object') {
@@ -347,17 +362,17 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           // It's a definition
           switch (value._type) {
             case 'job': {
-              registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>);
+              registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>, services);
 
               break;
             }
             case 'schedule': {
-              await registerScheduleDefinition(value);
+              await registerScheduleDefinition(value, services);
 
               break;
             }
             case 'flow': {
-              registerFlowDefinition(value);
+              registerFlowDefinition(value, services);
 
               break;
             }
@@ -365,7 +380,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           }
         } else if (typeof value === 'object' && !Array.isArray(value)) {
           // It's a nested registry, recurse
-          await traverseRegistry(value);
+          await traverseRegistry(value, services);
         }
       }
     }
@@ -374,9 +389,12 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Register a registry of jobs, schedules, and flows
    */
-  async function register(registry: Registry): Promise<void> {
+  async function register(registry: Registry, options?: RegisterOptions): Promise<void> {
     debugRegister.debug('Starting registry traversal');
-    await traverseRegistry(registry);
+    // Each top-level branch runs with its own services (a feature's, keyed by its name), if any
+    for (const [key, value] of Object.entries(registry)) {
+      await traverseRegistry({ [key]: value }, options?.services?.[key]);
+    }
     debugRegister.debug('Registry traversal complete');
   }
 

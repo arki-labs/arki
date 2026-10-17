@@ -16,7 +16,7 @@ import type { AnyFeatureSlice, Driver, MountedFeature } from '@arki/dot/feature'
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
-import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
+import { driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
@@ -24,13 +24,14 @@ import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueClient, QueueClientHandle, QueueClientOptions } from './queue-client.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
-import type { JobDefinition, JobOptions } from './types/job.ts';
+import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
-import type { Outbox, OutboxOptions } from './outbox/outbox.ts';
+import type { Outbox, OutboxOptions, OutboxTx, Scheduled, ScheduleOptions } from './outbox/outbox.ts';
 import type { QueueRegistry } from './outbox/registry.ts';
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 import { debugWorker } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
+import { triggerJob } from './job-builder.ts';
 import { createQueueClient } from './queue-client.ts';
 import { outbox } from './outbox/outbox.ts';
 import { collectQueueDefinitions, isFlowDefinition, isJobDefinition, isScheduleDefinition } from './outbox/registry.ts';
@@ -149,8 +150,27 @@ export function queueActions(registry: QueueRegistry): readonly QueueDotAction[]
 }
 
 /**
- * The slice a `jobs(...)` declaration produces. The registry lands under
- * `queue` in the feature's slice record, where `queueWorker()` collects it.
+ * What a job declared in a feature's `jobs(...)` runs with, on top of the worker's `context` and
+ * the job: `services`, the services of the feature that registered it — its needs (an instance's
+ * rebound ones), infra, children's provides and `usecases`, without the kernel's `$` keys. Type the
+ * feature's jobs with it: `initQueue.context<WorkerContext & FeatureJobContext<Services>>().create()`.
+ *
+ * Both workers hand it over (`queueWorker`, `outboxJobs`). A job registered outside a feature
+ * (`q.createQueue(...).register(...)`) runs without it. A job two plain features list is one job:
+ * it runs once, with the services of the first.
+ */
+export type FeatureJobContext<TServices> = { readonly services: TServices };
+
+/** The payload of a feature's `jobs(...)` slice once the feature booted: its jobs and its services. */
+export type FeatureJobs<TRegistry extends QueueRegistry = QueueRegistry> = {
+  readonly registry: TRegistry;
+  /** What the feature's jobs see as `ctx.services` ({@link FeatureJobContext}). */
+  readonly services: object;
+};
+
+/**
+ * The slice a `jobs(...)` declaration produces. The registry and the feature's services land
+ * under `queue` in the feature's slice record, where `queueWorker()` collects them.
  * The slice's manifest actions are the PRODUCER side only (the feature can
  * enqueue these jobs wherever it is mounted); the consumer side belongs to
  * the worker, which exists only in the process that runs the jobs.
@@ -159,25 +179,125 @@ export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
   /** Lets a `defineFeature` feature list it in `.entrypoints(...)`; object-form features ignore it. */
   readonly kind: 'queue';
   readonly key: 'queue';
+  /** Empty: the producer ids need the feature's name, so they come from `actionsOf`. */
   readonly actions: readonly QueueDotAction[];
+  /** The producer side, named after the feature: an instance's ids carry its instance (`send-mail#eu.produce`). */
+  readonly actionsOf: (feature: string) => readonly QueueDotAction[];
   readonly registry: TRegistry;
-  readonly resolve: (services: unknown) => TRegistry;
+  readonly resolve: (services: unknown) => FeatureJobs<TRegistry>;
 };
+
+/** A feature's services as its jobs see them: the kernel's `$` keys ($app, $plugin, …) belong to the unit. */
+function jobServicesOf(services: unknown): object {
+  if (typeof services !== 'object' || services === null) return {};
+  return Object.fromEntries(Object.entries(services).filter(([key]) => !key.startsWith('$')));
+}
 
 /**
  * Declare a feature's jobs: `defineFeature('orders')….entrypoints(jobs(orderJobs))`,
  * or `feature('orders', { use: [jobs(orderJobs)] })` in the object form.
+ * Each mounted copy of the feature runs them with its own services ({@link FeatureJobContext}).
  */
 export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry): QueueFeatureSlice<TRegistry> {
-  return { kind: 'queue', key: 'queue', actions: queueProducerActions(registry), registry, resolve: () => registry };
+  return {
+    kind: 'queue',
+    key: 'queue',
+    actions: [],
+    actionsOf: feature => queueProducerActions(featureRegistry(feature, registry)),
+    registry,
+    resolve: services => ({ registry, services: jobServicesOf(services) }),
+  };
 }
 
 function isQueueRegistry(value: unknown): value is QueueRegistry {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isFeatureJobs(value: unknown): value is FeatureJobs {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'registry' in value &&
+    isQueueRegistry(value.registry) &&
+    'services' in value &&
+    typeof value.services === 'object' &&
+    value.services !== null
+  );
+}
+
 function isJobsSlice(slice: AnyFeatureSlice): slice is AnyFeatureSlice & { readonly registry: QueueRegistry } {
   return slice.key === 'queue' && 'registry' in slice && isQueueRegistry(slice.registry);
+}
+
+/**
+ * How a feature (or one of its units, `reports#eu/job-producers`) names its jobs: an instance
+ * appends its instance (`send-mail#eu`), so two copies get two queues. A plain feature's names
+ * never change (`undefined`): live queues, scheduler ids and stored outbox rows keep resolving.
+ */
+function jobNamingOf(owner: string): ((name: string) => string) | undefined {
+  const instance = instanceOf(owner);
+  return instance === undefined ? undefined : name => `${name}#${instance}`;
+}
+
+/** A job under another name. Registering it sets the copy's own `_queue`/`_worker`, never the original's. */
+function renamedJob<TInput, TOutput, TDeps>(
+  job: JobDefinition<TInput, TOutput, TDeps>,
+  name: string,
+): JobDefinition<TInput, TOutput, TDeps> {
+  const { inputSchema, handler, options, middlewares } = job._internal;
+  const copy: JobDefinition<TInput, TOutput, TDeps> = {
+    _type: 'job',
+    _internal: { name, inputSchema, handler, middlewares, ...(options === undefined ? {} : { options }) },
+    trigger: (data, triggerOptions) => triggerJob(copy._internal, data, triggerOptions),
+  };
+  return copy;
+}
+
+/**
+ * A feature instance's registry: every job, schedule and flow renamed by `rename`. Each job is
+ * copied once, so a schedule or flow step points at the same copy the registry lists.
+ */
+function renamedRegistry(registry: QueueRegistry, rename: (name: string) => string): QueueRegistry {
+  const copies = new Map<object, JobDefinition<unknown, unknown, unknown>>();
+  const jobCopy = (job: JobDefinition<unknown, unknown, unknown>): JobDefinition<unknown, unknown, unknown> => {
+    const known = copies.get(job);
+    if (known !== undefined) return known;
+    const copy = renamedJob(job, rename(job._internal.name));
+    copies.set(job, copy);
+    return copy;
+  };
+  const copyOf = (value: unknown): unknown => {
+    if (isJobDefinition(value)) return jobCopy(value);
+    if (isScheduleDefinition(value)) {
+      const internal = value._internal as InternalScheduleDefinition;
+      const renamed: InternalScheduleDefinition = {
+        ...internal,
+        name: rename(internal.name),
+        job: jobCopy(internal.job),
+      };
+      return { ...value, _internal: renamed };
+    }
+    if (isFlowDefinition(value)) {
+      const internal = value._internal as InternalFlowDefinition;
+      const renamed: InternalFlowDefinition = {
+        ...internal,
+        name: rename(internal.name),
+        steps: internal.steps.map(step => ({ ...step, job: jobCopy(step.job) })),
+      };
+      return { ...value, _internal: renamed };
+    }
+    if (isQueueRegistry(value)) return walk(value);
+    return value;
+  };
+  const walk = (node: QueueRegistry): QueueRegistry =>
+    Object.fromEntries(Object.entries(node).map(([key, value]) => [key, copyOf(value)]));
+  return walk(registry);
+}
+
+/** The registry a mounted feature runs: its own for a plain feature, renamed copies for an instance. */
+function featureRegistry(featureName: string, registry: QueueRegistry): QueueRegistry {
+  const naming = jobNamingOf(featureName);
+  return naming === undefined ? registry : renamedRegistry(registry, naming);
 }
 
 /** The jobs every feature declared, keyed by feature name — known before boot, for the manifest. */
@@ -185,18 +305,23 @@ function declaredRegistry(features: readonly MountedFeature[]): QueueRegistry {
   const registry: QueueRegistry = {};
   for (const f of features) {
     const slice = entrypointsOf(f).find(candidate => isJobsSlice(candidate));
-    if (slice !== undefined) registry[f.name] = slice.registry;
+    if (slice !== undefined) registry[f.name] = featureRegistry(f.name, slice.registry);
   }
   return registry;
 }
 
-/** The jobs every booted feature published, read from its slice record. */
-function bootedRegistry(ctx: object, features: readonly MountedFeature[]): QueueRegistry {
+/** The jobs every booted feature published, read from its slice record, and the services each feature's jobs run with. */
+function bootedJobs(
+  ctx: object,
+  features: readonly MountedFeature[],
+): { readonly registry: QueueRegistry; readonly services: Readonly<Record<string, object>> } {
   const registry: QueueRegistry = {};
+  const services: Record<string, object> = {};
   for (const f of features) {
     const slice = sliceOf(ctx, f)['queue'];
-    if (isQueueRegistry(slice)) {
-      registry[f.name] = slice;
+    if (isFeatureJobs(slice)) {
+      registry[f.name] = featureRegistry(f.name, slice.registry);
+      services[f.name] = slice.services;
       continue;
     }
     debugWorker.debug('[{value1}] Feature "{featureName}" did not contribute a queue slice.', {
@@ -204,7 +329,7 @@ function bootedRegistry(ctx: object, features: readonly MountedFeature[]): Queue
       featureName: f.name,
     });
   }
-  return registry;
+  return { registry, services };
 }
 
 function queuePluginError(args: {
@@ -391,14 +516,14 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
     const runStartup = async (ctx: CtxOf<WorkerShape<TNeeds>>): Promise<QueueInstance> => {
       const start = async (): Promise<QueueInstance> => {
         const client = queueClientOf(ctx, pluginName);
-        const registry = bootedRegistry(ctx, features);
+        const { registry, services } = bootedJobs(ctx, features);
         const resolvedContext = await options.context(ctx);
         const instance = options.q.createQueue({
           connection: client.connection,
           keyPrefix: client.keyPrefix,
           createContext: () => resolvedContext,
         });
-        await instance.register(registry);
+        await instance.register(registry, { services });
         await instance.start();
         return instance;
       };
@@ -518,7 +643,102 @@ export function outboxJobs<TNeeds extends NeedsShape & NoReservedKeys, TContext>
   return {
     needs: options.needs,
     actions: features => queueConsumerActions(declaredRegistry(features)),
-    build: (features, services) =>
-      outboxRunner({ registry: bootedRegistry(services, features), context: () => options.context(services) }),
+    build: (features, services) => {
+      const booted = bootedJobs(services, features);
+      return outboxRunner({
+        registry: booted.registry,
+        services: booted.services,
+        context: () => options.context(services),
+      });
+    },
   };
+}
+
+/** The input type of a job definition, read from its `trigger`. */
+type InputOf<TJob> = TJob extends {
+  readonly trigger: (data: infer TInput, options?: TriggerOptions) => Promise<string>;
+}
+  ? TInput
+  : never;
+
+/** A job's producer on the Redis lane: enqueue under the feature's name for it (`send-mail#eu` in an instance). */
+export type JobProducer<TInput> = {
+  enqueue(data: TInput, options?: TriggerOptions): Promise<string>;
+};
+
+export type JobProducers<TJobs> = { readonly [K in keyof TJobs]: JobProducer<InputOf<TJobs[K]>> };
+
+/** A job's producer on the outbox lane: a row in the caller's transaction, under the feature's name for it. */
+export type OutboxProducer<TInput> = {
+  runAfter(tx: OutboxTx, args: TInput, options?: ScheduleOptions): Promise<Scheduled>;
+  runAt(tx: OutboxTx, args: TInput, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>): Promise<Scheduled>;
+};
+
+export type OutboxProducers<TJobs> = { readonly [K in keyof TJobs]: OutboxProducer<InputOf<TJobs[K]>> };
+
+type JobsRecord = Readonly<Record<string, AnyJobDefinition>>;
+
+/**
+ * One producer per job, each bound to the name the owning feature runs it under. `unit` is the
+ * producing plugin's own name: inside an instance it is `reports#eu/job-producers`, so the
+ * producer and the worker (`jobs(...)` of `reports#eu`) both derive `send-mail#eu` and cannot drift.
+ */
+function producersOf<TProducer>(
+  jobsToProduce: JobsRecord,
+  unit: string,
+  producerOf: (job: JobDefinition<unknown, unknown, unknown>) => TProducer,
+): Readonly<Record<string, TProducer>> {
+  const naming = jobNamingOf(unit);
+  const producers: Record<string, TProducer> = {};
+  for (const [key, job] of Object.entries(jobsToProduce)) {
+    if (!isJobDefinition(job)) continue;
+    producers[key] = producerOf(naming === undefined ? job : renamedJob(job, naming(job._internal.name)));
+  }
+  return producers;
+}
+
+/**
+ * A feature's producers on the Redis lane, as feature-private infra:
+ * `defineFeature('reports').needs({ queue: queuePlugin.provides.queue }).infra(jobProducers({ sendMail }))`,
+ * then `deps.jobs.sendMail.enqueue(data)` in a usecase. In an instance (`reports.instance('eu', …)`)
+ * it enqueues to `send-mail#eu`, the queue that instance's `jobs(...)` runs; in a plain feature
+ * to `send-mail`, exactly as `queue.enqueue(sendMail, data)`.
+ */
+export function jobProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
+  return plugin({
+    name: 'job-producers',
+    version: QUEUE_PLUGIN_VERSION,
+    needs: { queue: service<QueueClient>() },
+    provides: {
+      jobs: ({ queue: client, $plugin }): JobProducers<TJobs> =>
+        // Erasure seam: each producer takes its own job's input; `producersOf` walks them untyped.
+        producersOf(jobsToProduce, $plugin, job => ({
+          enqueue: (data: unknown, options?: TriggerOptions) => client.enqueue(job, data, options),
+        })) as JobProducers<TJobs>,
+    },
+  });
+}
+
+/**
+ * A feature's producers on the outbox lane (`@arki/queue/outbox`), as feature-private infra:
+ * `.needs({ schedule: scheduling.provides.schedule }).infra(outboxProducers({ sendMail }))`, then
+ * `deps.jobs.sendMail.runAfter(tx, args)`. Rows carry the feature's name for the job (`send-mail#eu`
+ * in an instance), which `outboxJobs()` resolves to that instance's job. A feature mounts one of
+ * `jobProducers` and `outboxProducers`: both provide `jobs`.
+ */
+export function outboxProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
+  return plugin({
+    name: 'outbox-producers',
+    version: QUEUE_PLUGIN_VERSION,
+    needs: { schedule: service<Outbox>() },
+    provides: {
+      jobs: ({ schedule, $plugin }): OutboxProducers<TJobs> =>
+        // Erasure seam: each producer takes its own job's input; `producersOf` walks them untyped.
+        producersOf(jobsToProduce, $plugin, job => ({
+          runAfter: (tx: OutboxTx, args: unknown, options?: ScheduleOptions) => schedule.runAfter(tx, job, args, options),
+          runAt: (tx: OutboxTx, args: unknown, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>) =>
+            schedule.runAt(tx, job, args, at, options),
+        })) as OutboxProducers<TJobs>,
+    },
+  });
 }

@@ -6,19 +6,20 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { plugin, service } from '@arki/dot/plugin';
+import { plugin, rename, service } from '@arki/dot/plugin';
 import { initJournal } from '@arki/journal';
 import { journal, journalWorker } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 
-import { jobs, outboxJobs, outboxPlugin } from '../dot.ts';
+import type { FeatureJobContext } from '../dot.ts';
+import { jobs, outboxJobs, outboxPlugin, outboxProducers } from '../dot.ts';
 import { initQueue } from '../init.ts';
 
 const tables = journalTables();
@@ -65,6 +66,35 @@ const signup = defineFeature('signup')
   })
   .entrypoints(jobs(q.registry({ welcome })));
 
+// Two copies of one feature, each on its own region: the copy's rows must carry its name and run its job.
+const regionOf = (region: string) => plugin({ name: 'region', provides: { region: () => region } });
+const regionUs = regionOf('us');
+const regionEu = rename(regionOf('eu'), { region: 'regionEu' }, 'regionEu');
+const rq = initQueue.context<FeatureJobContext<{ readonly region: string }>>().create();
+const reminded: string[] = [];
+let remindedOne: () => void = () => {
+  // replaced by the test before it schedules
+};
+const remind = rq.job
+  .name('mail.remind.v1')
+  .input(z.object({ userId: z.string() }))
+  .handler((data, ctx) => {
+    reminded.push(`${ctx.services.region}:${ctx.job.name}:${data.userId}`);
+    remindedOne();
+    return Promise.resolve({ sent: true });
+  });
+const reminders = defineFeature('reminders')
+  .needs({ db: database.provides.db, schedule: scheduling.provides.schedule, region: regionUs.provides.region })
+  .infra(outboxProducers({ remind }))
+  .usecases({
+    remind:
+      ({ db: root, jobs: producers }) =>
+      (userId: string) =>
+        root.transaction(tx => producers.remind.runAfter(tx, { userId })),
+  })
+  .provides({ reminder: ({ usecases }) => usecases })
+  .entrypoints(jobs(rq.registry({ remind })));
+
 describe('outboxPlugin + outboxJobs', () => {
   it('a feature schedules in its transaction and the journal worker runs its jobs slice', async () => {
     const app = await defineApp('outbox-worker')
@@ -97,6 +127,28 @@ describe('outboxPlugin + outboxJobs', () => {
     const actions = app.manifest.actions.map(action => `${action.plugin}:${action.id}`);
     expect(actions).toContain('journal-worker:mail.welcome.v1.consume');
     expect(actions).toContain('signup:mail.welcome.v1.produce');
+  });
+
+  it("an instance's row carries its instance and runs that instance's job, with its rebound need", async () => {
+    const app = await defineApp('outbox-regions')
+      .infra(database, scheduling, regionUs, regionEu, journal({ j, tables }))
+      .features([reminders.instance('eu', { region: regionEu.provides.regionEu }), reminders.instance('us')])
+      .entrypoints(journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'regions' }) }) }))
+      .boot();
+    await app.start();
+    try {
+      const ran = new Promise<void>(resolve => {
+        remindedOne = resolve;
+      });
+      const { id } = await app.services['reminders#eu.reminder'].remind('u2');
+      const [row] = await db.select({ jobName: tables.jobs.jobName }).from(tables.jobs).where(eq(tables.jobs.id, id));
+      expect(row?.jobName).toBe('mail.remind.v1#eu');
+      await ran;
+      expect(reminded).toEqual(['eu:mail.remind.v1#eu:u2']);
+    } finally {
+      await app.stop();
+      await app.dispose();
+    }
   });
 
   it('an outboxJobs need the app does not provide is a compile error and fails boot', async () => {

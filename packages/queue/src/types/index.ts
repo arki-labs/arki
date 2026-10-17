@@ -18,6 +18,7 @@ export type {
   QueueBuilder,
   QueueEnqueue,
   QueueInstance,
+  RegisterOptions,
   ScheduleBuilderChain,
   ScheduleBuilderDef,
   ScheduleBuilderFactory,

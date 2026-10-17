@@ -501,13 +501,24 @@ export type QueueEnqueue = {
 };
 
 /**
+ * Options of `QueueInstance.register()`.
+ */
+export type RegisterOptions = {
+  /**
+   * The services each top-level branch of the registry runs with, by its key. `queueWorker()`
+   * keys the registry by feature name, so a feature's jobs see its own services as `ctx.services`.
+   */
+  readonly services?: Readonly<Record<string, object>>;
+};
+
+/**
  * Queue instance that can register and run jobs
  */
 export type QueueInstance = {
   /**
    * Register a job registry
    */
-  register(registry: Record<string, unknown>): Promise<void>;
+  register(registry: Record<string, unknown>, options?: RegisterOptions): Promise<void>;
 
   /**
    * Start all registered workers
