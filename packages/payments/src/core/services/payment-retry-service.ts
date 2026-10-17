@@ -7,6 +7,7 @@ import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId } from '../types.js';
+import { CardDeclined } from '../providers/provider-error.js';
 
 const logger = getLogger('arki:payments:retry');
 
@@ -244,6 +245,11 @@ export class PaymentRetryService {
         attempt.status = 'failed';
         attempt.failureReason = result.message;
         logger.warn('Retry {attemptId} failed: {code}', { attemptId: attempt.id, code: result.code, failure: result });
+
+        // A declined card is a failed retry like any other: the last one ends dunning
+        if (CardDeclined.is(result) && (await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber))) {
+          await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+        }
         return;
       }
 

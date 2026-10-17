@@ -124,24 +124,48 @@ describe('the last retry fails', () => {
   });
 });
 
-/** A decline is now returned, not thrown. The attempt must end exactly as it did when the provider threw. */
+/**
+ * A decline is returned, not thrown, and it is the most common way a retry fails. On the last
+ * attempt it must still end dunning like any other failed retry: otherwise the subscription stays
+ * in limbo, neither recovered nor marked past due.
+ */
 describe('a retry the card declines', () => {
-  it('fails the attempt with the decline, and leaves the subscription and the journal alone', async () => {
+  const declining: Provider = {
+    confirmPayment: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
+  };
+
+  /** Two retries: the first is due now, the second an hour later, so only the first runs. */
+  const twoRetries: RetryStrategy = { ...oneRetryNow, name: 'two_retries', maxAttempts: 2, delayMinutes: [0, 60] };
+
+  async function declinedRetryWith(strategy: RetryStrategy) {
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id);
-    const declining: Provider = {
-      confirmPayment: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
-    };
-    const service = new PaymentRetryService(declining, reads, writes, [oneRetryNow]);
+    const service = new PaymentRetryService(declining, reads, writes, [strategy]);
     await service.scheduleRetries(payment.id, 'card_declined');
     const eventsBefore = await countEvents(db);
 
     await service.processRetries();
 
-    expect(service.getRetryAttempts(payment.id)).toMatchObject([
-      { status: 'failed', failureReason: 'The card was declined (card_declined)' },
-    ]);
-    expect(await countEvents(db)).toBe(eventsBefore);
-    expect(await subscriptionRow(db, subscription.id)).toMatchObject({ status: 'active' });
+    return {
+      id: subscription.id,
+      attempts: service.getRetryAttempts(payment.id),
+      eventsWritten: (await countEvents(db)) - eventsBefore,
+    };
+  }
+
+  it('on the last attempt ends dunning: the subscription is past due, with the event', async () => {
+    const { id, attempts } = await declinedRetryWith(oneRetryNow);
+
+    expect(attempts).toMatchObject([{ status: 'failed', failureReason: 'The card was declined (card_declined)' }]);
+    expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+    expect(await eventTypesOf(db, 'subscription', id)).toEqual(['SubscriptionCreated', 'SubscriptionPastDue']);
+  });
+
+  it('before the last attempt only fails that attempt: the next one stays scheduled and nothing is written', async () => {
+    const { id, attempts, eventsWritten } = await declinedRetryWith(twoRetries);
+
+    expect(attempts.map(attempt => attempt.status)).toEqual(['failed', 'pending']);
+    expect(eventsWritten).toBe(0);
+    expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
   });
 });
