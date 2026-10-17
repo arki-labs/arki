@@ -10,6 +10,21 @@
       "import": "./src/index.ts",
       "node": "./src/index.ts"
     },
+    "./ai": {
+      "types": "./dist/src/ai/index.d.ts",
+      "import": "./src/ai/index.ts",
+      "node": "./src/ai/index.ts"
+    },
+    "./ai/playwright": {
+      "types": "./dist/src/ai/playwright.d.ts",
+      "import": "./src/ai/playwright.ts",
+      "node": "./src/ai/playwright.ts"
+    },
+    "./ai/vitest": {
+      "types": "./dist/src/ai/vitest.d.ts",
+      "import": "./src/ai/vitest.ts",
+      "node": "./src/ai/vitest.ts"
+    },
     "./assertions": {
       "types": "./dist/src/assertions.d.ts",
       "import": "./src/assertions.ts",
@@ -124,25 +139,25 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
+    "@types/pg": "catalog:drizzle",
     "arktype": "catalog:",
     "msw": "catalog:testing",
     "testcontainers": "catalog:testing",
     "valibot": "catalog:",
     "vitest": "catalog:",
-    "zod": "catalog:",
-    "@types/pg": "catalog:drizzle",
-    "@playwright/test": "catalog:testing"
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@arki/auth": "workspace:*",
+    "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
     "msw": "catalog:testing",
     "testcontainers": "catalog:testing",
-    "vitest": "catalog:",
-    "@playwright/test": "catalog:testing"
+    "vitest": "catalog:"
   },
   "peerDependenciesMeta": {
     "@arki/auth": {

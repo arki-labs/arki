@@ -17,7 +17,7 @@ import type {
   PlaywrightWorkerOptions,
   TestInfo,
 } from '@playwright/test';
-import { test as base, expect } from '@playwright/test';
+import { test as base } from '@playwright/test';
 
 import { getLogger } from '@arki/log';
 
@@ -25,6 +25,7 @@ import type { MailpitWorker, Mailbox, MailSummary, ReceivedMail } from '../servi
 import type { Json, ServiceSpec, Stack, WorkerValues } from '../stack/index.js';
 import type { RunningServer, ServerOptions } from './server.js';
 import { mailbox } from '../services/mailpit.js';
+import { expect } from '../ai/playwright.js';
 import { readManifest } from '../stack/index.js';
 import { freePort, startServer } from './server.js';
 
