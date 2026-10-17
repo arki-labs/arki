@@ -18,6 +18,8 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 | [research/02-advisors/](research/02-advisors/) | Round 2: the same brief answered blind by two advisors (Fable and Astra), plus the synthesis and verified findings. |
 | [research/03-plan/](research/03-plan/) | Round 3: top Laravel packages + Laravel AI, the JS AI market, Arki's AI inventory, and the two advisor plans merged into plan.md. |
 | [research/04-effect/](research/04-effect/) | Round 4: why Effect is famous, a capability map of Effect vs `@arki`, two blind advisor answers, and a merged three-wave roadmap (synthesis.md) with decisions D-01…D-07. |
+| [research/05-convex/](research/05-convex/) | Round 5: why Convex is famous, a 44-row capability map of Convex vs `@arki`, two blind advisor answers, and a merged ranked list of 13 lessons (synthesis.md) — live queries are the one hard gap. |
+| [research/06-nestjs/](research/06-nestjs/) | Round 6: why NestJS is famous, its Sep–Oct 2026 first-party reliability/auth/observability wave, a capability map vs `@arki`, two blind advisor answers, 10 verified code findings, and a five-wave merged recommendation (synthesis.md) with decisions A–E. |
 | [research/07-result/](research/07-result/) | Round 7: Result and typed-error libraries in TypeScript, PHP and other languages, and the founder's design and name choices for `@arki/failure`. |
 
 ## How to add to this area
