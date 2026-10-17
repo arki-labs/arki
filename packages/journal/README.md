@@ -879,7 +879,20 @@ The procedure must have `journal` and a `db` the journal can write through on it
 
 ## Tables
 
-`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive` and `jobOperations`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps` and `workflowSignals`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+
+**Export every table on its own.** drizzle-kit collects only a schema module's top-level exports, so a table that sits only inside the `journalTables()` object never gets a migration. Export each one, and add `ExportsEveryJournalTable` from `@arki/journal/pg` so a table added in a later version fails the build until you export it:
+
+```ts
+import type * as thisModule from './journal.tables'; // the module itself
+
+const tables = journalTables(schema);
+export const journalEvents = tables.events;
+// …one export per table
+export type JournalTablesCheck = ExportsEveryJournalTable<typeof thisModule>;
+```
+
+A missing export reads `Property 'missingJournalTableExports' is missing … required in type '{ missingJournalTableExports: "jobArchive"; }'`. Tables match by type, so the export names are yours. Then run `drizzle-kit generate`.
 
 `seq` is commit order, not only insert order. Every write takes one advisory transaction lock (`pg_advisory_xact_lock`, namespace `0x4a524e4c`) at its start and holds it until the transaction commits, so a transaction that took a lower `seq` always commits first. A reader that remembers the last `seq` it saw, as `rerun` does with `afterSeq`, therefore misses nothing. The cost: event appends across the whole app commit one transaction at a time, and a transaction that writes events and then does slow work holds every other writer until it commits. Keep writes near the end of a transaction, or keep the transaction short.
 

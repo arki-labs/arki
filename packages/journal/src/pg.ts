@@ -344,3 +344,24 @@ export function journalTables(schema?: PgSchema) {
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;
+
+/** The names of journal tables that no top-level export of `Module` holds. */
+type MissingJournalTables<Module> = {
+  [Name in keyof JournalTables]: JournalTables[Name] extends Module[keyof Module] ? never : Name;
+}[keyof JournalTables];
+
+/**
+ * drizzle-kit reads only a schema module's top-level exports, so every journal
+ * table must be exported on its own. Put this line in the module that calls
+ * `journalTables()`:
+ *
+ * `type _ = ExportsEveryJournalTable<typeof import('./journal.tables')>;`
+ *
+ * It fails to compile while a table is missing and names it. Tables match by
+ * type, so the export names are the app's own.
+ */
+export type ExportsEveryJournalTable<
+  Module extends ([MissingJournalTables<Module>] extends [never]
+    ? unknown
+    : { missingJournalTableExports: MissingJournalTables<Module> }),
+> = Module;

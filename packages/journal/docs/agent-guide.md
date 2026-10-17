@@ -56,6 +56,8 @@ export const journal = j.compose({ tables, projections: [customerStats], effects
 
 `.tx<AppTx>()` types `tx` in commands and projections. `.db<AppDb>()` types `db` in effects. Both steps are optional and type-only. `initJournal({ meta })` alone also returns `j`. `AppDb` is the app's Drizzle database type. `AppTx` is its transaction type: `Parameters<Parameters<AppDb['transaction']>[0]>[0]`.
 
+drizzle-kit migrates only the schema module's top-level exports. Export each `journalTables()` table on its own, never only the object. Keep `export type JournalTablesCheck = ExportsEveryJournalTable<typeof thisModule>;` in that module (`import type * as thisModule` from the file itself): it stops compiling and names the table when a journal upgrade adds one you have not exported. Export it, then run `drizzle-kit generate`.
+
 ## Task map
 
 ### Add an event and react in the same transaction
