@@ -1,7 +1,7 @@
 /**
  * Fleet administration contract.
  *
- * Every ARKI app that wants to appear in Foreman (admin.fork.works) exposes a
+ * Every ARKI app that wants to appear in Foreman exposes a
  * single authenticated endpoint that returns a {@link FleetSnapshot}. Foreman
  * fetches each app's snapshot and validates it against this same schema, so the
  * two sides agree on shape without sharing a runtime or an oRPC router. The
@@ -28,7 +28,7 @@ export const fleetInfoSchema = z.object({
   id: z.string().min(1),
   /** Human brand name, e.g. `Forkworks`. */
   brand: z.string().min(1),
-  /** Public production domain, e.g. `fork.works`. */
+  /** Public production domain, e.g. `shop.example.com`. */
   domain: z.string().min(1),
   /** App version or build identifier (package version, git sha, …). */
   version: z.string().min(1),

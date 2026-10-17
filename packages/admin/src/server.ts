@@ -89,7 +89,7 @@ export type FleetRegistryEntry = {
   id: string;
   brand: string;
   domain: string;
-  /** Origin Foreman fetches against, e.g. `https://fork.works`. */
+  /** Origin Foreman fetches against, e.g. `https://shop.example.com`. */
   baseUrl: string;
   /** Shared secret for this app. */
   token: string;

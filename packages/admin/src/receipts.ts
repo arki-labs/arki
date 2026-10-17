@@ -151,7 +151,7 @@ export type ReceiptKV = {
 
 export type KvReceiptStoreOptions = {
   /**
-   * Whose receipts these are: the app's audience, `slug:environment` (`novelette:prod`).
+   * Whose receipts these are: the app's audience, `slug:environment` (`shop:prod`).
    * Every key carries it, so two apps (or two environments) on one KV never read each other's receipts.
    */
   namespace: string;
@@ -182,7 +182,7 @@ export function kvReceiptStore(kv: ReceiptKV, options: KvReceiptStoreOptions): R
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidConfig,
       `The receipt store options are invalid:\n${z.prettifyError(parsed.error)}`,
-      `Pass the app's audience as namespace ("novelette:production"). Keep receipts at least ${String(RECEIPT_WINDOW_SECONDS)} s (Foreman's receipt window); the default is 30 days.`,
+      `Pass the app's audience as namespace ("shop:prod"). Keep receipts at least ${String(RECEIPT_WINDOW_SECONDS)} s (Foreman's receipt window); the default is 30 days.`,
     );
   }
   const ttl = parsed.data.ttlSeconds ?? DEFAULT_RECEIPT_TTL_SECONDS;

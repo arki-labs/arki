@@ -19,11 +19,11 @@ import type { TechArticleSchemaProps } from '../types';
  * <TechArticleSchema
  *   title="How Length Measurement Works"
  *   description="Everything about converting between metric and imperial length units."
- *   url="https://ekuation.com/unit-converter/length"
+ *   url="https://units.example.com/length"
  *   articleMeta={{ datePublished: "2024-01-15", dateModified: "2024-06-01" }}
- *   siteName="Ekuation"
- *   siteUrl="https://ekuation.com"
- *   authorName="Ekuation"
+ *   siteName="Units"
+ *   siteUrl="https://units.example.com"
+ *   authorName="Units"
  * />
  * ```
  */

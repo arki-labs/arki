@@ -75,7 +75,7 @@ export type OfflineRuntime = {
  * ```ts
  * export const offline = createOfflineRuntime({
  *   tier: 'queue',
- *   appId: 'avocabo',
+ *   appId: 'shop',
  *   rpc: rpcClient,
  *   actorId: () => signedInUserId, // your session state; `null` signed out, `undefined` not known yet
  *   devtools: true,

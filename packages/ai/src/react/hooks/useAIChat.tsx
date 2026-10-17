@@ -3,7 +3,7 @@
 /**
  * Thin wrapper around `useChat` from `@ai-sdk/react@3` that preserves the
  * historical `{ messages, input, isLoading, sendMessage, ... }` surface used by
- * downstream apps (hyphenate, ekuation, everseek).
+ * downstream apps.
  *
  * The SDK handles the UI Message Stream Protocol, retries, abort, and message
  * accumulation. We translate its `UIMessage[]` (parts-based) into the flat

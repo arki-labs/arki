@@ -74,7 +74,7 @@ export {
 export type ForemanTarget = {
   /** `${appId}:${environment}`. */
   aud: string;
-  /** Origin Foreman calls, e.g. `https://novelette.app`. */
+  /** Origin Foreman calls, e.g. `https://shop.example.com`. */
   baseUrl: string;
   /** The app's identity public key, recorded at enrollment (`FOREMAN_APP_KEY`'s public half). */
   appKey: string;

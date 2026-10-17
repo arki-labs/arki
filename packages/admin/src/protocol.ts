@@ -75,13 +75,13 @@ const NONCE_PATTERN = /^[\w-]{22,128}$/;
 export const foremanEnvironmentSchema = z.enum(['prod', 'staging', 'dev']);
 export type ForemanEnvironment = z.output<typeof foremanEnvironmentSchema>;
 
-/** Target identity: `${appId}:${environment}`, e.g. `novelette:prod`. The environment is `prod`, `staging` or `dev`. */
+/** Target identity: `${appId}:${environment}`, e.g. `shop:prod`. The environment is `prod`, `staging` or `dev`. */
 export const audienceSchema = z
   .string()
-  .regex(AUDIENCE_PATTERN, 'Use "appId:environment" such as "novelette:prod".')
+  .regex(AUDIENCE_PATTERN, 'Use "appId:environment" such as "shop:prod".')
   .refine(
     audience => foremanEnvironmentSchema.safeParse(audience.slice(audience.indexOf(':') + 1)).success,
-    'The environment is prod, staging or dev, such as "novelette:prod".',
+    'The environment is prod, staging or dev, such as "shop:prod".',
   );
 
 /** An Ed25519 public key: base64url of its 32 raw bytes. */

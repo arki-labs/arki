@@ -26,11 +26,11 @@ export type AppLocaleConfig = {
  * - Forward: `(resourceId, locale)` → `slug` (link generation)
  * - Reverse: `(locale, slug)` → `resourceId` (page loader resolution)
  */
-export type LocalizedResourceSlug = {
+export type LocalizedResourceSlug<Kind extends string = string> = {
   /** Stable English key used internally (e.g., 'bmi-calculator') */
   resourceId: string;
-  /** The kind of resource this slug represents */
-  resourceKind: 'category' | 'calculator' | 'alias' | 'variant' | 'post' | 'legal';
+  /** The kind of resource this slug represents; an app names its own kinds through `Kind` */
+  resourceKind: Kind;
   /** The locale this slug belongs to */
   locale: string;
   /** The localized public slug (e.g., 'bmi-rechner' for German) */

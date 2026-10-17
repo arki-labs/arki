@@ -15,7 +15,7 @@ import { foremanEnvironmentSchema, writesModeSchema } from './protocol';
  * Every key is optional so an app without Foreman keys still boots.
  */
 export const foremanEnvShape = {
-  /** App slug, e.g. `novelette`. With the environment it forms the audience `novelette:prod`. */
+  /** App slug, e.g. `shop`. With the environment it forms the audience `shop:prod`. */
   FOREMAN_APP_ID: z.string().min(1).optional(),
   /** This app's identity key (PKCS#8, base64url). Signs every response. */
   FOREMAN_APP_KEY: z.string().min(1).optional(),

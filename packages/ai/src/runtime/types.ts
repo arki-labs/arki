@@ -5,7 +5,7 @@ import type { Failure } from '@arki/failure';
 /**
  * Agent-runtime adapter layer — neutral contracts.
  *
- * The brandability bake-off (apps/brandability/backend/spikes/EVALUATION.md) proved the
+ * A bake-off across frameworks showed the
  * agentic tool-loop is a commodity across AI SDK / Mastra / LangChain / LangGraph / TanStack.
  * These types are the framework-neutral seam every backend adapts to, so the runtime choice
  * is swappable rather than load-bearing. See packages/ai/docs/adapter-layer-proposal.md.
@@ -95,8 +95,8 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
   ): NoInfer<TOutput> | Failure | Promise<NoInfer<TOutput> | Failure>;
   /**
    * D-F-08 marker: required tools form the evidence floor. P0 records this but does NOT
-   * enforce an eager floor — callers pre-run required tools and inject their results (as the
-   * brandability assessment-agent does). Reserved for a future floor-enforcing option.
+   * enforce an eager floor — callers pre-run required tools and inject their results (as an
+   * assessment agent can). Reserved for a future floor-enforcing option.
    */
   required?: boolean;
 }

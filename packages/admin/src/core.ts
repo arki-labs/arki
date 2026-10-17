@@ -25,7 +25,7 @@ export const CORE_MANIFEST_MODULE_ID = 'core.manifest';
 export const CORE_MODULE_VERSION = '1.0.0';
 
 export type CoreModulesOptions<TCtx> = {
-  /** This target: `id` and `environment` make up the audience (`novelette:prod`). */
+  /** This target: `id` and `environment` make up the audience (`shop:prod`). */
   app: { id: string; environment: ForemanEnvironment; version: string; commit?: string };
   /** Installed `@arki/*` versions. */
   packages?: Record<string, string>;
