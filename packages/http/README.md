@@ -487,6 +487,12 @@ const partner = createClient(partnerRoutes, {
   checked address, and follows a redirect only to another public URL. It
   buffers the body (at most `maxBytes`, default 10 MB), so a streaming answer
   arrives whole.
+- **`UnsafeUrlError`** is what the guard throws when it refuses a URL: not
+  http(s), not a URL, or a private, loopback or link-local address, whether
+  typed, in the DNS answer, or behind a redirect. No request reached that
+  address, and the same URL is refused every time, so do not retry it.
+  `safeFetchBytes` and `validatePublicURL` throw it too. A network failure
+  still throws what the network throws.
 
 ## Without DOT
 
@@ -523,6 +529,7 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E408` | a client call got no response within `timeoutMs` (thrown by `@arki/http/client`, never sent on the wire) |
 | `ARKI_HTTP_E410` / `E411` / `E412` | idempotency: key missing (400), key reused for another request (422), request with this key still running (409) |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
+| `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |
 | `ARKI_HTTP_E420` / `E421` / `E422` | webhook: signature headers missing or malformed, no signature matches, signed time outside the window (all 401) |
 | `ARKI_HTTP_E500` | handler crash or output-schema violation |
 | `ARKI_HTTP_E510` | a `Response` without `output: raw()`, or a plain value from a `raw()` route (answers 500) |

@@ -60,7 +60,15 @@ export type {
 export { BASE_CTX_KEYS, derive } from './derive.js';
 export type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
 
-export { describeInternalError, errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
+export {
+  describeInternalError,
+  errorResponse,
+  HTTP_ERROR_CODES,
+  HttpConfigError,
+  HttpError,
+  toErrorResponse,
+  UnsafeUrlError,
+} from './error.js';
 export type { HttpErrorEnvelope } from './error.js';
 
 export { contractMeta, toOpenApi } from './openapi.js';

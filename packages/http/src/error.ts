@@ -13,6 +13,9 @@
  *    A handler that returns an `@arki/failure` failure gets the same
  *    envelope, with the failure's status, code, message and data.
  *
+ * Apart from both, {@link UnsafeUrlError} is the SSRF guard's refusal in
+ * `@arki/http/public-fetch`: thrown to the caller, never sent on the wire.
+ *
  * Every code is stable API. Match on codes, never parse messages.
  */
 
@@ -50,6 +53,8 @@ export const HTTP_ERROR_CODES = {
   idempotencyKeyReused: 'ARKI_HTTP_E411',
   /** A request with this idempotency key is still running. Answers 409 with `retry-after`. */
   idempotencyInProgress: 'ARKI_HTTP_E412',
+  /** `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one. Thrown as {@link UnsafeUrlError}; never sent on the wire. */
+  unsafeUrl: 'ARKI_HTTP_E430',
   /** A request body is larger than the route allows. Answers 413. */
   payloadTooLarge: 'ARKI_HTTP_E413',
   /** A client call ran past its `timeoutMs`. Thrown by `@arki/http/client`; never sent on the wire. */
@@ -135,6 +140,26 @@ export class HttpConfigError extends Error {
     this.code = fields.code;
     this.remediation = fields.remediation;
     this.docsUrl = fields.docsUrl ?? docsUrlFor(fields.code);
+  }
+}
+
+/**
+ * The SSRF guard in `@arki/http/public-fetch` refused a URL: it is not
+ * http(s), carries credentials it may not, is not a URL at all, or it (or
+ * its DNS answer, or a redirect hop) points at a private, loopback or
+ * link-local address. No request reached that address. The same URL is
+ * refused every time, so a caller must not retry it; a network failure
+ * still throws what the network throws.
+ */
+export class UnsafeUrlError extends Error {
+  readonly code = HTTP_ERROR_CODES.unsafeUrl;
+  readonly remediation =
+    'Use an http(s) URL whose host resolves only to public addresses; private, loopback and link-local targets, and redirects to them, are refused.';
+  readonly docsUrl = docsUrlFor(HTTP_ERROR_CODES.unsafeUrl);
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsafeUrlError';
   }
 }
 

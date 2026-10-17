@@ -1,5 +1,9 @@
-import ipaddr from 'ipaddr.js';
 import type { fetch as undiciFetch } from 'undici/index.js';
+import ipaddr from 'ipaddr.js';
+
+import { UnsafeUrlError } from './error.js';
+
+export { UnsafeUrlError } from './error.js';
 
 /**
  * The two network calls a public fetch makes. Production uses the system
@@ -37,20 +41,22 @@ export function isPublicAddress(address: string) {
 /**
  * The URL must be http(s) at a public address. `user:pass@` is refused unless
  * `allowCredentials` is set (private feeds use it; `safeFetchBytes` then sends
- * it as a Basic `Authorization` header). Errors never carry the URL itself.
+ * it as a Basic `Authorization` header). A refusal throws {@link UnsafeUrlError}, whose message
+ * never carries the URL itself.
  */
 export function validatePublicURL(value: string, options: { allowCredentials?: boolean } = {}) {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error('Invalid URL.');
+    throw new UnsafeUrlError('Invalid URL.');
   }
   const hasCredentials = url.username !== '' || url.password !== '';
   if (!['http:', 'https:'].includes(url.protocol) || (hasCredentials && !options.allowCredentials))
-    throw new Error('Only public HTTP feeds are supported.');
+    throw new UnsafeUrlError('Only public HTTP feeds are supported.');
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (ipaddr.isValid(host) && !isPublicAddress(host)) throw new Error('Private network addresses are not allowed.');
+  if (ipaddr.isValid(host) && !isPublicAddress(host))
+    throw new UnsafeUrlError('Private network addresses are not allowed.');
   return url;
 }
 
@@ -82,8 +88,8 @@ function untilAborted(signal: AbortSignal): Promise<never> {
 /**
  * The guard itself, shared by {@link safeFetchBytes} and {@link publicFetch}: every hop resolves
  * the host, refuses any private answer, pins the connection to the checked address, and follows a
- * redirect only to another public URL. The body is read here, under `maxBytes`, because the pinned
- * connection is closed before this returns.
+ * redirect only to another public URL; each refusal throws {@link UnsafeUrlError}. The body is
+ * read here, under `maxBytes`, because the pinned connection is closed before this returns.
  */
 async function fetchPinned(request: PinnedRequest) {
   const { transport, signal, maxBytes } = request;
@@ -97,7 +103,7 @@ async function fetchPinned(request: PinnedRequest) {
       : Promise.race([transport.lookup(host), untilAborted(signal)]));
     const [address] = addresses;
     if (address === undefined || addresses.some(a => !isPublicAddress(a.address)))
-      throw new Error('Private network addresses are not allowed.');
+      throw new UnsafeUrlError('Private network addresses are not allowed.');
     // Resolve once and pin the connection; a second DNS answer must never select a private address.
     const agent = new Agent({
       connect: {
@@ -106,7 +112,14 @@ async function fetchPinned(request: PinnedRequest) {
       },
     });
     try {
-      const response = await transport.fetch(url, { dispatcher: agent, method, body, headers, redirect: 'manual', signal });
+      const response = await transport.fetch(url, {
+        dispatcher: agent,
+        method,
+        body,
+        headers,
+        redirect: 'manual',
+        signal,
+      });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         const location = response.headers.get('location');

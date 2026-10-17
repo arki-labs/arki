@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { z } from 'zod';
 
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
-import { publicFetch, safeFetchBytes, validatePublicURL } from '../public-fetch.js';
+import { HTTP_ERROR_CODES } from '../error.js';
+import { publicFetch, safeFetchBytes, UnsafeUrlError, validatePublicURL } from '../public-fetch.js';
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), fetch: vi.fn(), destroy: vi.fn(), agent: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
@@ -102,7 +102,9 @@ describe('credentials in the URL', () => {
   it('refuses credentials by default and accepts them only when asked', () => {
     expect(() => validatePublicURL('https://u:p@example.com/feed')).toThrow('Only public HTTP feeds');
     expect(validatePublicURL('https://u:p@example.com/feed', { allowCredentials: true }).hostname).toBe('example.com');
-    expect(() => validatePublicURL('https://u:p@127.0.0.1/feed', { allowCredentials: true })).toThrow('Private network');
+    expect(() => validatePublicURL('https://u:p@127.0.0.1/feed', { allowCredentials: true })).toThrow(
+      'Private network',
+    );
     expect(() => validatePublicURL('not a url')).toThrow('Invalid URL.');
   });
 
@@ -127,7 +129,9 @@ describe('credentials in the URL', () => {
   });
 
   it('still refuses a private host that carries credentials, before any lookup', async () => {
-    await expect(safeFetchBytes('https://u:p@10.0.0.1/feed', { allowCredentials: true })).rejects.toThrow('Private network');
+    await expect(safeFetchBytes('https://u:p@10.0.0.1/feed', { allowCredentials: true })).rejects.toThrow(
+      'Private network',
+    );
     expect(mocks.lookup).not.toHaveBeenCalled();
   });
 });
@@ -227,5 +231,80 @@ describe('publicFetch: the guard as a fetch, for the typed client', () => {
   it('caps the buffered body at maxBytes', async () => {
     mocks.fetch.mockResolvedValueOnce(new Response('0123456789'));
     await expect(publicFetch({ maxBytes: 4 })('https://api.example.com/big')).rejects.toThrow('size limit');
+  });
+});
+
+/** Runs `promise` and answers what it rejected with (it must reject). */
+async function rejection(promise: Promise<unknown>) {
+  return promise.then(
+    () => expect.unreachable('the fetch should have been refused'),
+    (error: unknown) => error,
+  );
+}
+
+// WHY: a refused URL is refused the same way every time, so a caller must not retry it, and must
+// not report it as "the server is down". A network failure may pass on a later try. The two used
+// to throw the same plain Error; the refusal now has its own class, so a caller can tell them apart.
+describe('UnsafeUrlError: a refusal, not a network failure', () => {
+  const PUBLIC = { address: '93.184.216.34', family: 4 };
+
+  it('a private, loopback or link-local address in the URL is refused before any lookup', async () => {
+    const transport = { lookup: vi.fn(), fetch: vi.fn() };
+    const urls = [
+      'https://127.0.0.1/hook',
+      'https://10.0.0.5/hook',
+      'https://169.254.169.254/latest',
+      'https://[::1]/',
+    ];
+    const errors = await Promise.all(urls.map(url => rejection(safeFetchBytes(url, { transport }))));
+    for (const error of errors) {
+      expect(error).toBeInstanceOf(UnsafeUrlError);
+      expect(error).toMatchObject({
+        code: HTTP_ERROR_CODES.unsafeUrl,
+        message: 'Private network addresses are not allowed.',
+      });
+    }
+    expect(transport.lookup).not.toHaveBeenCalled();
+    expect(transport.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a hostname whose DNS answer is private is refused before the request', async () => {
+    const transport = { lookup: vi.fn().mockResolvedValue([{ address: '192.168.1.20', family: 4 }]), fetch: vi.fn() };
+    const error = await rejection(safeFetchBytes('https://hooks.example/x', { transport }));
+    expect(error).toBeInstanceOf(UnsafeUrlError);
+    expect(transport.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a redirect to a private address is refused, and never followed', async () => {
+    const transport = {
+      lookup: vi.fn().mockResolvedValue([PUBLIC]),
+      fetch: vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location: 'http://10.0.0.5/' } })),
+    };
+    const error = await rejection(safeFetchBytes('https://hooks.example/x', { method: 'POST', body: '{}', transport }));
+    expect(error).toBeInstanceOf(UnsafeUrlError);
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    expect(transport.lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it('a bad scheme, refused credentials, or no URL at all is refused too, with a remediation', () => {
+    for (const url of ['ftp://example.com/feed', 'https://u:p@example.com/feed', 'not a url']) {
+      expect(() => validatePublicURL(url)).toThrow(UnsafeUrlError);
+    }
+    expect(new UnsafeUrlError('x').remediation).toMatch(/public addresses/);
+  });
+
+  it('publicFetch refuses with the same class', async () => {
+    const transport = { lookup: vi.fn().mockResolvedValue([{ address: '10.0.0.8', family: 4 }]), fetch: vi.fn() };
+    expect(await rejection(publicFetch({ transport })('https://api.example/x'))).toBeInstanceOf(UnsafeUrlError);
+  });
+
+  it('a network failure is not a refusal: it keeps the error the network threw', async () => {
+    const transport = {
+      lookup: vi.fn().mockResolvedValue([PUBLIC]),
+      fetch: vi.fn().mockRejectedValue(new TypeError('fetch failed')),
+    };
+    const error = await rejection(safeFetchBytes('https://hooks.example/x', { transport }));
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error).not.toBeInstanceOf(UnsafeUrlError);
   });
 });
