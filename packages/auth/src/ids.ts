@@ -27,6 +27,7 @@ export const createSessionId = sessionId.create;
 export const createRoleId = roleId.create;
 export const createPermissionId = permissionId.create;
 export const createAccountId = accountId.create;
+export const createVerificationId = userVerificationId.create;
 
 // ID validation schemas (backward compatibility)
 export const userIdSchema = userId.schema;

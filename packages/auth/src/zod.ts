@@ -6,11 +6,13 @@ import { z } from '@arki/contracts';
 
 export {
   accountIdSchema,
+  permissionIdSchema,
+  roleIdSchema,
   sessionIdSchema,
   userIdSchema,
   userVerificationIdSchema as verificationIdSchema,
 } from './ids.js';
-export { organizationIdSchema, teamIdSchema } from './workspaces/server/schema.js';
+export { organizationIdSchema, teamIdSchema } from './pg/workspaces/schema.js';
 
 /** An email address. */
 export const emailSchema = z.email();

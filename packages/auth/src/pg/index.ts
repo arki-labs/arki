@@ -51,14 +51,21 @@ export type {
 export { assertAuthSecret } from './secret.js';
 export { additionalFieldsFromColumns } from './fields.js';
 export { authLinkInput } from './mail.js';
-// The table factories still live in `../schema`; the delete step moves them here.
+export {
+  accountIdColumns,
+  permissionIdColumns,
+  roleIdColumns,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from './ids.js';
 export {
   authAccountColumns,
   authSessionColumns,
   authUserColumns,
   authVerificationColumns,
   createAuthTables,
-} from '../schema/index.js';
+} from './schema/index.js';
 export type {
   AuthColumnFill,
   AuthColumnNaming,
@@ -66,7 +73,7 @@ export type {
   CreateAuthTablesOptions,
   ExtraColumns,
   PrimaryColumnSource,
-} from '../schema/index.js';
+} from './schema/index.js';
 
 /**
  * Builds the auth from its definition and the app's bindings. Every mistake a deployment can make
