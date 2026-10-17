@@ -129,6 +129,7 @@ describe('ndjsonArchiveSink', () => {
       outcome: 'completed',
       attemptLog: [],
       replayOf: null,
+      runId: null,
       finishedAt: archivedAt,
       archivedAt,
       keepUntil: null,

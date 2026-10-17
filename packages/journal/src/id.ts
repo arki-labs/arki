@@ -15,6 +15,7 @@ export const commandId = () => prefixed('cmd_');
 export const correlationId = () => prefixed('cor_');
 export const attemptId = () => prefixed('att_');
 export const operationId = () => prefixed('jop_');
+export const workflowRunId = () => prefixed('wfr_');
 export const leaseToken = () => createId();
 
 const NAME_KINDS = {

@@ -8,12 +8,15 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
+
+import type { WorkflowShape } from './workflow/shape.js';
 
 /**
  * The journal tables. Call this once in the app's schema module so
@@ -86,6 +89,11 @@ export function journalTables(schema?: PgSchema) {
       lastError: text('last_error'),
       /** Set when attempts run out. A human clears it or deletes the row. */
       deadAt: timestamp('dead_at', { withTimezone: true, mode: 'date' }),
+      /**
+       * The workflow run that owns this step or timer job. Null for every other job and for rows written
+       * before the column. No foreign key: the job outlives a pruned run row until the sweeper archives it.
+       */
+      runId: varchar('run_id', { length: 256 }),
     },
     t => [
       unique('journal_jobs_event_seq_effect_unique').on(t.eventSeq, t.effect),
@@ -100,6 +108,9 @@ export function journalTables(schema?: PgSchema) {
       uniqueIndex('journal_jobs_queue_dedupe_unique')
         .on(t.jobName, t.dedupeKey)
         .where(sql`${t.dedupeKey} is not null`),
+      index('journal_jobs_run_id_idx')
+        .on(t.runId)
+        .where(sql`${t.runId} is not null`),
     ],
   );
 
@@ -150,8 +161,13 @@ export function journalTables(schema?: PgSchema) {
       keepUntil: timestamp('keep_until', { withTimezone: true, mode: 'date' }),
       /** Set once the archive sink has the row. Null: not exported yet (or no sink). */
       exportedAt: timestamp('exported_at', { withTimezone: true, mode: 'date' }),
+      /** The workflow run the job belonged to. Null for other jobs and for rows archived before the column. */
+      runId: varchar('run_id', { length: 256 }),
     },
     t => [
+      index('journal_job_archive_run_id_idx')
+        .on(t.runId)
+        .where(sql`${t.runId} is not null`),
       index('journal_job_archive_keep_until_idx').on(t.keepUntil),
       index('journal_job_archive_unexported_idx')
         .on(t.archivedAt)
@@ -216,7 +232,115 @@ export function journalTables(schema?: PgSchema) {
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   });
 
-  return { events, jobs, jobAttempts, jobArchive, jobOperations, receipts, cursors };
+  // `workflow.run` entity table. Its `version` is the journal's entity version; the workflow's own version is `workflowVersion`.
+  const workflowRuns = table(
+    'workflow_runs',
+    {
+      /** `wfr_xxx`, or the caller's own id: `start` is idempotent on it. */
+      id: varchar('id', { length: 256 }).primaryKey(),
+      name: varchar('name', { length: 128 }).notNull(),
+      /** The workflow definition's version this run is pinned to. */
+      workflowVersion: integer('workflow_version').notNull(),
+      /** The node manifest at start: lets Foreman draw a run whose code is gone. */
+      shape: jsonb('shape').notNull().$type<WorkflowShape>(),
+      shapeHash: varchar('shape_hash', { length: 64 }).notNull(),
+      input: jsonb('input').notNull(),
+      state: varchar('state', { length: 16 })
+        .notNull()
+        .$type<'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled'>(),
+      /** The node the run is at. Null once finished. */
+      node: varchar('node', { length: 256 }),
+      /** Done step results by node path. `null` for a node a `when` skipped. A projection of the events, bounded by `limits.payload`. */
+      results: jsonb('results').notNull().$type<Readonly<Record<string, unknown>>>().default({}),
+      output: jsonb('output'),
+      /** When a parked run wakes by itself. */
+      wakeAt: timestamp('wake_at', { withTimezone: true, mode: 'date' }),
+      deadlineAt: timestamp('deadline_at', { withTimezone: true, mode: 'date' }),
+      /** The signal name a parked run waits for. */
+      waitingFor: varchar('waiting_for', { length: 128 }),
+      parentId: varchar('parent_id', { length: 256 }),
+      parentPath: varchar('parent_path', { length: 256 }),
+      concurrencyKey: varchar('concurrency_key', { length: 256 }),
+      cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
+      cancelReason: text('cancel_reason'),
+      startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
+      finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+      /** Set when the run finishes, from the retention policy. Null keeps it. */
+      keepUntil: timestamp('keep_until', { withTimezone: true, mode: 'date' }),
+      /** The journal's entity version. */
+      version: integer('version').notNull().default(0),
+    },
+    t => [
+      // One unfinished run per name and concurrency key. A null key never collides.
+      uniqueIndex('workflow_runs_concurrency_unique')
+        .on(t.name, t.concurrencyKey)
+        .where(sql`${t.finishedAt} is null`),
+      index('workflow_runs_state_name_idx').on(t.state, t.name),
+      index('workflow_runs_parent_id_idx').on(t.parentId),
+      index('workflow_runs_keep_until_idx').on(t.keepUntil),
+    ],
+  );
+
+  const workflowSteps = table(
+    'workflow_steps',
+    {
+      runId: varchar('run_id', { length: 256 })
+        .notNull()
+        .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+      /** The node's path inside the run. */
+      path: varchar('path', { length: 256 }).notNull(),
+      /** `undo` rows are compensation: their own key, attempts and retry. */
+      phase: varchar('phase', { length: 4 }).notNull().$type<'do' | 'undo'>(),
+      status: varchar('status', { length: 16 })
+        .notNull()
+        .$type<'scheduled' | 'running' | 'done' | 'skipped' | 'failed'>(),
+      attempt: integer('attempt').notNull().default(0),
+      /** The step's idempotency key. Null on a step that was skipped before it was ever scheduled. */
+      key: varchar('key', { length: 512 }),
+      jobId: varchar('job_id'),
+      result: jsonb('result'),
+      error: text('error'),
+      /** Why a step was skipped. */
+      reason: text('reason'),
+      startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+      finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    },
+    t => [primaryKey({ name: 'workflow_steps_pk', columns: [t.runId, t.path, t.phase] })],
+  );
+
+  const workflowSignals = table(
+    'workflow_signals',
+    {
+      /** `wsg_xxx`. */
+      id: varchar('id').primaryKey(),
+      runId: varchar('run_id', { length: 256 })
+        .notNull()
+        .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+      name: varchar('name', { length: 128 }).notNull(),
+      /** The sender's own id for this delivery. A repeat returns the first row. */
+      deliveryId: varchar('delivery_id', { length: 256 }).notNull(),
+      payload: jsonb('payload'),
+      receivedAt: timestamp('received_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      /** Null until a wait takes the signal. A signal is consumed once. */
+      consumedAt: timestamp('consumed_at', { withTimezone: true, mode: 'date' }),
+      /** The node path that took it. */
+      consumedBy: varchar('consumed_by', { length: 256 }),
+    },
+    t => [unique('workflow_signals_run_name_delivery_unique').on(t.runId, t.name, t.deliveryId)],
+  );
+
+  return {
+    events,
+    jobs,
+    jobAttempts,
+    jobArchive,
+    jobOperations,
+    receipts,
+    cursors,
+    workflowRuns,
+    workflowSteps,
+    workflowSignals,
+  };
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;
