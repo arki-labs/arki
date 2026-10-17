@@ -10,7 +10,12 @@ export type JournalErrorCode =
   | 'UNSTABLE_SCHEMA'
   | 'ID_MISMATCH'
   | 'VALUE_MISMATCH'
-  | 'BAD_DEFINITION';
+  | 'BAD_DEFINITION'
+  | 'JOB_NOT_DEAD'
+  | 'JOB_NOT_PENDING'
+  | 'JOB_RUNNING'
+  | 'JOB_EXISTS'
+  | 'BAD_ARGUMENT';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -61,6 +66,26 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   BAD_DEFINITION: {
     what: 'a declaration is wrong',
     next: 'Fix the declaration named in the detail. It is thrown when the module that declares it loads, so no data was touched',
+  },
+  JOB_NOT_DEAD: {
+    what: 'the job is not dead',
+    next: 'Only a job that ran out of attempts can be retried or discarded. Look the job up first',
+  },
+  JOB_NOT_PENDING: {
+    what: 'the job is not waiting to run',
+    next: 'Only a job that has not run out of attempts can be cancelled. Look the job up first',
+  },
+  JOB_RUNNING: {
+    what: 'a worker holds the job right now',
+    next: 'Wait for it to finish, or for its lease to expire, then try again',
+  },
+  JOB_EXISTS: {
+    what: 'an unfinished job already holds this dedupe key',
+    next: 'Wait for that job to finish, or cancel it, then try again',
+  },
+  BAD_ARGUMENT: {
+    what: 'an argument is out of range',
+    next: 'Fix the argument named in the detail, then call again',
   },
 };
 

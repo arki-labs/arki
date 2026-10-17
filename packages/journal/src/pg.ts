@@ -77,6 +77,10 @@ export function journalTables(schema?: PgSchema) {
       priority: integer('priority').notNull().default(0),
       attempts: integer('attempts').notNull().default(0),
       availableAt: timestamp('available_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      /** When the row was written. The archive reads the job's age from it. Rows that predate the column take the migration time. */
+      enqueuedAt: timestamp('enqueued_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      /** The archived job id a replay was made from. Null on every other row. */
+      replayOf: text('replay_of'),
       leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
       leaseToken: varchar('lease_token'),
       lastError: text('last_error'),
@@ -97,6 +101,90 @@ export function journalTables(schema?: PgSchema) {
         .on(t.jobName, t.dedupeKey)
         .where(sql`${t.dedupeKey} is not null`),
     ],
+  );
+
+  const jobAttempts = table(
+    'journal_job_attempts',
+    {
+      /** `att_xxx`. */
+      id: varchar('id').primaryKey(),
+      /** Deleted with the job: ack, discard and cancel fold the attempts into the archive row's `attempt_log` first. */
+      jobId: varchar('job_id')
+        .notNull()
+        .references(() => jobs.id, { onDelete: 'cascade' }),
+      /** 1, 2, 3 for this job's tries. */
+      attempt: integer('attempt').notNull(),
+      startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      /** Null while the attempt is open. */
+      finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+      /** Null while open. `superseded`: the lease expired and another worker took the job. */
+      outcome: varchar('outcome', { length: 16 }).$type<'ok' | 'retry' | 'dead' | 'superseded'>(),
+      error: text('error'),
+    },
+    t => [index('journal_job_attempts_job_id_started_at_idx').on(t.jobId, t.startedAt)],
+  );
+
+  const jobArchive = table(
+    'journal_job_archive',
+    {
+      /** The finished job's id (`job_xxx`). */
+      id: varchar('id').primaryKey(),
+      kind: varchar('kind', { length: 8 }).notNull().$type<'effect' | 'queue'>(),
+      /** No foreign key: the archive outlives whatever the app does to its events. */
+      eventSeq: bigint('event_seq', { mode: 'number' }),
+      effect: varchar('effect', { length: 128 }),
+      jobName: varchar('job_name', { length: 128 }),
+      args: jsonb('args'),
+      dedupeKey: varchar('dedupe_key', { length: 256 }),
+      priority: integer('priority').notNull(),
+      enqueuedAt: timestamp('enqueued_at', { withTimezone: true, mode: 'date' }).notNull(),
+      attempts: integer('attempts').notNull(),
+      lastError: text('last_error'),
+      outcome: varchar('outcome', { length: 16 }).notNull().$type<'completed' | 'dead' | 'discarded' | 'cancelled'>(),
+      /** The job's attempt rows, oldest first, folded in when the job left the hot table. */
+      attemptLog: jsonb('attempt_log'),
+      replayOf: text('replay_of'),
+      finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }).notNull(),
+      archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      /** Resolved from the retention policy when the row was archived. Null keeps it forever. */
+      keepUntil: timestamp('keep_until', { withTimezone: true, mode: 'date' }),
+      /** Set once the archive sink has the row. Null: not exported yet (or no sink). */
+      exportedAt: timestamp('exported_at', { withTimezone: true, mode: 'date' }),
+    },
+    t => [
+      index('journal_job_archive_keep_until_idx').on(t.keepUntil),
+      index('journal_job_archive_unexported_idx')
+        .on(t.archivedAt)
+        .where(sql`${t.exportedAt} is null`),
+      index('journal_job_archive_outcome_name_idx').on(
+        t.outcome,
+        sql`coalesce(${t.effect}, ${t.jobName})`,
+        t.archivedAt,
+      ),
+    ],
+  );
+
+  const jobOperations = table(
+    'journal_job_operations',
+    {
+      /** `jop_xxx`. */
+      id: varchar('id').primaryKey(),
+      action: varchar('action', { length: 32 })
+        .notNull()
+        .$type<
+          'retry' | 'retryDead' | 'discard' | 'cancel' | 'replay' | 'purgeDead' | 'exportArchive' | 'pruneArchive'
+        >(),
+      /** Who did it: a free string. The retention sweeper writes `system:retention`. */
+      actor: varchar('actor', { length: 256 }).notNull(),
+      reason: text('reason'),
+      /** The Foreman execution that asked for it, when there was one. */
+      executionId: varchar('execution_id', { length: 256 }),
+      /** The jobs it touched, as a JSON array of ids. */
+      jobIds: jsonb('job_ids').notNull().$type<readonly string[]>(),
+      count: integer('count').notNull(),
+      at: timestamp('at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    },
+    t => [index('journal_job_operations_job_ids_idx').using('gin', t.jobIds)],
   );
 
   const receipts = table('journal_receipts', {
@@ -128,7 +216,7 @@ export function journalTables(schema?: PgSchema) {
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   });
 
-  return { events, jobs, receipts, cursors };
+  return { events, jobs, jobAttempts, jobArchive, jobOperations, receipts, cursors };
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;

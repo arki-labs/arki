@@ -13,6 +13,8 @@ export const eventId = () => prefixed('evt_');
 export const jobId = () => prefixed('job_');
 export const commandId = () => prefixed('cmd_');
 export const correlationId = () => prefixed('cor_');
+export const attemptId = () => prefixed('att_');
+export const operationId = () => prefixed('jop_');
 export const leaseToken = () => createId();
 
 const NAME_KINDS = {
