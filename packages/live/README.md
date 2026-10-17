@@ -4,6 +4,37 @@ Live queries on your own Postgres. A procedure declares the tables it reads in i
 
 This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot plugin, the stream client and the React provider, proven by a failure matrix on Postgres 16 and 18, a browser run on a TanStack Start app, and contract-checked benchmarks.
 
+## Installation
+
+```sh
+bun add @arki/live
+```
+
+The root entry (hub, client, schemas) needs no peers. Each other entry needs only its own, all optional:
+
+| Entry                | Peers                                     |
+| -------------------- | ----------------------------------------- |
+| `@arki/live/drizzle` | `drizzle-orm`                             |
+| `@arki/live/orpc`    | `@orpc/contract`, `@orpc/server`          |
+| `@arki/live/pg`      | `@arki/db`, `drizzle-orm`                 |
+| `@arki/live/http`    | `@arki/http`                              |
+| `@arki/live/dot`     | `@arki/dot`, `@arki/db`, `@orpc/contract` |
+| `@arki/live/react`   | `react`, `@tanstack/react-query`          |
+
+On the server you also need Postgres (tested on 16 and 18) and three things set up once:
+
+- The triggers. `liveMigration({ app, tables })` from `@arki/live/pg` returns `up` and `down` SQL. Paste them into a Drizzle custom migration (`drizzle-kit generate --custom`). The library never applies DDL itself. `verifyLiveTriggers` checks them at boot.
+- A pool of its own for the hub's listener (`max: 1`). It holds one connection for as long as the hub runs.
+- A receipts secret of at least 32 characters, the same on every instance (`openssl rand -base64 32`), for `liveReceipts({ app, secret })`.
+
+## Quick start
+
+1. Declare what each procedure reads: `.meta(live({ reads: [posts] }))` in the oRPC contract ([Declare what a procedure reads](#declare-what-a-procedure-reads)).
+2. Add the trigger migration (above).
+3. Start a hub on Postgres: `createLiveHub({ source: pgSource({ pool: listenPool, app }), receipts })`, then `await hub.start()` ([The hub](#the-hub)).
+4. Serve the stream: `liveEndpoint({ hub, manifest: liveManifest(contract), authorize })` on `GET /api/live` ([Serve the stream](#serve-the-stream)). In a Dot app, `liveQueries` from `@arki/live/dot` does steps 3 and 4.
+5. In the browser, wrap the app in `LiveProvider` and read with `useLiveQuery` ([Use it in React](#use-it-in-react)). Without React, `createLiveClient` reads the stream.
+
 ## The guarantees
 
 | Name                      | Promise                                                                                                                                                                                                                                                                                                                                                  |
@@ -445,7 +476,7 @@ Every write that commits through Postgres publishes: a journal command, a reposi
 
 `batchMs` 20, `replayMs` 120 000 (the age up to which a cursor resumes), `replayEnvelopes` 262 144 and `replayBytes` 64 MiB (the overload caps), `subscriberFrames` 256, 256 tags, 1024 keys and 256 txids per frame (a window that reaches 256 transactions flushes at once), `maxKeys` 65 536 distinct keys per statement, keys of at most 512 bytes, 4 096 granted keys per dimension, identifiers of at most 63 bytes. A stream that receives no byte for 35 s is dropped by the client.
 
-## Tests
+## Testing
 
 - `bun run test`: unit tests, PGlite, and Postgres 16 and 18 through testcontainers (Docker). The failure matrix (`src/tests/failure.pg.test.ts`) has one test per named scenario: commits around `LISTEN`, reverse commit order, rollback, listener gap, replica switch, server restart, cursor expiry and overload, slow subscriber, untracked table, pool exhaustion, a listen connection that ends cleanly. Barriers, not sleeps.
 - Scoped hints: `src/pg/scoped-triggers.pg.test.ts` (keys per statement, folding, overflow, TRUNCATE, partitions, the statement's own rows only) on PGlite and Postgres 16 and 18; `src/tests/tenants.pg.test.ts` (two tenants end to end through the real endpoint); `src/tests/scoped-hub.test.ts`, `scoped-endpoint.test.ts` and `react-scoped.test.ts` (projection, grants, re-authorization, the client's key match and grant diff).
@@ -487,3 +518,16 @@ Not measured: an Electric collection (it needs logical replication and the Elect
 | `ARKI_LIVE_E006` | A bounded resource was reached; `awaitTxId` or `waitForInvalidation` timed out.                                                                                                                                      |
 
 Every error has `code` and `remediation`.
+
+## Runtimes
+
+`bun run test:runtimes -- --require-all` loads every entry on Node, Bun, Deno, a browser and Hermes (React Native; set `HERMES_BIN`). The client and React entries need `fetch` with a streaming body: in React Native pass `expo/fetch` as `fetch`. The hub and `liveReceipts` need WebCrypto (`crypto.subtle`). The `pg`, `drizzle`, `orpc`, `http` and `dot` entries are for the server.
+
+## Documentation
+
+- [docs/agent-guide.md](./docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
+- [llms.txt](./llms.txt): the short form for agents.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

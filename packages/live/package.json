@@ -180,6 +180,9 @@
       "optional": true
     }
   },
+  "engines": {
+    "node": ">=22.10"
+  },
   "publishConfig": {
     "access": "public"
   }
