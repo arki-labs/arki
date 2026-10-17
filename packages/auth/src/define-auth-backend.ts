@@ -10,6 +10,7 @@ import { getLogger } from '@arki/log';
 
 import type { WorkspacePluginOptions } from './workspaces/server/plugin';
 import { betterAuth } from './create-auth';
+import { createUserId } from './ids';
 import { organizationPlugin } from './workspaces/server/plugin';
 
 const authLogger = getLogger('arki:auth');
@@ -106,8 +107,13 @@ export type DefineAuthBackendOptions = {
   organization?: { enabled: boolean } & WorkspacePluginOptions;
 };
 
+/**
+ * Users get the package's own user id (`usr_…`, the `UserId` of `@arki/contracts`), so the id
+ * Better Auth stores is the id every other package expects. Other models keep `<model>_<hex>`.
+ */
 const defaultGenerateId: GenerateIdHook = ({ model }) => {
   const slug = String(model).replace(/s$/, '');
+  if (slug === 'user') return createUserId();
   return `${slug}_${crypto.randomUUID().replace(/-/g, '')}`;
 };
 
