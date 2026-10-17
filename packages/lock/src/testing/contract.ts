@@ -6,7 +6,7 @@
  */
 import type { Scheduler } from '../scheduler.js';
 import type { Grant, Key, Locks, ReadWriteHandle, SemaphoreConfig, SemaphoreHandle, Store } from '../types.js';
-import { LockError } from '../errors.js';
+import { LockError, LockHeld } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 
@@ -307,14 +307,14 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
               await until(() => lost >= MUTEX_CALLERS - 1, 20_000, o, store);
               active -= 1;
             });
-            if (!result.ran) lost += 1;
+            if (LockHeld.is(result)) lost += 1;
             return result;
           }),
         );
         check(ran === 1 && maxActive === 1, `expected one runner, saw ${ran} (max overlap ${maxActive})`);
         check(
-          results.filter(result => !result.ran).length === MUTEX_CALLERS - 1,
-          `expected ${MUTEX_CALLERS - 1} { ran: false }`,
+          results.filter(result => LockHeld.is(result)).length === MUTEX_CALLERS - 1,
+          `expected ${MUTEX_CALLERS - 1} LockHeld`,
         );
       },
     ),
@@ -322,25 +322,25 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
     define('a held key blocks a second tryAcquire', async ({ locks }) => {
       const mutex = locks.mutex(uniqueKey('held').name);
       const guard = await mutex.tryAcquire();
-      check(guard !== undefined, 'first tryAcquire should win');
-      check((await mutex.tryAcquire()) === undefined, 'second tryAcquire should lose');
+      check(!LockHeld.is(guard), 'first tryAcquire should win');
+      check(LockHeld.is(await mutex.tryAcquire()), 'second tryAcquire should lose');
       await guard.release();
     }),
 
     define('release frees the key', async ({ locks }) => {
       const mutex = locks.mutex(uniqueKey('free').name);
       const guard = await mutex.tryAcquire();
-      check(guard !== undefined, 'first tryAcquire should win');
+      check(!LockHeld.is(guard), 'first tryAcquire should win');
       await guard.release();
       const again = await mutex.tryAcquire();
-      check(again !== undefined, 'tryAcquire after release should win');
+      check(!LockHeld.is(again), 'tryAcquire after release should win');
       await again.release();
     }),
 
     define('run with wait acquires after the holder releases, within the bound', async ({ locks, options: o }) => {
       const mutex = locks.mutex(uniqueKey('wait').name);
       const holder = await mutex.tryAcquire();
-      check(holder !== undefined, 'holder should win');
+      check(!LockHeld.is(holder), 'holder should win');
       const waiting = mutex.run(() => 'got-it', { wait: '30s' });
       await new Promise(resolve => setTimeout(resolve, 5));
       await holder.release();
@@ -375,7 +375,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       }
     }),
 
-    define('outage surfaces as LockError{code:"store"}, never ran or not-ran', async ({ store, options: o }) => {
+    define('outage surfaces as LockError{code:"store"}, never a value or LockHeld', async ({ store, options: o }) => {
       const broken: Store = {
         ...store,
         acquire: () => Promise.reject(new Error('simulated outage')),
@@ -536,14 +536,14 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { semaphore } = needSemaphore(context);
       const pool = semaphore(uniqueKey('weights').name, 3);
       const heavy = await pool.tryAcquire({ weight: 2 });
-      check(heavy !== undefined, 'weight 2 of 3 should fit');
-      check((await pool.tryAcquire({ weight: 2 })) === undefined, 'a second weight 2 should not fit');
+      check(!LockHeld.is(heavy), 'weight 2 of 3 should fit');
+      check(LockHeld.is(await pool.tryAcquire({ weight: 2 })), 'a second weight 2 should not fit');
       const light = await pool.tryAcquire({ weight: 1 });
-      check(light !== undefined, 'weight 1 should fit beside weight 2');
-      check((await pool.tryAcquire()) === undefined, 'the pool should be full');
+      check(!LockHeld.is(light), 'weight 1 should fit beside weight 2');
+      check(LockHeld.is(await pool.tryAcquire()), 'the pool should be full');
       await heavy.release();
       const again = await pool.tryAcquire({ weight: 2 });
-      check(again !== undefined, 'weight 2 should fit after the heavy hold left');
+      check(!LockHeld.is(again), 'weight 2 should fit after the heavy hold left');
       await again.release();
       await light.release();
     }),
@@ -578,11 +578,11 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         const { semaphore } = needSemaphore(context);
         const name = uniqueKey('limit').name;
         const first = await semaphore(name, 2).tryAcquire();
-        check(first !== undefined, 'limit 2 should acquire');
+        check(!LockHeld.is(first), 'limit 2 should acquire');
         await expectConfig(semaphore(name, 3).tryAcquire(), 'limit 3 while held with limit 2');
         await first.release();
         const second = await semaphore(name, 3).tryAcquire();
-        check(second !== undefined, 'a new limit should be accepted once no hold is left');
+        check(!LockHeld.is(second), 'a new limit should be accepted once no hold is left');
         await second.release();
       },
     ),
@@ -675,7 +675,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { read } = readWrite(uniqueKey('readers').name);
       const first = await read.tryAcquire();
       const second = await read.tryAcquire();
-      check(first !== undefined && second !== undefined, 'two readers should hold at once');
+      check(!LockHeld.is(first) && !LockHeld.is(second), 'two readers should hold at once');
       await first.release();
       await second.release();
     }),
@@ -684,16 +684,16 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { readWrite } = needReadWrite(context);
       const { read, write } = readWrite(uniqueKey('writer').name);
       const writer = await write.tryAcquire();
-      check(writer !== undefined, 'the first writer should win');
-      check((await read.tryAcquire()) === undefined, 'a reader should lose to a writer');
-      check((await write.tryAcquire()) === undefined, 'a second writer should lose to a writer');
+      check(!LockHeld.is(writer), 'the first writer should win');
+      check(LockHeld.is(await read.tryAcquire()), 'a reader should lose to a writer');
+      check(LockHeld.is(await write.tryAcquire()), 'a second writer should lose to a writer');
       await writer.release();
       const reader = await read.tryAcquire();
-      check(reader !== undefined, 'a reader should win once the writer left');
-      check((await write.tryAcquire()) === undefined, 'a writer should lose to a reader');
+      check(!LockHeld.is(reader), 'a reader should win once the writer left');
+      check(LockHeld.is(await write.tryAcquire()), 'a writer should lose to a reader');
       await reader.release();
       const again = await write.tryAcquire();
-      check(again !== undefined, 'a writer should win once the reader left');
+      check(!LockHeld.is(again), 'a writer should win once the reader left');
       await again.release();
     }),
 
@@ -701,7 +701,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { readWrite } = needReadWrite(context);
       const { read, write } = readWrite(uniqueKey('writer-waits').name);
       const reader = await read.tryAcquire();
-      check(reader !== undefined, 'the reader should win');
+      check(!LockHeld.is(reader), 'the reader should win');
       const waiting = write.run(() => 'wrote', { wait: '30s' });
       await new Promise(resolve => setTimeout(resolve, 5));
       await reader.release();
@@ -730,7 +730,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       if (context.store.guarantees.writerPreference !== true) skip('this store does not claim writerPreference');
       const { read, write } = readWrite(uniqueKey('preference').name);
       const first = await read.tryAcquire();
-      check(first !== undefined, 'the first reader should win');
+      check(!LockHeld.is(first), 'the first reader should win');
       const writing = write.run(() => 'wrote', { wait: '30s' });
       // The writer registers after its first refused attempt: poll until a new reader is turned away.
       const deadline = Date.now() + 10_000;
@@ -738,7 +738,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       let since = Date.now();
       while (!refused && Date.now() < deadline) {
         const slipped = await read.tryAcquire();
-        if (slipped === undefined) refused = true;
+        if (LockHeld.is(slipped)) refused = true;
         else {
           await slipped.release();
           since = await idle(context.options, leaseTtl(context.store, context.options), since);
@@ -751,7 +751,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         'the writer should run once the reader left',
       );
       const after = await read.tryAcquire();
-      check(after !== undefined, 'readers should be let in again once the writer is done');
+      check(!LockHeld.is(after), 'readers should be let in again once the writer is done');
       await after.release();
     }),
 
@@ -828,20 +828,20 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const name = uniqueKey('same-name').name;
       const guards = [];
       const mutex = await locks.mutex(name).tryAcquire();
-      check(mutex !== undefined, 'the mutex should win');
+      check(!LockHeld.is(mutex), 'the mutex should win');
       guards.push(mutex);
       if (store.guarantees.permits && hasSemaphore(locks)) {
         const semaphore = await locks.semaphore(name, { limit: 1 }).tryAcquire();
-        check(semaphore !== undefined, 'the semaphore should not be blocked by the mutex');
+        check(!LockHeld.is(semaphore), 'the semaphore should not be blocked by the mutex');
         guards.push(semaphore);
       }
       if (store.guarantees.shared && hasReadWrite(locks)) {
         const writer = await locks.readWrite(name).write.tryAcquire();
-        check(writer !== undefined, 'the writer should not be blocked by the mutex or the semaphore');
+        check(!LockHeld.is(writer), 'the writer should not be blocked by the mutex or the semaphore');
         guards.push(writer);
       }
       if (guards.length === 1) skip('this store has neither permits nor shared locks');
-      check((await locks.mutex(name).tryAcquire()) === undefined, 'the mutex should still be held');
+      check(LockHeld.is(await locks.mutex(name).tryAcquire()), 'the mutex should still be held');
       for (const guard of guards) await guard.release();
     }),
   ];

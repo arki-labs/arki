@@ -1,5 +1,7 @@
 import { CronPattern } from 'croner';
 
+import type { Failure } from '@arki/failure';
+
 import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
 
 export type ScheduleInterval = `${number}${'s' | 'm' | 'h'}`;
@@ -56,8 +58,8 @@ export type DefineScheduleOptions<TContext = undefined> =
 /** A number of milliseconds, or a string with unit `ms`, `s`, `m` or `h`: the same shape `@arki/lock` takes. */
 export type LockDuration = number | `${number}${'ms' | 's' | 'm' | 'h'}`;
 
-/** `{ ran: true; value }` when the callback ran, `{ ran: false }` when another holder had the key. */
-export type LockerRun<T> = { readonly ran: true; readonly value: T } | { readonly ran: false };
+/** The callback's value, or the `lock.held` failure (`LockHeld` of `@arki/lock`) when another holder had the key. */
+export type LockerRun<T> = T | Failure<'lock.held'>;
 
 /**
  * The lock port, and all a `lock:` schedule needs: `mutex(key).tryRun` runs

@@ -8,6 +8,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { pgSession, pgTransaction } from './index.js';
@@ -55,7 +57,7 @@ describe('the instant attempt lifts timeouts in its CTE', () => {
         const blocked = await other.mutex(name).tryRun(() => 'must not run');
         return { aborted: signal.aborted, blocked };
       });
-      expect(result).toEqual({ ran: true, value: { aborted: false, blocked: { ran: false } } });
+      expect(result).toMatchObject({ aborted: false, blocked: { code: 'lock.held' } });
     });
   }
 
@@ -63,12 +65,14 @@ describe('the instant attempt lifts timeouts in its CTE', () => {
     const strict = newPool({ max: 1, options: '-c statement_timeout=300 -c idle_in_transaction_session_timeout=400' });
     const strictDb = drizzle({ client: strict });
     const locks = createLocks({ store: pgSession(strictDb), namespace: 'rv' });
-    const holder = await createLocks({ store: pgSession(drizzle({ client: newPool() })), namespace: 'rv' })
-      .mutex('leak')
-      .acquire({ wait: '1s' });
-    expect(await locks.mutex('leak').tryRun(() => 'no')).toEqual({ ran: false });
+    const holder = await orThrow(
+      createLocks({ store: pgSession(drizzle({ client: newPool() })), namespace: 'rv' })
+        .mutex('leak')
+        .acquire({ wait: '1s' }),
+    );
+    expect(await locks.mutex('leak').tryRun(() => 'no')).toMatchObject({ code: 'lock.held' });
     await holder.release();
-    expect(await locks.mutex('leak').tryRun(() => 'yes')).toEqual({ ran: true, value: 'yes' });
+    expect(await locks.mutex('leak').tryRun(() => 'yes')).toBe('yes');
     const row = await strictDb.execute<{ st: string; idle: string }>(
       sql`select current_setting('statement_timeout') as st, current_setting('idle_in_transaction_session_timeout') as idle`,
     );
@@ -119,7 +123,7 @@ describe('release latency of a short hold', () => {
     await handle.tryRun(() => 'warm');
     const times: number[] = [];
     for (let index = 0; index < 10; index++) {
-      const guard = await handle.acquire({ wait: '1s' });
+      const guard = await orThrow(handle.acquire({ wait: '1s' }));
       await delay(5);
       const started = performance.now();
       await guard.release();

@@ -13,11 +13,11 @@ const result = await locks.mutex('send-invoices').tryRun(async ({ signal }) => {
   signal.throwIfAborted();
   return 'sent';
 });
-// { ran: true, value: 'sent' }, or { ran: false } when someone else holds the lock
+// 'sent', or the LockHeld failure when someone else holds the lock
 ```
 
 - **Four verbs, three lock types.** `tryRun`, `run`, `tryAcquire` and `acquire` work on a mutex, a semaphore and a read/write lock.
-- **Contention is a value.** A lock that someone else holds is `{ ran: false }`, not an exception.
+- **Contention is a value.** A lock that someone else holds is the `LockHeld` failure (`lock.held`, from `@arki/failure`), returned, not thrown.
 - **Every store says what it promises.** Each store has a `guarantees` object. The handle types follow it, so a method a store cannot back does not exist on the handle.
 - **Leases look after themselves.** They renew on their own, abort your callback's `signal` when ownership is lost, and hand out fencing tokens where the store can.
 - **Runs where your code runs.** Node, Bun and Deno. The memory store also runs in the browser and on Hermes.
@@ -92,10 +92,10 @@ Every lock handle has the same four verbs. `mutex`, `semaphore` and `readWrite` 
 
 | Verb | What it does | Result |
 | --- | --- | --- |
-| `tryRun(fn, opts?)` | One attempt. Runs `fn` if the lock is free, releases after. | `{ ran: true, value }` or `{ ran: false }` |
-| `run(fn, opts?)` | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after. | the value of `fn`; throws `held` or `aborted` |
-| `tryAcquire(opts?)` | One attempt. You release yourself. | a `Guard`, or `undefined` |
-| `acquire(opts?)` | Waits like `run`. You release yourself. | a `Guard`; throws `held` or `aborted` |
+| `tryRun(fn, opts?)` | One attempt. Runs `fn` if the lock is free, releases after. | the value of `fn`, or `LockHeld` |
+| `run(fn, opts?)` | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after. | the value of `fn`, or `LockHeld` when still busy after `wait`; throws `aborted` |
+| `tryAcquire(opts?)` | One attempt. You release yourself. | a `Guard`, or `LockHeld` |
+| `acquire(opts?)` | Waits like `run`. You release yourself. | a `Guard`, or `LockHeld` when still busy after `wait`; throws `aborted` |
 | `lead(fn, { signal })` | Campaigns until `signal` aborts. Runs `fn` while leader. Lease stores only. | settles when `signal` aborts |
 
 Call options:
@@ -113,7 +113,7 @@ A duration is a number of milliseconds, or a string with the unit `ms`, `s`, `m`
 ### Mutex
 
 ```ts
-import { createLocks, LockError } from '@arki/lock';
+import { createLocks, LockHeld } from '@arki/lock';
 import { pgSession } from '@arki/lock/pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
@@ -126,23 +126,18 @@ const locks = createLocks({ store: pgSession(db), namespace: 'billing' });
 const outcome = await locks.mutex('nightly-report').tryRun(async () => {
   return 'done';
 });
-if (!outcome.ran) console.info('another replica has it');
+if (LockHeld.is(outcome)) console.info('another replica has it');
 
-// Wait up to 5 seconds. Throws LockError{code:'held'} if it never frees.
+// Wait up to 5 seconds. Returns LockHeld if it never frees.
 const total = await locks.mutex('close-books').run(async () => 42, { wait: '5s' });
+if (LockHeld.is(total)) console.info(total.remediation, total.data.waitedMs);
 
 // Hold the guard yourself. `await using` releases at the end of the block.
-{
-  await using guard = await locks.mutex('export').acquire({ wait: '5s' });
-  console.info(guard.held, guard.key.name);
+const guard = await locks.mutex('export').acquire({ wait: '5s' });
+if (!LockHeld.is(guard)) {
+  await using held = guard;
+  console.info(held.held, held.key.name);
 }
-
-try {
-  await locks.mutex('close-books').run(async () => 1, { wait: '100ms' });
-} catch (error) {
-  if (error instanceof LockError && error.code === 'held') console.info(error.remediation);
-}
-console.info(total);
 ```
 
 A guard has `key`, `signal`, `held`, `fence` and `release()`. On a lease store it also has `expiresAt` and `extend()`. `held` turns false when the lock is released, lost, or when the local deadline passes, even before any timer fires. `release()` is safe to call twice and checks the owner. `extend()` logs and resolves when the store errors or times out; it rejects only with `lost`. A resolved `extend()` does not prove the lease was extended.
@@ -152,7 +147,7 @@ A guard has `key`, `signal`, `held`, `fence` and `release()`. On a lease store i
 A semaphore lets up to `limit` callers in at once. A call can take more than one permit with `weight`.
 
 ```ts
-import { createLocks } from '@arki/lock';
+import { createLocks, LockHeld } from '@arki/lock';
 import { memoryStore } from '@arki/lock/memory';
 
 const locks = createLocks({ store: memoryStore(), namespace: 'media' });
@@ -161,7 +156,7 @@ const transcoders = locks.semaphore('transcode', { limit: 4 });
 await transcoders.run(async () => 'small job'); // takes 1 of 4
 await transcoders.run(async () => 'big job', { weight: 3 }); // takes 3 of 4
 const maybe = await transcoders.tryRun(async () => 'try', { weight: 2 });
-console.info(maybe.ran);
+console.info(LockHeld.is(maybe));
 ```
 
 - `limit` and `weight` are positive integers up to 2^31-1. Anything else is a `config` error.
@@ -363,11 +358,18 @@ console.info(locks.store.guarantees.scope); // 'host'
 
 ## Failure semantics
 
-Every failure on purpose is a `LockError` with a stable `code`. Match on `code`, never on the message. `errorCode` is the stable id, and `remediation` is one sentence on what to do.
+A busy lock is not an error. `tryRun`, `run`, `tryAcquire` and `acquire` return the `LockHeld` failure (from `@arki/failure`) when the lock is busy:
+
+| Code | Status | Data | Returned by |
+| --- | --- | --- | --- |
+| `lock.held` | 409 | `waitedMs` (0 for `tryRun` and `tryAcquire`), and `key` (the full key) only when `createLocks` got `logKeys: true` | `tryRun`, `tryAcquire`, and `run`, `acquire` when still busy after `wait` |
+
+Check it with `LockHeld.is(result)`, or handle it with `match` from `@arki/failure`.
+
+Every other failure on purpose is a thrown `LockError` with a stable `code`. Match on `code`, never on the message. `errorCode` is the stable id, and `remediation` is one sentence on what to do. `ARKI_LOCK_E001` was `held`; it is not reused.
 
 | `code` | `errorCode` | When | Thrown by |
 | --- | --- | --- | --- |
-| `held` | `ARKI_LOCK_E001` | Not acquired within `wait`. | `run`, `acquire` |
 | `aborted` | `ARKI_LOCK_E002` | Your `signal` aborted the wait or the attempt. The callback never ran. | `run`, `acquire`, `tryRun`, `tryAcquire` |
 | `lost` | `ARKI_LOCK_E003` | Ownership was lost while the callback ran. The callback may have had side effects. Nothing retries it. | `run`, `tryRun` |
 | `store` | `ARKI_LOCK_E004` | The backend failed. It is never read as free or as held. | any |
@@ -379,12 +381,12 @@ Extra fields: `outcome` on `store` (`'not-acquired'` or `'unknown'`, meaning own
 
 The rules:
 
-1. **Contention is a value.** `tryRun` returns `{ ran: false }`. `tryAcquire` returns `undefined`. Neither throws for a held lock.
+1. **Contention is a value.** Every verb returns `LockHeld` for a busy lock; none throws for it. If your `fn` can itself return `LockHeld` (it calls another lock), the caller cannot tell which lock was busy: handle the inner one inside `fn`. Any other failure your `fn` returns comes back as the value, and `LockHeld.is` is false for it.
 2. **Your error wins.** If your callback throws, that error is what the caller sees. A loss or a failed release that happened at the same time is attached to it as `suppressed`.
 3. **Loss aborts `signal`.** When the manager learns the lock is gone (a refused renewal, a passed local deadline, a closed connection), it aborts `ctx.signal` with the `LockError` as the reason. Pass `signal` to the work you do.
 4. **A callback that returns after loss.** `run` and `tryRun` throw `lost` by default. This includes a loss during the `holdAtLeast` wait after `fn` finished. Pass `onLost: 'ignore'` to get the value anyway.
 5. **A failed release after a successful callback is not thrown.** The callback did its job, so you get its value. The failure is logged at error level, counted in `locks.counters.releaseErrors`, and passed to the `onReleaseError` hook you can give `createLocks`. On a lease store the key frees itself after `ttl`.
-6. **A slow store is bounded.** Store calls have a time limit, `storeTimeout`, default `'10s'`. `pgTransaction` is the exception: its acquire has no timer, so a silent connection can hang it. On `pgSession` (native wait) the bound for an acquire is `storeTimeout` plus your `wait`. A call that exceeds it is a `store` error with `outcome: 'unknown'`. It is never `held`, and never `{ ran: false }`. A grant that arrives after the limit is given back, so a late answer cannot leave a lock behind. Set `storeTimeout` above the slowest healthy answer of your store.
+6. **A slow store is bounded.** Store calls have a time limit, `storeTimeout`, default `'10s'`. `pgTransaction` is the exception: its acquire has no timer, so a silent connection can hang it. On `pgSession` (native wait) the bound for an acquire is `storeTimeout` plus your `wait`. A call that exceeds it is a `store` error with `outcome: 'unknown'`. It is never `LockHeld`. A grant that arrives after the limit is given back, so a late answer cannot leave a lock behind. Set `storeTimeout` above the slowest healthy answer of your store.
 
 ```ts
 import { createLocks, LockError } from '@arki/lock';
@@ -708,12 +710,12 @@ it('keeps two replicas apart, and frees the key when the first one finishes', as
   await clock.advance('1ms'); // let replica A take the lock
 
   expect(store.peek(key)).toBeDefined();
-  expect(await b.mutex('report').tryRun(() => 'b')).toEqual({ ran: false });
+  expect(await b.mutex('report').tryRun(() => 'b')).toMatchObject({ code: 'lock.held' });
 
   finish();
   await first;
   expect(store.peek(key)).toBeUndefined();
-  expect(await b.mutex('report').tryRun(() => 'b')).toEqual({ ran: true, value: 'b' });
+  expect(await b.mutex('report').tryRun(() => 'b')).toBe('b');
 });
 ```
 
@@ -739,10 +741,10 @@ it('renews through a five minute run', async () => {
   const guard = await a.mutex('long').acquire({ wait: '1s' });
   await clock.advance('5m'); // the renewal timer fires every second of fake time
   expect(guard.held).toBe(true);
-  expect(await b.mutex('long').tryRun(() => 'b')).toEqual({ ran: false });
+  expect(await b.mutex('long').tryRun(() => 'b')).toMatchObject({ code: 'lock.held' });
 
   await guard.release();
-  expect(await b.mutex('long').tryRun(() => 'b')).toEqual({ ran: true, value: 'b' });
+  expect(await b.mutex('long').tryRun(() => 'b')).toBe('b');
 });
 ```
 
@@ -783,7 +785,8 @@ it('runs the job once while another run holds the key', async () => {
   const { locks } = app.services;
 
   const outer = await locks.mutex('send-invoices').tryRun(() => locks.mutex('send-invoices').tryRun(() => 'inner'));
-  expect(outer).toEqual({ ran: true, value: { ran: false } });
+  // The outer call ran; its value is the inner call's answer: the key is busy, held by the outer call.
+  expect(outer).toMatchObject({ code: 'lock.held' });
   await app.dispose();
 });
 ```
@@ -819,7 +822,7 @@ For a `pgLease` service, pass `pgLeasePollGuarantees` (and the same `ttl`): the 
 | Default key is `ClassName.methodName`. | Explicit, namespaced keys. | Their own docs warn that a rename or a minifier breaks it. |
 | `ttl` per call. | `ttl` once, on the store. | One lease length per store keeps replicas consistent. |
 | `withLock` resolves after the lock was lost ("fn decides"). | `run` throws `lost`. | A result you cannot trust should not look like success. `onLost: 'ignore'` opts out. |
-| `acquire()` returns `null` on contention. | `tryAcquire` returns `undefined`; `tryRun` returns `{ ran: false }`. | One spelling for each verb. |
+| `acquire()` returns `null` on contention. | Every verb returns the `LockHeld` failure. | One answer for contention, with a code, a status and a remediation. |
 | `fencingToken` is a `number`. | `fence` is a `bigint`. | It matches the Postgres column. |
 | A store registers itself by a constructor side effect. | Dot `needs` and a store factory. | Explicit, and easy to review. |
 | rxjs `events$` and `node:diagnostics_channel`. | `@arki/log` logs and counters. | Cross-runtime, and the same as the rest of the Arki libraries. |

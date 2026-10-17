@@ -19,7 +19,7 @@ import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from 
 import type { RedisStore } from '@arki/lock/redis';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
-import { createLocks, LockError } from '@arki/lock';
+import { createLocks, LockError, LockHeld } from '@arki/lock';
 import { locks } from '@arki/lock/dot';
 import { memoryStore } from '@arki/lock/memory';
 import { manualScheduler } from '@arki/lock/testing';
@@ -154,7 +154,7 @@ describe('schedules(core, [{ lock }])', () => {
     const run = started.services.scheduler.trigger('cluster-batch');
     await settle();
     // The named key is the one held, not the schedule name.
-    await expect(service.mutex('clusters').tryRun(() => 1)).resolves.toEqual({ ran: false });
+    await expect(service.mutex('clusters').tryRun(() => 1)).resolves.toMatchObject({ code: 'lock.held' });
     await clock.advance('1s');
     await expect(run).resolves.toMatchObject({
       status: 'handler-failed',
@@ -181,15 +181,16 @@ describe('schedules(core, [{ lock }])', () => {
     const run = started.services.scheduler.trigger('cluster-assign');
     await settle();
     await clock.advance('10ms');
-    await expect(service.mutex('cluster-assign').tryRun(() => 'second replica')).resolves.toEqual({ ran: false });
+    await expect(service.mutex('cluster-assign').tryRun(() => 'second replica')).resolves.toMatchObject({
+      code: 'lock.held',
+    });
     await clock.advance('989ms');
-    await expect(service.mutex('cluster-assign').tryRun(() => 'second replica')).resolves.toEqual({ ran: false });
+    await expect(service.mutex('cluster-assign').tryRun(() => 'second replica')).resolves.toMatchObject({
+      code: 'lock.held',
+    });
     await clock.advance('1ms');
     await expect(run).resolves.toMatchObject({ status: 'ran' });
-    await expect(service.mutex('cluster-assign').tryRun(() => 'next tick')).resolves.toEqual({
-      ran: true,
-      value: 'next tick',
-    });
+    await expect(service.mutex('cluster-assign').tryRun(() => 'next tick')).resolves.toBe('next tick');
     await started.dispose();
   });
 
@@ -198,7 +199,7 @@ describe('schedules(core, [{ lock }])', () => {
     const { app } = buildApp(service);
     const started = await app.start();
     await expect(started.services.scheduler.trigger('cluster-instant')).resolves.toMatchObject({ status: 'ran' });
-    await expect(service.mutex('cluster-instant').tryRun(() => 'next')).resolves.toEqual({ ran: true, value: 'next' });
+    await expect(service.mutex('cluster-instant').tryRun(() => 'next')).resolves.toBe('next');
     await started.dispose();
   });
 
@@ -306,7 +307,7 @@ describe('lockSummary', () => {
 
   it('prints fence none for a store that hands out no fence', () => {
     const noFence: Locker = {
-      mutex: () => ({ tryRun: () => Promise.resolve({ ran: false }) }),
+      mutex: () => ({ tryRun: () => Promise.resolve(LockHeld({ waitedMs: 0 })) }),
       store: {
         name: 'redis',
         guarantees: { kind: 'lease', scope: 'cluster', fence: false, releasedOnCrash: 'ttl' },
@@ -341,7 +342,7 @@ describe('lock counters', () => {
     const runtime = createScheduleRuntime({ schedules: [job] });
     const run = runtime.trigger('job');
     await settle();
-    await expect(service.mutex('job').tryRun(() => 1)).resolves.toEqual({ ran: false });
+    await expect(service.mutex('job').tryRun(() => 1)).resolves.toMatchObject({ code: 'lock.held' });
     await clock.advance('1s');
     await expect(run).resolves.toMatchObject({ status: 'ran' });
   });
@@ -419,10 +420,10 @@ describe('lock lost after the handler finished', () => {
     const runtime = runtimeOver(service, () => Promise.reject(new Error('boom')));
     const run = runtime.trigger('job');
     await settle();
-    await expect(service.mutex('job').tryRun(() => 1)).resolves.toEqual({ ran: false });
+    await expect(service.mutex('job').tryRun(() => 1)).resolves.toMatchObject({ code: 'lock.held' });
     await clock.advance('1s');
     await expect(run).resolves.toMatchObject({ status: 'handler-failed' });
-    await expect(service.mutex('job').tryRun(() => 1)).resolves.toEqual({ ran: true, value: 1 });
+    await expect(service.mutex('job').tryRun(() => 1)).resolves.toBe(1);
   });
 });
 

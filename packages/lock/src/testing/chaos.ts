@@ -5,6 +5,7 @@
  */
 import type { Grant, Store } from '../types.js';
 import type { ContractCase, ContractOptions, MakeStore } from './contract.js';
+import { LockHeld } from '../errors.js';
 import { check, defineCase, grab, leaseTtl, requestFor, skip, uniqueKey } from './contract.js';
 
 export type ChaosHooks = {
@@ -52,6 +53,7 @@ export function chaos(makeStore: MakeStore, hooks: ChaosHooks, options: Contract
           skip('needs `ttl`, `advanceTime` and `scheduler` to drive renewals');
         }
         const guard = await locks.mutex(uniqueKey('chaos-renew').name).acquire({ wait: '1s' });
+        check(!LockHeld.is(guard), 'the lock should be free');
         await failRenewals(store, Number.MAX_SAFE_INTEGER);
         await options.advanceTime(ttl * 2);
         check(!guard.held && guard.signal.aborted, 'holder should know the lock is lost');

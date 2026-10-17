@@ -16,7 +16,9 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { LockError } from '../errors.js';
+import { orThrow } from '@arki/failure';
+
+import { LockError, LockHeld } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { chaos } from '../testing/chaos.js';
@@ -188,13 +190,13 @@ describe('pgSession across replicas', () => {
     });
     expect(await started.promise).toBe(1);
 
-    expect(await locksB.mutex(name).tryRun(() => 'must not run')).toEqual({ ran: false });
-    expect(await locksB.mutex(lockedNames('other')).tryRun(() => 'ran')).toEqual({ ran: true, value: 'ran' });
+    expect(await locksB.mutex(name).tryRun(() => 'must not run')).toMatchObject({ code: 'lock.held' });
+    expect(await locksB.mutex(lockedNames('other')).tryRun(() => 'ran')).toBe('ran');
 
     finish.resolve();
-    expect(await first).toEqual({ ran: true, value: 'first' });
+    expect(await first).toBe('first');
     await until(async () => (await advisoryCount(dbB)) === 0, 2000, 'the lock to be gone after release');
-    expect(await locksB.mutex(name).tryRun(() => 'now me')).toEqual({ ran: true, value: 'now me' });
+    expect(await locksB.mutex(name).tryRun(() => 'now me')).toBe('now me');
   });
 
   it('namespaces keep two apps on one server apart', async () => {
@@ -212,7 +214,7 @@ describe('pgSession across replicas', () => {
       await createLocks({ store: pgSession(dbB), namespace: 'novelette' })
         .mutex(name)
         .tryRun(() => 'ran'),
-    ).toEqual({ ran: true, value: 'ran' });
+    ).toBe('ran');
     finish.resolve();
     await avocabo;
   });
@@ -234,7 +236,7 @@ describe('pgSession across replicas', () => {
     );
     await started.promise;
     await delay(1200);
-    expect(await other.mutex(name).tryRun(() => 'must not run')).toEqual({ ran: false });
+    expect(await other.mutex(name).tryRun(() => 'must not run')).toMatchObject({ code: 'lock.held' });
     finish.resolve();
     expect(await holder).toBe(false);
   });
@@ -245,27 +247,26 @@ describe('bounded waits on a real server', () => {
     const locksA = createLocks({ store: pgSession(dbA), namespace: 'app' });
     const locksB = createLocks({ store: pgSession(dbB), namespace: 'app' });
     const name = lockedNames('wait');
-    const holder = await locksA.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locksA.mutex(name).acquire({ wait: '2s' }));
     const startedAt = Date.now();
     const error = await locksB
       .mutex(name)
       .run(() => 'never', { wait: '1500ms' })
       .catch((error_: unknown) => error_);
     const took = Date.now() - startedAt;
-    expect(error).toBeInstanceOf(LockError);
-    expect(error).toMatchObject({ code: 'held' });
+    expect(LockHeld.is(error)).toBe(true);
     expect(took).toBeGreaterThanOrEqual(1400);
     expect(took).toBeLessThan(4000);
     await holder.release();
     await until(async () => (await advisoryCount(dbB)) === 0, 4000, 'the waiter to leave no lock behind');
-    expect(await locksB.mutex(name).tryRun(() => 'ok')).toEqual({ ran: true, value: 'ok' });
+    expect(await locksB.mutex(name).tryRun(() => 'ok')).toBe('ok');
   });
 
   it('a waiter gets the lock soon after the holder releases, not after the whole wait', async () => {
     const locksA = createLocks({ store: pgSession(dbA), namespace: 'app' });
     const locksB = createLocks({ store: pgSession(dbB), namespace: 'app' });
     const name = lockedNames('handoff');
-    const holder = await locksA.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locksA.mutex(name).acquire({ wait: '2s' }));
     const waiting = locksB.mutex(name).run(() => 'got it', { wait: '10s' });
     await delay(300);
     const releasedAt = Date.now();
@@ -278,7 +279,7 @@ describe('bounded waits on a real server', () => {
     const locksA = createLocks({ store: pgSession(dbA), namespace: 'app' });
     const locksB = createLocks({ store: pgSession(dbB), namespace: 'app' });
     const name = lockedNames('abort');
-    const holder = await locksA.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locksA.mutex(name).acquire({ wait: '2s' }));
     const controller = new AbortController();
     const waiting = locksB
       .mutex(name)
@@ -315,7 +316,7 @@ describe('release speed of a held pgSession lock', () => {
     const locksA = createLocks({ store: pgSession(dbA), namespace: 'app' });
     const locksB = createLocks({ store: pgSession(dbB), namespace: 'app' });
     const name = lockedNames('fast-handoff');
-    const holder = await locksA.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locksA.mutex(name).acquire({ wait: '2s' }));
     let gotAt = 0;
     const waiting = locksB.mutex(name).run(
       () => {
@@ -361,7 +362,7 @@ describe('chaos: the pinned connection dies', () => {
     expect(reason).toBeInstanceOf(LockError);
     expect(reason).toMatchObject({ code: 'lost', detectedBy: 'connection' });
 
-    expect(await locksB.mutex(name).tryRun(() => 'B in')).toEqual({ ran: true, value: 'B in' });
+    expect(await locksB.mutex(name).tryRun(() => 'B in')).toBe('B in');
     const outcome = await holder;
     expect(outcome).toBeInstanceOf(LockError);
     expect(outcome).toMatchObject({ code: 'lost', detectedBy: 'connection' });
@@ -407,7 +408,7 @@ describe('chaos: the pinned connection dies', () => {
     expect(value).toBe('callback done');
     await ending;
     await until(async () => (await advisoryCount(dbB)) === 0, 4000, 'the lock to be gone after the pool ended');
-    expect(await other.mutex(name).tryRun(() => 'B in')).toEqual({ ran: true, value: 'B in' });
+    expect(await other.mutex(name).tryRun(() => 'B in')).toBe('B in');
   });
 
   it("pool.end() followed by a dead connection still rejects with the callback's own error", async () => {
@@ -523,15 +524,17 @@ describe('server timeouts set on the role or the pool', () => {
     const strict = newPool({ options: '-c statement_timeout=300' });
     const locks = createLocks({ store: pgSession(drizzle({ client: strict })), namespace: 'app' });
     const name = lockedNames('statement-timeout');
-    const holder = await createLocks({ store: pgSession(dbA), namespace: 'app' })
-      .mutex(name)
-      .acquire({ wait: '2s' });
+    const holder = await orThrow(
+      createLocks({ store: pgSession(dbA), namespace: 'app' })
+        .mutex(name)
+        .acquire({ wait: '2s' }),
+    );
     try {
       const error = await locks
         .mutex(name)
         .run(() => 'never', { wait: '1500ms' })
         .catch((error_: unknown) => error_);
-      expect(error).toMatchObject({ code: 'held' });
+      expect(LockHeld.is(error)).toBe(true);
     } finally {
       await holder.release();
     }
@@ -545,7 +548,7 @@ describe('server timeouts set on the role or the pool', () => {
     const aborted = await locks.mutex(name).run(
       async ({ signal }) => {
         await delay(1200);
-        expect(await other.mutex(name).tryRun(() => 'must not run')).toEqual({ ran: false });
+        expect(await other.mutex(name).tryRun(() => 'must not run')).toMatchObject({ code: 'lock.held' });
         return signal.aborted;
       },
       { wait: '2s' },
@@ -557,9 +560,11 @@ describe('server timeouts set on the role or the pool', () => {
     const tiny = newPool({ max: 1 });
     const locks = createLocks({ store: pgSession(drizzle({ client: tiny })), namespace: 'app' });
     const name = lockedNames('pool-queue');
-    const holder = await createLocks({ store: pgSession(dbA), namespace: 'app' })
-      .mutex(name)
-      .acquire({ wait: '2s' });
+    const holder = await orThrow(
+      createLocks({ store: pgSession(dbA), namespace: 'app' })
+        .mutex(name)
+        .acquire({ wait: '2s' }),
+    );
     const busy = await tiny.connect();
     try {
       const startedAt = Date.now();
@@ -569,7 +574,7 @@ describe('server timeouts set on the role or the pool', () => {
         .catch((error_: unknown) => error_);
       await delay(1500);
       busy.release();
-      expect(await waiting).toMatchObject({ code: 'held' });
+      expect(LockHeld.is(await waiting)).toBe(true);
       expect(Date.now() - startedAt).toBeLessThan(2200);
     } finally {
       await holder.release();
@@ -584,12 +589,14 @@ describe('server timeouts set on the role or the pool', () => {
 describe('legacyKeys during a rolling deploy', () => {
   async function holds(storeA: ReturnType<typeof pgSession>, storeB: ReturnType<typeof pgSession>): Promise<boolean> {
     const name = lockedNames('legacy');
-    const first = await createLocks({ store: storeA, namespace: 'avocabo' }).mutex(name).acquire({ wait: '2s' });
+    const first = await orThrow(
+      createLocks({ store: storeA, namespace: 'avocabo' }).mutex(name).acquire({ wait: '2s' }),
+    );
     try {
       const second = await createLocks({ store: storeB, namespace: 'avocabo' })
         .mutex(name)
         .tryRun(() => 'ran');
-      return !second.ran;
+      return LockHeld.is(second);
     } finally {
       await first.release();
     }
@@ -619,7 +626,7 @@ describe('legacyKeys during a rolling deploy', () => {
       const result = await createLocks({ store: pgSession(dbA, { legacyKeys: true }), namespace: 'avocabo' })
         .mutex(name)
         .tryRun(() => 'must not run');
-      expect(result).toEqual({ ran: false });
+      expect(result).toMatchObject({ code: 'lock.held' });
     } finally {
       await oldReplica.query(`select pg_advisory_unlock_all()`);
       oldReplica.release();
@@ -802,9 +809,11 @@ describe('pgTransaction between transactions', () => {
   // Without the core waiting for the store, the caller's next statement landed in the aborted savepoint (25P02).
   it("an aborted wait hands the caller's transaction back only once the store is done with it, so the caller's next statement works", async () => {
     const name = lockedNames('abort-tx');
-    const holder = await createLocks({ store: pgSession(dbA), namespace: 'tx' })
-      .mutex(name)
-      .acquire({ wait: '2s' });
+    const holder = await orThrow(
+      createLocks({ store: pgSession(dbA), namespace: 'tx' })
+        .mutex(name)
+        .acquire({ wait: '2s' }),
+    );
     try {
       await dbB.transaction(async tx => {
         const controller = new AbortController();

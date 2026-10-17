@@ -17,7 +17,7 @@
  */
 import { getLogger } from '@arki/log';
 
-import type { LockMethod } from './errors.js';
+import type { LockHeld as LockHeldFailure, LockMethod } from './errors.js';
 import type { Scheduler, SchedulerHandle } from './scheduler.js';
 import type {
   AcquireRequest,
@@ -26,7 +26,6 @@ import type {
   Grant,
   Key,
   LockCounters,
-  LockRun,
   Locks,
   PermitOps,
   ReleaseOutcome,
@@ -35,7 +34,7 @@ import type {
   Store,
   Waiter,
 } from './types.js';
-import { LockError } from './errors.js';
+import { LockError, LockHeld } from './errors.js';
 import { createKey } from './key.js';
 import { lead } from './lead.js';
 import { defaultScheduler } from './scheduler.js';
@@ -86,10 +85,10 @@ type GuardImpl = {
 };
 
 type HandleImpl = {
-  tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<LockRun<Awaited<T>>>;
-  run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T>>;
-  acquire(opts?: CallOptions): Promise<GuardImpl>;
-  tryAcquire(opts?: CallOptions): Promise<GuardImpl | undefined>;
+  tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockHeldFailure>;
+  run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockHeldFailure>;
+  acquire(opts?: CallOptions): Promise<GuardImpl | LockHeldFailure>;
+  tryAcquire(opts?: CallOptions): Promise<GuardImpl | LockHeldFailure>;
   /** Lease stores only. */
   lead?(fn: (ctx: ContextImpl) => unknown, opts?: { readonly signal?: AbortSignal }): Promise<void>;
 };
@@ -185,14 +184,6 @@ function configError(message: string, remediation: string): LockError {
   return new LockError({ code: 'config', message, remediation });
 }
 
-function heldError(): LockError {
-  return new LockError({
-    code: 'held',
-    message: 'the lock was not acquired within the wait',
-    remediation: 'Raise wait, or treat the key as busy.',
-  });
-}
-
 // ---------------------------------------------------------------------------
 // createLocks
 // ---------------------------------------------------------------------------
@@ -246,6 +237,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   const nextToken = (): string => `${nonce}-${(tokenCounter++).toString(36)}`;
   const keyField = (key: Key): string => (logKeys ? key.full : 'hidden');
+  /** The busy answer. The key rides along only under `logKeys`, as in logs. */
+  const heldFailure = (key: Key, waitedMs: number): LockHeldFailure =>
+    LockHeld(logKeys ? { key: key.full, waitedMs } : { waitedMs });
 
   // One in-flight remote attempt per key per process.
   const gates = new Map<string, Promise<void>>();
@@ -620,7 +614,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     key: Key,
     opts: CallOptions,
     mode: 'try' | 'wait',
-  ): Promise<Held | undefined> {
+  ): Promise<Held | LockHeldFailure> {
+    const startedAt = scheduler.now();
     const waitMs = mode === 'wait' && opts.wait !== undefined ? parseDuration(opts.wait) : undefined;
     // Parsed before the store is asked: a bad value must fail with nothing held, not leak a grant.
     const holdMs = opts.holdAtLeast === undefined ? 0 : parseDuration(opts.holdAtLeast);
@@ -649,9 +644,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
           // Lost before the callback starts (refused, or past the deadline): never acquired.
           if (held.lostError() === undefined) return held;
         }
-        if (mode === 'try') return undefined;
+        if (mode === 'try') return heldFailure(key, 0);
         const left = Number.isFinite(limit) ? limit - scheduler.now() : limit;
-        if (left <= 0) throw heldError();
+        if (left <= 0) return heldFailure(key, Math.round(scheduler.now() - startedAt));
         session ??= protocol.waiter?.(key);
         await pause(key, left, attempt, opts.signal, session);
       }
@@ -713,24 +708,29 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   /** The four verbs over one key. `protocolFor` runs per call, so a semaphore can check `weight` first. */
   function handleOver(key: Key, protocolFor: (opts: CallOptions) => Protocol): HandleImpl {
     return {
-      async tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts: CallOptions = {}): Promise<LockRun<Awaited<T>>> {
+      async tryRun<T>(
+        fn: (ctx: ContextImpl) => T | Promise<T>,
+        opts: CallOptions = {},
+      ): Promise<Awaited<T> | LockHeldFailure> {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
-        if (held === undefined) return { ran: false };
-        return { ran: true, value: await runHeld(held, fn, opts) };
+        if (LockHeld.is(held)) return held;
+        return runHeld(held, fn, opts);
       },
-      async run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts: CallOptions = {}): Promise<Awaited<T>> {
+      async run<T>(
+        fn: (ctx: ContextImpl) => T | Promise<T>,
+        opts: CallOptions = {},
+      ): Promise<Awaited<T> | LockHeldFailure> {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
-        if (held === undefined) throw heldError();
+        if (LockHeld.is(held)) return held;
         return runHeld(held, fn, opts);
       },
       async acquire(opts = {}) {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
-        if (held === undefined) throw heldError();
-        return held.guard();
+        return LockHeld.is(held) ? held : held.guard();
       },
       async tryAcquire(opts = {}) {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
-        return held?.guard();
+        return LockHeld.is(held) ? held : held.guard();
       },
     };
   }
@@ -758,7 +758,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
             scheduler,
             beatMs: leaseMs / 3,
             counts,
-            tryAcquire: callOpts => handle.tryAcquire(callOpts),
+            tryAcquire: async callOpts => {
+              const guard = await handle.tryAcquire(callOpts);
+              return LockHeld.is(guard) ? undefined : guard;
+            },
             ...(store.waitFor === undefined ? {} : { waitFor: (k, s) => store.waitFor?.(k, s) ?? Promise.resolve() }),
             onReleaseError: error => {
               const releaseError = asReleaseError(error);

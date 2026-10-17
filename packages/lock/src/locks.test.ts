@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { defineFailure, orThrow } from '@arki/failure';
+
 import type { Scheduler } from './scheduler.js';
 import type {
   AcquireRequest,
@@ -13,7 +15,8 @@ import type {
   SharedRequest,
   Store,
 } from './types.js';
-import { LockError } from './errors.js';
+import { LockError, LockHeld } from './errors.js';
+import { createKey } from './key.js';
 import { createLocks, MIN_LEASE_TTL_MS } from './locks.js';
 
 // The public type must accept the overloaded implementation.
@@ -209,7 +212,7 @@ type Outcome = 'ran' | 'busy';
 type Call = (mutex: Mutex, opts: { wait?: Duration; signal?: AbortSignal }) => Promise<Outcome>;
 
 async function viaGuard(guard: Awaited<ReturnType<Mutex['tryAcquire']>>): Promise<Outcome> {
-  if (guard === undefined) return 'busy';
+  if (LockHeld.is(guard)) return 'busy';
   await guard.release();
   return 'ran';
 }
@@ -220,32 +223,22 @@ const verbs: readonly { name: string; waits: boolean; call: Call }[] = [
     waits: false,
     call: async (mutex, opts) => {
       const result = await mutex.tryRun(() => 1, opts.signal ? { signal: opts.signal } : {});
-      return result.ran ? 'ran' : 'busy';
+      return LockHeld.is(result) ? 'busy' : 'ran';
     },
   },
   {
     name: 'run',
     waits: true,
     call: async (mutex, opts) => {
-      try {
-        await mutex.run(() => 1, opts);
-        return 'ran';
-      } catch (error) {
-        if (error instanceof LockError && error.code === 'held') return 'busy';
-        throw error;
-      }
+      const result = await mutex.run(() => 1, opts);
+      return LockHeld.is(result) ? 'busy' : 'ran';
     },
   },
   {
     name: 'acquire',
     waits: true,
     call: async (mutex, opts) => {
-      try {
-        return await viaGuard(await mutex.acquire(opts));
-      } catch (error) {
-        if (error instanceof LockError && error.code === 'held') return 'busy';
-        throw error;
-      }
+      return viaGuard(await mutex.acquire(opts));
     },
   },
   {
@@ -416,7 +409,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
     await t.clock.advance(10_000);
     work.resolve('done');
     const result = await pending;
-    expect(verb === 'tryRun' ? result : { ran: true, value: result }).toEqual({ ran: true, value: 'done' });
+    expect(result).toBe('done');
   });
 
   it('keeps retrying a failing renewal every beat while the deadline has not passed, because one network blip must not drop the lock', async () => {
@@ -460,7 +453,7 @@ describe('lease guard', () => {
   it('exposes the abort signal to the callback and flips held when the lock is lost', async () => {
     const t = setup(leaseCluster);
     t.script.extend = () => Promise.resolve(false);
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     expect(guard.held).toBe(true);
     await t.clock.advance(10_000);
     expect(guard.signal.aborted).toBe(true);
@@ -472,7 +465,7 @@ describe('lease guard', () => {
 
   it('reports held false as soon as the local deadline passes, even if no timer has fired, because a frozen process must not trust its lease', async () => {
     const t = setup(leaseCluster);
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     t.clock.jump(30_000);
     expect(t.clock.pending()).toBeGreaterThan(0);
     expect(guard.held).toBe(false);
@@ -480,7 +473,7 @@ describe('lease guard', () => {
 
   it('renews on the ttl/3 beat and moves the deadline, so a healthy holder keeps the lock', async () => {
     const t = setup(leaseCluster);
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     await t.clock.advance(35_000);
     expect(t.calls.extend.length).toBeGreaterThanOrEqual(3);
     expect(guard.held).toBe(true);
@@ -494,7 +487,7 @@ describe('lease guard', () => {
       t.clock.jump(25_000);
       return free(key, req);
     };
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     expect(t.calls.extend).toHaveLength(1);
     expect(guard.held).toBe(true);
   });
@@ -508,7 +501,7 @@ describe('lease guard', () => {
     };
     t.script.extend = () => Promise.resolve(false);
     const fn = vi.fn(() => 'ran');
-    expect(await t.locks.mutex('k').tryRun(fn, { onLost: 'ignore' })).toEqual({ ran: false });
+    expect(await t.locks.mutex('k').tryRun(fn, { onLost: 'ignore' })).toMatchObject({ code: 'lock.held' });
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -525,7 +518,7 @@ describe('lease guard', () => {
     await flush();
     // The deadline (30 s) passes before the 10 s store timeout ends the renewal.
     await t.clock.advance(10_000);
-    expect(await pending).toEqual({ ran: false });
+    expect(await pending).toMatchObject({ code: 'lock.held' });
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -545,7 +538,7 @@ describe('lease guard', () => {
     const pending = t.locks.mutex('k').acquire({ wait: '1m' });
     await flush();
     await t.clock.advance(2000);
-    const guard = await pending;
+    const guard = await orThrow(pending);
     expect(guard.held).toBe(true);
     expect(t.calls.acquire).toHaveLength(2);
   });
@@ -557,7 +550,7 @@ describe('lease guard', () => {
       t.clock.jump(30_000);
       return free(key, req);
     };
-    expect(await t.locks.mutex('k').tryAcquire()).toBeUndefined();
+    expect(LockHeld.is(await t.locks.mutex('k').tryAcquire())).toBe(true);
     const sent = t.calls.acquire[0];
     expect(t.calls.release.map(grant => grant.token)).toEqual([sent?.token]);
   });
@@ -584,7 +577,7 @@ describe('lease guard', () => {
     const t = setup(leaseCluster);
     const slow = deferred<boolean>();
     t.script.extend = () => slow.promise;
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     // advance() waits for the renewal in flight, so let it run in the background.
     const advancing = t.clock.advance(10_000);
     await flush();
@@ -597,7 +590,7 @@ describe('lease guard', () => {
 
   it('keeps one renewal beat after extend() runs mid-beat, because a second renewal chain doubles store load and outlives stopTimers', async () => {
     const t = setup(leaseCluster);
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     await t.clock.advance(5000);
     await guard.extend();
     // One chain: the extend at 5 s, then beats at 15 s and 25 s.
@@ -609,7 +602,7 @@ describe('lease guard', () => {
 
   it('extend() renews on demand and rejects with lost once the store refuses', async () => {
     const t = setup(leaseCluster);
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     await guard.extend();
     expect(t.calls.extend).toHaveLength(1);
     t.script.extend = () => Promise.resolve(false);
@@ -647,7 +640,7 @@ describe('release', () => {
       t.script.release = () => Promise.resolve('unknown');
       const result =
         verb === 'tryRun' ? await t.locks.mutex('k').tryRun(() => 42) : await t.locks.mutex('k').run(() => 42);
-      expect(verb === 'tryRun' ? result : { ran: true, value: result }).toEqual({ ran: true, value: 42 });
+      expect(result).toBe(42);
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ code: 'release', method: 'release' });
       expect(t.locks.counters.releaseErrors).toBe(1);
@@ -675,13 +668,13 @@ describe('release', () => {
   it('makes guard.release() reject with release on unknown, because explicit callers need to know', async () => {
     const t = setup(holdProcess);
     t.script.release = () => Promise.resolve('unknown');
-    const guard = await t.locks.mutex('k').acquire();
+    const guard = await orThrow(t.locks.mutex('k').acquire());
     expect(await failure(guard.release())).toMatchObject({ code: 'release', outcome: 'unknown' });
   });
 
   it('is idempotent, so disposing twice never frees a lock someone else now holds', async () => {
     const t = setup(holdProcess);
-    const guard = await t.locks.mutex('k').acquire();
+    const guard = await orThrow(t.locks.mutex('k').acquire());
     await guard.release();
     await guard.release();
     await guard[Symbol.asyncDispose]();
@@ -692,7 +685,7 @@ describe('release', () => {
   it('treats not-owner as already released, because the lock has moved on and there is nothing to free', async () => {
     const t = setup(holdProcess);
     t.script.release = () => Promise.resolve('not-owner');
-    const guard = await t.locks.mutex('k').acquire();
+    const guard = await orThrow(t.locks.mutex('k').acquire());
     await expect(guard.release()).resolves.toBeUndefined();
   });
 
@@ -785,7 +778,7 @@ describe("a store that runs on the caller's transaction (releasedBy: 'transactio
 describe('lease ttl', () => {
   it("uses the store's own ttl for the beat and the deadline, so a store set to 5 minutes is never cut to a shorter lease", async () => {
     const t = setup(leaseCluster, { ttlMs: 300_000 });
-    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     expect(t.calls.acquire[0]?.ttlMs).toBe(300_000);
     await t.clock.advance(99_000);
     expect(t.calls.extend).toHaveLength(0);
@@ -824,6 +817,67 @@ describe('createLocks', () => {
     const fake = scriptedStore(holdProcess);
     const locks = createLocks({ store: fake.store, namespace: 't' });
     expect(() => locks.mutex('')).toThrowError(LockError);
+  });
+});
+
+describe('a busy lock is a value, not a throw', () => {
+  const OtherFailure = defineFailure('test.other');
+
+  it('a busy lock is an answer the caller branches on, so tryRun returns LockHeld (409) and never calls fn', async () => {
+    const t = setup(holdProcess);
+    t.script.acquire = busy;
+    const fn = vi.fn(() => 'ran');
+    const result = await t.locks.mutex('k').tryRun(fn);
+    if (!LockHeld.is(result)) throw new Error('expected LockHeld');
+    expect(result.status).toBe(409);
+    expect(result.data.waitedMs).toBe(0);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('run with a wait returns LockHeld when the lock stays busy, so a timeout on a busy key is handled like tryRun, not caught', async () => {
+    const t = setup(holdProcess);
+    t.script.acquire = busy;
+    const fn = vi.fn(() => 'ran');
+    const pending = t.locks.mutex('k').run(fn, { wait: '5s' });
+    await t.clock.advance(6000);
+    const result = await pending;
+    if (!LockHeld.is(result)) throw new Error('expected LockHeld');
+    expect(result.data.waitedMs).toBeGreaterThanOrEqual(5000);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('acquire and tryAcquire resolve to LockHeld when the lock is busy, so no caller needs a try/catch for contention', async () => {
+    const t = setup(holdProcess);
+    t.script.acquire = busy;
+    expect(LockHeld.is(await t.locks.mutex('k').tryAcquire())).toBe(true);
+    const pending = t.locks.mutex('k').acquire({ wait: '2s' });
+    await t.clock.advance(3000);
+    const result = await pending;
+    if (!LockHeld.is(result)) throw new Error('expected LockHeld');
+    expect(result.data.waitedMs).toBeGreaterThanOrEqual(2000);
+  });
+
+  it('LockHeld carries the key only under logKeys, because raw keys stay out of logs by default', async () => {
+    const hidden = setup(holdProcess);
+    hidden.script.acquire = busy;
+    const plain = await hidden.locks.mutex('k').tryRun(() => 1);
+    if (!LockHeld.is(plain)) throw new Error('expected LockHeld');
+    expect('key' in plain.data).toBe(false);
+
+    const fake = scriptedStore(holdProcess);
+    fake.script.acquire = busy;
+    const locks = createLocks({ store: fake.store, namespace: 'test', logKeys: true });
+    const logged = await locks.mutex('k').tryRun(() => 1);
+    if (!LockHeld.is(logged)) throw new Error('expected LockHeld');
+    expect(logged.data.key).toBe(createKey('test', 'k').full);
+  });
+
+  it("a callback's own failure passes through tryRun as the value, so LockHeld.is tells the busy lock apart from the callback's answer", async () => {
+    const t = setup(holdProcess);
+    const own = OtherFailure();
+    const result = await t.locks.mutex('k').tryRun(() => own);
+    expect(result).toBe(own);
+    expect(LockHeld.is(result)).toBe(false);
   });
 });
 
@@ -1009,12 +1063,11 @@ describe('semaphore', () => {
   it('waits through the store permit waiter with the call weight and closes it when the wait ends, because the store knows when that weight fits', async () => {
     const t = opsSetup();
     t.script.permitAcquire = busy;
-    const pending = failure(t.locks.semaphore('pdf', { limit: 4 }).run(() => 1, { wait: '3s', weight: 3 }));
+    const pending = t.locks.semaphore('pdf', { limit: 4 }).run(() => 1, { wait: '3s', weight: 3 });
     await t.clock.advance(30);
     expect(t.calls.permitWaiters).toEqual([{ weight: 3, open: true }]);
     await t.clock.advance(5000);
-    const error = await pending;
-    expect(error.code).toBe('held');
+    expect(LockHeld.is(await pending)).toBe(true);
     expect(t.calls.permitWaiters).toEqual([{ weight: 3, open: false }]);
   });
 
@@ -1070,7 +1123,7 @@ describe('semaphore', () => {
       },
     };
     const locks = createLocks({ store, namespace: 'test', scheduler: clock.scheduler });
-    const guard = await locks.semaphore('pdf', { limit: 2 }).acquire({ wait: '1s' });
+    const guard = await orThrow(locks.semaphore('pdf', { limit: 2 }).acquire({ wait: '1s' }));
     await clock.advance(10_000);
     expect(extended).toHaveLength(1);
     await guard.release();
@@ -1144,23 +1197,24 @@ describe('readWrite', () => {
     const t = opsSetup();
     t.script.sharedAcquire = busy;
     const controller = new AbortController();
-    const pending = failure(
-      t.locks
-        .readWrite('catalog')
-        .read.run(() => 1, { wait: '3s', ...(how === 'caller aborts' ? { signal: controller.signal } : {}) }),
-    );
+    const pending = t.locks
+      .readWrite('catalog')
+      .read.run(() => 1, { wait: '3s', ...(how === 'caller aborts' ? { signal: controller.signal } : {}) })
+      .then(
+        outcome => (LockHeld.is(outcome) ? 'held' : 'ran'),
+        (error: unknown) => (error instanceof LockError ? error.code : 'other'),
+      );
     await t.clock.advance(30);
     if (how === 'caller aborts') controller.abort();
     else await t.clock.advance(5000);
-    const error = await pending;
-    expect(error.code).toBe(how === 'caller aborts' ? 'aborted' : 'held');
+    expect(await pending).toBe(how === 'caller aborts' ? 'aborted' : 'held');
     expect(t.calls.waiters).toEqual([{ mode: 'read', open: false }]);
   });
 
   it('does not register a waiter for a try', async () => {
     const t = opsSetup();
     t.script.sharedAcquire = busy;
-    expect(await t.locks.readWrite('catalog').write.tryAcquire()).toBeUndefined();
+    expect(LockHeld.is(await t.locks.readWrite('catalog').write.tryAcquire())).toBe(true);
     expect(t.calls.waiters).toEqual([]);
   });
 });
@@ -1194,10 +1248,9 @@ describe('review 2.4 manager regressions', () => {
     t.store.waitFor = () => {
       throw new Error('waitFor: connection closed');
     };
-    const pending = failure(t.locks.mutex('k').run(() => 1, { wait: '1s' }));
+    const pending = t.locks.mutex('k').run(() => 1, { wait: '1s' });
     await t.clock.advance(5000);
-    const error = await pending;
-    expect(error.code).toBe('held');
+    expect(LockHeld.is(await pending)).toBe(true);
     expect(t.clock.pending()).toBe(0);
   });
 });

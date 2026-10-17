@@ -10,9 +10,11 @@ import { Redis } from 'ioredis';
 import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { Store } from '../types.js';
 import type { RedisStore } from './index.js';
-import { LockError } from '../errors.js';
+import { LockError, LockHeld } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { chaos, describeCases, describeStoreContract, replicaCases } from '../testing/index.js';
@@ -103,7 +105,7 @@ describe('redisStore against a real server', () => {
   it('loses the lock at the next renewal when someone deletes the key, so a holder never keeps working on a lock Redis no longer has', async () => {
     const name = uniqueName('del');
     const locks = createLocks({ store: makeStore(), namespace: 'it' });
-    const guard = await locks.mutex(name).acquire({ wait: '2s' });
+    const guard = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const other = connect();
     await other.del(redisKeys(createKey('it', name)).lock);
     await eventually(() => !guard.held, 3000, 'the guard to notice the loss');
@@ -136,7 +138,7 @@ describe('redisStore against a real server', () => {
   it('reports a dropped connection during release as a release error, so a lock that may still be held is never called released', async () => {
     const broken = connect();
     const locks = createLocks({ store: redisStore(broken, { ttl: TTL_MS }), namespace: 'it' });
-    const guard = await locks.mutex(uniqueName('drop-release')).acquire({ wait: '2s' });
+    const guard = await orThrow(locks.mutex(uniqueName('drop-release')).acquire({ wait: '2s' }));
     broken.disconnect();
     await expect(guard.release()).rejects.toMatchObject({ code: 'release' });
   });
@@ -145,21 +147,20 @@ describe('redisStore against a real server', () => {
     const name = uniqueName('ttl');
     const real = makeStore();
     const blocked: Store = { ...real, extend: () => Promise.reject(new Error('renewals blocked')) };
-    const holder = await createLocks({ store: blocked, namespace: 'it' }).mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(createLocks({ store: blocked, namespace: 'it' }).mutex(name).acquire({ wait: '2s' }));
     const rival = createLocks({ store: makeStore(), namespace: 'it' }).mutex(name);
-    expect(await rival.tryAcquire()).toBeUndefined();
+    expect(LockHeld.is(await rival.tryAcquire())).toBe(true);
     await sleep(TTL_MS + 150);
-    const taken = await rival.tryAcquire();
-    expect(taken).toBeDefined();
+    const taken = await orThrow(rival.tryAcquire());
     expect(holder.held).toBe(false);
-    await taken?.release();
+    await taken.release();
   });
 
   it('wakes a waiter within 50 ms of the release through pub/sub, so handoff is not a polling delay', async () => {
     const name = uniqueName('wake');
     const store = makeStore();
     const locks = createLocks({ store, namespace: 'it' });
-    const holder = await locks.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const { channel } = redisKeys(createKey('it', name));
     const waiter = locks.mutex(name).run(() => Date.now(), { wait: '10s' });
     await eventually(
@@ -172,7 +173,7 @@ describe('redisStore against a real server', () => {
     );
     const releasedAt = Date.now();
     await holder.release();
-    const ranAt = await waiter;
+    const ranAt = await orThrow(waiter);
     // A pub/sub wake lands in a few ms; a poll wake lands anywhere up to the 1 s backoff cap.
     // 100 ms tells them apart without failing on a busy host (52 ms was seen under load).
     expect(ranAt - releasedAt).toBeLessThan(100);
@@ -184,12 +185,12 @@ describe('redisStore against a real server', () => {
     const name = uniqueName('poll');
     const store = redisStore(client, { ttl: TTL_MS, wake: 'poll' });
     const locks = createLocks({ store, namespace: 'it' });
-    const holder = await locks.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => Date.now(), { wait: '10s' });
     await sleep(20);
     const releasedAt = Date.now();
     await holder.release();
-    const ranAt = await waiter;
+    const ranAt = await orThrow(waiter);
     // The backoff step is 50 ms, then 100 ms; one missed poll costs at most the second.
     expect(ranAt - releasedAt).toBeLessThan(300);
     expect(store.guarantees.wait).toBe('poll');
@@ -209,7 +210,7 @@ describe('redisStore against a real server', () => {
     vi.spyOn(withoutPubSub, 'duplicate').mockReturnValue(deadSubscriber);
     const store = redisStore(withoutPubSub, { ttl: TTL_MS });
     const locks = createLocks({ store, namespace: 'it' });
-    const holder = await locks.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => 'ran', { wait: '10s' });
     await sleep(50);
     await holder.release();
@@ -230,7 +231,7 @@ describe('redisStore against a real server', () => {
     const store = redisStore(owner, { ttl: TTL_MS });
     const name = uniqueName('dispose');
     const locks = createLocks({ store, namespace: 'it' });
-    const holder = await locks.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => 'ran', { wait: '10s' });
     await eventually(() => subscribers.length === 1, 3000, 'the subscriber to open');
     await holder.release();
@@ -270,9 +271,9 @@ describe('redisStore against a real server', () => {
       const name = uniqueName('resend');
       const locks = createLocks({ store: redisStore(flaky, { ttl: TTL_MS }), namespace: 'it' });
       // Warm the script cache, so the cut reply is the script's own and not a NOSCRIPT.
-      expect(await locks.mutex(uniqueName('warm')).tryRun(() => 'warm')).toEqual({ ran: true, value: 'warm' });
+      expect(await locks.mutex(uniqueName('warm')).tryRun(() => 'warm')).toBe('warm');
       cutNextReply = true;
-      expect(await locks.mutex(name).tryRun(() => 'ran')).toEqual({ ran: true, value: 'ran' });
+      expect(await locks.mutex(name).tryRun(() => 'ran')).toBe('ran');
       expect(await client.exists(redisKeys(createKey('it', name)).lock)).toBe(0);
     } finally {
       flaky.disconnect();
@@ -286,13 +287,13 @@ describe('redisStore against a real server', () => {
     const name = uniqueName('prefix');
     const store = redisStore(prefixed, { ttl: TTL_MS });
     const locks = createLocks({ store, namespace: 'it' });
-    const holder = await locks.mutex(name).acquire({ wait: '2s' });
+    const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => Date.now(), { wait: '10s' });
     await eventually(() => store.guarantees.wait === 'wake' && prefixed.status === 'ready', 3000, 'the client');
     await sleep(100);
     const releasedAt = Date.now();
     await holder.release();
-    const ranAt = await waiter;
+    const ranAt = await orThrow(waiter);
     // A pub/sub wake lands in a few ms; a poll wake lands anywhere up to the 1 s backoff cap.
     // 100 ms tells them apart without failing on a busy host (52 ms was seen under load).
     expect(ranAt - releasedAt).toBeLessThan(100);
@@ -323,13 +324,13 @@ describe('redis semaphore and read/write against a real server', () => {
     const store = makeStore();
     const locks = createLocks({ store, namespace: 'it' });
     const name = uniqueName('limit');
-    const first = await locks.semaphore(name, { limit: 2 }).tryAcquire();
+    const first = await orThrow(locks.semaphore(name, { limit: 2 }).tryAcquire());
     expect(first).toBeDefined();
     await expect(locks.semaphore(name, { limit: 3 }).tryAcquire()).rejects.toMatchObject({ code: 'config' });
-    await first?.release();
-    const second = await locks.semaphore(name, { limit: 3 }).tryAcquire();
+    await first.release();
+    const second = await orThrow(locks.semaphore(name, { limit: 3 }).tryAcquire());
     expect(second).toBeDefined();
-    await second?.release();
+    await second.release();
   });
 
   it('gives a crashed holder permits back after the ttl, and leaves no key behind', async () => {
@@ -381,12 +382,12 @@ describe('redis semaphore and read/write against a real server', () => {
     const store = makeStore();
     const locks = createLocks({ store, namespace: 'it' });
     const { read, write } = locks.readWrite(uniqueName('wake'));
-    const reader = await read.acquire({ wait: '2s' });
+    const reader = await orThrow(read.acquire({ wait: '2s' }));
     const writing = write.run(() => Date.now(), { wait: '10s' });
     await sleep(100);
     const releasedAt = Date.now();
     await reader.release();
-    expect((await writing) - releasedAt).toBeLessThan(100);
+    expect((await orThrow(writing)) - releasedAt).toBeLessThan(100);
     await store.dispose?.();
   });
 });
@@ -419,10 +420,10 @@ describe('redis semaphore and read/write: review proofs', () => {
     const store = redisStore(client, { ttl: TTL_MS, wake: 'poll' });
     const locks = createLocks({ store, namespace: 'rv' });
     const name = uniqueName('poll');
-    const holder = await locks.semaphore(name, { limit: 1 }).acquire({ wait: '1s' });
+    const holder = await orThrow(locks.semaphore(name, { limit: 1 }).acquire({ wait: '1s' }));
     const permitCalls = vi.spyOn(store.permits, 'acquire');
     const mutexCalls = vi.spyOn(store, 'acquire');
-    const mutexHolder = await locks.mutex(name).acquire({ wait: '1s' });
+    const mutexHolder = await orThrow(locks.mutex(name).acquire({ wait: '1s' }));
     mutexCalls.mockClear();
     const semaphoreWait = locks
       .semaphore(name, { limit: 1 })
@@ -528,12 +529,12 @@ describe('redis semaphore and read/write: attacks that held', () => {
     const store = redisStore(prefixed, { ttl: TTL_MS });
     const locks = createLocks({ store, namespace: 'rv' });
     const sem = locks.semaphore(uniqueName('pfx'), { limit: 1 });
-    const held = await sem.acquire({ wait: '1s' });
+    const held = await orThrow(sem.acquire({ wait: '1s' }));
     const waiting = sem.run(() => Date.now(), { wait: '5s' });
     await sleep(150);
     const at = Date.now();
     await held.release();
-    expect((await waiting) - at).toBeLessThan(150);
+    expect((await orThrow(waiting)) - at).toBeLessThan(150);
     await store.dispose?.();
   });
 

@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 
-import type { LockError } from './errors.js';
+import type { LockError, LockHeld } from './errors.js';
 import type { Scheduler } from './scheduler.js';
 
 // ---------------------------------------------------------------------------
@@ -196,9 +196,6 @@ export type Store<G extends Guarantees = Guarantees> = StoreBase<G> & LeaseTtl<G
 /** `bigint` when the store hands out fences, else `undefined`. */
 export type FenceOf<S extends Store> = S['guarantees']['fence'] extends false ? undefined : bigint;
 
-/** `{ ran: true; value }` when the callback ran, `{ ran: false }` when the lock was held. */
-export type LockRun<T> = { readonly ran: true; readonly value: T } | { readonly ran: false };
-
 /** The only things a callback receives. */
 export type LockContext<S extends Store> = {
   /** Aborts when the lock is known lost (or the caller's signal aborts). */
@@ -264,12 +261,14 @@ export type Guard<S extends Store> = GuardBase<S> &
 
 /** The four verbs every lock handle has. `Extra` carries the options of one handle kind. */
 export type LockVerbs<S extends Store, Extra = unknown> = {
-  /** One atomic attempt. Contention is a value, never an error. */
-  tryRun<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, opts?: TryOptions<Extra>): Promise<LockRun<Awaited<T>>>;
-  /** Waits up to `wait`, or until `signal` aborts; throws `held` / `aborted`. */
-  run<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, ...opts: RunArgs<S, Extra>): Promise<Awaited<T>>;
-  acquire(...opts: RunArgs<S, Extra>): Promise<Guard<S>>;
-  tryAcquire(opts?: TryOptions<Extra>): Promise<Guard<S> | undefined>;
+  /** One atomic attempt. The value of `fn`, or {@link LockHeld} when the lock is busy: contention is a value, never an error. */
+  tryRun<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, opts?: TryOptions<Extra>): Promise<Awaited<T> | LockHeld>;
+  /** Waits up to `wait`, or until `signal` aborts. {@link LockHeld} when the lock is still busy after the wait; throws `aborted`. */
+  run<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, ...opts: RunArgs<S, Extra>): Promise<Awaited<T> | LockHeld>;
+  /** Waits like `run`. You release the guard yourself. */
+  acquire(...opts: RunArgs<S, Extra>): Promise<Guard<S> | LockHeld>;
+  /** One attempt, like `tryRun`. You release the guard yourself. */
+  tryAcquire(opts?: TryOptions<Extra>): Promise<Guard<S> | LockHeld>;
 };
 
 /** Abort = step down and stop campaigning. */

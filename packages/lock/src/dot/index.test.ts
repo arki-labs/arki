@@ -44,8 +44,8 @@ describe('locks()', () => {
       inner = await handle.mutex('job').tryRun(() => 'second');
       return 'first';
     });
-    expect(outer).toEqual({ ran: true, value: 'first' });
-    expect(inner).toEqual({ ran: false });
+    expect(outer).toBe('first');
+    expect(inner).toMatchObject({ code: 'lock.held' });
     await app.dispose();
   });
 

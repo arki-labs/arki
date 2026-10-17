@@ -10,6 +10,7 @@ import type { Scheduler } from '../scheduler.js';
 import type { Guard, Store } from '../types.js';
 import type { ContractCase, MakeStore } from './contract.js';
 import type { ManualScheduler } from './manual-scheduler.js';
+import { LockHeld } from '../errors.js';
 import { createLocks } from '../locks.js';
 import { check, ContractSkip, hasSemaphore, resolveMade } from './contract.js';
 import { manualScheduler } from './manual-scheduler.js';
@@ -102,7 +103,7 @@ async function runSteps(store: Store, clock: ManualScheduler, steps: readonly St
   for (const step of steps) {
     if (step.kind === 'acquire') {
       const guard = await replicas[step.replica]?.mutex(KEYS[step.key] ?? 'a').tryAcquire();
-      if (guard !== undefined) live.push({ key: step.key, guard });
+      if (guard !== undefined && !LockHeld.is(guard)) live.push({ key: step.key, guard });
     } else if (step.kind === 'release') {
       const [entry] = live.splice(step.pick % Math.max(live.length, 1), 1);
       await entry?.guard.release();
@@ -130,7 +131,7 @@ async function runPermitSteps(store: Store, clock: ManualScheduler, steps: reado
           ? replica.semaphore(KEYS[step.key] ?? 'a', { limit: POOL_LIMIT })
           : undefined;
       const guard = await pool?.tryAcquire({ weight: step.weight });
-      if (guard !== undefined) live.push({ key: step.key, weight: step.weight, guard });
+      if (guard !== undefined && !LockHeld.is(guard)) live.push({ key: step.key, weight: step.weight, guard });
     } else if (step.kind === 'release') {
       const [entry] = live.splice(step.pick % Math.max(live.length, 1), 1);
       await entry?.guard.release();

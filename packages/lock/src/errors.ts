@@ -1,12 +1,32 @@
 /**
- * Every failure `@arki/lock` raises on purpose is a {@link LockError} with a
- * stable `code`. Match on `code` (or `errorCode`), never on the message.
+ * A busy lock is an answer the caller branches on, so it is returned as the
+ * {@link LockHeld} failure. Everything else `@arki/lock` raises on purpose is a
+ * thrown {@link LockError} with a stable `code`. Match on `code` (or
+ * `errorCode`), never on the message.
  */
+import { z } from 'zod';
 
-/** Stable ids, one per `LockError.code`. Never renumber. */
+import { defineFailure } from '@arki/failure';
+
+/**
+ * The lock was busy: the one attempt was refused, or the wait ended with the
+ * lock still held. `key` is the full key, present only when the manager was
+ * made with `logKeys: true` (raw keys stay out of logs by default).
+ * `waitedMs` is 0 for `tryRun` and `tryAcquire`.
+ */
+export const LockHeld = defineFailure('lock.held', {
+  status: 409,
+  data: z.object({ key: z.string().optional(), waitedMs: z.number() }),
+  message: ({ key, waitedMs }) =>
+    `${key === undefined ? 'the lock' : `lock ${key}`} is held${waitedMs > 0 ? ` after waiting ${waitedMs} ms` : ''}`,
+  remediation: 'Treat the key as busy and try again later, or raise wait.',
+});
+
+/** A {@link LockHeld} failure value. */
+export type LockHeld = ReturnType<typeof LockHeld>;
+
+/** Stable ids, one per `LockError.code`. Never renumber. `ARKI_LOCK_E001` was `held`, now the {@link LockHeld} failure. */
 export const LOCK_ERROR_CODES = {
-  /** Not acquired within `wait`. */
-  held: 'ARKI_LOCK_E001',
   /** The caller's signal aborted the wait; the callback never ran. */
   aborted: 'ARKI_LOCK_E002',
   /** Ownership was lost while the callback ran. The callback may have had side effects; nothing retries it. */
@@ -46,7 +66,7 @@ export type LockErrorInit = {
 /** Which store call a {@link LockError} blames. */
 export type LockMethod = NonNullable<LockErrorInit['method']>;
 
-/** A coded failure of `@arki/lock`. */
+/** A thrown, coded error of `@arki/lock`: a bug, misuse, or a store fault. */
 export class LockError extends Error {
   readonly code: LockErrorCode;
   /** The stable id of `code`, e.g. `ARKI_LOCK_E004`. */

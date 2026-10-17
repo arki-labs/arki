@@ -1,5 +1,6 @@
 import { Cron } from 'croner';
 
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { ScheduleDef, ScheduleLock } from './index.js';
@@ -229,7 +230,8 @@ export function createScheduleRuntime<TContext = undefined>(
         },
         { holdAtLeast: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS },
       );
-      if (locked.ran) return locked.value;
+      // The handler's result is never a failure, so a failure here is the busy lock.
+      if (!isFailure(locked)) return locked;
       lockContention += 1;
       debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {
         scheduleName: schedule.name,

@@ -17,7 +17,7 @@ import type { CaseStore } from '../testing/index.js';
 import type { ManualScheduler } from '../testing/manual-scheduler.js';
 import type { Duration, Store } from '../types.js';
 import type { LeaseDb } from './lease.js';
-import { LockError } from '../errors.js';
+import { LockError, LockHeld } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { chaos } from '../testing/chaos.js';
@@ -174,7 +174,7 @@ describe('pgLease failure bounds', () => {
 
     await sleep(1200); // ttl passes in the database; A's renewal timer never fires
     const taken = await locksB.mutex('blocked-renewal').tryRun(({ fence }) => fence);
-    expect(taken).toEqual({ ran: true, value: (fenceA ?? 0n) + 1n });
+    expect(taken).toBe((fenceA ?? 0n) + 1n);
 
     await schedulerA.advance(400); // A's first renewal beat: the database answers zero rows
     const error = await running.then(
@@ -528,7 +528,9 @@ describe('pgLease permits (review proofs)', () => {
     expect(held).toBeDefined();
     const locks = createLocks({ store: waiterStore, namespace: 'rev' });
     try {
-      await expect(locks.semaphore(name, { limit: 2 }).run(() => 1, { wait: '1500ms', weight: 2 })).rejects.toThrow();
+      expect(LockHeld.is(await locks.semaphore(name, { limit: 2 }).run(() => 1, { wait: '1500ms', weight: 2 }))).toBe(
+        true,
+      );
       // Without a wake-up, a wait of 1.5 s makes a handful of attempts (backoff tops out at 1 s).
       expect(statements).toBeLessThan(40);
     } finally {

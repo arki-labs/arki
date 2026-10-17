@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import nodePath from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChildProcess } from 'node:child_process';
+import { orThrow } from '@arki/failure';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Key } from '../types.js';
@@ -236,7 +237,7 @@ describe('file store chaos', () => {
     const stale = 1000;
     const store = fileStore(dir, { stale });
     const locks = createLocks({ store, namespace: 'file-test' });
-    const guard = await locks.mutex('vanish').acquire({ wait: '1s' });
+    const guard = await orThrow(locks.mutex('vanish').acquire({ wait: '1s' }));
     await rm(store.lockPath(createKey('file-test', 'vanish')), { recursive: true, force: true });
     const deadline = Date.now() + stale * 5;
     while (!guard.signal.aborted && Date.now() < deadline) await sleep(20);

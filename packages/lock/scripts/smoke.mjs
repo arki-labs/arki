@@ -8,7 +8,7 @@ import { memoryStore } from '../dist/memory.js';
 const locks = createLocks({ store: memoryStore(), namespace: 'smoke' });
 
 const attempt = await locks.mutex('smoke:try').tryRun(async () => 'ok');
-if (!attempt.ran || attempt.value !== 'ok') {
+if (attempt !== 'ok') {
   throw new Error('tryRun did not run the callback');
 }
 

@@ -102,6 +102,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/clock": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "zod": "catalog:"
   },

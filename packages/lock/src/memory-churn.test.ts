@@ -1,10 +1,11 @@
 /**
  * The memory hand-off under churn: seeded random mixes of tryRun, waits and aborts never show two holders or strand a reservation.
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import type { Duration, Grant, Store } from './types.js';
-import { LockError } from './errors.js';
+import { LockError, LockHeld } from './errors.js';
 import { createKey } from './key.js';
 import { createLocks } from './locks.js';
 import { memoryStore } from './memory.js';
@@ -57,11 +58,11 @@ describe('memory hand-off under churn', () => {
       }
       const outcomes = await Promise.all(tasks);
       const codes = outcomes.filter(outcome => typeof outcome === 'string');
-      for (const code of codes) expect(['held', 'aborted']).toContain(code);
+      for (const code of codes) expect(code).toBe('aborted');
       expect(maxInside).toBe(1);
       expect(store.peek(createKey('r', 'm'))).toBeUndefined();
       // A stranded reservation would refuse every newcomer forever.
-      expect(await handle.tryRun(() => 'free')).toEqual({ ran: true, value: 'free' });
+      expect(await handle.tryRun(() => 'free')).toBe('free');
     });
 
     it(`semaphore seed ${seed}: never over the limit, and every permit comes back`, async () => {
@@ -97,7 +98,7 @@ describe('memory hand-off under churn', () => {
       await Promise.all(tasks);
       expect(maxUsed).toBeLessThanOrEqual(4);
       expect(store.peek(createKey('r', 's', 'semaphore'))).toBeUndefined();
-      expect(await handle.tryRun(() => 'free', { weight: 4 })).toEqual({ ran: true, value: 'free' });
+      expect(await handle.tryRun(() => 'free', { weight: 4 })).toBe('free');
     });
 
     it(`read/write seed ${seed}: a writer is always alone, and the key ends free`, async () => {
@@ -132,7 +133,7 @@ describe('memory hand-off under churn', () => {
       await Promise.all(tasks);
       expect(violations).toBe(0);
       expect(store.peek(createKey('r', 'w', 'readWrite'))).toBeUndefined();
-      expect(await rw.write.tryRun(() => 'free')).toEqual({ ran: true, value: 'free' });
+      expect(await rw.write.tryRun(() => 'free')).toBe('free');
     });
   }
 });
@@ -141,22 +142,23 @@ describe('memory hand-off edges through the manager', () => {
   it('a waiter whose deadline passes while it is queued leaves no reservation behind', async () => {
     const store = memoryStore();
     const locks = createLocks({ store, namespace: 'r' });
-    const holder = await locks.mutex('d').acquire();
+    const holder = await orThrow(locks.mutex('d').acquire());
     const late = locks
       .mutex('d')
       .run(() => 'late', { wait: 20 })
       .catch(codeOf);
     const patient = locks.mutex('d').run(() => 'patient', { wait: '2s' });
-    expect(await late).toBe('held');
+    // A wait that runs out resolves to a LockHeld value; it is not thrown.
+    expect(await late).toMatchObject({ code: 'lock.held' });
     await holder.release();
     expect(await patient).toBe('patient');
-    expect(await locks.mutex('d').tryRun(() => 'free')).toEqual({ ran: true, value: 'free' });
+    expect(await locks.mutex('d').tryRun(() => 'free')).toBe('free');
   });
 
   it('a woken waiter aborted in the same turn as the release passes the lock on', async () => {
     const store = memoryStore();
     const locks = createLocks({ store, namespace: 'r' });
-    const holder = await locks.mutex('a').acquire();
+    const holder = await orThrow(locks.mutex('a').acquire());
     const controller = new AbortController();
     const first = locks
       .mutex('a')
@@ -170,17 +172,17 @@ describe('memory hand-off edges through the manager', () => {
     await released;
     expect(await first).toBe('aborted');
     expect(await second).toBe('second');
-    expect(await locks.mutex('a').tryRun(() => 'free')).toEqual({ ran: true, value: 'free' });
+    expect(await locks.mutex('a').tryRun(() => 'free')).toBe('free');
   });
 
   it('tryRun is refused while a release is reserved for a queued waiter (FIFO kept)', async () => {
     const store = memoryStore();
     const locks = createLocks({ store, namespace: 'r' });
-    const holder = await locks.mutex('f').acquire();
+    const holder = await orThrow(locks.mutex('f').acquire());
     const waiting = locks.mutex('f').run(() => 'waiter', { wait: '2s' });
     await sleep(5);
     await holder.release();
-    expect(await locks.mutex('f').tryRun(() => 'barger')).toEqual({ ran: false });
+    expect(LockHeld.is(await locks.mutex('f').tryRun(() => 'barger'))).toBe(true);
     expect(await waiting).toBe('waiter');
   });
 
@@ -192,7 +194,7 @@ describe('memory hand-off edges through the manager', () => {
       .run(() => 'never', { holdAtLeast: 'bogus' as Duration })
       .catch(codeOf);
     expect(error).toBe('config');
-    expect(await locks.mutex('h').tryRun(() => 'free')).toEqual({ ran: true, value: 'free' });
+    expect(await locks.mutex('h').tryRun(() => 'free')).toBe('free');
   });
 });
 

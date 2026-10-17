@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { MemoryGuarantees } from './memory.js';
 import type { Grant, Store } from './types.js';
-import { LockError } from './errors.js';
+import { LockError, LockHeld } from './errors.js';
 import { createKey } from './key.js';
 import { createLocks } from './locks.js';
 import { memoryStore } from './memory.js';
@@ -19,7 +21,7 @@ async function grab(store: ReturnType<typeof memoryStore>, token: string) {
 describe('memoryStore', () => {
   it('wakes waiters in the order they began to wait, so contended jobs run first come, first served', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
-    const holder = await locks.mutex('job').acquire();
+    const holder = await orThrow(locks.mutex('job').acquire());
     const order: string[] = [];
     const waiters = ['a', 'b', 'c'].map(async name => {
       await locks.mutex('job').run(
@@ -118,7 +120,7 @@ describe('memoryStore semaphore', () => {
   it('wakes waiters first come, first served', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
     const pool = locks.semaphore('pool', { limit: 1 });
-    const holder = await pool.acquire();
+    const holder = await orThrow(pool.acquire());
     const order: string[] = [];
     const waiters = ['a', 'b', 'c'].map(name =>
       pool.run(
@@ -137,7 +139,7 @@ describe('memoryStore semaphore', () => {
   it('lets a light waiter pass a heavy one, because there is no head-of-line reservation', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
     const pool = locks.semaphore('pool', { limit: 2 });
-    const holder = await pool.acquire({ weight: 1 });
+    const holder = await orThrow(pool.acquire({ weight: 1 }));
     const ran: string[] = [];
     const heavy = pool.run(() => void ran.push('heavy'), { wait: '5s', weight: 2 });
     await sleep(10);
@@ -193,16 +195,15 @@ describe('memoryStore read/write', () => {
   it('turns readers away while a writer waits, and lets them in again once it stops waiting', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
     const { read, write } = locks.readWrite('catalog');
-    const first = await read.acquire();
+    const first = await orThrow(read.acquire());
     const writing = write.run(() => 'wrote', { wait: '5s' });
     await sleep(10);
     // Without writer preference this reader would get in and could starve the writer forever.
-    expect(await read.tryAcquire()).toBeUndefined();
+    expect(LockHeld.is(await read.tryAcquire())).toBe(true);
     await first.release();
     expect(await writing).toBe('wrote');
-    const after = await read.tryAcquire();
-    expect(after).toBeDefined();
-    await after?.release();
+    const after = await orThrow(read.tryAcquire());
+    await after.release();
   });
 
   it.each(['its wait runs out', 'its caller aborts'] as const)(
@@ -210,12 +211,12 @@ describe('memoryStore read/write', () => {
     async how => {
       const locks = createLocks({ store: memoryStore(), namespace: 't' });
       const { read, write } = locks.readWrite('catalog');
-      const first = await read.acquire();
+      const first = await orThrow(read.acquire());
       const controller = new AbortController();
       const writing = write
         .run(() => 'wrote', how === 'its caller aborts' ? { wait: '5s', signal: controller.signal } : { wait: '40ms' })
         .then(
-          () => 'wrote',
+          outcome => (LockHeld.is(outcome) ? 'held' : 'wrote'),
           (error: unknown) => (error instanceof LockError ? error.code : 'other'),
         );
       // A reader that queues behind the waiting writer.
@@ -225,7 +226,8 @@ describe('memoryStore read/write', () => {
       if (how === 'its caller aborts') controller.abort();
       expect(await writing).toBe(how === 'its caller aborts' ? 'aborted' : 'held');
       expect(await queued).toBe('read');
-      expect(await read.tryAcquire()).toBeDefined();
+      const reader = await orThrow(read.tryAcquire());
+      await reader.release();
       await first.release();
     },
   );
@@ -255,13 +257,12 @@ describe('memoryStore read/write', () => {
 describe('memoryStore primitives are independent', () => {
   it('lets a mutex, a semaphore and a writer of one name be held together', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
-    const mutex = await locks.mutex('x').tryAcquire();
-    const pool = await locks.semaphore('x', { limit: 1 }).tryAcquire();
-    const writer = await locks.readWrite('x').write.tryAcquire();
-    expect([mutex, pool, writer].every(guard => guard !== undefined)).toBe(true);
-    await mutex?.release();
-    await pool?.release();
-    await writer?.release();
+    const mutex = await orThrow(locks.mutex('x').tryAcquire());
+    const pool = await orThrow(locks.semaphore('x', { limit: 1 }).tryAcquire());
+    const writer = await orThrow(locks.readWrite('x').write.tryAcquire());
+    await mutex.release();
+    await pool.release();
+    await writer.release();
   });
 });
 
@@ -282,14 +283,14 @@ describe('memoryStore permits and the contract', () => {
   it('wakes a semaphore waiter at once when a permit frees between its refusal and its park, because it must not sleep the 1 s backoff', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 'r1' });
     const pool = locks.semaphore('p', { limit: 2 });
-    const first = await pool.acquire();
-    const second = await pool.acquire();
+    const first = await orThrow(pool.acquire());
+    const second = await orThrow(pool.acquire());
     const started = performance.now();
     // The refusal is decided synchronously inside this call; the waiter parks a few microtasks later.
     const waiting = pool.acquire({ wait: '5s' });
     // The permit frees before the waiter parks: a wake-all finds nobody, and `second` still holds.
     void first.release();
-    const third = await waiting;
+    const third = await orThrow(waiting);
     const took = performance.now() - started;
     await third.release();
     await second.release();
@@ -436,7 +437,7 @@ describe('memoryStore hand-off', () => {
 
   it('passes the lock on when an aborted waiter leaves the middle of the queue, so one quitter cannot stall the rest', async () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
-    const holder = await locks.mutex('job').acquire();
+    const holder = await orThrow(locks.mutex('job').acquire());
     const order: string[] = [];
     const controller = new AbortController();
     const run = (name: string, signal?: AbortSignal) =>

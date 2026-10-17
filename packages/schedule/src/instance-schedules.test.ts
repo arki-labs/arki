@@ -28,10 +28,7 @@ function recordingLocker() {
     mutex: key => {
       keys.push(key);
       return {
-        tryRun: async fn => ({
-          ran: true,
-          value: await fn({ signal: new AbortController().signal, fence: undefined }),
-        }),
+        tryRun: fn => Promise.resolve(fn({ signal: new AbortController().signal, fence: undefined })),
       };
     },
   };

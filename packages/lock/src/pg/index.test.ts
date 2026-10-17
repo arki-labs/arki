@@ -396,7 +396,7 @@ describe('PGlite: the SQL is valid on a real engine', () => {
     for (const legacyKeys of [false, true]) {
       const locks = createLocks({ store: pgSession(db, { legacyKeys }), namespace: 'pglite' });
       const result = await locks.mutex(`job-${legacyKeys}`).tryRun(() => 'ran');
-      expect(result).toEqual({ ran: true, value: 'ran' });
+      expect(result).toBe('ran');
     }
   });
 
@@ -412,7 +412,7 @@ describe('PGlite: the SQL is valid on a real engine', () => {
       await delay(10);
       return 'ran';
     });
-    expect(result).toEqual({ ran: true, value: 'ran' });
+    expect(result).toBe('ran');
   });
 
   it('keepAlive: false keeps a PGlite job fast: no beat blocks the thread for 200 ms between its awaits', async () => {
@@ -422,7 +422,7 @@ describe('PGlite: the SQL is valid on a real engine', () => {
       for (let step = 0; step < 5; step++) await delay(5);
       return 'ran';
     });
-    expect(result).toEqual({ ran: true, value: 'ran' });
+    expect(result).toBe('ran');
     // With beats, each await can wait out a 200 ms synchronous pg_sleep.
     expect(performance.now() - startedAt).toBeLessThan(150);
   });

@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { fileStore } from './file/index.js';
-import type { FenceOf, Guarantees, Guard, LockContext, LockRun, Locks, Store } from './index.js';
+import type { FenceOf, Guarantees, Guard, LockContext, LockHeld, Locks, Store } from './index.js';
 import type { memoryStore } from './memory.js';
 import type { pgSession, pgTransaction } from './pg/index.js';
 import type { pgLease } from './pg/lease.js';
@@ -69,7 +69,7 @@ describe('createLocks', () => {
 describe('wait bound (Decision 2)', () => {
   it('run(fn) compiles without options on a process-scope store', () => {
     const mutex = createLocks({ store: processHold, namespace: 'a' }).mutex('k');
-    expectTypeOf(mutex.run(work)).toEqualTypeOf<Promise<number>>();
+    expectTypeOf(mutex.run(work)).toEqualTypeOf<Promise<number | LockHeld>>();
     void mutex.run(work, { wait: '1s' });
     void mutex.acquire();
   });
@@ -99,8 +99,11 @@ describe('wait bound (Decision 2)', () => {
 
   it('the try verbs never need a bound, on any store', () => {
     const mutex = createLocks({ store: clusterHold, namespace: 'a' }).mutex('k');
-    expectTypeOf(mutex.tryRun(work)).toEqualTypeOf<Promise<LockRun<number>>>();
-    expectTypeOf(mutex.tryAcquire()).toEqualTypeOf<Promise<Guard<ClusterHold> | undefined>>();
+    // A busy lock is a LockHeld value the caller branches on, not a wrapper and not undefined.
+    expectTypeOf(mutex.tryRun(work)).toEqualTypeOf<Promise<number | LockHeld>>();
+    expectTypeOf(mutex.tryAcquire()).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld>>();
+    expectTypeOf(mutex.run(work, { wait: '1s' })).toEqualTypeOf<Promise<number | LockHeld>>();
+    expectTypeOf(mutex.acquire({ wait: '1s' })).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld>>();
     // tryRun never waits, so it takes no `wait`.
     // @ts-expect-error no wait on a try verb
     void mutex.tryRun(work, { wait: '1s' });
@@ -240,7 +243,7 @@ describe('callback context and guard', () => {
       },
       { wait: '1s' },
     );
-    expectTypeOf(run).toEqualTypeOf<Promise<'done'>>();
+    expectTypeOf(run).toEqualTypeOf<Promise<'done' | LockHeld>>();
   });
 
   it('a guard has a boolean held flag and a signal', () => {
@@ -253,9 +256,7 @@ describe('callback context and guard', () => {
 describe('LockError', () => {
   it('carries the review fields', () => {
     const error = new LockError({ code: 'lost', message: 'x', remediation: 'y', detectedBy: 'deadline' });
-    expectTypeOf(error.code).toEqualTypeOf<
-      'held' | 'aborted' | 'lost' | 'store' | 'release' | 'config' | 'unsupported'
-    >();
+    expectTypeOf(error.code).toEqualTypeOf<'aborted' | 'lost' | 'store' | 'release' | 'config' | 'unsupported'>();
     expectTypeOf(error.detectedBy).toEqualTypeOf<'renewal' | 'deadline' | 'connection' | undefined>();
     expectTypeOf(error.method).toEqualTypeOf<
       'acquire' | 'release' | 'extend' | 'waitFor' | 'permits' | 'shared' | undefined

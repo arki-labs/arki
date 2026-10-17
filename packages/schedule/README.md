@@ -100,10 +100,11 @@ schedules(core, [
   schedule name. A string, or `key`, locks on that key (give two jobs the same
   key to make them exclude each other).
 - The lock comes from the feature's `locks` service, typed by the small
-  `Locker` port: `mutex(key).tryRun(fn, { holdAtLeast })` returns
-  `{ ran: true, value }` or `{ ran: false }`. `locks()` from `@arki/lock/dot`
-  provides it, and so does the `Locks` that `createLocks` returns. A schedule
-  with `lock` and no `locks` service is a compile error (and
+  `Locker` port: `mutex(key).tryRun(fn, { holdAtLeast })` returns the value
+  of `fn`, or the `lock.held` failure when another holder has the key.
+  `locks()` from `@arki/lock/dot` provides it, and so does the `Locks` that
+  `createLocks` returns. A schedule with `lock` and no `locks` service is a
+  compile error (and
   `ARKI_SCHEDULE_E009` at boot for code that skips the types).
 - The lock is held while the handler runs, not for a fixed time. There is no
   key-value lease any more: that path is gone.

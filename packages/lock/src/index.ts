@@ -1,4 +1,4 @@
-export { LOCK_ERROR_CODES, LockError } from './errors.js';
+export { LOCK_ERROR_CODES, LockError, LockHeld } from './errors.js';
 export type { LockErrorCode, LockErrorInit, LockMethod } from './errors.js';
 export type { Scheduler, SchedulerHandle } from './scheduler.js';
 export { LOCK_COUNTER_NAMES } from './types.js';
@@ -15,7 +15,6 @@ export type {
   LeadOptions,
   LockContext,
   LockCounters,
-  LockRun,
   Locks,
   LocksFor,
   LockVerbs,
