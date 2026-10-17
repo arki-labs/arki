@@ -4,6 +4,7 @@
  */
 
 import { debugRetry } from '../debug.ts';
+import { RateLimited } from '../failures.ts';
 
 export type RateLimiterConfig = {
   maxRequests: number; // Maximum requests allowed
@@ -11,8 +12,6 @@ export type RateLimiterConfig = {
   maxRetries?: number; // Maximum retry attempts
   retryDelayMs?: number; // Base delay between retries
 };
-
-export type RateLimitResult<T> = { success: true; data: T } | { success: false; error: Error; retryAfterMs: number };
 
 export class RateLimiter {
   private requests = new Map<string, number[]>();
@@ -38,9 +37,11 @@ export class RateLimiter {
   }
 
   /**
-   * Execute a function with rate limiting
+   * Execute a function with rate limiting. Returns the function's value, or `RateLimited` when no
+   * slot frees up within `maxRetries` waits. A busy limit is an answer the caller branches on, so it
+   * is returned, not thrown.
    */
-  async execute<T>(key: string, fn: () => Promise<T>): Promise<RateLimitResult<T>> {
+  async execute<T>(key: string, fn: () => Promise<T>): Promise<T | RateLimited> {
     debugRetry.debug('[RateLimiter] Executing function for key: {key}', { key });
     let attempts = 0;
 
@@ -55,7 +56,7 @@ export class RateLimiter {
         });
         const data = await fn();
         debugRetry.debug('[RateLimiter] Function executed successfully for key: {key}', { key });
-        return { success: true, data };
+        return data;
       }
 
       // Rate limited, calculate retry delay
@@ -68,11 +69,7 @@ export class RateLimiter {
       if (attempts === this.config.maxRetries - 1) {
         // Last attempt failed
         debugRetry.debug('[RateLimiter] Max retries reached for key: {key}', { key });
-        return {
-          success: false,
-          error: new Error(`Rate limit exceeded for ${key}`),
-          retryAfterMs,
-        };
+        return RateLimited({ retryAfterMs });
       }
 
       // Wait before retrying
@@ -82,11 +79,7 @@ export class RateLimiter {
     }
 
     debugRetry.debug('[RateLimiter] All retry attempts exhausted for key: {key}', { key });
-    return {
-      success: false,
-      error: new Error(`Max retry attempts reached for ${key}`),
-      retryAfterMs: this.getRetryAfterMs(key),
-    };
+    return RateLimited({ retryAfterMs: this.getRetryAfterMs(key) });
   }
 
   /**
@@ -195,29 +188,20 @@ export class RateLimiter {
 }
 
 /**
- * Create a rate-limited wrapper for any async function
+ * Create a rate-limited wrapper for any async function. The wrapper returns the function's value,
+ * or `RateLimited` when the limit stays busy.
  */
 export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
   fn: (...args: TArgs) => Promise<TResult>,
   config: RateLimiterConfig,
-): (...args: TArgs) => Promise<TResult> {
+): (...args: TArgs) => Promise<TResult | RateLimited> {
   const limiter = new RateLimiter(config);
   const functionKey = fn.name || 'anonymous';
 
   debugRetry.debug('[RateLimiter] Created rate-limited wrapper for function: {function}', { function: functionKey });
 
-  return async (...args: TArgs): Promise<TResult> => {
-    // Use a stable key for this function
-    const key = functionKey;
-
-    const result = await limiter.execute(key, () => fn(...args));
-
-    if (!result.success) {
-      throw result.error;
-    }
-
-    return result.data;
-  };
+  // Use a stable key for this function
+  return (...args: TArgs): Promise<TResult | RateLimited> => limiter.execute(functionKey, () => fn(...args));
 }
 
 /**

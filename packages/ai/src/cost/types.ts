@@ -104,26 +104,6 @@ export type BudgetConfig<TPeriod extends string = StandardBudgetPeriod> = {
 }
 
 /**
- * Result of a budget check operation.
- */
-export type BudgetCheckResult<TPeriod extends string = StandardBudgetPeriod> = {
-  /** Whether the operation is allowed */
-  allowed: boolean;
-
-  /** Reason for rejection (if not allowed) */
-  rejectionReason?: string;
-
-  /** Current spend in USD */
-  currentSpendUsd: number;
-
-  /** Remaining budget in USD */
-  remainingUsd: number;
-
-  /** Which period caused rejection (if any) */
-  rejectedPeriod?: TPeriod;
-}
-
-/**
  * Metadata for a spend record.
  */
 export type SpendMetadata = {

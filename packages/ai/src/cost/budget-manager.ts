@@ -7,8 +7,8 @@
  * @module cost/budget-manager
  */
 
+import { BudgetExceeded } from '../failures';
 import type {
-  BudgetCheckResult,
   BudgetConfig,
   BudgetLimits,
   BudgetPeriod,
@@ -59,10 +59,8 @@ export const DEFAULT_BUDGET_LIMITS: BudgetLimits = {
  * });
  *
  * // Check if operation is within budget
- * const check = await budgetManager.checkBudget(userId, estimatedCost);
- * if (!check.allowed) {
- *   throw new Error(check.rejectionReason);
- * }
+ * const exceeded = await budgetManager.checkBudget(userId, estimatedCost);
+ * if (BudgetExceeded.is(exceeded)) return exceeded;
  *
  * // Record actual spend after operation
  * await budgetManager.recordSpend(userId, actualCost, metadata);
@@ -90,11 +88,13 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
   /**
    * Check if a user has sufficient budget for an operation.
    *
+   * An exhausted budget is an answer the caller must branch on, so it is returned, not thrown.
+   *
    * @param userId - User identifier
    * @param estimatedCostUsd - Estimated cost in USD
-   * @returns Budget check result
+   * @returns Nothing when every period has room, or `BudgetExceeded` for the first period that would be exceeded
    */
-  async checkBudget(userId: string, estimatedCostUsd: number): Promise<BudgetCheckResult<TPeriod>> {
+  async checkBudget(userId: string, estimatedCostUsd: number): Promise<BudgetExceeded | undefined> {
     // Get current spend across all periods
     const spends = await Promise.all(
       this.periods.map(async period => ({
@@ -104,34 +104,19 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
       }))
     );
 
-    // Find the most restrictive period
-    let lowestRemaining = Infinity;
-
     for (const { period, currentSpend, limit } of spends) {
-      const remaining = limit - currentSpend;
-      if (remaining < lowestRemaining) {
-        lowestRemaining = remaining;
-      }
-
       // Check if any period would be exceeded
       if (currentSpend + estimatedCostUsd > limit) {
-        return {
-          allowed: false,
-          rejectionReason: `${String(period)} budget would be exceeded. Current: $${currentSpend.toFixed(4)}, Limit: $${limit.toFixed(2)}, Requested: $${estimatedCostUsd.toFixed(4)}`,
+        return BudgetExceeded({
+          period: String(period),
           currentSpendUsd: currentSpend,
-          remainingUsd: Math.max(0, remaining),
-          rejectedPeriod: period,
-        };
+          remainingUsd: Math.max(0, limit - currentSpend),
+        });
       }
     }
 
     // All periods OK
-    const primarySpend = spends[0];
-    return {
-      allowed: true,
-      currentSpendUsd: primarySpend?.currentSpend ?? 0,
-      remainingUsd: lowestRemaining,
-    };
+    return;
   }
 
   /**

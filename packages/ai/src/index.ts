@@ -34,6 +34,9 @@ export {
   getErrorMessage,
 } from './errors';
 
+// Expected failures, returned (not thrown)
+export { BudgetExceeded, RateLimited } from './failures';
+
 // Input validation
 export {
   // Schemas
@@ -221,7 +224,6 @@ export {
 // Cost management utilities
 export {
   // Types
-  type BudgetCheckResult,
   type BudgetConfig,
   type BudgetLimits,
   type BudgetPeriod,

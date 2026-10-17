@@ -1,0 +1,5 @@
+---
+'@arki/ai': minor
+---
+
+An exhausted budget and a busy rate limit are now failures from `@arki/failure`, returned, never thrown. `BudgetManager.checkBudget(userId, costUsd)` returns `undefined` when every period has room, or `BudgetExceeded` (code `ai.budget_exceeded`, status 402, data `{ period, currentSpendUsd, remainingUsd }`) for the first period that would go over; the `{ allowed, rejectionReason, rejectedPeriod }` result and the `BudgetCheckResult` type are gone. `RateLimiter.execute(key, fn)` returns the value of `fn`, or `RateLimited` (code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) when no slot frees up; the `{ success, data, error, retryAfterMs }` wrapper and the `RateLimitResult` type are gone. Functions from `createRateLimitedFunction` resolve to `RateLimited` instead of rejecting. Both definitions are exported from `@arki/ai`, and `BudgetExceeded` also from `@arki/ai/cost`. The provider services (`OpenAIService`, `AnthropicService`, `GoogleService`, `GroqService`, `MistralService`, `OpenRouterService`) still throw `RateLimitError` when their limiter returns `RateLimited`, so their methods keep a plain result.

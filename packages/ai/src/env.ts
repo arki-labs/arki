@@ -96,6 +96,9 @@ export const env = defineEnv({
       .default(DEFAULT_LLM_PROVIDER),
     // Default model for the selected LLM provider
     LLM_MODEL: z.string().optional(),
+    // Tests only: when set, every createLLMProvider() call runs at temperature 0 with this seed,
+    // so a real local model answers the same input the same way run after run.
+    AI_DETERMINISTIC_SEED: z.coerce.number().int().optional(),
 
     // Embedding and vector search. No default: `createEmbeddingRuntime(env)` in
     // `embeddings/runtime.ts` resolves local-first (Ollama → OpenAI → null) and

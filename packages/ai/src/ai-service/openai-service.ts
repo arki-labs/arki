@@ -14,6 +14,7 @@ import { z } from '@arki/contracts';
 import type { SanitizerConfig } from '../safety/types';
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import { rateLimiters } from '../utils/rate-limiter';
@@ -382,19 +383,19 @@ Content: "${text}"`;
   private async withRateLimit<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const result = await rateLimiters.openai.execute(key, fn);
 
-    if (!result.success) {
+    if (RateLimited.is(result)) {
       debugService.debug('[OpenAI] Rate limit exceeded for {key} (retry after: {after}ms)', {
         key,
-        after: result.retryAfterMs,
+        after: result.data.retryAfterMs,
       });
 
       throw new RateLimitError(
-        `Rate limit exceeded for ${key}: retry after ${result.retryAfterMs}ms`,
-        result.retryAfterMs,
+        `Rate limit exceeded for ${key}: retry after ${result.data.retryAfterMs}ms`,
+        result.data.retryAfterMs,
       );
     }
 
-    return result.data;
+    return result;
   }
 
   /**

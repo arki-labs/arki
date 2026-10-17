@@ -11,6 +11,7 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { rateLimiters } from '../utils/rate-limiter';
 import { aiServiceConfigSchema, validateInput } from '../validation';
@@ -145,16 +146,16 @@ export class AnthropicService {
       }
     });
 
-    if (!result.success) {
-      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.retryAfterMs });
+    if (RateLimited.is(result)) {
+      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
 
       throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
-        result.retryAfterMs,
+        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
+        result.data.retryAfterMs,
       );
     }
 
-    return result.data;
+    return result;
   }
 
   /**
@@ -229,16 +230,16 @@ export class AnthropicService {
       }
     });
 
-    if (!result.success) {
-      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.retryAfterMs });
+    if (RateLimited.is(result)) {
+      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
 
       throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
-        result.retryAfterMs,
+        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
+        result.data.retryAfterMs,
       );
     }
 
-    return result.data;
+    return result;
   }
 
   /**
@@ -296,15 +297,15 @@ export class AnthropicService {
   private async consumeRateLimitSlot(key: string): Promise<void> {
     const result = await rateLimiters.anthropic.execute(key, async () => undefined);
 
-    if (!result.success) {
+    if (RateLimited.is(result)) {
       debugService.debug('[Anthropic] Rate limit exceeded for {key} (retry after: {after}ms)', {
         key,
-        after: result.retryAfterMs,
+        after: result.data.retryAfterMs,
       });
 
       throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
-        result.retryAfterMs,
+        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
+        result.data.retryAfterMs,
       );
     }
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { GenerationError, RateLimitError } from '../errors';
+import { RateLimited } from '../failures';
 import { rateLimiters } from '../utils/rate-limiter';
 
 import { AnthropicService } from './anthropic-service';
@@ -103,14 +104,17 @@ describe('AnthropicService — conversation', () => {
       expect(executeSpy).toHaveBeenCalledWith('generateConversation', expect.any(Function));
     });
 
-    it('throws RateLimitError when the limiter rejects', async () => {
-      const executeSpy = vi.spyOn(rateLimiters.anthropic, 'execute').mockResolvedValue({
-        success: false,
-        error: new Error('limited'),
-        retryAfterMs: 4000,
-      });
+    it('throws RateLimitError when the limiter returns RateLimited', async () => {
+      // The service keeps a plain Promise<string> result, so it turns the limiter's failure into its own throw.
+      const executeSpy = vi.spyOn(rateLimiters.anthropic, 'execute').mockResolvedValue(
+        RateLimited({ retryAfterMs: 4000 }),
+      );
 
       const svc = new AnthropicService();
+      await expect(svc.generateConversation([{ role: 'user', content: 'hi' }])).rejects.toMatchObject({
+        name: 'RateLimitError',
+        retryAfter: 4000,
+      });
       await expect(svc.generateConversation([{ role: 'user', content: 'hi' }])).rejects.toThrow(
         RateLimitError,
       );

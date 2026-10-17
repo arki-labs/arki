@@ -63,6 +63,12 @@ export type LLMProviderConfig = {
   temperature?: number;
   /** Maximum retries on transient failures. */
   maxRetries?: number;
+  /**
+   * Run every call at temperature 0 with this seed, overriding any per-call temperature, so the
+   * same input gets the same answer (as far as the provider honours a seed; Ollama does).
+   * Defaults to `AI_DETERMINISTIC_SEED`; meant for tests on a real local model.
+   */
+  deterministicSeed?: number;
 };
 
 // ── Factory ───────────────────────────────────────────────────
@@ -131,6 +137,7 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
     model,
     config.temperature ?? 0.7,
     config.maxRetries ?? 2,
+    config.deterministicSeed ?? env.AI_DETERMINISTIC_SEED,
   );
 }
 
@@ -151,7 +158,14 @@ class LanguageModelAdapter implements StructuredLLMProvider {
     private readonly modelName: string,
     private readonly defaultTemperature: number,
     private readonly defaultMaxRetries: number,
+    private readonly deterministicSeed: number | undefined,
   ) {}
+
+  /** The sampling settings of one call: the asked temperature, or temperature 0 + the seed in deterministic mode. */
+  private sampling(options: { readonly temperature?: number }): { temperature: number; seed?: number } {
+    if (this.deterministicSeed === undefined) return { temperature: options.temperature ?? this.defaultTemperature };
+    return { temperature: 0, seed: this.deterministicSeed };
+  }
 
   async generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
@@ -164,7 +178,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         system: options.systemPrompt,
         prompt,
         output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
-        temperature: options.temperature ?? this.defaultTemperature,
+        ...this.sampling(options),
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
         maxOutputTokens: options.maxTokens,
@@ -191,7 +205,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
-        temperature: options.temperature ?? this.defaultTemperature,
+        ...this.sampling(options),
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
         maxOutputTokens: options.maxTokens,
@@ -213,7 +227,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         prompt,
-        temperature: options.temperature ?? this.defaultTemperature,
+        ...this.sampling(options),
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
         maxOutputTokens: options.maxTokens,
@@ -234,7 +248,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        temperature: options.temperature ?? this.defaultTemperature,
+        ...this.sampling(options),
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
         maxOutputTokens: options.maxTokens,

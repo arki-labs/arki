@@ -9,6 +9,7 @@
  * @example
  * ```typescript
  * import {
+ *   BudgetExceeded,
  *   BudgetManager,
  *   CostEstimator,
  *   CostCircuitBreaker,
@@ -24,11 +25,9 @@
  * // Estimate cost before operation
  * const cost = estimator.estimateLLMCost('gpt-4o', 1000, 500);
  *
- * // Check budget
- * const check = await budgetManager.checkBudget(userId, cost);
- * if (!check.allowed) {
- *   throw new Error(check.rejectionReason);
- * }
+ * // Check budget: nothing, or the BudgetExceeded failure
+ * const exceeded = await budgetManager.checkBudget(userId, cost);
+ * if (BudgetExceeded.is(exceeded)) return exceeded;
  *
  * // Execute with circuit breaker protection
  * const result = await circuitBreaker.executeOrThrow(
@@ -47,7 +46,6 @@
 
 export type {
   // Core types
-  BudgetCheckResult,
   BudgetConfig,
   BudgetLimits,
   BudgetPeriod,
@@ -100,6 +98,8 @@ export {
 // ============================================
 // Budget Manager
 // ============================================
+
+export { BudgetExceeded } from '../failures';
 
 export {
   BudgetManager,

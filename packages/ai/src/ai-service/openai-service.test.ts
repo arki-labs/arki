@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from '@arki/contracts';
 
 import { GenerationError, RateLimitError } from '../errors';
+import { RateLimited } from '../failures';
 import { rateLimiters } from '../utils/rate-limiter';
 
 import { OpenAIService } from './openai-service';
@@ -333,13 +334,12 @@ describe('OpenAIService', () => {
       const ai = new OpenAIService();
 
       // Exhaust the rate limiter (60 RPM)
-      const executeSpy = vi.spyOn(rateLimiters.openai, 'execute').mockResolvedValue({
-        success: false,
-        error: new Error('Rate limit exceeded'),
-        retryAfterMs: 5000,
-      });
+      const executeSpy = vi.spyOn(rateLimiters.openai, 'execute').mockResolvedValue(
+        RateLimited({ retryAfterMs: 5000 }),
+      );
 
       await expect(ai.generateText('hello')).rejects.toThrow(RateLimitError);
+      await expect(ai.generateText('hello')).rejects.toMatchObject({ retryAfter: 5000 });
 
       executeSpy.mockRestore();
     });

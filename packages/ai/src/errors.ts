@@ -67,7 +67,8 @@ export class ValidationError extends AIError {
 }
 
 /**
- * Error thrown when API rate limits are exceeded
+ * Thrown by the provider services (`OpenAIService`, `AnthropicService`, …) when their local rate
+ * limiter returns `RateLimited`, so their methods keep a plain `Promise<string>` result.
  */
 export class RateLimitError extends AIError {
   constructor(

@@ -12,6 +12,7 @@ import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './typ
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors.ts';
+import { RateLimited } from '../failures.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
 
 export type GroqServiceConfig = {
@@ -90,14 +91,14 @@ export class GroqService implements LLMProvider {
       }
     });
 
-    if (!rateLimitResult.success) {
+    if (RateLimited.is(rateLimitResult)) {
       throw new RateLimitError(
-        `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
-        rateLimitResult.retryAfterMs,
+        `Rate limit exceeded: retry after ${rateLimitResult.data.retryAfterMs}ms`,
+        rateLimitResult.data.retryAfterMs,
       );
     }
 
-    return rateLimitResult.data;
+    return rateLimitResult;
   }
 
   /**
@@ -134,14 +135,14 @@ export class GroqService implements LLMProvider {
       }
     });
 
-    if (!rateLimitResult.success) {
+    if (RateLimited.is(rateLimitResult)) {
       throw new RateLimitError(
-        `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
-        rateLimitResult.retryAfterMs,
+        `Rate limit exceeded: retry after ${rateLimitResult.data.retryAfterMs}ms`,
+        rateLimitResult.data.retryAfterMs,
       );
     }
 
-    return rateLimitResult.data;
+    return rateLimitResult;
   }
 
   /**
