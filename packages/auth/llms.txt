@@ -53,4 +53,3 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 ## Optional
 - [Security review](docs/security-review.md)
 - [Migration guide](docs/migration.md)
-- [User vs Account](docs/USER_VS_ACCOUNT.md)

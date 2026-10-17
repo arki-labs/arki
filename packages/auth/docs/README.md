@@ -2,21 +2,6 @@
 
 This directory contains documentation for the `@arki/auth` package, which provides authentication utilities and configuration for Arki applications using better-auth.
 
-## Documentation Files
-
-### [User vs Account](./USER_VS_ACCOUNT.md)
-**Essential reading for understanding authentication.**
-
-Explains the fundamental distinction between "User" (identity) and "Account" (authentication method) entities in better-auth. This is critical for:
-- Building features that reference the correct entity (always User, not Account)
-- Understanding authentication flows (sign-up, sign-in, account linking)
-- Avoiding common pitfalls (storing user data on accounts, referencing account IDs)
-
-**Read this first if you're:**
-- Building new features that need to reference users
-- Implementing authentication flows
-- Confused about when to use `userId` vs `accountId`
-
 ## Quick Reference
 
 ### Common Questions
@@ -38,8 +23,7 @@ A: Rarely. better-auth manages accounts internally. Your app works with users.
 ```
 packages/auth/
 ├── docs/              # This directory
-│   ├── README.md      # This file
-│   └── USER_VS_ACCOUNT.md
+│   └── README.md      # This file
 ├── src/
 │   ├── dot.config.ts  # better-auth configuration
 │   ├── env.ts         # Environment variables

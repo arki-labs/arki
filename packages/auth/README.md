@@ -367,7 +367,6 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 - [Agent guide](./docs/agent-guide.md): the short version, for agents.
 - [Security review](./docs/security-review.md): the engine read line by line, check by check.
 - [Migration guide](./docs/migration.md): old names to new, and the steps for each app.
-- [User vs Account](./docs/USER_VS_ACCOUNT.md): a user is a person, an account is a way to sign in.
 
 ## Support
 
