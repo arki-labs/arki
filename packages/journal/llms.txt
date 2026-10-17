@@ -24,7 +24,7 @@
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
 
 ## Files
-- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the twelve codes and their messages, the command failures and `CommandError`), `src/hooks.ts` (around-hooks on command and effect runs).
+- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the codes and their messages, the command failures and `CommandError`), `src/hooks.ts` (around-hooks on command and effect runs).
 - Definitions: `src/journal.ts` (`initJournal`, `j`, `j.compose`), `src/entity.ts` (entity builder, reducers, key checks), `src/event.ts` (`j.event`), `src/handlers.ts` (`j.projection`, `j.effect`, `need`, and `bindEffect`, which gives an effect its services).
 - Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
 - After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
@@ -32,7 +32,7 @@
 
 ## Rules that bite
 - The door is `journal.bind(db, meta)`: bind once per request or job, then call `run(command, input)`. You give `meta`; the library never picks an actor.
-- A rule that rejects a request returns a failure (`CommandNotFound({ detail })` and the others, or the app's own). The command rolls back exactly as for a throw, and `journal.run` returns it, typed. An `events` failure comes back from `write`: return it from the handler. Throwing `CommandError(code, message)` still works. Neither is a `JournalError`. An oRPC app adds `commandErrors()` once, after its own error middleware; it answers a returned failure as an error too.
+- A rule that rejects a request returns a failure (`CommandNotFound({ detail })` and the others, or the app's own). The command rolls back exactly as for a throw, and `journal.run` returns it, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler. A command that got one and still returns a success throws `IGNORED_FAILURE` and commits nothing. Throwing `CommandError(code, message)` still works. Neither is a `JournalError`. An oRPC app adds `commandErrors()` once, after its own error middleware; it answers a returned failure as an error too.
 - Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.
 - `drain` and `worker` take the root database, never a transaction.
 - An effect that needs a service lists it: `j.effect(name, entity, { mailer: need<Mailer>() }, on)`. The handler reads `mailer` from its context. Do not wrap an effect in a function. A plain app gives the services once, in `j.compose({ services })`. In a Dot app the feature that lists the effect declares them in `needs`.

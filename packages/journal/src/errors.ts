@@ -14,6 +14,7 @@ export type JournalErrorCode =
   | 'UNSTABLE_SCHEMA'
   | 'ID_MISMATCH'
   | 'VALUE_MISMATCH'
+  | 'IGNORED_FAILURE'
   | 'BAD_DEFINITION'
   | 'JOB_NOT_DEAD'
   | 'JOB_NOT_PENDING'
@@ -66,6 +67,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   VALUE_MISMATCH: {
     what: 'the database stored a different value than the reducer produced',
     next: 'The write was rolled back. Make the reducer produce the value in the form the column stores',
+  },
+  IGNORED_FAILURE: {
+    what: 'a write or a child command returned a failure, and the command still returned a success',
+    next: 'Return that failure from the handler, or another one: `if (isFailure(result)) return result;`. A command that met a failure must end with one, so none of its writes commit',
   },
   BAD_DEFINITION: {
     what: 'a declaration is wrong',

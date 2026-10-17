@@ -15,7 +15,7 @@ import type { Failure } from '@arki/failure';
 import { defineFailure, isFailure } from '@arki/failure';
 
 import type { AccountId, OrderId } from './test-support.js';
-import { CommandConflict, CommandForbidden, CommandNotFound } from './errors.js';
+import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, isJournalError } from './errors.js';
 import {
   accountId,
   customerOrderCounts,
@@ -210,9 +210,9 @@ describe('a failure an events function returns', () => {
     expect(await profileOf(acc)).toEqual([]);
   });
 
-  it('rolls its own savepoint back, so a row it wrote through tx is gone even when the handler goes on', async () => {
+  it('rolls its own savepoint back, so a row it wrote through tx is gone, and the handler may answer with another refusal', async () => {
     // Why: `events` may read and write through its `tx`. A no from it must undo that work,
-    // as a throw would, whatever the handler then decides.
+    // as a throw would. The handler may turn it into its own refusal: the command fails either way.
     const id = orderId(++next);
     const customer = `refusing-${next}`;
     const tryNote = j.command('tryNote', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
@@ -220,14 +220,15 @@ describe('a failure an events function returns', () => {
         await tx.insert(customerOrderCounts).values({ customerId: customer, placed: 1 });
         return CommandConflict({ detail: 'Not now' });
       });
-      // The handler chooses to go on: it places the order instead.
       await write(order, input.orderId, () => [OrderPlaced({ customerId: 'fallback', total: 1 })]);
-      return isFailure(noted) ? 'fell back' : 'noted';
+      return isFailure(noted) ? CommandInvalid({ detail: 'Try a note later' }) : 'noted';
     });
 
-    expect(await journal.run(db, tryNote, { orderId: id }, meta)).toBe('fell back');
+    const result = await journal.run(db, tryNote, { orderId: id }, meta);
+
+    expect(result).toMatchObject({ code: 'journal.invalid', message: 'Try a note later' });
     expect(await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customer))).toEqual([]);
-    expect(await typesOf(id)).toEqual(['OrderPlaced']);
+    expect(await typesOf(id), 'the fallback write is undone with the rest').toEqual([]);
   });
 
   it('journal.write outside a command returns it and writes nothing', async () => {
@@ -314,37 +315,19 @@ describe('a failure and an idempotency key', () => {
   });
 });
 
+/** Places its own order, then runs `signUp` as a child. `returnChild` says whether it passes a refusal on. */
+const parent = j.command(
+  'parentOfSignUp',
+  ids.extend({ parentOrderId: orderIdSchema, returnChild: z.boolean() }),
+  async (input, { write, run }) => {
+    await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'parent', total: 1 })]);
+    const child = await run(signUp, { orderId: input.orderId, accountId: input.accountId, nick: 'taken' });
+    if (isFailure(child) && input.returnChild) return child;
+    return 'went on';
+  },
+);
+
 describe('a failure a child command returns', () => {
-  /** Places its own order, then runs `signUp` as a child. `returnChild` says whether it passes a refusal on. */
-  const parent = j.command(
-    'parentOfSignUp',
-    ids.extend({ parentOrderId: orderIdSchema, returnChild: z.boolean() }),
-    async (input, { write, run }) => {
-      await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'parent', total: 1 })]);
-      const child = await run(signUp, { orderId: input.orderId, accountId: input.accountId, nick: 'taken' });
-      if (isFailure(child) && input.returnChild) return child;
-      return 'went on';
-    },
-  );
-
-  it("rolls back the child's savepoint and hands the failure to the parent, which decides", async () => {
-    const parentId = orderId(++next);
-    const id = orderId(++next);
-    const acc = accountId(++next);
-
-    const result = await journal.run(
-      db,
-      parent,
-      { parentOrderId: parentId, orderId: id, accountId: acc, returnChild: false },
-      meta,
-    );
-
-    expect(result).toBe('went on');
-    expect(await rowsOf(parentId), "the parent's own write commits").toHaveLength(1);
-    expect(await profileOf(acc), "the child's writes do not").toEqual([]);
-    expect(await rowsOf(id)).toEqual([]);
-  });
-
   it('passed on by the parent, it rolls back the parent too', async () => {
     const parentId = orderId(++next);
     const id = orderId(++next);
@@ -360,5 +343,147 @@ describe('a failure a child command returns', () => {
     expect(CommandConflict.is(result)).toBe(true);
     expect(await rowsOf(parentId)).toEqual([]);
     expect(await profileOf(acc)).toEqual([]);
+  });
+});
+
+/** The `JournalError` a call rejects with. */
+async function misuseOf(call: Promise<unknown>) {
+  const error = await call.then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  if (!isJournalError(error)) throw new Error(`expected a JournalError, got ${String(error)}`);
+  return error;
+}
+
+describe('a command that ignores a failure it was handed', () => {
+  // Why: an ignored refusal must never commit the rest of the command. Once a write's `events`
+  // or a child command returned a failure, the command must end with a failure; a success is a
+  // missing `if (isFailure(x)) return x;`, so the run throws and nothing commits.
+  it('throws IGNORED_FAILURE when the handler goes on after a write said no, and commits nothing', async () => {
+    const id = orderId(++next);
+    const acc = accountId(++next);
+    const payAnyway = j.command('payAnyway', ids, async (input, { write }) => {
+      await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+      await write(order, input.orderId, row =>
+        row ? [OrderPaid({ amount: 1 })] : CommandNotFound({ detail: 'No order' }),
+      );
+      return 'paid';
+    });
+
+    const error = await misuseOf(journal.run(db, payAnyway, { orderId: id, accountId: acc }, meta));
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.kind).toBe('command');
+    expect(error.entityId).toBe('payAnyway');
+    expect(error.message, 'names the write and the code, so the missing check can be found').toContain(
+      `the write to order ${id} returned the failure "journal.not_found"`,
+    );
+    expect(await profileOf(acc), 'the write before the refusal does not commit').toEqual([]);
+  });
+
+  it("throws when the parent goes on after a child said no: the parent's own write is undone too", async () => {
+    const parentId = orderId(++next);
+    const id = orderId(++next);
+    const acc = accountId(++next);
+
+    const error = await misuseOf(
+      journal.run(db, parent, { parentOrderId: parentId, orderId: id, accountId: acc, returnChild: false }, meta),
+    );
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.message).toContain('the child command "signUp" returned the failure "journal.conflict"');
+    expect(await rowsOf(parentId)).toEqual([]);
+    expect(await profileOf(acc)).toEqual([]);
+    expect(await rowsOf(id)).toEqual([]);
+  });
+
+  it('a doomed child thrown from deep inside rolls back every level, like any throw', async () => {
+    const parentId = orderId(++next);
+    const id = orderId(++next);
+    const acc = accountId(++next);
+    const grandparentId = orderId(++next);
+    const grandparent = j.command(
+      'grandparentOfSignUp',
+      ids.extend({ parentOrderId: orderIdSchema, own: orderIdSchema }),
+      async (input, { write, run }) => {
+        await write(order, input.own, () => [OrderPlaced({ customerId: 'grandparent', total: 1 })]);
+        return run(parent, { ...input, returnChild: false });
+      },
+    );
+
+    const error = await misuseOf(
+      journal.run(db, grandparent, { own: grandparentId, parentOrderId: parentId, orderId: id, accountId: acc }, meta),
+    );
+
+    expect(error.entityId, 'the command that ignored it is named').toBe('parentOfSignUp');
+    expect(await rowsOf(grandparentId)).toEqual([]);
+    expect(await rowsOf(parentId)).toEqual([]);
+  });
+
+  it('a different refusal is fine: the command fails either way, and nothing commits', async () => {
+    const parentId = orderId(++next);
+    const acc = accountId(++next);
+    const translate = j.command(
+      'translateRefusal',
+      ids.extend({ parentOrderId: orderIdSchema }),
+      async (input, { write, run }) => {
+        await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'translator', total: 1 })]);
+        const child = await run(signUp, { orderId: input.orderId, accountId: input.accountId, nick: 'taken' });
+        return isFailure(child) ? CommandInvalid({ detail: 'Pick another nick' }) : child;
+      },
+    );
+
+    const result = await journal.run(
+      db,
+      translate,
+      { parentOrderId: parentId, orderId: orderId(++next), accountId: acc },
+      meta,
+    );
+
+    expect(CommandInvalid.is(result)).toBe(true);
+    expect(await rowsOf(parentId)).toEqual([]);
+  });
+});
+
+describe("an effect that ignores its command's failure", () => {
+  // Why: the job must not count as done when a command it ran said no. Each command rolled back on
+  // its own; what is left is the job's outcome. It ends dead after one try with that refusal, not
+  // thrown and retried, because a retry would run again the commands that did commit.
+  let effectDb: PgliteDatabase;
+  let effectClient: PGlite;
+  const refuse = j.command('alwaysRefuse', z.object({}), () => CommandConflict({ detail: 'No' }));
+  const ignores = j.effect('relay-ignores', order, {
+    OrderNoted: async (_event, { run }) => {
+      await run(refuse, {}, meta);
+    },
+  });
+  const passes = j.effect('relay-passes', order, {
+    OrderNoted: async (event, { run }) => {
+      await run(placeOrder, { orderId: `${event.entityId}_copy` }, meta);
+    },
+  });
+  const relays = j.compose({ tables, effects: [ignores, passes] });
+
+  beforeAll(async () => {
+    ({ db: effectDb, client: effectClient } = await openDb());
+  });
+
+  afterAll(async () => {
+    await effectClient.close();
+  });
+
+  it('fails the job with the refusal, while an effect whose commands succeeded is done', async () => {
+    const id = orderId(++next);
+    await relays.run(effectDb, placeOrder, { orderId: id }, meta);
+    await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] });
+
+    await relays.drain(effectDb);
+
+    const dead = await relays.jobs(effectDb, { status: 'dead' });
+    expect(dead.map(job => job.effect)).toEqual(['relay-ignores']);
+    expect(dead[0]?.attempts, 'dead after one try, not retried').toBe(1);
+    expect(dead[0]?.lastError).toContain('journal.conflict');
+    expect(await relays.jobs(effectDb, { effect: 'relay-passes' }), 'the other job is done').toEqual([]);
   });
 });
