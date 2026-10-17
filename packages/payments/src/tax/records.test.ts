@@ -97,7 +97,7 @@ describe('getCustomerTaxSummary', () => {
   });
 
   it('adds up what each jurisdiction collected, less what it gave back, per currency', async () => {
-    await service.createTaxTransaction({
+    await orThrow(service.createTaxTransaction({
       reference: 'pay_1',
       type: 'sale',
       customerId,
@@ -105,8 +105,8 @@ describe('getCustomerTaxSummary', () => {
       currency: 'EUR',
       breakdown: [germany, berlin],
       occurredAt: instant('2031-03-10T12:00:00Z'),
-    });
-    await service.createTaxTransaction({
+    }));
+    await orThrow(service.createTaxTransaction({
       reference: 'pay_2',
       type: 'sale',
       customerId,
@@ -114,8 +114,8 @@ describe('getCustomerTaxSummary', () => {
       currency: 'EUR',
       breakdown: [germany, { ...germany, amount: money('4', 'EUR') }],
       occurredAt: instant('2031-11-02T12:00:00Z'),
-    });
-    await service.createTaxTransaction({
+    }));
+    await orThrow(service.createTaxTransaction({
       reference: 'refund_1',
       type: 'refund',
       customerId,
@@ -124,13 +124,13 @@ describe('getCustomerTaxSummary', () => {
       breakdown: [{ ...germany, amount: money('5', 'EUR') }],
       originalReference: 'pay_1',
       occurredAt: instant('2031-12-01T12:00:00Z'),
-    });
+    }));
     expect(requests.at(-1)).toMatchObject({
       path: '/v1/tax/transactions/create_reversal',
       form: { original_transaction: 'tax_txn_pay_1', reference: 'refund_1' },
     });
     // Another year and another customer must not leak in
-    await service.createTaxTransaction({
+    await orThrow(service.createTaxTransaction({
       reference: 'pay_old',
       type: 'sale',
       customerId,
@@ -138,8 +138,8 @@ describe('getCustomerTaxSummary', () => {
       currency: 'EUR',
       breakdown: [germany],
       occurredAt: instant('2030-12-31T23:59:59Z'),
-    });
-    await service.createTaxTransaction({
+    }));
+    await orThrow(service.createTaxTransaction({
       reference: 'pay_other',
       type: 'sale',
       customerId: otherCustomer,
@@ -147,7 +147,7 @@ describe('getCustomerTaxSummary', () => {
       currency: 'EUR',
       breakdown: [germany],
       occurredAt: instant('2031-03-10T12:00:00Z'),
-    });
+    }));
 
     const summary = await service.getCustomerTaxSummary({ customerId, year: 2031 });
 

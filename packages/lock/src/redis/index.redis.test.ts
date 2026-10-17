@@ -428,11 +428,17 @@ describe('redis semaphore and read/write: review proofs', () => {
     const semaphoreWait = locks
       .semaphore(name, { limit: 1 })
       .run(() => 0, { wait: '1500ms' })
-      .catch(() => 'timed out');
+      .then(
+        () => 'settled',
+        () => 'settled',
+      );
     const mutexWait = locks
       .mutex(name)
       .run(() => 0, { wait: '1500ms' })
-      .catch(() => 'timed out');
+      .then(
+        () => 'settled',
+        () => 'settled',
+      );
     await Promise.all([semaphoreWait, mutexWait]);
     await holder.release();
     await mutexHolder.release();
@@ -546,14 +552,16 @@ describe('redis semaphore and read/write: attacks that held', () => {
     let maxUsed = 0;
     await Promise.all(
       Array.from({ length: 16 }, (_, i) =>
-        locks.semaphore(sem, { limit: 3 }).run(
-          async () => {
-            used += 1 + (i % 2);
-            maxUsed = Math.max(maxUsed, used);
-            await sleep(15);
-            used -= 1 + (i % 2);
-          },
-          { wait: '10s', weight: 1 + (i % 2) },
+        orThrow(
+          locks.semaphore(sem, { limit: 3 }).run(
+            async () => {
+              used += 1 + (i % 2);
+              maxUsed = Math.max(maxUsed, used);
+              await sleep(15);
+              used -= 1 + (i % 2);
+            },
+            { wait: '10s', weight: 1 + (i % 2) },
+          ),
         ),
       ),
     );
@@ -565,16 +573,18 @@ describe('redis semaphore and read/write: attacks that held', () => {
     let overlap = false;
     await Promise.all(
       Array.from({ length: 16 }, (_, i) =>
-        (i % 4 === 0 ? write : read).run(
-          async () => {
-            if (i % 4 === 0) writers++;
-            else readers++;
-            if (writers > 1 || (writers > 0 && readers > 0)) overlap = true;
-            await sleep(10);
-            if (i % 4 === 0) writers--;
-            else readers--;
-          },
-          { wait: '10s' },
+        orThrow(
+          (i % 4 === 0 ? write : read).run(
+            async () => {
+              if (i % 4 === 0) writers++;
+              else readers++;
+              if (writers > 1 || (writers > 0 && readers > 0)) overlap = true;
+              await sleep(10);
+              if (i % 4 === 0) writers--;
+              else readers--;
+            },
+            { wait: '10s' },
+          ),
         ),
       ),
     );

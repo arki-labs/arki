@@ -6,6 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { MailEvent, MailMessage, MailTransport } from './types.js';
 import { MAIL_ERROR_CODES, MailError } from './errors.js';
 import { MailInvalidInput, MailQuotaExhausted, MailUncertain } from './failures.js';
@@ -42,9 +44,9 @@ describe('sender', () => {
   it('uses the call, then the template default, then the mailer default', async () => {
     const { transport, sent } = recording();
     const mail = mailer({ transport, from: 'App <hi@app.dev>' });
-    await mail.send(note, { body: 'x' }, { to: 'ada@example.com' });
-    await mail.send(receipt, { total: '5 EUR' }, { to: 'ada@example.com' });
-    await mail.send(receipt, { total: '5 EUR' }, { to: 'ada@example.com', from: 'Ops <ops@app.dev>' });
+    await orThrow(mail.send(note, { body: 'x' }, { to: 'ada@example.com' }));
+    await orThrow(mail.send(receipt, { total: '5 EUR' }, { to: 'ada@example.com' }));
+    await orThrow(mail.send(receipt, { total: '5 EUR' }, { to: 'ada@example.com', from: 'Ops <ops@app.dev>' }));
     expect(sent.map(message => message.from)).toEqual([
       'App <hi@app.dev>',
       'Billing <billing@app.dev>',
@@ -98,7 +100,7 @@ describe('an unsent mail is a returned failure; misuse throws', () => {
     const events: MailEvent[] = [];
     const transport: MailTransport = { id: 'flaky', send: () => Promise.reject(new Error('socket hang up')) };
     const mail = mailer({ transport, from: 'hi@app.dev', onEvent: event => void events.push(event) });
-    await mail.sendRaw({ to: 'a@b.c', subject: 's', text: 't' });
+    expect(MailUncertain.is(await mail.sendRaw({ to: 'a@b.c', subject: 's', text: 't' }))).toBe(true);
     const failed = events.find(event => event.type === 'failed');
     expect(failed?.type === 'failed' && MailUncertain.is(failed.failure)).toBe(true);
   });
@@ -112,7 +114,7 @@ describe('events', () => {
       from: 'hi@app.dev',
       onEvent: event => void events.push(event),
     });
-    await mail.send(note, { body: 'x' }, { to: 'ada@example.com' });
+    await orThrow(mail.send(note, { body: 'x' }, { to: 'ada@example.com' }));
     expect(events.map(event => [event.type, event.template])).toEqual([
       ['sending', 'note'],
       ['sent', 'note'],
@@ -150,7 +152,7 @@ describe('local and staging safety', () => {
   it('redirectTo sends every mail to the staging inbox only', async () => {
     const { transport, sent } = recording();
     const mail = mailer({ transport, from: 'hi@app.dev', redirectTo: 'staging@app.dev' });
-    await mail.send(note, { body: 'x' }, { to: 'customer@example.com', cc: 'boss@example.com' });
+    await orThrow(mail.send(note, { body: 'x' }, { to: 'customer@example.com', cc: 'boss@example.com' }));
     expect(sent[0]).toMatchObject({ to: 'staging@app.dev', headers: { 'X-Original-To': 'customer@example.com' } });
     expect(sent[0]?.cc).toBeUndefined();
   });

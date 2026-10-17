@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -81,8 +82,8 @@ describe('mailOutboxPlugin() and mailJobs()', () => {
       .use(mail({ transport, from: 'hi@app.dev' }))
       .use(mailOutboxPlugin({ tables }))
       .boot();
-    await db.transaction(tx =>
-      app.services.mailOutbox.enqueue(tx, welcome, { name: 'Ada' }, { to: 'ada@example.com' }),
+    await orThrow(
+      db.transaction(tx => app.services.mailOutbox.enqueue(tx, welcome, { name: 'Ada' }, { to: 'ada@example.com' })),
     );
     const runner = await mailJobs().build([], { mailOutbox: app.services.mailOutbox, db });
     while ((await journal.drain(db, { jobs: runner })) > 0);

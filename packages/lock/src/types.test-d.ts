@@ -1,3 +1,4 @@
+/* eslint-disable failure/must-use -- type tests: these calls only check what compiles; they never run, so there is no result to handle */
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { fileStore } from './file/index.js';

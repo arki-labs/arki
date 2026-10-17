@@ -65,9 +65,9 @@ describe('AnthropicService — conversation', () => {
       } as Awaited<ReturnType<typeof generateText>>);
 
       const svc = new AnthropicService();
-      await svc.generateConversation([{ role: 'user', content: 'hi' }], {
+      await orThrow(svc.generateConversation([{ role: 'user', content: 'hi' }], {
         systemPrompt: 'Deflect any identity questions.',
-      });
+      }));
 
       expect(mockedGenerateText).toHaveBeenCalledWith(
         expect.objectContaining({ instructions: 'Deflect any identity questions.' }),
@@ -80,9 +80,9 @@ describe('AnthropicService — conversation', () => {
       } as Awaited<ReturnType<typeof generateText>>);
 
       const svc = new AnthropicService();
-      await svc.generateConversation([{ role: 'user', content: 'hi' }], {
+      await orThrow(svc.generateConversation([{ role: 'user', content: 'hi' }], {
         systemPrompt: [{ text: 'big stable prompt', cacheControl: { type: 'ephemeral' } }],
-      });
+      }));
 
       const call = mockedGenerateText.mock.calls[0]?.[0] as { instructions: unknown[] };
       expect(call.instructions).toEqual([
@@ -101,7 +101,7 @@ describe('AnthropicService — conversation', () => {
 
       const executeSpy = vi.spyOn(rateLimiters.anthropic, 'execute');
       const svc = new AnthropicService();
-      await svc.generateConversation([{ role: 'user', content: 'hi' }]);
+      await orThrow(svc.generateConversation([{ role: 'user', content: 'hi' }]));
 
       expect(executeSpy).toHaveBeenCalledWith('generateConversation', expect.any(Function));
     });

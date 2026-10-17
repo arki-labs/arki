@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { MailMessage, MailTransport } from '../types.js';
 import { MAIL_ERROR_CODES } from '../errors.js';
@@ -115,14 +115,14 @@ export function transportContract(harness: TransportHarness): void {
 
     it.runIf(harness.lastIdempotencyKey !== undefined)('forwards the idempotency key to the service', async () => {
       harness.succeed();
-      await harness.create().send(message, { idempotencyKey: 'job_123' });
+      await orThrow(harness.create().send(message, { idempotencyKey: 'job_123' }));
       expect(harness.lastIdempotencyKey?.()).toBe('job_123');
     });
 
     it('passes the abort signal to the request', async () => {
       harness.succeed();
       const controller = new AbortController();
-      await harness.create().send(message, { signal: controller.signal });
+      await orThrow(harness.create().send(message, { signal: controller.signal }));
       expect(harness.lastSignal()).toBe(controller.signal);
     });
   });

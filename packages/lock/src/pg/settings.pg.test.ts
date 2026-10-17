@@ -120,7 +120,7 @@ describe('release latency of a short hold', () => {
     const locks = createLocks({ store: pgSession(drizzle({ client: newPool() })), namespace: 'rv' });
     const handle = locks.mutex('latency');
     // Warm the pool.
-    await handle.tryRun(() => 'warm');
+    await orThrow(handle.tryRun(() => 'warm'));
     const times: number[] = [];
     for (let index = 0; index < 10; index++) {
       const guard = await orThrow(handle.acquire({ wait: '1s' }));

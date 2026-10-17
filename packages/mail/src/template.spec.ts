@@ -26,9 +26,9 @@ describe('types flow from the schema', () => {
   it('callers pass the schema input; renderers get its output with defaults applied', async () => {
     expectTypeOf(welcome.name).toEqualTypeOf<'welcome'>();
     // @ts-expect-error -- `name` is required
-    await renderTemplate(welcome, { trialDays: 3 });
+    expect(MailInvalidInput.is(await renderTemplate(welcome, { trialDays: 3 }))).toBe(true);
     // @ts-expect-error -- `trialDays` must be a number
-    await renderTemplate(welcome, { name: 'Ada', trialDays: '3' });
+    expect(MailInvalidInput.is(await renderTemplate(welcome, { name: 'Ada', trialDays: '3' }))).toBe(true);
 
     const rendered = await renderTemplate(welcome, { name: 'Ada' });
     expect(rendered).toEqual({

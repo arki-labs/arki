@@ -46,14 +46,14 @@ beforeEach(() => {
 describe('ses', () => {
   it('builds the SDK client with retries off (maxAttempts: 1)', async () => {
     sdk.send.mockResolvedValue({ MessageId: 'ses-1' });
-    await ses({ region: 'eu-west-1' }).send(message, {});
+    await orThrow(ses({ region: 'eu-west-1' }).send(message, {}));
     expect(sdk.configs).toEqual([{ region: 'eu-west-1', maxAttempts: 1 }]);
   });
 
   it("forwards the caller's signal to the SDK as abortSignal", async () => {
     sdk.send.mockResolvedValue({ MessageId: 'ses-1' });
     const controller = new AbortController();
-    await ses({ region: 'eu-west-1' }).send(message, { signal: controller.signal });
+    await orThrow(ses({ region: 'eu-west-1' }).send(message, { signal: controller.signal }));
     expect(sdk.send.mock.calls[0]?.[1]).toEqual({ abortSignal: controller.signal });
   });
 

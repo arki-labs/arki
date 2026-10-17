@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Result } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { QuotaStore } from './quota-store.js';
 import type { MailMessage, MailTransport, SentMail, TransportFailure } from './types.js';
@@ -52,8 +53,8 @@ describe('quota', () => {
     const store = inMemoryQuotaStore();
     const resend = scripted('resend', accepted, 2);
     const chain = failover([resend.transport], { store, now });
-    await chain.send(message, {});
-    await chain.send(message, {});
+    await orThrow(chain.send(message, {}));
+    await orThrow(chain.send(message, {}));
     expect(await store.getSent('resend', '2026-10')).toBe(2);
     expect(await store.getSent('resend', '2026-11')).toBe(0);
   });
@@ -71,7 +72,7 @@ describe('quota', () => {
   it('a failed send does not use up quota', async () => {
     const store = inMemoryQuotaStore();
     const resend = scripted('resend', badAddress, 5);
-    await failover([resend.transport], { store, now }).send(message, {});
+    expect(isFailure(await failover([resend.transport], { store, now }).send(message, {}))).toBe(true);
     expect(await store.getSent('resend', '2026-10')).toBe(0);
   });
 

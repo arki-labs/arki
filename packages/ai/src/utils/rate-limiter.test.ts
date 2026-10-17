@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { RateLimited } from '../failures';
 import { createRateLimitedFunction, RateLimiter } from './rate-limiter';
@@ -17,7 +17,7 @@ describe('RateLimiter.execute', () => {
 
   test('returns RateLimited for a full window, so the caller can wait retryAfterMs instead of catching', async () => {
     const limiter = new RateLimiter(config);
-    await limiter.execute('key', () => Promise.resolve('first'));
+    await orThrow(limiter.execute('key', () => Promise.resolve('first')));
     const fn = vi.fn(() => Promise.resolve('second'));
 
     const result = await limiter.execute('key', fn);

@@ -416,6 +416,7 @@ const arkiAdvisoryTry = (): Impl => {
   const locks = createLocks({ store: pgSession(db), namespace: 'bench' });
   return pgImpl(
     async (name, section) => {
+      // eslint-disable-next-line failure/must-use -- contended tryRun returns LockHeld; that outcome is what this bench measures
       await locks.mutex(name).tryRun(section);
     },
     { mayskip: true, dispose: () => locks.store.dispose?.() ?? Promise.resolve() },
@@ -491,6 +492,7 @@ const arkiXact = (): Impl =>
   pgImpl(async (name, section) => {
     await db.transaction(async tx => {
       const locks = createLocks({ store: pgTransaction(tx), namespace: 'bench' });
+      // eslint-disable-next-line failure/must-use -- wrapping would add work inside the timed loop
       await locks.mutex(name).run(section, { wait: WAIT });
     });
   });

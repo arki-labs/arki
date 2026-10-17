@@ -3,7 +3,7 @@
 // for reasons that have nothing to do with the app.
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { SentRecord } from './testing.js';
 import { MailUncertain } from './failures.js';
@@ -34,8 +34,8 @@ describe('mailSink', () => {
 
   it('sentWith returns only that template, typed by its name', async () => {
     const { sink, mail } = setup();
-    await mail.send(magicLink, { appName: 'Notes', url }, { to: 'ada@example.com' });
-    await mail.send(signInCode, { appName: 'Notes', code: '123456' }, { to: 'ada@example.com' });
+    await orThrow(mail.send(magicLink, { appName: 'Notes', url }, { to: 'ada@example.com' }));
+    await orThrow(mail.send(signInCode, { appName: 'Notes', code: '123456' }, { to: 'ada@example.com' }));
     const links = sink.sentWith(magicLink);
     expect(links.map(record => record.template)).toEqual(['auth.magic-link']);
     expectTypeOf(links).toEqualTypeOf<readonly SentRecord<'auth.magic-link'>[]>();
@@ -43,9 +43,9 @@ describe('mailSink', () => {
 
   it('sentTo matches the mailbox in To, Cc or Bcc, ignoring display name and case', async () => {
     const { sink, mail } = setup();
-    await mail.sendRaw({ to: 'Ada <Ada@Example.com>', subject: 'a', text: 'a' });
-    await mail.sendRaw({ to: 'bob@example.com', bcc: 'ada@example.com', subject: 'b', text: 'b' });
-    await mail.sendRaw({ to: 'bob@example.com', subject: 'c', text: 'c' });
+    await orThrow(mail.sendRaw({ to: 'Ada <Ada@Example.com>', subject: 'a', text: 'a' }));
+    await orThrow(mail.sendRaw({ to: 'bob@example.com', bcc: 'ada@example.com', subject: 'b', text: 'b' }));
+    await orThrow(mail.sendRaw({ to: 'bob@example.com', subject: 'c', text: 'c' }));
     expect(sink.sentTo('ada@example.com').map(record => record.message.subject)).toEqual(['a', 'b']);
   });
 
@@ -61,7 +61,7 @@ describe('mailSink', () => {
 
   it('clear forgets mails and a pending failure', async () => {
     const { sink, mail } = setup();
-    await mail.sendRaw({ to: 'ada@example.com', subject: 'a', text: 'a' });
+    await orThrow(mail.sendRaw({ to: 'ada@example.com', subject: 'a', text: 'a' }));
     sink.failNext();
     sink.clear();
     const sent = await mail.sendRaw({ to: 'ada@example.com', subject: 'b', text: 'b' });

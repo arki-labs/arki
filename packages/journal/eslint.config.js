@@ -1,4 +1,5 @@
 import { library, portableImportPatterns } from '@arki/eslint-config/library';
+import failure from '@arki/failure/eslint';
 
 const dotOnlyInBridge = {
   group: ['@arki/dot', '@arki/dot/*'],
@@ -12,6 +13,8 @@ const orpcOnlyInAdapter = {
 // `src/dot.ts`, `src/orpc.ts` and `src/foreman/` are the adapters; `src/test-support.ts` is test scaffolding.
 export default [
   ...library({ adapters: ['src/dot.ts', 'src/orpc.ts', 'src/foreman/*.ts', 'src/test-support.ts'] }),
+  // `failure/must-use` and `failure/no-blind-accept`: a returned failure is never thrown away or accepted unchecked.
+  failure.configs.recommended,
   {
     // The core may not import the optional peers (features live in `@arki/dot/feature`).
     files: ['src/**/*.ts'],

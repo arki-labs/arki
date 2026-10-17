@@ -153,13 +153,15 @@ describe('createTaxTransaction', () => {
       body: transaction('tax_txn_r', 'usd', [{ amount: -500, amount_tax: -100, tax_behavior: 'exclusive' }]),
     }));
 
-    await stripe.createTaxTransaction({
-      reference: 'refund_7',
-      type: 'refund',
-      currency: 'USD',
-      originalTransactionId: 'tax_txn_1',
-      lineItems: [{ amount: money('6.00', 'USD'), reference: 'plan' }],
-    });
+    await orThrow(
+      stripe.createTaxTransaction({
+        reference: 'refund_7',
+        type: 'refund',
+        currency: 'USD',
+        originalTransactionId: 'tax_txn_1',
+        lineItems: [{ amount: money('6.00', 'USD'), reference: 'plan' }],
+      }),
+    );
 
     expect(requests[0]?.form).toMatchObject({ mode: 'partial', flat_amount: '-600' });
   });

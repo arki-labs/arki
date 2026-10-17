@@ -11,6 +11,7 @@ import { z } from 'zod';
 
 import type { Result } from '@arki/failure';
 import type { JobRunner } from '@arki/journal';
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -98,7 +99,7 @@ describe('the mail commits with the write', () => {
     const outbox = outboxWith(transport);
     await expect(
       db.transaction(async tx => {
-        await outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to });
+        await orThrow(outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
         throw new Error('sign-up failed');
       }),
     ).rejects.toThrow('sign-up failed');
@@ -110,7 +111,7 @@ describe('the mail commits with the write', () => {
   it('a committed mail is sent once by the worker and its row is gone', async () => {
     const { transport, calls } = provider('ok');
     const outbox = outboxWith(transport);
-    await db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
+    await orThrow(db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to })));
     expect(await queue().queued(magicLink)).toMatchObject([{ to, subject: 'Your sign-in link' }]);
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(1);

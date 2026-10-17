@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
 import type { AccountId, OrderId } from './test-support.js';
 import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, isJournalError } from './errors.js';
@@ -365,6 +365,7 @@ describe('a command that ignores a failure it was handed', () => {
     const acc = accountId(++next);
     const payAnyway = j.command('payAnyway', ids, async (input, { write }) => {
       await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+      // eslint-disable-next-line failure/must-use -- the test proves an ignored write refusal dooms the command
       await write(order, input.orderId, row =>
         row ? [OrderPaid({ amount: 1 })] : CommandNotFound({ detail: 'No order' }),
       );
@@ -455,6 +456,7 @@ describe("an effect that ignores its command's failure", () => {
   const refuse = j.command('alwaysRefuse', z.object({}), () => CommandConflict({ detail: 'No' }));
   const ignores = j.effect('relay-ignores', order, {
     OrderNoted: async (_event, { run }) => {
+      // eslint-disable-next-line failure/must-use -- ignored on purpose: the test proves the job then ends dead
       await run(refuse, {}, meta);
     },
   });
@@ -615,7 +617,7 @@ describe('a refusal the command accepts', () => {
     const id = orderId(++next);
     const acc = accountId(++next);
     await journal.run(db, placeOrder, { orderId: id }, meta);
-    await journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta);
+    await orThrow(journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta));
     const ensurePaid = j.command('ensurePaid', ids, async (input, { write, accept }) => {
       await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
       const paid = await write(order, input.orderId, row => {
@@ -655,6 +657,7 @@ describe('a refusal the command accepts', () => {
   it('accepting one of two refusals still throws IGNORED_FAILURE, naming the other', async () => {
     const a = orderId(++next);
     const b = orderId(++next);
+    // eslint-disable-next-line failure/no-blind-accept -- accept() itself is under test; twoRefusals fixes the kind
     const acceptsFirst = twoRefusals('acceptsFirst', (first, _second, accept) => accept(first));
 
     const error = await misuseOf(journal.run(db, acceptsFirst, { a, b }, meta));
@@ -664,9 +667,12 @@ describe('a refusal the command accepts', () => {
   });
 
   it('identity decides, not the code: two refusals with the same code need two accepts', async () => {
+    // eslint-disable-next-line failure/no-blind-accept -- accept() itself is under test; twoRefusals fixes the kind
     const acceptsSecond = twoRefusals('acceptsSecond', (_first, second, accept) => accept(second));
     const acceptsBoth = twoRefusals('acceptsBoth', (first, second, accept) => {
+      // eslint-disable-next-line failure/no-blind-accept -- accept() itself is under test; twoRefusals fixes the kind
       accept(first);
+      // eslint-disable-next-line failure/no-blind-accept -- accept() itself is under test; twoRefusals fixes the kind
       accept(second);
     });
 
@@ -686,6 +692,7 @@ describe('a refusal the command accepts', () => {
       z.object({ a: orderIdSchema, b: orderIdSchema, accepts: z.int() }),
       async (input, { write, accept }) => {
         const first = await write(order, input.a, () => soldOut);
+        // eslint-disable-next-line failure/must-use -- the same refusal again; ignoring it is the point of the test
         await write(order, input.b, () => soldOut);
         if (isFailure(first)) for (let n = 0; n < input.accepts; n += 1) accept(first);
         return 'went on';
@@ -721,6 +728,7 @@ describe('a refusal the command accepts', () => {
     ).toContain(notReceived);
     expect(await invalidAccept('acceptsHelperMade', (_r, accept) => accept(helperRefusal()))).toContain(notReceived);
     // A spread copy loses the failure brand, so it is not even a failure; the type allows it, the run does not.
+    // eslint-disable-next-line failure/no-blind-accept -- a spread copy is not a failure; accepting it is the misuse
     expect(await invalidAccept('acceptsClone', (received, accept) => accept({ ...received }))).toContain(
       'accept() expects an @arki/failure value',
     );
@@ -733,7 +741,9 @@ describe('a refusal the command accepts', () => {
 
   it('accepting the same return twice throws "already accepted": a repeat is a copy-paste bug', async () => {
     const message = await invalidAccept('acceptsTwice', (received, accept) => {
+      // eslint-disable-next-line failure/no-blind-accept -- accepting one refusal twice is the misuse under test
       accept(received);
+      // eslint-disable-next-line failure/no-blind-accept -- accepting one refusal twice is the misuse under test
       accept(received);
     });
 
@@ -779,6 +789,7 @@ describe('a refusal the command accepts', () => {
       });
       if (!OutOfStock.is(stock)) return stock;
       accept(stock);
+      // eslint-disable-next-line failure/must-use -- ignored on purpose: an ignored fallback refusal dooms the command
       await run(placeBackorder, { backorderId: args.backorderId, sku: args.sku, qty: 1 });
       return 'backordered';
     });
@@ -848,6 +859,7 @@ describe('a refusal the command accepts', () => {
     const theirs: Failure[] = [];
     const meddles = j.command('meddlingChild', z.object({}), (_input, { accept }) => {
       const failure = theirs.at(-1);
+      // eslint-disable-next-line failure/no-blind-accept -- accepting a parent's refusal is the misuse under test
       if (failure !== undefined) accept(failure);
       return 'meddled';
     });
@@ -947,6 +959,7 @@ describe('a refusal the effect accepts', () => {
   });
   const forgets = j.effect('relay-forgets', order, {
     OrderNoted: async (_event, { run }) => {
+      // eslint-disable-next-line failure/must-use -- forgotten on purpose: the test proves the job then ends dead
       await run(refuse, {}, meta);
     },
   });

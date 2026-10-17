@@ -227,7 +227,7 @@ describe('customers', () => {
   it('deleteCustomer deletes the Stripe customer', async () => {
     const { stripe, requests } = provider(() => ({ body: { id: 'cus_alice', object: 'customer', deleted: true } }));
 
-    await stripe.deleteCustomer(customer.id);
+    await orThrow(stripe.deleteCustomer(customer.id));
 
     expect(requests[0]).toMatchObject({ method: 'DELETE', path: '/v1/customers/cus_alice' });
   });
@@ -322,7 +322,7 @@ describe('plans', () => {
         : { body: stripePrice({ product: 'prod_pro', active: false }) },
     );
 
-    await stripe.deletePlan(planId);
+    await orThrow(stripe.deletePlan(planId));
 
     expect(requests).toMatchObject([
       { method: 'POST', path: '/v1/prices/price_pro', form: { active: 'false' } },
@@ -606,7 +606,7 @@ describe('payment methods', () => {
   it("setDefaultPaymentMethod sets the customer's invoice default", async () => {
     const { stripe, requests } = provider(() => ({ body: stripeCustomer() }));
 
-    await stripe.setDefaultPaymentMethod({ customerId: customer.id, paymentMethodId: 'pm_9' });
+    await orThrow(stripe.setDefaultPaymentMethod({ customerId: customer.id, paymentMethodId: 'pm_9' }));
 
     expect(requests[0]).toMatchObject({
       method: 'POST',

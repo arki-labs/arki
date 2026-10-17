@@ -38,7 +38,7 @@ const envelope = (result: unknown) => ({ success: true, errors: [], messages: []
 describe('cloudflare request', () => {
   it('POSTs to the account endpoint with Bearer auth, one reply_to and the headers', async () => {
     const { transport, calls } = answeredWith(200, envelope({ delivered: ['a@example.com', 'b@example.com'] }));
-    await transport.send(message, {});
+    await orThrow(transport.send(message, {}));
     const call = calls[0];
     expect(call?.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct-123/email/sending/send');
     expect(new Headers(call?.init?.headers).get('Authorization')).toBe('Bearer token-abc');

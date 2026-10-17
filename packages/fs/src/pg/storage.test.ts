@@ -353,7 +353,7 @@ describe('access', () => {
   it('denies another owner with the same failure as a missing file (FileUnavailable)', async () => {
     const env = setup();
     const ticket = await upload(env);
-    await env.storage.confirmUpload(alice, ticket.fileId);
+    await orThrow(env.storage.confirmUpload(alice, ticket.fileId));
     for (const call of [
       env.storage.confirmUpload(bob, ticket.fileId),
       env.storage.get(bob, ticket.fileId),
@@ -371,7 +371,7 @@ describe('access', () => {
   it('lets a policy widen reads', async () => {
     const env = setup({ policy: { canRead: () => true } });
     const ticket = await upload(env);
-    await env.storage.confirmUpload(alice, ticket.fileId);
+    await orThrow(env.storage.confirmUpload(alice, ticket.fileId));
     expect(await env.storage.get(bob, ticket.fileId)).toHaveProperty('ownerId', alice);
   });
 
@@ -400,7 +400,7 @@ describe('url', () => {
   it('rejects a TTL over the cap instead of clamping it (ARKI_FS_E001)', async () => {
     const env = setup({ maxUrlTtlSeconds: 600 });
     const ticket = await upload(env);
-    await env.storage.confirmUpload(alice, ticket.fileId);
+    await orThrow(env.storage.confirmUpload(alice, ticket.fileId));
     expect(await codeOf(env.storage.url(alice, ticket.fileId, { expiresIn: 601 }))).toBe(FILE_ERROR_CODES.invalid);
     expect(await codeOf(env.storage.url(alice, ticket.fileId, { filename: 'a"b' }))).toBe(FILE_ERROR_CODES.invalid);
     const { url } = orThrow(await env.storage.url(alice, ticket.fileId, { expiresIn: 600 }));
@@ -429,7 +429,7 @@ describe('remove', () => {
   it('is scheduled when the object delete fails; the sweep finishes it', async () => {
     const env = setup();
     const ticket = await upload(env);
-    await env.storage.confirmUpload(alice, ticket.fileId);
+    await orThrow(env.storage.confirmUpload(alice, ticket.fileId));
     const failing = fileStorage(
       db,
       { ...env.adapter, delete: () => Promise.reject(new Error('store down')) },
@@ -464,7 +464,7 @@ describe('cleanupOrphans', () => {
   it('leaves ready rows and fresh pending rows alone', async () => {
     const env = setup();
     const ready = await upload(env);
-    await env.storage.confirmUpload(alice, ready.fileId);
+    await orThrow(env.storage.confirmUpload(alice, ready.fileId));
     const fresh = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 }));
     await env.storage.cleanupOrphans({ batch: 1000 });
     expect(await row(ready.fileId)).toHaveProperty('status', 'ready');

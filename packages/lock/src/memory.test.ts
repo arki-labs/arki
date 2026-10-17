@@ -24,11 +24,13 @@ describe('memoryStore', () => {
     const holder = await orThrow(locks.mutex('job').acquire());
     const order: string[] = [];
     const waiters = ['a', 'b', 'c'].map(async name => {
-      await locks.mutex('job').run(
-        () => {
-          order.push(name);
-        },
-        { wait: '5s' },
+      await orThrow(
+        locks.mutex('job').run(
+          () => {
+            order.push(name);
+          },
+          { wait: '5s' },
+        ),
       );
     });
     // Let all three reach their wait before the holder lets go.
@@ -123,11 +125,13 @@ describe('memoryStore semaphore', () => {
     const holder = await orThrow(pool.acquire());
     const order: string[] = [];
     const waiters = ['a', 'b', 'c'].map(name =>
-      pool.run(
-        () => {
-          order.push(name);
-        },
-        { wait: '5s' },
+      orThrow(
+        pool.run(
+          () => {
+            order.push(name);
+          },
+          { wait: '5s' },
+        ),
       ),
     );
     await sleep(20);
@@ -143,7 +147,7 @@ describe('memoryStore semaphore', () => {
     const ran: string[] = [];
     const heavy = pool.run(() => void ran.push('heavy'), { wait: '5s', weight: 2 });
     await sleep(10);
-    await pool.run(() => void ran.push('light'), { wait: '5s', weight: 1 });
+    await orThrow(pool.run(() => void ran.push('light'), { wait: '5s', weight: 1 }));
     expect(ran).toEqual(['light']);
     await holder.release();
     await heavy;
@@ -239,14 +243,16 @@ describe('memoryStore read/write', () => {
     let maxActive = 0;
     await Promise.all(
       Array.from({ length: 20 }, () =>
-        write.run(
-          async () => {
-            active += 1;
-            maxActive = Math.max(maxActive, active);
-            await sleep(1);
-            active -= 1;
-          },
-          { wait: '10s' },
+        orThrow(
+          write.run(
+            async () => {
+              active += 1;
+              maxActive = Math.max(maxActive, active);
+              await sleep(1);
+              active -= 1;
+            },
+            { wait: '10s' },
+          ),
         ),
       ),
     );
@@ -399,9 +405,11 @@ describe('memoryStore hand-off', () => {
     const callers = 1000;
     await Promise.all(
       Array.from({ length: callers }, () =>
-        locks.mutex('job').run(async () => {
-          await Promise.resolve();
-        }),
+        orThrow(
+          locks.mutex('job').run(async () => {
+            await Promise.resolve();
+          }),
+        ),
       ),
     );
     // One refused attempt, then the one that takes the handed-over lock. Waking everyone would be ~n²/2.
@@ -413,10 +421,12 @@ describe('memoryStore hand-off', () => {
     const order: number[] = [];
     await Promise.all(
       Array.from({ length: 1000 }, (_, index) =>
-        locks.mutex('job').run(async () => {
-          order.push(index);
-          await Promise.resolve();
-        }),
+        orThrow(
+          locks.mutex('job').run(async () => {
+            order.push(index);
+            await Promise.resolve();
+          }),
+        ),
       ),
     );
     expect(order).toEqual(Array.from({ length: 1000 }, (_, index) => index));
@@ -524,12 +534,14 @@ describe('memoryStore hand-off', () => {
     let most = 0;
     await Promise.all(
       Array.from({ length: tasks }, () =>
-        locks.semaphore('pool', { limit: 10 }).run(async () => {
-          inside += 1;
-          most = Math.max(most, inside);
-          await Promise.resolve();
-          inside -= 1;
-        }),
+        orThrow(
+          locks.semaphore('pool', { limit: 10 }).run(async () => {
+            inside += 1;
+            most = Math.max(most, inside);
+            await Promise.resolve();
+            inside -= 1;
+          }),
+        ),
       ),
     );
     expect(most).toBe(10);

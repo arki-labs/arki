@@ -9,6 +9,7 @@
  * real Postgres in `index.pg.test.ts`.
  */
 import type { SQL } from 'drizzle-orm';
+import { orThrow } from '@arki/failure';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
@@ -469,7 +470,7 @@ describe('PGlite: the SQL is valid on a real engine', () => {
   it('pgTransaction takes an advisory lock that exists in pg_locks until the transaction ends', async () => {
     const seen = await db.transaction(async tx => {
       const locks = createLocks({ store: pgTransaction(tx), namespace: 'pglite' });
-      await locks.mutex('in-tx').tryRun(() => 0);
+      await orThrow(locks.mutex('in-tx').tryRun(() => 0));
       const result = await tx.execute<{ n: number }>(
         sql`select count(*)::int as n from pg_locks where locktype = 'advisory'`,
       );

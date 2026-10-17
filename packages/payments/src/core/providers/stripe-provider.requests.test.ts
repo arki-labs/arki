@@ -359,12 +359,14 @@ describe('createPaymentIntent', () => {
       body: { id: 'pi_2', object: 'payment_intent', client_secret: 'pi_2_secret' },
     }));
 
-    await stripe.createPaymentIntent({
-      customerId: customer.id,
-      amount: money('19.99', 'USD'),
-      paymentMethodId: 'pm_1',
-      automatic: true,
-    });
+    await orThrow(
+      stripe.createPaymentIntent({
+        customerId: customer.id,
+        amount: money('19.99', 'USD'),
+        paymentMethodId: 'pm_1',
+        automatic: true,
+      }),
+    );
 
     expect(requests[0]?.form).toMatchObject({
       amount: '1999',

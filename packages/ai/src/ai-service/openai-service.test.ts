@@ -137,7 +137,7 @@ describe('OpenAIService', () => {
         { role: 'user' as const, content: 'Tell me about the brand Lumina' },
       ];
 
-      await ai.generateConversation(messages);
+      await orThrow(ai.generateConversation(messages));
 
       // The system message contains "Act as" which would trigger injection detection
       // if it were sanitized — but system messages should pass through unchanged
@@ -221,7 +221,7 @@ describe('OpenAIService', () => {
         text: 'response',
       } as Awaited<ReturnType<typeof generateText>>);
 
-      await ai.generateText('Contact me at john@example.com or call 555-123-4567');
+      await orThrow(ai.generateText('Contact me at john@example.com or call 555-123-4567'));
 
       // The prompt sent to the API should have PII redacted
       const callArgs = mockedGenerateText.mock.calls[0]?.[0];
@@ -243,7 +243,7 @@ describe('OpenAIService', () => {
 
       const executeSpy = vi.spyOn(rateLimiters.openai, 'execute');
 
-      await ai.generateText('hello');
+      await orThrow(ai.generateText('hello'));
 
       expect(executeSpy).toHaveBeenCalledWith('generateText', expect.any(Function));
     });
@@ -257,7 +257,7 @@ describe('OpenAIService', () => {
 
       const executeSpy = vi.spyOn(rateLimiters.openai, 'execute');
 
-      await ai.generateConversation([{ role: 'user', content: 'hello' }]);
+      await orThrow(ai.generateConversation([{ role: 'user', content: 'hello' }]));
 
       expect(executeSpy).toHaveBeenCalledWith('generateConversation', expect.any(Function));
     });
@@ -272,7 +272,7 @@ describe('OpenAIService', () => {
 
       const executeSpy = vi.spyOn(rateLimiters.openai, 'execute');
 
-      await ai.generateStructuredData('hello', schema);
+      await orThrow(ai.generateStructuredData('hello', schema));
 
       expect(executeSpy).toHaveBeenCalledWith('generateStructuredData', expect.any(Function));
     });
@@ -323,7 +323,7 @@ describe('OpenAIService', () => {
 
       const executeSpy = vi.spyOn(rateLimiters.openai, 'execute');
 
-      await ai.moderateContent('hello');
+      await orThrow(ai.moderateContent('hello'));
 
       expect(executeSpy).toHaveBeenCalledWith('moderateContent', expect.any(Function));
     });

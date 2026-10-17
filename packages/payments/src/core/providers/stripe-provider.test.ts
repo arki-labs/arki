@@ -104,7 +104,7 @@ describe('refundPayment', () => {
     const row = paymentRow();
     const { stripe, requests } = provider(row, refundAnswers({ amount: 1500 }, { amount: 5000, refunded: 1500 }));
 
-    await stripe.refundPayment(row.id, { amount: money(1500, 'JPY') });
+    await orThrow(stripe.refundPayment(row.id, { amount: money(1500, 'JPY') }));
 
     expect(requests[0]).toMatchObject({
       method: 'POST',
@@ -117,7 +117,7 @@ describe('refundPayment', () => {
     const row = paymentRow();
     const { stripe, requests } = provider(row, refundAnswers({ amount: 1500 }, { amount: 5000, refunded: 1500 }));
 
-    await stripe.refundPayment(row.id, { amount: money(1500, 'JPY') });
+    await orThrow(stripe.refundPayment(row.id, { amount: money(1500, 'JPY') }));
 
     expect(requests[0]?.form.amount).toBe('1500');
   });
@@ -126,7 +126,7 @@ describe('refundPayment', () => {
     const row = paymentRow({ currency: 'USD' });
     const { stripe, requests } = provider(row, refundAnswers({ amount: 1234 }, { amount: 5000, refunded: 1234 }));
 
-    await stripe.refundPayment(row.id, { amount: money('12.34', 'USD') });
+    await orThrow(stripe.refundPayment(row.id, { amount: money('12.34', 'USD') }));
 
     expect(requests[0]?.form.amount).toBe('1234');
   });
@@ -135,7 +135,7 @@ describe('refundPayment', () => {
     const row = paymentRow();
     const { stripe, requests } = provider(row, refundAnswers({ amount: 5000 }, { amount: 5000, refunded: 5000 }));
 
-    await stripe.refundPayment(row.id, {});
+    await orThrow(stripe.refundPayment(row.id, {}));
 
     expect(requests[0]?.form).not.toHaveProperty('amount');
   });

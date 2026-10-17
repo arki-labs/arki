@@ -802,7 +802,7 @@ describe('lease ttl', () => {
 
   it('does not ask a hold store for a ttl, because holds end with the connection or process', async () => {
     const t = setup(holdProcess);
-    await t.locks.mutex('k').run(() => 1);
+    await orThrow(t.locks.mutex('k').run(() => 1));
     expect(t.calls.acquire[0]?.ttlMs).toBeUndefined();
   });
 });
@@ -1025,8 +1025,8 @@ describe('semaphore', () => {
   it('sends limit and weight to the permits ops and leaves the mutex ops alone, because a semaphore is its own lock', async () => {
     const t = opsSetup();
     const pool = t.locks.semaphore('pdf', { limit: 4 });
-    await pool.tryRun(() => 1, { weight: 3 });
-    await pool.tryRun(() => 1);
+    await orThrow(pool.tryRun(() => 1, { weight: 3 }));
+    await orThrow(pool.tryRun(() => 1));
     expect(t.calls.permitAcquire.map(req => [req.limit, req.weight])).toEqual([
       [4, 3],
       [4, 1],
@@ -1043,7 +1043,7 @@ describe('semaphore', () => {
       seen.push(key.full);
       return Promise.resolve({ key, token: req.token });
     };
-    await t.locks.semaphore('x', { limit: 1 }).tryRun(() => 1);
+    await orThrow(t.locks.semaphore('x', { limit: 1 }).tryRun(() => 1));
     expect(seen).toEqual(['1s:4:test:1:x']);
   });
 
@@ -1172,8 +1172,8 @@ describe('readWrite', () => {
       return Promise.resolve({ key, token: req.token });
     };
     const rw = t.locks.readWrite('catalog');
-    await rw.read.tryRun(() => 1);
-    await rw.write.tryRun(() => 1);
+    await orThrow(rw.read.tryRun(() => 1));
+    await orThrow(rw.write.tryRun(() => 1));
     expect(t.calls.sharedAcquire.map(req => req.mode)).toEqual(['read', 'write']);
     expect(seen).toEqual(['1rw:4:test:7:catalog', '1rw:4:test:7:catalog']);
     expect(t.calls.sharedRelease).toHaveLength(2);
@@ -1237,7 +1237,7 @@ describe('review 2.4 manager regressions', () => {
       if (type === 'abort') live -= 1;
       remove(type, listener, opts as EventListenerOptions);
     };
-    for (let i = 0; i < 50; i++) await t.locks.mutex('k').run(() => i, { signal });
+    for (let i = 0; i < 50; i++) await orThrow(t.locks.mutex('k').run(() => i, { signal }));
     expect(live).toBeLessThanOrEqual(1);
     expect(peak).toBeLessThanOrEqual(2);
   });

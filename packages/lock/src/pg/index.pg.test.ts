@@ -300,11 +300,11 @@ describe('bounded waits on a real server', () => {
 describe('release speed of a held pgSession lock', () => {
   it('an uncontended tryRun ends in a few ms, far under the longest beat, because release never waits out a long pg_sleep', async () => {
     const locks = createLocks({ store: pgSession(dbA), namespace: 'app' });
-    await locks.mutex(lockedNames('warm')).tryRun(() => 1);
+    await orThrow(locks.mutex(lockedNames('warm')).tryRun(() => 1));
     const durations: number[] = [];
     for (let i = 0; i < 10; i++) {
       const startedAt = performance.now();
-      await locks.mutex(lockedNames('fast')).tryRun(() => 1);
+      await orThrow(locks.mutex(lockedNames('fast')).tryRun(() => 1));
       durations.push(performance.now() - startedAt);
     }
     durations.sort((a, b) => a - b);
