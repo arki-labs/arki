@@ -62,7 +62,7 @@ function writeRoot(root: string, catalog: Record<string, string> = {}): void {
   writeFixtureFile(
     root,
     'package.json',
-    JSON.stringify({ name: 'arki', version: '0.0.0', private: true, catalog }, null, 2),
+    JSON.stringify({ name: 'arki', version: '0.0.0', private: true, packageManager: 'bun@1.4.2', catalog }, null, 2),
   );
 }
 
@@ -120,6 +120,37 @@ describe('exportPublicTree', () => {
     expect(files).toContain('package.json');
     expect(files).toContain('.gitignore');
     expect(files).toContain('README.md');
+  });
+
+  it('ships a verify-only workflow and no publish workflow, so CI can never publish unreviewed bytes', async () => {
+    writeRoot(tmp);
+    const config: ReleaseConfig = { ...baseConfig, waves: [] };
+    await exportPublicTree({ rootCwd: tmp, config });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const files = listTreeRelative(outDir);
+    expect(files).not.toContain('.github/workflows/release.yml');
+    expect(files).toContain('.github/workflows/verify.yml');
+    const workflow = readFileSync(path.join(outDir, '.github', 'workflows', 'verify.yml'), 'utf8');
+    for (const forbidden of ['NPM_TOKEN', 'publish', 'changesets/action', 'id-token: write', 'canary']) {
+      expect(workflow).not.toContain(forbidden);
+    }
+    expect(workflow).toContain('contents: read');
+    // Pinned to the root packageManager version so a candidate is reproducible.
+    expect(workflow).toContain('bun-version: "1.4.2"');
+    expect(workflow).not.toContain('bun-version: "latest"');
+  });
+
+  it('public text states the no-backward-compat rule and that CI only verifies', async () => {
+    writeRoot(tmp);
+    const config: ReleaseConfig = { ...baseConfig, waves: [] };
+    await exportPublicTree({ rootCwd: tmp, config });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const readme = readFileSync(path.join(outDir, 'README.md'), 'utf8');
+    const changesetReadme = readFileSync(path.join(outDir, '.changeset', 'README.md'), 'utf8');
+    expect(readme).toContain('CI only verifies');
+    expect(changesetReadme).toContain('CI only verifies');
+    expect(changesetReadme).not.toContain('changesets/action');
+    expect(changesetReadme).not.toContain('changeset publish');
   });
 
   it('exports a single public-candidate package and writes a materialized manifest', async () => {
@@ -378,7 +409,7 @@ describe('exportPublicTree', () => {
     expect(rootPkg).not.toHaveProperty('workspaces');
   });
 
-  it('writes a publish-ready scaffolding: LICENSE, AGENTS.md, .changeset/, .github/workflows/release.yml', async () => {
+  it('writes the public scaffolding: LICENSE, AGENTS.md, .changeset/, .github/workflows/verify.yml', async () => {
     writeRoot(tmp);
     writePkg(tmp, 'assert', {
       name: '@arki/assert',
@@ -394,7 +425,7 @@ describe('exportPublicTree', () => {
     expect(tree).toContain('AGENTS.md');
     expect(tree).toContain('.changeset/config.json');
     expect(tree).toContain('.changeset/README.md');
-    expect(tree).toContain('.github/workflows/release.yml');
+    expect(tree).toContain('.github/workflows/verify.yml');
 
     const license = readFileSync(path.join(outDir, 'LICENSE'), 'utf8');
     expect(license).toMatch(/^MIT License/);
@@ -407,19 +438,16 @@ describe('exportPublicTree', () => {
     expect(changesetCfg['access']).toBe('public');
     // Public repo defaults to `main`, even though the workspace uses `master`.
     expect(changesetCfg['baseBranch']).toBe('main');
-    // commit:false leaves the version-bump commit to changesets/action.
+    // commit:false leaves the version-bump commit to the maintainer.
     expect(changesetCfg['commit']).toBe(false);
 
-    const workflow = readFileSync(path.join(outDir, '.github/workflows/release.yml'), 'utf8');
-    expect(workflow).toMatch(/name: Release/);
-    expect(workflow).toMatch(/changesets\/action@v1/);
-    expect(workflow).toMatch(/NPM_TOKEN/);
-    // Canary path is gated behind workflow_dispatch + canary input.
-    expect(workflow).toMatch(/--snapshot canary/);
-    expect(workflow).toMatch(/--tag canary/);
+    const workflow = readFileSync(path.join(outDir, '.github/workflows/verify.yml'), 'utf8');
+    expect(workflow).toMatch(/name: Verify/);
+    expect(workflow).toMatch(/npm pack/);
+    expect(workflow).toMatch(/actions\/upload-artifact@v4/);
   });
 
-  it('regenerates the publish scaffolding byte-identically across runs', async () => {
+  it('regenerates the public scaffolding byte-identically across runs', async () => {
     writeRoot(tmp);
     writePkg(tmp, 'assert', {
       name: '@arki/assert',
@@ -435,7 +463,7 @@ describe('exportPublicTree', () => {
       'README.md',
       '.changeset/config.json',
       '.changeset/README.md',
-      '.github/workflows/release.yml',
+      '.github/workflows/verify.yml',
     ];
     const before = targets.map(t => readFileSync(path.join(outDir, t), 'utf8'));
 

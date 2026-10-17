@@ -243,7 +243,7 @@ export async function exportPublicTree(
   }
 
   // 7. Root tree scaffolding.
-  await writeRootScaffolding(outputPath, options.skipWorkspacesRoot ?? false);
+  await writeRootScaffolding(outputPath, options.skipWorkspacesRoot ?? false, await readPinnedBunVersion(rootCwd));
   await writeRootLlmsTxt(rootCwd, outputPath, exportItems);
 
   const status: 'success' | 'failure' = failed > 0 ? 'failure' : 'success';
@@ -626,16 +626,20 @@ async function loadRootManifest(rootCwd: string): Promise<unknown> {
  *      - `LICENSE`       — MIT (matches each package's bundled LICENSE)
  *      - `AGENTS.md`     — agent-discoverable docs convention
  *
- *   3. Release pipeline (Changesets + GitHub Actions)
+ *   3. Verification pipeline (Changesets + GitHub Actions, verify only)
  *      - `.changeset/config.json`
  *      - `.changeset/README.md`
- *      - `.github/workflows/release.yml`
+ *      - `.github/workflows/verify.yml` (never a publish workflow; decision A-26)
  *
  * All content is static. Determinism is preserved: regeneration produces
  * byte-identical output, so `removeDirectory` + `writeRootScaffolding`
  * is safe to run on every export.
  */
-async function writeRootScaffolding(outputPath: string, skipWorkspacesRoot: boolean): Promise<void> {
+async function writeRootScaffolding(
+  outputPath: string,
+  skipWorkspacesRoot: boolean,
+  bunVersion: string,
+): Promise<void> {
   // Conditionally include the `workspaces` field. Omitting it makes the
   // tree publish-safe (npm publish parent-walks find a non-workspace
   // root and behave normally); including it makes the tree dev-friendly
@@ -662,7 +666,7 @@ async function writeRootScaffolding(outputPath: string, skipWorkspacesRoot: bool
   await writeJsonFile(path.join(outputPath, '.changeset', 'config.json'), CHANGESET_CONFIG);
   await writeTextFile(path.join(outputPath, '.changeset', 'README.md'), CHANGESET_README);
 
-  await writeTextFile(path.join(outputPath, '.github', 'workflows', 'release.yml'), RELEASE_WORKFLOW);
+  await writeTextFile(path.join(outputPath, '.github', 'workflows', 'verify.yml'), verifyWorkflow(bunVersion));
 }
 
 /**
@@ -858,7 +862,7 @@ const PUBLIC_README = [
   'ARKI is that glue, factored into composable packages, with a kernel',
   'that owns the lifecycle and a release pipeline that proves every',
   'published package passes the same gates — pack audit, leak scan,',
-  'fixture install, typecheck, docs coverage. Failed gate, no publish.',
+  'fixture install, typecheck, docs coverage. Failed gate, no release.',
   '',
   '## Quick start',
   '',
@@ -887,7 +891,7 @@ const PUBLIC_README = [
   '',
   '1. **No shortcuts.** Every published package passes the release',
   '   scorecard (pack audit, leak scan, fixture install, typecheck,',
-  '   docs coverage) before it is published. Failed gate, no publish.',
+  '   docs coverage) before it is released. Failed gate, no release.',
   '2. **Test the boundary, not the implementation.** Packed tarballs,',
   '   public exports, CLI output, JSON envelopes, generated apps — those',
   '   are what is tested. Private helpers are not tested directly.',
@@ -907,8 +911,10 @@ const PUBLIC_README = [
   'ARKI is on the experimental track (`0.0.x` for foundation packages,',
   '`0.1.x` for the kernel and adapters). The kernel is stable in shape;',
   'adapters are stable per their per-package README; the public API may',
-  'evolve before `1.0`. The release scorecard at the upstream workspace',
-  'gates every publish.',
+  'change before `1.0`. There is no backward compatibility below `1.0`:',
+  'a breaking change is a minor bump. Releases are published by the',
+  'maintainer from a verified candidate. CI only verifies. The release',
+  'scorecard at the upstream workspace gates every release.',
   '',
   '## License',
   '',
@@ -938,7 +944,8 @@ const PUBLIC_AGENTS_MD = [
   'The public ARKI release tree. Every `packages/<name>` directory is an',
   'independently-versioned npm package under the `@arki/*` scope. The root',
   'is a private workspace whose only job is to host those packages and the',
-  'release pipeline that publishes them.',
+  'verification pipeline that checks them. Releases are published by the',
+  'maintainer from a verified candidate. CI only verifies.',
   '',
   '## Where to look',
   '',
@@ -948,7 +955,7 @@ const PUBLIC_AGENTS_MD = [
   '  `defineApp` + `plugin()` API, typed needs/provides, lifecycle hooks, CLI).',
   '- `packages/<name>/README.md` — per-package contract and examples.',
   '- `.changeset/` — how versions and changelogs are produced.',
-  '- `.github/workflows/release.yml` — how packages get published.',
+  '- `.github/workflows/verify.yml` — how packages are verified (CI never publishes).',
   '',
   '## How to propose changes',
   '',
@@ -959,7 +966,10 @@ const PUBLIC_AGENTS_MD = [
   '',
   '## Stable contracts',
   '',
-  "Every `@arki/*` package follows semver. DOT's plugin contract (`plugin()`,",
+  'Every `@arki/*` package follows semver. Below `1.0` there is no',
+  'backward compatibility: a breaking change is a minor bump, and the',
+  'upgrade guide for it is in `docs/upgrades/`.',
+  "DOT's plugin contract (`plugin()`,",
   '`Plugin`, `service`, `token`, `rename`, `lazy`), `DotAppManifest`, and',
   '`DotDiagnosticsSnapshot` are versioned as part of `@arki/dot` — read its',
   'CHANGELOG before upgrading.',
@@ -969,7 +979,7 @@ const PUBLIC_AGENTS_MD = [
 /**
  * `.changeset/config.json` for the public repo. Mirrors the workspace
  * config but: (a) targets `main` (GitHub default) instead of `master`,
- * (b) keeps `commit: false` so the changesets/action step owns commits,
+ * (b) keeps `commit: false` so versioning commits stay a maintainer action,
  * (c) keeps `ignore: []` because every public-candidate package is
  * non-private and Changesets respects each package's `private` flag.
  */
@@ -994,126 +1004,107 @@ const CHANGESET_README = [
   '# Changesets',
   '',
   'This directory holds [Changesets](https://github.com/changesets/changesets)',
-  'configuration for the ARKI public release pipeline.',
+  'configuration for the ARKI public repository.',
   '',
   '## Author flow (maintainers)',
   '',
   'Changesets are authored in the upstream private workspace. When the',
   'export-public job runs, the entire `.changeset/` directory (except this',
-  'README and `config.json`) is mirrored here so the `changesets/action`',
-  'step can see the pending bumps.',
+  'README and `config.json`) is mirrored here.',
   '',
-  '## Consumer flow',
+  '## Versions',
   '',
-  '1. Maintainer pushes to `main` carrying one or more changeset entries.',
-  '2. `changesets/action` opens a `Version Packages` PR that consumes the',
-  '   entries and bumps each affected package + dependents.',
-  '3. Merging the PR triggers `changeset publish`, which:',
-  '   - runs the gates one more time,',
-  '   - publishes the bumped packages to npm under `@arki/*`,',
-  '   - creates a GitHub Release per published package.',
+  'Below `1.0` there is no backward compatibility. A breaking change is a',
+  'minor bump. Fixes and additions are patch bumps. The changeset must name',
+  'the right package and the right bump. The prose is free. Explain a',
+  'breaking change in the upgrade guide.',
   '',
-  '## Canary releases',
+  '## Releases',
   '',
-  'For canary publishing, run `workflow_dispatch` on `release.yml` with',
-  '`canary` set to `true`. The workflow runs:',
-  '',
-  '```bash',
-  'bunx changeset version --snapshot canary',
-  'bunx changeset publish --tag canary --no-git-tag',
-  '```',
-  '',
-  'Canary tags never become "latest" on npm — install them explicitly via',
-  '`bunx @arki/dot@canary` etc.',
+  'Releases are published by the maintainer from a verified candidate.',
+  'CI only verifies.',
   '',
 ].join('\n');
 
 /**
- * The publish workflow. Triggers:
- *
- *  - `push` to `main`            — opens/refreshes the "Version Packages" PR
- *                                  when changesets are present; publishes on
- *                                  PR-merge that carries no changesets.
- *  - `workflow_dispatch`         — manual trigger; `canary: true` switches
- *                                  to snapshot publish on the `canary` tag.
- *
- * Required secrets:
- *  - `NPM_TOKEN`        — npm automation token with publish rights on `@arki/*`
- *  - `GITHUB_TOKEN`     — automatically provided by Actions
+ * Read the Bun version pinned in the workspace root `package.json`
+ * (`packageManager: "bun@x.y.z"`). The generated CI uses exactly this
+ * version, never `latest`, so a verified candidate is reproducible.
  */
-const RELEASE_WORKFLOW = [
-  'name: Release',
-  '',
-  'on:',
-  '  push:',
-  '    branches: [main]',
-  '  workflow_dispatch:',
-  '    inputs:',
-  '      canary:',
-  '        description: "Publish a canary snapshot release"',
-  '        required: false',
-  '        default: "false"',
-  '',
-  'concurrency:',
-  '  group: release-${{ github.ref }}',
-  '  cancel-in-progress: false',
-  '',
-  'permissions:',
-  '  contents: write',
-  '  pull-requests: write',
-  '  id-token: write',
-  '',
-  'jobs:',
-  '  release:',
-  '    name: Release',
-  '    runs-on: ubuntu-latest',
-  '    timeout-minutes: 25',
-  '    steps:',
-  '      - name: Checkout',
-  '        uses: actions/checkout@v4',
-  '        with:',
-  '          fetch-depth: 0',
-  '',
-  '      - name: Setup Bun',
-  '        uses: oven-sh/setup-bun@v2',
-  '        with:',
-  '          bun-version: latest',
-  '',
-  '      - name: Setup Node 26',
-  '        uses: actions/setup-node@v4',
-  '        with:',
-  '          node-version: "26"',
-  '          registry-url: "https://registry.npmjs.org"',
-  '',
-  '      - name: Install dependencies',
-  '        run: bun install --frozen-lockfile',
-  '',
-  '      - name: Build all packages',
-  '        run: bun run -F "@arki/*" build',
-  '',
-  '      - name: Publish canary snapshot',
-  "        if: github.event_name == 'workflow_dispatch' && github.event.inputs.canary == 'true'",
-  '        env:',
-  '          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}',
-  '          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}',
-  '        run: |',
-  '          bunx changeset version --snapshot canary',
-  '          bunx changeset publish --tag canary --no-git-tag',
-  '',
-  '      - name: Create release PR or publish (stable)',
-  "        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.canary != 'true')",
-  '        uses: changesets/action@v1',
-  '        with:',
-  '          publish: bunx changeset publish',
-  '          version: bunx changeset version',
-  '          title: "chore: version packages"',
-  '          commit: "chore: version packages"',
-  '        env:',
-  '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}',
-  '          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}',
-  '          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}',
-  '',
-].join('\n');
+async function readPinnedBunVersion(rootCwd: string): Promise<string> {
+  const raw = await readFile(path.join(rootCwd, 'package.json'), 'utf8');
+  const parsed: unknown = JSON.parse(raw);
+  const packageManager =
+    typeof parsed === 'object' && parsed !== null && 'packageManager' in parsed ? parsed.packageManager : undefined;
+  const match = typeof packageManager === 'string' ? /^bun@(\d+\.\d+\.\d+)$/.exec(packageManager) : null;
+  if (match?.[1] === undefined) {
+    throw new Error('Root package.json needs `packageManager: "bun@<x.y.z>"` so the public CI can pin Bun.');
+  }
+  return match[1];
+}
+
+/**
+ * The verify-only workflow (decision A-26: no automated npm publish).
+ * Triggers on `pull_request` and `push`, holds read-only permissions,
+ * and has no npm credentials. It installs, builds, tests, packs every
+ * package into `artifacts/`, and uploads those tarballs. The maintainer
+ * publishes from a verified candidate. CI only verifies.
+ */
+function verifyWorkflow(bunVersion: string): string {
+  return [
+    'name: Verify',
+    '',
+    'on:',
+    '  pull_request:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: verify-${{ github.ref }}',
+    '  cancel-in-progress: true',
+    '',
+    'permissions:',
+    '  contents: read',
+    '',
+    'jobs:',
+    '  verify:',
+    '    name: Verify',
+    '    runs-on: ubuntu-latest',
+    '    timeout-minutes: 25',
+    '    steps:',
+    '      - name: Checkout',
+    '        uses: actions/checkout@v4',
+    '',
+    '      - name: Setup Bun',
+    '        uses: oven-sh/setup-bun@v2',
+    '        with:',
+    `          bun-version: "${bunVersion}"`,
+    '',
+    '      - name: Install dependencies',
+    '        run: bun install --frozen-lockfile',
+    '',
+    '      - name: Build all packages',
+    '        run: bun run -F "@arki/*" build',
+    '',
+    '      - name: Test all packages',
+    '        run: bun run -F "@arki/*" test',
+    '',
+    '      - name: Pack all packages',
+    '        run: |',
+    '          mkdir -p artifacts',
+    '          for dir in packages/*/; do',
+    '            (cd "$dir" && npm pack --pack-destination "$GITHUB_WORKSPACE/artifacts")',
+    '          done',
+    '',
+    '      - name: Upload candidate tarballs',
+    '        uses: actions/upload-artifact@v4',
+    '        with:',
+    '          name: candidate-tarballs',
+    '          path: artifacts/*.tgz',
+    '          if-no-files-found: error',
+    '',
+  ].join('\n');
+}
 
 /**
  * Serialize a publishable manifest with stable field ordering, two-space
