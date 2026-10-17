@@ -126,4 +126,17 @@ function createPlaywrightConfig(options: PlaywrightConfigOptions = {}) {
   });
 }
 
-export { createPlaywrightConfig, type PlaywrightConfigOptions };
+/**
+ * Run policy for suites on a real stack (`e2eConfig` from `@arki/testing/e2e`): one server and
+ * one database per worker, so workers are cheap to add. Retries are visible in the report; a test
+ * that passes only on a retry is flaky, not green.
+ */
+const e2ePolicy = {
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 4 : 2,
+  reporter: [['list'], ['html', { open: 'never' }]],
+} satisfies PlaywrightTestConfig;
+
+export { createPlaywrightConfig, e2ePolicy, type PlaywrightConfigOptions };

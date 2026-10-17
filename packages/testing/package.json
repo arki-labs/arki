@@ -30,6 +30,41 @@
       "import": "./src/factories.ts",
       "node": "./src/factories.ts"
     },
+    "./e2e": {
+      "types": "./dist/src/e2e/index.d.ts",
+      "import": "./src/e2e/index.ts",
+      "node": "./src/e2e/index.ts"
+    },
+    "./services/mailpit": {
+      "types": "./dist/src/services/mailpit.d.ts",
+      "import": "./src/services/mailpit.ts",
+      "node": "./src/services/mailpit.ts"
+    },
+    "./services/ollama": {
+      "types": "./dist/src/services/ollama.d.ts",
+      "import": "./src/services/ollama.ts",
+      "node": "./src/services/ollama.ts"
+    },
+    "./services/postgres": {
+      "types": "./dist/src/services/postgres.d.ts",
+      "import": "./src/services/postgres.ts",
+      "node": "./src/services/postgres.ts"
+    },
+    "./services/redis": {
+      "types": "./dist/src/services/redis.d.ts",
+      "import": "./src/services/redis.ts",
+      "node": "./src/services/redis.ts"
+    },
+    "./stack": {
+      "types": "./dist/src/stack/index.d.ts",
+      "import": "./src/stack/index.ts",
+      "node": "./src/stack/index.ts"
+    },
+    "./stack/contract": {
+      "types": "./dist/src/stack/contract.d.ts",
+      "import": "./src/stack/contract.ts",
+      "node": "./src/stack/contract.ts"
+    },
     "./server/integration-tester": {
       "types": "./dist/src/integration-tester.d.ts",
       "import": "./src/integration-tester.ts",
@@ -80,7 +115,8 @@
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
-    "drizzle-orm": "catalog:drizzle"
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle"
   },
   "devDependencies": {
     "@arki/auth": "workspace:*",
@@ -95,7 +131,9 @@
     "testcontainers": "catalog:testing",
     "valibot": "catalog:",
     "vitest": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@types/pg": "catalog:drizzle",
+    "@playwright/test": "catalog:testing"
   },
   "peerDependencies": {
     "@arki/auth": "workspace:*",
@@ -103,7 +141,8 @@
     "@testcontainers/redis": "catalog:testing",
     "msw": "catalog:testing",
     "testcontainers": "catalog:testing",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@playwright/test": "catalog:testing"
   },
   "peerDependenciesMeta": {
     "@arki/auth": {
@@ -119,6 +158,9 @@
       "optional": true
     },
     "testcontainers": {
+      "optional": true
+    },
+    "@playwright/test": {
       "optional": true
     }
   }

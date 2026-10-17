@@ -26,6 +26,11 @@
       "import": "./dist/http/resend.js",
       "default": "./dist/http/resend.js"
     },
+    "./http/mailpit": {
+      "types": "./dist/http/mailpit.d.ts",
+      "import": "./dist/http/mailpit.js",
+      "default": "./dist/http/mailpit.js"
+    },
     "./http/unosend": {
       "types": "./dist/http/unosend.d.ts",
       "import": "./dist/http/unosend.js",
