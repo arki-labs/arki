@@ -21,7 +21,7 @@ import type { Command, JournalDefinitions, RootCommandRunner } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { JobRetention } from '../retention.js';
 import type { EffectContext, Needed, Needs, RecordedOf, RootDb, TransactionSource } from '../types.js';
-import type { AnySignals, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
 import { workflowRunId, workflowSignalId } from '../id.js';
@@ -62,20 +62,26 @@ export type WorkflowStarter<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   Input extends StandardSchemaV1,
+  Signals extends AnySignals,
 > = {
   readonly start: Command<StartSchema<Input>, Promise<StartOutcome>, SchemaOutput<Meta>, Tx>;
   /**
    * The command that delivers the signal `name` to a run. `name` is one of the signals the workflow's `waitFor`
-   * nodes declare, and `payload` is the input of that signal's schema. `this` only tells the type which signals
-   * the definition declares; call it as `def.signal(name)`.
+   * nodes declare, and `payload` is the input of that signal's schema.
    */
-  readonly signal: <Signals extends AnySignals, Name extends keyof Signals & string>(
-    this: SignalReceiver<Signals>,
+  readonly signal: <Name extends keyof Signals & string>(
     name: Name,
   ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome>, SchemaOutput<Meta>, Tx>;
 };
-/** A definition, seen only for the signals it declares. */
-type SignalReceiver<Signals extends AnySignals> = { readonly types?: { readonly signals: Signals } };
+/** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
+export interface StarterOf<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  Input extends StandardSchemaV1,
+> extends DefExtension {
+  readonly out: WorkflowStarter<Meta, Tx, Input, Extract<this['signals'], AnySignals>>;
+}
 
 function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<Input> {
   return {
@@ -686,12 +692,8 @@ export function createWorkflows<
   };
 
   /** `def.signal(name)`: the command that delivers one of the definition's signals. */
-  const signalCommandFor = (def: WorkflowDef) =>
-    function signal<Signals extends AnySignals, Name extends keyof Signals & string>(
-      // Only types the call: the signals come from the definition the command was made for.
-      this: SignalReceiver<Signals>,
-      name: Name,
-    ) {
+  const signalCommandFor = <Signals extends AnySignals>(def: WorkflowDef<StandardSchemaV1, unknown, Signals>) =>
+    function signal<Name extends keyof Signals & string>(name: Name) {
       // One signal name has one payload schema, which `define` enforces: the first node that waits for it has it.
       const waiting = def.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
       if (waiting === undefined || waiting.kind !== 'waitFor') {

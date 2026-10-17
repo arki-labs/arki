@@ -238,8 +238,9 @@ describe('waitFor and signals', () => {
 
   it('asking for the signal of a name no waitFor waits for is refused at once, not a command that never fires', () => {
     // The types stop this call; a caller without them (plain JavaScript) still gets the error.
-    const untyped: (name: string) => unknown = approval.signal;
-    expect(() => untyped('nobody.waits')).toThrow(/no waitFor node waits for signal/);
+    expect(() => Reflect.apply(approval.signal, undefined, ['nobody.waits'])).toThrow(
+      /no waitFor node waits for signal/,
+    );
   });
 });
 

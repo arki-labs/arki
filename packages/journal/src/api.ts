@@ -50,7 +50,7 @@ import type {
   WakeListener,
 } from './types.js';
 import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions } from './workflow/define.js';
-import type { WorkflowStarter } from './workflow/runner.js';
+import type { StarterOf } from './workflow/runner.js';
 
 /**
  * Looks at the locked row, checks the rules, and returns the events to append.
@@ -610,7 +610,7 @@ export type JournalDefinitions<
     Declared,
     never,
     { readonly db: AppDb; readonly run: RootCommandRunner<Meta, Tx> },
-    WorkflowStarter<Meta, Tx, Input>
+    StarterOf<Meta, Tx, Input>
   >;
   compose<
     const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],

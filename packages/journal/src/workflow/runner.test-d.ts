@@ -42,6 +42,14 @@ describe('def.signal, as types', () => {
     expectTypeOf<SchemaInput<typeof _shipped.input>['payload']>().toEqualTypeOf<{ at: unknown }>();
   });
 
+  it('works detached from the definition, because it is an ordinary function', () => {
+    const { signal } = approval;
+    const _granted = signal('approval.granted');
+    expectTypeOf<SchemaInput<typeof _granted.input>['payload']>().toEqualTypeOf<{ by: string }>();
+    // @ts-expect-error a detached signal still names only the declared signals
+    signal('nobody.waits');
+  });
+
   it('keeps the outcome type', () => {
     const _granted = approval.signal('approval.granted');
     expectTypeOf<Awaited<ReturnType<typeof _granted.handler>>>().toEqualTypeOf<SignalOutcome>();

@@ -186,7 +186,7 @@ export type WorkflowBuilder<
   Declared extends StandardSchemaV1 | undefined,
   Last,
   Where extends Host,
-  Extra extends object = Record<never, never>,
+  Ext extends DefExtension = NoExtension,
   Signals extends AnySignals = NoSignals,
 > = {
   step<Name extends string, Returned, When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined>(
@@ -203,7 +203,7 @@ export type WorkflowBuilder<
     Declared,
     StepResult<Returned, When>,
     Where,
-    Extra,
+    Ext,
     Signals
   >;
 
@@ -228,14 +228,14 @@ export type WorkflowBuilder<
     Declared,
     OnTimeout extends 'continue' ? SchemaOutput<Payload> | null : SchemaOutput<Payload>,
     Where,
-    Extra,
+    Ext,
     AddSignal<Signals, Signal, Payload>
   >;
 
   sleep<Name extends string>(
     name: Fresh<Results, Name>,
     until: RetentionAge | ((ctx: Ctx<Input, Results, N, Where>) => Date),
-  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Extra, Signals>;
+  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals>;
 
   child<Name extends string, Def extends WorkflowDef>(
     name: Fresh<Results, Name>,
@@ -244,7 +244,7 @@ export type WorkflowBuilder<
       readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
       readonly onCancel?: 'cancel' | 'detach';
     },
-  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Extra, Signals>;
+  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -262,7 +262,7 @@ export type WorkflowBuilder<
     Declared,
     Wait extends 'any' ? OutputOf<Def> : OutputOf<Def>[],
     Where,
-    Extra,
+    Ext,
     Signals
   >;
 
@@ -273,7 +273,7 @@ export type WorkflowBuilder<
   finish<Returned = Last>(
     run?: (ctx: FinishContext<Input, Results>) => Returned,
     ...check: FinishCheck<Declared, Returned>
-  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals> & Extra;
+  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals> & ApplyExtension<Ext, Signals>;
 };
 
 type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
@@ -301,11 +301,26 @@ type FinishContext<Input extends StandardSchemaV1, Results extends AnyResults> =
 
 const DEFAULT_LIMITS: WorkflowLimits = { payload: 65_536, transitions: 1000, children: 1000 };
 
-/** Adds what a journal puts on a finished definition, such as `start`. It sees the definition without it. */
-type Attach<Input extends StandardSchemaV1, Extra extends object> = (def: WorkflowDef<Input>) => Extra;
+/**
+ * What a journal puts on a finished definition, such as `start` and `signal`, as a type-level function of the
+ * definition's signals. The signals are only complete at `finish()`, after `workflow()` has fixed the extension,
+ * so the extension is `out`, written in terms of `this['signals']`, and `ApplyExtension` fills the slot in.
+ */
+export type DefExtension = { readonly signals: unknown; readonly out: object };
+/** The extension that adds nothing. */
+export type NoExtension = { readonly signals: unknown; readonly out: Record<never, never> };
+/** What the extension `Ext` adds to a definition that declares the signals `Signals`. */
+export type ApplyExtension<Ext extends DefExtension, Signals extends AnySignals> = (Ext & {
+  readonly signals: Signals;
+})['out'];
 
-type BuilderState<Input extends StandardSchemaV1, Extra extends object> = {
-  readonly attach: Attach<Input, Extra>;
+/** Adds what a journal puts on a finished definition. It sees the definition, with its signals, without the addition. */
+type Attach<Input extends StandardSchemaV1, Ext extends DefExtension> = <Signals extends AnySignals>(
+  def: WorkflowDef<Input, unknown, Signals>,
+) => ApplyExtension<Ext, Signals>;
+
+type BuilderState<Input extends StandardSchemaV1, Ext extends DefExtension> = {
+  readonly attach: Attach<Input, Ext>;
   readonly name: string;
   readonly header: Omit<WorkflowDef<Input>, 'shape' | 'shapeHash' | 'nodes' | 'finish' | 'types'>;
   readonly nodes: readonly WorkflowNode[];
@@ -336,10 +351,10 @@ function refuse(workflowName: string, detail: string): never {
 }
 
 /** Adds a node after checking the rules that need no types. */
-function withNode<Input extends StandardSchemaV1, Extra extends object>(
-  state: BuilderState<Input, Extra>,
+function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
+  state: BuilderState<Input, Ext>,
   node: WorkflowNode,
-): BuilderState<Input, Extra> {
+): BuilderState<Input, Ext> {
   if (node.name === '') refuse(state.name, 'a node name must not be empty');
   if (node.name === 'next') refuse(state.name, "a node cannot be called 'next', because `next: 'next'` means carry on");
   if (state.nodes.some(existing => existing.name === node.name)) {
@@ -363,10 +378,10 @@ function refuseUndo(workflowName: string, kind: string, name: string, options: o
   }
 }
 
-function finishDef<Input extends StandardSchemaV1, Output, Signals extends AnySignals, Extra extends object>(
-  state: BuilderState<Input, Extra>,
+function finishDef<Input extends StandardSchemaV1, Output, Signals extends AnySignals, Ext extends DefExtension>(
+  state: BuilderState<Input, Ext>,
   finish: WorkflowDef['finish'],
-): WorkflowDef<Input, Output, Signals> & Extra {
+): WorkflowDef<Input, Output, Signals> & ApplyExtension<Ext, Signals> {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
@@ -393,9 +408,9 @@ function makeBuilder<
   Declared extends StandardSchemaV1 | undefined,
   Last,
   Where extends Host,
-  Extra extends object,
+  Ext extends DefExtension,
   Signals extends AnySignals,
->(state: BuilderState<Input, Extra>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Extra, Signals> {
+>(state: BuilderState<Input, Ext>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Ext, Signals> {
   return {
     step: (name, run, options) =>
       makeBuilder(
@@ -483,19 +498,19 @@ export function workflow<
 
 /**
  * `workflow` with a journal's additions: `attach` runs when `finish` builds the definition and
- * returns what to merge into it (`start`, from `j.workflow`). The builder types carry that as `Extra`.
+ * returns what to merge into it (`start`, from `j.workflow`). The builder types carry that as `Ext`.
  */
 export function workflowWith<
   Input extends StandardSchemaV1,
   N extends Needs,
   Declared extends StandardSchemaV1 | undefined,
   Where extends Host,
-  Extra extends object,
+  Ext extends DefExtension,
 >(
   name: string,
   options: WorkflowOptions<Input, N, Declared>,
-  attach: Attach<Input, Extra>,
-): WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Extra> {
+  attach: Attach<Input, Ext>,
+): WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Ext> {
   if (name === '') refuse(name, 'a workflow needs a name');
   if (!isPositiveInt(options.version)) refuse(name, `version must be a positive whole number, got ${options.version}`);
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
