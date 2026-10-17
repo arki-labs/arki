@@ -217,8 +217,14 @@ A failure is a return value, so the compiler checks it only when the value is us
 
 ```ts
 await remove(id); // ✗ failure/must-use: this call can return a failure ("post.not_found") and its result is thrown away
-void (await remove(id)); // ✓ discarded on purpose
+void (await remove(id)); // ✗ `void` hides the failure too
+await Promise.all([remove(a), remove(b)]); // ✗ each item's failure is dropped (same for Promise.allSettled)
+
+// eslint-disable-next-line failure/must-use -- the post may already be gone, and either way we are done
+await remove(id); // ✓ dropped on purpose, with the reason in the comment
 ```
+
+The disable comment is the only deliberate discard. A kept value (`const result = await remove(id)`) is left to the compiler and the unused-variable rules.
 
 ```js
 // eslint.config.js
