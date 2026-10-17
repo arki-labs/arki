@@ -302,6 +302,33 @@ describe('GeocodingService', () => {
       expect(NoAddressAtLocation.is(await service.reverseGeocode(0, -30))).toBe(true);
     });
 
+    // node-geocoder throws for these "nothing here" bodies instead of returning an empty
+    // list. These tests run the real adapters on the providers' real bodies, so a
+    // node-geocoder upgrade that changes the wording fails here.
+    it("reverse geocoding returns NoAddressAtLocation for Google's ZERO_RESULTS", async () => {
+      server.use(http.get(GOOGLE, () => HttpResponse.json({ status: 'ZERO_RESULTS', results: [] })));
+      const service = new GeocodingService(baseConfig({ provider: 'google', fallbackProviders: [], cache: noCache }));
+
+      expect(NoAddressAtLocation.is(await service.reverseGeocode(0, -30))).toBe(true);
+    });
+
+    it('reverse geocoding returns NoAddressAtLocation for Nominatim\'s "Unable to geocode"', async () => {
+      server.use(http.get(`${NOMINATIM}/reverse`, () => HttpResponse.json({ error: 'Unable to geocode' })));
+      const service = new GeocodingService(baseConfig({ fallbackProviders: [], cache: noCache }));
+
+      expect(NoAddressAtLocation.is(await service.reverseGeocode(0, -30))).toBe(true);
+    });
+
+    it('reverse geocoding treats any other Google status or Nominatim error as a provider fault', async () => {
+      server.use(
+        http.get(`${NOMINATIM}/reverse`, () => HttpResponse.json({ error: 'Unable to geocode right now' })),
+        http.get(GOOGLE, () => HttpResponse.json({ status: 'OVER_QUERY_LIMIT', results: [] })),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+
+      await expect(service.reverseGeocode(0, -30)).rejects.toBeInstanceOf(GeocodingError);
+    });
+
     it('reverse geocoding throws GeocodingError when every provider fails', async () => {
       server.use(
         http.get(`${NOMINATIM}/reverse`, () => new HttpResponse(null, { status: 503 })),

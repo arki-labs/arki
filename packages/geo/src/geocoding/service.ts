@@ -43,6 +43,21 @@ const throwIfAborted = (signal: AbortSignal | undefined): void => {
   if (signal?.aborted) throw new GeocodingAbortedError(undefined, signal.reason);
 };
 
+/**
+ * True when a reverse lookup error is really the answer "no address here".
+ * node-geocoder throws for these instead of returning an empty list, so they
+ * would otherwise look like a provider fault:
+ * - Google: the status `ZERO_RESULTS` (node-geocoder says "Status is ZERO_RESULTS.").
+ * - Nominatim: the error "Unable to geocode", sent for a point with no address.
+ * Any other error is a provider fault.
+ */
+const isNoAddressError = (provider: GeocodingProvider, error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  if (provider === 'google') return /\bZERO_RESULTS\b/.test(error.message);
+  if (provider === 'nominatim') return error.message === 'Unable to geocode';
+  return false;
+};
+
 export class GeocodingService {
   private geocoders: Map<GeocodingProvider, NodeGeocoder.Geocoder>;
   private primaryProvider: GeocodingProvider;
@@ -255,6 +270,10 @@ export class GeocodingService {
         return result;
       } catch (error) {
         if (error instanceof GeocodingAbortedError) throw error;
+        if (isNoAddressError(providerName, error)) {
+          answeredWithNoResults = true;
+          continue;
+        }
         lastError = error as Error;
         console.warn(`Reverse geocoding failed with provider ${providerName}:`, error);
         continue;
