@@ -9,7 +9,8 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { renderExplain } from '../cli/render-explain.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import { defineFeature, instanceOf, mountFeatures, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
 import { rpc } from '../orpc.js';
@@ -150,8 +151,9 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     const us = reports.instance('us').override({ repos: { region: () => 'faked' } });
     expect(us.name).toBe('reports#us');
     const configured = await defineApp('t').use(database).use(databaseEu).features([eu, us]).configure();
-    let text = '';
-    renderExplain({ manifest: configured.manifest }, { json: false, out: line => (text += line) });
+    const explained = textUi();
+    renderExplainText(configured.manifest, explained.ui);
+    const text = explained.text();
     const names = configured.manifest.plugins.map(p => p.name);
     expect(names).toEqual(expect.arrayContaining(['reports#eu/store', 'reports#eu', 'reports#us/store', 'reports#us']));
     expect(text).toContain('reports#eu --[reports#eu.repos]--> reports#eu/store');

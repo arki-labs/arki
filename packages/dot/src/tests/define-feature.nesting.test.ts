@@ -19,7 +19,8 @@ import type { Db, Tx } from './fixtures/nested-digest/db.js';
 import type { digestLogic } from './fixtures/nested-digest/digest/feature.js';
 import type { Repos } from './fixtures/nested-digest/digest/infra/store.js';
 import type { RequestContext } from './fixtures/rpc-app/orpc.js';
-import { renderExplain } from '../cli/render-explain.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import {
   allFeatures,
   defineFeature,
@@ -592,8 +593,9 @@ describe('lifecycle and explain', () => {
 
   it('dot explain shows the tree by name: nested units in boot order and the edges between them', () => {
     const configured = defineApp('explain').infra(database).features([digest]).configure();
-    let text = '';
-    renderExplain({ manifest: configured.manifest }, { json: false, out: line => (text += line) });
+    const explained = textUi();
+    renderExplainText(configured.manifest, explained.ui);
+    const text = explained.text();
     const names = configured.manifest.plugins.map(p => p.name);
     expect(names.indexOf('digest.compile/ranker')).toBeLessThan(names.indexOf('digest.compile'));
     expect(names.indexOf('digest.compile')).toBeLessThan(names.indexOf('digest'));

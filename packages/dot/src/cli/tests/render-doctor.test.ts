@@ -8,54 +8,42 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import { defineApp } from '../../define-app.js';
 import { plugin } from '../../plugin-contract.js';
 import { testApp } from '../../test-harness.js';
-import { runDoctor } from '../index.js';
-import { buildDoctorEnvelope, renderDoctor } from '../render-doctor.js';
+import { runDoctor } from '../doctor.js';
+import { DoctorFailed } from '../failures.js';
+import { allIssues, doctorStatus, renderDoctorText } from '../render-doctor.js';
+import { textUi } from './text-ui.js';
 
-const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
+const quiet = () =>
+  plugin({
+    name: 'p',
+    boot: () => {
+      /* side effects only */
+    },
+  });
 
-describe('buildDoctorEnvelope', () => {
-  it('emits a DotCliEnvelope with all 5 diagnostics arrays on success', async () => {
-    const p = plugin({
-      name: 'p',
-      boot: () => {
-        /* side effects only */
-      },
-    });
-    const app = await testApp([p]).boot();
-    const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
+describe('doctorStatus', () => {
+  it('a clean boot is success: the snapshot has all 5 diagnostics arrays and no error issue', async () => {
+    const app = await testApp([quiet()]).boot();
+    const diagnostics = app.diagnostics;
 
-    expect(envelope.status).toBe('success');
-    expect(envelope.command).toBe('doctor');
-    expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
-
-    expect(envelope.data.snapshotVersion).toBe(2);
-    expect(envelope.data.plugins).toBeInstanceOf(Array);
-    expect(envelope.data.actions).toBeInstanceOf(Array);
-    expect(envelope.data.services).toBeInstanceOf(Array);
-    expect(envelope.data.lifecycle).toBeInstanceOf(Array);
-    expect(envelope.data.issues).toBeInstanceOf(Array);
+    expect(doctorStatus(diagnostics)).toBe('success');
+    expect(diagnostics.snapshotVersion).toBe(2);
+    expect(diagnostics.plugins).toBeInstanceOf(Array);
+    expect(diagnostics.actions).toBeInstanceOf(Array);
+    expect(diagnostics.services).toBeInstanceOf(Array);
+    expect(diagnostics.lifecycle).toBeInstanceOf(Array);
+    expect(diagnostics.issues).toBeInstanceOf(Array);
+    expect(allIssues(diagnostics).filter(issue => issue.severity === 'error')).toHaveLength(0);
 
     await app.dispose();
   });
 
-  it('clean-boot app yields status=success with no error-severity issues', async () => {
-    const p = plugin({
-      name: 'p',
-      boot: () => {
-        /* side effects only */
-      },
-    });
-    const app = await testApp([p]).boot();
-    const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
-    expect(envelope.status).toBe('success');
-    expect(envelope.errors.filter(e => e.severity === 'error')).toHaveLength(0);
-    await app.dispose();
-  });
-
-  it('failed boot yields status=failure, failed plugin status, structured issue', async () => {
+  it('a failed boot is failure, with a failed plugin and a structured issue', async () => {
     const bad = plugin({
       name: 'bad',
       boot: () => {
@@ -69,10 +57,8 @@ describe('buildDoctorEnvelope', () => {
       // expected
     }
 
-    const envelope = buildDoctorEnvelope({ diagnostics: seam.diagnostics }, { json: true, now: FROZEN_NOW });
-    expect(envelope.status).toBe('failure');
-
-    const badPlugin = envelope.data.plugins.find(p => p.plugin === 'bad');
+    expect(doctorStatus(seam.diagnostics)).toBe('failure');
+    const badPlugin = seam.diagnostics.plugins.find(p => p.plugin === 'bad');
     expect(badPlugin?.status).toBe('failed');
 
     const issue = badPlugin!.issues[0]!;
@@ -82,48 +68,20 @@ describe('buildDoctorEnvelope', () => {
   });
 });
 
-describe('renderDoctor', () => {
-  it('JSON mode writes a parseable envelope', async () => {
-    const p = plugin({
-      name: 'p',
-      boot: () => {
-        /* side effects only */
-      },
-    });
-    const app = await testApp([p]).boot();
-
-    let written = '';
-    renderDoctor({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW, out: line => (written += line) });
-    expect(written.endsWith('\n')).toBe(true);
-
-    const parsed = JSON.parse(written) as ReturnType<typeof renderDoctor>;
-    expect(parsed.status).toBe('success');
-    expect(parsed.command).toBe('doctor');
-
-    await app.dispose();
-  });
-
-  it('text mode includes per-plugin status markers', async () => {
-    const p = plugin({
-      name: 'p',
-      boot: () => {
-        /* side effects only */
-      },
-    });
-    const app = await testApp([p]).boot();
-
-    let written = '';
-    renderDoctor({ diagnostics: app.diagnostics }, { json: false, now: FROZEN_NOW, out: line => (written += line) });
-    expect(written).toContain('[OK]');
-    expect(written).toContain('p');
-    expect(written).toContain('Summary');
-
+describe('renderDoctorText', () => {
+  it('includes per-plugin status markers and the verdict', async () => {
+    const app = await testApp([quiet()]).boot();
+    const { ui, text } = textUi();
+    renderDoctorText({ ...app.diagnostics, status: 'success' }, ui);
+    expect(text()).toContain('[OK]');
+    expect(text()).toContain('p');
+    expect(text()).toContain('Summary: SUCCESS');
     await app.dispose();
   });
 });
 
 describe('runDoctor', () => {
-  it('disposes the app after rendering when it booted from a builder', async () => {
+  it('disposes the app after reading it when it booted from a builder', async () => {
     const disposeSpy = vi.fn();
     const p = plugin({
       name: 'p',
@@ -135,17 +93,10 @@ describe('runDoctor', () => {
       },
     });
 
-    const builder = testApp([p]);
-    let written = '';
-    const envelope = await runDoctor(builder, {
-      json: true,
-      now: FROZEN_NOW,
-      out: line => (written += line),
-    });
+    const report = await runDoctor(testApp([p]));
 
-    expect(envelope.status).toBe('success');
+    expect(report).toMatchObject({ status: 'success', snapshotVersion: 2 });
     expect(disposeSpy).toHaveBeenCalledTimes(1);
-    expect(written).toContain('"command": "doctor"');
   });
 
   it('does NOT dispose when caller passed an already-booted app', async () => {
@@ -161,18 +112,28 @@ describe('runDoctor', () => {
     });
 
     const app = await testApp([p]).boot();
-    let written = '';
-    const envelope = await runDoctor(app, {
-      json: true,
-      now: FROZEN_NOW,
-      out: line => (written += line),
-    });
+    const report = await runDoctor(app);
 
-    expect(envelope.status).toBe('success');
+    expect(report).toMatchObject({ status: 'success' });
     expect(disposeSpy).not.toHaveBeenCalled();
 
     // We're still responsible for disposing it since the CLI didn't.
     await app.dispose();
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a boot that throws returns dot.doctor_failed carrying the report, so `.error.data.plugins[]` names the plugin', async () => {
+    const bad = plugin({
+      name: 'bad',
+      boot: () => {
+        throw new Error('boot-boom');
+      },
+    });
+    const result = await runDoctor(defineApp('test').use(bad));
+
+    expect(isFailure(result)).toBe(true);
+    if (!DoctorFailed.is(result)) throw new Error('expected dot.doctor_failed');
+    expect(result.data.status).toBe('failure');
+    expect(result.data.plugins.find(p => p.plugin === 'bad')?.status).toBe('failed');
   });
 });

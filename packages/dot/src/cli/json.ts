@@ -1,15 +1,11 @@
 /**
- * JSON envelope shapes for the `dot new` command.
- *
- * The envelope mirrors `DotCliEnvelope` in spirit but exposes the
- * scaffold-specific `app` + `operations` payload directly at the top level
- * so consumers don't have to dig under a generic `data` field.
+ * The `data` shape of `dot new`: the app and the file operations, without
+ * the in-memory file contents.
  */
 
-import type { DiagnosticIssue } from '../diagnostics.js';
 import type { FileOperation } from './files.js';
 
-/** Subset of {@link FileOperation} emitted in the JSON envelope. */
+/** One file `dot new` plans or writes, as printed in `.data.operations[]`. */
 export type DotNewOperation = {
   readonly path: string;
   readonly action: FileOperation['action'];
@@ -18,23 +14,15 @@ export type DotNewOperation = {
   readonly reason: string;
 };
 
-/**
- * Envelope returned by `dot new`. Both dry-run and real runs share the
- * same shape, distinguished only by `errors` and per-operation `action`.
- *
- * `errors` carries the same {@link DiagnosticIssue} shape used everywhere
- * else in the CLI — agents already parse it.
- */
-export type DotNewEnvelope = {
-  readonly status: 'success' | 'failure';
-  readonly command: 'new';
-  readonly generatedAt: string;
+/** What `dot new` returns: the same shape for `--dry-run` and a real run. */
+export type DotNewResult = {
   readonly app: {
     readonly name: string;
     readonly target: string;
   };
   readonly operations: readonly DotNewOperation[];
-  readonly errors: readonly DiagnosticIssue[];
+  /** The commands to run next, from the directory `dot new` ran in. */
+  readonly nextSteps: readonly string[];
 };
 
 /** Strip the in-memory `content` field before serialising. */

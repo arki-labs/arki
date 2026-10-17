@@ -1,63 +1,11 @@
 /**
- * Renderers for `dot explain`.
- *
- * Reads a configured (or booted) app's `manifest` and emits one of:
- *   - JSON envelope to stdout (when --json)
- *   - human-readable plain text to stdout (default)
- *
- * The JSON envelope shape matches the broader release-tooling envelope so
- * agents can parse the output identically across CLI surfaces.
+ * Text renderer for `dot explain`: the manifest as plain-text tables. In
+ * json mode the manifest is the envelope's `data` and this never runs.
  */
 
-import type { DiagnosticIssue } from '../diagnostics.js';
+import type { Ui } from '@arki/cli';
+
 import type { DotAppManifest } from '../manifest.js';
-
-export type DotCliEnvelopeStatus = 'success' | 'failure' | 'warning';
-
-export type DotCliEnvelope<T = unknown> = {
-  status: DotCliEnvelopeStatus;
-  command: string;
-  generatedAt: string;
-  data: T;
-  errors: DiagnosticIssue[];
-};
-
-export type ExplainSource = {
-  /** The static manifest produced by configure (or read off a booted app). */
-  manifest: DotAppManifest;
-};
-
-export type RenderOptions = {
-  /** Set to true to emit JSON to stdout; otherwise pretty text. */
-  json: boolean;
-  /** Override clock for deterministic test output. */
-  now?: () => Date;
-  /** Override stdout sink. Defaults to `process.stdout.write`. */
-  out?: (line: string) => void;
-};
-
-const defaultOut = (line: string) => {
-  process.stdout.write(line);
-};
-
-function nowIso(opts: RenderOptions): string {
-  const factory = opts.now ?? (() => new Date());
-  return factory().toISOString();
-}
-
-/**
- * Build the envelope without writing anything. Useful for tests that need
- * to assert shape and for embedding the CLI logic from other tools.
- */
-export function buildExplainEnvelope(source: ExplainSource, opts: RenderOptions): DotCliEnvelope<DotAppManifest> {
-  return {
-    status: 'success',
-    command: 'explain',
-    generatedAt: nowIso(opts),
-    data: source.manifest,
-    errors: [],
-  };
-}
 
 function pad(s: string, width: number): string {
   return s.length >= width ? s : s + ' '.repeat(width - s.length);
@@ -159,19 +107,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
   return lines.join('\n');
 }
 
-/**
- * Render the explain output. Returns the envelope so callers can act on it
- * (e.g. set the process exit code based on `status`).
- */
-export function renderExplain(source: ExplainSource, opts: RenderOptions): DotCliEnvelope<DotAppManifest> {
-  const envelope = buildExplainEnvelope(source, opts);
-  const out = opts.out ?? defaultOut;
-
-  if (opts.json) {
-    out(`${JSON.stringify(envelope, null, 2)}\n`);
-  } else {
-    out(`${renderTextManifest(source.manifest)}\n`);
-  }
-
-  return envelope;
+/** Print the manifest as text: plugins, services, actions, projections, dependencies, lifecycle hooks. */
+export function renderExplainText(manifest: DotAppManifest, ui: Ui): void {
+  ui.out(renderTextManifest(manifest));
 }

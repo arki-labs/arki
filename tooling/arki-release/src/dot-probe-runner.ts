@@ -11,12 +11,14 @@
  *     present (plugins, actions, services, lifecycle, dependencies)
  *   - reads `app.diagnostics` and asserts the five contract arrays are
  *     present (plugins, actions, services, lifecycle, issues)
- *   - calls `runExplain(app, --json)` / `runDoctor(app, --json)` (the public
- *     CLI seams) and validates the `{ status, command, generatedAt, data,
- *     errors }` envelope shape
- *   - calls `runNew({ dryRun: true, json: true })` for a probe app name and
- *     checks the `{ status, command, generatedAt, app, operations, errors }`
- *     envelope plus the presence of every required scaffold file
+ *   - runs the `dot` program in-process (`program.main` from `@arki/dot/cli`,
+ *     the public CLI seam) with captured stdout: `explain --json` and
+ *     `doctor --json` against this file's default export, and checks the
+ *     `arki.cli/1` envelope (`ok`, `command`, `meta.schema`) and the `.data`
+ *     shape (the manifest; the diagnostics report, which a doctor that finds
+ *     errors returns as `.error.data` of `dot.doctor_failed`)
+ *   - runs `dot new probe-app --dry-run --json` and checks `.data.app`,
+ *     `.data.operations[]` and the presence of every required scaffold file
  *
  * Emits a {@link DotProbeResult} JSON object on stdout. Non-zero exit code
  * signals an unexpected throw — the scorecard surfaces it as a probe
@@ -26,19 +28,19 @@
  * `bun` so its module graph (which pulls in @arki/dot + adapters) stays
  * out of the scorecard's own bundle.
  */
-
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
-import { db } from '@arki/db/dot';
-import { defineApp } from '@arki/dot';
-import { runDoctor, runExplain, runNew } from '@arki/dot/cli';
-import { env } from '@arki/env/dot';
-import { kv } from '@arki/kv/dot';
+import { fileURLToPath } from 'node:url';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
+
+import { db } from '@arki/db/dot';
+import { defineApp } from '@arki/dot';
+import { program } from '@arki/dot/cli';
+import { env } from '@arki/env/dot';
+import { kv } from '@arki/kv/dot';
 
 import type { DotProbeResult } from './types';
 
@@ -51,7 +53,11 @@ export const DOT_PROBE_REQUIRED_FILES = [
   '.gitignore',
 ] as const;
 
-async function runProbe(): Promise<DotProbeResult> {
+/**
+ * The synthetic three-adapter app. The default export is what `dot explain` /
+ * `dot doctor --app <this file>` discover, the way they discover a user's app.
+ */
+function probeApp() {
   // Schema is incidental — we only assert the adapter publishes a usable
   // service. The fixture uses the same shape.
   const widgets = pgTable('widgets', {
@@ -60,7 +66,7 @@ async function runProbe(): Promise<DotProbeResult> {
   });
   const relations = defineRelations({ widgets });
 
-  const app = await defineApp('arki-dot-probe')
+  return defineApp('arki-dot-probe')
     .use(
       env({
         schema: { PROBE_GREETING: z.string().default('hello') },
@@ -68,8 +74,53 @@ async function runProbe(): Promise<DotProbeResult> {
       }),
     )
     .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'arki-dot-probe' }))
-    .use(db({ driver: 'pglite', memory: true, relations }))
-    .boot();
+    .use(db({ driver: 'pglite', memory: true, relations }));
+}
+
+export default probeApp();
+
+const THIS_FILE = fileURLToPath(import.meta.url);
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The value at a key path, or `undefined` when a step is not an object. */
+function at(value: unknown, ...keys: readonly string[]): unknown {
+  let current = value;
+  for (const key of keys) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+/** Run one `dot` command line in-process with stdout captured, and parse the envelope it prints. */
+async function dot(argv: readonly string[]): Promise<{ readonly code: number; readonly envelope: unknown }> {
+  let stdout = '';
+  const code = await program.main([...argv, '--json'], {
+    stdout: chunk => {
+      stdout += chunk;
+    },
+  });
+  const envelope: unknown = JSON.parse(stdout);
+  return { code, envelope };
+}
+
+/** True when the envelope is `arki.cli/1` for this command. */
+function isEnvelopeFor(envelope: unknown, command: string): boolean {
+  const path = at(envelope, 'command');
+  return (
+    at(envelope, 'meta', 'schema') === 'arki.cli/1' && Array.isArray(path) && path.length === 1 && path[0] === command
+  );
+}
+
+function hasArrays(value: unknown, keys: readonly string[]): boolean {
+  return keys.every(key => Array.isArray(at(value, key)));
+}
+
+async function runProbe(): Promise<DotProbeResult> {
+  const app = await probeApp().boot();
 
   const tempTarget = mkdtempSync(path.join(tmpdir(), 'arki-dot-probe-'));
   try {
@@ -90,74 +141,55 @@ async function runProbe(): Promise<DotProbeResult> {
       Number(Array.isArray(diagnostics.lifecycle)) +
       Number(Array.isArray(diagnostics.issues));
 
-    const noopOut = (_line: string): void => {
-      /* swallow CLI stdout */
-    };
-
-    // `app.manifest` is stable (built once during configure); `app.diagnostics`
-    // is a getter that returns a FRESH snapshot on every access. So the
-    // explain envelope's `data` is referentially equal to our `manifest`,
-    // but the doctor envelope's `data` is a sibling snapshot of `diagnostics`.
-    // We use structural shape checks below to avoid identity coupling.
-    const explainEnv = await runExplain(app, { json: true, out: noopOut });
-    const explainData = explainEnv.data as typeof manifest;
+    // `dot explain` configures its own copy of the app (never boots); `.data`
+    // is the manifest. Shape checks only, no identity coupling.
+    const explained = await dot(['explain', '--app', THIS_FILE]);
+    const explainData = at(explained.envelope, 'data');
     const explainEnvelopeOk =
-      explainEnv.command === 'explain' &&
-      typeof explainEnv.generatedAt === 'string' &&
-      typeof explainData === 'object' &&
-      explainData !== null &&
-      typeof explainData.app === 'object' &&
-      explainData.app.name === manifest.app.name &&
-      Array.isArray(explainData.plugins) &&
-      Array.isArray(explainData.actions) &&
-      Array.isArray(explainData.services) &&
-      Array.isArray(explainData.lifecycle) &&
-      Array.isArray(explainData.dependencies) &&
-      Array.isArray(explainEnv.errors) &&
-      (explainEnv.status === 'success' || explainEnv.status === 'warning');
+      explained.code === 0 &&
+      at(explained.envelope, 'ok') === true &&
+      isEnvelopeFor(explained.envelope, 'explain') &&
+      at(explainData, 'app', 'name') === manifest.app.name &&
+      hasArrays(explainData, ['plugins', 'actions', 'services', 'lifecycle', 'dependencies']);
 
-    const doctorEnv = await runDoctor(app, { json: true, out: noopOut });
-    const doctorData = doctorEnv.data as typeof diagnostics;
+    // `dot doctor` boots and disposes its own copy. A doctor that finds error
+    // issues exits 3 with `dot.doctor_failed` and the report in `.error.data`;
+    // the probe checks the report's shape either way.
+    const doctored = await dot(['doctor', '--app', THIS_FILE]);
+    const doctorPassed = doctored.code === 0 && at(doctored.envelope, 'ok') === true;
+    const doctorFailed = doctored.code === 3 && at(doctored.envelope, 'error', 'code') === 'dot.doctor_failed';
+    const report = doctorPassed ? at(doctored.envelope, 'data') : at(doctored.envelope, 'error', 'data');
     const doctorEnvelopeOk =
-      doctorEnv.command === 'doctor' &&
-      typeof doctorEnv.generatedAt === 'string' &&
-      typeof doctorData === 'object' &&
-      doctorData !== null &&
-      typeof doctorData.app === 'object' &&
-      doctorData.app.name === diagnostics.app.name &&
-      typeof doctorData.app.state === 'string' &&
-      Array.isArray(doctorData.plugins) &&
-      Array.isArray(doctorData.actions) &&
-      Array.isArray(doctorData.services) &&
-      Array.isArray(doctorData.lifecycle) &&
-      Array.isArray(doctorData.issues) &&
-      Array.isArray(doctorEnv.errors);
+      (doctorPassed || doctorFailed) &&
+      isEnvelopeFor(doctored.envelope, 'doctor') &&
+      typeof at(report, 'status') === 'string' &&
+      at(report, 'app', 'name') === diagnostics.app.name &&
+      typeof at(report, 'app', 'state') === 'string' &&
+      hasArrays(report, ['plugins', 'actions', 'services', 'lifecycle', 'issues']);
 
-    // `dot new --dry-run --json` — capture envelope without printing.
-    const newEnv = await runNew({
-      name: 'probe-app',
-      target: tempTarget,
-      dryRun: true,
-      json: true,
-      out: noopOut,
-      err: noopOut,
-    });
+    // `dot new --dry-run` plans the scaffold and writes nothing.
+    const scaffolded = await dot(['new', 'probe-app', '--target', tempTarget, '--dry-run']);
+    const rawOperations = at(scaffolded.envelope, 'data', 'operations');
+    const operations = Array.isArray(rawOperations) ? rawOperations : [];
     const newRequiredFilesPresent = DOT_PROBE_REQUIRED_FILES.filter(required =>
-      newEnv.operations.some(op => op.path === required),
+      operations.some(op => at(op, 'path') === required),
     );
     const newEnvelopeOk =
-      newEnv.command === 'new' &&
-      newEnv.status === 'success' &&
-      newEnv.operations.length > 0 &&
+      scaffolded.code === 0 &&
+      at(scaffolded.envelope, 'ok') === true &&
+      isEnvelopeFor(scaffolded.envelope, 'new') &&
+      at(scaffolded.envelope, 'meta', 'dryRun') === true &&
+      at(scaffolded.envelope, 'data', 'app', 'name') === 'probe-app' &&
+      operations.length > 0 &&
       newRequiredFilesPresent.length === DOT_PROBE_REQUIRED_FILES.length &&
-      newEnv.operations.every(
+      operations.every(
         op =>
-          typeof op.path === 'string' &&
-          typeof op.contentHash === 'string' &&
-          op.contentHash.length > 0 &&
-          typeof op.contentBytes === 'number' &&
-          typeof op.action === 'string' &&
-          typeof op.reason === 'string',
+          typeof at(op, 'path') === 'string' &&
+          typeof at(op, 'contentHash') === 'string' &&
+          String(at(op, 'contentHash')).length > 0 &&
+          typeof at(op, 'contentBytes') === 'number' &&
+          typeof at(op, 'action') === 'string' &&
+          typeof at(op, 'reason') === 'string',
       );
 
     return {
@@ -168,7 +200,7 @@ async function runProbe(): Promise<DotProbeResult> {
       explainEnvelopeOk,
       doctorEnvelopeOk,
       newEnvelopeOk,
-      newOperationCount: newEnv.operations.length,
+      newOperationCount: operations.length,
       newRequiredFilesPresent,
       appState: String(app.state),
     };

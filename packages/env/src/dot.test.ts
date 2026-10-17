@@ -7,15 +7,18 @@
  *   - boots/disposes through the standard DOT lifecycle
  */
 
-import type { StandardSchemaV1 } from '@arki/schema';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { runExplain } from '@arki/dot/cli';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { program } from '@arki/dot/cli';
 import { defineApp, DotLifecycleError, DotLifecycleErrorCode, DotPluginError, rename } from '@arki/dot/plugin';
 
 import type { EnvServices } from './dot.js';
-import { ENV_PLUGIN_ERROR_CODES, env } from './dot.js';
+import { env, ENV_PLUGIN_ERROR_CODES } from './dot.js';
 
 describe('@arki/env/dot', () => {
   it('boots and exposes the validated env service', async () => {
@@ -125,7 +128,9 @@ describe('@arki/env/dot validation at boot', () => {
 
   it('skipValidation: true boots with missing keys', async () => {
     // WHY: the explicit opt-out must reach the plugin.
-    const app = await defineApp('env-skip').use(env({ schema, skipValidation: true })).boot();
+    const app = await defineApp('env-skip')
+      .use(env({ schema, skipValidation: true }))
+      .boot();
     await app.dispose();
   });
 
@@ -138,10 +143,35 @@ describe('@arki/env/dot validation at boot', () => {
 
   it('`dot explain` configures an app whose env has a missing required key', async () => {
     // WHY: explain needs no secrets. This fails if validation moves into `configure`.
-    const builder = defineApp('env-explain').use(env({ schema }));
-    const envelope = await runExplain(builder, { json: true, out: vi.fn() });
-    expect(envelope.status).toBe('success');
-    expect(JSON.stringify(envelope.data)).toContain('"env"');
+    // The app file lives under this package so `@arki/dot` and `zod` resolve from it.
+    const cacheDir = fileURLToPath(new URL('../.cache', import.meta.url));
+    await mkdir(cacheDir, { recursive: true });
+    const appDir = await mkdtemp(path.join(cacheDir, 'explain-'));
+    try {
+      const appFile = path.join(appDir, 'app.ts');
+      const envModule = JSON.stringify(fileURLToPath(new URL('dot.ts', import.meta.url)));
+      await writeFile(
+        appFile,
+        [
+          "import { defineApp } from '@arki/dot/plugin';",
+          "import { z } from 'zod';",
+          `import { env } from ${envModule};`,
+          "export default defineApp('env-explain').use(env({ schema: { ENV_PLUGIN_T1_A: z.string(), ENV_PLUGIN_T1_B: z.url() } }));",
+          '',
+        ].join('\n'),
+      );
+      let stdout = '';
+      const code = await program.main(['explain', '--app', appFile, '-o', 'json'], {
+        stdout: text => {
+          stdout += text;
+        },
+      });
+      const envelope = JSON.parse(stdout) as { ok: boolean; data: { plugins: { name: string }[] } | null };
+      expect({ code, ok: envelope.ok }).toEqual({ code: 0, ok: true });
+      expect(envelope.data?.plugins.map(plugin => plugin.name)).toContain('env');
+    } finally {
+      await rm(appDir, { recursive: true, force: true });
+    }
   });
 
   it('exposes the typed keys on EnvServices', () => {

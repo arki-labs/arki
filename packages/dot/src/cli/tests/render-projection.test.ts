@@ -14,11 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
 import { plugin } from '../../plugin-contract.js';
-import { DotCliErrorCode } from '../error-codes.js';
-import { parseArgs, runExplain } from '../index.js';
+import { runExplain } from '../explain.js';
+import { program } from '../index.js';
 import { renderProjection } from '../render-projection.js';
-
-const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 let workDir: string;
 
@@ -44,39 +42,56 @@ function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
   };
 }
 
-describe('--as arg parsing', () => {
-  it('parses --as and --module on explain', () => {
-    const parsed = parseArgs(['explain', '--as', 'openapi', '--module', './projection.ts']);
-    expect(parsed.as).toBe('openapi');
-    expect(parsed.module).toBe('./projection.ts');
+/** Run `dot` with argv; return the exit code and the parsed JSON envelope. */
+async function dot(argv: string[]): Promise<{ code: number; envelope: { error: { code: string; message: string } } }> {
+  let stdout = '';
+  const code = await program.main([...argv, '--json'], {
+    stdout: text => {
+      stdout += text;
+    },
+  });
+  return { code, envelope: JSON.parse(stdout) as { error: { code: string; message: string } } };
+}
+
+describe('--as flag rules', () => {
+  it('rejects --as with --graph, --module without --as, and --as on doctor: exit 2, cli.invalid_input', async () => {
+    const both = await dot(['explain', '--as', 'openapi', '--graph']);
+    expect(both.code).toBe(2);
+    expect(both.envelope.error).toMatchObject({
+      code: 'cli.invalid_input',
+      message: expect.stringContaining('--graph'),
+    });
+
+    const moduleOnly = await dot(['explain', '--module', './projection.ts']);
+    expect(moduleOnly.code).toBe(2);
+    expect(moduleOnly.envelope.error.message).toContain('--module needs --as');
+
+    const onDoctor = await dot(['doctor', '--as', 'openapi']);
+    expect(onDoctor.code).toBe(2);
+    expect(onDoctor.envelope.error.code).toBe('cli.invalid_input');
   });
 
-  it('keeps --openapi as a deprecated alias for --as openapi', () => {
-    const parsed = parseArgs(['explain', '--openapi']);
-    expect(parsed.as).toBe('openapi');
-    expect(parsed.openapi).toBe(true);
-  });
-
-  it('rejects projections on doctor and graph output', () => {
-    expect(() => parseArgs(['doctor', '--as', 'openapi'])).toThrow(/--as is not supported by doctor/);
-    expect(() => parseArgs(['explain', '--as', 'openapi', '--graph'])).toThrow(/mutually exclusive/);
+  it('--openapi is gone: it was a deprecated alias for --as openapi', async () => {
+    const result = await dot(['explain', '--openapi']);
+    expect(result.code).toBe(2);
+    expect(result.envelope.error.code).toBe('cli.invalid_input');
   });
 });
 
 describe('renderProjection', () => {
-  it('throws DOT_CLI_E008 when the requested format is not registered', async () => {
+  it('returns dot.projection_not_found when the requested format is not registered', async () => {
     const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');
 
-    await expect(
-      renderProjection(
-        { manifest: manifestOf({}), command: 'explain', format: 'openapi', appFilePath },
-        { json: true, now: FROZEN_NOW },
-      ),
-    ).rejects.toMatchObject({ code: DotCliErrorCode.ProjectionNotFound });
+    await expect(renderProjection({ manifest: manifestOf({}), format: 'openapi', appFilePath })).resolves.toMatchObject(
+      {
+        code: 'dot.projection_not_found',
+        data: { format: 'openapi', registeredFormats: [] },
+      },
+    );
   });
 
-  it('throws DOT_CLI_E011 for conflicting projection modules in the same format', async () => {
+  it('returns dot.projection_conflict for conflicting projection modules in the same format', async () => {
     const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');
     const manifest = manifestOf({
@@ -86,12 +101,12 @@ describe('renderProjection', () => {
       ],
     });
 
-    await expect(
-      renderProjection({ manifest, command: 'explain', format: 'openapi', appFilePath }, { json: true }),
-    ).rejects.toMatchObject({ code: DotCliErrorCode.ProjectionConflict });
+    await expect(renderProjection({ manifest, format: 'openapi', appFilePath })).resolves.toMatchObject({
+      code: 'dot.projection_conflict',
+    });
   });
 
-  it('resolves projection modules relative to the app file and wraps JSON output', async () => {
+  it('resolves projection modules relative to the app file and returns the document', async () => {
     const appFilePath = path.join(workDir, 'nested', 'app.ts');
     await mkdir(path.join(workDir, 'nested'), { recursive: true });
     await writeFile(appFilePath, '');
@@ -109,19 +124,9 @@ export function project(manifest) {
       projections: [{ format: 'custom:doc', binding: 'http', module: './projection.ts', plugin: 'api' }],
     });
 
-    let written = '';
-    const envelope = await renderProjection(
-      { manifest, command: 'explain', format: 'custom:doc', appFilePath },
-      { json: true, now: FROZEN_NOW, out: line => (written += line) },
-    );
+    const projected = await renderProjection({ manifest, format: 'custom:doc', appFilePath });
 
-    expect(envelope).toMatchObject({
-      status: 'success',
-      command: 'explain',
-      generatedAt: '2026-01-01T00:00:00.000Z',
-      data: { format: 'custom:doc', document: { title: 'shop-api', actionCount: 1 } },
-    });
-    expect(JSON.parse(written)).toMatchObject({ data: { format: 'custom:doc' } });
+    expect(projected).toEqual({ format: 'custom:doc', document: { title: 'shop-api', actionCount: 1 } });
   });
 });
 
@@ -146,17 +151,8 @@ export function project(manifest) {
     });
     const builder = defineApp('cli-app').use(api);
 
-    let written = '';
-    const envelope = await runExplain(builder, {
-      json: false,
-      as: 'help-text',
-      module: './override.ts',
-      appFilePath,
-      now: FROZEN_NOW,
-      out: line => (written += line),
-    });
+    const projected = await runExplain(builder, { as: 'help-text', module: './override.ts', appFilePath });
 
-    expect(envelope).toMatchObject({ status: 'success', data: { document: 'override:cli-app' } });
-    expect(written).toBe('override:cli-app\n');
+    expect(projected).toEqual({ format: 'help-text', document: 'override:cli-app' });
   });
 });

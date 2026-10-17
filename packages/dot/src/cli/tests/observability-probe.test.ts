@@ -3,7 +3,7 @@
  *
  * Two regimes:
  *   - No SDK registered → probe returns a warning DiagnosticIssue with
- *     code `DOT_CLI_E007`.
+ *     code `dot.observability_no_sdk`.
  *   - SDK registered → probe returns `null`.
  *
  * SDK registration here uses `@opentelemetry/sdk-trace-base` with a
@@ -17,11 +17,23 @@ import { trace } from '@opentelemetry/api';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
+import type { DoctorReport } from '../failures.js';
 import { defineApp } from '../../define-app.js';
 import { plugin } from '../../plugin-contract.js';
 import { testApp } from '../../test-harness.js';
-import { runDoctor } from '../index.js';
+import { runDoctor } from '../doctor.js';
+import { DoctorFailed } from '../failures.js';
 import { probeObservability } from '../observability-probe.js';
+import { allIssues } from '../render-doctor.js';
+
+/** The doctor report, whether doctor passed or returned `dot.doctor_failed`. */
+function reportOf(result: Awaited<ReturnType<typeof runDoctor>>): DoctorReport {
+  if (DoctorFailed.is(result)) return result.data;
+  if (isFailure(result) || !('snapshotVersion' in result)) throw new Error('expected a doctor report');
+  return result;
+}
 
 describe('probeObservability — direct', () => {
   it('returns a coded warning issue when no SDK is registered', () => {
@@ -30,7 +42,7 @@ describe('probeObservability — direct', () => {
 
     const issue = probeObservability();
     expect(issue).not.toBeNull();
-    expect(issue?.code).toBe('DOT_CLI_E007');
+    expect(issue?.code).toBe('dot.observability_no_sdk');
     expect(issue?.severity).toBe('warning');
     expect(issue?.message).toMatch(/No OpenTelemetry SDK is registered/);
     expect(issue?.remediation).toMatch(/Register an OTel SDK/);
@@ -60,7 +72,7 @@ describe('runDoctor — --observability flag', () => {
     trace.disable();
   });
 
-  it('without --observability, no DOT_CLI_E007 issue appears in the envelope', async () => {
+  it('without --observability, no dot.observability_no_sdk issue appears in the envelope', async () => {
     const p = plugin({
       name: 'p',
       boot: () => {
@@ -69,21 +81,14 @@ describe('runDoctor — --observability flag', () => {
     });
     const app = await testApp([p]).boot();
     try {
-      let written = '';
-      const envelope = await runDoctor(app, {
-        json: true,
-        out: (line: string) => {
-          written += line;
-        },
-      });
-      expect(envelope.errors.some(e => e.code === 'DOT_CLI_E007')).toBe(false);
-      expect(written.length).toBeGreaterThan(0);
+      const envelope = reportOf(await runDoctor(app));
+      expect(allIssues(envelope).some(e => e.code === 'dot.observability_no_sdk')).toBe(false);
     } finally {
       await app.dispose();
     }
   });
 
-  it('with --observability and no SDK, the envelope carries a DOT_CLI_E007 warning issue', async () => {
+  it('with --observability and no SDK, the envelope carries a dot.observability_no_sdk warning issue', async () => {
     const p = plugin({
       name: 'p',
       boot: () => {
@@ -92,24 +97,18 @@ describe('runDoctor — --observability flag', () => {
     });
     const app = await testApp([p]).boot();
     try {
-      const envelope = await runDoctor(app, {
-        json: true,
-        out: () => {
-          /* noop */
-        },
-        observability: true,
-      });
-      const obsIssue = envelope.errors.find(e => e.code === 'DOT_CLI_E007');
+      const envelope = reportOf(await runDoctor(app, { observability: true }));
+      const obsIssue = allIssues(envelope).find(e => e.code === 'dot.observability_no_sdk');
       expect(obsIssue).toBeDefined();
       expect(obsIssue?.severity).toBe('warning');
-      // Warning-only — envelope should not be `failure` solely because of OTel.
+      // Warning-only: the report must not be `failure` solely because of OTel.
       expect(envelope.status).not.toBe('failure');
     } finally {
       await app.dispose();
     }
   });
 
-  it('with --observability and an SDK registered, no DOT_CLI_E007 issue appears', async () => {
+  it('with --observability and an SDK registered, no dot.observability_no_sdk issue appears', async () => {
     const provider = new BasicTracerProvider();
     trace.setGlobalTracerProvider(provider);
     try {
@@ -121,14 +120,8 @@ describe('runDoctor — --observability flag', () => {
       });
       const app = await testApp([p]).boot();
       try {
-        const envelope = await runDoctor(app, {
-          json: true,
-          out: () => {
-            /* noop */
-          },
-          observability: true,
-        });
-        expect(envelope.errors.some(e => e.code === 'DOT_CLI_E007')).toBe(false);
+        const envelope = reportOf(await runDoctor(app, { observability: true }));
+        expect(allIssues(envelope).some(e => e.code === 'dot.observability_no_sdk')).toBe(false);
       } finally {
         await app.dispose();
       }
@@ -146,18 +139,12 @@ describe('runDoctor — --observability flag', () => {
     });
     const builder = defineApp('test').use(bad);
 
-    const envelope = await runDoctor(builder, {
-      json: true,
-      out: () => {
-        /* noop */
-      },
-      observability: true,
-    });
+    const envelope = reportOf(await runDoctor(builder, { observability: true }));
 
     expect(envelope.status).toBe('failure');
     // The boot-failed issue from the kernel must still be present.
-    expect(envelope.errors.some(e => e.severity === 'error')).toBe(true);
+    expect(allIssues(envelope).some(e => e.severity === 'error')).toBe(true);
     // The OTel warning must ALSO be present.
-    expect(envelope.errors.some(e => e.code === 'DOT_CLI_E007')).toBe(true);
+    expect(allIssues(envelope).some(e => e.code === 'dot.observability_no_sdk')).toBe(true);
   });
 });

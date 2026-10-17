@@ -9,6 +9,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { runExplain } from '../cli/index.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
@@ -85,15 +87,17 @@ describe('dot explain', () => {
     const digest = feature('daily-digest', { needs: { access: billing.provides.entitlements, db: service<Db>() } });
     const builder = defineApp('explain-edges').use(db).features([billing, digest]);
 
-    let table = '';
-    const envelope = await runExplain(builder.configure(), { json: false, out: line => (table += line) });
-    let graph = '';
-    await runExplain(builder.configure(), { json: false, graph: true, out: line => (graph += line) });
+    const explained = textUi();
+    renderExplainText(builder.configure().manifest, explained.ui);
+    const table = explained.text();
+    const manifest = await runExplain(builder.configure());
+    const graphed = await runExplain(builder.configure(), { graph: true });
+    const graph = 'source' in graphed ? graphed.source : '';
 
     expect(built).toBe(0);
     expect(table).toContain('daily-digest --[entitlements]--> billing');
     expect(graph).toContain('p2 -->|entitlements| p1');
-    expect(envelope).toMatchObject({ status: 'success' });
+    expect(manifest).toMatchObject({ manifestVersion: 2 });
     const configured = builder.configure();
     expect(configured.manifest.plugins.find(p => p.name === 'billing')?.provides).toEqual([
       'entitlements',

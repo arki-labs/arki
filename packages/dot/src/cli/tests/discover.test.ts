@@ -11,8 +11,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
+import type { DiscoveryResult } from '../discover.js';
 import { discoverApp, loadAppFromFile, resolveAppFile } from '../discover.js';
-import { DotCliError, DotCliErrorCode } from '../error-codes.js';
+import { AppImportFailed, AppInvalidExport, AppNotFound } from '../failures.js';
 
 // Sources for synthetic app files. They import directly from the kernel
 // modules (not the barrel `index.ts`) so vitest's import-analysis doesn't
@@ -145,27 +148,27 @@ describe('loadAppFromFile', () => {
       file,
       appSource("export const one = defineApp('one').use(p);\nexport const two = defineApp('two').use(p);"),
     );
-    await expect(loadAppFromFile(file)).rejects.toMatchObject({
-      code: DotCliErrorCode.AppInvalidExport,
+    await expect(loadAppFromFile(file)).resolves.toMatchObject({
+      code: AppInvalidExport.code,
       message: expect.stringMatching(/one, two/),
       remediation: expect.stringContaining('`default` or as `app`'),
     });
   });
 
-  it('throws the coded error listing the exports when the file has no DOT app, so the failure names what was found', async () => {
+  it('returns the coded failure listing the exports when the file has no DOT app, so the failure names what was found', async () => {
     const file = path.join(workDir, 'app.ts');
     await writeFile(file, 'export const config = { a: 1 };\n');
-    await expect(loadAppFromFile(file)).rejects.toMatchObject({
-      code: DotCliErrorCode.AppInvalidExport,
+    await expect(loadAppFromFile(file)).resolves.toMatchObject({
+      code: AppInvalidExport.code,
       message: expect.stringContaining('config'),
     });
   });
 
-  it('throws DOT_CLI_E002 when default export is not a DotApp', async () => {
+  it('returns dot.app_invalid_export when default export is not a DotApp', async () => {
     const file = path.join(workDir, 'app.ts');
     await writeFile(file, BAD_EXPORT_SOURCE);
-    await expect(loadAppFromFile(file)).rejects.toMatchObject({
-      code: DotCliErrorCode.AppInvalidExport,
+    await expect(loadAppFromFile(file)).resolves.toMatchObject({
+      code: AppInvalidExport.code,
     });
   });
 
@@ -182,19 +185,28 @@ describe('loadAppFromFile', () => {
 throw error;
 `,
     );
-    await expect(loadAppFromFile(file)).rejects.toMatchObject({
-      code: DotCliErrorCode.AppImportFailed,
+    await expect(loadAppFromFile(file)).resolves.toMatchObject({
+      code: AppImportFailed.code,
       message: expect.stringContaining('[ARKI_DOT_E022] [feature] router mount key "orders"'),
-      remediation: 'Give each feature its own router mount key.',
-      metadata: { filePath: file, causeCode: 'ARKI_DOT_E022' },
+      data: {
+        filePath: file,
+        causeCode: 'ARKI_DOT_E022',
+        causeRemediation: 'Give each feature its own router mount key.',
+      },
     });
   });
 });
 
+/** The discovery result, or a thrown error naming the failure: these cases expect an app. */
+function found(result: DiscoveryResult | Awaited<ReturnType<typeof discoverApp>>): DiscoveryResult {
+  if (isFailure(result)) throw new Error(`expected an app, got ${result.code}: ${result.message}`);
+  return result;
+}
+
 describe('discoverApp', () => {
   it('default discovery: dot.config.ts at cwd is loaded', async () => {
     await writeFile(path.join(workDir, 'dot.config.ts'), BUILDER_SOURCE);
-    const result = await discoverApp({ cwd: workDir });
+    const result = found(await discoverApp({ cwd: workDir }));
     expect(result.filePath).toBe(path.join(workDir, 'dot.config.ts'));
     expect(typeof (result.app as { use?: unknown }).use).toBe('function');
   });
@@ -203,7 +215,7 @@ describe('discoverApp', () => {
     await mkdir(path.join(workDir, 'src'), { recursive: true });
     await writeFile(path.join(workDir, 'src', 'app.ts'), BUILDER_SOURCE);
 
-    const result = await discoverApp({ cwd: workDir });
+    const result = found(await discoverApp({ cwd: workDir }));
     expect(result.filePath).toBe(path.join(workDir, 'src', 'app.ts'));
   });
 
@@ -212,21 +224,17 @@ describe('discoverApp', () => {
     const explicit = path.join(workDir, 'real.ts');
     await writeFile(explicit, BUILDER_SOURCE);
 
-    const result = await discoverApp({ cwd: workDir, appPath: 'real.ts' });
+    const result = found(await discoverApp({ cwd: workDir, appPath: 'real.ts' }));
     expect(result.filePath).toBe(explicit);
   });
 
-  it('throws DOT_CLI_E001 with remediation when no app file is found', async () => {
-    let thrown: unknown;
-    try {
-      await discoverApp({ cwd: workDir });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(DotCliError);
-    const cliErr = thrown as DotCliError;
-    expect(cliErr.code).toBe(DotCliErrorCode.AppNotFound);
-    expect(cliErr.remediation).toMatch(/dot\.config\.ts|--app/);
-    expect(cliErr.docsUrl).toMatch(/^https?:\/\//);
+  it('returns dot.app_not_found with what it searched when no app file is found', async () => {
+    const result = await discoverApp({ cwd: workDir });
+    expect(AppNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'dot.app_not_found',
+      data: { cwd: workDir, searched: ['dot.config', 'src/app', 'app'] },
+      remediation: expect.stringMatching(/dot\.config\.ts|--app/),
+    });
   });
 });

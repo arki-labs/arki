@@ -18,7 +18,8 @@ import type {
   ServicesBag,
   UsecaseGuard,
 } from '../feature.js';
-import { renderExplain } from '../cli/render-explain.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import {
   defineFeature,
   driven,
@@ -386,8 +387,9 @@ describe('compilation into kernel units', () => {
     ]);
     expect(unit('digest/mailer')?.dependencies).toEqual(['digest.store']);
     expect(unit('digest/store')?.dependencies).toEqual(['db']);
-    let text = '';
-    renderExplain({ manifest: app.manifest }, { json: false, out: line => (text += line) });
+    const explained = textUi();
+    renderExplainText(app.manifest, explained.ui);
+    const text = explained.text();
     expect(text).toContain('digest --[digest.store]--> digest/store');
     expect(text).toContain('digest/mailer --[digest.store]--> digest/store');
     expect(text).toContain('digest/store --[db]--> database');

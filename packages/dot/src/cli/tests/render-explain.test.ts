@@ -8,9 +8,9 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../../define-app.js';
 import { plugin, service } from '../../plugin-contract.js';
-import { buildExplainEnvelope, renderExplain } from '../render-explain.js';
-
-const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
+import { runExplain } from '../explain.js';
+import { renderExplainText } from '../render-explain.js';
+import { textUi } from './text-ui.js';
 
 function syntheticApp() {
   const db = plugin({
@@ -38,38 +38,53 @@ function syntheticApp() {
   return defineApp('synthetic').use(db).use(api);
 }
 
-describe('buildExplainEnvelope', () => {
-  it('emits a DotCliEnvelope with all 6 manifest arrays', () => {
-    const configured = syntheticApp().configure();
-    const envelope = buildExplainEnvelope({ manifest: configured.manifest }, { json: true, now: FROZEN_NOW });
+describe('runExplain', () => {
+  it("returns the manifest with all 6 arrays: it is the envelope's `.data`", async () => {
+    const manifest = await runExplain(syntheticApp());
+    if (!('manifestVersion' in manifest)) throw new Error('expected the manifest');
 
-    expect(envelope.status).toBe('success');
-    expect(envelope.command).toBe('explain');
-    expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
-    expect(envelope.errors).toEqual([]);
-
-    expect(envelope.data.manifestVersion).toBe(2);
+    expect(manifest.manifestVersion).toBe(2);
     // 6-array contract (manifest has plugins, actions, services, lifecycle, dependencies, projections)
-    expect(envelope.data.plugins).toBeInstanceOf(Array);
-    expect(envelope.data.actions).toBeInstanceOf(Array);
-    expect(envelope.data.services).toBeInstanceOf(Array);
-    expect(envelope.data.lifecycle).toBeInstanceOf(Array);
-    expect(envelope.data.dependencies).toBeInstanceOf(Array);
-    expect(envelope.data.projections).toBeInstanceOf(Array);
+    expect(manifest.plugins).toBeInstanceOf(Array);
+    expect(manifest.actions).toBeInstanceOf(Array);
+    expect(manifest.services).toBeInstanceOf(Array);
+    expect(manifest.lifecycle).toBeInstanceOf(Array);
+    expect(manifest.dependencies).toBeInstanceOf(Array);
+    expect(manifest.projections).toBeInstanceOf(Array);
 
     // Substance
-    expect(envelope.data.plugins.map(p => p.name)).toEqual(['db', 'api']);
-    expect(envelope.data.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
-    expect(envelope.data.actions).toEqual([
+    expect(manifest.plugins.map(p => p.name)).toEqual(['db', 'api']);
+    expect(manifest.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
+    expect(manifest.actions).toEqual([
       { id: 'api.health', plugin: 'api', binding: 'http', direction: 'in', address: 'GET /health' },
     ]);
-    expect(envelope.data.projections).toEqual([
+    expect(manifest.projections).toEqual([
       { format: 'openapi', binding: 'http', module: '@arki/http/projection', plugin: 'api' },
     ]);
   });
+
+  it('returns dot.app_lifecycle_failed when configure throws, instead of throwing', async () => {
+    const broken = plugin({
+      name: 'broken',
+      configure: () => {
+        throw new Error('configure-boom');
+      },
+    });
+    const result = await runExplain(defineApp('broken').use(broken));
+    expect(result).toMatchObject({
+      code: 'dot.app_lifecycle_failed',
+      data: { phase: 'configure', causeMessage: expect.stringContaining('configure-boom') },
+    });
+  });
+
+  it('snapshot stability: same app -> same JSON (no random ordering)', async () => {
+    const first = JSON.stringify(await runExplain(syntheticApp()));
+    const second = JSON.stringify(await runExplain(syntheticApp()));
+    expect(first).toBe(second);
+  });
 });
 
-describe('renderExplain', () => {
+describe('renderExplainText', () => {
   it('prints the summary line right after an action row, and nothing for an action without one', () => {
     const api = plugin({
       name: 'api',
@@ -87,9 +102,9 @@ describe('renderExplain', () => {
       },
     });
     const configured = defineApp('synthetic').use(api).configure();
-    const written: string[] = [];
-    renderExplain({ manifest: configured.manifest }, { json: false, now: FROZEN_NOW, out: line => written.push(line) });
-    const lines = written.join('').split('\n');
+    const { ui, text } = textUi();
+    renderExplainText(configured.manifest, ui);
+    const lines = text().split('\n');
     const sweep = lines.findIndex(line => line.includes('api.sweep'));
     expect(lines[sweep + 1]).toBe('      ↳ lock: one runner at a time');
     const plain = lines.findIndex(line => line.includes('api.plain'));
@@ -97,22 +112,11 @@ describe('renderExplain', () => {
     expect(lines.filter(line => line.includes('↳'))).toHaveLength(1);
   });
 
-  it('JSON mode writes a parseable envelope to the sink', () => {
+  it('includes plugin names, service names, actions, and projections', () => {
     const configured = syntheticApp().configure();
-    let written = '';
-    renderExplain({ manifest: configured.manifest }, { json: true, now: FROZEN_NOW, out: line => (written += line) });
-
-    expect(written.endsWith('\n')).toBe(true);
-    const parsed = JSON.parse(written) as ReturnType<typeof renderExplain>;
-    expect(parsed.status).toBe('success');
-    expect(parsed.command).toBe('explain');
-    expect(parsed.data.app.name).toBe('synthetic');
-  });
-
-  it('text mode includes plugin names, service names, actions, and projections', () => {
-    const configured = syntheticApp().configure();
-    let written = '';
-    renderExplain({ manifest: configured.manifest }, { json: false, now: FROZEN_NOW, out: line => (written += line) });
+    const { ui, text } = textUi();
+    renderExplainText(configured.manifest, ui);
+    const written = text();
 
     expect(written).toContain('synthetic');
     expect(written).toContain('db');
@@ -122,25 +126,5 @@ describe('renderExplain', () => {
     expect(written).toContain('/health');
     expect(written).toContain('Projections (1)');
     expect(written).toContain('@arki/http/projection');
-  });
-
-  it('snapshot stability: same app → same JSON (no random ordering)', () => {
-    const configured1 = syntheticApp().configure();
-    const configured2 = syntheticApp().configure();
-    let first = '';
-    let second = '';
-    renderExplain({ manifest: configured1.manifest }, { json: true, now: FROZEN_NOW, out: line => (first += line) });
-    renderExplain({ manifest: configured2.manifest }, { json: true, now: FROZEN_NOW, out: line => (second += line) });
-    expect(first).toBe(second);
-  });
-
-  it('reports status=success on a valid configured app', () => {
-    const configured = syntheticApp().configure();
-    let written = '';
-    const envelope = renderExplain(
-      { manifest: configured.manifest },
-      { json: true, now: FROZEN_NOW, out: line => (written += line) },
-    );
-    expect(envelope.status).toBe('success');
   });
 });

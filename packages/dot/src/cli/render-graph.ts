@@ -13,9 +13,8 @@
  */
 
 import type { DotAppManifest } from '../manifest.js';
-import type { DotCliEnvelope, RenderOptions } from './render-explain.js';
 
-/** Envelope payload for graph output. */
+/** The `data` of `--graph`: Mermaid source. */
 export type GraphData = {
   format: 'mermaid';
   /** Mermaid `flowchart` source. */
@@ -73,34 +72,14 @@ export function buildMermaidGraph(manifest: DotAppManifest): string {
   return `${lines.join('\n')}\n`;
 }
 
-/**
- * Render the graph output. Plain mode prints raw Mermaid source (pipe it
- * straight into a markdown code fence); `--json` wraps it in the standard
- * CLI envelope under `data.source`.
- */
-export function renderGraph(
-  source: { manifest: DotAppManifest; command: 'explain' | 'doctor' },
-  opts: RenderOptions,
-): DotCliEnvelope<GraphData> {
-  const mermaid = buildMermaidGraph(source.manifest);
-  const nowFactory = opts.now ?? (() => new Date());
-  const envelope: DotCliEnvelope<GraphData> = {
-    status: 'success',
-    command: source.command,
-    generatedAt: nowFactory().toISOString(),
-    data: { format: 'mermaid', source: mermaid },
-    errors: [],
-  };
+/** The graph payload of `explain --graph` / `doctor --graph`. Text mode prints `source` as is. */
+export function renderGraph(manifest: DotAppManifest): GraphData {
+  return { format: 'mermaid', source: buildMermaidGraph(manifest) };
+}
 
-  const out =
-    opts.out ??
-    ((line: string) => {
-      process.stdout.write(line);
-    });
-  if (opts.json) {
-    out(`${JSON.stringify(envelope, null, 2)}\n`);
-  } else {
-    out(mermaid);
-  }
-  return envelope;
+/** True when a command's data is the `--graph` payload. */
+export function isGraphData(value: unknown): value is GraphData {
+  return (
+    typeof value === 'object' && value !== null && 'format' in value && value.format === 'mermaid' && 'source' in value
+  );
 }

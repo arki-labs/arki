@@ -778,8 +778,8 @@ export type ScorecardStatus = 'pass' | 'fail' | 'warn' | 'deferred';
  * Result of the one-shot DOT probe that runs alongside the scorecard. The
  * probe boots a synthetic 3-adapter DOT app (env + kv + db), reads the
  * static `DotAppManifest` + runtime `DotDiagnosticsSnapshot`, and exercises
- * the CLI's pure envelope builders (`buildExplainEnvelope`,
- * `buildDoctorEnvelope`) plus `runNew --dry-run --json`. The structured
+ * the `dot` program in-process (`explain`, `doctor`, `new --dry-run`, all
+ * `--json`, read as `arki.cli/1` envelopes). The structured
  * output drives both the `dot-gates` and `agent-native-gates` dimensions.
  *
  * Counts are kept as numbers (not booleans) so the gate evaluator can
@@ -798,11 +798,11 @@ export type DotProbeOk = {
   readonly manifestArrays: number;
   /** Count of the five contract arrays present on diagnostics. Gate requires 5. */
   readonly diagnosticsArrays: number;
-  /** True iff `buildExplainEnvelope` emits `{ status, command: 'explain', generatedAt, data: <manifest>, errors }`. */
+  /** True iff `dot explain --json` exits 0 with an `arki.cli/1` envelope: `ok`, `command: ['explain']`, `.data` = the manifest. */
   readonly explainEnvelopeOk: boolean;
-  /** True iff `buildDoctorEnvelope` emits `{ status, command: 'doctor', generatedAt, data: <snapshot>, errors }`. */
+  /** True iff `dot doctor --json` prints an `arki.cli/1` envelope whose report (`.data`, or `.error.data` of `dot.doctor_failed`) has the snapshot shape. */
   readonly doctorEnvelopeOk: boolean;
-  /** True iff `runNew(--dry-run --json)` emits a success envelope with operations. */
+  /** True iff `dot new --dry-run --json` exits 0 with `.data.operations[]` holding every required file. */
   readonly newEnvelopeOk: boolean;
   /** Number of file operations the dry-run reported. */
   readonly newOperationCount: number;

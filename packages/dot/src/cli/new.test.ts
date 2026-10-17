@@ -15,9 +15,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
+import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
+import type { DotNewResult } from './json.js';
+import type { NewPlan, RunNewOptions } from './new.js';
 import { sha256 } from './files.js';
-import { main } from './index.js';
+import { program } from './index.js';
 import {
   DEFAULT_TEMPLATE,
   planOperations,
@@ -31,7 +35,6 @@ import { readDotVersion, TEMPLATE_VERSIONS, ZOD_VERSION } from './versions.js';
 const join = (...segments: string[]): string => path.join(...segments);
 const resolve = (...segments: string[]): string => path.resolve(...segments);
 
-const FROZEN_NOW = () => new Date('2026-05-21T00:00:00.000Z');
 const TEMPLATE_ROOT = resolve(__dirname, '..', '..', 'templates', 'app-minimal');
 
 const EXPECTED_FILES = [
@@ -55,32 +58,56 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true });
 });
 
-function captureSink() {
-  const lines: string[] = [];
-  return {
-    out: (line: string) => {
-      lines.push(line);
+/** The plan, for cases that expect one: a failure throws with its code. */
+async function plan(opts: RunNewOptions): Promise<NewPlan> {
+  const planned = await planOperations(opts);
+  if (isFailure(planned)) throw unexpected(planned);
+  return planned;
+}
+
+function unexpected(failure: Failure): Error {
+  return new Error(`expected success, got ${failure.code}: ${failure.message}`);
+}
+
+/** The scaffold result, for cases that expect one: a failure throws with its code. */
+async function scaffold(opts: RunNewOptions): Promise<DotNewResult> {
+  const result = await runNew(opts);
+  if (isFailure(result)) throw unexpected(result);
+  return result;
+}
+
+/** Run `dot` through `program.main`, as the bin would with stdout piped. */
+async function dot(argv: string[], options: { tty?: boolean } = {}) {
+  let stdout = '';
+  let stderr = '';
+  const code = await program.main(argv, {
+    stdout: text => {
+      stdout += text;
     },
-    lines,
-  };
+    stderr: text => {
+      stderr += text;
+    },
+    tty: options.tty ?? false,
+  });
+  return { code, stdout, stderr };
 }
 
 describe('validateAppName', () => {
   it('accepts simple lower-case names', () => {
-    expect(() => validateAppName('my-app')).not.toThrow();
-    expect(() => validateAppName('app123')).not.toThrow();
-    expect(() => validateAppName('a.b.c')).not.toThrow();
+    expect(validateAppName('my-app')).toBeUndefined();
+    expect(validateAppName('app123')).toBeUndefined();
+    expect(validateAppName('a.b.c')).toBeUndefined();
   });
 
   it('rejects names with spaces, capitals, or leading punctuation', () => {
-    expect(() => validateAppName('My App')).toThrowError(/invalid/i);
-    expect(() => validateAppName('MyApp')).toThrowError(/invalid/i);
-    expect(() => validateAppName('-leading-hyphen')).toThrowError(/invalid/i);
-    expect(() => validateAppName('@scope/name')).toThrowError(/invalid/i);
+    expect(validateAppName('My App')).toMatch(/invalid/i);
+    expect(validateAppName('MyApp')).toMatch(/invalid/i);
+    expect(validateAppName('-leading-hyphen')).toMatch(/invalid/i);
+    expect(validateAppName('@scope/name')).toMatch(/invalid/i);
   });
 
   it('rejects empty name', () => {
-    expect(() => validateAppName('')).toThrowError(/required/i);
+    expect(validateAppName('')).toMatch(/required/i);
   });
 });
 
@@ -100,7 +127,7 @@ describe('resolveTargetDir', () => {
 
 describe('planOperations', () => {
   it('plans exactly the expected file set', async () => {
-    const { operations, target } = await planOperations({
+    const { operations, target } = await plan({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
@@ -111,7 +138,7 @@ describe('planOperations', () => {
   });
 
   it('marks all files as `create` when target dir is empty', async () => {
-    const { operations } = await planOperations({
+    const { operations } = await plan({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
@@ -123,8 +150,8 @@ describe('planOperations', () => {
   });
 
   it('produces deterministic content hashes for the same input', async () => {
-    const planA = await planOperations({ name: 'fixture', cwd: workDir, templateRoot: TEMPLATE_ROOT });
-    const planB = await planOperations({ name: 'fixture', cwd: workDir, templateRoot: TEMPLATE_ROOT });
+    const planA = await plan({ name: 'fixture', cwd: workDir, templateRoot: TEMPLATE_ROOT });
+    const planB = await plan({ name: 'fixture', cwd: workDir, templateRoot: TEMPLATE_ROOT });
 
     for (let i = 0; i < planA.operations.length; i++) {
       expect(planA.operations[i]!.contentHash).toBe(planB.operations[i]!.contentHash);
@@ -133,8 +160,8 @@ describe('planOperations', () => {
   });
 
   it('changes content hash when name changes', async () => {
-    const planA = await planOperations({ name: 'alpha', cwd: workDir, templateRoot: TEMPLATE_ROOT });
-    const planB = await planOperations({ name: 'beta', cwd: workDir, templateRoot: TEMPLATE_ROOT });
+    const planA = await plan({ name: 'alpha', cwd: workDir, templateRoot: TEMPLATE_ROOT });
+    const planB = await plan({ name: 'beta', cwd: workDir, templateRoot: TEMPLATE_ROOT });
 
     const pkgA = planA.operations.find(op => op.path === 'package.json')!;
     const pkgB = planB.operations.find(op => op.path === 'package.json')!;
@@ -142,7 +169,7 @@ describe('planOperations', () => {
   });
 
   it('attaches a human-readable reason to every operation', async () => {
-    const { operations } = await planOperations({
+    const { operations } = await plan({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
@@ -163,7 +190,7 @@ describe('planOperations', () => {
     await mkdir(target, { recursive: true });
     await writeFile(join(target, 'package.json'), '{}');
 
-    const { operations } = await planOperations({
+    const { operations } = await plan({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
@@ -179,7 +206,7 @@ describe('planOperations', () => {
     await mkdir(target, { recursive: true });
     await writeFile(join(target, 'package.json'), '{}');
 
-    const { operations } = await planOperations({
+    const { operations } = await plan({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
@@ -193,35 +220,25 @@ describe('planOperations', () => {
 
 describe('runNew (dry-run JSON)', () => {
   it('emits a well-formed envelope with all required fields', async () => {
-    const sink = captureSink();
-    const envelope = await runNew({
+    const envelope = await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
+      template: 'minimal',
       dryRun: true,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
-    expect(envelope.status).toBe('success');
-    expect(envelope.command).toBe('new');
-    expect(envelope.generatedAt).toBe('2026-05-21T00:00:00.000Z');
     expect(envelope.app).toEqual({ name: 'fixture', target: join(workDir, 'fixture') });
-    expect(envelope.errors).toEqual([]);
     expect(envelope.operations).toHaveLength(EXPECTED_FILES.length);
+    expect(envelope.nextSteps).toEqual(['cd fixture', 'bun install', 'bun run test']);
   });
 
   it('does not write any files in dry-run', async () => {
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
       dryRun: true,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const target = join(workDir, 'fixture');
@@ -229,15 +246,11 @@ describe('runNew (dry-run JSON)', () => {
   });
 
   it('matches the exact file-list snapshot', async () => {
-    const sink = captureSink();
-    const envelope = await runNew({
+    const envelope = await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
       dryRun: true,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const paths = envelope.operations.map(op => op.path);
@@ -255,39 +268,23 @@ describe('runNew (dry-run JSON)', () => {
     `);
   });
 
-  it('emits JSON envelope onto the out sink as a single block', async () => {
-    const sink = captureSink();
-    await runNew({
-      name: 'fixture',
-      cwd: workDir,
-      templateRoot: TEMPLATE_ROOT,
-      dryRun: true,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
-    });
+  it('prints one arki.cli/1 envelope on stdout when piped, with no --json', async () => {
+    const { code, stdout } = await dot(['new', 'fixture', '--template', 'minimal', '--dry-run', '--cwd', workDir]);
 
-    // Should be a single newline-terminated JSON document.
-    expect(sink.lines).toHaveLength(1);
-    const parsed = JSON.parse(sink.lines[0]!);
-    expect(parsed.command).toBe('new');
-    expect(parsed.status).toBe('success');
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout) as { ok: boolean; command: string[]; meta: { schema: string; dryRun: boolean } };
+    expect(parsed).toMatchObject({ ok: true, command: ['new'], meta: { schema: 'arki.cli/1', dryRun: true } });
   });
 });
 
 describe('runNew (real run)', () => {
   it('writes every planned file to disk', async () => {
-    const sink = captureSink();
-    const envelope = await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
-    expect(envelope.status).toBe('success');
     const target = join(workDir, 'fixture');
     const entries = await readdir(target, { recursive: true });
     // Filter to relative paths only; readdir(recursive) returns nested files
@@ -302,14 +299,10 @@ describe('runNew (real run)', () => {
   });
 
   it('written file contents match the planned contentHash', async () => {
-    const sink = captureSink();
-    const envelope = await runNew({
+    const envelope = await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const target = join(workDir, 'fixture');
@@ -324,22 +317,16 @@ describe('runNew (real run)', () => {
     const { mkdir } = await import('node:fs/promises');
     await mkdir(target, { recursive: true });
     await writeFile(join(target, 'package.json'), '{"existing": true}');
-
-    const sink = captureSink();
-    const errSink = captureSink();
-    const envelope = await runNew({
+    const result = await runNew({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      err: errSink.out,
-      now: FROZEN_NOW,
     });
 
-    expect(envelope.status).toBe('failure');
-    expect(envelope.errors.length).toBeGreaterThan(0);
-    expect(envelope.errors[0]!.code).toBe(DotCliErrorCode.InvalidArgs);
+    expect(result).toMatchObject({
+      code: 'dot.target_not_empty',
+      data: { target, conflicting: ['package.json'] },
+    });
 
     // The existing file should be untouched.
     const after = await readFile(join(target, 'package.json'), 'utf-8');
@@ -351,69 +338,46 @@ describe('runNew (real run)', () => {
     const { mkdir } = await import('node:fs/promises');
     await mkdir(target, { recursive: true });
     await writeFile(join(target, 'package.json'), '{"existing": true}');
-
-    const sink = captureSink();
-    const envelope = await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
       force: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
-    expect(envelope.status).toBe('success');
     const after = await readFile(join(target, 'package.json'), 'utf-8');
     expect(after).not.toBe('{"existing": true}');
     expect(after).toContain('"name": "fixture"');
   });
 
-  it('rejects invalid app names with a structured failure envelope', async () => {
-    const sink = captureSink();
-    const errSink = captureSink();
-    const envelope = await runNew({
+  it('rejects invalid app names with cli.invalid_input, the code the CLI gives', async () => {
+    const result = await runNew({
       name: 'Invalid Name With Spaces',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      err: errSink.out,
-      now: FROZEN_NOW,
     });
 
-    expect(envelope.status).toBe('failure');
-    expect(envelope.errors[0]!.code).toBe(DotCliErrorCode.InvalidArgs);
+    expect(result).toMatchObject({ code: 'cli.invalid_input', data: { issues: [{ path: ['name'] }] } });
   });
 
-  it('emits non-JSON progress output when --json is omitted', async () => {
-    const sink = captureSink();
-    const envelope = await runNew({
-      name: 'fixture',
-      cwd: workDir,
-      templateRoot: TEMPLATE_ROOT,
-      out: sink.out,
-      now: FROZEN_NOW,
+  it('prints text progress on a terminal', async () => {
+    const { code, stdout, stderr } = await dot(['new', 'fixture', '--template', 'minimal', '--cwd', workDir], {
+      tty: true,
     });
 
-    expect(envelope.status).toBe('success');
-    const joined = sink.lines.join('');
-    expect(joined).toContain('Scaffolded');
-    expect(joined).toContain('Next steps:');
-    expect(joined).toContain('install');
+    expect(code).toBe(0);
+    expect(stderr).toContain('Scaffolded');
+    expect(stdout).toContain('Next steps:');
+    expect(stdout).toContain('bun install');
   });
 });
 
 describe('generated app content', () => {
   it('package.json declares the chosen name and required deps', async () => {
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const pkgRaw = await readFile(join(workDir, 'fixture', 'package.json'), 'utf-8');
@@ -427,14 +391,10 @@ describe('generated app content', () => {
   });
 
   it('AGENTS.md documents verification commands and boundaries', async () => {
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const agents = await readFile(join(workDir, 'fixture', 'AGENTS.md'), 'utf-8');
@@ -448,14 +408,10 @@ describe('generated app content', () => {
   });
 
   it('src/app.ts uses defineApp and boots without TODOs', async () => {
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const appTs = await readFile(join(workDir, 'fixture', 'src', 'app.ts'), 'utf-8');
@@ -466,15 +422,11 @@ describe('generated app content', () => {
   });
 
   it('package manager flag flows into the README and AGENTS.md', async () => {
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: workDir,
       templateRoot: TEMPLATE_ROOT,
       pm: 'pnpm',
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const readme = await readFile(join(workDir, 'fixture', 'README.md'), 'utf-8');
@@ -495,15 +447,10 @@ describe('generated app boots', () => {
     const bootRoot = join(workspaceRoot, 'packages', 'dot', '.cache', `boot-${Date.now()}`);
     const { mkdir: mkdirBoot } = await import('node:fs/promises');
     await mkdirBoot(bootRoot, { recursive: true });
-
-    const sink = captureSink();
-    await runNew({
+    await scaffold({
       name: 'fixture',
       cwd: bootRoot,
       templateRoot: TEMPLATE_ROOT,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
 
     const appDir = join(bootRoot, 'fixture');
@@ -572,13 +519,10 @@ describe('generated stack app explain', () => {
     const { mkdir: mkdirCache } = await import('node:fs/promises');
     await mkdirCache(cacheRoot, { recursive: true });
     try {
-      await runNew({
+      await scaffold({
         name: 'fixture',
         cwd: cacheRoot,
         templateRoot: resolve(__dirname, '..', '..', 'templates', 'app-stack'),
-        json: true,
-        out: captureSink().out,
-        now: FROZEN_NOW,
       });
       const appDir = join(cacheRoot, 'fixture');
       const envPath = join(appDir, 'src', 'env.ts');
@@ -611,14 +555,14 @@ describe('generated stack app explain', () => {
       });
       expect(code, `explain exited ${code}; stderr=${stderr}`).toBe(0);
       const envelope = JSON.parse(stdout) as {
-        status: string;
-        command: string;
-        errors: unknown[];
+        ok: boolean;
+        command: string[];
+        error: unknown;
         data: { services: { name: string }[] };
       };
-      expect(envelope.status).toBe('success');
-      expect(envelope.command).toBe('explain');
-      expect(envelope.errors).toEqual([]);
+      expect(envelope.ok).toBe(true);
+      expect(envelope.command).toEqual(['explain']);
+      expect(envelope.error).toBeNull();
       expect(envelope.data.services.map(service => service.name)).toEqual(
         expect.arrayContaining(['env', 'db', 'journal']),
       );
@@ -675,13 +619,13 @@ const STACK_KEY_FILES = [
 describe('templates', () => {
   it('uses the stack template when --template is omitted', async () => {
     expect(DEFAULT_TEMPLATE).toBe('stack');
-    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    const { operations } = await plan({ name: 'fixture', cwd: workDir });
     const paths = operations.map(op => op.path);
     expect(paths).toEqual(expect.arrayContaining([...STACK_KEY_FILES]));
   });
 
   it('the stack plan ships an initial migration for the notes and journal tables', async () => {
-    const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template: 'stack' });
+    const { operations } = await plan({ name: 'fixture', cwd: workDir, template: 'stack' });
     const migration = operations.find(op => /^drizzle\/\d{14}_init\/migration\.sql$/.test(op.path));
     expect(migration, 'drizzle/<timestamp>_init/migration.sql').toBeDefined();
     expect(migration!.content).toContain('CREATE TABLE "notes"');
@@ -692,7 +636,7 @@ describe('templates', () => {
   // The release packlist forbids `.env*` files in the tarball, so the
   // template stores `env.example` and the scaffold writes `.env.example`.
   it('writes .env.example although the template stores it as env.example', async () => {
-    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    const { operations } = await plan({ name: 'fixture', cwd: workDir });
     expect(operations.map(op => op.path)).toContain('.env.example');
     expect(operations.map(op => op.path)).not.toContain('env.example');
     const { readdir: readTemplateDir } = await import('node:fs/promises');
@@ -701,53 +645,33 @@ describe('templates', () => {
   });
 
   it('--template minimal still produces the 8-file skeleton', async () => {
-    const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template: 'minimal' });
+    const { operations } = await plan({ name: 'fixture', cwd: workDir, template: 'minimal' });
     expect(operations.map(op => op.path)).toEqual([...EXPECTED_FILES]);
   });
 
-  it('rejects an unknown template with DOT_CLI_E005', async () => {
-    expect(() => resolveTemplateName('fullstack')).toThrow(DotCliError);
-    const sink = captureSink();
-    const envelope = await runNew({
+  it('rejects an unknown template with cli.invalid_input', async () => {
+    expect(resolveTemplateName('fullstack')).toBeUndefined();
+    const result = await runNew({
       name: 'fixture',
       cwd: workDir,
       template: 'fullstack',
       dryRun: true,
-      json: true,
-      out: sink.out,
-      now: FROZEN_NOW,
     });
-    expect(envelope.status).toBe('failure');
-    expect(envelope.errors[0]?.code).toBe(DotCliErrorCode.InvalidArgs);
-    expect(envelope.errors[0]?.message).toContain('fullstack');
-    expect(envelope.operations).toEqual([]);
+    expect(result).toMatchObject({ code: 'cli.invalid_input', message: expect.stringContaining('fullstack') });
   });
 
-  it('the CLI passes --template through and fails on an unknown name', async () => {
-    const out: string[] = [];
-    const ok = await main({
-      argv: ['new', 'fixture', '--template', 'minimal', '--dry-run', '--json', '--cwd', workDir],
-      stdout: line => out.push(line),
-      stderr: () => {
-        /* noop */
-      },
-      now: FROZEN_NOW,
-    });
-    expect(ok).toBe(0);
-    const envelope = JSON.parse(out.join('')) as { operations: { path: string }[] };
-    expect(envelope.operations.map(op => op.path)).toEqual([...EXPECTED_FILES]);
+  it('the CLI passes --template through and fails on an unknown name with exit 2', async () => {
+    const ok = await dot(['new', 'fixture', '--template', 'minimal', '--dry-run', '--json', '--cwd', workDir]);
+    expect(ok.code).toBe(0);
+    const envelope = JSON.parse(ok.stdout) as { data: { operations: { path: string }[] } };
+    expect(envelope.data.operations.map(op => op.path)).toEqual([...EXPECTED_FILES]);
 
-    const errLines: string[] = [];
-    const bad = await main({
-      argv: ['new', 'fixture', '--template', 'nope', '--dry-run', '--cwd', workDir],
-      stdout: () => {
-        /* noop */
-      },
-      stderr: line => errLines.push(line),
-      now: FROZEN_NOW,
-    });
-    expect(bad).toBe(1);
-    expect(errLines.join('')).toContain(DotCliErrorCode.InvalidArgs);
+    const bad = await dot(['new', 'fixture', '--template', 'nope', '--dry-run', '--cwd', workDir]);
+    expect(bad.code).toBe(2);
+    const failure = JSON.parse(bad.stdout) as { ok: boolean; error: { code: string; issues: { flag: string }[] } };
+    expect(failure.ok).toBe(false);
+    expect(failure.error.code).toBe('cli.invalid_input');
+    expect(failure.error.issues[0]?.flag).toBe('--template');
   });
 
   // A stranger installs from npm, outside this monorepo. Anything that only
@@ -755,7 +679,7 @@ describe('templates', () => {
   it.each(['stack', 'minimal'] as const)(
     '%s: no generated file contains workspace-only specifiers, parent escapes, TODOs or unfilled placeholders',
     async template => {
-      const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template });
+      const { operations } = await plan({ name: 'fixture', cwd: workDir, template });
       for (const op of operations) {
         expect(op.content, op.path).not.toContain('workspace:');
         expect(op.content, op.path).not.toContain('catalog:');
@@ -767,7 +691,7 @@ describe('templates', () => {
   );
 
   it('stack package.json pins every @arki dependency to a published version', async () => {
-    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    const { operations } = await plan({ name: 'fixture', cwd: workDir });
     const manifest = JSON.parse(operations.find(op => op.path === 'package.json')!.content) as {
       name: string;
       dependencies: Record<string, string>;
@@ -821,9 +745,8 @@ describe('template versions', () => {
     const manifest = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf-8')) as {
       version: string;
     };
-    const out: string[] = [];
-    const code = await main({ argv: ['--version'], stdout: line => out.push(line) });
+    const { code, stdout } = await dot(['--version']);
     expect(code).toBe(0);
-    expect(out.join('').trim()).toBe(manifest.version);
+    expect(stdout.trim()).toBe(manifest.version);
   });
 });

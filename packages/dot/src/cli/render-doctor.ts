@@ -1,86 +1,34 @@
 /**
- * Renderers for `dot doctor`.
+ * `dot doctor`'s verdict and text renderer.
  *
- * Reads a booted (or fully-failed) app's `diagnostics` snapshot and emits
- * either a JSON envelope or a human-readable per-plugin status report.
- *
- * Envelope `status` reflects the worst severity present:
+ * The verdict is the worst severity among every issue in the snapshot:
  *   - `failure` if any issue has severity `error`
  *   - `warning` if any issue has severity `warning` (and no errors)
  *   - `success` otherwise
  */
 
+import type { Ui } from '@arki/cli';
+
 import type { DiagnosticIssue, DiagnosticStatus, DotDiagnosticsSnapshot } from '../diagnostics.js';
-import type { DotCliEnvelope, DotCliEnvelopeStatus, RenderOptions } from './render-explain.js';
+import type { DoctorReport, DoctorStatus } from './failures.js';
 
-export type DoctorSource = {
-  diagnostics: DotDiagnosticsSnapshot;
-};
-
-const defaultOut = (line: string) => {
-  process.stdout.write(line);
-};
-
-function nowIso(opts: RenderOptions): string {
-  const factory = opts.now ?? (() => new Date());
-  return factory().toISOString();
+/** Every issue in the snapshot: top-level, then per plugin, action, service and lifecycle entry. */
+export function allIssues(snap: DotDiagnosticsSnapshot): DiagnosticIssue[] {
+  return [
+    ...snap.issues,
+    ...snap.plugins.flatMap(p => p.issues),
+    ...snap.actions.flatMap(action => action.issues),
+    ...snap.services.flatMap(s => s.issues),
+    ...snap.lifecycle.flatMap(l => l.issues),
+  ];
 }
 
-/**
- * Walk every issue carried anywhere in the snapshot (top-level + per-plugin +
- * per-action + per-service + per-lifecycle entry) and pick the worst severity.
- */
-function worstSeverity(snap: DotDiagnosticsSnapshot): DotCliEnvelopeStatus {
-  let hasWarning = false;
-
-  const collect = (issues: readonly DiagnosticIssue[]): void => {
-    for (const issue of issues) {
-      if (issue.severity === 'error') {
-        // Short-circuit through a thrown sentinel is overkill; track a flag.
-        hasError = true;
-      } else if (issue.severity === 'warning') {
-        hasWarning = true;
-      }
-    }
-  };
-
-  let hasError = false;
-  collect(snap.issues);
-  for (const p of snap.plugins) collect(p.issues);
-  for (const action of snap.actions) collect(action.issues);
-  for (const s of snap.services) collect(s.issues);
-  for (const l of snap.lifecycle) collect(l.issues);
-
-  if (hasError) return 'failure';
-  if (hasWarning) return 'warning';
+/** The worst severity among all the snapshot's issues. */
+export function doctorStatus(snap: DotDiagnosticsSnapshot): DoctorStatus {
+  const issues = allIssues(snap);
+  if (issues.some(issue => issue.severity === 'error')) return 'failure';
+  if (issues.some(issue => issue.severity === 'warning')) return 'warning';
   return 'success';
-}
-
-/**
- * Compose the JSON envelope. Pure — no IO. Useful for tests and embedding.
- */
-export function buildDoctorEnvelope(source: DoctorSource, opts: RenderOptions): DotCliEnvelope<DotDiagnosticsSnapshot> {
-  const status = worstSeverity(source.diagnostics);
-
-  // Top-level `errors` is the flat list of every issue, so agents can fail
-  // fast without walking the nested arrays.
-  const errors: DiagnosticIssue[] = [];
-  const collect = (issues: readonly DiagnosticIssue[]): void => {
-    for (const issue of issues) errors.push(issue);
-  };
-  collect(source.diagnostics.issues);
-  for (const p of source.diagnostics.plugins) collect(p.issues);
-  for (const action of source.diagnostics.actions) collect(action.issues);
-  for (const s of source.diagnostics.services) collect(s.issues);
-  for (const l of source.diagnostics.lifecycle) collect(l.issues);
-
-  return {
-    status,
-    command: 'doctor',
-    generatedAt: nowIso(opts),
-    data: source.diagnostics,
-    errors,
-  };
 }
 
 function statusIcon(status: DiagnosticStatus): string {
@@ -116,7 +64,7 @@ function renderIssueLines(issues: readonly DiagnosticIssue[], indent: string): s
   return lines;
 }
 
-function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeStatus): string {
+function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DoctorStatus): string {
   const lines: string[] = [];
   const title = `Doctor: ${snap.app.name} (state=${snap.app.state})`;
   lines.push(
@@ -183,19 +131,7 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeSt
   return lines.join('\n');
 }
 
-/**
- * Render the doctor output. Returns the envelope so callers can act on it
- * (e.g. set the process exit code based on `status`).
- */
-export function renderDoctor(source: DoctorSource, opts: RenderOptions): DotCliEnvelope<DotDiagnosticsSnapshot> {
-  const envelope = buildDoctorEnvelope(source, opts);
-  const out = opts.out ?? defaultOut;
-
-  if (opts.json) {
-    out(`${JSON.stringify(envelope, null, 2)}\n`);
-  } else {
-    out(`${renderTextDoctor(source.diagnostics, envelope.status)}\n`);
-  }
-
-  return envelope;
+/** Print the report as text: per-plugin status, services, actions, lifecycle and app-level issues, the verdict. */
+export function renderDoctorText(report: DoctorReport, ui: Ui): void {
+  ui.out(renderTextDoctor(report, report.status));
 }

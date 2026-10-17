@@ -1184,7 +1184,7 @@ Every error the kernel throws carries a stable `code`, a one-sentence `remediati
 | `ARKI_DOT_E031` | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.               | Keep contract `meta` JSON-safe.                        |
 | `ARKI_DOT_E032` | `DotManifestError`  | Manifest data is not plain JSON.                                        | Pass plain JSON only.                                  |
 
-The `dot` command has its own codes (`DOT_CLI_E001` and up),.
+The `dot` command returns `dot.*` failure codes (`dot.app_not_found`, `dot.doctor_failed`, ...) in the `arki.cli/1` envelope; see the [agent guide](./docs/agent-guide.md#errors). Exit codes: `0` ok, `1` bug, `2` usage, `3` a returned failure.
 
 ## Runtime support
 
@@ -1217,7 +1217,7 @@ dot new my-app --dry-run --json | jq '.operations'
 # Print the app manifest as a structured envelope.
 dot explain --app ./my-app.ts
 
-# Run boot-time diagnostics; non-zero exit if any check fails.
+# Run boot-time diagnostics; exit 3 (dot.doctor_failed) if any check fails.
 dot doctor --app ./my-app.ts
 
 # Render the plugin graph as Mermaid flowchart source. explain shows
@@ -1253,7 +1253,7 @@ starting point with `--template`:
   a vitest that boots the app and asserts the manifest shape, and an
   `AGENTS.md` documenting verification commands.
 
-An unknown template name fails with `DOT_CLI_E005`. Pass `--dry-run --json`
+An unknown template name fails with `cli.invalid_input` (exit 2). Pass `--dry-run --json`
 to inspect the exact file operations (path, action, contentHash,
 contentBytes, reason) before committing them to disk; `--force`
 overwrites pre-existing files in the target directory.

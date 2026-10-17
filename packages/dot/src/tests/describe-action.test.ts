@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { renderDoctor } from '../cli/render-doctor.js';
+import { doctorStatus, renderDoctorText } from '../cli/render-doctor.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
 import { plugin } from '../plugin-contract.js';
 
@@ -83,9 +84,10 @@ describe('$describeAction', () => {
       },
     });
     const app = await defineApp('t').use(owner).configure().boot();
-    const lines: string[] = [];
-    renderDoctor({ diagnostics: app.diagnostics }, { json: false, out: line => lines.push(line) });
-    expect(lines.join('')).toContain('jobs:job.fire (plugin: owner)\n      ↳ full text');
+    const { ui, text } = textUi();
+    const diagnostics = app.diagnostics;
+    renderDoctorText({ ...diagnostics, status: doctorStatus(diagnostics) }, ui);
+    expect(text()).toContain('jobs:job.fire (plugin: owner)\n      ↳ full text');
     await app.dispose();
   });
 });

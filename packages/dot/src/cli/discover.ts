@@ -18,10 +18,12 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
+import { AppImportFailed, AppInvalidExport, AppNotFound } from './failures.js';
 
 const debugDiscover = getLogger('arki:dot:cli:discover');
 
@@ -161,20 +163,14 @@ function findAppExport(
 }
 
 /**
- * Dynamic-import the app file and unwrap its default export into a
- * `DotApp` / `DotAppBuilder`. Functions returning either are awaited.
- *
- * Throws `DotCliError` on any failure path.
- */
-/**
  * The code and fix-it hint of an error thrown by a declaration helper
  * (`FeatureError`, `JournalError`, `ScheduleError`, ...), if it carries them.
  * A declaration that rejects a mistake in the code throws while the app
  * module is imported, so its own code is the useful one to show.
  */
-function codedCause(err: unknown): { readonly code: string; readonly remediation?: string } | undefined {
+function codedCause(err: unknown): { readonly code: string; readonly remediation: string | null } | undefined {
   if (!(err instanceof Error) || !('code' in err) || typeof err.code !== 'string') return undefined;
-  const remediation = 'remediation' in err && typeof err.remediation === 'string' ? err.remediation : undefined;
+  const remediation = 'remediation' in err && typeof err.remediation === 'string' ? err.remediation : null;
   return { code: err.code, remediation };
 }
 
@@ -184,96 +180,78 @@ function describeCause(err: unknown): string {
   return coded === undefined || text.includes(coded.code) ? text : `[${coded.code}] ${text}`;
 }
 
-export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp> {
+function importFailed(filePath: string, exportName: string | null, error: unknown): Failure {
+  const coded = codedCause(error);
+  return AppImportFailed(
+    {
+      filePath,
+      exportName,
+      causeMessage: describeCause(error),
+      causeCode: coded?.code ?? null,
+      causeRemediation: coded?.remediation ?? null,
+    },
+    { cause: error },
+  );
+}
+
+/**
+ * Dynamic-import the app file and unwrap its app export into a `DotApp` /
+ * `DotAppBuilder`. A function export is called and awaited. Every failure
+ * path is returned: `dot.app_import_failed` or `dot.app_invalid_export`.
+ */
+export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp | Failure> {
   let mod: unknown;
   try {
     // Use `pathToFileURL` so dynamic import accepts absolute paths on Windows.
     mod = await import(pathToFileURL(filePath).href);
   } catch (error) {
-    const coded = codedCause(error);
-    throw new DotCliError({
-      code: DotCliErrorCode.AppImportFailed,
-      message: `Failed to import app file at ${filePath}: ${describeCause(error)}`,
-      remediation:
-        coded?.remediation ??
-        'Verify the file path is correct and that the module loads without errors. Run the file directly with `bun <path>` to reproduce.',
-      metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
-      cause: error,
-    });
+    return importFailed(filePath, null, error);
   }
 
   const exported = findAppExport(mod);
   if (!exported.found) {
-    const listed = (names: readonly string[]): string => (names.length === 0 ? 'none' : names.join(', '));
-    throw new DotCliError({
-      code: DotCliErrorCode.AppInvalidExport,
-      message:
-        exported.matches.length > 1
-          ? `${filePath} exports several DOT apps (${listed(exported.matches)}) and none is \`default\` or \`app\`.`
-          : `${filePath} exports no DOT app. Exports found: ${listed(exported.names)}.`,
-      remediation:
-        'Export the app as `default` or as `app`. Example: `export const app = defineApp("my-app").use(plugin);`',
-      metadata: { filePath, exports: exported.names },
+    return AppInvalidExport({
+      filePath,
+      exportName: null,
+      exports: [...exported.names],
+      matches: [...exported.matches],
     });
   }
   let candidate = exported.value;
 
-  // If the default export is a function, call it (it may return the
+  // If the app export is a function, call it (it may return the
   // builder/app, or a Promise of one). This supports lazy/async setup.
   if (typeof candidate === 'function') {
     try {
-      const fn = candidate as () => unknown;
-      const result = fn();
+      const factory: () => unknown = candidate as () => unknown;
+      const result = factory();
       candidate = result instanceof Promise ? await result : result;
     } catch (error) {
-      const coded = codedCause(error);
-      throw new DotCliError({
-        code: DotCliErrorCode.AppImportFailed,
-        message: `The \`${exported.name}\` export function in ${filePath} threw: ${describeCause(error)}`,
-        remediation:
-          coded?.remediation ?? 'Make the exported factory return a DotApp or DotAppBuilder. Check for setup errors.',
-        metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
-        cause: error,
-      });
+      return importFailed(filePath, exported.name, error);
     }
   }
 
-  if (
-    looksLikeDotApp(candidate) &&
-    (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate))
-  ) {
+  if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
     debugDiscover.debug('loaded app from {filePath}', { filePath });
     return candidate;
   }
 
-  throw new DotCliError({
-    code: DotCliErrorCode.AppInvalidExport,
-    message: `The \`${exported.name}\` export from ${filePath} is not a DotApp or DotAppBuilder.`,
-    remediation:
-      'Export a DotApp or DotAppBuilder as `default` or `app`. Example: `export default defineApp("my-app").use(plugin);`',
-    metadata: { filePath },
-  });
+  return AppInvalidExport({ filePath, exportName: exported.name, exports: [...exported.names], matches: [] });
 }
 
 /**
- * Combined: resolve the file and load the app. Throws `DotCliError` when no
- * file was found or the import/export shape is invalid.
+ * Resolve the file and load the app. Returns `dot.app_not_found` when no
+ * file was found, or the failure of `loadAppFromFile`.
  */
-export async function discoverApp(options: DiscoveryOptions = {}): Promise<DiscoveryResult> {
+export async function discoverApp(options: DiscoveryOptions = {}): Promise<DiscoveryResult | Failure> {
   const filePath = await resolveAppFile(options);
 
   if (!filePath) {
-    const cwd = options.cwd ?? process.cwd();
-    throw new DotCliError({
-      code: DotCliErrorCode.AppNotFound,
-      message: `No DOT app file found in ${cwd}.`,
-      remediation:
-        'Create `dot.config.ts` exporting your app (e.g. `export default defineApp("my-app").use(plugin)`), or pass `--app <path>` to point at an existing file.',
-      metadata: { cwd, searched: DEFAULT_APP_PATHS },
-    });
+    return AppNotFound({ cwd: options.cwd ?? process.cwd(), searched: [...DEFAULT_APP_PATHS] });
   }
 
   const app = await loadAppFromFile(filePath);
+  if (isFailure(app)) return app;
   return { filePath, app };
 }
 

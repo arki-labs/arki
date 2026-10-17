@@ -176,20 +176,17 @@ at `configure()`:
   graphs, dynamic http bundle tokens). It is no longer the code for a plain
   ordering mistake.
 
-Output envelope:
+Output envelope (`arki.cli/1`, from `@arki/cli`; JSON when piped or with `--json`):
 
 ```ts
-type DotCliEnvelope<T> = {
-  status: 'success' | 'warning' | 'failure';
-  command: string;
-  generatedAt: string;
-  data: T;
-  errors: DiagnosticIssue[];
-};
+type Envelope<T> =
+  | { ok: true; command: string[]; data: T; error: null; meta: EnvelopeMeta }
+  | { ok: false; command: string[]; data: null; error: EnvelopeError; meta: EnvelopeMeta };
 ```
 
-`data.manifest` carries the `DotAppManifest`. `errors` is populated when
-`configure` fails — the envelope still parses, agents still see the issue.
+`.data` is the `DotAppManifest` itself. When `configure` throws, the envelope
+is `ok: false` with `.error.code == "dot.app_lifecycle_failed"` and exit 3 —
+it still parses, agents still see the cause.
 
 ## CLI: `dot doctor`
 
@@ -200,7 +197,7 @@ type DotCliEnvelope<T> = {
 npx dot doctor
 
 # JSON (for agents and CI)
-npx dot doctor --json | jq '.data.diagnostics.issues'
+npx dot doctor --json | jq '.data.issues'
 ```
 
 If `boot()` throws, `dot doctor` **still emits a diagnostics envelope**

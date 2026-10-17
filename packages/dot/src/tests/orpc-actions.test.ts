@@ -7,12 +7,17 @@
  * Two features with a procedure of the same name must not collide, and a
  * policy declared in contract meta must show up as written.
  */
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { oc } from '@orpc/contract';
 import { implement, ORPCError } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { renderExplain } from '../cli/render-explain.js';
+import { program } from '../cli/index.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import { defineFeature, FEATURE_ERROR_CODES } from '../feature.js';
 import { defineApp } from '../index.js';
 import { rpc, RPC_ACTION_META_SCHEMA } from '../orpc.js';
@@ -113,18 +118,59 @@ describe('dot explain: the policy a procedure declares', () => {
   const manifest = defineApp('policy-explain').features([orders]).configure().manifest;
 
   it('prints `policy: order.refund` under the action in the text output', () => {
-    const written: string[] = [];
-    renderExplain({ manifest }, { json: false, out: line => written.push(line) });
-    const text = written.join('');
+    const explained = textUi();
+    renderExplainText(manifest, explained.ui);
+    const text = explained.text();
     expect(text).toMatch(
       /orders\.refund\s+rpc\s+in\s+POST \/orders\/\{id\}\/refund\s+orders\n\s+↳ policy: order\.refund\n/,
     );
   });
 
-  it('carries the policy in --json as the action meta', () => {
-    let written = '';
-    renderExplain({ manifest }, { json: true, out: line => (written += line) });
-    const parsed: unknown = JSON.parse(written);
+  it('carries the policy in --json as the action meta', async () => {
+    // The same app as above, as a file `dot explain` discovers; it lives under this package so
+    // `@orpc/*` and `zod` resolve. Run the real program and read what it prints.
+    const source = (file: string): string => JSON.stringify(fileURLToPath(new URL(`../${file}`, import.meta.url)));
+    const cacheDir = fileURLToPath(new URL('../../.cache', import.meta.url));
+    await mkdir(cacheDir, { recursive: true });
+    const appDir = await mkdtemp(path.join(cacheDir, 'orpc-explain-'));
+    const appFile = path.join(appDir, 'app.ts');
+    await writeFile(
+      appFile,
+      `import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { oc } from '@orpc/contract';
+import { implement } from '@orpc/server';
+import { z } from 'zod';
+import { defineFeature } from ${source('feature.ts')};
+import { defineApp } from ${source('define-app.ts')};
+import { rpc } from ${source('orpc.ts')};
+
+const orderContract = oc.$meta<{ policy?: string }>({}).router({
+  refund: oc
+    .meta({ policy: 'order.refund' })
+    .route({ method: 'POST', path: '/orders/{id}/refund' })
+    .input(z.object({ id: z.string() })),
+});
+const orders = defineFeature('orders').entrypoints(
+  rpc(orderContract, implement(orderContract), { refund: o => o.refund.handler(() => null) }),
+);
+export default defineApp('policy-explain').features([orders]);
+`,
+    );
+    let stdout = '';
+    try {
+      const code = await program.main(['explain', '--app', appFile, '-o', 'json'], {
+        stdout: text => {
+          stdout += text;
+        },
+      });
+      expect(code).toBe(0);
+    } finally {
+      await rm(appDir, { recursive: true, force: true });
+    }
+    const parsed: unknown = JSON.parse(stdout);
     expect(parsed).toMatchObject({
       data: {
         actions: [

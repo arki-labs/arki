@@ -13,7 +13,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Handle, Lazy, Provided } from '../plugin-contract.js';
-import { runExplain } from '../cli/index.js';
+import { renderExplainText } from '../cli/render-explain.js';
+import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
 import { feature, providesOf } from '../feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
@@ -129,8 +130,9 @@ describe('the kernel checks adapters at configure time', () => {
     const database = makeDb('pg://main', opened);
     const digest = feature('daily-digest', { needs: { db: database.provides.db } });
     const configured = defineApp('explain-db').use(database).features([digest]).configure();
-    let table = '';
-    await runExplain(configured, { json: false, out: line => (table += line) });
+    const explained = textUi();
+    renderExplainText(configured.manifest, explained.ui);
+    const table = explained.text();
     expect(table).toContain('daily-digest --[db]--> db');
     expect(configured.manifest.plugins.find(p => p.name === 'db')?.provides).toEqual(['db']);
     expect(configured.manifest.dependencies).toEqual([{ from: 'daily-digest', to: 'db', kind: 'requires', key: 'db' }]);

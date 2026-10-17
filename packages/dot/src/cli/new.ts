@@ -12,12 +12,12 @@
  * entries describing every file the scaffold WOULD write (template
  * substitution included), then either:
  *
- *   - `--dry-run` -> print the JSON envelope, write nothing.
+ *   - `--dry-run` -> return the plan, write nothing.
  *   - real run    -> commit the planned operations to disk.
  *
- * The dry-run envelope is the contract: agents read it to know exactly
- * which files will land, with sha256 hashes so they can verify the
- * post-run filesystem matches the plan.
+ * The dry-run result is the contract: agents read `.data.operations[]` to
+ * know exactly which files will land, with sha256 hashes so they can verify
+ * the post-run filesystem matches the plan.
  *
  * Templates live at `packages/dot/templates/app-<name>/` and use
  * `.tmpl` suffixes + `{{name}}`-style placeholders. The suffix is
@@ -31,12 +31,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { Failure } from '@arki/failure';
+import { InvalidInput } from '@arki/cli';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
-import type { DiagnosticIssue } from '../diagnostics.js';
 import type { FileOperation } from './files.js';
-import type { DotNewEnvelope } from './json.js';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
+import type { DotNewResult } from './json.js';
+import { TargetNotEmpty, TemplateMissing, WriteFailed } from './failures.js';
 import {
   collectTemplateFiles,
   directoryIsNonEmpty,
@@ -67,6 +69,12 @@ export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 /** The template `dot new` uses when `--template` is omitted. */
 export const DEFAULT_TEMPLATE: TemplateName = 'stack';
 
+/** What {@link planOperations} returns: every file the scaffold would write, and where. */
+export type NewPlan = {
+  readonly operations: FileOperation[];
+  readonly target: string;
+};
+
 /** Options accepted by {@link runNew}. */
 export type RunNewOptions = {
   /** Application name (becomes `package.json#name`). */
@@ -85,21 +93,13 @@ export type RunNewOptions = {
   readonly pm?: PackageManager;
   /**
    * Bundled template to scaffold (`stack` or `minimal`). Defaults to
-   * {@link DEFAULT_TEMPLATE}. Any other value fails with `DOT_CLI_E005`.
+   * {@link DEFAULT_TEMPLATE}. Any other value fails with `cli.invalid_input`.
    */
   readonly template?: string;
   /** When true, only plan operations — write nothing. */
   readonly dryRun?: boolean;
-  /** When true, emit JSON to `out`. Otherwise emit progress lines. */
-  readonly json?: boolean;
   /** When true, overwrite existing files in the target dir. */
   readonly force?: boolean;
-  /** Stdout sink. Defaults to `process.stdout.write`. */
-  readonly out?: (line: string) => void;
-  /** Stderr sink. Defaults to `process.stderr.write`. */
-  readonly err?: (line: string) => void;
-  /** Override clock for deterministic envelopes. */
-  readonly now?: () => Date;
   /**
    * Override template root. Used by tests; production callers should
    * leave this undefined so the bundled `templates/app-<template>/`
@@ -123,7 +123,7 @@ export type RunNewOptions = {
   };
 };
 
-const DEFAULT_PM: PackageManager = 'bun';
+export const DEFAULT_PM: PackageManager = 'bun';
 
 const APP_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
@@ -188,18 +188,12 @@ function isTemplateName(value: string): value is TemplateName {
 }
 
 /**
- * Validate a `--template` value. Omitted means {@link DEFAULT_TEMPLATE}.
- * Exported so tests can assert the error without running a scaffold.
+ * The template a `--template` value names: omitted means
+ * {@link DEFAULT_TEMPLATE}; an unknown name is `undefined`.
  */
-export function resolveTemplateName(value: string | undefined): TemplateName {
+export function resolveTemplateName(value: string | undefined): TemplateName | undefined {
   if (value === undefined) return DEFAULT_TEMPLATE;
-  if (isTemplateName(value)) return value;
-  throw new DotCliError({
-    code: DotCliErrorCode.InvalidArgs,
-    message: `Unknown template "${value}".`,
-    remediation: `Use one of: ${TEMPLATE_NAMES.join(', ')}. Omit --template for the default (${DEFAULT_TEMPLATE}).`,
-    metadata: { received: value, allowed: [...TEMPLATE_NAMES] },
-  });
+  return isTemplateName(value) ? value : undefined;
 }
 
 /**
@@ -214,27 +208,17 @@ export function resolveTargetDir(opts: { name: string; cwd?: string; target?: st
 }
 
 /**
- * Validate an app name. Rules match `package.json#name` constraints
- * (lower-case, leading alphanumeric, no spaces) with one extra: we
- * disallow scoped names so the scaffold produces a single-segment dir.
+ * What is wrong with an app name, or `undefined` when it is valid. Rules
+ * match `package.json#name` constraints (lower-case, leading alphanumeric,
+ * no spaces) with one extra: scoped names are refused so the scaffold
+ * produces a single-segment dir. The `name` schema of `dot new` calls it.
  */
-export function validateAppName(name: string): void {
-  if (!name) {
-    throw new DotCliError({
-      code: DotCliErrorCode.InvalidArgs,
-      message: 'App name is required.',
-      remediation: 'Pass an app name: `dot new <app-name>`.',
-    });
-  }
+export function validateAppName(name: string): string | undefined {
+  if (!name) return 'App name is required: `dot new <app-name>`.';
   if (!APP_NAME_PATTERN.test(name)) {
-    throw new DotCliError({
-      code: DotCliErrorCode.InvalidArgs,
-      message: `App name "${name}" is invalid.`,
-      remediation:
-        'Use lowercase letters, digits, dots, hyphens, or underscores; start with a letter or digit. Scoped names (`@scope/name`) are not supported by `dot new`.',
-      metadata: { received: name, pattern: APP_NAME_PATTERN.source },
-    });
+    return `App name "${name}" is invalid: use lowercase letters, digits, dots, hyphens, or underscores, starting with a letter or digit (no \`@scope/\` names).`;
   }
+  return undefined;
 }
 
 function describeFile(template: TemplateName, relativePath: string): string {
@@ -254,27 +238,21 @@ function substitute(content: string, vars: Record<string, string>): string {
  * Plan the file operations for a scaffold run. Pure — does not touch
  * disk other than reading templates and `stat`-ing target paths.
  */
-export async function planOperations(opts: RunNewOptions): Promise<{
-  operations: FileOperation[];
-  target: string;
-}> {
-  validateAppName(opts.name);
-
+export async function planOperations(opts: RunNewOptions): Promise<NewPlan | Failure> {
+  const nameProblem = validateAppName(opts.name);
+  if (nameProblem !== undefined)
+    return InvalidInput({ issues: [{ path: ['name'], flag: '<name>', message: nameProblem }] });
   const template = resolveTemplateName(opts.template);
+  if (template === undefined) {
+    const message = `Unknown template "${opts.template ?? ''}": use one of ${TEMPLATE_NAMES.join(', ')}.`;
+    return InvalidInput({ issues: [{ path: ['template'], flag: '--template', message }] });
+  }
   const target = resolveTargetDir(opts);
   const templateRoot = opts.templateRoot ?? defaultTemplateRoot(template);
   const pm = opts.pm ?? DEFAULT_PM;
 
   const templateFiles = await collectTemplateFiles(templateRoot);
-  if (templateFiles.length === 0) {
-    throw new DotCliError({
-      code: DotCliErrorCode.AppLifecycleFailed,
-      message: `No template files found under ${templateRoot}.`,
-      remediation:
-        'The @arki/dot package must ship its `templates/` directory. Reinstall the package or pass --template-root via the programmatic API.',
-      metadata: { templateRoot },
-    });
-  }
+  if (templateFiles.length === 0) return TemplateMissing({ templateRoot });
 
   const vars: Record<string, string> = {
     name: opts.name,
@@ -326,176 +304,60 @@ export async function planOperations(opts: RunNewOptions): Promise<{
   return { operations, target };
 }
 
-/** Build the JSON envelope from a plan + status. */
-function buildEnvelope(args: {
-  name: string;
-  target: string;
-  operations: FileOperation[];
-  errors: DiagnosticIssue[];
-  status: DotNewEnvelope['status'];
-  generatedAt: string;
-}): DotNewEnvelope {
-  return {
-    status: args.status,
-    command: 'new',
-    generatedAt: args.generatedAt,
-    app: { name: args.name, target: args.target },
-    operations: args.operations.map(op => toPublicOperation(op)),
-    errors: args.errors,
-  };
+/** The commands to run after scaffolding, from the target's parent directory. */
+function nextStepsOf(opts: RunNewOptions, target: string): string[] {
+  const pm = opts.pm ?? DEFAULT_PM;
+  const relativeTarget = path.relative(opts.cwd ?? process.cwd(), target) || '.';
+  const start = [`cd ${relativeTarget}`, `${pm} install`];
+  return resolveTemplateName(opts.template) === 'stack'
+    ? [...start, 'cp .env.example .env', 'docker compose up -d', `${pm} run dev`]
+    : [...start, `${pm} run test`];
 }
 
-function nowIso(opts: RunNewOptions): string {
-  const factory = opts.now ?? (() => new Date());
-  return factory().toISOString();
+function resultOf(opts: RunNewOptions, target: string, operations: readonly FileOperation[]): DotNewResult {
+  return {
+    app: { name: opts.name, target },
+    operations: operations.map(op => toPublicOperation(op)),
+    nextSteps: nextStepsOf(opts, target),
+  };
 }
 
 /**
- * Run the `new` command. Returns the envelope so callers (CLI + tests)
- * can act on it. Side effects: writes files when not in dry-run mode,
- * emits progress to `out`/`err`.
+ * Run `dot new`: plan, then write unless `dryRun`. Returns `{ app, operations }`
+ * or a failure: `cli.invalid_input` (name, template), `dot.target_not_empty`,
+ * `dot.template_missing`, `dot.write_failed`. Prints nothing.
  */
-export async function runNew(opts: RunNewOptions): Promise<DotNewEnvelope> {
-  const out = opts.out ?? ((line: string) => process.stdout.write(line));
-  const err = opts.err ?? ((line: string) => process.stderr.write(line));
-  const generatedAt = nowIso(opts);
-
-  // Plan first — any error here surfaces as a failure envelope.
-  let plan: { operations: FileOperation[]; target: string };
-  try {
-    plan = await planOperations(opts);
-  } catch (error) {
-    if (error instanceof DotCliError) {
-      const envelope = buildEnvelope({
-        name: opts.name,
-        target: resolveTargetDir(opts),
-        operations: [],
-        errors: [toIssue(error)],
-        status: 'failure',
-        generatedAt,
-      });
-      if (opts.json) out(`${JSON.stringify(envelope, null, 2)}\n`);
-      else err(`dot: ${error.code} ${error.message}\n  remediation: ${error.remediation}\n  docs: ${error.docsUrl}\n`);
-      return envelope;
-    }
-    throw error;
-  }
-
+export async function runNew(opts: RunNewOptions): Promise<DotNewResult | Failure> {
+  const plan = await planOperations(opts);
+  if (isFailure(plan)) return plan;
   const { operations, target } = plan;
 
+  if (opts.dryRun) return resultOf(opts, target, operations);
+
   // Refuse to overwrite a non-empty target dir unless --force.
-  if (!opts.dryRun && !opts.force) {
-    const hasSkip = operations.some(op => op.action === 'skip');
-    const nonEmpty = await directoryIsNonEmpty(target);
-    if (hasSkip || nonEmpty) {
-      const issue: DiagnosticIssue = {
-        code: DotCliErrorCode.InvalidArgs,
-        severity: 'error',
-        message: `Target directory "${target}" is not empty.`,
-        remediation: 'Choose an empty directory, or re-run with --force to overwrite.',
-        docsUrl: 'https://docs.arki.dev/dot/cli#new',
-        metadata: { target, conflicting: operations.filter(op => op.action === 'skip').map(op => op.path) },
-      };
-      const envelope = buildEnvelope({
-        name: opts.name,
-        target,
-        operations,
-        errors: [issue],
-        status: 'failure',
-        generatedAt,
-      });
-      if (opts.json) out(`${JSON.stringify(envelope, null, 2)}\n`);
-      else err(`dot: ${issue.code} ${issue.message}\n  remediation: ${issue.remediation}\n`);
-      return envelope;
+  if (!opts.force) {
+    const conflicting = operations.filter(op => op.action === 'skip').map(op => op.path);
+    if (conflicting.length > 0 || (await directoryIsNonEmpty(target))) {
+      return TargetNotEmpty({ target, conflicting });
     }
   }
 
-  // Dry-run: emit envelope, write nothing.
-  if (opts.dryRun) {
-    const envelope = buildEnvelope({
-      name: opts.name,
-      target,
-      operations,
-      errors: [],
-      status: 'success',
-      generatedAt,
-    });
-    if (opts.json) {
-      out(`${JSON.stringify(envelope, null, 2)}\n`);
-    } else {
-      out(`Would scaffold ${operations.length} file(s) under ${target}:\n`);
-      for (const op of operations) {
-        out(`  ${op.action.padEnd(9)} ${op.path}\n`);
-      }
-    }
-    return envelope;
-  }
-
-  // Real run: commit files.
-  const errors: DiagnosticIssue[] = [];
   const written: FileOperation[] = [];
+  const failed: { path: string; message: string }[] = [];
   for (const op of operations) {
-    const dest = path.join(target, op.path);
     try {
-      await writeFileEnsuringDir(dest, op.content);
-      // Normalise the action to `create` for the envelope; the file was
-      // either created or overwritten with the planned content.
-      written.push({ ...op, action: op.action === 'skip' ? 'create' : op.action });
+      await writeFileEnsuringDir(path.join(target, op.path), op.content);
+      written.push(op);
     } catch (error) {
-      debugNew.debug('write failed for {dest}', { dest, error: error instanceof Error ? error : String(error) });
-      errors.push({
-        code: DotCliErrorCode.AppLifecycleFailed,
-        severity: 'error',
-        message: `Failed to write ${op.path}: ${error instanceof Error ? error.message : String(error)}`,
-        remediation: 'Check filesystem permissions on the target directory.',
-        docsUrl: 'https://docs.arki.dev/dot/cli#new',
-        metadata: { target, file: op.path },
+      debugNew.debug('write failed for {path}', {
+        path: op.path,
+        error: error instanceof Error ? error : String(error),
       });
+      failed.push({ path: op.path, message: error instanceof Error ? error.message : String(error) });
     }
   }
-
-  const status: DotNewEnvelope['status'] = errors.length === 0 ? 'success' : 'failure';
-  const envelope = buildEnvelope({
-    name: opts.name,
-    target,
-    operations: written,
-    errors,
-    status,
-    generatedAt,
-  });
-
-  if (opts.json) {
-    out(`${JSON.stringify(envelope, null, 2)}\n`);
-  } else if (status === 'success') {
-    const relativeTarget = path.relative(opts.cwd ?? process.cwd(), target) || '.';
-    const pm = opts.pm ?? DEFAULT_PM;
-    out(`Scaffolded ${written.length} file(s) under ${relativeTarget}.\n`);
-    out(`Next steps:\n`);
-    out(`  cd ${relativeTarget}\n`);
-    out(`  ${pm} install\n`);
-    if (resolveTemplateName(opts.template) === 'stack') {
-      out(`  cp .env.example .env\n`);
-      out(`  docker compose up -d\n`);
-      out(`  ${pm} run dev\n`);
-    } else {
-      out(`  ${pm} run test\n`);
-    }
-  } else {
-    err(`dot: scaffold completed with ${errors.length} error(s).\n`);
-    for (const issue of errors) {
-      err(`  ${issue.code} ${issue.message}\n`);
-    }
+  if (failed.length > 0) {
+    return WriteFailed({ target, written: written.map(op => toPublicOperation(op)), failed });
   }
-  return envelope;
-}
-
-function toIssue(error: DotCliError): DiagnosticIssue {
-  return {
-    code: error.code,
-    severity: 'error',
-    message: error.message,
-    remediation: error.remediation,
-    docsUrl: error.docsUrl,
-    metadata: error.metadata,
-  };
+  return resultOf(opts, target, written);
 }

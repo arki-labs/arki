@@ -64,30 +64,15 @@ describe('buildMermaidGraph', () => {
 });
 
 describe('renderGraph', () => {
-  it('plain mode prints raw mermaid; --json wraps it in the standard envelope', () => {
+  it('returns the Mermaid source as `{ format, source }`: text mode prints `source` as is', () => {
     const manifest = manifestOf({
       plugins: [{ name: 'solo', dependencies: [], provides: [] }],
     });
 
-    const plainLines: string[] = [];
-    renderGraph(
-      { manifest, command: 'explain' },
-      { json: false, out: line => plainLines.push(line), now: () => new Date(0) },
-    );
-    expect(plainLines.join('')).toBe('flowchart TD\n  %% numbers = boot order\n  p0["1 · solo"]\n');
-
-    const jsonLines: string[] = [];
-    const envelope = renderGraph(
-      { manifest, command: 'doctor' },
-      { json: true, out: line => jsonLines.push(line), now: () => new Date(0) },
-    );
-    expect(envelope).toMatchObject({
-      status: 'success',
-      command: 'doctor',
-      generatedAt: '1970-01-01T00:00:00.000Z',
-      data: { format: 'mermaid' },
+    expect(renderGraph(manifest)).toEqual({
+      format: 'mermaid',
+      source: 'flowchart TD\n  %% numbers = boot order\n  p0["1 · solo"]\n',
     });
-    expect(JSON.parse(jsonLines.join('')) as unknown).toMatchObject({ data: { format: 'mermaid' } });
   });
 
   it('a booted app renders its OBSERVED wiring edges', async () => {

@@ -110,7 +110,4 @@ export type { TestAppOptions, TestPluginBuilder } from './test-harness.js';
 export { hookSignals } from './signals.js';
 export type { HookSignalsOptions, SignalTarget } from './signals.js';
 
-// Task 9b: CLI envelope type is exported so adapter packages can produce the
-// same shape from related tooling (release-tooling, plugin scaffolds, etc.).
-export type { DotCliEnvelope, DotCliEnvelopeStatus } from './cli/render-explain.js';
 // #endregion

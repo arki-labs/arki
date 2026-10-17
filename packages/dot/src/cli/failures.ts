@@ -1,0 +1,307 @@
+/**
+ * The failures the `dot` commands return. Each code is stable: agents branch
+ * on `.error.code`. A returned failure exits 3; the framework's own
+ * (`cli.unknown_command`, `cli.invalid_input`) exit 2.
+ *
+ * Data schemas are Standard Schemas built from type guards, so the public
+ * types name no validator library (the `@arki/cli` pattern).
+ */
+import type { Failure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { defineFailure } from '@arki/failure';
+
+import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
+import type { DotNewOperation } from './json.js';
+import { DotLifecycleError } from '../lifecycle.js';
+
+/** Base URL of the CLI error docs: an envelope's `error.docsUrl` is `<base>#<code with . and _ as ->`. */
+export const DOT_CLI_DOCS_URL = 'https://docs.arki.dev/dot/cli';
+
+/** `doctor`'s verdict: the worst severity among all the snapshot's issues. */
+export type DoctorStatus = 'success' | 'warning' | 'failure';
+
+/** What `dot doctor` returns: the diagnostics snapshot and its verdict. */
+export type DoctorReport = DotDiagnosticsSnapshot & { readonly status: DoctorStatus };
+
+/** The docs link of a code, the way `@arki/cli` builds `error.docsUrl`. */
+export function dotCliDocsUrl(code: string): string {
+  return `${DOT_CLI_DOCS_URL}#${code.replaceAll(/[._]/g, '-')}`;
+}
+
+type Fields = Readonly<Record<string, unknown>>;
+
+function isRecord(value: unknown): value is Fields {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every(entry => typeof entry === 'string');
+}
+
+/** True when each named field is a string (or null, for the keys in `nullable`). */
+function strings(value: Fields, keys: readonly string[], nullable: readonly string[] = []): boolean {
+  return (
+    keys.every(key => typeof value[key] === 'string') &&
+    nullable.every(key => value[key] === null || typeof value[key] === 'string')
+  );
+}
+
+/** A Standard Schema from a type guard: typed failure data without a validator dependency. */
+function guarded<T>(code: string, guard: (value: unknown) => value is T): StandardSchemaV1<T> {
+  return {
+    '~standard': {
+      version: 1,
+      vendor: '@arki/dot',
+      validate: value => (guard(value) ? { value } : { issues: [{ message: `not ${code} data` }] }),
+    },
+  };
+}
+
+export type AppNotFoundData = { readonly cwd: string; readonly searched: readonly string[] };
+
+/** No app file at the default paths and no `--app`. */
+export const AppNotFound = defineFailure('dot.app_not_found', {
+  data: guarded(
+    'dot.app_not_found',
+    (value): value is AppNotFoundData => isRecord(value) && strings(value, ['cwd']) && isStringArray(value['searched']),
+  ),
+  message: 'No DOT app file found in {cwd}',
+  remediation:
+    'Create `dot.config.ts` exporting your app (`export default defineApp("my-app").use(plugin)`), or pass `--app <path>`.',
+});
+
+export type AppInvalidExportData = {
+  readonly filePath: string;
+  /** The export that was picked and is not an app; null when none was picked. */
+  readonly exportName: string | null;
+  readonly exports: readonly string[];
+  /** The exports that look like DOT apps, when there are several. */
+  readonly matches: readonly string[];
+};
+
+/** The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`. */
+export const AppInvalidExport = defineFailure('dot.app_invalid_export', {
+  data: guarded(
+    'dot.app_invalid_export',
+    (value): value is AppInvalidExportData =>
+      isRecord(value) &&
+      strings(value, ['filePath'], ['exportName']) &&
+      isStringArray(value['exports']) &&
+      isStringArray(value['matches']),
+  ),
+  message: data => {
+    const listed = (names: readonly string[]): string => (names.length === 0 ? 'none' : names.join(', '));
+    if (data.exportName !== null) {
+      return `The \`${data.exportName}\` export from ${data.filePath} is not a DotApp or DotAppBuilder.`;
+    }
+    return data.matches.length > 1
+      ? `${data.filePath} exports several DOT apps (${listed(data.matches)}) and none is \`default\` or \`app\`.`
+      : `${data.filePath} exports no DOT app. Exports found: ${listed(data.exports)}.`;
+  },
+  remediation: 'Export the app as `default` or as `app`: `export const app = defineApp("my-app").use(plugin);`',
+});
+
+export type AppImportFailedData = {
+  readonly filePath: string;
+  /** The factory export that threw; null when the import itself threw. */
+  readonly exportName: string | null;
+  readonly causeMessage: string;
+  /** The code of the thrown error, when it carries one (a declaration rejecting a mistake). */
+  readonly causeCode: string | null;
+  /** The thrown error's own fix, when it carries one. */
+  readonly causeRemediation: string | null;
+};
+
+/** Importing the app file threw, or its exported factory did. */
+export const AppImportFailed = defineFailure('dot.app_import_failed', {
+  data: guarded(
+    'dot.app_import_failed',
+    (value): value is AppImportFailedData =>
+      isRecord(value) &&
+      strings(value, ['filePath', 'causeMessage'], ['exportName', 'causeCode', 'causeRemediation']),
+  ),
+  message: data =>
+    data.exportName === null
+      ? `Failed to import app file at ${data.filePath}: ${data.causeMessage}`
+      : `The \`${data.exportName}\` export function in ${data.filePath} threw: ${data.causeMessage}`,
+  remediation:
+    'Apply `.error.data.causeRemediation` when it is set; otherwise run the file directly (`bun <path>`) to reproduce.',
+});
+
+export type AppLifecycleFailedData = {
+  readonly phase: 'configure' | 'boot';
+  readonly underlyingCode: string;
+  readonly causeMessage: string;
+};
+
+/** `configure` threw while the CLI prepared the app. */
+export const AppLifecycleFailed = defineFailure('dot.app_lifecycle_failed', {
+  data: guarded(
+    'dot.app_lifecycle_failed',
+    (value): value is AppLifecycleFailedData =>
+      isRecord(value) &&
+      (value['phase'] === 'configure' || value['phase'] === 'boot') &&
+      strings(value, ['underlyingCode', 'causeMessage']),
+  ),
+  message: 'App {phase} failed: {causeMessage}',
+  remediation:
+    'Look for a plugin `configure` hook that throws or returns a Promise; `dot doctor` shows per-plugin diagnostics.',
+});
+
+/** `doctor --observability` found no OpenTelemetry SDK. Reported as a warning issue in the snapshot, not returned. */
+export const ObservabilityNoSdk = defineFailure('dot.observability_no_sdk', {
+  message: 'No OpenTelemetry SDK is registered. Lifecycle traces and metrics will not be exported.',
+  remediation:
+    'Register an OTel SDK (e.g. @opentelemetry/sdk-node with AsyncLocalStorageContextManager) once at app entry, before any DotApp boots.',
+});
+
+export type ProjectionNotFoundData = { readonly format: string; readonly registeredFormats: readonly string[] };
+
+/** No plugin registers the `--as` format. */
+export const ProjectionNotFound = defineFailure('dot.projection_not_found', {
+  data: guarded(
+    'dot.projection_not_found',
+    (value): value is ProjectionNotFoundData =>
+      isRecord(value) && strings(value, ['format']) && isStringArray(value['registeredFormats']),
+  ),
+  message: 'No projection is registered for format "{format}"',
+  remediation:
+    'Use a format from `.error.data.registeredFormats`, or mount the adapter that provides it; otherwise remove --as.',
+});
+
+export type ProjectionImportFailedData = {
+  readonly specifier: string;
+  readonly registeringPlugin: string;
+  /** Where it failed: resolving the specifier, importing the module, or finding `project`. */
+  readonly stage: 'resolve' | 'import' | 'export';
+  readonly causeMessage: string | null;
+};
+
+/** The projection module could not be resolved or imported, or exports no `project(manifest)`. */
+export const ProjectionImportFailed = defineFailure('dot.projection_import_failed', {
+  data: guarded(
+    'dot.projection_import_failed',
+    (value): value is ProjectionImportFailedData =>
+      isRecord(value) &&
+      strings(value, ['specifier', 'registeringPlugin'], ['causeMessage']) &&
+      (value['stage'] === 'resolve' || value['stage'] === 'import' || value['stage'] === 'export'),
+  ),
+  message: data => {
+    if (data.stage === 'resolve') return `Failed to resolve projection module "${data.specifier}".`;
+    if (data.stage === 'import') return `Failed to import projection module "${data.specifier}".`;
+    return `Projection module "${data.specifier}" does not export project(manifest).`;
+  },
+  remediation:
+    'Install the module and export a named `project(manifest)` function from it; `--module <specifier>` tries a replacement.',
+});
+
+export type ProjectionExecutionFailedData = {
+  readonly format: string;
+  readonly specifier: string;
+  readonly registeringPlugin: string;
+  readonly causeMessage: string;
+};
+
+/** `project(manifest)` threw or returned output that does not survive a JSON round trip. */
+export const ProjectionExecutionFailed = defineFailure('dot.projection_execution_failed', {
+  data: guarded(
+    'dot.projection_execution_failed',
+    (value): value is ProjectionExecutionFailedData =>
+      isRecord(value) && strings(value, ['format', 'specifier', 'registeringPlugin', 'causeMessage']),
+  ),
+  message: 'Projection "{format}" failed while rendering: {causeMessage}',
+  remediation: 'Make `project(manifest)` pure and return JSON-round-trip-safe output.',
+});
+
+export type ProjectionConflictData = {
+  readonly format: string;
+  readonly projections: readonly { readonly plugin: string; readonly module: string }[];
+};
+
+/** Two plugins register different modules for one projection format. */
+export const ProjectionConflict = defineFailure('dot.projection_conflict', {
+  data: guarded(
+    'dot.projection_conflict',
+    (value): value is ProjectionConflictData =>
+      isRecord(value) &&
+      strings(value, ['format']) &&
+      Array.isArray(value['projections']) &&
+      value['projections'].every(entry => isRecord(entry) && strings(entry, ['plugin', 'module'])),
+  ),
+  message: 'Multiple projection modules are registered for format "{format}"',
+  remediation: 'Remove one registration, or make both plugins register the same module specifier.',
+});
+
+/** `doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`. */
+export const DoctorFailed = defineFailure('dot.doctor_failed', {
+  data: guarded(
+    'dot.doctor_failed',
+    (value): value is DoctorReport =>
+      isRecord(value) &&
+      typeof value['status'] === 'string' &&
+      isRecord(value['app']) &&
+      Array.isArray(value['plugins']) &&
+      Array.isArray(value['issues']),
+  ),
+  message: data => `Doctor found errors in ${data.app.name} (state=${data.app.state})`,
+  remediation: 'Read the issues in `.error.data.plugins[].issues` and `.error.data.issues`; each carries its own fix.',
+});
+
+export type TargetNotEmptyData = { readonly target: string; readonly conflicting: readonly string[] };
+
+/** `dot new` would overwrite files in a non-empty target directory. */
+export const TargetNotEmpty = defineFailure('dot.target_not_empty', {
+  data: guarded(
+    'dot.target_not_empty',
+    (value): value is TargetNotEmptyData =>
+      isRecord(value) && strings(value, ['target']) && isStringArray(value['conflicting']),
+  ),
+  message: 'Target directory "{target}" is not empty',
+  remediation: 'Choose an empty directory, or re-run with --force to overwrite.',
+});
+
+export type TemplateMissingData = { readonly templateRoot: string };
+
+/** The package's bundled template directory is empty or missing. */
+export const TemplateMissing = defineFailure('dot.template_missing', {
+  data: guarded(
+    'dot.template_missing',
+    (value): value is TemplateMissingData => isRecord(value) && strings(value, ['templateRoot']),
+  ),
+  message: 'No template files found under {templateRoot}',
+  remediation: 'Reinstall @arki/dot: it must ship its `templates/` directory.',
+});
+
+export type WriteFailedData = {
+  readonly target: string;
+  /** The files that were written before and after the failures. */
+  readonly written: readonly DotNewOperation[];
+  readonly failed: readonly { readonly path: string; readonly message: string }[];
+};
+
+/** `dot new` could not write some files. `written` lists the ones that landed. */
+export const WriteFailed = defineFailure('dot.write_failed', {
+  data: guarded(
+    'dot.write_failed',
+    (value): value is WriteFailedData =>
+      isRecord(value) &&
+      strings(value, ['target']) &&
+      Array.isArray(value['written']) &&
+      Array.isArray(value['failed']) &&
+      value['failed'].every(entry => isRecord(entry) && strings(entry, ['path', 'message'])),
+  ),
+  message: data => `Failed to write ${String(data.failed.length)} file(s) under ${data.target}`,
+  remediation: 'Check the filesystem permissions of the target directory, then re-run with --force.',
+});
+
+/** `dot.app_lifecycle_failed` from what `configure` or `boot` threw. */
+export function lifecycleFailed(error: unknown, phase: 'configure' | 'boot'): Failure {
+  return AppLifecycleFailed(
+    {
+      phase,
+      underlyingCode: error instanceof DotLifecycleError ? error.code : 'UNKNOWN',
+      causeMessage: error instanceof Error ? error.message : String(error),
+    },
+    { cause: error },
+  );
+}

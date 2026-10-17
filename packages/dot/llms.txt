@@ -5,13 +5,13 @@
 Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: it IS the manifest (`explain`) or the diagnostics snapshot (`doctor`).
 
 ## Import paths
-- `@arki/dot`: `defineApp`, `plugin`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `testApp`, `testPlugin`, `fake`; types `Provided`, `NeedsShape`, `DotAppManifest`, `DotDiagnosticsSnapshot`, `DotCliEnvelope`.
+- `@arki/dot`: `defineApp`, `plugin`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `testApp`, `testPlugin`, `fake`; types `Provided`, `NeedsShape`, `DotAppManifest`, `DotDiagnosticsSnapshot`.
 - `@arki/dot/plugin`: the adapter-author surface: `plugin`, `handleOf`, `lazy`, `token`, `rename`, `defineApp`, contract types.
 - `@arki/dot/feature`: `defineFeature`, `DepsOf`, `routerFor`, `entrypointOnly`, `providesOf`, `servicesOf`, `resolveNeeds`, `ServicesBag`; object-form `feature()`.
 - `@arki/dot/orpc`: `needsMiddleware`, `rpc`. Optional peer `@orpc/server`.
 - `@arki/dot/log`: `log()`, the logging plugin. Mount it first.
 - `@arki/dot/test-harness`: `testPlugin`, `testApp`, `bootTestApp`, `fake`.
-- `@arki/dot/cli`: `main`, `runExplain`, `runDoctor`, `runNew`; types `DotNewEnvelope`, `DotNewOperation`. The `dot` bin.
+- `@arki/dot/cli`: `program` (built with `@arki/cli`; `program.main(argv, io)`), `runExplain`, `runDoctor`, `runNew`, the failures `AppNotFound`, `AppInvalidExport`, `AppImportFailed`, `AppLifecycleFailed`, `DoctorFailed`, `ObservabilityNoSdk`, `ProjectionNotFound`, `ProjectionImportFailed`, `ProjectionExecutionFailed`, `ProjectionConflict`, `TargetNotEmpty`, `TemplateMissing`, `WriteFailed`; types `DotNewResult`, `DotNewOperation`, `DoctorReport`. The `dot` bin: `arki.cli/1` envelope, exit 0/1/2/3.
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.
