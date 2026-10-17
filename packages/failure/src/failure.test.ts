@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { DataOf, Failure, FailureOf, SuccessOf } from './failure.js';
+import type { DataOf, Failure, FailureOf, Stoppable, SuccessOf } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
 import { defineFailure, isFailure, orThrow, UnexpectedFailure } from './failure.js';
 
@@ -188,5 +188,36 @@ describe('orThrow', () => {
     expectTypeOf(pending).toEqualTypeOf<Promise<Post>>();
     expect(await pending).toEqual({ id: 'p1', title: 'Hello' });
     await expect(orThrow(find('missing'))).rejects.toBeInstanceOf(UnexpectedFailure);
+  });
+});
+
+// WHY: a partial success keeps what was delivered before the failure. If the caller had to
+// write `'stoppedBy' in result` to read the failure, it would be easy to skip; with Stoppable
+// the field is always readable and typed, so the check is a plain `if (result.stoppedBy)`.
+describe('Stoppable', () => {
+  const TokenRefused = defineFailure('push.token_refused', { status: 422 });
+  const push = async (
+    items: readonly string[],
+  ): Promise<Stoppable<{ delivered: string[] }, Failure<'push.token_refused', undefined>>> => {
+    await Promise.resolve(); // stands in for the network
+    const delivered: string[] = [];
+    for (const item of items) {
+      if (item === 'refused') return { delivered, stoppedBy: TokenRefused() };
+      delivered.push(item);
+    }
+    return { delivered };
+  };
+
+  it('reads stoppedBy without narrowing: the failure, or undefined', async () => {
+    const result = await push(['a', 'refused', 'b']);
+    expectTypeOf(result.stoppedBy).toEqualTypeOf<Failure<'push.token_refused', undefined> | undefined>();
+    expect(result.delivered).toEqual(['a']);
+    expect(TokenRefused.is(result.stoppedBy)).toBe(true);
+    const finished = await push(['a']);
+    expect(finished.stoppedBy).toBeUndefined();
+  });
+
+  it('is the value itself, not a wrapper', () => {
+    expectTypeOf<Stoppable<{ delivered: string[] }, Failure>>().toExtend<{ delivered: string[] }>();
   });
 });

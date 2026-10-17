@@ -242,6 +242,23 @@ export function isFailure(value: unknown): boolean {
 /** A value that may be a failure: the success value, or one of the failures it can return. */
 export type Result<Value, Failures extends Failure = never> = Value | Failures;
 
+/**
+ * A partial success: the value, plus the failure that stopped the work early when one did.
+ * Callers read `result.stoppedBy` directly, with no `'stoppedBy' in result` check.
+ *
+ * @example
+ * async function exportAll(items: Item[]): Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>> {
+ *   const delivered: Item[] = [];
+ *   for (const item of items) {
+ *     const sent = await send(item);
+ *     if (isFailure(sent)) return { delivered, stoppedBy: sent };
+ *     delivered.push(item);
+ *   }
+ *   return { delivered };
+ * }
+ */
+export type Stoppable<Value, Failures extends Failure> = Value & { readonly stoppedBy?: Failures };
+
 /** The failures a function can return, for sync and async functions: `FailureOf<typeof findPost>`. */
 export type FailureOf<Fn extends (...args: never[]) => unknown> = Extract<Awaited<ReturnType<Fn>>, Failure>;
 

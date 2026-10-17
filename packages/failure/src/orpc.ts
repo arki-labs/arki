@@ -85,6 +85,10 @@ type LooseErrors = Readonly<Partial<Record<string, ErrorConstructor<unknown>>>>;
  * Pass the handler's `errors`: a failure the contract does not list is a
  * compile error. Takes a promise too, so a handler can return
  * `orThrowRpc(usecase(input), errors)` directly.
+ *
+ * With a third argument it answers `success` instead of the value, for a
+ * usecase that returns nothing or a failure:
+ * `return orThrowRpc(await disconnect(id), errors, { success: true })`.
  */
 export function orThrowRpc<Value>(
   value: PromiseLike<Value>,
@@ -94,13 +98,24 @@ export function orThrowRpc<Value>(
   value: Value,
   errors: NoInfer<DeclaredErrors<Awaited<Value>>>,
 ): Exclude<Value, Failure>;
-export function orThrowRpc(value: unknown, errors: LooseErrors): unknown {
-  if (isThenable(value)) return Promise.resolve(value).then(resolved => orThrowRpcNow(resolved, errors));
-  return orThrowRpcNow(value, errors);
+export function orThrowRpc<Value, Success>(
+  value: PromiseLike<Value>,
+  errors: NoInfer<DeclaredErrors<Value>>,
+  success: Success,
+): Promise<Success>;
+export function orThrowRpc<Value, Success>(
+  value: Value,
+  errors: NoInfer<DeclaredErrors<Awaited<Value>>>,
+  success: Success,
+): Success;
+export function orThrowRpc(value: unknown, errors: LooseErrors, ...success: readonly [] | readonly [unknown]): unknown {
+  if (isThenable(value)) return Promise.resolve(value).then(resolved => orThrowRpcNow(resolved, errors, success));
+  return orThrowRpcNow(value, errors, success);
 }
 
-function orThrowRpcNow(value: unknown, errors: LooseErrors): unknown {
-  if (!isFailure(value)) return value;
+/** Throw the failure, or answer `success` when one was passed, else the value. */
+function orThrowRpcNow(value: unknown, errors: LooseErrors, success: readonly [] | readonly [unknown]): unknown {
+  if (!isFailure(value)) return success.length === 0 ? value : success[0];
   const declared = errors[value.code];
   // Reached only when the types were bypassed: the client sees an undeclared error (`defined: false`).
   if (declared === undefined) {

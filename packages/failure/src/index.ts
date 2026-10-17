@@ -14,6 +14,7 @@ export type {
   FailureOptions,
   MakeOptions,
   Result,
+  Stoppable,
   SuccessOf,
 } from './failure.js';
 export { assertNever, match, recover } from './handle.js';

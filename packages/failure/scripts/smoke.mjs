@@ -1,7 +1,8 @@
 // Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes
-// targets. One call per feature; the unit tests cover the details. The `/orpc`
-// and `/eslint` entries need their peers, so the unit tests cover them.
+// targets. One call per feature; the unit tests cover the details. The `/eslint`
+// entry needs its peers, so the unit tests cover it; `/orpc` gets one check of
+// `orThrowRpc`, with plain errors standing in for the handler's.
 
 import {
   assertNever,
@@ -18,6 +19,7 @@ import {
   revive,
   UnexpectedFailure,
 } from '../dist/index.js';
+import { orThrowRpc } from '../dist/orpc.js';
 
 /** A minimal Standard Schema object, so the smoke test needs no validator library. */
 function idSchema() {
@@ -68,6 +70,13 @@ async function main() {
   const revived = revive(JSON.parse(json), [NotFound, Timeout]);
   const [ok, failed] = partition([findSync(1), findSync(2)]);
   const chain = NotFound({ id: 9 }, { cause: Timeout() });
+  // The handler's `errors`: one constructor per declared code.
+  const rpcErrors = { 'item.not_found': ({ message }) => new Error(message) };
+  const answered = orThrowRpc(undefined, rpcErrors, 'success');
+  const rpcThrown = await orThrowRpc(find(2), rpcErrors, 'success').then(
+    () => 'resolved',
+    error => error.message,
+  );
 
   const checks = [
     ['success is the plain value', isFailure(found) ? 'failure' : found.name, 'one'],
@@ -89,6 +98,8 @@ async function main() {
     ['partition splits', `${ok.length}:${failed.length}`, '1:1'],
     ['collect returns the first failure', collect([findSync(1), findSync(4)]).code, 'item.not_found'],
     ['findCause walks the chain', findCause(chain, Timeout)?.code, 'db.timeout'],
+    ['orThrowRpc answers success for nothing', answered, 'success'],
+    ['orThrowRpc still throws the failure', rpcThrown, 'no item 2'],
   ];
 
   let failedChecks = 0;

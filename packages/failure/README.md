@@ -60,9 +60,14 @@ A **failure value** is a frozen object, `{ code, message, data, status, remediat
 - **401** only for "you are not signed in". A client may sign the user out on a 401, so never use it for an upstream answer.
 - **503** when an upstream service is unavailable and a later try may work.
 
+When a failure carries an upstream service's HTTP status in its data, name that field `upstreamStatus`, so it is never confused with the failure's own `status`.
+
 ```ts
 export const NotionTokenRejected = defineFailure('export.notion_token_rejected', { status: 422 });
-export const NotionUnavailable = defineFailure('export.notion_unavailable', { status: 503 });
+export const NotionUnavailable = defineFailure('export.notion_unavailable', {
+  status: 503,
+  data: z.object({ upstreamStatus: z.number().optional() }),
+});
 ```
 
 ## Check
@@ -102,10 +107,10 @@ if (isFailure(removed)) return removed;
 
 ### Partial success
 
-When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away.
+When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away. `Stoppable<Value, Failures>` is that shape: `Value & { readonly stoppedBy?: Failures }`.
 
 ```ts
-async function exportAll(items: Item[]) {
+async function exportAll(items: Item[]): Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>> {
   const delivered: Item[] = [];
   for (const item of items) {
     const sent = await send(item);
@@ -114,7 +119,10 @@ async function exportAll(items: Item[]) {
   }
   return { delivered };
 }
-// the caller gets { delivered, stoppedBy?: failure } and keeps what was already sent
+
+const result = await exportAll(items);
+save(result.delivered); // keep what was already sent
+if (result.stoppedBy) return result.stoppedBy; // typed, with no `'stoppedBy' in result` check
 ```
 
 This is not "data that is itself a failure" (see Pitfalls): here the failure is a field of the result, not the result.
@@ -197,6 +205,7 @@ const pair = collect([await find(a), await findAuthor(b)]); // [Post, Author] | 
 - `Failure<Code, Data>`: a failure value.
 - `FailureOf<typeof fn>` and `SuccessOf<typeof fn>`: the failures and the success value a function returns, sync or async.
 - `Result<Value, Failures>`: `Value | Failures`, for a return type written by hand (a port or an interface).
+- `Stoppable<Value, Failures>`: `Value & { readonly stoppedBy?: Failures }`, a partial success (see above).
 - `FailureDefinition<Code, Schema>`, `MatchHandlers<Value>`, `RecoverHandlers<Value>`.
 - `DataOf<Schema>`: the data a failure carries, the schema's **output** type (the live value), or `undefined` without a schema.
 
@@ -243,6 +252,7 @@ byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(conte
 
 - `errorMap(...definitions)` builds the contract's error map. Two definitions with one code throw `ARKI_FAILURE_E005`.
 - `orThrowRpc(value, errors)` returns the value, or throws the failure through the handler's `errors`: the typed `ORPCError` the contract declares, with the failure's message and data. The client gets it as `defined: true`.
+- `orThrowRpc(value, errors, success)` throws the failure the same way, or returns `success`. It is for a usecase that returns nothing or a failure: `return orThrowRpc(await disconnect(id), errors, { success: true })`.
 - A failure the usecase can return but the contract does not list is a compile error: `Property '"post.locked"' is missing in type …`. Add its definition to `errorMap(...)`. If the types are bypassed anyway, the failure arrives as undeclared (`defined: false`).
 - Forgetting `orThrowRpc` is a compile error: `Post | Failure` is not the procedure's output.
 - `reviveRpcError(error, definitions)` is the client side: a caught `ORPCError` whose code is one of the definitions becomes the live failure, its data checked like `revive`. Anything else returns `undefined`, so rethrow it. Then `match` on the failure as the backend does.
@@ -256,6 +266,14 @@ const post = await client.posts.byId({ id }).catch((error: unknown) => {
 ```
 
 `@orpc/client` is an optional peer dependency, needed only for this entry. The entry imports nothing from `@orpc/server`, so contract files and client code that use it can ship to browsers.
+
+## Adopting in an app
+
+An app that adopts the package meets three gates:
+
+- **The contract lint.** Contract files may import only an allow-list. The workspace's `tooling/eslint/feature-layers.js` already allows `@arki/failure/orpc`.
+- **The browser package list.** An app's import-purity and rpc-purity checks list the packages the browser may load. Add `@arki/failure` and `@arki/failure/orpc`; the app template already has them.
+- **The definitions as runtime values.** The client needs the definitions themselves, for `reviveRpcError`, not only their types. Export them from a narrow backend entry next to the contract, such as avocabo's `./pkm-export/failures`, so the browser does not load the rest of the backend.
 
 ## Errors
 

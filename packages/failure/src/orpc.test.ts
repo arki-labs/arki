@@ -102,6 +102,64 @@ describe('orThrowRpc in a procedure', () => {
   });
 });
 
+// WHY: a usecase that returns nothing or a failure (delete, disconnect) still needs a fixed
+// success answer. The third argument keeps that one expression, so the handler cannot drop the
+// failure check on the way to `return { success: true }`.
+describe('orThrowRpc with a success answer', () => {
+  const remove = async (id: string) => {
+    await Promise.resolve(); // stands in for the repository delete
+    if (id === 'locked') return PostLocked();
+    return posts.has(id) ? undefined : PostNotFound({ id });
+  };
+  /** A delete that grew a failure the contract does not list yet. */
+  const removeUnlisted = async (id: string) => (id === 'unlisted' ? Unlisted() : remove(id));
+  const removeById = oc
+    .errors(errorMap(PostNotFound, PostLocked))
+    .input(z.object({ id: z.string() }))
+    .output(z.object({ success: z.literal(true) }));
+  const removeProcedure = implement(removeById).handler(({ input, errors }) =>
+    orThrowRpc(remove(input.id), errors, { success: true }),
+  );
+
+  it('answers the success value when the usecase returned nothing', async () => {
+    await expect(call(removeProcedure, { id: 'p1' })).resolves.toEqual({ success: true });
+  });
+
+  it('still throws the declared failure instead of answering success', async () => {
+    await expect(call(removeProcedure, { id: 'nope' })).rejects.toMatchObject({
+      code: 'post.not_found',
+      status: 404,
+      defined: true,
+    });
+    await expect(call(removeProcedure, { id: 'locked' })).rejects.toMatchObject({ code: 'post.locked' });
+  });
+
+  it('works on a value that is already awaited', () => {
+    const errors = {
+      'post.not_found': () => new Error('not found'),
+      'post.locked': () => new Error('locked'),
+    };
+    expect(orThrowRpc(undefined, errors, 'done')).toBe('done');
+    expect(() => orThrowRpc(PostLocked(), errors, 'done')).toThrow('locked');
+  });
+
+  it('is typed as the success answer, and still checks the contract lists every failure', () => {
+    implement(removeById).handler(async ({ input, errors }) => {
+      expectTypeOf(orThrowRpc(remove(input.id), errors, { success: true as const })).toEqualTypeOf<
+        Promise<{ success: true }>
+      >();
+      expectTypeOf(orThrowRpc(await remove(input.id), errors, 0)).toEqualTypeOf<number>();
+      return orThrowRpc(await remove(input.id), errors, { success: true });
+    });
+    const compileOnly = () =>
+      implement(removeById).handler(({ input, errors }) =>
+        // @ts-expect-error -- 'post.unlisted' is missing from the contract's errors
+        orThrowRpc(removeUnlisted(input.id), errors, { success: true }),
+      );
+    expect(compileOnly).toBeTypeOf('function');
+  });
+});
+
 /** What the frontend does: call, catch, and get the declared failure back as a value. */
 const fetchPost = async (id: string) => {
   try {
