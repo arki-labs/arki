@@ -6,6 +6,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 
+import type { Failure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isUniqueViolation } from '@arki/db/errors';
 import { parse } from '@arki/schema';
@@ -19,6 +20,7 @@ import type {
   EntityDef,
   EntityId,
   EntityTable,
+  PendingOf,
   Projection,
   Recorded,
   Row,
@@ -29,6 +31,7 @@ import { debugWrite } from './debug.js';
 import { JournalError } from './errors.js';
 import { fold, hasDeclaredEventType } from './fold.js';
 import { correlationId, eventId, jobId } from './id.js';
+import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 import {
   assertExactId,
   assertRoundTrips,
@@ -98,6 +101,9 @@ export type WriteDeps<
   readonly wakeChannel: string;
 };
 
+/** What `events` returned, once it is known not to be a failure: an array of events. */
+const isEventList = <Value>(value: Value): value is Exclude<Value, Failure> => Array.isArray(value);
+
 export function createWriter<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -113,16 +119,21 @@ export function createWriter<
    * `getValidatedMeta` runs inside the one-at-a-time guard, so a bad meta on a busy
    * transaction waits for the running operation like any other rejection.
    */
-  const writeWithValidatedMeta = async <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+  const writeWithValidatedMeta = async <
+    Tbl extends EntityTable,
+    E extends AnyEventDef,
+    Key extends string,
+    Returned extends readonly PendingOf<E>[] | Failure,
+  >(
     tx: Tx,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     getValidatedMeta: () => MetaOut,
-    events: NextEvents<Tbl, E, Tx>,
+    events: NextEvents<Tbl, E, Tx, Returned>,
     trace: Trace,
     onJobs?: (count: number) => void,
     opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>> => {
     const adopting = opts?.mode === 'adopt';
     const expectedVersion = opts?.expectedVersion;
     if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
@@ -130,7 +141,9 @@ export function createWriter<
     return oneAtATime(tx, `${adopting ? 'adopt' : 'write to'} ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
       const meta = getValidatedMeta();
-      return tx.transaction(async sp => {
+      // A failure `events` returns rolls the savepoint back, like a throw, and is the write's result.
+      const refusal = rollbackOnFailure<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>>();
+      const savepoint = tx.transaction(async sp => {
         // Before the row lock, so every journal transaction takes its locks in the same
         // order (append lock, then rows) and two commands writing two entities cannot deadlock.
         // Re-entrant inside one transaction, so nested commands take it once.
@@ -151,7 +164,13 @@ export function createWriter<
             `expected version ${expectedVersion} but the row is at version ${row?.version ?? 0}`,
           );
         }
-        const pending = await events(row, { tx: sp });
+        const returned = await events(row, { tx: sp });
+        if (isReturnedFailure(returned)) return refusal.settle(returned);
+        if (!isEventList(returned))
+          throw new Error(
+            `journal: events for ${entity.kind} ${id} returned ${typeof returned}; return an array of events, or a failure`,
+          );
+        const pending = returned;
         if (pending.length === 0) {
           debugWrite.debug('{kind} {id}: events returned nothing', { kind: entity.kind, id });
           return { row, events: [] };
@@ -374,16 +393,22 @@ export function createWriter<
         });
         return { row: saved, events: recorded };
       });
+      return savepoint.catch(refusal.recover);
     });
   };
 
   /** `journal.write`: parses and checks `meta` for this one call. */
-  const write = <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+  const write = <
+    Tbl extends EntityTable,
+    E extends AnyEventDef,
+    Key extends string,
+    Returned extends readonly PendingOf<E>[] | Failure,
+  >(
     tx: Tx,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-    input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key>> =>
+    input: WriteInput<Tbl, E, Meta, Tx, Returned>,
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>> =>
     writeWithValidatedMeta(
       tx,
       entity,

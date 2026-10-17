@@ -1,3 +1,7 @@
+import { z } from 'zod';
+
+import { defineFailure } from '@arki/failure';
+
 export type JournalErrorCode =
   | 'CONFLICT'
   | 'NO_ROW'
@@ -103,7 +107,8 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   the journal parses sync, or a `validate` that throws) is a `SchemaRunError`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
  *   projection passes through unchanged. A rejected business rule is one of
- *   these: a `CommandError`, below.
+ *   these: a `CommandError`, below. It is better returned as a failure
+ *   (`CommandNotFound` and the others below): `journal.run` returns it.
  * An error thrown by an effect is caught by `drain` and stored on the job.
  */
 export class JournalError extends Error {
@@ -128,6 +133,51 @@ export function isJournalError(error: unknown, code?: JournalErrorCode): error i
   return error instanceof JournalError && (code === undefined || error.code === code);
 }
 
+/** What every command failure carries: the message, written for the client. */
+const CommandRefusal = z.object({ detail: z.string() });
+
+/**
+ * The four failures a command returns when a rule of the app says no. Return one from a
+ * command handler, its `authorize`, or the `events` function of a `write`: the command's
+ * transaction rolls back, exactly as for a throw, and `journal.run` returns the same
+ * failure to the caller. `detail` is the message, written for the client. An app may
+ * return its own `defineFailure` values too; any failure rolls the command back.
+ */
+export const CommandNotFound = defineFailure('journal.not_found', {
+  status: 404,
+  data: CommandRefusal,
+  message: '{detail}',
+});
+/** A {@link CommandNotFound} failure value. */
+export type CommandNotFound = ReturnType<typeof CommandNotFound>;
+
+/** The request is wrong in a way the input schema cannot see. See {@link CommandNotFound}. */
+export const CommandInvalid = defineFailure('journal.invalid', {
+  status: 400,
+  data: CommandRefusal,
+  message: '{detail}',
+});
+/** A {@link CommandInvalid} failure value. */
+export type CommandInvalid = ReturnType<typeof CommandInvalid>;
+
+/** The caller may not do this. See {@link CommandNotFound}. */
+export const CommandForbidden = defineFailure('journal.forbidden', {
+  status: 403,
+  data: CommandRefusal,
+  message: '{detail}',
+});
+/** A {@link CommandForbidden} failure value. */
+export type CommandForbidden = ReturnType<typeof CommandForbidden>;
+
+/** The current state does not allow it, such as an order that is already paid. See {@link CommandNotFound}. */
+export const CommandConflict = defineFailure('journal.conflict', {
+  status: 409,
+  data: CommandRefusal,
+  message: '{detail}',
+});
+/** A {@link CommandConflict} failure value. */
+export type CommandConflict = ReturnType<typeof CommandConflict>;
+
 /** The kind of answer a rejected request gets. The names are the usual HTTP ones: 404, 400, 403, 409. */
 export type CommandErrorCode = 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONFLICT';
 
@@ -135,6 +185,10 @@ export type CommandErrorCode = 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONF
  * A business rule rejected the request. App code throws it: a command handler,
  * or the `events` function of a `write`. The code names the kind of answer and
  * the message is written for the client.
+ *
+ * Prefer returning a failure: {@link CommandNotFound}, {@link CommandInvalid},
+ * {@link CommandForbidden}, {@link CommandConflict}, or the app's own. It rolls
+ * back the same way, and the caller's type shows it. `CommandError` still works.
  *
  * It is NOT a `JournalError`. A `JournalError` is the library's own failure: a
  * row or a history it refuses. A `CommandError` is the app's rule saying no.

@@ -35,6 +35,7 @@ import { defineEvent } from './event.js';
 import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
+import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
 import {
   createAdmin,
@@ -132,10 +133,16 @@ function createInit<
   return {
     event: defineEvent,
     entity,
-    command: (name, input, handler, options) =>
-      options?.authorize === undefined
-        ? { name, input, handler }
-        : { name, input, handler, authorize: options.authorize },
+    command: (name, input, handler, options) => {
+      const authorize = options?.authorize;
+      if (authorize === undefined) return { name, input, handler };
+      // Keeps only a failure, so the command's type holds the failures `authorize` can return.
+      const refuse = async (...args: Parameters<typeof authorize>) => {
+        const refused = await authorize(...args);
+        return isReturnedFailure(refused) ? refused : undefined;
+      };
+      return { name, input, handler, authorize: refuse };
+    },
     projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
     effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
     tap: tapFor<MetaOut, AppDb>(),

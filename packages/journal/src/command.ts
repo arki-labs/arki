@@ -1,6 +1,7 @@
 /**
  * Command execution: parse the input, open the transaction, give the handler a
  * context bound to it, and refuse to close while an operation is still running.
+ * A returned failure rolls the transaction back and is the run's result.
  * May import `api`, `write` (types), `storage`, `transaction-guard` and leaf files.
  * Must not import `journal`, `history` or `worker`.
  */
@@ -18,6 +19,7 @@ import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
 import { JournalError } from './errors.js';
 import { commandId, correlationId } from './id.js';
+import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 import { assertRoundTrips, sameValue } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
 
@@ -135,7 +137,10 @@ export function createCommandRunner<
         own,
         correlationId: trace.correlationId,
       });
-      return source.transaction(async (tx): Promise<Awaited<R>> => {
+      // A failure the handler or `authorize` returns rolls the transaction back, like a throw,
+      // and is what the run returns: a rule that says no never leaves half a change behind.
+      const refusal = rollbackOnFailure<Awaited<R>>();
+      const transaction = source.transaction(async (tx): Promise<Awaited<R>> => {
         // Every operation the handler starts through this context. The transaction
         // must not close while one is still running: its work would land outside.
         const started: Promise<unknown>[] = [];
@@ -176,7 +181,10 @@ export function createCommandRunner<
             async (): Promise<Awaited<R>> => {
               // Before the receipt: a receipt proves the command ran once, not that this caller
               // may have its result. A replay is authorized like a first run.
-              if (command.authorize !== undefined) await command.authorize(parsed, { tx, meta });
+              if (command.authorize !== undefined) {
+                const refused = await command.authorize(parsed, { tx, meta });
+                if (isReturnedFailure(refused)) return refused;
+              }
               if (key === undefined) return await command.handler(parsed, context);
               const held = await claimReceipt(tx, key, command.name, parsed, own);
               if (held !== undefined) {
@@ -186,6 +194,8 @@ export function createCommandRunner<
                 return held.replay as Awaited<R>;
               }
               const value = await command.handler(parsed, context);
+              // A refusal is not stored: the rollback takes the claimed key back, so a repeat runs again.
+              if (isReturnedFailure(value)) return value;
               await storeReceipt(tx, key, command.name, value);
               return value;
             },
@@ -203,8 +213,9 @@ export function createCommandRunner<
           );
         }
         debugCommand.debug('{commandName}: done', { commandName: command.name });
-        return result;
+        return refusal.settle(result);
       });
+      return transaction.catch(refusal.recover);
     });
 
   /**

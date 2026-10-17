@@ -7,8 +7,17 @@
 import { call, ORPCError, os } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 
+import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+
 import type { CommandErrorCode } from './errors.js';
-import { CommandError, JournalError } from './errors.js';
+import {
+  CommandConflict,
+  CommandError,
+  CommandForbidden,
+  CommandInvalid,
+  CommandNotFound,
+  JournalError,
+} from './errors.js';
 import { commandErrors, toORPCError } from './orpc.js';
 
 const RETRY_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
@@ -34,7 +43,29 @@ const answerOf = (builder: Pick<typeof os, 'handler'>, thrown: unknown): Promise
     {},
   ).catch((error: unknown) => error);
 
+/** A procedure whose handler returns `returned`, called like a request would call it: the answer or the error. */
+const resultOf = (builder: Pick<typeof os, 'handler'>, returned: unknown): Promise<unknown> =>
+  call(
+    builder.handler(() => returned),
+    {},
+  ).catch((error: unknown) => error);
+
 describe('toORPCError', () => {
+  it.each([
+    [CommandNotFound({ detail: 'Order not found' }), 'journal.not_found', 404],
+    [CommandInvalid({ detail: 'Pick a later date' }), 'journal.invalid', 400],
+    [CommandForbidden({ detail: 'Not your order' }), 'journal.forbidden', 403],
+    [CommandConflict({ detail: 'Order is already paid' }), 'journal.conflict', 409],
+  ])(
+    'turns a returned %o into the ORPCError with its code, status, message and data, so the client reads the rule that said no',
+    (failure, code, status) => {
+      const mapped = toORPCError(failure);
+
+      expect(mapped).toBeInstanceOf(ORPCError);
+      expect(mapped).toMatchObject({ code, status, message: failure.message, data: { detail: failure.message } });
+    },
+  );
+
   it.each(Object.entries(STATUS))(
     'turns a CommandError %s into the ORPCError with the same code and message, so the client reads the rule that rejected it',
     (code, status) => {
@@ -101,6 +132,25 @@ describe('commandErrors()', () => {
     const boom = new Error('database is down');
 
     expect(await answerOf(os.use(commandErrors()), boom)).toBe(boom);
+  });
+
+  it('answers a returned failure as an error, never as a success the client would take for done', async () => {
+    const answer = await resultOf(os.use(commandErrors()), CommandConflict({ detail: 'Order is already paid' }));
+
+    expect(answer).toBeInstanceOf(ORPCError);
+    expect(answer).toMatchObject({ code: 'journal.conflict', status: 409, message: 'Order is already paid' });
+  });
+
+  it('a contract that lists the failure with errorMap gets it as a declared error through orThrowRpc', async () => {
+    // The recommended form for a contract-first procedure: the client gets it typed (`defined: true`).
+    const procedure = os
+      .errors(errorMap(CommandNotFound))
+      .use(commandErrors())
+      .handler(({ errors }) => orThrowRpc(Promise.resolve(CommandNotFound({ detail: 'Order not found' })), errors));
+
+    const answer = await call(procedure, {}).catch((error: unknown) => error);
+
+    expect(answer).toMatchObject({ code: 'journal.not_found', status: 404, message: 'Order not found', defined: true });
   });
 
   it('lets the handler result through untouched', async () => {

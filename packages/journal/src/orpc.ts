@@ -1,8 +1,8 @@
 /**
  * `@orpc/server` adapter: what an oRPC client sees when a command fails, and who runs it.
  *
- * - `toORPCError(error)` maps one error.
- * - `commandErrors()` is the middleware that maps whatever a procedure throws.
+ * - `toORPCError(error)` maps one error, or one returned failure.
+ * - `commandErrors()` is the middleware that maps whatever a procedure throws, and a failure it returns.
  * - `actorRun(select)` is the middleware that puts `context.run`, bound to the request's
  *   actor, on a procedure's context.
  *
@@ -16,6 +16,8 @@
 import type { IntersectPick } from '@orpc/server';
 import { ORPCError, os } from '@orpc/server';
 
+import { isFailure } from '@arki/failure';
+
 import type { RunOptions } from './api.js';
 import { CommandError, isJournalError } from './errors.js';
 
@@ -28,6 +30,9 @@ import { CommandError, isJournalError } from './errors.js';
 const CONFLICT_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
 
 /**
+ * - A failure (`@arki/failure`), such as `CommandNotFound`, becomes the `ORPCError` with its code,
+ *   status, message and data: what `orThrowRpc` from `@arki/failure/orpc` throws for a failure the
+ *   contract does not list. A contract that lists it with `errorMap` gets it typed instead.
  * - A `CommandError` becomes the `ORPCError` with the same code and message.
  * - A `JournalError` with code `CONFLICT` becomes an `ORPCError('CONFLICT')`, a 409 the client can retry.
  * - Anything else is returned unchanged: the app decides what it means.
@@ -37,6 +42,9 @@ const CONFLICT_MESSAGE = 'This was changed by another request. Reload the curren
  * in a middleware placed inside this one.
  */
 export function toORPCError(error: unknown): unknown {
+  if (isFailure(error)) {
+    return new ORPCError(error.code, { status: error.status, message: error.message, data: error.data });
+  }
   if (error instanceof CommandError) {
     return new ORPCError(error.code, { message: error.message });
   }
@@ -48,7 +56,12 @@ export function toORPCError(error: unknown): unknown {
 
 /**
  * The middleware form of `toORPCError`. Add it once to the app's procedure
- * builders, and no procedure needs a try/catch around a command.
+ * builders, and no procedure needs a try/catch around a command. A procedure
+ * that returns a failure, such as `context.run(...)`'s, answers with it as an
+ * error too, never as a success. Only a procedure without an output schema can
+ * do that: one with a schema fails output validation first. Such a procedure,
+ * and every contract-first one, hands the result to `orThrowRpc(result, errors)`
+ * from `@arki/failure/orpc` instead, so the client gets the failure typed.
  *
  * Order: put it INSIDE the app's own error middleware, so after it in the
  * chain: `os.use(appErrors).use(commandErrors())`. A rejected rule is then
@@ -57,11 +70,17 @@ export function toORPCError(error: unknown): unknown {
  */
 export function commandErrors() {
   return os.middleware(async ({ next }) => {
-    try {
-      return await next();
-    } catch (error) {
-      throw toORPCError(error);
-    }
+    const answered = async () => {
+      try {
+        return await next();
+      } catch (error) {
+        throw toORPCError(error);
+      }
+    };
+    const result = await answered();
+    // `<unknown>`: oRPC types the output as `any` here.
+    if (isFailure<unknown>(result.output)) throw toORPCError(result.output);
+    return result;
   });
 }
 

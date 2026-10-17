@@ -8,7 +8,7 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/errors` (`CommandError`, `JournalError` and their guards with no Drizzle import, for browser code that matches on codes), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules), `@arki/journal/testing` (`openJournalDb(schema)`: an in-memory PGlite with the schema pushed, for tests; `@electric-sql/pglite` and `drizzle-kit` are optional peers).
+Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/errors` (the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, plus `CommandError`, `JournalError` and their guards, with no Drizzle import, for browser code that matches on codes), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules), `@arki/journal/testing` (`openJournalDb(schema)`: an in-memory PGlite with the schema pushed, for tests; `@electric-sql/pglite` and `drizzle-kit` are optional peers).
 
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
@@ -30,7 +30,7 @@ Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions)
 
 ```ts
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
-import { initJournal, need } from '@arki/journal';
+import { CommandConflict, CommandNotFound, initJournal, need } from '@arki/journal';
 // src/schema.ts — the two journal tables live in the app's schema.
 import { journalTables } from '@arki/journal/pg';
 
@@ -62,13 +62,14 @@ export const order = j
   .on(OrderCancelled, () => null); // null deletes the row; the events stay
 
 // src/features/orders/commands.ts — a command needs only `j`, entities and events.
+// A rule that says no returns a failure: the command rolls back and `run` returns it, typed.
 export const payOrder = j.command(
   'payOrder',
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
   (input, { write }) =>
     write(order, input.orderId, row => {
-      if (!row) throw new CommandError('NOT_FOUND', 'Order not found');
-      if (row.status !== 'placed') throw new CommandError('CONFLICT', `Order is already ${row.status}`);
+      if (!row) return CommandNotFound({ detail: 'Order not found' });
+      if (row.status !== 'placed') return CommandConflict({ detail: `Order is already ${row.status}` });
       return [OrderPaid({ amount: input.amount })]; // [] means: write nothing
     }),
 );
@@ -105,8 +106,9 @@ export const journal = j.compose({ tables, projections: [customerStats], effects
 // The request context binds the door once: the database and the signed-in actor.
 export const createContext = (user: User) => ({ user, runCommand: journal.bind(db, { actorId: user.id }) });
 
-// A procedure. The schema is reused. A rule that rejects the request throws `CommandError`;
-// `commandErrors()` from `@arki/journal/orpc`, on the builder, answers the client with its code.
+// A procedure. The schema is reused. A rule that says no returns a failure; `commandErrors()`
+// from `@arki/journal/orpc`, on the builder, answers the client with its code and status.
+// A contract-first procedure hands the result to `orThrowRpc` instead (see Rejected rules).
 export const pay = protectedProcedure
   .input(payOrder.input.pick({ orderId: true, amount: true }))
   .handler(({ context, input }) => context.runCommand(payOrder, input));
@@ -152,7 +154,7 @@ A webhook or a retried request can run the same command twice. `journal.run(db, 
 
 The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and an effect's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
 
-A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it throws (a `CommandError` `FORBIDDEN`, usually) to refuse, and a refused replay changes nothing.
+A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it returns a failure (`CommandForbidden`, usually) to refuse, and a refused replay changes nothing. `journal.run` returns that failure, and the command's type includes it. A throw refuses too.
 
 Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
 
@@ -205,11 +207,11 @@ export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 
 ## The low-level write
 
-`journal.write(tx, entity, id, { meta, events })` is what a command's `write` calls. Use it directly only when there is no command: a one-off migration step, or a test that needs a specific `meta` per write. `events` is the function that looks at the locked row, checks the rules, and returns the events to append. It runs after the row is locked, inside the write's savepoint, and receives that savepoint as `{ tx }`, so it can read related rows under the lock. It may be async. It only accepts events declared on the entity; the row type, the id type and the event data types are all inferred.
+`journal.write(tx, entity, id, { meta, events })` is what a command's `write` calls. Use it directly only when there is no command: a one-off migration step, or a test that needs a specific `meta` per write. `events` is the function that looks at the locked row, checks the rules, and returns the events to append. It runs after the row is locked, inside the write's savepoint, and receives that savepoint as `{ tx }`, so it can read related rows under the lock. It may be async. It only accepts events declared on the entity; the row type, the id type and the event data types are all inferred. When a rule says no, `events` returns a failure instead, such as `CommandNotFound({ detail: 'Order not found' })`: the savepoint rolls back, nothing is written, and `write` returns that failure. A command handler returns it on (`if (isFailure(paid)) return paid;`), and the whole command rolls back.
 
 `expectedVersion` is the row version the caller saw. If the stored version differs (0 for no row), the write is refused with `CONFLICT` before `events` runs. A command passes it on: `write(order, id, events, { expectedVersion: input.version })`. The client sends the version it rendered; `commandErrors()` turns the refusal into a 409 that asks it to reload. This is how concurrent editors and stale game moves are caught without a hand-written version compare.
 
-`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` the trace `commandId`, `causeSeq`, `correlationId` (see Tracing), and `erasedAt` (see Erasure). An entity can be created again after a delete; its version continues from the last event.
+`write` returns `{ row, events }`, or the failure `events` returned: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` the trace `commandId`, `causeSeq`, `correlationId` (see Tracing), and `erasedAt` (see Erasure). An entity can be created again after a delete; its version continues from the last event.
 
 ### Rows that existed before the journal
 
@@ -290,7 +292,9 @@ Other errors are not `JournalError`. A wrong definition or a misuse is a plain `
 
 ### Rejected rules
 
-A rule of the app that rejects a request throws `new CommandError(code, message)`. The code is `NOT_FOUND`, `BAD_REQUEST`, `FORBIDDEN` or `CONFLICT`. The message is written for the client. It is not a `JournalError`: a `JournalError` is the library's own failure, a `CommandError` is the app saying no. The command rolls back and the caller gets the same error. `isCommandError(error, code?)` matches it.
+A rule of the app that rejects a request returns a failure from `@arki/failure`. The journal has four, each with `{ detail }`, the message written for the client: `CommandNotFound` (`journal.not_found`, 404), `CommandInvalid` (`journal.invalid`, 400), `CommandForbidden` (`journal.forbidden`, 403) and `CommandConflict` (`journal.conflict`, 409). An app may return its own `defineFailure` values too. A command handler, its `authorize` and an `events` function can return one. The command's transaction rolls back exactly as for a throw, and `journal.run` returns the same failure instance; its type is inferred from the handler. A child's failure comes back from `context.run` as a value: its savepoint is already rolled back, and the parent returns it on or goes on. A failure is never stored as an idempotency receipt, so a repeat runs again. It is not a `JournalError`: a `JournalError` is the library's own failure, a command failure is the app saying no.
+
+`throw new CommandError(code, message)` still works the same way (codes `NOT_FOUND`, `BAD_REQUEST`, `FORBIDDEN`, `CONFLICT`; `isCommandError(error, code?)` matches it), but the caller cannot see it in the type. Prefer the failures.
 
 An oRPC app maps it once, with `@arki/journal/orpc`. `@orpc/server` is an optional peer. The core entry never imports it.
 
@@ -302,7 +306,7 @@ import { commandErrors } from '@arki/journal/orpc';
 export const publicProcedure = os.use(appErrors).use(commandErrors());
 ```
 
-`commandErrors()` answers a `CommandError` with the `ORPCError` of the same code and message, and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A host without oRPC writes its own few lines with `isCommandError`. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules-commanderror).
+`commandErrors()` answers a failure, thrown or returned by the procedure, with the `ORPCError` of its code, status, message and data; a `CommandError` with the `ORPCError` of the same code and message; and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A procedure with an output schema, and every contract-first one, hands the command's result to `orThrowRpc(result, errors)` from `@arki/failure/orpc`, with the failures listed in the contract by `errorMap(CommandNotFound, ...)`; the client then gets them typed. A host without oRPC reads the failure's `status`, or matches with `isCommandError`. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules).
 
 Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { afterSeq, batchSize })`, `drain(db, { batchSize, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
 

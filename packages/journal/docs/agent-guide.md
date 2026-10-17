@@ -129,11 +129,11 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 
 ### Add a command and run it
 
-Library files: `src/api.ts` (`Command`, `CommandContext`, `bind`), `src/command.ts` (how `journal.run` runs one), `src/errors.ts` (`CommandError`), `src/orpc.ts` (the oRPC error mapping).
+Library files: `src/api.ts` (`Command`, `CommandContext`, `bind`), `src/command.ts` (how `journal.run` runs one), `src/errors.ts` (`CommandNotFound` and the other command failures, `CommandError`), `src/rollback.ts` (how a returned failure rolls back), `src/orpc.ts` (the oRPC error mapping).
 
 ```ts
 // features/orders/commands.ts
-import { CommandError } from '@arki/journal';
+import { CommandConflict, CommandNotFound } from '@arki/journal';
 // core/orpc.ts, in an oRPC app: once, after the app's own error middleware.
 import { commandErrors } from '@arki/journal/orpc';
 
@@ -142,8 +142,8 @@ export const payOrder = j.command(
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
   (input, { write }) =>
     write(order, input.orderId, row => {
-      if (!row) throw new CommandError('NOT_FOUND', 'Order not found');
-      if (row.status !== 'placed') throw new CommandError('CONFLICT', `Order is already ${row.status}`);
+      if (!row) return CommandNotFound({ detail: 'Order not found' });
+      if (row.status !== 'placed') return CommandConflict({ detail: `Order is already ${row.status}` });
       return [OrderPaid({ amount: input.amount })]; // [] means: write nothing
     }),
 );
@@ -151,7 +151,8 @@ export const payOrder = j.command(
 // The door. Bind the database and the actor once, then pass only the command and its input.
 // A request: the actor comes from the session. Put the bound runner on the request context.
 const runCommand = journal.bind(db, { actorId: user.id });
-await runCommand(payOrder, { orderId: id, amount: 10 });
+// The result is the write's, or CommandNotFound | CommandConflict: then nothing was written.
+const paid = await runCommand(payOrder, { orderId: id, amount: 10 });
 // A job, a schedule, a script or a seed: use a clear system actor.
 const runSystemCommand = journal.bind(db, { actorId: 'system' });
 await runSystemCommand(payOrder, { orderId: id, amount: 10 });
@@ -163,9 +164,9 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - `journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`. You still give `meta`: the library never picks an actor. `meta` is parsed on every call, as in `journal.run`, so a default in the meta schema is new for each command.
 - `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
 - A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
-- A rule that rejects the request throws `new CommandError(code, message)`. The command rolls back and the caller gets the same error. The four codes are in [Rejected rules](#rejected-rules-commanderror).
+- A rule that rejects the request returns a failure: `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, or the app's own. The handler, `authorize` and an `events` function can return one. The command rolls back exactly as for a throw, and the caller gets the same failure, typed. An `events` failure comes back from `write`: return it from the handler. See [Rejected rules](#rejected-rules). `throw new CommandError(code, message)` still works.
 - A permission check goes in `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
-- An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command. Any other host matches with `isCommandError(error, code?)`.
+- An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command, and a returned failure answers as an error. A procedure with an output schema, or a contract-first one, uses `orThrowRpc(context.run(cmd, input), errors)` with `errorMap(CommandNotFound, ...)` in the contract. Any other host reads the failure's `status`, or matches with `isCommandError(error, code?)`.
 - `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
 - From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
 - In the games-platform backend, procedures call `context.runCommand`. `core/context.ts` binds it to the signed-in user. A job or a schedule binds its own runner: `journal.bind(db, { actorId: null })`. Do not call `journal.run` from a procedure there.
@@ -213,7 +214,7 @@ Rules:
 
 ### Find out why a write failed
 
-1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. A `SchemaError` (from `@arki/schema`): input, event data or `meta` failed its schema; read its `issues`. A `SchemaRunError`: a schema could not run (async where the journal parses sync, or its `validate` threw); fix the schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
+1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. Not an error at all, but `isFailure(result)`: a rule returned a failure and the command rolled back; read its `code` and `message`, and find the `return` in the handler, `authorize` or `events`. A `SchemaError` (from `@arki/schema`): input, event data or `meta` failed its schema; read its `issues`. A `SchemaRunError`: a schema could not run (async where the journal parses sync, or its `validate` threw); fix the schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
 2. Read `error.code`, `error.kind` and `error.entityId`. Match on the code, for example `isJournalError(error, 'CONFLICT')`. Never match on the message. The message reads `CODE: what happened (kind id): detail. What to do next.`
 3. Find the code in the [error table](#errors). To see the exact check, search for the code in the file the table names.
 4. Run again with `DEBUG=arki:journal:*`. It prints commands, writes, replays, drains and worker ticks.
@@ -244,7 +245,7 @@ Rules:
 Two kinds of error have a code.
 
 - A `JournalError` is the library's own failure. It is about one entity's row or history. It has `code`, `kind` and `entityId`. Its twelve codes are in the table below.
-- A `CommandError` is a rule of the app that rejects a request. App code throws it; the library never does. It is not a `JournalError`. Its four codes are in [Rejected rules](#rejected-rules-commanderror).
+- A `CommandError` is a rule of the app that rejects a request. App code throws it; the library never does. It is not a `JournalError`. Its four codes are in [Rejected rules](#rejected-rules). A rule is better written as a returned failure, listed there too.
 
 This is the only copy of this table. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
 
@@ -263,23 +264,26 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 | `BAD_DEFINITION`   | A declaration is wrong. It is thrown when the declaring code runs (import time), before any data is touched.                                                                                                                                                                                                                    | A bad event type, entity kind or effect name; a bad key column; `.create` after `.on`; a second reducer for one event; a need named `db`; two effects or projections with one name; a missing service in `compose`. | Fix the declaration the message names. The message text is the detail after the code.                                                                                                  | `src/id.ts`, `src/entity.ts`, `src/handlers.ts`, `src/journal.ts`, `src/dot.ts` |
 | `VALUE_MISMATCH`   | The database stored a different value than the reducer produced. The write was rolled back.                                                                                                                                                                                                                                     | A `numeric` value with more decimals than the column keeps, such as `"1.234"` for `numeric(10,2)`.                                                                                                                  | Make the reducer produce the value in the form the column stores.                                                                                                                      | `src/storage.ts`                                                                |
 
-### Rejected rules: `CommandError`
+### Rejected rules
 
-`new CommandError(code, message)` is thrown by a command handler or by an `events` function. The command rolls back, and `journal.run` lets the same error out. `isCommandError(error, code?)` matches it. The message is written for the client.
+A command handler, its `authorize` or an `events` function returns a failure from `@arki/failure` when a rule says no. The command's transaction rolls back exactly as for a throw, and `journal.run` returns the same failure instance; the type comes from the handler. An `events` failure comes back from `write` first: the handler returns it on (`if (isFailure(paid)) return paid;`). A child command's failure comes back from `context.run`: the child's savepoint is rolled back, and the parent returns it on or goes on. A failure is never stored as an idempotency receipt. The journal has four, each with data `{ detail }`, the message written for the client (`message` is `detail`). An app may return its own `defineFailure` values too.
 
-| Code          | HTTP | Use it when                                                                  |
-| ------------- | ---- | ---------------------------------------------------------------------------- |
-| `NOT_FOUND`   | 404  | The thing the request names does not exist.                                  |
-| `BAD_REQUEST` | 400  | The input has the right shape, but a rule refuses it. An end before a start. |
-| `FORBIDDEN`   | 403  | This actor may not do this to this entity.                                   |
-| `CONFLICT`    | 409  | The current state does not allow it. Already paid. A name that is taken.     |
+| Failure            | Code                | HTTP | Use it when                                                                  | Was `CommandError` |
+| ------------------ | ------------------- | ---- | ---------------------------------------------------------------------------- | ------------------ |
+| `CommandNotFound`  | `journal.not_found` | 404  | The thing the request names does not exist.                                  | `NOT_FOUND`        |
+| `CommandInvalid`   | `journal.invalid`   | 400  | The input has the right shape, but a rule refuses it. An end before a start. | `BAD_REQUEST`      |
+| `CommandForbidden` | `journal.forbidden` | 403  | This actor may not do this to this entity.                                   | `FORBIDDEN`        |
+| `CommandConflict`  | `journal.conflict`  | 409  | The current state does not allow it. Already paid. A name that is taken.     | `CONFLICT`         |
+
+`new CommandError(code, message)`, thrown, still works: the command rolls back, `journal.run` lets the same error out, and `isCommandError(error, code?)` matches it. Its codes are the last column. The caller cannot see it in the type, so prefer the failures.
 
 `@arki/journal/orpc` maps these for an oRPC app. The code is in `src/orpc.ts`. `@orpc/server` is an optional peer, and the core entry never imports it.
 
-- `toORPCError(error)` turns a `CommandError` into an `ORPCError` with the same code and message.
+- `toORPCError(error)` turns a failure into the `ORPCError` with its code, status, message and data. That is what `orThrowRpc` from `@arki/failure/orpc` throws for a failure the contract does not list (`defined: false`). List them with `errorMap(CommandNotFound, ...)` in the contract and call `orThrowRpc(result, errors)` in the procedure, and the client gets them typed (`defined: true`).
+- It turns a `CommandError` into an `ORPCError` with the same code and message.
 - It turns a `JournalError` with code `CONFLICT` into an `ORPCError('CONFLICT')` with the message `This was changed by another request. Reload the current state and try again.` The client reloads first: with an `expectedVersion`, the same request fails again.
 - It returns every other error unchanged.
-- `commandErrors()` is the same mapping as a middleware. Put it after the app's own error middleware: `os.use(appErrors).use(commandErrors())`. Put before it, the app's middleware sees a plain error first and answers 500.
+- `commandErrors()` is the same mapping as a middleware. It also answers a failure the procedure returns as an error, never as a success. A procedure with an output schema fails output validation on a failure first, so it uses `orThrowRpc`. Put it after the app's own error middleware: `os.use(appErrors).use(commandErrors())`. Put before it, the app's middleware sees a plain error first and answers 500.
 
 ### Dot boot errors
 

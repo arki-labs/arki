@@ -22,7 +22,16 @@ export type {
   WriteOptions,
   WriteResult,
 } from './api.js';
-export { CommandError, JournalError, isCommandError, isJournalError } from './errors.js';
+export {
+  CommandConflict,
+  CommandError,
+  CommandForbidden,
+  CommandInvalid,
+  CommandNotFound,
+  JournalError,
+  isCommandError,
+  isJournalError,
+} from './errors.js';
 export type { CommandErrorCode, JournalErrorCode } from './errors.js';
 export type { GuaranteedCreateKeys, EntityBuilder, OnReducerRow, OnOnlyEntityBuilder } from './entity.js';
 export type {

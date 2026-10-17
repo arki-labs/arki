@@ -3,6 +3,7 @@
  * definition helpers `initJournal` returns, and the input, option and result types.
  * Types only, no runtime code. May import `entity`, `types` and `pg`; nothing else.
  */
+import type { Failure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
@@ -49,12 +50,16 @@ import type {
 /**
  * Looks at the locked row, checks the rules, and returns the events to append.
  * Runs after the row is locked, inside the write's savepoint. `tx` is that
- * savepoint: reads through it see the locked row's transaction.
+ * savepoint: reads through it see the locked row's transaction. Return a failure
+ * (`@arki/failure`) when a rule says no: the savepoint rolls back, nothing is
+ * written, and the write returns that failure.
  */
-export type NextEvents<Tbl extends EntityTable, E extends AnyEventDef, Tx = DbHandle> = (
-  row: Row<Tbl> | null,
-  ctx: { readonly tx: Tx },
-) => readonly PendingOf<E>[] | Promise<readonly PendingOf<E>[]>;
+export type NextEvents<
+  Tbl extends EntityTable,
+  E extends AnyEventDef,
+  Tx = DbHandle,
+  Returned extends readonly PendingOf<E>[] | Failure = readonly PendingOf<E>[],
+> = (row: Row<Tbl> | null, ctx: { readonly tx: Tx }) => Returned | Promise<Returned>;
 /** Options of a write, from `journal.write` or a command's `write`. */
 export type WriteOptions = {
   /**
@@ -69,9 +74,10 @@ export type WriteInput<
   E extends AnyEventDef,
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx = DbHandle,
+  Returned extends readonly PendingOf<E>[] | Failure = readonly PendingOf<E>[],
 > = WriteOptions & {
   readonly meta: SchemaInput<Meta>;
-  readonly events: NextEvents<Tbl, E, Tx>;
+  readonly events: NextEvents<Tbl, E, Tx, Returned>;
 };
 
 /**
@@ -83,27 +89,34 @@ export type Command<S extends StandardSchemaV1, R, in MetaOut, in Tx extends Tra
   readonly name: string;
   readonly input: S;
   readonly handler: (input: SchemaOutput<S>, context: CommandContext<MetaOut, Tx>) => R;
-  /** The command's `authorize` option, when it has one. See {@link CommandOptions}. */
-  readonly authorize?: CommandAuthorize<SchemaOutput<S>, MetaOut, Tx>;
+  /** The command's `authorize` option, when it has one. See {@link CommandOptions}. Its failures are part of `R`. */
+  // `R` holds the failures `authorize` can return: `j.command` adds them. A value that is not a failure is ignored.
+  readonly authorize?: CommandAuthorize<SchemaOutput<S>, MetaOut, Tx, void | R>;
 };
 /**
  * Decides whether the caller may run a command. It runs inside the command's transaction,
  * after the input and `meta` are parsed, on every call: a call that replays an idempotency
- * receipt runs it too, before the stored result is returned. Throw (a `CommandError`
- * `FORBIDDEN`, usually) to refuse; the run rolls back and nothing is replayed.
+ * receipt runs it too, before the stored result is returned. Return a failure
+ * (`CommandForbidden`, usually) to refuse: the run rolls back, nothing is replayed,
+ * and `journal.run` returns that failure. A throw refuses too.
  */
-export type CommandAuthorize<Input, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle> = (
+export type CommandAuthorize<Input, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle, Refused = void> = (
   input: Input,
   context: { readonly tx: Tx; readonly meta: MetaOut },
-) => void | Promise<void>;
+) => Refused | Promise<Refused>;
 /** Options of `j.command`. */
-export type CommandOptions<Input, MetaOut, Tx extends TransactionSource<Tx> = DbHandle> = {
+export type CommandOptions<
+  Input,
+  MetaOut,
+  Tx extends TransactionSource<Tx> = DbHandle,
+  Refused extends void | undefined | Failure = void,
+> = {
   /**
    * Put the caller's permission check here, not in the handler. A repeat with an idempotency
    * key does not run the handler, so a check inside it would not run either: the stored result
    * would go to whoever replays the key. `authorize` runs on the first call and on every replay.
    */
-  readonly authorize?: CommandAuthorize<Input, MetaOut, Tx>;
+  readonly authorize?: CommandAuthorize<Input, MetaOut, Tx, Refused>;
 };
 /**
  * What a command handler receives. `write` and `run` are bound to the command's
@@ -146,13 +159,22 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
   readonly commandId: string;
   /** The chain this run belongs to. Every event it writes carries it; a child run inherits it. */
   readonly correlationId: string;
-  /** `journal.write` on this command's transaction with this command's metadata. Safe to destructure. */
-  readonly write: <K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+  /**
+   * `journal.write` on this command's transaction with this command's metadata. Safe to destructure.
+   * A failure `events` returns comes back here: return it from the handler, and the command rolls back.
+   */
+  readonly write: <
+    K extends string,
+    Tbl extends EntityTable,
+    E extends AnyEventDef,
+    Key extends string,
+    Returned extends readonly PendingOf<E>[] | Failure,
+  >(
     entity: EntityDef<K, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-    events: NextEvents<Tbl, E, Tx>,
+    events: NextEvents<Tbl, E, Tx, Returned>,
     opts?: WriteOptions,
-  ) => Promise<WriteResult<Tbl, E, MetaOut, Key>>;
+  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
   readonly run: <S extends StandardSchemaV1, R>(
     command: Command<S, R, MetaOut, Tx>,
@@ -202,17 +224,28 @@ export type Journal<
   Tx extends TransactionSource<Tx> = DbHandle,
   AppDb extends RootDb = RootDb,
 > = {
-  /** Append events, run reducers, save the row, run projections, queue jobs. All inside `tx`. */
-  write<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+  /**
+   * Append events, run reducers, save the row, run projections, queue jobs. All inside `tx`.
+   * A failure `events` returns is the result: the write's savepoint rolled back.
+   */
+  write<
+    K extends string,
+    Tbl extends EntityTable,
+    E extends AnyEventDef,
+    Key extends string,
+    Returned extends readonly PendingOf<E>[] | Failure,
+  >(
     tx: Tx,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
-    input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key>>;
+    input: WriteInput<Tbl, E, Meta, Tx, Returned>,
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | Extract<Returned, Failure>>;
   /**
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
    * opens a savepoint. Returns what the handler returns. Errors pass through.
+   * A returned failure (`@arki/failure`) rolls the transaction back like a throw, and is
+   * returned, the same instance.
    * On a root database, a run that queued a job calls `wake()` after the commit.
    */
   run<S extends StandardSchemaV1, R>(
@@ -471,12 +504,12 @@ export type JournalDefinitions<
    * `write` and `run` are bound to one transaction and one parsed `meta`.
    * Needs only `j`, entities and events, never the finished journal.
    */
-  command<S extends StandardSchemaV1, R>(
+  command<S extends StandardSchemaV1, R, Refused extends void | undefined | Failure = void>(
     name: string,
     input: S,
     handler: (input: SchemaOutput<S>, context: CommandContext<SchemaOutput<Meta>, Tx>) => R,
-    options?: CommandOptions<SchemaOutput<S>, SchemaOutput<Meta>, Tx>,
-  ): Command<S, R, SchemaOutput<Meta>, Tx>;
+    options?: CommandOptions<SchemaOutput<S>, SchemaOutput<Meta>, Tx, Refused>,
+  ): Command<S, R | Extract<Refused, Failure>, SchemaOutput<Meta>, Tx>;
   /** `on` is `NoInfer` so `E` comes from `entity`; handlers are then contextually typed. */
   projection<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
