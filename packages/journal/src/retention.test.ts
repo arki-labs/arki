@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import type { ResolvedKeep } from './retention.js';
+import type { ArchivedJob, ResolvedKeep } from './retention.js';
 import { isJournalError } from './errors.js';
-import { keepFor, keepUntil, parseAge, parseKeep, resolveRetention, retryableForMs } from './retention.js';
+import {
+  keepFor,
+  keepUntil,
+  ndjsonArchiveSink,
+  parseAge,
+  parseKeep,
+  resolveRetention,
+  retryableForMs,
+} from './retention.js';
 
 const now = new Date('2026-10-17T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -92,5 +101,69 @@ describe('retention resolution', () => {
     expect(resolveRetention({ sweep: false }).sweep).toBe(false);
     expect(resolveRetention({ sweep: { every: '5m' } }).sweep).toEqual({ everyMs: 300_000, batch: 1000 });
     expect(() => resolveRetention({ sweep: { batch: 0 } })).toThrow();
+  });
+});
+
+describe('the sweep interval', () => {
+  it('sweep.every of 0 is BAD_DEFINITION, because a 0 ms interval would spin the worker', () => {
+    for (const every of [0, '0m', '0h'] as const) {
+      expect(() => resolveRetention({ sweep: { every } })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
+    }
+  });
+});
+
+describe('ndjsonArchiveSink', () => {
+  const row = (id: string, archivedAt: Date) =>
+    ({
+      id,
+      kind: 'queue',
+      eventSeq: null,
+      effect: null,
+      jobName: 'demo',
+      args: { n: 1 },
+      dedupeKey: null,
+      priority: 0,
+      enqueuedAt: archivedAt,
+      attempts: 1,
+      lastError: null,
+      outcome: 'completed',
+      attemptLog: [],
+      replayOf: null,
+      finishedAt: archivedAt,
+      archivedAt,
+      keepUntil: null,
+      exportedAt: null,
+    }) satisfies ArchivedJob;
+
+  it('writes one file per batch under a key built from the first row, and one JSON line per row', async () => {
+    const puts: { key: string; body: string }[] = [];
+    // Shaped like @arki/fs StorageAdapter.put (a Buffer body, extra options): it must fit without a dependency.
+    // A Buffer is a Uint8Array, so the sink hands it plain bytes and the adapter reads them as bytes.
+    const adapter = {
+      put: (key: string, body: Buffer, _options?: { contentType?: string }): Promise<{ key: string }> => {
+        puts.push({ key, body: new TextDecoder().decode(body) });
+        return Promise.resolve({ key });
+      },
+    };
+    const sink = ndjsonArchiveSink({ put: adapter.put, prefix: 'archive/jobs/' });
+    const at = new Date('2026-10-17T03:04:05.678Z');
+    await sink.write([row('job_a', at), row('job_b', new Date(at.getTime() + 1))], {
+      signal: new AbortController().signal,
+    });
+
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.key).toBe(`archive/jobs/2026/10/17/${at.getTime()}-job_a.ndjson`);
+    const lines = (puts[0]?.body ?? '').split('\n');
+    expect(lines.pop()).toBe('');
+    const line = z.object({ id: z.string(), archivedAt: z.string() });
+    const parsed = lines.map(text => line.parse(JSON.parse(text)));
+    expect(parsed.map(item => item.id)).toEqual(['job_a', 'job_b']);
+    expect(parsed[0]?.archivedAt).toBe('2026-10-17T03:04:05.678Z');
+
+    // The same batch again gives the same key, so a store that overwrites by key makes the resend harmless.
+    await sink.write([row('job_a', at), row('job_b', new Date(at.getTime() + 1))], {
+      signal: new AbortController().signal,
+    });
+    expect(puts[1]?.key).toBe(puts[0]?.key);
   });
 });

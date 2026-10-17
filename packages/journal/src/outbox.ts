@@ -18,7 +18,7 @@ import type { DbHandle } from './types.js';
 import type { JobRow } from './worker.js';
 import { JournalError } from './errors.js';
 import { jobId as newJobId, operationId as newOperationId } from './id.js';
-import { keepFor, keepUntil, retryableForMs } from './retention.js';
+import { keepFor, keepUntil, MAX_SWEEP_BATCH, retryableForMs } from './retention.js';
 
 const debug = getLogger('arki:journal');
 
@@ -92,8 +92,11 @@ type PageOptions = { readonly limit?: number; readonly after?: string };
 
 const LIST_LIMIT = { default: 100, max: 200 } as const;
 const RETRY_DEAD_LIMIT = { default: 100, max: 500 } as const;
-const PURGE_LIMIT = { default: 1000, max: 5000 } as const;
+const PURGE_LIMIT = { default: 1000, max: MAX_SWEEP_BATCH } as const;
 const OPERATION_HISTORY = 100;
+/** The actor on every operation row the sweeper (or a schedule calling the sweep verbs without one) writes. */
+const RETENTION_ACTOR = 'system:retention';
+const retentionOp: JobOperationInput = { actor: RETENTION_ACTOR };
 
 export type JobOpsDeps = {
   readonly tables: JournalTables;
@@ -701,6 +704,252 @@ export function createJobOps(deps: JobOpsDeps) {
     );
   };
 
+  // ---- retention: export, prune --------------------------------------------------------------------------------
+
+  /**
+   * Send unexported archive rows to the sink, oldest first, up to `limit` (default 1000, at most 5000), and mark
+   * `exported_at` only after `sink.write` resolved. The rows are locked with `SKIP LOCKED` for the whole call, so
+   * workers that export at once take different rows. At-least-once: a crash between the write and the commit sends
+   * the batch again. A sink that throws leaves the batch unexported, logs a warning and returns `failed: true`; the
+   * rows wait (they are never pruned unexported). No sink, or nothing to send, writes no operation row.
+   */
+  const exportArchive = async (
+    db: DbHandle,
+    opts?: { readonly limit?: number; readonly signal?: AbortSignal },
+    op: JobOperationInput = retentionOp,
+  ): Promise<{ exported: number; failed: boolean; operationId: string | null }> => {
+    assertOperation(op);
+    const limit = bounded('exportArchive', opts?.limit, PURGE_LIMIT);
+    const sink = policy.sink;
+    if (sink === undefined) return { exported: 0, failed: false, operationId: null };
+    return inTransaction(
+      db,
+      async tx => {
+        const rows = await tx
+          .select()
+          .from(jobArchive)
+          .where(isNull(jobArchive.exportedAt))
+          .orderBy(asc(jobArchive.archivedAt), asc(jobArchive.id))
+          .limit(limit)
+          .for('update', { skipLocked: true });
+        if (rows.length === 0) return { exported: 0, failed: false, operationId: null };
+        try {
+          await sink.write(rows, { signal: opts?.signal ?? new AbortController().signal });
+        } catch (error) {
+          debug.warn('exportArchive: sink {sink} failed, {count} rows stay unexported: {failed}', {
+            sink: sink.name,
+            count: rows.length,
+            failed: error instanceof Error ? error.message : String(error),
+          });
+          return { exported: 0, failed: true, operationId: null };
+        }
+        const ids = rows.map(row => row.id);
+        await tx
+          .update(jobArchive)
+          .set({ exportedAt: sql`now()` })
+          .where(inArray(jobArchive.id, ids));
+        const operationId = await record(tx, 'exportArchive', op, ids);
+        debug.debug('exportArchive: {count} rows to {sink}, {operationId}', {
+          count: ids.length,
+          sink: sink.name,
+          operationId,
+        });
+        return { exported: ids.length, failed: false, operationId };
+      },
+      false,
+    );
+  };
+
+  /** With a sink, a row goes only after the sink has it; without one nothing is ever exported. */
+  const prunable = policy.sink === undefined ? undefined : isNotNull(jobArchive.exportedAt);
+
+  /**
+   * Delete archive rows: first those past `keep_until` (when a sink exists, only exported ones), then, for each
+   * (outcome, effect or job name) with a `max`, the oldest beyond the newest `max`. `max` comes from the effect's
+   * override, else the journal's. At most `limit` rows per call (default 1000, at most 5000). An unexported row is
+   * never deleted while a sink exists, whatever its age or the cap. Nothing deleted writes no operation row.
+   */
+  const pruneArchive = async (
+    db: DbHandle,
+    opts?: { readonly limit?: number },
+    op: JobOperationInput = retentionOp,
+  ): Promise<{ pruned: number; operationId: string | null }> => {
+    assertOperation(op);
+    const limit = bounded('pruneArchive', opts?.limit, PURGE_LIMIT);
+    return inTransaction(
+      db,
+      async tx => {
+        const ids: string[] = [];
+        const expired = await tx
+          .delete(jobArchive)
+          .where(
+            inArray(
+              jobArchive.id,
+              tx
+                .select({ id: jobArchive.id })
+                .from(jobArchive)
+                .where(and(lte(jobArchive.keepUntil, sql`now()`), prunable))
+                .orderBy(asc(jobArchive.keepUntil), asc(jobArchive.id))
+                .limit(limit)
+                .for('update', { skipLocked: true }),
+            ),
+          )
+          .returning({ id: jobArchive.id });
+        ids.push(...expired.map(row => row.id));
+
+        const groups = await tx
+          .select({
+            outcome: jobArchive.outcome,
+            effect: jobArchive.effect,
+            jobName: jobArchive.jobName,
+            rows: sql<number>`count(*)::int`,
+          })
+          .from(jobArchive)
+          .groupBy(jobArchive.outcome, jobArchive.effect, jobArchive.jobName);
+        for (const group of groups) {
+          if (ids.length >= limit) break;
+          const keep = keepFor(policy, group.outcome, overrideOf({ effect: group.effect }));
+          const max = keep.store ? keep.max : undefined;
+          if (max === undefined || group.rows <= max) continue;
+          const sameGroup = and(
+            eq(jobArchive.outcome, group.outcome),
+            group.effect === null ? isNull(jobArchive.effect) : eq(jobArchive.effect, group.effect),
+            group.jobName === null ? isNull(jobArchive.jobName) : eq(jobArchive.jobName, group.jobName),
+          );
+          // OFFSET max skips the newest `max`; the offset counts unexported rows too, so the cap keeps the newest rows
+          // overall and an unexported one among the overflow simply waits for a later call.
+          const overflow = await tx
+            .delete(jobArchive)
+            .where(
+              and(
+                inArray(
+                  jobArchive.id,
+                  tx
+                    .select({ id: jobArchive.id })
+                    .from(jobArchive)
+                    .where(sameGroup)
+                    .orderBy(desc(jobArchive.archivedAt), desc(jobArchive.id))
+                    .limit(limit - ids.length)
+                    .offset(max)
+                    .for('update', { skipLocked: true }),
+                ),
+                prunable,
+              ),
+            )
+            .returning({ id: jobArchive.id });
+          ids.push(...overflow.map(row => row.id));
+        }
+        if (ids.length === 0) return { pruned: 0, operationId: null };
+        const operationId = await record(tx, 'pruneArchive', op, ids);
+        debug.debug('pruneArchive: {count} rows, {operationId}', { count: ids.length, operationId });
+        return { pruned: ids.length, operationId };
+      },
+      false,
+    );
+  };
+
+  /**
+   * Delete operation rows past the `operations` keep: older than its age, then the oldest beyond its `max`. 'forever'
+   * deletes nothing. Writes no operation row of its own: recording its own deletion would never end.
+   */
+  const pruneOperations = async (db: DbHandle, opts?: { readonly limit?: number }): Promise<{ pruned: number }> => {
+    const limit = bounded('pruneOperations', opts?.limit, PURGE_LIMIT);
+    const keep = policy.operations;
+    const age = keep.store ? keep.ageMs : 0;
+    const max = keep.store ? keep.max : undefined;
+    if (age === null && max === undefined) return { pruned: 0 };
+    return inTransaction(
+      db,
+      async tx => {
+        let pruned = 0;
+        if (age !== null) {
+          const old = await tx
+            .delete(jobOperations)
+            .where(
+              inArray(
+                jobOperations.id,
+                tx
+                  .select({ id: jobOperations.id })
+                  .from(jobOperations)
+                  .where(lte(jobOperations.at, sql`now() - ${age} * interval '1 millisecond'`))
+                  .orderBy(asc(jobOperations.at), asc(jobOperations.id))
+                  .limit(limit)
+                  .for('update', { skipLocked: true }),
+              ),
+            )
+            .returning({ id: jobOperations.id });
+          pruned += old.length;
+        }
+        if (max !== undefined && pruned < limit) {
+          const overflow = await tx
+            .delete(jobOperations)
+            .where(
+              inArray(
+                jobOperations.id,
+                tx
+                  .select({ id: jobOperations.id })
+                  .from(jobOperations)
+                  .orderBy(desc(jobOperations.at), desc(jobOperations.id))
+                  .limit(limit - pruned)
+                  .offset(max)
+                  .for('update', { skipLocked: true }),
+              ),
+            )
+            .returning({ id: jobOperations.id });
+          pruned += overflow.length;
+        }
+        if (pruned > 0) debug.debug('pruneOperations: {count} rows', { count: pruned });
+        return { pruned };
+      },
+      false,
+    );
+  };
+
+  /**
+   * One sweep tick, as the worker runs it: purge old dead jobs, export, prune the archive, prune the operations.
+   * Each step takes at most `sweep.batch` rows and a step that fills its batch warns, because the backlog is growing.
+   * A step that throws is logged and the next one still runs. Several workers may tick at once: the steps lock their
+   * rows with `SKIP LOCKED`. With `sweep: false` there is no batch; the app calls the verbs itself.
+   */
+  const sweepOnce = async (db: DbHandle, signal?: AbortSignal): Promise<void> => {
+    if (policy.sweep === false) return;
+    const { batch } = policy.sweep;
+    const step = async (name: string, run: () => Promise<number>) => {
+      try {
+        const handled = await run();
+        if (handled >= batch)
+          debug.warn('sweep: {step} filled its batch of {batch}; the backlog is growing', { step: name, batch });
+      } catch (error) {
+        debug.warn('sweep: {step} failed: {failed}', {
+          step: name,
+          failed: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+    await step('purgeDead', async () => {
+      const done = await purgeDead(
+        db,
+        { olderThan: new Date(Date.now() - policy.retryableForMs), limit: batch },
+        retentionOp,
+      );
+      return done.archived + done.deleted;
+    });
+    if (signal?.aborted !== true && policy.sink !== undefined) {
+      await step('exportArchive', async () => {
+        const done = await exportArchive(db, { limit: batch, signal }, retentionOp);
+        return done.exported;
+      });
+    }
+    await step('pruneArchive', async () => {
+      const done = await pruneArchive(db, { limit: batch }, retentionOp);
+      return done.pruned;
+    });
+    await step('pruneOperations', async () => {
+      const done = await pruneOperations(db, { limit: batch });
+      return done.pruned;
+    });
+  };
+
   return {
     jobs,
     job,
@@ -715,6 +964,10 @@ export function createJobOps(deps: JobOpsDeps) {
     retryDead,
     purgeDead,
     replayJob: replay,
+    exportArchive,
+    pruneArchive,
+    pruneOperations,
+    sweepOnce,
   };
 }
 

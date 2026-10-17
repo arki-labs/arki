@@ -276,9 +276,13 @@ function createJournal<
     dispatch,
     checkServices: services => void bindHandlers({ effects, taps }, services),
     tapNames: taps.map(tap => tap.name),
+    sweep:
+      retention.sweep === false
+        ? undefined
+        : { everyMs: retention.sweep.everyMs, run: (db, signal) => sweepOnce(db, signal) },
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
-  const jobOps = createJobOps({ tables, retention, wake: () => journal.wake(), overrideFor: effectOverride });
+  const { sweepOnce, ...jobOps } = createJobOps({ tables, retention, wake: () => journal.wake(), overrideFor: effectOverride });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),

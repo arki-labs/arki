@@ -402,6 +402,11 @@ export type WorkerDeps<AppDb extends RootDb> = {
     },
   ) => Promise<number>;
   /** One batch per async projection. Returns how many events were scanned. */
+  /** The retention sweep: run `run` every `everyMs` while the worker is up. Absent when `retention.sweep` is false. */
+  readonly sweep?: {
+    readonly everyMs: number;
+    readonly run: (db: AppDb & RootDb, signal: AbortSignal) => Promise<void>;
+  };
   readonly catchUp: (
     db: AppDb & RootDb,
     opts?: { readonly batchSize?: number },
@@ -669,6 +674,21 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
           resolve();
         };
       });
+    // The sweeper has its own timer: a busy drain loop must not starve it, and a long sweep must not hold up jobs.
+    let sweeping: Promise<void> = Promise.resolve();
+    let endSweepSleep: (() => void) | undefined;
+    const sweepSleep = (ms: number) =>
+      new Promise<void>(resolve => {
+        const timer = setTimeout(() => {
+          endSweepSleep = undefined;
+          resolve();
+        }, ms);
+        endSweepSleep = () => {
+          clearTimeout(timer);
+          endSweepSleep = undefined;
+          resolve();
+        };
+      });
     // `stop()` and `wake()` flip these from another call while `run` is awaiting.
     const isRunning = () => running;
     const isWoken = () => woken;
@@ -694,6 +714,18 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         if (isRunning() && processed === 0 && !isWoken()) await sleep();
       }
     };
+    const sweepLoop = async (sweep: NonNullable<typeof deps.sweep>) => {
+      // The first tick comes one interval after start, so a worker that restarts often never sweeps on every boot.
+      while (isRunning()) {
+        await sweepSleep(sweep.everyMs);
+        if (!isRunning()) break;
+        try {
+          await sweep.run(db, stopping.signal);
+        } catch (error) {
+          debugWorker.warn('sweep failed: {failed}', { failed: errorText(error) });
+        }
+      }
+    };
     const wake = () => {
       if (!running) return;
       woken = true;
@@ -717,16 +749,19 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
           value2: unlisten === undefined ? '' : ', listening',
         });
         loop = run();
+        if (deps.sweep !== undefined) sweeping = sweepLoop(deps.sweep);
       },
       async stop() {
         running = false;
         stopping.abort();
         wakers.delete(wake);
         endSleep?.();
+        endSweepSleep?.();
         await unlisten?.();
         unlisten = undefined;
         await dispatching;
         await loop;
+        await sweeping;
         debugWorker.debug('stopped');
       },
       wake,

@@ -99,7 +99,15 @@ export type {
   JobSelection,
   JobState,
 } from './outbox.js';
-export type { ArchiveSink, EffectRetention, JobRetention, Keep, RetentionAge } from './retention.js';
+export type {
+  ArchiveObjectStore,
+  ArchiveSink,
+  EffectRetention,
+  JobRetention,
+  Keep,
+  RetentionAge,
+} from './retention.js';
+export { ndjsonArchiveSink } from './retention.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';

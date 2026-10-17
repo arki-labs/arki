@@ -462,6 +462,19 @@ export type Journal<
   retryDead: JobOps['retryDead'];
   /** Dead jobs older than `olderThan` leave the hot table, archived or deleted by the retention policy. */
   purgeDead: JobOps['purgeDead'];
+  /**
+   * Send unexported archive rows to `retention.archive.sink`, oldest first, up to `limit`. Marks them exported only
+   * after the sink resolved (at-least-once); a throwing sink leaves them and returns `failed: true`. No sink: a no-op.
+   * `op` defaults to the actor `system:retention`.
+   */
+  exportArchive: JobOps['exportArchive'];
+  /**
+   * Delete archive rows past `keep_until` and the oldest beyond any `max`. With a sink, only exported rows go.
+   * `op` defaults to the actor `system:retention`.
+   */
+  pruneArchive: JobOps['pruneArchive'];
+  /** Delete operation rows past the `operations` keep. Writes no operation row of its own. */
+  pruneOperations: JobOps['pruneOperations'];
   /** A new job from an archived one. Not a retry: it gets a new id. `JOB_EXISTS` when a live job holds the dedupe key. Not `replay`, which rebuilds an entity from its events. */
   replayJob: JobOps['replayJob'];
   /**

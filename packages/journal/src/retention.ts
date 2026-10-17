@@ -122,6 +122,8 @@ export function parseKeep(keep: Keep): ResolvedKeep {
 }
 
 const DEFAULT_SWEEP_BATCH = 1000;
+/** The most rows one verb call takes: the same bound `purgeDead` has. */
+export const MAX_SWEEP_BATCH = 5000;
 
 /** The defaults, as the synthesis fixes them: completed 7d, dead 90d, retryable 30d, operations forever, sweep hourly. */
 export const defaultRetention = {
@@ -145,24 +147,27 @@ export function resolveRetention(retention: JobRetention | undefined): ResolvedR
     sweep !== undefined &&
     sweep !== false &&
     sweep.batch !== undefined &&
-    (!Number.isInteger(sweep.batch) || sweep.batch < 1)
+    (!Number.isInteger(sweep.batch) || sweep.batch < 1 || sweep.batch > MAX_SWEEP_BATCH)
   ) {
-    throw badRetention(String(sweep.batch), '`sweep.batch` must be a whole number, 1 or more');
+    throw badRetention(String(sweep.batch), `\`sweep.batch\` must be a whole number from 1 to ${MAX_SWEEP_BATCH}`);
   }
+  const resolved = resolveSweep(sweep);
   return {
     retryableForMs: parseAge(retention?.retryableFor ?? defaultRetention.retryableFor),
     completed: parseKeep(retention?.archive?.completed ?? defaultRetention.completed),
     dead: parseKeep(retention?.archive?.dead ?? defaultRetention.dead),
     sink: retention?.archive?.sink,
     operations: parseKeep(retention?.operations ?? defaultRetention.operations),
-    sweep:
-      sweep === false
-        ? false
-        : {
-            everyMs: parseAge(sweep?.every ?? defaultRetention.sweep.every),
-            batch: sweep?.batch ?? defaultRetention.sweep.batch,
-          },
+    sweep: resolved,
   };
+}
+
+function resolveSweep(sweep: JobRetention['sweep']): ResolvedRetention['sweep'] {
+  if (sweep === false) return false;
+  const everyMs = parseAge(sweep?.every ?? defaultRetention.sweep.every);
+  // A 0 ms interval would make the worker's sweep loop spin without ever sleeping.
+  if (everyMs <= 0) throw badRetention(String(sweep?.every), '`sweep.every` must be longer than 0');
+  return { everyMs, batch: sweep?.batch ?? defaultRetention.sweep.batch };
 }
 
 /**
@@ -225,6 +230,9 @@ export function assertRetention(policy: ResolvedRetention, effects: readonly Ret
       "journal: retention 'untilExported' needs `retention.archive.sink`; without one nothing is ever exported",
     );
   }
+  if (needsSink(policy.operations)) {
+    throw badRetention("'untilExported'", "`operations` cannot be 'untilExported': the audit has no sink");
+  }
   for (const effect of effects) {
     const override = effect.schedule.retention;
     if (override === undefined) continue;
@@ -239,4 +247,39 @@ export function assertRetention(policy: ResolvedRetention, effects: readonly Ret
       );
     }
   }
+}
+
+/** Where `ndjsonArchiveSink` puts a file. A method type on purpose: `@arki/fs`'s `StorageAdapter.put(key, Buffer, options?)` fits it. */
+export type ArchiveObjectStore = {
+  put(key: string, body: Uint8Array | string): Promise<unknown>;
+};
+
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+
+/**
+ * An {@link ArchiveSink} that writes one NDJSON file per batch: one JSON line per archived job, in batch order.
+ * The key is `<prefix>/YYYY/MM/DD/<first archived_at in ms>-<first id>.ndjson` (UTC). Resending a batch after a
+ * crash between write and mark gives the same key when the batch starts at the same row, so a store that overwrites
+ * by key makes the retry harmless; a different start gives another file and the reader dedupes on `id`.
+ */
+export function ndjsonArchiveSink(
+  // Called as `options.put(...)`, not detached: an adapter's `put` may use `this`.
+  options: ArchiveObjectStore & {
+    /** Default `journal-archive`. */
+    readonly prefix?: string;
+  },
+): ArchiveSink {
+  const prefix = (options.prefix ?? 'journal-archive').replace(/\/+$/, '');
+  const encoder = new TextEncoder();
+  return {
+    name: 'ndjson',
+    async write(rows) {
+      const first = rows[0];
+      if (first === undefined) return;
+      const at = first.archivedAt;
+      const day = `${at.getUTCFullYear()}/${pad(at.getUTCMonth() + 1)}/${pad(at.getUTCDate())}`;
+      const key = `${prefix}/${day}/${at.getTime()}-${first.id}.ndjson`;
+      await options.put(key, encoder.encode(rows.map(row => `${JSON.stringify(row)}\n`).join('')));
+    },
+  };
 }
