@@ -472,9 +472,161 @@ The rules, all enforced:
 
 ## Operating the jobs
 
-`journal.jobs(db, { status, effect, job, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on when the effect's `retry` said stop (after 8 tries by default, or after one for a returned failure), with `lastError`. `effect` filters effect rows by effect name. `job` filters queue rows by job name. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it.
+A job is in one of four states. The state comes from the database clock.
+
+- `ready`: due now, waiting for a worker.
+- `delayed`: waiting for its due time.
+- `running`: a worker holds its lease.
+- `dead`: the worker gave up, because the effect's `retry` said stop (after 8 tries by default, or after one for a returned failure). `lastError` says why.
+
+`pending` means `ready`, `delayed` and `running` together. It is the default filter. `all` adds the dead ones.
+
+**Reads.** They take the root database. A list returns `{ jobs, next }`. `next` is an opaque cursor: pass it back as `after` for the next page, and never build or read it yourself. It is `null` on the last page. A page has 100 jobs by default and at most 200; a larger `limit` is `BAD_ARGUMENT`. The cursor holds the exact Postgres timestamp, so paging never repeats or skips a row.
+
+```ts
+const { jobs, next } = await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50 });
+const second = next === null ? undefined : await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50, after: next });
+
+const detail = await journal.job(db, 'job_abc'); // the row and its state, the event header, attemptLog, the latest operations; undefined if gone
+const counts = await journal.jobCounts(db); // per effect or job name: ready, delayed, running, dead, oldestDeadAt
+const history = await journal.jobOperations(db, { limit: 20 }); // newest first, same { ..., next } paging
+```
+
+`effect` filters effect rows by effect name. `job` filters queue rows by job name. `journal.job` never reads the event payload, only its header. `journal.jobOperations(db, { jobId, limit, after })` lists who did what, newest first.
+
+**Verbs.** Every verb that changes a job takes `op` as its last argument: `{ actor, reason?, executionId? }`. `actor` is a free string you own (a user id, a script name) and must not be empty. `executionId` is the Foreman execution that asked, when there was one. Each verb that changes something writes exactly one row to `journal_job_operations` in the same transaction, so the audit and the change commit together or not at all. A verb that changes nothing writes no row.
+
+```ts
+const op = { actor: user.id, reason: 'provider outage' } as const;
+
+await journal.retry(db, jobId, op); // dead -> pending, due now, attempts and lease cleared, workers woken
+await journal.discard(db, jobId, op); // dead job leaves the hot table, archived as 'discarded'
+await journal.cancel(db, jobId, op); // ready or delayed job leaves the hot table, archived as 'cancelled'
+await journal.retryDead(db, { ids: [firstId, secondId] }, op); // or { effect: 'sendWelcomeMail', limit: 200 }
+await journal.purgeDead(db, { olderThan: new Date(Date.now() - 45 * 86_400_000), limit: 500 }, op);
+const { jobId: replayedId } = await journal.replayJob(db, archivedId, op); // a NEW job from an archived one
+```
+
+Each of `retry`, `discard`, `cancel` and `replayJob` returns `{ operationId }` (`replayJob` also returns the new `jobId`). They throw a `JournalError`:
+
+| Code | When |
+| --- | --- |
+| `JOB_NOT_DEAD` | `retry` or `discard` on a job that is not dead. Retrying a live job would run it twice. |
+| `JOB_NOT_PENDING` | `cancel` on a job that is dead or gone. |
+| `JOB_RUNNING` | `cancel` on a job a worker holds. Deleting it would not stop its work. |
+| `JOB_EXISTS` | `replayJob` while an unfinished job holds the same dedupe key. |
+| `BAD_ARGUMENT` | A bad `limit`, a bad cursor, an empty `actor`, or a `purgeDead` bound that is too short. |
+
+Bounds on the batch verbs:
+
+- `retryDead` takes either `ids` (at most 500) or a filter over dead jobs, oldest dead first: `effect`, `job`, `deadBefore`, `limit` (default 100, at most 500). With `ids` it is all or nothing: if one id is not dead, nothing changes. It returns `{ ids, operationId }`. `operationId` is `null` when nothing matched.
+- `purgeDead` takes `olderThan` and a `limit` (default 1000, at most 5000). It refuses an `olderThan` that is newer than `retention.retryableFor` allows, with `BAD_ARGUMENT`: that would remove dead jobs an operator may still retry. It moves matching dead jobs to the archive, or deletes them, as the retention policy says. It returns `{ archived, deleted, operationId }`.
+
+**`replayJob` is not `retry`.** `retry` brings back the same job with the same id. `replayJob` makes a new job from a finished job in the archive: same effect or job name, same input, a new id. A provider that deduped on the old `jobId` will not dedupe this run, so its side effect may happen twice. Use it only when you know the first run did not do its work. The new row has `replay_of` set to the archived id, and the operation row says `replay`. It is called `replayJob` because `journal.replay` already rebuilds an entity from its events.
+
+**The audit.** `journal_job_operations` keeps one row per verb: `action`, `actor`, `reason`, `executionId`, the job ids it touched, how many, and when. Discard, cancel and purge archive the job with its attempt log first, so nothing an operator removed is gone. The retention sweeper writes its own rows with the actor `system:retention`. How long the audit lives is `retention.operations` (default `'forever'`).
 
 `journal.strandedJobs(db, { jobs })` finds pending jobs that nothing in this process can run. It returns a list of `{ kind: 'effect' | 'queue', name, jobs }`: the kind of row, the effect or job name, and how many rows wait. Queue rows are counted only when you pass the runner as `jobs`. The journal cannot judge a queue job name without it.
+
+## Retention and archive
+
+A finished job does not have to disappear. Three tables hold the story, each with its own clock.
+
+- `journal_jobs` is the hot table. It holds work that can still run (pending) or be retried (dead). A job row used to be deleted when its handler succeeded. Now the success moves it to the archive, if the policy says to keep it.
+- `journal_job_archive` holds finished jobs, with their attempts folded in as `attempt_log`. Its `outcome` is `completed`, `dead`, `discarded` or `cancelled`. Each row has a `keep_until` time, worked out from the policy when the row was archived, so every cleanup is a plain comparison.
+- `journal_job_operations` holds who did what (see [Operating the jobs](#operating-the-jobs)).
+
+A third helper table, `journal_job_attempts`, has one row per try. It lives and dies with the hot job row.
+
+Move on success is one statement under the lease fence: the fenced `DELETE` feeds the archive `INSERT`. A worker that lost its lease archives nothing.
+
+**The policy.** Give it to `compose` next to `tables`. Every field is optional.
+
+```ts
+import { ndjsonArchiveSink } from '@arki/journal';
+
+export const sendWelcomeMail = j
+  .effect('sendWelcomeMail', user, { mailer: need<Mailer>() }, {
+    UserSignedUp: (e, { jobId, mailer }) => mailer.send({ to: e.data.email, idempotencyKey: jobId }),
+  })
+  .withSchedule({ retention: { completed: '1d' } }); // this effect keeps finished rows one day
+
+export const auditTrail = j
+  .effect('auditTrail', order, { OrderPlaced: (e, { db }) => writeAudit(db, e) })
+  .withSchedule({ retention: { completed: 'untilExported' } }); // kept only until the sink has it
+
+export const journal = j.compose({
+  tables,
+  effects: [sendWelcomeMail, auditTrail],
+  services: { mailer },
+  retention: {
+    retryableFor: '30d', // a dead job stays retryable this long
+    archive: {
+      completed: '7d',
+      dead: { age: '90d', max: 50_000 }, // dead, discarded, cancelled
+      sink: ndjsonArchiveSink({ put: (key, body) => storage.put(key, Buffer.from(body)), prefix: 'journal/archive' }),
+    },
+    operations: 'forever',
+    sweep: { every: '1h', batch: 1000 },
+  },
+});
+```
+
+`journal.retention` is the policy after parsing, with the defaults filled in. The worker, the verbs and the Foreman module all read it.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `retryableFor` | `'30d'` | How long a dead job stays in the hot table, retryable. Then the sweeper archives it. |
+| `archive.completed` | `'7d'` | How long a successful job is kept. |
+| `archive.dead` | `'90d'` | How long a dead, discarded or cancelled job is kept. |
+| `archive.sink` | none | Where archive rows go after the table. |
+| `operations` | `'forever'` | How long the operations audit is kept. |
+| `sweep` | `{ every: '1h', batch: 1000 }` | How often the sweeper runs, and how many rows each step takes. `false` turns it off. |
+
+**`Keep` has these forms.** It is used for `completed`, `dead` and `operations`:
+
+| Value | Meaning |
+| --- | --- |
+| `false` | Never written. The job is deleted the moment it finishes, as before. |
+| `'forever'` | Kept until someone deletes it. |
+| `'untilExported'` | Kept only until the sink has it, then deleted. Needs `archive.sink`, or `compose` throws `BAD_DEFINITION` at boot and names the effect. Not allowed for `operations`. |
+| `'30d'`, `'12h'`, `'90m'`, or seconds as a number | Kept this long. |
+| `{ age: '90d', max: 50_000 }` | Kept this long, and at most `max` rows per outcome and per effect or job name. The oldest go first. `age` may be `'forever'`. |
+
+A bad age is `BAD_DEFINITION`. `sweep.every` of `0` is too.
+
+**Per effect and per queue job.** An effect overrides the journal with `withSchedule({ retention })`. It takes `completed`, `dead` and `retryableFor`, with the same `Keep` forms. A queue job sets the same thing with `.options({ retention })` in `@arki/queue`; the outbox runner passes it to the journal under the job name. The order is: the effect or job, then the journal, then the default. A single job row cannot set its own retention.
+
+**The sweeper.** Every running worker ticks every `sweep.every`. The first tick comes one interval after the worker starts. A tick runs four steps in this order:
+
+1. `purgeDead`: dead jobs older than `retryableFor` move to the archive (or are deleted).
+2. `exportArchive`: unexported archive rows go to the sink.
+3. `pruneArchive`: rows past `keep_until` are deleted, then the oldest rows beyond any `max`. `'untilExported'` rows go as soon as they are exported.
+4. `pruneOperations`: only when `operations` is not `'forever'`.
+
+Each step takes at most `sweep.batch` rows. A failing step is logged and the next step runs. A step that fills its batch logs a warning: the backlog is growing. Several workers can sweep at once, because rows are taken with `FOR UPDATE SKIP LOCKED`. Steps 1 to 3 write one operation row each when they did something, with the actor `system:retention`. Step 4 writes none, because recording its own deletion would never end.
+
+**An app that schedules the sweep itself.** Set `sweep: false`, and call the three verbs from your own schedule. Each one is public and takes `op` as its last argument; without it the actor is `system:retention`.
+
+```ts
+// compose({ tables, retention: { sweep: false, archive: { sink } } })
+await journal.purgeDead(db, { olderThan: new Date(Date.now() - 30 * 86_400_000) }, { actor: 'cron:journal' });
+await journal.exportArchive(db, { limit: 1000 }, { actor: 'cron:journal' });
+await journal.pruneArchive(db, { limit: 1000 }, { actor: 'cron:journal' });
+await journal.pruneOperations(db, { limit: 1000 }); // no op: it records nothing
+```
+
+Each takes at most 5000 rows per call.
+
+**Sink guarantees.** The table is always the first stop. A sink cannot join a Postgres transaction. `'untilExported'` is how an app keeps rows only elsewhere.
+
+- At-least-once. A row's `exported_at` is set only after `sink.write` resolved. A crash between the write and the mark sends the batch again. Dedupe on the row `id`.
+- Never prune unexported. While a sink is set, no row is deleted before `exported_at` is set, whatever its age or `max`. A sink that throws leaves the batch unexported and logs a warning. The table grows instead of losing data. `journal.archiveStatus(db)` shows `rows`, `unexported`, `oldestUnexportedAt` and `pastKeepUntil`.
+- Ordered inside a batch by `archived_at`, then `id`. There is no order across workers.
+
+**`ndjsonArchiveSink({ put, prefix? })`** writes one NDJSON file per batch: one JSON line per job. The key is `<prefix>/YYYY/MM/DD/<first archived_at in ms>-<first id>.ndjson` in UTC. `prefix` defaults to `journal-archive`. `put(key, body)` is any function that stores a file, so `@arki/fs` fits with no dependency, as above. A store that overwrites by key makes a resent batch harmless.
+
+**Reading the archive.** `journal.archivedJobs(db, { outcome, effect, job, limit, after })` pages finished jobs, newest first, with the same `{ jobs, next }` shape. `journal.archivedJob(db, id)` returns one with its attempt log, or `undefined`. The archive keeps `args` as the hot table does. A `'untilExported'` row is gone from the table once exported: read the file.
 
 ## Queue jobs in the jobs table
 
@@ -512,7 +664,7 @@ What a queue row promises:
 | No early visibility | Yes | Other connections cannot claim an uncommitted row. |
 | At-least-once execution | Yes | The row stays until the fenced ack. A crash between handler and ack runs it again. Pass the job id on as an idempotency key. |
 | At-most-once execution | No | A job can run twice. |
-| Eventual success | No | When the retry policy stops, the row is dead. List it with `journal.jobs(db, { status: 'dead' })`. `journal.retry` requeues it with the same id. |
+| Eventual success | No | When the retry policy stops, the row is dead. List it with `journal.jobs(db, { status: 'dead' })`. `journal.retry(db, id, op)` requeues it with the same id. |
 | Fenced state | Yes | Renew, ack and retry need the current lease token. A stale worker changes nothing. It cannot undo an external effect. |
 | Due time | Lower bound | `available_at` is the transaction's `now()` plus the delay. A long transaction uses part of the delay. A job can run late by up to `pollMs` without a listener, or under load. |
 | Order | None | Among due rows: higher priority first, then oldest due time. `SKIP LOCKED` is not FIFO. Strict priority can starve low rows. |
@@ -554,7 +706,7 @@ journal.worker(db, { jobs: combineRunners(outboxRunner(...), webhooks.runner) })
 
 - **`dispatch(tx, …)`** needs a transaction. It writes the message once, as the body `{ type, timestamp, data }`, and one delivery row for each active subscription of that partner that lists the event. A payload over `maxPayloadBytes` (default 1 MiB) is refused.
 - **Delivery** signs the stored bytes with [Standard Webhooks](https://www.standardwebhooks.com/). `webhook-id` is the message id, the same on every retry and replay, so a receiver dedupes on it (`verifyWebhook` with `standardWebhooks` from `@arki/http/webhooks` accepts it). It posts through `publicFetch()`, so an endpoint cannot reach a private address, even after a DNS change. Each try has `timeoutMs` (default 10 s). Any 2xx is delivered; anything else is retried.
-- **Retries are the worker's.** `retry` (a `Backoff`, default from 5 s doubling to 1 h, 10 retries) sets when the next try runs and when the delivery is dead. A dead delivery stays in `journal_jobs` like any dead job: `journal.jobs(db, { status: 'dead' })` lists it and `journal.retry` runs it again.
+- **Retries are the worker's.** `retry` (a `Backoff`, default from 5 s doubling to 1 h, 10 retries) sets when the next try runs and when the delivery is dead. A dead delivery stays in `journal_jobs` like any dead job: `journal.jobs(db, { status: 'dead' })` lists it and `journal.retry(db, id, op)` runs it again.
 - **Every try is a row** in `webhook_attempts`: `delivered`, `failed` (with `next_at`), `dead`, or `skipped` (the subscription was disabled). Because delivery is at least once, a crash between the send and the ack can add a second row for one try.
 - **Auto-disable.** `disableAfter` (default 5) dead deliveries in a row disable the subscription. A success resets the count. `enable(db, id)` turns it back on; `disable(db, id)` stops it by hand. A delivery queued before the subscription was disabled is recorded as `skipped`, not sent.
 - **`replay(db, { messageId, subscriptionId })`** sends a stored message again, with the same `webhook-id`. It refuses a subscription of another partner.
@@ -564,6 +716,76 @@ journal.worker(db, { jobs: combineRunners(outboxRunner(...), webhooks.runner) })
 - `combineRunners(...)` from `@arki/journal` lets one worker run webhook deliveries and other queue jobs. Two runners that claim the same job name throw `BAD_DEFINITION`.
 
 Migration: add `webhookTables()` (or `webhookTables(schema)` next to `journalTables(schema)`) to the schema module, run `drizzle-kit generate`, and apply the migration before the first `subscribe`. It creates `webhook_subscriptions`, `webhook_messages` and `webhook_attempts`; existing tables are unchanged.
+
+## Inbox
+
+A sender delivers a webhook at least once, and sends it again after a timeout. Make the event id the idempotency key of a journal command. The receipt and the domain write then commit together, so a resent event changes nothing. There is no separate "seen events" table to drift from the data.
+
+```ts
+const scheme = standardWebhooks({ secrets: [process.env.WEBHOOK_SECRET] });
+const orderPlaced = route.post('/hooks/orders', { id: 'hooks.orders', body: placeOrderInput });
+
+const engine = buildEngine([
+  routes()
+    .derive('webhook', verifyWebhook({ scheme }))
+    .bind(orderPlaced, async ({ body }, { webhook }) => {
+      await journal.run(db, placeOrder, body, { actorId: 'partner' }, { idempotencyKey: `hook:${webhook.id}` });
+    }),
+]);
+```
+
+`verifyWebhook` rejects an unsigned or wrongly signed request before it reaches the journal. Scope the key by sender if you take events from more than one (`${partner}:${webhook.id}`). The test `src/webhooks-inbox.test.ts` runs this end to end: a resent event writes one event row and keeps one receipt.
+
+## Relay recipe
+
+To pass an event to a queue or a broker, write an effect. The effect runs after commit, at least once, from the job table. Pass `jobId` on as the queue's own job id. The id is the same on every retry, so a retried effect adds the same queue job once.
+
+```ts
+import type { Queue } from 'bullmq';
+
+export const relayOrderPaid = j.effect('relayOrderPaid', order, { queue: need<Queue>() }, {
+  OrderPaid: (e, { jobId, queue }) => queue.add('order.paid', { orderId: e.entityId }, { jobId }),
+});
+```
+
+For a broker that dedupes on a message id, use `jobId` the same way. `kv.publish` (Redis Pub/Sub) is a best-effort notification: nobody acknowledges it, and it does not take a job id. Use it for a live page or a cache poke, never for work that must happen. For work that must happen, relay a durable job as above. The journal has no generic broker framework on purpose.
+
+## Foreman
+
+`@arki/journal/foreman` is the job console for Foreman. `@arki/admin` is an optional peer. `journalJobsModule` serves the job reads and verbs above, with previews and approvals.
+
+```ts
+import { journalJobsModule } from '@arki/journal/foreman';
+
+const jobsModule = journalJobsModule({ journal, db, payload: 'hidden', jobs: queueRunner });
+// foreman({ ..., modules: [jobsModule] })
+```
+
+Options: `journal` and `db` (the root database) are required. `payload` is `'hidden'` (default) or `'redacted'`: what `journal.job` and `journal.archivedJob` show of a job's input. A list never carries a payload. `jobs` is the worker's runner; with it `journal.strandedJobs` also counts queue rows no handler knows. Error text goes through `redactSecrets`. Archive and purge rules come from `journal.retention`.
+
+| Id | Kind | Permission | Risk |
+| --- | --- | --- | --- |
+| `journal.jobs`, `journal.job`, `journal.jobCounts`, `journal.strandedJobs`, `journal.jobOperations`, `journal.archivedJobs`, `journal.archivedJob`, `journal.archiveStatus` | read | `journal:read` | read |
+| `journal.retryJob` | action | `journal:retry` | low |
+| `journal.retryDead` | action | `journal:retry` | medium |
+| `journal.discardJob` | action | `journal:delete` | medium |
+| `journal.purgeDead` | action | `journal:delete` | medium |
+| `journal.cancelJob` | action | `journal:delete` | high |
+| `journal.replayJob` | action | `journal:retry` | high |
+
+Every action previews first. Execute re-checks the revision the approval pinned, runs the journal verb, and records the approver and the execution id in the operations audit. `retryDead` is all or nothing on the previewed set. `journal.replayJob` says in its preview that the new job has a new id.
+
+The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each with its own status. The codes are in `JOURNAL_JOBS_ERROR_CODES`:
+
+| Code | Name | Status | Meaning |
+| --- | --- | --- | --- |
+| `ARKI_JOURNAL_E001` | `staleRevision` | 409 | The job or set changed since the preview. |
+| `ARKI_JOURNAL_E002` | `notDead` | 409 | The action needs a dead job and it is not dead, or is gone. |
+| `ARKI_JOURNAL_E003` | `boundTooShort` | 400 | `purgeDead` `olderThanDays` is shorter than `retention.retryableFor`. |
+| `ARKI_JOURNAL_E004` | `notPending` | 409 | `cancelJob` needs a ready or delayed job. |
+| `ARKI_JOURNAL_E005` | `exists` | 409 | `replayJob` is blocked by a job with the same dedupe key. |
+
+`journalReceiptStore` and `foremanReceiptTables` live here too. They used to be `@arki/admin/pg`. Import them from `@arki/journal/foreman`.
 
 ## Dot
 
@@ -659,7 +881,7 @@ The procedure must have `journal` and a `db` the journal can write through on it
 
 ## Tables
 
-`journalTables()` returns both. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive` and `jobOperations`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
 
 `seq` is commit order, not only insert order. Every write takes one advisory transaction lock (`pg_advisory_xact_lock`, namespace `0x4a524e4c`) at its start and holds it until the transaction commits, so a transaction that took a lower `seq` always commits first. A reader that remembers the last `seq` it saw, as `rerun` does with `afterSeq`, therefore misses nothing. The cost: event appends across the whole app commit one transaction at a time, and a transaction that writes events and then does slow work holds every other writer until it commits. Keep writes near the end of a transaction, or keep the transaction short.
 
@@ -713,20 +935,64 @@ journal_jobs
   lease_token   varchar
   last_error    text
   dead_at       timestamptz               -- set after 8 failed attempts
+  enqueued_at   timestamptz not null default now() -- when the row was written; the archive needs the age
+  replay_of     text                      -- the archived job id a replay came from
   unique (event_seq, effect)
   unique (job_name, dedupe_key) where dedupe_key is not null
   check journal_jobs_kind_check             -- an effect row has event_seq and effect and no job_name, args or dedupe_key;
                                             -- a queue row has job_name and args and no event_seq or effect
   index (priority desc, available_at) where dead_at is null
+
+journal_job_attempts
+  id            varchar primary key       -- att_xxx
+  job_id        varchar not null references journal_jobs(id) on delete cascade
+  attempt       integer not null          -- 1, 2, 3 for this job's tries
+  started_at    timestamptz not null default now()
+  finished_at   timestamptz               -- null while the attempt is open
+  outcome       varchar(16)               -- 'ok' | 'retry' | 'dead' | 'superseded'; null while open
+  error         text
+  index (job_id, started_at)
+
+journal_job_archive
+  id            varchar primary key       -- the finished job's id (job_xxx)
+  kind, event_seq, effect, job_name, args, dedupe_key, priority   -- as in journal_jobs; no foreign key
+  enqueued_at   timestamptz not null
+  attempts      integer not null
+  last_error    text
+  outcome       varchar(16) not null      -- 'completed' | 'dead' | 'discarded' | 'cancelled'
+  attempt_log   jsonb                     -- the attempt rows, oldest first
+  replay_of     text
+  finished_at   timestamptz not null
+  archived_at   timestamptz not null default now()
+  keep_until    timestamptz               -- from the retention policy; null keeps it forever
+  exported_at   timestamptz               -- set once the archive sink has the row
+  index (keep_until)
+  index (archived_at) where exported_at is null
+  index (outcome, coalesce(effect, job_name), archived_at)
+
+journal_job_operations
+  id            varchar primary key       -- jop_xxx
+  action        varchar(32) not null      -- retry, retryDead, discard, cancel, replay, purgeDead, exportArchive, pruneArchive
+  actor         varchar(256) not null
+  reason        text
+  execution_id  varchar(256)              -- the Foreman execution, when there was one
+  job_ids       jsonb not null            -- the ids it touched
+  count         integer not null
+  at            timestamptz not null default now()
+  gin index (job_ids)
 ```
 
 `kind = 'effect'` rows are the rows the journal always had. `unique (event_seq, effect)` stays. NULLs are distinct, so queue rows never collide on it. The due index serves both kinds. A dedupe key is scoped to its `job_name`.
 
 **Migrating an existing app.** Run `drizzle-kit generate`. The new migration drops `NOT NULL` on `event_seq` and `effect`, adds the four columns and the check, and creates the dedupe index. Every statement is additive or relaxes a constraint. Existing rows take the default `kind = 'effect'` and pass the check. The check scans the table once. The table is small, because rows are deleted on success. If it holds very many dead rows, edit the generated SQL to add the check as `NOT VALID` and run `VALIDATE CONSTRAINT` after.
 
+**Upgrading to job operations and the archive.** Three tables are new (`journal_job_attempts`, `journal_job_archive`, `journal_job_operations`) and `journal_jobs` gains `enqueued_at` and `replay_of`. Generate the migration from `journalTables()`: run `drizzle-kit generate` and review the SQL. Every statement is additive. Old rows get `enqueued_at` at migration time, and no history is invented for them. Dead rows that exist already stay retryable.
+
+Migrate first. Then roll the workers. An old worker on the new schema still works: it does not write attempt rows and it deletes a job on success, as before, so it archives nothing until it is replaced. A new worker on the old schema fails at the first claim, so never roll workers first.
+
 **Rollout order.** Migrate first. Then roll the workers. Then roll the processes that call `runAfter`. This order makes sure a queue row always has a worker. It is not a safety rule: an old worker cannot claim a queue row. To roll back, stop the producers first and let the new workers drain. Never restore `NOT NULL` while queue rows exist.
 
-A job row is deleted when its handler succeeds. The table holds only pending and dead work. The event row is the lasting record.
+A job row leaves `journal_jobs` when its handler succeeds. The table holds only pending and dead work. What happens to the finished job is the retention policy's business: see [Retention and archive](#retention-and-archive). The event row is the lasting record.
 
 An entity table needs a string key column that is primary or unique (`id` by default) and `version integer not null default 0`.
 

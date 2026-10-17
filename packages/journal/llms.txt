@@ -3,11 +3,12 @@
 > A journal for Drizzle entities. Every change is one immutable event row and one normal table row, written in one transaction. Projections run inside that transaction. Effects run after the commit, from a job table.
 
 ## Import paths
-- `@arki/journal`: the core. `initJournal`, `need`, `jobId`, the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, `CommandError`, `isCommandError`, `JournalError`, `isJournalError` and the types, including `JobRunner` and `ScheduledJob` (the port that runs queue rows), and `combineRunners(...)` for a worker with several runners.
-- `@arki/journal/pg`: `journalTables()`, the two tables (`journal_events`, `journal_jobs`) for the app's schema.
+- `@arki/journal`: the core. `initJournal`, `need`, `jobId`, the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, `CommandError`, `isCommandError`, `JournalError`, `isJournalError` and the types, including `JobRunner` and `ScheduledJob` (the port that runs queue rows), and `combineRunners(...)` for a worker with several runners. Job operations live on the `journal` object (`jobs`, `job`, `jobCounts`, `retry`, `discard`, `cancel`, `retryDead`, `purgeDead`, `replayJob`, `archivedJobs`, `archiveStatus` and more). The retention policy types and `ndjsonArchiveSink` are exported too.
+- `@arki/journal/pg`: `journalTables()`, the tables for the app's schema (`journal_events`, `journal_jobs`, `journal_job_attempts`, `journal_job_archive`, `journal_job_operations`, `journal_receipts`, `journal_cursors`).
 - `@arki/journal/dot`: optional. The `@arki/dot` adapters `journal(...)` (driven, for `.use()`) and `journalWorker(...)` (driving, for `.serve()`, with an optional `jobs` source), and the feature slice `journalHandlers(...)`.
 - `@arki/journal/orpc`: optional. The oRPC middleware `commandErrors()`, `actorRun(select)`, `idempotent({ scope })` and the function `toORPCError(error)`.
 - `@arki/journal/http`: optional. `responseCache(db, tables)`, the Postgres `ResponseCache` for `idempotent()` from `@arki/http/idempotency` (HTTP replay on `journal_receipts`; not the command receipt).
+- `@arki/journal/foreman`: optional. The Foreman job console `journalJobsModule({ journal, db })` (reads, retry, discard, cancel, purge, replay, with previews and approvals), its `JOURNAL_JOBS_ERROR_CODES` (`ARKI_JOURNAL_E001` to `E005`), and `journalReceiptStore` / `foremanReceiptTables` (moved from `@arki/admin/pg`). Needs the optional peer `@arki/admin`.
 - `@arki/journal/http/webhooks`: optional, Node or Bun. Outgoing webhooks on the job table: `webhookTables()`, `webhookSender({ tables, webhooks, encryptionKey })` with `subscribe`, `dispatch(tx, …)`, `replay`, `rotateSecret`, `enable`, `disable` and the queue `runner`.
 
 ## Start here
@@ -20,6 +21,8 @@
 - [Add a command and run it](docs/agent-guide.md#add-a-command-and-run-it)
 - [Schedule a job in the same transaction](docs/agent-guide.md#schedule-a-job-in-the-same-transaction)
 - Run jobs scheduled by `@arki/queue/outbox`: give `journal.worker(db, { jobs })` or `journalWorker({ jobs })` a runner. See [Queue jobs in the jobs table](README.md#queue-jobs-in-the-jobs-table)
+- [Operate and retain jobs](docs/agent-guide.md#operate-and-retain-jobs): states, paged reads, verbs with `op`, retention, archive sink. Long form: [Operating the jobs](README.md#operating-the-jobs) and [Retention and archive](README.md#retention-and-archive)
+- Inbox and relay recipes: [Inbox](README.md#inbox), [Relay recipe](README.md#relay-recipe)
 - [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), with the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs)
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
 
@@ -28,7 +31,8 @@
 - Definitions: `src/journal.ts` (`initJournal`, `j`, `j.compose`), `src/entity.ts` (entity builder, reducers, key checks), `src/event.ts` (`j.event`), `src/handlers.ts` (`j.projection`, `j.effect`, `need`, and `bindEffect`, which gives an effect its services).
 - Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
 - After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
-- Edges: `src/pg.ts` (the two tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
+- Job operations and retention: `src/outbox.ts` (`createJobOps`: reads, verbs, sweep steps), `src/retention.ts` (`Keep`, defaults, `ndjsonArchiveSink`), `src/foreman/index.ts` (the Foreman module).
+- Edges: `src/pg.ts` (the tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
 
 ## Rules that bite
 - The door is `journal.bind(db, meta)`: bind once per request or job, then call `run(command, input)`. You give `meta`; the library never picks an actor.

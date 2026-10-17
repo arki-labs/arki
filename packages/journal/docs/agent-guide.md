@@ -209,8 +209,35 @@ Rules:
 - Pass `tx`, never `db`. The root database is a compile error and a runtime error (`OUTBOX_E001`).
 - Pass `ctx.job.id` on to external systems as the idempotency key. The job runs at least once. The id is the row id and stays the same across retries.
 - Job args are plain JSON. A `Date`, a `Map` or a class instance is rejected (`OUTBOX_E003`).
-- A worker without `jobs` never claims a queue row. List queue rows with `journal.jobs(db, { job })`. Find stranded ones with `journal.strandedJobs(db, { jobs })`.
+- A worker without `jobs` never claims a queue row. List queue rows with `journal.jobs(db, { job })` (it returns `{ jobs, next }`). Find stranded ones with `journal.strandedJobs(db, { jobs })`.
 - After a migration, run `drizzle-kit generate`. Roll out migrate, then workers, then producers.
+
+### Operate and retain jobs
+
+A job is `ready`, `delayed`, `running` or `dead`. `pending` is the first three. Reads take the root database and page with an opaque cursor.
+
+```ts
+const { jobs, next } = await journal.jobs(db, { status: 'dead', limit: 50 }); // pass `next` back as `after`; null on the last page
+const counts = await journal.jobCounts(db);
+const op = { actor: 'alice', reason: 'provider outage' }; // required on every verb; actor is a non-empty free string
+
+await journal.retry(db, jobId, op); // dead only: JOB_NOT_DEAD
+await journal.discard(db, jobId, op); // dead only; archived as 'discarded'
+await journal.cancel(db, jobId, op); // ready or delayed; JOB_RUNNING if a worker holds it
+await journal.retryDead(db, { ids: [a, b] }, op); // at most 500 ids, all or nothing
+await journal.purgeDead(db, { olderThan, limit: 500 }, op); // olderThan must respect retention.retryableFor
+await journal.replayJob(db, archivedId, op); // a NEW job id, not a retry; JOB_EXISTS on a live dedupe key
+```
+
+Every verb that changes something writes one `journal_job_operations` row in its transaction. Retention goes in `j.compose({ tables, retention })`: `retryableFor` (`'30d'`), `archive.completed` (`'7d'`), `archive.dead` (`'90d'`), `archive.sink`, `operations` (`'forever'`), `sweep` (`{ every: '1h', batch: 1000 }` or `false`). A `Keep` is `false`, `'forever'`, `'untilExported'` (needs a sink, else `BAD_DEFINITION` at boot), an age (`'30d'`) or `{ age, max }`. One effect overrides it with `withSchedule({ retention: { completed: false } })`; a queue job with `.options({ retention })`.
+
+Rules:
+
+- Each worker sweeps: `purgeDead`, `exportArchive`, `pruneArchive`, `pruneOperations`. With `sweep: false` call the first three yourself.
+- A sink gets rows at least once and dedupes on `row.id`. No row is pruned before it is exported. `ndjsonArchiveSink({ put, prefix })` writes one NDJSON file per batch; `@arki/fs` `put` fits.
+- Upgrading: generate the migration from `journalTables()` (three new tables, two new `journal_jobs` columns). Migrate first, then roll workers.
+- Foreman: `journalJobsModule({ journal, db })` from `@arki/journal/foreman`. Refusals are `ARKI_JOURNAL_E001` to `E005`.
+- Inbox: key a command with the webhook event id (`journal.run(db, cmd, input, meta, { idempotencyKey })`). Relay: an effect that calls `queue.add(name, data, { jobId })`. `kv.publish` is best-effort only.
 
 ### Find out why a write failed
 
@@ -292,6 +319,7 @@ A command handler, its `authorize` or an `events` function returns a failure fro
 - `ARKI_JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature lists a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
 - `journal: duplicate effect name "x" (features "orders" and "billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
 - `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app, and at the boot of the feature that lists the effect in a Dot app. A journal composed with `services: 'worker'` throws it from `worker` or `drain` instead. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
+- Job verbs throw a `JournalError` with `JOB_NOT_DEAD`, `JOB_NOT_PENDING`, `JOB_RUNNING`, `JOB_EXISTS` or `BAD_ARGUMENT` (a bad limit, cursor, actor or purge bound).
 - `journal: effect "x" has a need named "db", ...`: thrown by `j.effect`. The names `jobId`, `signal`, `db` and `run` are taken. Give the need another name.
 
 ## Recovery verbs
