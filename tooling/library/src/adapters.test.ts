@@ -12,6 +12,12 @@ describe('isAdapterSubpath', () => {
     expect(isAdapterSubpath('./pg/lease')).toBe(true);
   });
 
+  it('treats the @arki/mcp peer entries as adapters, so each may carry its optional peer or a Node import', () => {
+    for (const name of ['contract', 'auth', 'eval', 'stdio']) {
+      expect(isAdapterSubpath(`./${name}`)).toBe(true);
+    }
+  });
+
   it('keeps plain subpaths portable', () => {
     expect(isAdapterSubpath('./memory')).toBe(false);
   });

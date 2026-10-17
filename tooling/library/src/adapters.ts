@@ -27,6 +27,10 @@ export const ADAPTERS = new Set([
   'redis',
   'file',
   'eslint',
+  'contract',
+  'auth',
+  'eval',
+  'stdio',
 ]);
 
 /** True when the export subpath (`./react`, `./comparison/server`) is an adapter entry: its first segment is in {@link ADAPTERS}. */
