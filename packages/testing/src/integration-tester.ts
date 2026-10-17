@@ -6,7 +6,7 @@ import { is, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import type { UserId } from '@arki/auth';
-import { createUserId } from '@arki/auth';
+import { createUserId } from '@arki/auth/ids';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
 

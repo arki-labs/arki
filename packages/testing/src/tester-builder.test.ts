@@ -9,7 +9,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { createUserId } from '@arki/auth';
+import { createUserId } from '@arki/auth/ids';
 
 import type { TestUser } from './types';
 import { initTester } from './tester-builder';

@@ -8,7 +8,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { describe, expect, it } from 'vitest';
 
-import { createUserId } from '@arki/auth';
+import { createUserId } from '@arki/auth/ids';
 import { instant, zoned } from '@arki/date';
 
 import type { TestUser } from './types';
