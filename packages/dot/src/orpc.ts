@@ -37,7 +37,9 @@
  * serves oRPC; the rest of Dot never loads it.
  */
 import type { ContractProcedure, ContractRouter, IntersectPick, Meta, Router } from '@orpc/server';
-import { os, traverseContractProcedures } from '@orpc/server';
+import { ORPCError, os, traverseContractProcedures } from '@orpc/server';
+
+import { getLogger } from '@arki/log';
 
 import type { RpcEntrypoint } from './define-feature.js';
 import type { HandleEntries, ServicesBag } from './feature.js';
@@ -98,6 +100,44 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
         context: services as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
       });
     });
+}
+
+/** What `errorCaptureMiddleware` hands its reporter with the error. */
+export type ErrorCaptureInfo = { readonly path: readonly string[] };
+
+/**
+ * Make the app's error capture, once:
+ * `export const errorCapture = errorCaptureMiddleware({ report: (error, { path }) => captureException(error) })`.
+ *
+ * The middleware reports a procedure's unexpected failures, then rethrows them
+ * unchanged: capture never changes the response. An `ORPCError` below 500
+ * (`UNAUTHORIZED`, `BAD_REQUEST`, …) is normal traffic, not an incident, and
+ * is not reported. `report` is called synchronously; a reporter that throws is
+ * logged at warn and ignored, so the caller still gets the procedure's own error.
+ * Written on an empty context, it fits any app's implementer.
+ */
+export function errorCaptureMiddleware(options: {
+  readonly report: (error: unknown, info: ErrorCaptureInfo) => void;
+}) {
+  const logger = getLogger('arki:dot:orpc');
+  return os.middleware(async ({ next, path }) => {
+    try {
+      return await next();
+    } catch (error) {
+      const isClientError = error instanceof ORPCError && error.status < 500;
+      if (!isClientError) {
+        try {
+          options.report(error, { path });
+        } catch (reportError) {
+          logger.warn('errorCapture: the reporter threw on {procedure}; the error was not reported', {
+            procedure: path.join('.'),
+            reportError: String(reportError),
+          });
+        }
+      }
+      throw error;
+    }
+  });
 }
 
 /**

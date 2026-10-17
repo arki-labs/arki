@@ -374,6 +374,28 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
   the kind of cycle no amount of coffee fixes).
 
+#### Error capture: `errorCaptureMiddleware`
+
+One middleware in front of the app router sends a procedure's unexpected
+failures to your error tracker, so no procedure needs its own try/catch:
+
+```ts
+import { errorCaptureMiddleware } from '@arki/dot/orpc';
+
+// core/orpc.ts — once per app; captureException is your tracker's
+export const errorCapture = errorCaptureMiddleware({
+  report: (error, { path }) => captureException(error, { tags: { procedure: path.join('.') } }),
+});
+
+// router.ts
+export const router = implement(rpcContract).$context<RequestContext>().use(errorCapture).router(/* … */);
+```
+
+Every error is rethrown unchanged: capture never changes the response. An
+`ORPCError` below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, …) is normal traffic and
+is not reported. `report` runs synchronously; if it throws, that is logged at
+warn on `arki:dot:orpc` and the caller still gets the procedure's own error.
+
 #### Spans for every usecase
 
 Each usecase call runs in an OpenTelemetry span named
