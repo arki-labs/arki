@@ -346,7 +346,7 @@ describe('GeocodingService', () => {
       const { cache, writes } = createFakeCache();
       const service = new GeocodingService(baseConfig(), cache);
 
-      await service.geocode('  1600  Pennsylvania Ave., NW ');
+      expect(await service.geocode('  1600  Pennsylvania Ave., NW ')).toMatchObject({ provider: 'nominatim' });
 
       expect(writes).toEqual([{ key: 'geo:-1600-pennsylvania-ave-nw-', ttl: 3600 }]);
     });
@@ -362,8 +362,8 @@ describe('GeocodingService', () => {
       const { cache } = createFakeCache();
       const service = new GeocodingService(baseConfig(), cache);
 
-      await service.geocode('10 Main St.');
-      await service.geocode('10 main st');
+      expect(await service.geocode('10 Main St.')).toMatchObject({ provider: 'nominatim' });
+      expect(await service.geocode('10 main st')).toMatchObject({ provider: 'nominatim' });
 
       expect(calls).toBe(1);
     });
@@ -379,8 +379,8 @@ describe('GeocodingService', () => {
       const { cache } = createFakeCache();
       const service = new GeocodingService(baseConfig(), cache);
 
-      await service.geocode('10 Main St');
-      await service.geocode('12 Main St');
+      expect(await service.geocode('10 Main St')).toMatchObject({ provider: 'nominatim' });
+      expect(await service.geocode('12 Main St')).toMatchObject({ provider: 'nominatim' });
 
       expect(calls).toBe(2);
     });
@@ -406,7 +406,7 @@ describe('GeocodingService', () => {
       const { cache, writes } = createFakeCache();
       const service = new GeocodingService(baseConfig(), cache);
 
-      await service.reverseGeocode(38.8977, -77.0365);
+      expect(await service.reverseGeocode(38.8977, -77.0365)).toMatchObject({ provider: 'nominatim' });
 
       expect(writes).toEqual([{ key: 'geo:reverse:38.8977,-77.0365', ttl: 3600 }]);
     });
@@ -417,7 +417,7 @@ describe('GeocodingService', () => {
       const get = vi.spyOn(cache, 'get');
       const service = new GeocodingService(baseConfig({ cache: { enabled: false, ttl: 10, keyPrefix: 'geo:' } }), cache);
 
-      await service.geocode('10 Main St');
+      expect(await service.geocode('10 Main St')).toMatchObject({ provider: 'nominatim' });
 
       expect(get).not.toHaveBeenCalled();
       expect(writes).toEqual([]);
