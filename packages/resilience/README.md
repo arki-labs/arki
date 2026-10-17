@@ -46,6 +46,31 @@ const quote = await quotes.execute(() => fetchQuote()); // Quote | null
 - To fall back on some errors only, rethrow the others: `(error) => { if (!isBrokenCircuitError(error)) throw error; return cached; }`.
 - Put it outermost. `wrap` does not accept a policy with a fallback (a compile error), because inside a retry it would hide the errors the retry needs.
 
+### Throws as failures: `onThrow`
+
+```ts
+import { backoff, createResiliencePolicy } from '@arki/resilience';
+
+const push = createResiliencePolicy({
+  retry: backoff.exponential({ base: 500 }).upTo(3).while(ExportUnavailable),
+  onThrow: cause => ExportUnavailable({ cause }), // the network, a deadline, an open circuit
+});
+
+for (const batch of batches) {
+  const sent = await push.execute(() => send(batch)); // Sent | the failures send returns | ExportUnavailable
+  if (isFailure(sent)) return { delivered, stoppedBy: sent }; // one error path, no try/catch
+  delivered.push(batch);
+}
+```
+
+`onThrow(error)` turns a thrown error that reaches the caller into a value, usually a failure from [`@arki/failure`](../failure). The call then resolves to `T | Mapped`, typed from the mapper. Without `onThrow`, the call throws as before. It is the same word as `attempt(run, onThrow)` in `@arki/failure`.
+
+- It sees only what the retries gave up on, or what they never retry. A returned failure is the answer as before.
+- It is outermost, so an open circuit (`CircuitOpenError`), a deadline (`TimeoutError`) and a full bulkhead (`BulkheadRejectedError`) are throws that reach it too.
+- A cancel by the caller's signal is never mapped; the `CancelledError` is thrown.
+- Rethrow what you do not recognise, so unknown errors stay bugs: `cause => { if (!isNetworkError(cause)) throw cause; return Unavailable({ cause }); }`.
+- `createRetryPolicy` and `withRetry` take it too. A policy with `onThrow` is a `Policy<Mapped>`, so like a fallback it cannot go inside `wrap`.
+
 ### Named presets
 
 ```ts
@@ -208,9 +233,9 @@ await app.services.resilience.run('carrier', () => callCarrier());
 
 ## API
 
-- `createResiliencePolicy(options)` — compose retry + circuit breaker + timeout, plus an optional `bulkhead` that wraps them all (one logical call holds one slot).
+- `createResiliencePolicy(options)` — compose retry + circuit breaker + timeout, plus an optional `bulkhead` that wraps them all (one logical call holds one slot), and an optional `onThrow` that maps what is still thrown to a value.
 - `backoff.exponential`, `backoff.constant` — retry schedules (`Backoff`), shared with `@arki/queue` and `@arki/journal`.
-- `createRetryPolicy({ backoff?, clock? })`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
+- `createRetryPolicy({ backoff?, clock?, onThrow? })`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.
 - `withFallback(policy, fallback)` — a last answer when a policy gives up; `definePresets({ name: options })` — named composed policies.
@@ -218,7 +243,7 @@ await app.services.resilience.run('carrier', () => callCarrier());
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
 - `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError`, `InvalidBackoffError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
-- Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`, `Presets`, `ResiliencePolicy`, `ResilienceComponents`. `Policy<F>` carries the fallback type `F` (`never` for a plain policy).
+- Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`, `Presets`, `ResiliencePolicy`, `ResilienceComponents`, `OnThrow`. `Policy<F>`, `RetryPolicy<F>` and `ResiliencePolicy<F>` carry the type `F` a fallback or `onThrow` may answer (`never` for a plain policy).
 
 ## Errors
 

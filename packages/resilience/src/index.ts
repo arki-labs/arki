@@ -52,6 +52,7 @@ export { withFallback } from './fallback.js';
 
 export type {
   RetryPolicyOptions,
+  OnThrow,
   CircuitBreakerPolicyOptions,
   TimeoutPolicyOptions,
   BulkheadPolicyOptions,

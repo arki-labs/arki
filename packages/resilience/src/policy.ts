@@ -65,7 +65,8 @@ export type Policy<F = never> = {
   readonly onFailure: PolicyEvent<FailureEvent>;
 };
 
-export type RetryPolicy = Policy & {
+/** A retry policy. `F` is what its `onThrow` may answer instead of the function's own `T`; `never` without one. */
+export type RetryPolicy<F = never> = Policy<F> & {
   readonly onRetry: PolicyEvent<RetryEvent>;
   /**
    * Fires when the last attempt has failed and its error, or its failure after at least one

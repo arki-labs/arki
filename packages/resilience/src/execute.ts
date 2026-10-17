@@ -37,7 +37,10 @@ export function withResilience<T, F = never>(fn: PolicyCallback<T>, policy: Poli
  * Convenience wrapper that creates an ephemeral retry policy from the provided
  * options and executes immediately.
  */
-export function withRetry<T>(fn: PolicyCallback<T>, options?: RetryPolicyOptions): Promise<T> {
+export function withRetry<T, Mapped = never>(
+  fn: PolicyCallback<T>,
+  options?: RetryPolicyOptions<Mapped>,
+): Promise<T | Mapped> {
   return run(createRetryPolicy(options), fn);
 }
 

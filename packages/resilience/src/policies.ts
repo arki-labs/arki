@@ -16,13 +16,20 @@ import type { Backoff } from './backoff.js';
 import type { BulkheadPolicy, CircuitBreakerPolicy, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
 import { backoff } from './backoff.js';
 import { engineOf, fromEngine } from './engine.js';
+import { withFallback } from './fallback.js';
 import { buildRetryPolicy } from './retry.js';
 
 // ---------------------------------------------------------------------------
 // Option types
 // ---------------------------------------------------------------------------
 
-export type RetryPolicyOptions = {
+/**
+ * Turns a thrown error that reaches the caller into a value, usually a failure from
+ * `@arki/failure`. Rethrow the errors it does not recognise, so they stay bugs.
+ */
+export type OnThrow<Mapped> = (error: unknown) => Mapped | PromiseLike<Mapped>;
+
+export type RetryPolicyOptions<Mapped = never> = {
   /**
    * When to retry and how long to wait first. Default:
    * `backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 }).upTo(3)`.
@@ -30,6 +37,11 @@ export type RetryPolicyOptions = {
   backoff?: Backoff;
   /** Whose timer the retry delay waits on. Default: the system clock. Pass a `MockClock` to make tests instant. */
   clock?: Clock;
+  /**
+   * Map an error that outlasts the retries, or one that is not retried, to a value. The call then
+   * resolves to `T | Mapped` instead of throwing. A cancel by the caller's signal is never mapped.
+   */
+  onThrow?: OnThrow<Mapped>;
 };
 
 export type CircuitBreakerPolicyOptions = {
@@ -51,7 +63,7 @@ export type BulkheadPolicyOptions = {
   maxQueue?: number;
 };
 
-export type ResiliencePolicyOptions = {
+export type ResiliencePolicyOptions<Mapped = never> = {
   /** When to retry and how long to wait first. Default: the `createRetryPolicy` default. */
   retry?: Backoff;
   /** Whose timer the retry delay waits on. Default: the system clock. */
@@ -64,6 +76,14 @@ export type ResiliencePolicyOptions = {
    * holds one slot.
    */
   bulkhead?: BulkheadPolicyOptions;
+  /**
+   * Map a thrown error that reaches the caller to a value, usually a failure from `@arki/failure`.
+   * The call then resolves to `T | Mapped` instead of throwing. It wraps everything, so it also
+   * sees an open circuit (`CircuitOpenError`), a deadline (`TimeoutError`) and a full bulkhead
+   * (`BulkheadRejectedError`). A cancel by the caller's signal is never mapped. Rethrow the
+   * errors it does not recognise, so they stay bugs.
+   */
+  onThrow?: OnThrow<Mapped>;
 };
 
 // ---------------------------------------------------------------------------
@@ -79,8 +99,10 @@ const defaultRetry = backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 
  *
  * Default backoff: 3 retries, 100 ms doubling to at most 10 s, with 25% jitter.
  */
-export function createRetryPolicy(options: RetryPolicyOptions = {}): RetryPolicy {
-  return buildRetryPolicy(options.backoff ?? defaultRetry, options.clock ?? systemClock);
+export function createRetryPolicy<Mapped = never>(options: RetryPolicyOptions<Mapped> = {}): RetryPolicy<Mapped> {
+  const retry = buildRetryPolicy(options.backoff ?? defaultRetry, options.clock ?? systemClock);
+  if (options.onThrow === undefined) return retry;
+  return { ...withFallback(retry, options.onThrow), onRetry: retry.onRetry, onGiveUp: retry.onGiveUp };
 }
 
 /**
@@ -142,8 +164,11 @@ export type ResilienceComponents = {
   readonly bulkhead?: BulkheadPolicy;
 };
 
-/** What `createResiliencePolicy` returns: the composed policy plus the parts it runs. */
-export type ResiliencePolicy = Policy & { readonly components: ResilienceComponents };
+/**
+ * What `createResiliencePolicy` returns: the composed policy plus the parts it runs. `F` is what
+ * its `onThrow` may answer instead of the function's own `T`; `never` without one.
+ */
+export type ResiliencePolicy<F = never> = Policy<F> & { readonly components: ResilienceComponents };
 
 /**
  * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.
@@ -155,7 +180,17 @@ export type ResiliencePolicy = Policy & { readonly components: ResilienceCompone
  *
  * `components` holds the parts it runs, so you can listen to their events.
  */
-export function createResiliencePolicy(options: ResiliencePolicyOptions = {}): ResiliencePolicy {
+export function createResiliencePolicy<Mapped = never>(
+  options: ResiliencePolicyOptions<Mapped> = {},
+): ResiliencePolicy<Mapped> {
+  const policy = composeResiliencePolicy(options);
+  if (options.onThrow === undefined) return policy;
+  // Outermost, so an open circuit, a deadline and a full bulkhead reach it too.
+  return { ...withFallback(policy, options.onThrow), components: policy.components };
+}
+
+/** [bulkhead ->] retry -> circuit breaker -> timeout, without `onThrow`. */
+function composeResiliencePolicy(options: ResiliencePolicyOptions<unknown>): ResiliencePolicy {
   const retry = createRetryPolicy({ backoff: options.retry, clock: options.clock });
   const circuitBreaker = createCircuitBreakerPolicy(options.circuitBreaker);
   const timeoutPolicy = createTimeoutPolicy(options.timeout);

@@ -11,6 +11,7 @@ import {
   CircuitOpenError,
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
+  createResiliencePolicy,
   createRetryPolicy,
   createTimeoutPolicy,
   definePresets,
@@ -91,10 +92,26 @@ const ExportUnavailable = defineFailure('export.unavailable', { status: 503 });
 const ExportUnauthorized = defineFailure('export.unauthorized', { status: 422 });
 const namedRetry = backoff.constant(1).while(ExportUnavailable);
 
+// onThrow: a throw that outlasts the retries, or an open circuit, comes back as a value.
+const mappedThrow = await createRetryPolicy({
+  backoff: backoff.constant(1).upTo(1),
+  onThrow: cause => ExportUnavailable({ cause }),
+}).execute(() => Promise.reject(new Error('down')));
+const mappedPolicy = createResiliencePolicy({
+  retry: backoff.constant(1).upTo(0),
+  circuitBreaker: { consecutiveFailures: 1 },
+  onThrow: cause => (cause instanceof CircuitOpenError ? 'open' : 'down'),
+});
+const mappedFirst = await mappedPolicy.execute(() => Promise.reject(new Error('down')));
+const mappedOpen = await mappedPolicy.execute(() => 'x');
+
 const checks = [
   ['while(definition) retries its failure', namedRetry.delay(1, ExportUnavailable()), 1],
   ['while(definition) skips other failures', namedRetry.delay(1, ExportUnauthorized()), undefined],
   ['while(definition) retries thrown errors', namedRetry.delay(1, new Error('down')), 1],
+  ['onThrow maps a throw the retries gave up on', ExportUnavailable.is(mappedThrow), true],
+  ['onThrow sees the first throw', mappedFirst, 'down'],
+  ['onThrow sees an open circuit', mappedOpen, 'open'],
   ['preset breaker is its own', presetA, 'CircuitOpenError'],
   ['other preset unaffected', presetB, 'fine'],
   ['fallback on open breaker', fellBack, 'cached'],
