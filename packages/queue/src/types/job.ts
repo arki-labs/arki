@@ -4,6 +4,7 @@
 
 import type { JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
 
+import type { EffectRetention } from '@arki/journal';
 import type { StandardSchemaV1 } from '@arki/schema';
 import type { Backoff } from '@arki/resilience';
 
@@ -67,6 +68,11 @@ export type JobOptions = {
    * so 3 tries in all, 1 s and then 2 s apart.
    */
   retry?: Backoff;
+  /**
+   * How long the journal keeps this job's finished and dead rows when it runs through the outbox.
+   * Overrides the journal's retention for this job name. The BullMQ lane ignores it.
+   */
+  retention?: EffectRetention;
   bullmqOptions?: Partial<JobsOptions>;
   workerOptions?: Partial<WorkerOptions>;
 };

@@ -58,7 +58,7 @@ const wrapped = q.job
   .use(inner)
   .name('wrapped')
   .input(z.object({ n: z.number() }))
-  .options({ retry: backoff.constant(0).upTo(1) })
+  .options({ retry: backoff.constant(0).upTo(1), retention: { dead: '30d' } })
   .handler(async (data, ctx) => {
     order.push('handler');
     handled.push({ name: 'wrapped', data, jobId: ctx.job.id });
@@ -337,6 +337,12 @@ describe('pieces', () => {
     expect(runner.retryDelay(job('mail.welcome.v1', 3), new Error('x'))).toBeUndefined();
     const bad = outboxError(OUTBOX_ERROR_CODES.badStoredArgs, 'bad');
     expect(runner.retryDelay(job('mail.welcome.v1', 1), bad)).toBeUndefined();
+  });
+
+  it('a queue job\u2019s retention reaches the journal archive: the runner returns it, and a job without one gets undefined', () => {
+    expect(runner.retention?.(job('wrapped', 1))).toEqual({ dead: '30d' });
+    expect(runner.retention?.(job('shout', 1))).toBeUndefined();
+    expect(runner.retention?.(job('unlisted', 1))).toBeUndefined();
   });
 
   it('flattens a nested registry by persisted name and refuses two jobs with one name', () => {

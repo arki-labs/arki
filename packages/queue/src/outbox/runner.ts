@@ -96,6 +96,7 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
       // A returned failure fails the job, as on the BullMQ lane; the backoff decides whether it runs again.
       throwIfReturnedFailure(result);
     },
+    retention: job => byName.get(job.name)?._internal.options?.retention,
     retryDelay(job, error) {
       // Stored args that fail the schema fail every time: dead at once, no handler ran.
       if (isOutboxError(error) && error.code === OUTBOX_ERROR_CODES.badStoredArgs) return;

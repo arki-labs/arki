@@ -7,6 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
+import { redactSecrets as adminRedactSecrets } from '@arki/admin/module';
 import { z } from '@arki/contracts';
 
 import type { QueueInstance } from '../types/builder.ts';
@@ -148,15 +149,7 @@ describe('T(queue-foreman)', () => {
 });
 
 describe('redactSecrets', () => {
-  it('removes credentials and caps length', () => {
-    expect(redactSecrets('auth failed: Bearer abcdefghijklmnop')).toBe('auth failed: Bearer [REDACTED]');
-    expect(redactSecrets('{"api_key":"sk-live-abcdef123456"}')).not.toContain('abcdef123456');
-    expect(redactSecrets('x'.repeat(2000)).length).toBeLessThan(510);
-  });
-
-  it('redacts a secret near the start of a huge message', () => {
-    const out = redactSecrets(`password=hunter2 ${'x'.repeat(1_000_000)}`);
-    expect(out).not.toContain('hunter2');
-    expect(out.length).toBeLessThan(510);
+  it('is the same function @arki/admin owns, so existing importers of @arki/queue/foreman keep working', () => {
+    expect(redactSecrets).toBe(adminRedactSecrets);
   });
 });

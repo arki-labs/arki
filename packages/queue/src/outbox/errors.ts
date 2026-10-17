@@ -26,7 +26,7 @@ const REMEDIATIONS: Readonly<Record<OutboxErrorCode, string>> = {
   OUTBOX_E004:
     'delayMs must be a non-negative safe integer, runAt needs a valid Date, and priority must be one of QUEUE_PRIORITIES.',
   OUTBOX_E005:
-    "The stored args no longer pass the job's schema, so the job is dead without running. Fix the schema or the row, then journal.retry(db, id); version job names when their input changes.",
+    "The stored args no longer pass the job's schema, so the job is dead without running. Fix the schema or the row, then journal.retry(db, id, { actor }); version job names when their input changes.",
   OUTBOX_E006: 'Register the job in the registry the outbox runner was built from.',
   OUTBOX_E007: 'Give every job in the registry its own name: the name is how a stored row finds its job.',
 };

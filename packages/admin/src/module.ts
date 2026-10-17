@@ -695,3 +695,5 @@ async function parseOutput<TSchema extends StandardSchemaV1>(
     );
   }
 }
+
+export { redactSecrets } from './redact.ts';

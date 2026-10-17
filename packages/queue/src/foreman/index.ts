@@ -6,17 +6,16 @@
  */
 import { z } from 'zod';
 
-import { defineAction, defineModule, defineRead } from '@arki/admin/module';
+import { defineAction, defineModule, defineRead, redactSecrets } from '@arki/admin/module';
 import { getLogger } from '@arki/log';
 
 import type { FailedJobRecord, FailedJobSource } from './source.ts';
 import { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError } from './errors.ts';
-import { redactSecrets } from './redact.ts';
 
 export { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError, type QueueForemanErrorCode } from './errors.ts';
 export { bullmqFailedJobSource, type BullMQFailedJobSourceOptions } from './bullmq-source.ts';
 export { pgBossFailedJobSource, type PgBossFailedJobSourceOptions } from './pg-boss-source.ts';
-export { redactSecrets } from './redact.ts';
+export { redactSecrets };
 export type { FailedJobRecord, FailedJobSource } from './source.ts';
 
 const log = getLogger('arki:queue');
