@@ -35,7 +35,7 @@
 
 import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot/plugin';
-import { allFeatures, driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
+import { allFeatures, driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
 import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
@@ -154,7 +154,13 @@ export type ScheduleOptions<
   };
 
 /** What a locked schedule asks for, resolved: the key, and the minimum hold in milliseconds. */
-type LockPlan = { readonly key: string; readonly holdAtLeastMs: number; readonly locks?: Locker };
+type LockPlan = {
+  readonly key: string;
+  readonly holdAtLeastMs: number;
+  readonly locks?: Locker;
+  /** The key is the schedule name (`lock: true` or no key), so an instance qualifies it. */
+  readonly byName?: boolean;
+};
 
 /** `1000` -> `1s`, `1500` -> `1500ms`: the shortest whole unit, for manifest text. */
 function formatHold(ms: number): string {
@@ -314,7 +320,11 @@ function lockPlanOf(def: { readonly name: string; readonly lock?: FeatureLockOpt
     });
   }
   const holdAtLeast = typeof option === 'object' ? option.holdAtLeast : undefined;
-  return { key, holdAtLeastMs: holdAtLeast === undefined ? DEFAULT_LOCK_HOLD_MS : lockDurationMs(holdAtLeast) };
+  return {
+    key,
+    holdAtLeastMs: holdAtLeast === undefined ? DEFAULT_LOCK_HOLD_MS : lockDurationMs(holdAtLeast),
+    ...(requested === undefined ? { byName: true } : {}),
+  };
 }
 
 function isLocker(value: unknown): value is Locker {
@@ -399,7 +409,7 @@ function featureOwnedSchedules<TServices, const TDefs extends readonly FeatureSc
 /** The plan joined to the feature's `locks` service. */
 function boundLock(schedule: string, plan: LockPlan, services: unknown): NonNullable<ScheduleDef<unknown>['lock']> {
   const locks = locksOf(services, schedule);
-  return { key: plan.key, holdAtLeastMs: plan.holdAtLeastMs, locks };
+  return { key: plan.key, holdAtLeastMs: plan.holdAtLeastMs, locks, ...(plan.byName === true ? { byName: true } : {}) };
 }
 
 function isScheduleDefList<TContext>(
@@ -474,8 +484,11 @@ function isScheduleList(value: unknown): value is readonly ScheduleDef<unknown>[
  * checks shape only: each handler's context type is the app's contract
  * with its features, which the runtime cannot see (see the module docs).
  */
-function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[]): readonly ScheduleDef<unknown>[] {
-  const collected: ScheduleDef<unknown>[] = [];
+/** A collected schedule; `declaredName` is set on an instance's, whose name was qualified. */
+type CollectedSchedule = ScheduleDef<unknown> & { readonly declaredName?: string };
+
+function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[]): readonly CollectedSchedule[] {
+  const collected: CollectedSchedule[] = [];
   for (const f of features) {
     const defs = sliceOf(ctx, f)['schedules'];
     if (defs === undefined) continue;
@@ -487,7 +500,23 @@ function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[
           'Declare feature schedules with schedules([...]) or schedules(needs, [...]) from @arki/schedule/dot.',
       });
     }
-    collected.push(...defs);
+    // Only an instance ('reports#eu') gets a qualified name; a plain feature's names, and the lock
+    // keys hashed from them, must stay byte-identical.
+    const instance = instanceOf(f.name);
+    for (const def of defs) {
+      if (instance === undefined) {
+        collected.push(def);
+        continue;
+      }
+      const name = `${def.name}#${instance}`;
+      // A default lock key follows the name (own lock per instance); a custom key is shared on purpose.
+      const lock =
+        def.lock !== undefined && 'byName' in def.lock && def.lock.byName === true
+          ? { ...def.lock, key: name }
+          : def.lock;
+      const qualified = { ...def, name, declaredName: def.name, ...(lock === undefined ? {} : { lock }) };
+      collected.push(qualified);
+    }
   }
   return collected;
 }
@@ -576,12 +605,15 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
       provides: {
         scheduler: ctx => {
           const durable = durableBackend(ctx);
-          const all: readonly ScheduleDef<TContext>[] = [...own, ...collectFeatureSchedules(ctx, features)];
+          const all: readonly (ScheduleDef<TContext> & { readonly declaredName?: string })[] = [
+            ...own,
+            ...collectFeatureSchedules(ctx, features),
+          ];
           for (const definition of all) {
             const lock = definition.lock;
             // A locker that can say its store lets the action show the whole line: `dot doctor` prints it.
             if (lock?.locks.store === undefined) continue;
-            ctx.$describeAction(`${definition.name}.fire`, {
+            ctx.$describeAction(`${definition.declaredName ?? definition.name}.fire`, {
               summary: lockSummary({
                 key: lock.key,
                 holdAtLeastMs: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS,
@@ -664,16 +696,39 @@ type FeatureTreeOf<F, TDepth extends readonly unknown[] = []> = TDepth['length']
   ? F
   : F | (F extends { readonly features: readonly (infer TChild)[] } ? FeatureTreeOf<TChild, [...TDepth, 1]> : never);
 
-/** Every feature-owned schedule name the feature tuple declares, nested children included. */
-export type ScheduleNameOf<TFeatures extends readonly MountedFeature[]> = FeatureScheduleDefsOf<
-  FeatureTreeOf<TFeatures[number]>
->['name'];
+/** The instance of a mounted feature name: `reports#eu` and `reports#eu.audit` give `eu`. */
+type InstanceSegmentOf<TName> = TName extends `${string}#${infer TRest}`
+  ? TRest extends `${infer THead}.${string}`
+    ? THead
+    : TRest
+  : never;
+
+/** The name a schedule is registered under: qualified only when its feature is an instance. */
+type RegisteredName<F, TName extends string> = [
+  InstanceSegmentOf<F extends { readonly name: infer N } ? N : never>,
+] extends [never]
+  ? TName
+  : `${TName}#${InstanceSegmentOf<F extends { readonly name: infer N } ? N : never>}`;
+
+/** Every feature-owned schedule name the feature tuple declares, nested children included, as registered. */
+export type ScheduleNameOf<TFeatures extends readonly MountedFeature[]> =
+  FeatureTreeOf<TFeatures[number]> extends infer F
+    ? F extends unknown
+      ? RegisteredName<F, FeatureScheduleDefsOf<F>['name']>
+      : never
+    : never;
 
 /** The resolved value of the handler named `TName`. */
 export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName extends string> =
-  FeatureScheduleDefsOf<FeatureTreeOf<TFeatures[number]>> extends infer TDef
-    ? TDef extends { readonly name: TName; readonly handler: (services: never) => infer TResult }
-      ? Awaited<TResult>
+  FeatureTreeOf<TFeatures[number]> extends infer F
+    ? F extends unknown
+      ? FeatureScheduleDefsOf<F> extends infer TDef
+        ? TDef extends { readonly name: infer N extends string; readonly handler: (services: never) => infer TResult }
+          ? RegisteredName<F, N> extends TName
+            ? Awaited<TResult>
+            : never
+          : never
+        : never
       : never
     : never;
 
@@ -713,7 +768,9 @@ export function composeSchedules<const TFeatures extends readonly MountedFeature
 ): ScheduleClient<TFeatures> {
   const served = new Set(scheduler.names);
   for (const f of allFeatures(features)) {
-    for (const name of entrypointsOf(f).flatMap(slice => declaredNames(slice))) {
+    const instance = instanceOf(f.name);
+    for (const declared of entrypointsOf(f).flatMap(slice => declaredNames(slice))) {
+      const name = instance === undefined ? declared : `${declared}#${instance}`;
       if (served.has(name)) continue;
       throw new ScheduleError({
         code: SCHEDULE_ERROR_CODES.scheduleNotServed,
