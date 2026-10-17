@@ -35,7 +35,9 @@ import { debugDrain, debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
 import { bindHandlers } from './handlers.js';
-import { leaseToken } from './id.js';
+import { attemptId, leaseToken } from './id.js';
+import type { EffectRetention, ResolvedRetention } from './retention.js';
+import { keepFor, keepUntil, resolveRetention } from './retention.js';
 import { assertRootDb } from './storage.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
@@ -73,12 +75,15 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
   readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
+  /** The journal-wide archive policy. Internal until `journal.ts` passes the journal's `retention`; the default keeps completed jobs 7 days. */
+  readonly retention?: ResolvedRetention;
 };
 
 export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run>(
   deps: DrainDeps<Meta, AppDb, Run>,
 ) {
-  const { events: eventsTable, jobs: jobsTable } = deps.tables;
+  const { events: eventsTable, jobs: jobsTable, jobAttempts: attemptsTable, jobArchive: archiveTable } = deps.tables;
+  const policy = deps.retention ?? resolveRetention(undefined);
   const { decodeStoredEvent } = deps.history;
   const known = deps.effects.map(effect => effect.name);
 
@@ -119,6 +124,14 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
         })
         .where(eq(jobsTable.id, first.id))
         .returning();
+      if (claimed === undefined) return;
+      // The claim and its attempt row commit together, so no try runs without a row and no row lies about a try.
+      // An attempt still open here belongs to a worker whose lease ran out: close it as superseded.
+      await tx
+        .update(attemptsTable)
+        .set({ finishedAt: sql`now()`, outcome: 'superseded' })
+        .where(and(eq(attemptsTable.jobId, claimed.id), isNull(attemptsTable.finishedAt)));
+      await tx.insert(attemptsTable).values({ id: attemptId(), jobId: claimed.id, attempt: claimed.attempts });
       return claimed;
     });
 
@@ -193,6 +206,51 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     );
   };
 
+  /**
+   * The per-job retention override. A queue job's comes from its runner; an effect's is not wired yet
+   * (the effect schedule gains `retention` in the next step), so this is the one place to add it.
+   */
+  const overrideFor = (job: JobRow, runner: JobRunner<AppDb> | undefined): EffectRetention | undefined =>
+    job.kind === 'queue' ? runner?.retention?.(scheduledJob(job)) : undefined;
+
+  /**
+   * The ack. One fenced statement: delete the job and, when the policy keeps completed jobs, insert its archive
+   * row from the deleted row. A lost lease deletes nothing, so it archives nothing. The attempt rows are read in the
+   * same statement (one snapshot, before the cascade removes them) and the open one is logged as `ok`.
+   * A keep of `false` is the plain fenced delete.
+   */
+  const ack = async (db: AppDb & RootDb, job: JobRow, runner: JobRunner<AppDb> | undefined): Promise<void> => {
+    const fence = and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? ''));
+    const keep = keepFor(policy, 'completed', overrideFor(job, runner));
+    if (!keep.store) {
+      await db.delete(jobsTable).where(fence);
+      return;
+    }
+    // Retention is a horizon of days, so the worker's clock is good enough for keep_until; leases and retries stay on database time.
+    const until = keepUntil(keep, new Date())?.toISOString() ?? null;
+    await db.execute(sql`
+      WITH gone AS (
+        DELETE FROM ${jobsTable} WHERE id = ${job.id} AND lease_token = ${job.leaseToken ?? ''} RETURNING *
+      ), log AS (
+        SELECT coalesce(jsonb_agg(jsonb_build_object(
+          'attempt', a.attempt,
+          'startedAt', a.started_at,
+          'finishedAt', coalesce(a.finished_at, now()),
+          'outcome', coalesce(a.outcome, 'ok'),
+          'error', a.error
+        ) ORDER BY a.started_at, a.attempt), '[]'::jsonb) AS entries
+        FROM ${attemptsTable} a WHERE a.job_id = ${job.id}
+      )
+      INSERT INTO ${archiveTable} (
+        id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
+        last_error, outcome, attempt_log, replay_of, finished_at, keep_until
+      )
+      SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
+        g.last_error, 'completed', log.entries, g.replay_of, now(), ${until}::timestamptz
+      FROM gone g CROSS JOIN log
+    `);
+  };
+
   const runJob = async (
     db: AppDb & RootDb,
     job: JobRow,
@@ -212,15 +270,24 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
           ? runner?.retryDelay(scheduledJob(job), reason)
           : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, reason);
       const dead = delayMs === undefined;
-      await db
-        .update(jobsTable)
-        .set({
-          lastError: errorText(reason),
-          leaseToken: null,
-          leaseUntil: null,
-          ...(delayMs === undefined ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(delayMs / 1000) }),
-        })
-        .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
+      // The attempt closes only if the job update matched: a stale worker's lease token matches nothing, so it finishes nothing.
+      await db.transaction(async tx => {
+        const updated = await tx
+          .update(jobsTable)
+          .set({
+            lastError: errorText(reason),
+            leaseToken: null,
+            leaseUntil: null,
+            ...(delayMs === undefined ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(delayMs / 1000) }),
+          })
+          .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')))
+          .returning({ id: jobsTable.id });
+        if (updated.length === 0) return;
+        await tx
+          .update(attemptsTable)
+          .set({ finishedAt: sql`now()`, outcome: dead ? 'dead' : 'retry', error: errorText(reason) })
+          .where(and(eq(attemptsTable.jobId, job.id), isNull(attemptsTable.finishedAt)));
+      });
       debugDrain.debug('{effect} {jobId}: attempt {attempts} failed{value4}: {value5}', {
         effect: jobLabel(job),
         jobId: job.id,
@@ -244,7 +311,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
           return;
         }
       }
-      await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
+      await ack(db, job, runner);
       debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
     } catch (error) {
       await recordFailure(error);

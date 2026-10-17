@@ -4,6 +4,8 @@ import type { AnyPgColumn, PgAsyncDatabase, PgQueryResultHKT, PgTableWithColumns
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
+import type { EffectRetention } from './retention.js';
+
 /**
  * A function type whose parameters are checked bivariantly.
  *
@@ -482,4 +484,6 @@ export type JobRunner<AppDb extends RootDb = RootDb> = {
   run(job: ScheduledJob, ctx: { readonly db: AppDb; readonly signal: AbortSignal }): Promise<void>;
   /** Milliseconds before the next try, or `undefined` for dead. Called with the thrown error. */
   retryDelay(job: ScheduledJob, error: unknown): number | undefined;
+  /** Overrides the journal's archive policy for this job. `undefined` takes the journal's. */
+  retention?(job: ScheduledJob): EffectRetention | undefined;
 };
