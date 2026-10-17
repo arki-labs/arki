@@ -6,15 +6,40 @@
 
 /** Stable error codes of `@arki/string`. */
 export const STRING_ERROR_CODES = {
-  /** An argument is outside what the function accepts (empty needle, negative length, bad glyph). */
+  /**
+   * An argument is outside what the function accepts (empty needle, negative length, bad glyph).
+   *
+   * @fix Check the argument against the range in the function reference: a non-empty needle, a whole number of at least 0 for lengths.
+   * @verify bun run test
+   */
   invalidArgument: 'ARKI_STRING_E001',
-  /** Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte. */
+  /**
+   * Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte.
+   *
+   * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Use `tryFromBase64` to get `null` instead of a throw.
+   * @verify bun run test
+   */
   invalidUtf8: 'ARKI_STRING_E002',
-  /** An input is not valid strict base64. */
+  /**
+   * An input is not valid strict base64: whitespace, a mixed alphabet, bad padding or an impossible length.
+   *
+   * @fix Pass strict base64 of the chosen alphabet with correct padding. Use `tryFromBase64` to get `null` instead of a throw.
+   * @verify bun run test
+   */
   invalidBase64: 'ARKI_STRING_E003',
-  /** A `interpolate` template has a malformed placeholder. */
+  /**
+   * An `interpolate` template has a malformed placeholder.
+   *
+   * @fix Write placeholders as `{{ name }}` with an identifier inside, and close every `{{` with `}}`.
+   * @verify bun run test
+   */
   invalidTemplate: 'ARKI_STRING_E004',
-  /** A `interpolate` placeholder has no value and `missing` is `'throw'`. */
+  /**
+   * An `interpolate` placeholder has no value and `missing` is `'throw'`.
+   *
+   * @fix Pass a value for the placeholder, or set `missing` to `'keep'` or `'empty'`.
+   * @verify bun run test
+   */
   missingValue: 'ARKI_STRING_E005',
 } as const;
 

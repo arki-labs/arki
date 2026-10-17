@@ -1,3 +1,5 @@
+/** Helper types for casing (`SnakeToCamel`, `CamelToSnake`), paths (`RecordToPath`, `PathValue`) and object shapes (`DeepPartial`, `Nullable`, `Without`). */
+
 export type SnakeToCamel<T> = T extends `${infer A}_${infer B}`
   ? `${Uncapitalize<A>}${Capitalize<SnakeToCamel<B>>}`
   : T extends object

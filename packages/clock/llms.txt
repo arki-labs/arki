@@ -1,0 +1,28 @@
+# @arki/clock
+
+> A `Clock` you inject instead of calling `Date` and `setTimeout`. `SystemClock` for production, `MockClock` for tests. It is not a scheduler or a date library.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/clock`: A clock you inject instead of calling `Date` and `setTimeout`: `SystemClock` for production, `MockClock` for tests. `CLOCK_ERROR_CODES`, `ClockError`, `MAX_TIMER_MS`, `MockClock`, `SystemClock`; types `Clock`, `ClockErrorCode`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Make time-dependent code testable](docs/agent-guide.md#make-time-dependent-code-testable)
+- [Test a retry loop that waits between tries](docs/agent-guide.md#test-a-retry-loop-that-waits-between-tries)
+- [Cancel a wait](docs/agent-guide.md#cancel-a-wait)
+
+## Rules that bite
+
+- Take a `Clock` parameter. Never call `new Date()` or `setTimeout` in logic a test must control.
+- `advance` is synchronous. Use `advanceAsync` when async code sets the next timer.
+- Delays above `MAX_TIMER_MS` (about 24.8 days) throw `ARKI_CLOCK_E002`.
+- `setNow` fires no timers.

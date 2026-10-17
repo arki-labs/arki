@@ -1,3 +1,4 @@
+/** Abortable sleep, debounce and throttle, and structured concurrency (scoped, all, mapConcurrent, race, timeout) on plain Promises and AbortSignal. */
 export { all, mapConcurrent, race, timeout } from './concurrency.js';
 export type { ConcurrencyOptions, SignalOptions, TimeoutOptions } from './concurrency.js';
 export { ASYNC_ERROR_CODES, AsyncError, MAX_WAIT_MS } from './errors.js';

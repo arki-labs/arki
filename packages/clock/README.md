@@ -1,60 +1,88 @@
 # @arki/clock
 
-Clock abstraction for testable time-dependent code, with deterministic mock and system implementations.
+A clock you pass in, so time-dependent code can be tested without waiting. `SystemClock` reads real time. `MockClock` moves only when a test says so.
 
-## Installation
+## Install
 
 ```sh
-npm install @arki/clock
-# or
 bun add @arki/clock
 # or
-pnpm add @arki/clock
+npm install @arki/clock
 ```
 
-## Why
+## Quick start
 
-Code that calls `new Date()`, `Date.now()` or `setTimeout` directly is hard to test deterministically. Inject a `Clock` instead, and tests can swap in `MockClock` to advance time on demand — useful for cooling windows, scheduled jobs, expiration logic, retry delays, and any time-sensitive flow. A wait of minutes runs instantly.
+Limit a password-reset email to one per 15 minutes. The gate takes a `Clock`, so the test runs a 15-minute window in no time.
 
-## Usage
-
-### Production code
-
-```ts
+```ts run
 import type { Clock } from '@arki/clock';
-import { SystemClock } from '@arki/clock';
+import { MockClock } from '@arki/clock';
 
-function makeService(clock: Clock = new SystemClock()) {
+function createCooldownGate(clock: Clock, windowMs: number) {
+  const lastAllowed = new Map<string, number>();
+  return (key: string): boolean => {
+    const now = clock.now().getTime();
+    const last = lastAllowed.get(key);
+    if (last !== undefined && now - last < windowMs) return false;
+    lastAllowed.set(key, now);
+    return true;
+  };
+}
+
+const clock = new MockClock(new Date('2026-01-01T00:00:00.000Z'));
+const tryAcquire = createCooldownGate(clock, 15 * 60 * 1000);
+const first = tryAcquire('ana@example.com'); // true
+clock.advance(15 * 60 * 1000 - 1);
+const early = tryAcquire('ana@example.com'); // false: 1 ms left in the window
+clock.advance(1);
+const later = tryAcquire('ana@example.com'); // true: the window is over
+if (!first || early || !later) throw new Error('the window did not behave');
+```
+
+In production, pass `new SystemClock()` instead. The tested version of this gate is `examples/cooldown-gate.ts`, and it has a test.
+
+```ts from="examples/cooldown-gate.ts#cooldown-gate"
+/** Lets one action through per window, for example one password-reset email per 15 minutes. */
+export function createCooldownGate(clock: Clock, windowMs: number) {
+  const lastAllowed = new Map<string, number>();
   return {
-    isExpired(at: Date) {
-      return clock.now().getTime() > at.getTime();
+    /** True when the key may act now. A true answer starts a new window for that key. */
+    tryAcquire(key: string): boolean {
+      const now = clock.now().getTime();
+      const last = lastAllowed.get(key);
+      if (last !== undefined && now - last < windowMs) return false;
+      lastAllowed.set(key, now);
+      return true;
     },
   };
 }
 ```
 
-### Tests
+## When not to use this
 
-```ts
-import { describe, expect, it } from 'vitest';
+- You need fake timers for code you do not own. That code calls the global `setTimeout`, and `@arki/clock` cannot reach it. Use a library that patches the globals, such as `@sinonjs/fake-timers`.
+- You need a scheduler with cron rules or persistence. A clock only reads time and waits.
+- You need dates, zones or durations. Use `@arki/date`, which builds on this package.
 
-import { MockClock } from '@arki/clock';
+## Runtime support
 
-describe('isExpired', () => {
-  it('returns true after the deadline passes', () => {
-    const clock = new MockClock(new Date('2026-01-01T00:00:00.000Z'));
-    const service = makeService(clock);
-    const deadline = new Date('2026-01-01T01:00:00.000Z');
+Pure ESM with no dependencies and no `node:*` imports. It uses only `Date` and `setTimeout` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
 
-    expect(service.isExpired(deadline)).toBe(false);
+<!-- runtimes:start -->
 
-    clock.advance(60 * 60 * 1000 + 1);
-    expect(service.isExpired(deadline)).toBe(true);
-  });
-});
-```
+| Runtime | Result  | Version tested        | Date (UTC) |
+| ------- | ------- | --------------------- | ---------- |
+| node    | pass    | v26.11.1              | 2026-10-17 |
+| bun     | pass    | 1.4.2                 | 2026-10-17 |
+| deno    | pass    | 2.9.7                 | 2026-10-17 |
+| browser | pass    | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes  | not run | -                     | 2026-10-17 |
 
-## API
+<!-- runtimes:end -->
+
+## Public imports
+
+`import { Clock, SystemClock, MockClock, MAX_TIMER_MS, ClockError, CLOCK_ERROR_CODES } from '@arki/clock'`. The package has one entry.
 
 ### `Clock`
 
@@ -80,18 +108,27 @@ Controllable clock for tests.
 - `advanceAsync(ms: number): Promise<void>` — like `advance`, but lets pending promise callbacks run before the first timer and after each one. Use it when async code sets the next timer after an `await`, like a retry loop. It waits one real macrotask per timer, so do not mix it with fake timers that replace `setTimeout`.
 - `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios. Fires no timers.
 
-```ts
-import { backoff, withRetry } from '@arki/resilience';
+```ts run
+import { MockClock } from '@arki/clock';
 
 const clock = new MockClock();
-const result = withRetry(callFlakyApi, { backoff: backoff.exponential({ base: 1000 }).upTo(3), clock });
-await clock.advanceAsync(10_000); // 1 s + 2 s + 4 s of retry delay, in about a millisecond
-await result;
+async function callWithRetry(): Promise<number> {
+  let tries = 0;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    tries += 1;
+    await clock.sleep(1000 * 2 ** attempt); // 1 s, 2 s, 4 s between tries
+  }
+  return tries;
+}
+
+const result = callWithRetry();
+await clock.advanceAsync(7000); // all the retry delay, in about a millisecond
+if ((await result) !== 3) throw new Error('expected three tries');
 ```
 
-## Errors
+## Failure behaviour
 
-`import { ClockError } from '@arki/clock'`. Match on `error.code`, never on the message. Each error has a `remediation` string.
+Every failure is a `ClockError` with a stable `code` and a `remediation` sentence. Match on `error.code`, never on the message. `setTimer`, `advance` and `advanceAsync` throw at once. `sleep` rejects. `now()` and `setNow()` never throw.
 
 | Code              | Raised by                           | Meaning                                                             |
 | ----------------- | ----------------------------------- | ------------------------------------------------------------------- |
@@ -99,18 +136,43 @@ await result;
 | `ARKI_CLOCK_E002` | `setTimer`, `sleep`                 | The delay is negative, not finite, or above `MAX_TIMER_MS`.         |
 | `ARKI_CLOCK_E003` | `sleep`                             | The signal aborted the sleep. `cause` is `signal.reason`.           |
 
-`now()` and `setNow()` never throw.
+Handle an aborted sleep like this:
 
-## Runtime support
+```ts run
+import { CLOCK_ERROR_CODES, ClockError, MockClock } from '@arki/clock';
 
-Pure ESM with no dependencies and no `node:*` imports. It uses only `Date` and `setTimeout` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+const clock = new MockClock();
+const controller = new AbortController();
+const waiting = clock.sleep(1000, controller.signal);
+controller.abort('user cancelled');
+try {
+  await waiting;
+  throw new Error('sleep should have rejected');
+} catch (error) {
+  if (!(error instanceof ClockError) || error.code !== CLOCK_ERROR_CODES.aborted) throw error;
+  if (error.cause !== 'user cancelled') throw new Error('cause should be the abort reason');
+}
+```
+
+## Limits
+
+- The longest delay is `MAX_TIMER_MS`: 2^31 - 1 ms, about 24.8 days. `setTimer(fn, MAX_TIMER_MS)` works. `setTimer(fn, MAX_TIMER_MS + 1)` throws `ARKI_CLOCK_E002`. Split a longer wait into steps.
+- `MockClock.advance` is synchronous. A timer that async code sets after an `await` does not exist yet. Use `advanceAsync`, which waits one real macrotask per timer.
+- `setNow` moves time and fires no timers, even ones it jumps past.
+- A timer has no jitter and no drift. `SystemClock` timers are as exact as the platform `setTimeout`.
+- The clock does not patch the globals. Code that calls `Date` or `setTimeout` directly is not controlled.
 
 ## Documentation
 
-`@arki/clock` is framework-agnostic and works on its own. When you compose
-it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-application framework, see `packages/dot/docs/` for plugin authoring,
-lifecycle, and diagnostics.
+- [Agent guide](./docs/agent-guide.md): tasks, rules that bite, errors.
+- [llms.txt](./llms.txt): the index an agent reads first.
+- [Changelog](./CHANGELOG.md).
+
+`@arki/clock` works on its own. With the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) application framework, see `packages/dot/docs/`.
+
+## Support
+
+Report a bug or ask a question at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues). Include the delay or step you passed and the error code you saw.
 
 <!-- bench:start -->
 

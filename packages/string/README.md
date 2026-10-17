@@ -1,18 +1,158 @@
 # @arki/string
 
-Zero-dependency string toolkit for TypeScript. Grapheme-aware where it matters,
-strict where it counts, and available as plain functions or an immutable fluent
-wrapper. Runs in Node 24+, Bun, Deno, browsers, and React Native (Hermes).
+A string toolkit with no dependencies. Positions count what a reader sees (graphemes), not UTF-16 units. Use plain functions by concern, or one immutable fluent wrapper.
 
-## Installation
+## Install
 
 ```sh
-npm install @arki/string
-# or
 bun add @arki/string
 # or
-pnpm add @arki/string
+npm install @arki/string
 ```
+
+## Quick start
+
+Turn a blog post into what an index page needs: a URL slug, a one-line summary that stops at a word, and a reading time.
+
+```ts run
+import { squish, truncate } from '@arki/string/format';
+import { readingTime } from '@arki/string/readability';
+import { slugify } from '@arki/string/slug';
+
+const title = 'Café Guide & Notes';
+const body = 'We moved the ledger to a new   database last week.\n\nThe move took two hours.';
+
+const slug = slugify(title); // 'cafe-guide-and-notes'
+const summary = truncate(squish(body), 40, { boundary: 'word-before' }); // never cuts a word or an emoji
+const minutes = Math.max(1, Math.round(readingTime(body).minutes));
+
+if (slug !== 'cafe-guide-and-notes') throw new Error(slug);
+if (summary !== 'We moved the ledger to a new database…') throw new Error(summary);
+if (minutes !== 1) throw new Error(String(minutes));
+```
+
+The tested version is `examples/describe-post.ts`. Its tests pin the slug, the summary and the minimum of one minute.
+
+```ts from="examples/describe-post.ts#describe-post"
+/** What a blog index needs from a post: a URL slug, a one-line summary and a reading time. */
+export function describePost(title: string, body: string): { slug: string; summary: string; minutes: number } {
+  return {
+    slug: slugify(title),
+    summary: truncate(squish(body), 60, { boundary: 'word-before' }),
+    minutes: Math.max(1, Math.round(readingTime(body).minutes)),
+  };
+}
+```
+
+## When not to use this
+
+- You need to check that a string is a URL or base64. Use `@arki/assert`. This package encodes and decodes base64 and does not validate URLs.
+- You need to parse, strip or sanitize HTML. Use `@arki/formats`. `escapeHtml` here only escapes text. It does not sanitize.
+- You need dates, durations or relative time. Use `@arki/date`.
+- You need hyphenation, dictionaries or embeddings. Use the `@arki/text-*` packages.
+- You need English pluralization or number and byte formatting. They are out of scope on purpose.
+- You need cryptographic hashing. `hashCode` is a fast 32-bit hash and is not secure.
+
+## Runtime support
+
+Node 24+, Bun, Deno, every evergreen browser, and React Native (Hermes). The
+library uses only ECMAScript 2022 plus Unicode property escapes: no `Buffer`,
+`atob`, `TextEncoder`, `node:` imports, or ES2023 array-copy methods. The one
+feature check is `Intl.Segmenter`, with an in-house fallback that follows
+Unicode 18 (ICU engines through Unicode 17 still split a leading Indic
+virama from the consonant after it). A lint rule and a
+test (`src/runtime.test.ts`) fail the build if any of that changes.
+
+Three more checks keep the claim honest:
+
+- `bun run smoke` builds nothing itself; after `bun run build` it imports
+  `dist/` under Node, Node with `Intl.Segmenter` deleted (the Hermes path),
+  Bun, and Deno, and runs one check per subpath on each.
+- `src/internal/graphemes.fuzz.test.ts` compares the fallback scanner with the
+  engine's `Intl.Segmenter` on 3000 seeded random strings built from the hard
+  cases (ZWJ sequences, flags, tags, Hangul jamo, Indic conjuncts, CR LF).
+- `src/performance.test.ts` guards the paths that used to be quadratic by
+  comparing a large input against a small one, so a regression fails the
+  suite on any machine.
+
+With `Intl.Segmenter`, the native path segments a growing prefix instead of
+the whole string, so `at(text, 5)` costs the same on 10k and 100k characters.
+
+<!-- runtimes:start -->
+
+| Runtime | Result  | Version tested        | Date (UTC) |
+| ------- | ------- | --------------------- | ---------- |
+| node    | pass    | v26.11.1              | 2026-10-17 |
+| bun     | pass    | 1.4.2                 | 2026-10-17 |
+| deno    | pass    | 2.9.7                 | 2026-10-17 |
+| browser | pass    | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes  | not run | -                     | 2026-10-17 |
+
+<!-- runtimes:end -->
+
+## Public imports
+
+The root entry `@arki/string` re-exports everything. Each concern also has its own subpath, so a bundler keeps only what you import.
+
+| Subpath        | Functions                                                                                                                                                                                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `fold`, `graphemeBoundaries`                                                                                                                                                                                           |
+| `/case`        | `caseWords`, `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`, `constantCase`, `dotCase`, `pathCase`, `titleCase`, `sentenceCase`, `capitalize`, `uncapitalize`                                                                                                                                 |
+| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`, `dedent`                                                                                                                                                                                                            |
+| `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                                                                                                        |
+| `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                                                                                             |
+| `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                                                                                |
+| `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                                                                                                       |
+| `/interpolate` | `interpolate`                                                                                                                                                                                                                                                                                      |
+| `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
+| `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
+| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
+| `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
+| `/keywords`    | `keywords`, `STOP_WORDS`                                                                                                                                                                                                                                                                           |
+| `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
+| `/metrics`     | `textMetrics` (everything above in one object), `analyze`                                                                                                                                                                                                                                          |
+| `/distance`    | `levenshtein`, `diceCoefficient`, `jaroWinkler`                                                                                                                                                                                                                                                    |
+| `/hash`        | `hashCode`                                                                                                                                                                                                                                                                                         |
+| `/fluent`      | `str`, `StringValue`                                                                                                                                                                                                                                                                               |
+
+## Failure behaviour
+
+Every failure on purpose is a `StringError` with a stable `code` and a `remediation` sentence. Match on `error.code`, never on the message. `import { StringError, STRING_ERROR_CODES } from '@arki/string'` (or `@arki/string/errors`). Wrong runtime types, such as a number where a string is required, are not checked and have no code.
+
+The functions throw synchronously. Nothing returns a result object. `tryFromBase64` is the one function that returns `null` instead of throwing.
+
+| Code               | Raised by                                                                                                                        | Meaning                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `ARKI_STRING_E001` | `padStart`, `mask`, `truncate`, `wrapText`, `indexOf`, `keywords`, `chunk`, `slugify`, `readingTime`, search helpers, and others | An argument is out of range: empty needle, negative or non-integer length, bad glyph. |
+| `ARKI_STRING_E002` | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
+| `ARKI_STRING_E003` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
+| `ARKI_STRING_E004` | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
+| `ARKI_STRING_E005` | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
+
+Handle bad user input without a try block:
+
+```ts run
+import { STRING_ERROR_CODES, StringError } from '@arki/string';
+import { fromBase64, tryFromBase64 } from '@arki/string/base64';
+
+if (tryFromBase64('not base64!') !== null) throw new Error('expected null');
+try {
+  fromBase64('not base64!');
+  throw new Error('fromBase64 should have thrown');
+} catch (error) {
+  if (!(error instanceof StringError) || error.code !== STRING_ERROR_CODES.invalidBase64) throw error;
+}
+```
+
+## Limits
+
+- Segmentation follows Unicode 18 on the fallback path. ICU engines through Unicode 17 still split a leading Indic virama from the consonant after it. A string with that sequence can measure differently on Hermes than on V8.
+- `slugify('ä ö')` gives `ae-oe` (German rules). `slugify('ä ö', { locale: 'sv' })` gives `a-o`. Pass `locale` when the language is not German.
+- Chinese and Korean transliteration is opt-in through `@arki/string/slug-cjk`, because the tables are large. Without it, those characters are dropped from a slug.
+- `interpolate` takes flat identifier keys. `{{ user.name }}` is a `StringError` (`ARKI_STRING_E004`).
+- Base64 decoding is strict. A string with a newline, a mixed alphabet or bad padding throws `ARKI_STRING_E003`. Trim and normalize it first, or use `tryFromBase64`.
+- `escapeHtml` is not a sanitizer. It makes text safe inside HTML text and attribute values and does nothing for URLs, scripts or styles.
+- `syllableCount` and the readability scores use a heuristic for English, Spanish and German. They suit grades and reading time. They do not suit hyphenation.
 
 ## Two ways to use it
 
@@ -71,28 +211,7 @@ Literal searches (`before`, `after`, `replaceFirst`, `ensureStart`, …) only
 match on grapheme boundaries, so searching `e` never matches part of `é` in
 decomposed form.
 
-## API by concern
-
-| Subpath        | Functions                                                                                                                                                                                                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `fold`, `graphemeBoundaries`                                                                                                                                                                                           |
-| `/case`        | `caseWords`, `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`, `constantCase`, `dotCase`, `pathCase`, `titleCase`, `sentenceCase`, `capitalize`, `uncapitalize`                                                                                                                                 |
-| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`, `dedent`                                                                                                                                                                                                            |
-| `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                                                                                                        |
-| `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                                                                                             |
-| `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                                                                                |
-| `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                                                                                                       |
-| `/interpolate` | `interpolate`                                                                                                                                                                                                                                                                                      |
-| `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
-| `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
-| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
-| `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
-| `/keywords`    | `keywords`, `STOP_WORDS`                                                                                                                                                                                                                                                                           |
-| `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
-| `/metrics`     | `textMetrics` (everything above in one object), `analyze`                                                                                                                                                                                                                                          |
-| `/distance`    | `levenshtein`, `diceCoefficient`, `jaroWinkler`                                                                                                                                                                                                                                                    |
-| `/hash`        | `hashCode`                                                                                                                                                                                                                                                                                         |
-| `/fluent`      | `str`, `StringValue`                                                                                                                                                                                                                                                                               |
+## Reference by concern
 
 ### Case conversion
 
@@ -166,6 +285,9 @@ import { textMetrics } from '@arki/string/metrics';
 import { readability, readingTime, syllableCount } from '@arki/string/readability';
 import { lexicalDiversity, wordFrequencies } from '@arki/string/vocabulary';
 
+declare const article: string;
+declare const articulo: string;
+
 readability(article).fleschKincaidGrade; // 8.4
 readability(articulo, { language: 'es' }).fernandezHuerta; // Spanish score set
 readingTime(article); // { words: 1200, seconds: 302.5, minutes: 5.04 }
@@ -193,6 +315,8 @@ textMetrics(article); // every count, score, and statistic in one object
   import { analyze } from '@arki/string/metrics';
   import { fleschKincaidGrade, lix } from '@arki/string/readability';
 
+  declare const text: string;
+
   const a = analyze(text);
   const grade = fleschKincaidGrade(a);
   const lixScore = lix(a);
@@ -209,45 +333,6 @@ textMetrics(article); // every count, score, and statistic in one object
 - `hashCode` (in `/hash`) is the non-negative Java `String.hashCode` over
   UTF-16 units: stable, fast, and not cryptographic.
 
-## Errors
-
-`import { StringError } from '@arki/string'` (or `@arki/string/errors`). Every failure on purpose is a `StringError` with a stable `code` and a `remediation`. Match on `error.code`, never on the message. Wrong runtime types, such as a number where a string is required, are not checked and have no code.
-
-| Code               | Raised by                                                                                                                        | Meaning                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `ARKI_STRING_E001` | `padStart`, `mask`, `truncate`, `wrapText`, `indexOf`, `keywords`, `chunk`, `slugify`, `readingTime`, search helpers, and others | An argument is out of range: empty needle, negative or non-integer length, bad glyph. |
-| `ARKI_STRING_E002` | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
-| `ARKI_STRING_E003` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
-| `ARKI_STRING_E004` | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
-| `ARKI_STRING_E005` | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
-
-The codes are also exported as `STRING_ERROR_CODES`.
-
-## Runtime support
-
-Node 24+, Bun, Deno, every evergreen browser, and React Native (Hermes). The
-library uses only ECMAScript 2022 plus Unicode property escapes: no `Buffer`,
-`atob`, `TextEncoder`, `node:` imports, or ES2023 array-copy methods. The one
-feature check is `Intl.Segmenter`, with an in-house fallback that follows
-Unicode 18 (ICU engines through Unicode 17 still split a leading Indic
-virama from the consonant after it). A lint rule and a
-test (`src/runtime.test.ts`) fail the build if any of that changes.
-
-Three more checks keep the claim honest:
-
-- `bun run smoke` builds nothing itself; after `bun run build` it imports
-  `dist/` under Node, Node with `Intl.Segmenter` deleted (the Hermes path),
-  Bun, and Deno, and runs one check per subpath on each.
-- `src/internal/graphemes.fuzz.test.ts` compares the fallback scanner with the
-  engine's `Intl.Segmenter` on 3000 seeded random strings built from the hard
-  cases (ZWJ sequences, flags, tags, Hangul jamo, Indic conjuncts, CR LF).
-- `src/performance.test.ts` guards the paths that used to be quadratic by
-  comparing a large input against a small one, so a regression fails the
-  suite on any machine.
-
-With `Intl.Segmenter`, the native path segments a growing prefix instead of
-the whole string, so `at(text, 5)` costs the same on 10k and 100k characters.
-
 ### Base64 and UTF-8
 
 No `Buffer`, `atob`, or `btoa`. Text functions are UTF-8; byte functions take
@@ -256,6 +341,8 @@ padding, impossible lengths, and nonzero unused bits throw `StringError` (`ARKI_
 invalid UTF-8 throws `StringError` (`ARKI_STRING_E002`). `tryFromBase64` returns `null` instead.
 
 ```ts
+import { base64ToBytes, fromBase64, toBase64 } from '@arki/string/base64';
+
 toBase64('f'); // 'Zg=='
 toBase64('f', { alphabet: 'url' }); // 'Zg'  (url defaults to no padding)
 base64ToBytes('/w=='); // Uint8Array [255]
@@ -284,6 +371,7 @@ diacritics are stripped. Chinese (pinyin) and Korean rule sets are large, so
 they are opt-in:
 
 ```ts
+import { slugify } from '@arki/string/slug';
 import { chinese } from '@arki/string/slug-cjk';
 
 slugify('我是谁', { replacements: chinese }); // 'wo-shi-shui'
@@ -292,6 +380,8 @@ slugify('我是谁', { replacements: chinese }); // 'wo-shi-shui'
 ### Interpolation
 
 ```ts
+import { interpolate } from '@arki/string/interpolate';
+
 interpolate('Hi {{ name }}', { name: 'Ada' }); // 'Hi Ada'
 interpolate('{{ missing }}', {}); // throws StringError ARKI_STRING_E005
 interpolate('{{ missing }}', {}, { missing: 'keep' }); // '{{ missing }}'
@@ -300,20 +390,17 @@ interpolate('{{ missing }}', {}, { missing: 'keep' }); // '{{ missing }}'
 Flat identifier keys only. `null` renders as `''`, `undefined` is missing.
 `\{{` emits a literal `{{`. Output is plain text; call `escapeHtml` separately.
 
-## What lives elsewhere
-
-- Validation (`isURL`, `isBase64`): `@arki/assert`.
-- HTML parsing, stripping, and sanitizing: `@arki/formats`.
-- Dates, durations, relative time: `@arki/date`.
-- Hyphenation, dictionaries, embeddings: `@arki/text-*`.
-- English pluralization and byte/number formatting: deliberately out of scope.
-
 ## Documentation
 
-`@arki/string` is framework-agnostic and works on its own. When you compose
-it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-application framework, see `packages/dot/docs/` for plugin authoring,
-lifecycle, and diagnostics.
+- [Agent guide](./docs/agent-guide.md): tasks, rules that bite, errors.
+- [llms.txt](./llms.txt): the index an agent reads first.
+- [Changelog](./CHANGELOG.md).
+
+`@arki/string` works on its own. With the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) application framework, see `packages/dot/docs/`.
+
+## Support
+
+Report a bug or ask a question at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues). Include the input string, the function and the result you expected.
 
 <!-- bench:start -->
 

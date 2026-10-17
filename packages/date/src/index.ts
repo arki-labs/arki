@@ -1,3 +1,4 @@
+/** Date and time math on Temporal values: constructors, arithmetic, calendar, intervals, business days, formatting, parsing and relative text. */
 export * from './types.js';
 export * from './core.js';
 export * from './interop.js';

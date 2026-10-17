@@ -1,15 +1,142 @@
 # @arki/date
 
-Date and time math for ARKI, built on [Temporal](https://tc39.es/proposal-temporal/) semantics with a small, explicit API. Calendar dates, instants, zoned date-times, durations, interval algebra, business days, formatting and relative text — immutable values, one arithmetic policy, no hidden "now", no hidden zone.
+Date and time math on [Temporal](https://tc39.es/proposal-temporal/) values with a small, explicit API. Calendar dates, instants, zoned date-times, durations, interval algebra, business days, formatting and relative text. Values are immutable, one arithmetic policy applies everywhere, and there is no hidden "now" and no hidden zone.
 
-Runs unchanged on **Node 22+, Bun, Deno, browsers and edge runtimes**: ECMAScript + `Intl` only. The `temporal-polyfill` ponyfill hands back the runtime's native `Temporal` where one exists (Node 26, Chrome 144, Firefox 139) and costs about 19 kB gzipped where it does not.
-
-## Installation
+## Install
 
 ```sh
 bun add @arki/date
-# npm install @arki/date · pnpm add @arki/date
+# or
+npm install @arki/date
 ```
+
+## Quick start
+
+Tell a customer when their order arrives: count business days in the shop's zone, skip public holidays, and move late orders to the next day.
+
+```ts run
+import { addBusinessDays, businessCalendar, format, nextBusinessDay, plainDate, toPlainDate, zoned } from '@arki/date';
+
+const romania = businessCalendar({ holidays: ['2026-12-01', '2026-12-25'] });
+
+// Friday 27 Nov, 12:00 in Bucharest. After a 15:00 cut-off the order ships the next business day.
+const placed = zoned('2026-11-27T10:00:00Z', 'Europe/Bucharest');
+const day = toPlainDate(placed);
+const shipsOn = placed.hour >= 15 ? nextBusinessDay(day, romania) : day;
+const arrives = addBusinessDays(shipsOn, 3, romania); // Mon is day 1, Tue 1 Dec is a holiday
+
+if (String(arrives) !== '2026-12-03') throw new Error(String(arrives));
+if (format(arrives, 'EEEE, MMMM do') !== 'Thursday, December 3rd') throw new Error('format');
+if (String(plainDate('2026-01-31')) !== '2026-01-31') throw new Error('plainDate');
+```
+
+The tested version is `examples/delivery-estimate.ts`. Its tests pin the holiday, the cut-off to the second and the shop-zone day.
+
+```ts from="examples/delivery-estimate.ts#delivery-estimate"
+const romania = businessCalendar({ holidays: ['2026-12-01', '2026-12-25'] });
+const cutOffHour = 15;
+
+/**
+ * The day an order arrives: `days` business days after it ships.
+ * An order placed at or after 15:00 in the shop's zone ships on the next business day.
+ */
+export function estimateDelivery(orderedAt: string, shopZone: string, days: number): PlainDate {
+  const placed = zoned(orderedAt, shopZone);
+  const day = toPlainDate(placed);
+  const shipsOn = placed.hour >= cutOffHour ? nextBusinessDay(day, romania) : day;
+  return addBusinessDays(shipsOn, days, romania);
+}
+
+/** The same day as text for an order confirmation, for example "Thursday, December 3rd". */
+export function describeDelivery(orderedAt: string, shopZone: string, days: number): string {
+  return format(estimateDelivery(orderedAt, shopZone, days), 'EEEE, MMMM do');
+}
+```
+
+## When not to use this
+
+- You need recurrence rules (RRULE), natural-language parsing, a holiday database or non-ISO calendars. They are non-goals.
+- You need a mutable API, macros or plugins.
+- You need a monotonic clock for measuring elapsed time. Use `performance.now()`.
+- You only format a date once in a browser and bundle size is tight. `Intl.DateTimeFormat` alone is smaller. This package pulls in `temporal-polyfill` (about 19 kB gzipped) where the runtime has no native `Temporal`.
+- You need a different model of "now" per call without passing it in. This package never reads the clock behind your back. Pass a `Clock` from `@arki/clock`.
+
+## Runtime support
+
+Runs on Node 22+, Bun, Deno, browsers and edge runtimes: ECMAScript and `Intl` only. The `temporal-polyfill` ponyfill hands back the runtime's native `Temporal` where one exists (Node 26, Chrome 144, Firefox 139) and costs about 19 kB gzipped where it does not.
+
+`bun run test` runs the suite on Node. `bun run test:bun` runs it under Bun, and the React hooks run in happy-dom. `bun run build && bun run smoke` runs one check per module under `node`, `bun` and `deno`. The token formatter and `parseISO` are differential-tested against date-fns for every pattern used in the monorepo. `bun run test:runtimes` writes the table below. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v26.11.1 | 2026-10-17 |
+| bun | pass | 1.4.2 | 2026-10-17 |
+| deno | pass | 2.9.7 | 2026-10-17 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes | not run | - | 2026-10-17 |
+<!-- runtimes:end -->
+
+## Public imports
+
+Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, and so on. The root `@arki/date` re-exports the core modules. The optional subpaths (`zod`, `react`, `orpc`, `tanstack`) are not re-exported from the root.
+
+| Subpath     | Contents                                                                                                                                                                                                                                                                         |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types`     | the value-type aliases, `Point`/`Civil`/`Timeline` unions, unit and option types, `ISO_WEEK` `SUNDAY_WEEK`, `isPlainDate`… guards, `kindOf`                                                                                                                                      |
+| `core`      | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `tryParse` `parseISO` `tryParse`                                                                                                                     |
+| `interop`   | `fromDate` `toDate` `fromPickerDate` `toPickerDate` `systemTimeZone`                                                                                                                                                                                                             |
+| `math`      | `add` `sub` `set` `parts` `startOf` `endOf` `nextBoundary` `floor` `ceil` `round` `diff` `until` `diffElapsed` `elapsedNanoseconds`                                                                                                                                              |
+| `calendar`  | `dayOfWeek` `dayOfYear` `daysInMonth` `daysInYear` `isLeapYear` `isWeekend` `isWeekday` `isoWeek` `weekOf` `weeksInYear` `quarter` `calendarDaysBetween` `age` `nthWeekdayOfMonth` `lastWeekdayOfMonth` `easter` `weekRulesFor`                                                  |
+| `compare`   | `equals` `sameInstant` `compareAsc` `compareDesc` `isBefore` `isAfter` `isSameOrBefore` `isSameOrAfter` `isSame` `isSameDay/Week/Month/Quarter/Year` `isBetween` `min` `max` `clamp`                                                                                             |
+| `zone`      | `inZone` (same instant) `reinterpretZone` (same wall clock) `atTime` `toUTC` `offset` `offsetMinutes` `isValidTimeZone`                                                                                                                                                          |
+| `duration`  | `duration` `years…milliseconds` `addDuration` `subDuration` `multiplyDuration` `negateDuration` `absDuration` `normalizeDuration` `totalDuration` `toUnits` `compareDurations` `isZeroDuration` `isNegativeDuration` `formatDurationISO` `humanizeDuration` `formatDurationIntl` |
+| `interval`  | `interval` `contains` `overlaps` `abuts` `intersection` `union` `gap` `subtract` `symmetricDifference` `mergeIntervals` `gapsBetween` `intervalLength` `splitByUnit` `each` `range` `toISOInterval`                                                                              |
+| `business`  | `businessCalendar` `isBusinessDay` `addBusinessDays` `subBusinessDays` `nextBusinessDay` `previousBusinessDay` `businessDaysBetween` `businessDaysIn`                                                                                                                            |
+| `format`    | `format` (date-fns-compatible tokens) `formatIntl` `formatRange` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                                       |
+| `relative`  | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                                           |
+| `clock`     | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                                           |
+| `fluent`    | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                                           |
+| `parse`     | `parseDate` `parseDateTime` `parseZoned` `tryParseDate` `tryParseDateTime` `tryParseZoned` (inverse of `format`)                                                                                                                                                                 |
+| `zod`       | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
+| `react`     | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
+| `serialize` | optional, needs `@orpc/client` and/or `superjson`: `temporalJsonSerializers` `registerTemporalTypes` `TEMPORAL_RPC_TYPES`                                                                                                                                                        |
+| `tanstack`  | optional, needs `@tanstack/react-router`: `temporalSerializationAdapters` and one adapter per type                                                                                                                                                                               |
+| `parseISO`  | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                                               |
+
+## Failure behaviour
+
+Invalid input throws at construction. Nothing returns a result object, and the package defines no error codes.
+
+- A bad value (month 13, `2026-02-30`, an unknown time zone) throws `RangeError`.
+- Mixed kinds (a `PlainDate` compared with an `Instant`) throw `TypeError`.
+- An unknown format token throws. A time token on a `PlainDate`, or a zone token on a value without a zone, throws.
+- A zone-less string passed to `zoned` throws and tells you to pass a zone. A zone is never guessed.
+- `tryParse`, `tryParseDate`, `tryParseDateTime` and `tryParseZoned` return `undefined` instead of throwing. Use them for user input.
+- `{ overflow: 'reject' }` and `{ disambiguation: 'reject' }` turn a clamp or a DST choice into a `RangeError`.
+
+```ts run
+import { plainDate, tryParseDate } from '@arki/date';
+
+if (tryParseDate('nope', 'yyyy-MM-dd') !== undefined) throw new Error('expected undefined');
+try {
+  plainDate('2026-02-30');
+  throw new Error('expected a RangeError');
+} catch (error) {
+  if (!(error instanceof RangeError)) throw error;
+}
+```
+
+## Limits
+
+- Overflow clamps. `add(plainDate('2026-01-31'), { months: 1 })` is `2026-02-28`. Subtraction is therefore not always the inverse of addition. Pass `{ overflow: 'reject' }` to throw instead.
+- Iteration is bounded. `each`, `range` and `splitByUnit` throw when they would pass `maxItems` (10 000) items. They never truncate silently.
+- A DST gap or fold resolves with the `compatible` rule: a skipped 02:30 becomes 03:30, and a repeated 02:30 takes the first. Pass `{ disambiguation }` to choose.
+- Adding one day across a DST change moves 23 or 25 elapsed hours. Adding 24 hours is always 24. Use `diffElapsed` for exact time.
+- `P1D - PT1H` throws, because a day is not always 24 hours. Give `normalizeDuration` a zoned `relativeTo`.
+- The default locale is `en-US`, so a server and a client agree. Pass your app's locale.
+- `systemTimeZone()` reads the runtime zone. Never let a server's zone leak into output: pass the user's zone.
+- `parseISO` is a legacy door with date-fns semantics: zone-less text is read in local time.
 
 ## The five value types
 
@@ -89,6 +216,35 @@ A zone-less string is never guessed into a zone: `zoned('2026-05-20T09:30')` thr
 ## Common tasks
 
 ```ts
+import {
+  addBusinessDays,
+  age,
+  businessCalendar,
+  each,
+  endOf,
+  formatRange,
+  inZone,
+  interval,
+  isPast,
+  plainDate,
+  relativeToNow,
+  startOf,
+  today,
+  zoned,
+  type Interval,
+  type PlainDate,
+  type ZonedDateTime,
+} from '@arki/date';
+
+import type { Clock } from '@arki/clock';
+
+declare const clock: Clock;
+declare const order: { dueAt: string };
+declare const user: { birthDate: string };
+declare const month: PlainDate;
+declare const stay: Interval<PlainDate>;
+declare const launch: ZonedDateTime;
+
 // Deadline in business days, skipping Romanian public holidays
 const calendar = businessCalendar({ holidays: ['2026-12-01', '2026-12-25'] });
 addBusinessDays(plainDate('2026-11-27'), 3, calendar); // 2026-12-03
@@ -124,32 +280,7 @@ relativeToNow(launch, { numeric: 'auto', clock });
 - **Half-open intervals.** `[start, end)` everywhere; touching intervals do not overlap; `union` returns sorted disjoint pieces and never bridges a gap.
 - **Fail loud.** Invalid input throws `RangeError` at construction; mixed kinds throw `TypeError`; unknown format tokens throw. `tryParse` is the non-throwing door for user input.
 
-## Modules
-
-Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, …
-
-| Subpath     | Contents                                                                                                                                                                                                                                                                         |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `types`     | the value-type aliases, `Point`/`Civil`/`Timeline` unions, unit and option types, `ISO_WEEK` `SUNDAY_WEEK`, `isPlainDate`… guards, `kindOf`                                                                                                                                      |
-| `core`      | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `tryParse` `parseISO` `tryParse`                                                                                                                     |
-| `interop`   | `fromDate` `toDate` `fromPickerDate` `toPickerDate` `systemTimeZone`                                                                                                                                                                                                             |
-| `math`      | `add` `sub` `set` `parts` `startOf` `endOf` `nextBoundary` `floor` `ceil` `round` `diff` `until` `diffElapsed` `elapsedNanoseconds`                                                                                                                                              |
-| `calendar`  | `dayOfWeek` `dayOfYear` `daysInMonth` `daysInYear` `isLeapYear` `isWeekend` `isWeekday` `isoWeek` `weekOf` `weeksInYear` `quarter` `calendarDaysBetween` `age` `nthWeekdayOfMonth` `lastWeekdayOfMonth` `easter` `weekRulesFor`                                                  |
-| `compare`   | `equals` `sameInstant` `compareAsc` `compareDesc` `isBefore` `isAfter` `isSameOrBefore` `isSameOrAfter` `isSame` `isSameDay/Week/Month/Quarter/Year` `isBetween` `min` `max` `clamp`                                                                                             |
-| `zone`      | `inZone` (same instant) `reinterpretZone` (same wall clock) `atTime` `toUTC` `offset` `offsetMinutes` `isValidTimeZone`                                                                                                                                                          |
-| `duration`  | `duration` `years…milliseconds` `addDuration` `subDuration` `multiplyDuration` `negateDuration` `absDuration` `normalizeDuration` `totalDuration` `toUnits` `compareDurations` `isZeroDuration` `isNegativeDuration` `formatDurationISO` `humanizeDuration` `formatDurationIntl` |
-| `interval`  | `interval` `contains` `overlaps` `abuts` `intersection` `union` `gap` `subtract` `symmetricDifference` `mergeIntervals` `gapsBetween` `intervalLength` `splitByUnit` `each` `range` `toISOInterval`                                                                              |
-| `business`  | `businessCalendar` `isBusinessDay` `addBusinessDays` `subBusinessDays` `nextBusinessDay` `previousBusinessDay` `businessDaysBetween` `businessDaysIn`                                                                                                                            |
-| `format`    | `format` (date-fns-compatible tokens) `formatIntl` `formatRange` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                                       |
-| `relative`  | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                                           |
-| `clock`     | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                                           |
-| `fluent`    | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                                           |
-| `parse`     | `parseDate` `parseDateTime` `parseZoned` `tryParseDate` `tryParseDateTime` `tryParseZoned` (inverse of `format`)                                                                                                                                                                 |
-| `zod`       | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
-| `react`     | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
-| `serialize` | optional, needs `@orpc/client` and/or `superjson`: `temporalJsonSerializers` `registerTemporalTypes` `TEMPORAL_RPC_TYPES`                                                                                                                                                        |
-| `tanstack`  | optional, needs `@tanstack/react-router`: `temporalSerializationAdapters` and one adapter per type                                                                                                                                                                               |
-| `parseISO`  | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                                               |
+## Guides
 
 ### Durations
 
@@ -158,6 +289,12 @@ A `Duration` keeps calendar fields (years…days) and exact fields (hours…ns) 
 ### Intervals
 
 ```ts
+import { intervalLength, splitByUnit, subtract, type Instant, type Interval, type ZonedDateTime } from '@arki/date';
+
+declare const availability: Interval<Instant>;
+declare const booking: Interval<Instant>;
+declare const shift: Interval<ZonedDateTime>;
+
 const free = subtract(availability, booking); // 0, 1 or 2 pieces
 const byDay = [...splitByUnit(shift, 'day')]; // aligned pieces; partial first/last kept
 intervalLength(shift, 'hour', { fractional: true });
@@ -167,16 +304,16 @@ Iteration (`each`, `range`, `splitByUnit`) is lazy and bounded: more than `maxIt
 
 ### Testing time
 
-```ts
+```ts run
 import { MockClock } from '@arki/clock';
 import { createDateContext } from '@arki/date/fluent';
 
 const clock = new MockClock(new Date('2026-10-09T09:00:00Z'));
 const dates = createDateContext({ clock, timeZone: 'Europe/Bucharest', locale: 'ro-RO' });
 const deadline = dates.now().add({ hours: 2 });
-deadline.isFuture(); // true
+if (!deadline.isFuture()) throw new Error('two hours from now is in the future');
 clock.advance(3 * 60 * 60 * 1000);
-deadline.isPast(); // true
+if (!deadline.isPast()) throw new Error('three hours later it is past');
 ```
 
 There is no package-level `setTestNow`: a global test clock leaks across tests and requests. Pass a clock.
@@ -201,6 +338,8 @@ Any other letter throws. Time tokens on a `PlainDate`, and zone tokens on a valu
 `parse` is the inverse of `format` for the same tokens (no ordinals or presets): the whole text must match, names are matched case-insensitively in the pattern's locale, and impossible dates throw.
 
 ```ts
+import { parseDate, parseDateTime, parseZoned, tryParseDate } from '@arki/date';
+
 parseDate('20 May 2026', 'd MMMM yyyy'); // PlainDate 2026-05-20
 parseDateTime('2026-05-20 09:30 PM', 'yyyy-MM-dd hh:mm a'); // PlainDateTime
 parseZoned('20/05/2026 09:30', 'dd/MM/yyyy HH:mm', 'Europe/Bucharest'); // wall clock in that zone
@@ -233,6 +372,10 @@ const input = z.object({
 
 ```ts
 import { useNow, useRelativeTime, useToday } from '@arki/date/react';
+import type { Instant } from '@arki/date';
+
+declare const user: { timeZone: string };
+declare const post: { publishedAt: Instant };
 
 const now = useNow({ every: 1000 }); // Instant, re-read every second
 const today = useToday({ timeZone: user.timeZone }); // PlainDate, re-renders only when the date changes
@@ -246,11 +389,23 @@ Every hook takes `clock` so tests can drive it with a `MockClock`. The first ren
 oRPC and SuperJSON keep `Date` but not Temporal values: without help an `Instant` arrives as a string typed as `Instant`, or as `{}`. Register the codecs on both ends:
 
 ```ts
+import { RPCLink } from '@orpc/client/fetch';
+import SuperJSON from 'superjson';
+
 import { registerTemporalTypes, temporalJsonSerializers } from '@arki/date/orpc';
 
-new RPCHandler(appRouter, { customJsonSerializers: temporalJsonSerializers }); // server
-new RPCLink({ url, customJsonSerializers: temporalJsonSerializers }); // web and native clients
+const link = new RPCLink({ url: 'https://api.example.com/rpc', customJsonSerializers: temporalJsonSerializers }); // web and native clients
 registerTemporalTypes(SuperJSON); // where the TanStack Query client dehydrates with SuperJSON
+```
+
+The server side uses the same list:
+
+```ts skip="needs @orpc/server and an app router, which this package does not depend on"
+import { RPCHandler } from '@orpc/server/fetch';
+
+import { temporalJsonSerializers } from '@arki/date/orpc';
+
+new RPCHandler(appRouter, { customJsonSerializers: temporalJsonSerializers });
 ```
 
 Values travel as ISO text and are checked on arrival. The codecs use oRPC custom type ids 100–104 (`TEMPORAL_RPC_TYPES`).
@@ -259,7 +414,7 @@ Values travel as ISO text and are checked on arrival. The codecs use oRPC custom
 
 TanStack Start sends loader data, server-function results and the SSR payload through seroval, which keeps `Date` but throws on a Temporal value. Register the adapters once in `src/start.ts`:
 
-```ts
+```ts skip="needs @tanstack/react-start, which this package does not depend on"
 import { createStart } from '@tanstack/react-start';
 
 import { temporalSerializationAdapters } from '@arki/date/tanstack';
@@ -275,13 +430,16 @@ Values travel as ISO / RFC 9557 text, so a `ZonedDateTime` keeps its zone and an
 
 `fromDate(d)` keeps the **instant**. `fromPickerDate(d, { basis: 'local' })` keeps the **calendar fields** the picker showed (`new Date(2026, 0, 31)` → `2026-01-31`). They are different on purpose; `toPickerDate` round-trips and throws for a day the zone skipped.
 
-## Non-goals
 
-Recurrence rules (RRULE), natural-language parsing, a holiday database, non-ISO calendars, a mutable API, macros or plugins, a monotonic clock.
+## Documentation
 
-## Verification
+- [Agent guide](./docs/agent-guide.md): tasks, rules that bite, errors.
+- [llms.txt](./llms.txt): the index an agent reads first.
+- [Changelog](./CHANGELOG.md).
 
-`bun run test` (vitest, Node), `bun run test:bun` (same suite under Bun; the React hooks run in happy-dom), `bun run build && bun run smoke` (one check per module under `node`, `bun` and `deno`). The token formatter and `parseISO` are differential-tested against date-fns for every pattern used in the monorepo.
+## Support
+
+Report a bug or ask a question at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues). Include the input, the zone and the result you expected.
 
 <!-- bench:start -->
 ## Benchmarks

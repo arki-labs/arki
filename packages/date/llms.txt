@@ -1,0 +1,51 @@
+# @arki/date
+
+> Date and time math on Temporal values: constructors, arithmetic, calendar, intervals, business days, formatting, parsing and relative text. It is not a mutable date class or a recurrence engine.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/date`: Date and time math on Temporal values: constructors, arithmetic, calendar, intervals, business days, formatting, parsing and relative text. `DEFAULT_BUSINESS_CALENDAR`, `DEFAULT_WEEKEND`, `DateValue`, `ISO_WEEK`, `SUNDAY_WEEK`, `Temporal`, `absDuration`, `abuts`, `add`, `addBusinessDays`, `addDuration`, `age`; and 219 more.
+- `@arki/date/types`: Shared vocabulary for @arki/date. `ISO_WEEK`, `SUNDAY_WEEK`, `Temporal`, `isDuration`, `isInstant`, `isPlainDate`, `isPlainDateTime`, `isPoint`, `isZonedDateTime`, `kindOf`; types `Amount`, `AmountFor`; and 28 more.
+- `@arki/date/core`: Construction and parsing. `fromMillis`, `fromUnix`, `instant`, `parseISO`, `plainDate`, `plainDateTime`, `toISO`, `toInstant`, `toMillis`, `toPlainDate`, `toUnix`, `tryParse`; and 5 more.
+- `@arki/date/interop`: The native `Date` boundary. `fromDate`, `fromPickerDate`, `systemTimeZone`, `toDate`, `toPickerDate`; types `DateBasis`.
+- `@arki/date/math`: Arithmetic, field access, boundaries, rounding and differences. `add`, `ceil`, `diff`, `diffElapsed`, `elapsedNanoseconds`, `endOf`, `floor`, `nextBoundary`, `parts`, `round`, `set`, `startOf`; and 12 more.
+- `@arki/date/calendar`: Calendar facts: weekdays, week numbers, quarters, leap years, age. `DEFAULT_WEEKEND`, `age`, `calendarDaysBetween`, `dayOfWeek`, `dayOfYear`, `daysInMonth`, `daysInYear`, `easter`, `isLeapYear`, `isWeekday`, `isWeekend`, `isoWeek`; and 9 more.
+- `@arki/date/compare`: Equality, ordering and predicates. `clamp`, `compareAsc`, `compareDesc`, `equals`, `isAfter`, `isBefore`, `isBetween`, `isSame`, `isSameDay`, `isSameMonth`, `isSameOrAfter`, `isSameOrBefore`; and 8 more.
+- `@arki/date/zone`: Time-zone projection. `atTime`, `inZone`, `isValidTimeZone`, `offset`, `offsetMinutes`, `reinterpretZone`, `toUTC`.
+- `@arki/date/duration`: Durations: construction, field algebra, normalization, totals and human-readable text. `absDuration`, `addDuration`, `compareDurations`, `days`, `duration`, `formatDurationISO`, `formatDurationIntl`, `hours`, `humanizeDuration`, `isNegativeDuration`, `isZeroDuration`, `milliseconds`; and 15 more.
+- `@arki/date/interval`: Interval algebra over half-open ranges `[start, end)`. `abuts`, `contains`, `each`, `gap`, `gapsBetween`, `intersection`, `interval`, `intervalEquals`, `intervalLength`, `isEmptyInterval`, `mergeIntervals`, `overlaps`; and 10 more.
+- `@arki/date/business`: Business-day arithmetic: weekends and holidays. `DEFAULT_BUSINESS_CALENDAR`, `addBusinessDays`, `businessCalendar`, `businessDaysBetween`, `businessDaysIn`, `isBusinessDay`, `nextBusinessDay`, `previousBusinessDay`, `subBusinessDays`; types `BusinessCalendar`, `BusinessCalendarOptions`.
+- `@arki/date/format`: Formatting: Unicode LDML patterns (`format`), ISO 8601 text (`formatISO`) and locale-native output (`formatIntl`). `format`, `formatISO`, `formatIntl`, `formatRange`; types `FormatIntlOptions`, `FormatOptions`.
+- `@arki/date/parse`: Pattern parsing: the inverse of `format`. `parseDate`, `parseDateTime`, `parseZoned`, `tryParseDate`, `tryParseDateTime`, `tryParseZoned`; types `ParseOptions`.
+- `@arki/date/relative`: "In 3 days" / "3 days ago" — relative time text via `Intl.RelativeTimeFormat`. `relative`, `relativeToNow`, `relativeUnit`; types `RelativeOptions`, `RelativeUnit`, `RelativeValue`.
+- `@arki/date/clock`: "What time is it?" — answered only through an `@arki/clock` `Clock`, read once per call and copied into an immutable value. `isFuture`, `isPast`, `isThisMonth`, `isThisWeek`, `isThisYear`, `isToday`, `isTomorrow`, `isYesterday`, `now`, `nowIn`, `today`; types `ClockOptions`; and 1 more.
+- `@arki/date/fluent`: The fluent face of the package: `date(x, { timeZone })` wraps a `ZonedDateTime` plus the display/clock settings it should use, and exposes every receiver-first function as a method. `DateValue`, `createDateContext`, `date`; types `DateContext`, `DateContextOptions`, `DateLike`.
+- `@arki/date/zod`: Zod v4 schemas for the Temporal values this package returns. `durationSchema`, `instantSchema`, `intervalSchema`, `plainDateSchema`, `plainDateTimeSchema`, `timeZoneSchema`, `zonedDateTimeSchema`.
+- `@arki/date/react`: React 19 hooks that keep a Temporal value in step with a clock. `useNow`, `useRelativeTime`, `useToday`; types `NowOptions`.
+- `@arki/date/orpc`: Temporal values across process boundaries: oRPC's RPC protocol and SuperJSON (TanStack Query SSR dehydration). `TEMPORAL_RPC_TYPES`, `registerTemporalTypes`, `temporalJsonSerializers`.
+- `@arki/date/tanstack`: Temporal values across TanStack Router and Start boundaries: loader data, server-function results and the dehydrated SSR payload. `durationSerializationAdapter`, `instantSerializationAdapter`, `plainDateSerializationAdapter`, `plainDateTimeSerializationAdapter`, `temporalSerializationAdapters`, `zonedDateTimeSerializationAdapter`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Count business days with holidays](docs/agent-guide.md#count-business-days-with-holidays)
+- [Add a month without surprises](docs/agent-guide.md#add-a-month-without-surprises)
+- [Show a moment in the user's zone](docs/agent-guide.md#show-a-moment-in-the-users-zone)
+- [Test code that depends on time](docs/agent-guide.md#test-code-that-depends-on-time)
+- [Parse user text](docs/agent-guide.md#parse-user-text)
+- [Send values over the wire](docs/agent-guide.md#send-values-over-the-wire)
+
+## Rules that bite
+
+- Time comes from a `Clock` you pass. The zone comes from an argument. Nothing is hidden.
+- `add` clamps (Jan 31 + 1 month = Feb 28). Pass `{ overflow: 'reject' }` to throw.
+- `zoned` on a zone-less string throws. `tryParse*` returns `undefined`.
+- `diff` counts calendar units, `diffElapsed` counts exact time.
+- `zod`, `react`, `orpc` and `tanstack` are subpaths, not root exports.

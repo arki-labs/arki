@@ -58,6 +58,9 @@
     "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
+    "llms.txt",
+    "docs/**",
+    "AGENTS.md",
     "package.json"
   ],
   "scripts": {
@@ -69,7 +72,8 @@
     "lint": "eslint .",
     "test:runtimes": "arki-runtimes",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:docs": "arki-doc-examples"
   },
   "prettier": "@arki/prettier-config",
   "devDependencies": {

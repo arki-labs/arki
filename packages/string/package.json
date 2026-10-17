@@ -145,6 +145,9 @@
     "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
+    "llms.txt",
+    "docs/**",
+    "AGENTS.md",
     "package.json"
   ],
   "scripts": {
@@ -156,8 +159,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:bun": "bun --bun vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false && tsc -p examples/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "devDependencies": {

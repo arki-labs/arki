@@ -5,11 +5,26 @@
 
 /** Stable error codes of `@arki/clock`. */
 export const CLOCK_ERROR_CODES = {
-  /** `MockClock.advance` got a negative or non-finite number of milliseconds. */
+  /**
+   * `MockClock.advance` or `advanceAsync` got a negative or non-finite number of milliseconds.
+   *
+   * @fix Pass a step that is zero or more. Use `setNow` to move the mock clock back.
+   * @verify bun run test
+   */
   invalidAdvance: 'ARKI_CLOCK_E001',
-  /** `setTimer` or `sleep` got a delay that is negative, not finite, or longer than a timer can hold. */
+  /**
+   * `setTimer` or `sleep` got a delay that is negative, not finite, or longer than a timer can hold.
+   *
+   * @fix Pass a finite delay from 0 up to `MAX_TIMER_MS` (about 24.8 days). Split a longer wait into steps.
+   * @verify bun run test
+   */
   invalidDelay: 'ARKI_CLOCK_E002',
-  /** A `sleep` was cut short by its `AbortSignal`. `cause` is `signal.reason`. */
+  /**
+   * A `sleep` was cut short by its `AbortSignal`. `cause` is `signal.reason`.
+   *
+   * @fix Catch `ClockError` with this code where you abort, or check `signal.aborted` before you sleep.
+   * @verify bun run test
+   */
   aborted: 'ARKI_CLOCK_E003',
 } as const;
 

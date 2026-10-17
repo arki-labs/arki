@@ -5,19 +5,42 @@
 
 /** Stable error codes of `@arki/async`. */
 export const ASYNC_ERROR_CODES = {
-  /** A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}. */
+  /**
+   * A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}.
+   *
+   * @fix Pass a finite wait from 0 up to `MAX_WAIT_MS` (about 24.8 days). For a longer wait, sleep again when the timer fires.
+   * @verify bun run test
+   */
   invalidWait: 'ARKI_ASYNC_E001',
   /**
    * Work was cut short by its `AbortSignal` before it finished: a `sleep`, a
    * `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call.
    * `cause` is `signal.reason`.
+   *
+   * @fix Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work.
+   * @verify bun run test
    */
   aborted: 'ARKI_ASYNC_E002',
-  /** One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any. */
+  /**
+   * One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any.
+   *
+   * @fix Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice.
+   * @verify bun run test
+   */
   cleanupFailed: 'ARKI_ASYNC_E003',
-  /** A `timeout` deadline passed before the task finished. */
+  /**
+   * A `timeout` deadline passed before the task finished.
+   *
+   * @fix Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline.
+   * @verify bun run test
+   */
   timedOut: 'ARKI_ASYNC_E004',
-  /** A `concurrency` limit is not a positive integer or `Infinity`. */
+  /**
+   * A `concurrency` limit is not a positive integer or `Infinity`.
+   *
+   * @fix Pass a whole number of at least 1, or leave `concurrency` out for no limit.
+   * @verify bun run test
+   */
   invalidConcurrency: 'ARKI_ASYNC_E005',
 } as const;
 
