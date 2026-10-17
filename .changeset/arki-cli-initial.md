@@ -1,0 +1,5 @@
+---
+'@arki/cli': minor
+---
+
+New package: typed command-line programs from one `defineCommand({...})`. The input schema (any Standard Schema with JSON Schema) drives the flags, their coercion and their help; `run` returns data or an `@arki/failure` value, and the output type is inferred with failures removed. `defineCli` builds a lazy command tree with groups, aliases and "did you mean" suggestions; `main(argv, io)` returns the exit code without touching the process, and `run(program)` is the process boundary (argv, stdio, terminal, SIGINT/SIGTERM). A run writes the `arki.cli/1` JSON envelope when stdout is not a terminal and text when it is (`-o`, `--json`, `ARKI_OUTPUT` override; `--fields`, ndjson), with stable exit codes (0 ok, 1 bug, 2 usage, 3 failure, 4 retryable, 5 input required, 130 interrupted). Global flags: `--input-json`, `--input-file`, `--dry-run` (runs `preview`), `-q`, `-h`, `--version`. Help and `--version` never run a command or resolve services. Runs on Node, Bun and Deno.

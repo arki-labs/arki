@@ -1,0 +1,111 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`envelope arki.cli/1 > a failure run returns with status 503: retryable, outcome unknown, exit 4 1`] = `
+{
+  "command": [
+    "seed",
+  ],
+  "data": null,
+  "error": {
+    "code": "embed.not_ready",
+    "data": {
+      "provider": "local",
+    },
+    "docsUrl": "https://example.test/errors#embed-not-ready",
+    "exitCode": 4,
+    "issues": [],
+    "message": "provider local is not ready",
+    "outcome": "unknown",
+    "remediation": "Start the provider, then retry.",
+    "retryable": true,
+  },
+  "meta": {
+    "dryRun": false,
+    "durationMs": 0,
+    "schema": "arki.cli/1",
+    "version": "2.0.0",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope arki.cli/1 > a thrown error is cli.bug, exit 1, message only: no stack in the envelope 1`] = `
+{
+  "command": [
+    "crash",
+  ],
+  "data": null,
+  "error": {
+    "code": "cli.bug",
+    "data": null,
+    "docsUrl": "https://example.test/errors#cli-bug",
+    "exitCode": 1,
+    "issues": [],
+    "message": "database password is hunter2 at line 3",
+    "outcome": "unknown",
+    "remediation": "This is a bug in the command; report it with the command line that caused it.",
+    "retryable": false,
+  },
+  "meta": {
+    "dryRun": false,
+    "durationMs": 0,
+    "schema": "arki.cli/1",
+    "version": "2.0.0",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope arki.cli/1 > invalid input: issues name the flag, outcome unchanged, exit 2 1`] = `
+{
+  "command": [
+    "seed",
+  ],
+  "data": null,
+  "error": {
+    "code": "cli.invalid_input",
+    "data": null,
+    "docsUrl": "https://example.test/errors#cli-invalid-input",
+    "exitCode": 2,
+    "issues": [
+      {
+        "flag": "--batches",
+        "message": "--batches expected an integer, received "big"",
+        "path": [
+          "batches",
+        ],
+      },
+    ],
+    "message": "--batches expected an integer, received "big"",
+    "outcome": "unchanged",
+    "remediation": "Fix the flags named in the issues; run with --help to see them.",
+    "retryable": false,
+  },
+  "meta": {
+    "dryRun": false,
+    "durationMs": 0,
+    "schema": "arki.cli/1",
+    "version": "2.0.0",
+  },
+  "ok": false,
+}
+`;
+
+exports[`envelope arki.cli/1 > ok: data, error null, exit 0 1`] = `
+{
+  "command": [
+    "seed",
+  ],
+  "data": {
+    "embedded": 200,
+  },
+  "error": null,
+  "meta": {
+    "dryRun": false,
+    "durationMs": 0,
+    "schema": "arki.cli/1",
+    "version": "2.0.0",
+  },
+  "ok": true,
+}
+`;

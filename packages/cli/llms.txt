@@ -1,0 +1,31 @@
+# @arki/cli
+
+> Typed command-line programs from one `defineCommand({...})`: flags from the input schema, a JSON envelope when piped, text on a terminal, stable exit codes, help that never runs a command. Not a prompt or color library; it does not configure logging.
+
+`main(argv, io)` never exits the process; `run(program)` is the only process boundary.
+
+## Import paths
+
+- `@arki/cli`: `defineCommand`, `group`, `defineCli`, `run`, `ExitCode`, the failures `UnknownCommand`, `InvalidInput`, `PreviewUnsupported`, `InputRequired`, `ConfirmationRequired`, `Cancelled`, and the types `Command`, `AnyCommand`, `RunContext`, `InputOf`, `OutputOf`, `ServicesOf`, `CommandTree`, `Group`, `Cli`, `Program`, `Io`, `Ui`, `Envelope`.
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Add a command](docs/agent-guide.md#add-a-command)
+- [Group commands](docs/agent-guide.md#group-commands)
+- [Return a failure](docs/agent-guide.md#return-a-failure)
+- [Offer a dry run](docs/agent-guide.md#offer-a-dry-run)
+- [Test a command](docs/agent-guide.md#test-a-command)
+
+## Rules that bite
+
+- Write no type arguments: input, output and services are inferred.
+- Command stdout goes through the envelope or `ui.out`, never `console.log` or `process.stdout`.
+- Input keys may not be global flag names (`output`, `json`, `fields`, `quiet`, `dryRun`, `help`, `version`, …).
+- Schema defaults apply in validation; the parser never fills them.
+- `main` writes nowhere for an `io` field you leave out.

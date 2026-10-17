@@ -1,0 +1,74 @@
+{
+  "name": "@arki/cli",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Typed command-line programs from one defineCommand: schema-driven flags, a JSON envelope when piped, text on a TTY, stable exit codes, and help that never loads a handler.",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "!src/**/__fixtures__/**",
+    "docs/**",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "bench": "bun run build && tsc -p tsconfig.bench.json && arki-bench",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/failure": "workspace:*",
+    "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@optique/core": "1.3.6",
+    "@stricli/core": "1.3.0",
+    "@types/node": "catalog:node",
+    "citty": "0.2.2",
+    "commander": "15.0.0",
+    "eslint": "catalog:",
+    "gunshi": "0.37.3",
+    "incur": "0.7.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  }
+}
