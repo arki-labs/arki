@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
-import { redactSecrets as adminRedactSecrets } from '@arki/admin/module';
+import { isModuleError, redactSecrets as adminRedactSecrets } from '@arki/admin/module';
 import { z } from '@arki/contracts';
 
 import type { QueueInstance } from '../types/builder.ts';
@@ -15,7 +15,6 @@ import { createRuntimeLocalQueueInstance, initQueue } from '../runtime-local/ind
 import {
   pgBossFailedJobSource,
   QUEUE_FOREMAN_ERROR_CODES,
-  QueueForemanError,
   queueForemanModule,
   redactSecrets,
 } from './index.ts';
@@ -81,9 +80,8 @@ async function expectCode(promise: Promise<unknown>, code: string): Promise<void
     () => null,
     (error_: unknown) => error_,
   );
-  expect(error).toBeInstanceOf(QueueForemanError);
-  if (!(error instanceof QueueForemanError)) throw new Error('unreachable');
-  expect(error.code).toBe(code);
+  expect(isModuleError(error)).toBe(true);
+  expect(error).toMatchObject({ code });
 }
 
 describe('T(queue-foreman)', () => {

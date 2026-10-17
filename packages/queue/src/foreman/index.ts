@@ -6,13 +6,13 @@
  */
 import { z } from 'zod';
 
-import { defineAction, defineModule, defineRead, redactSecrets } from '@arki/admin/module';
+import { defineAction, defineModule, defineRead, moduleError, redactSecrets } from '@arki/admin/module';
 import { getLogger } from '@arki/log';
 
 import type { FailedJobRecord, FailedJobSource } from './source.ts';
-import { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError } from './errors.ts';
+import { QUEUE_FOREMAN_ERROR_CODES } from './errors.ts';
 
-export { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError, type QueueForemanErrorCode } from './errors.ts';
+export { QUEUE_FOREMAN_ERROR_CODES, type QueueForemanErrorCode } from './errors.ts';
 export { bullmqFailedJobSource, type BullMQFailedJobSourceOptions } from './bullmq-source.ts';
 export { pgBossFailedJobSource, type PgBossFailedJobSourceOptions } from './pg-boss-source.ts';
 export { redactSecrets };
@@ -60,8 +60,9 @@ export function queueForemanModule(options: QueueForemanOptions) {
   function sourceFor(queue: string): FailedJobSource {
     const source = options.queues[queue];
     if (!source) {
-      throw new QueueForemanError(
+      throw moduleError(
         QUEUE_FOREMAN_ERROR_CODES.unknownQueue,
+        404,
         `No queue is registered under "${queue}".`,
         `Use one of: ${entries.map(([key]) => key).join(', ') || '(none registered)'}.`,
       );
@@ -72,8 +73,9 @@ export function queueForemanModule(options: QueueForemanOptions) {
   async function requireFailed(queue: string, jobId: string): Promise<FailedJobRecord> {
     const record = await sourceFor(queue).getFailed(jobId);
     if (!record) {
-      throw new QueueForemanError(
+      throw moduleError(
         QUEUE_FOREMAN_ERROR_CODES.notFailed,
+        409,
         `Job ${jobId} is not failed any more. It was already re-queued, or it is gone.`,
         'Reload the failed jobs list.',
       );
@@ -149,8 +151,9 @@ export function queueForemanModule(options: QueueForemanOptions) {
     execute: async ({ queue, jobId }, _ctx: Record<string, never>, permit) => {
       const current = await requireFailed(queue, jobId);
       if (current.revision !== permit.expectedRevision) {
-        throw new QueueForemanError(
+        throw moduleError(
           QUEUE_FOREMAN_ERROR_CODES.staleRevision,
+          409,
           `Job ${jobId} changed since the preview (it failed again).`,
           'Preview the retry again and approve the new revision.',
         );
@@ -158,8 +161,9 @@ export function queueForemanModule(options: QueueForemanOptions) {
       // The source re-checks the revision inside its write, so two racing retries cannot both win.
       const requeued = await sourceFor(queue).retryFailed(jobId, permit.expectedRevision);
       if (!requeued) {
-        throw new QueueForemanError(
+        throw moduleError(
           QUEUE_FOREMAN_ERROR_CODES.notFailed,
+          409,
           `Job ${jobId} was already re-queued since the preview.`,
           'Reload the failed jobs list.',
         );

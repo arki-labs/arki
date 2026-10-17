@@ -50,7 +50,8 @@ import { ADMIN_ERROR_CODES, AdminError } from './errors';
 import { jsonObjectSchema, schemaHash } from './json';
 
 export type { AdminErrorCode } from './errors';
-export { ADMIN_ERROR_CODES, AdminError } from './errors';
+export { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors';
+export type { ModuleError } from './errors';
 export type { JsonObject, JsonValue } from './json';
 export { canonicalJson, jsonObjectSchema, jsonValueSchema, schemaHash } from './json';
 

@@ -34,7 +34,7 @@ import type { AdminErrorCode } from './errors';
 import type { AnyAction, AnyRead, ForemanModule, Permit } from './module';
 import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol';
 import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
+import { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors';
 import { canonicalJson, jsonValueSchema, sha256 } from './json';
 import { describeModule } from './module';
 import {
@@ -91,7 +91,7 @@ export type CreateForemanHandlerOptions<TCtx> = {
   /** Replay protection. Pass an `@arki/kv` `KV`. */
   nonces: NonceStore;
   /**
-   * Execution receipts (`kvReceiptStore` or `@arki/admin/pg` `journalReceiptStore`).
+   * Execution receipts (`kvReceiptStore` or `@arki/journal/foreman` `journalReceiptStore`).
    * Required for writes: with `writes: 'on'` and no store, every execute is refused
    * (`ARKI_ADMIN_E017`). Serve it to Foreman with `withCoreModules({ receipts })`.
    */
@@ -432,11 +432,12 @@ export function createForemanHandler<TCtx>(
         return receipt.result;
       }
       case 'failed': {
-        throw new AdminError(
-          receipt.error.code,
-          receipt.error.message,
-          'This execution already ran and failed. Propose and approve it again.',
-        );
+        const again = 'This execution already ran and failed. Propose and approve it again.';
+        const adminCode = Object.values(ADMIN_ERROR_CODES).find(code => code === receipt.error.code);
+        if (adminCode === undefined) {
+          throw moduleError(receipt.error.code, receipt.error.status ?? 400, receipt.error.message, again);
+        }
+        throw new AdminError(adminCode, receipt.error.message, again);
       }
       case 'pending':
       case undefined: {
@@ -585,7 +586,12 @@ function unknownCapability(url: URL): AdminError {
 }
 
 /** The code and message a failure shows on the wire. 5xx messages never carry the app's internal message. */
-function publicError(error: unknown): { code: AdminErrorCode; message: string } {
+function publicError(error: unknown): { code: string; message: string; status?: number } {
+  if (isModuleError(error)) {
+    const prefix = `${error.code}: `;
+    const message = error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+    return { code: error.code, message, status: error.status };
+  }
   if (!(error instanceof AdminError)) {
     return { code: ADMIN_ERROR_CODES.handlerFailed, message: 'The app failed to handle the request.' };
   }
@@ -604,6 +610,9 @@ function publicError(error: unknown): { code: AdminErrorCode; message: string } 
 /** Status and wire body for a failure. 5xx bodies never carry the app's internal message. */
 function errorResponse(error: unknown, url: URL): [number, ErrorBody] {
   const { code, message } = publicError(error);
+  if (isModuleError(error)) {
+    return [error.status, { error: { code, message, remediation: error.remediation } }];
+  }
   const status = error instanceof AdminError ? (STATUS_BY_CODE[error.code] ?? 500) : 500;
   if (error instanceof AdminError) {
     if (status >= 500) {

@@ -15,19 +15,18 @@
  * commit and then crash before the settle leaves the receipt `pending`, which
  * Foreman reads as "unknown" — never as "not applied".
  *
- * `@arki/journal` and `drizzle-orm` are optional peers: only this entry needs them.
+ * `@arki/admin` is an optional peer: only the `@arki/journal/foreman` entry needs it.
  */
 import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
 
-import type { Journal, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { ReceiptClaimResult, ReceiptStore, StoredReceipt } from '@arki/admin/receipts';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+import { ADMIN_ERROR_CODES, AdminError } from '@arki/admin/module';
+import { pendingReceiptSchema, settledReceiptSchema, storedReceiptSchema } from '@arki/admin/receipts';
 
-import { z } from '@arki/contracts';
-import { isJournalError } from '@arki/journal';
-
-import type { ReceiptClaimResult, ReceiptStore, StoredReceipt } from './receipts';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { pendingReceiptSchema, settledReceiptSchema, storedReceiptSchema } from './receipts';
+import type { Journal, JournalDefinitions, RootDb, TransactionSource } from '../index.js';
+import { isJournalError } from '../index.js';
 
 /**
  * The receipts table, shaped for a journal entity (string `id`, `version`).
@@ -63,9 +62,11 @@ export type JournalReceiptStoreOptions<
 };
 
 /** A receipt store on `@arki/journal`. Call it once at boot: it defines the `foreman_receipt` entity. */
-export function journalReceiptStore<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  options: JournalReceiptStoreOptions<Meta, Tx, AppDb>,
-): ReceiptStore {
+export function journalReceiptStore<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(options: JournalReceiptStoreOptions<Meta, Tx, AppDb>): ReceiptStore {
   const { j, journal, db, tables, meta } = options;
 
   const ReceiptClaimed = j.event('ForemanReceiptClaimed', z.object({ receipt: pendingReceiptSchema }));

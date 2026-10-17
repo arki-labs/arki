@@ -8,12 +8,13 @@ import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
+import { isModuleError } from '@arki/admin/module';
 import { z } from '@arki/contracts';
 import { backoff } from '@arki/resilience';
 
 import type { BullMQQueueInstance } from '../types/builder.ts';
 import { initQueue } from '../init.ts';
-import { bullmqFailedJobSource, QUEUE_FOREMAN_ERROR_CODES, QueueForemanError, queueForemanModule } from './index.ts';
+import { bullmqFailedJobSource, QUEUE_FOREMAN_ERROR_CODES, queueForemanModule } from './index.ts';
 
 let redisContainer: StartedTestContainer;
 let redisUrl: string;
@@ -110,7 +111,7 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
     () => null,
     (error_: unknown) => error_,
   );
-  if (!(error instanceof QueueForemanError)) throw new Error(`expected a QueueForemanError, got ${String(error)}`);
+  if (!isModuleError(error)) throw new Error(`expected a ModuleError, got ${String(error)}`);
   return error.code;
 }
 
@@ -164,7 +165,7 @@ describe('T(queue-foreman-bullmq)', () => {
     // The id of the `other` job aimed at the `mail` queue (ids are per queue, so this id may not exist there).
     const forged = await module.actions.retryJob.runPreview({ queue: 'mail', jobId: `${otherId}-x` }, {}).then(
       () => 'ok',
-      (error: unknown) => (error instanceof QueueForemanError ? error.code : 'other'),
+      (error: unknown) => (isModuleError(error) ? error.code : 'other'),
     );
     expect(forged).toBe(QUEUE_FOREMAN_ERROR_CODES.notFailed);
     // BullMQ keeps its own bookkeeping under the same key prefix, so a hostile id such as "meta" must not read as a job.

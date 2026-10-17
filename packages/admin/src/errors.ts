@@ -66,3 +66,42 @@ export class AdminError extends Error {
     this.remediation = remediation;
   }
 }
+
+/**
+ * A coded refusal a module declares itself. `code` is the module's own (`ARKI_JOURNAL_E001`);
+ * the dispatcher answers it with `status` and never learns what it means. Build one with {@link moduleError}.
+ */
+export class ModuleError extends Error {
+  readonly code: string;
+  /** The HTTP status of the answer: 400 to 499. */
+  readonly status: number;
+  /** What to do about it, in one sentence. */
+  readonly remediation: string;
+
+  constructor(code: string, status: number, message: string, remediation: string) {
+    super(`${code}: ${message}`);
+    this.name = 'ModuleError';
+    this.code = code;
+    this.status = status;
+    this.remediation = remediation;
+  }
+}
+
+/** A module's own coded refusal. `status` must be a 4xx: a module cannot make the dispatcher answer a server error. */
+export function moduleError(code: string, status: number, message: string, remediation: string): ModuleError {
+  if (code.trim() === '') {
+    throw new AdminError(ADMIN_ERROR_CODES.invalidConfig, 'A module error needs a code.', 'Pass the module\'s own code.');
+  }
+  if (!Number.isInteger(status) || status < 400 || status > 499) {
+    throw new AdminError(
+      ADMIN_ERROR_CODES.invalidConfig,
+      `Module error ${code} has status ${String(status)}; a module error is a client error, 400 to 499.`,
+      'Use a 4xx status. A failure of the app itself is a plain Error and answers ARKI_ADMIN_E015.',
+    );
+  }
+  return new ModuleError(code, status, message, remediation);
+}
+
+export function isModuleError(error: unknown): error is ModuleError {
+  return error instanceof ModuleError;
+}

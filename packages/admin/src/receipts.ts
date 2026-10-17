@@ -19,7 +19,7 @@
  * no longer land.
  *
  * Two stores: {@link kvReceiptStore} here (any `@arki/kv` `KV`), and
- * `journalReceiptStore` in `@arki/admin/pg` (Postgres through `@arki/journal`).
+ * `journalReceiptStore` in `@arki/journal/foreman` (Postgres through `@arki/journal`).
  */
 import { z } from '@arki/contracts';
 
@@ -95,7 +95,12 @@ export const failedReceiptSchema = z.object({
   requestHash: requestHashSchema,
   claimedAt: isoSchema,
   failedAt: isoSchema,
-  error: z.object({ code: z.enum(ADMIN_ERROR_CODES), message: z.string().max(2000) }),
+  error: z.object({
+    code: z.string().min(1).max(64),
+    message: z.string().max(2000),
+    /** Set for a module's own error, so a repeat answers the same status. */
+    status: z.number().int().min(400).max(499).optional(),
+  }),
 });
 
 export const settledReceiptSchema = z.discriminatedUnion('status', [appliedReceiptSchema, failedReceiptSchema]);

@@ -152,9 +152,9 @@ export const requestBodySchema = z.strictObject({ input: jsonValueSchema });
 /** Success response body. */
 export const successBodySchema = z.strictObject({ data: jsonValueSchema });
 
-/** Error response body. `code` is one of {@link ADMIN_ERROR_CODES}. */
+/** Error response body. `code` is one of {@link ADMIN_ERROR_CODES}, or a module's own code. */
 export const errorBodySchema = z.strictObject({
-  error: z.strictObject({ code: z.enum(ADMIN_ERROR_CODES), message: z.string(), remediation: z.string() }),
+  error: z.strictObject({ code: z.string().min(1).max(64), message: z.string(), remediation: z.string() }),
 });
 
 /** Whether the app accepts executes (`FOREMAN_WRITES`). */

@@ -21,7 +21,7 @@ import { z } from '@arki/contracts';
 
 import type { JsonValue } from './json';
 import type { ForemanManifest, KeyUse, PermitClaim } from './protocol';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
+import { ADMIN_ERROR_CODES, AdminError, moduleError } from './errors';
 import { sha256 } from './json';
 import {
   audienceSchema,
@@ -321,7 +321,11 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
       const failure = errorBodySchema.safeParse(result.body);
       if (failure.success) {
         const { code, message, remediation } = failure.data.error;
-        throw new AdminError(code, `${target.aud} answered HTTP ${String(result.status)}: ${message}`, remediation);
+        const text = `${target.aud} answered HTTP ${String(result.status)}: ${message}`;
+        const adminCode = Object.values(ADMIN_ERROR_CODES).find(known => known === code);
+        if (adminCode !== undefined) throw new AdminError(adminCode, text, remediation);
+        // A module's own code: keep it, with the status the app answered.
+        throw moduleError(code, result.status, text, remediation);
       }
     }
     throw new AdminError(

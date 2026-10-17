@@ -189,7 +189,7 @@ async function signedRequest(raw: RawRequest): Promise<Request> {
   });
 }
 
-async function errorCode(response: Response): Promise<AdminErrorCode> {
+async function errorCode(response: Response): Promise<string> {
   return errorBodySchema.parse(await response.json()).error.code;
 }
 

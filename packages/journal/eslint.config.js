@@ -9,13 +9,13 @@ const orpcOnlyInAdapter = {
   message: '`@orpc/server` is an optional peer. Only `src/orpc.ts` may import it, so the core entry loads without it.',
 };
 
-// `src/dot.ts` and `src/orpc.ts` are the adapters; `src/test-support.ts` is test scaffolding.
+// `src/dot.ts`, `src/orpc.ts` and `src/foreman/` are the adapters; `src/test-support.ts` is test scaffolding.
 export default [
-  ...library({ adapters: ['src/dot.ts', 'src/orpc.ts', 'src/test-support.ts'] }),
+  ...library({ adapters: ['src/dot.ts', 'src/orpc.ts', 'src/foreman/*.ts', 'src/test-support.ts'] }),
   {
     // The core may not import the optional peers (features live in `@arki/dot/feature`).
     files: ['src/**/*.ts'],
-    ignores: ['src/**/*.test.ts', 'src/dot.ts', 'src/orpc.ts', 'src/test-support.ts'],
+    ignores: ['src/**/*.test.ts', 'src/dot.ts', 'src/orpc.ts', 'src/foreman/*.ts', 'src/test-support.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

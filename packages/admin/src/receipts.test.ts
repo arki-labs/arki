@@ -11,26 +11,30 @@ import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
-import { initJournal } from '@arki/journal';
-import { journalTables } from '@arki/journal/pg';
-import { openJournalDb } from '@arki/journal/testing';
 
 import type { PermitClaim } from './client';
 import type { ForemanEnv } from './env';
 import type { Permit } from './module';
-import type { ReceiptStore, SettledReceipt } from './receipts';
+import type { ReceiptStore } from './receipts';
 import { createForemanClient, generateForemanKeyPair } from './client';
 import { withCoreModules } from './core';
 import { createForemanHandler } from './dispatcher';
 import { foremanEnvShape } from './env';
-import { ADMIN_ERROR_CODES, AdminError, defineAction, defineModule, describeModule } from './module';
-import { foremanReceiptTables, journalReceiptStore } from './pg';
+import {
+  ADMIN_ERROR_CODES,
+  AdminError,
+  defineAction,
+  defineModule,
+  describeModule,
+  isModuleError,
+  moduleError,
+} from './module';
 import { kvReceiptStore, RECEIPT_WINDOW_SECONDS, receiptAnswerSchema } from './receipts';
 import { memoryKv } from './test-support';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
-type Behaviour = 'ok' | 'throw' | 'badOutput';
+type Behaviour = 'ok' | 'throw' | 'badOutput' | 'moduleError';
 
 const AUD = 'novelette:prod';
 const BASE_URL = 'https://novelette.test';
@@ -65,6 +69,9 @@ function buildModule(behaviour: Behaviour) {
       preview: (_input, _ctx: Ctx) => Promise.resolve({ revision: 'rev_3' }),
       execute: ({ jobId }, _ctx: Ctx, permit) => {
         runs.push({ actionId: id, permit });
+        if (behaviour === 'moduleError') {
+          return Promise.reject(moduleError('ARKI_TEST_E001', 409, 'The job changed since the preview.', 'Preview again.'));
+        }
         if (behaviour === 'throw') return Promise.reject(new Error('database password leaked in this message'));
         // Breaks the action's own output schema: it ran, then answered badly.
         if (behaviour === 'badOutput') return Promise.resolve({ requeued: true, jobId: 'not a job id' });
@@ -285,6 +292,30 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
   });
 });
 
+describe('T(admin-receipts) a module declares its own errors', () => {
+  it('an action that throws a ModuleError answers its own status and code over the signed protocol, and a repeat answers the same', async () => {
+    const { execute, receiptOf } = setup({ behaviour: 'moduleError' });
+    const error: unknown = await execute('exe_mod').then(
+      () => null,
+      (error_: unknown) => error_,
+    );
+    expect(isModuleError(error)).toBe(true);
+    expect(error).toMatchObject({ code: 'ARKI_TEST_E001', status: 409, remediation: 'Preview again.' });
+    expect(await receiptOf('exe_mod')).toMatchObject({ status: 'failed', error: { code: 'ARKI_TEST_E001', status: 409 } });
+    expect(await execute('exe_mod').catch((error_: unknown) => error_)).toMatchObject({
+      code: 'ARKI_TEST_E001',
+      status: 409,
+    });
+  });
+
+  it('a ModuleError cannot be made with a server status, so a module can never fake a 5xx', () => {
+    for (const status of [500, 399, 600, 409.5]) {
+      expect(() => moduleError('ARKI_TEST_E002', status, 'no', 'no')).toThrow(ADMIN_ERROR_CODES.invalidConfig);
+    }
+    expect(moduleError('ARKI_TEST_E002', 404, 'ok', 'ok').status).toBe(404);
+  });
+});
+
 describe('T(admin-receipts) fail closed', () => {
   it('writes on and no receipt store: every execute is refused with E017 and nothing runs', async () => {
     const { execute, runs, client } = setup({ receipts: null });
@@ -371,61 +402,6 @@ describe('T(admin-receipts) the KV store', () => {
     await execute('exe_late');
     clock.advance(24 * 60 * 60 * 1000);
     expect(await receiptOf('exe_late')).toMatchObject({ status: 'applied' });
-  });
-});
-
-/** A journal receipt store on an in-memory Postgres, the way a DOT app builds it. */
-async function journalStore() {
-  const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
-  const tables = journalTables();
-  const receiptTables = foremanReceiptTables();
-  const journal = j.compose({ tables });
-  const { db } = await openJournalDb({ ...tables, ...receiptTables });
-  const store = journalReceiptStore({ j, journal, db, tables: receiptTables, meta: { actorId: 'foreman' } });
-  return { store };
-}
-
-describe('T(admin-receipts) the journal store', () => {
-  it('records claim then settle as journal events, and a repeat sees the stored receipt', async () => {
-    const { store } = await journalStore();
-    const pending = {
-      status: 'pending',
-      executionId: 'exe_j1',
-      actionId: 'queue.retryJob',
-      claimedAt: T0.toISOString(),
-    } as const;
-    expect(await store.claim(pending)).toEqual({ claimed: true });
-    expect(await store.claim(pending)).toEqual({ claimed: false, receipt: pending });
-    const applied: SettledReceipt = {
-      ...pending,
-      status: 'applied',
-      appliedAt: T0.toISOString(),
-      result: { requeued: true },
-    };
-    await store.settle(applied);
-    expect(await store.get('exe_j1')).toEqual(applied);
-    expect(await store.get('exe_unknown')).toBeUndefined();
-  });
-
-  it('of two concurrent claims for one id exactly one wins', async () => {
-    const { store } = await journalStore();
-    const pending = {
-      status: 'pending',
-      executionId: 'exe_race',
-      actionId: 'queue.retryJob',
-      claimedAt: T0.toISOString(),
-    } as const;
-    const results = await Promise.all([store.claim(pending), store.claim(pending)]);
-    expect(results.filter(result => result.claimed)).toHaveLength(1);
-  });
-
-  it('serves a lost answer end to end through the handler', async () => {
-    const { store } = await journalStore();
-    const { execute, receiptOf, runs } = setup({ receipts: store, loseExecuteAnswers: true });
-    await expect(execute('exe_journal')).rejects.toThrow();
-    expect(await execute('exe_journal').catch(() => 'lost again')).toBe('lost again');
-    expect(await receiptOf('exe_journal')).toMatchObject({ status: 'applied', result: { requeued: true } });
-    expect(runs).toHaveLength(1);
   });
 });
 

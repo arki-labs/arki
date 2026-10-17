@@ -37,6 +37,11 @@
       "import": "./dist/pg.js",
       "default": "./dist/pg.js"
     },
+    "./foreman": {
+      "types": "./dist/foreman/index.d.ts",
+      "import": "./dist/foreman/index.js",
+      "default": "./dist/foreman/index.js"
+    },
     "./http": {
       "types": "./dist/http.d.ts",
       "import": "./dist/http.js",
@@ -108,6 +113,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/admin": "workspace:*",
     "@arki/bench": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
@@ -128,6 +134,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@arki/admin": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/http": "workspace:*",
     "@electric-sql/pglite": "catalog:",
@@ -135,6 +142,9 @@
     "drizzle-kit": "catalog:drizzle"
   },
   "peerDependenciesMeta": {
+    "@arki/admin": {
+      "optional": true
+    },
     "@arki/dot": {
       "optional": true
     },
