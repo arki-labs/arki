@@ -2,7 +2,7 @@
 
 The contract between an ARKI app and Foreman (the fleet control plane). An app exposes **modules** (reads and actions) behind signed requests. Foreman reads the manifest and calls them.
 
-Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler), `./receipts` (receipt schemas and the KV store), `./pg` (the journal receipt store), `./client` (Foreman side), `./dot` (DOT slice), `./http` (v1 `/api/fleet`).
+Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler), `./receipts` (receipt schemas and the KV store), `./client` (Foreman side), `./dot` (DOT slice), `./http` (v1 `/api/fleet`).
 
 ## Turn it on
 
@@ -57,7 +57,7 @@ Keep the `/api/fleet` route. Foreman still polls it until it negotiates protocol
 ```ts
 import { foreman } from '@arki/admin/dot';
 import { feature } from '@arki/dot/feature';
-import { journalReceiptStore } from '@arki/admin/pg';
+import { journalReceiptStore } from '@arki/journal/foreman';
 
 export const operations = feature('operations', {
   needs: { kv: kvPlugin.provides.kv, db: database.provides.db }, // handles; service<T>() also works
@@ -92,6 +92,22 @@ Output is only as narrow as its schema. Zod and Valibot objects drop keys they d
 
 `core.health` has two reads, `core.health.status` and `core.health.checks`, in the v1 `fleetHealthSchema` shape. `core.manifest.get` returns the same manifest as `GET /api/foreman/manifest`. `core.receipts.get` is there when the app passes `receipts`. Both attachments add them for you (`withCoreModules`).
 
+## Module errors
+
+A module can refuse a request with its own coded error. Admin does not need to know what the code means.
+
+```ts
+import { moduleError } from '@arki/admin/module';
+
+throw moduleError('ARKI_JOURNAL_E002', 409, 'Job job_1 is not dead.', 'Reload the job and check its state.');
+```
+
+`moduleError(code, status, message, remediation)` takes the module's own `code`, an HTTP `status` from 400 to 499, a `message` and a one-sentence `remediation`. A status outside 400 to 499, or an empty code, throws `ARKI_ADMIN_E014`. A server failure is a plain `Error`; it answers `ARKI_ADMIN_E015` and its text stays in the app's log. `isModuleError(error)` and the `ModuleError` type are exported from `@arki/admin/module`.
+
+The dispatcher answers a `ModuleError` with the module's own status and code, and the client reads them back. A failed receipt keeps both, so a lost answer settled later through `core.receipts.get` still says `ARKI_JOURNAL_E002`, not a generic code. The wire and receipt `code` is therefore a string: one of `ADMIN_ERROR_CODES`, or a module's own. `@arki/journal/foreman` (`ARKI_JOURNAL_E001` to `E005`) and `@arki/queue/foreman` (`ARKI_QUEUE_E014` to `E016`) use it.
+
+`redactSecrets` also lives in `@arki/admin/module`. A module runs error text through it before it reaches the wire.
+
 ## Receipts
 
 Foreman never sends an execute twice. When an answer is lost, it asks the app what happened: `core.receipts.get({ executionId })`, signed with the read key (scope `core:read`).
@@ -115,11 +131,11 @@ An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) 
 
 **Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:prod`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
 
-**DOT app with a journal: `journalReceiptStore(...)`** (`@arki/admin/pg`). Add the table and migrate:
+**DOT app with a journal: `journalReceiptStore(...)`** (`@arki/journal/foreman`; it used to be `@arki/admin/pg`). Add the table and migrate:
 
 ```ts
 // schema.ts
-import { foremanReceiptTables } from '@arki/admin/pg';
+import { foremanReceiptTables } from '@arki/journal/foreman';
 
 export const { receipts: foremanReceipts } = foremanReceiptTables(); // table `foreman_receipts`
 ```

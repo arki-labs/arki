@@ -8,8 +8,8 @@
 - `@arki/queue/runtime-local`: the same builders on pg-boss and PGlite, with no Redis. `initQueue`, `createRuntimeLocalQueueInstance`.
 - `@arki/queue/dot`: the `@arki/dot` adapters. `queue(...)`, `queueWorker(...)`, `jobs(...)`, `durableScheduler(...)`, `outboxPlugin(...)` and `outboxJobs(...)`.
 - `@arki/queue/projection`: `project(manifest)`, which builds a queue topology document from an app manifest.
-- `@arki/queue/foreman`: the Foreman admin module `queueForemanModule(...)` (failed jobs and retry). Needs the optional peer `@arki/admin`.
-- `@arki/queue/outbox`: transactional scheduling. `outbox`, `outboxRunner`, `isOutboxError`, `OUTBOX_ERROR_CODES`. No BullMQ, Redis or pg-boss at runtime.
+- `@arki/queue/foreman`: the Foreman admin module `queueForemanModule(...)` (failed jobs and retry). Its errors are `ModuleError`s from `@arki/admin/module` (409 for a stale approval or a job no longer failed, 404 for an unknown queue; `QueueForemanError` is removed). It re-exports `redactSecrets`, which `@arki/admin/module` owns. Needs the optional peer `@arki/admin`.
+- `@arki/queue/outbox`: transactional scheduling. `outbox`, `outboxRunner`, `isOutboxError`, `OUTBOX_ERROR_CODES`. A job's `.options({ retention })` sets how long the journal keeps its finished and dead rows (outbox lane only). No BullMQ, Redis or pg-boss at runtime.
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): the model, the task map, the rules. Read it first.
