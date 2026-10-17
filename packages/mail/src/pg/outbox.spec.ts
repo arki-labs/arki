@@ -9,14 +9,16 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import type { Result } from '@arki/failure';
 import type { JobRunner } from '@arki/journal';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 import { backoff } from '@arki/resilience';
 
-import type { MailFailure, MailMessage, MailResult, MailTransport } from '../types.js';
-import { MAIL_ERROR_CODES, MailError } from '../errors.js';
+import type { MailMessage, MailTransport, SentMail, TransportFailure } from '../types.js';
+import { MAIL_ERROR_CODES } from '../errors.js';
+import { MailInvalidInput, MailQuotaExhausted, MailRejected, MailUncertain } from '../failures.js';
 import { mailer } from '../mailer.js';
 import { defineTemplate } from '../template.js';
 import { mailOutbox } from './index.js';
@@ -47,30 +49,30 @@ const magicLink = defineTemplate({
 type Call = { readonly message: MailMessage; readonly idempotencyKey: string | undefined };
 
 /** A transport that answers from a script (the last answer repeats) and records each call. */
-function provider(...answers: ('ok' | Partial<MailFailure>)[]) {
+function provider(...answers: ('ok' | TransportFailure)[]) {
   const calls: Call[] = [];
   const transport: MailTransport = {
     id: 'fake',
     send: (message, options) => {
       calls.push({ message, idempotencyKey: options.idempotencyKey });
       const answer = answers[Math.min(calls.length, answers.length) - 1] ?? 'ok';
-      const result: MailResult =
-        answer === 'ok'
-          ? { data: { id: `m${calls.length}`, transport: 'fake', status: 'accepted', recipients: [] }, error: null }
-          : {
-              data: null,
-              error: {
-                code: MAIL_ERROR_CODES.rejected,
-                message: 'busy',
-                retryable: true,
-                acceptance: 'none',
-                ...answer,
-              },
-            };
+      const result: Result<SentMail, TransportFailure> =
+        answer === 'ok' ? { id: `m${calls.length}`, transport: 'fake', status: 'accepted', recipients: [] } : answer;
       return Promise.resolve(result);
     },
   };
   return { transport, calls };
+}
+
+const busy = (detail = 'busy') => MailRejected({ transport: 'fake', retryable: true, upstreamStatus: 503, detail });
+
+/** Enqueues in a transaction and returns the job; the input is valid, so a failure is a test bug. */
+async function enqueued(outbox: ReturnType<typeof outboxWith>, options: { readonly expiresAt?: Date } = {}) {
+  const job = await db.transaction(tx =>
+    outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, ...options }),
+  );
+  if (MailInvalidInput.is(job)) throw new Error(job.message);
+  return job;
 }
 
 /** Two retries after the first try, no wait. */
@@ -130,29 +132,49 @@ describe('the mail commits with the write', () => {
 
 describe('retries belong to the journal', () => {
   it('a retryable failure is tried again, then dead-lettered with the last error', async () => {
-    const { transport, calls } = provider({ message: 'provider busy' });
+    const { transport, calls } = provider(busy('provider busy'));
     const outbox = outboxWith(transport);
-    await db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
+    await enqueued(outbox);
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(3);
     const [dead] = await queue().dead();
     expect(dead?.attempts).toBe(3);
     expect(dead?.lastError).toContain('provider busy');
+    expect(dead?.lastError).toContain('mail.rejected');
   });
 
-  it('a permanent failure is dead on the first try', async () => {
-    const { transport, calls } = provider({ retryable: false, message: 'mailbox does not exist' });
+  it('an uncertain send is tried again: the job id keeps a provider from delivering it twice', async () => {
+    const { transport, calls } = provider(MailUncertain({ transport: 'fake', detail: 'timed out' }), 'ok');
     const outbox = outboxWith(transport);
-    await db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
+    await enqueued(outbox);
+    await drainAll(outbox.runner);
+    expect(calls).toHaveLength(2);
+    expect(await queue().dead()).toEqual([]);
+  });
+
+  it('a refusal no retry can fix is dead on the first try', async () => {
+    const detail = 'mailbox does not exist';
+    const { transport, calls } = provider(MailRejected({ transport: 'fake', retryable: false, detail }));
+    const outbox = outboxWith(transport);
+    await enqueued(outbox);
+    await drainAll(outbox.runner);
+    expect(calls).toHaveLength(1);
+    expect(await queue().dead()).toHaveLength(1);
+  });
+
+  it('an exhausted quota is dead on the first try: a quota is a budget, and retries would spend it', async () => {
+    const { transport, calls } = provider(MailQuotaExhausted({ month: '2026-10' }));
+    const outbox = outboxWith(transport);
+    await enqueued(outbox);
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(1);
     expect(await queue().dead()).toHaveLength(1);
   });
 
   it('every retry sends the same message with the job id as the idempotency key', async () => {
-    const { transport, calls } = provider({}, 'ok');
+    const { transport, calls } = provider(busy(), 'ok');
     const outbox = outboxWith(transport);
-    const { jobId } = await db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
+    const { jobId } = await enqueued(outbox);
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(2);
     expect(calls[1]?.message).toEqual(calls[0]?.message);
@@ -170,19 +192,19 @@ describe('what is accepted into the queue', () => {
       );
     const first = await enqueue();
     const second = await enqueue();
+    if (MailInvalidInput.is(first)) throw new Error(first.message);
     expect(second).toEqual({ jobId: first.jobId, deduped: true });
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(1);
   });
 
-  it('bad input throws E003 inside the command, so the write rolls back too', async () => {
+  it('bad input is returned as MailInvalidInput and nothing is queued; the caller decides about its write', async () => {
     const outbox = outboxWith(provider('ok').transport);
-    const write = db.transaction(tx =>
+    const result = await db.transaction(tx =>
       // @ts-expect-error -- not a URL; refused at compile time and at run time
       outbox.enqueue(tx, magicLink, { url: 42 }, { to }),
     );
-    await expect(write).rejects.toBeInstanceOf(MailError);
-    await expect(write).rejects.toMatchObject({ code: MAIL_ERROR_CODES.invalidInput });
+    expect(MailInvalidInput.is(result)).toBe(true);
     expect(await queue().queued()).toEqual([]);
   });
 
@@ -204,15 +226,14 @@ describe('what is accepted into the queue', () => {
 });
 
 describe('expiry', () => {
-  it('a mail past its expiresAt is not sent: it is dead with E011', async () => {
+  it('a mail past its expiresAt is not sent: it is dead on the first try with MailExpired', async () => {
     const { transport, calls } = provider('ok');
     const outbox = outboxWith(transport);
-    await db.transaction(tx =>
-      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, expiresAt: new Date(Date.now() - 1000) }),
-    );
+    await enqueued(outbox, { expiresAt: new Date(Date.now() - 1000) });
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(0);
     const [dead] = await queue().dead();
-    expect(dead?.lastError).toContain('expired');
+    expect(dead?.attempts).toBe(1);
+    expect(dead?.lastError).toContain('mail.expired');
   });
 });

@@ -5,9 +5,7 @@ export type {
   Awaitable,
   MailContent,
   MailEvent,
-  MailFailure,
   MailMessage,
-  MailResult,
   MailTransport,
   RecipientOutcome,
   RenderContext,
@@ -16,6 +14,7 @@ export type {
 } from './types.js';
 export type { MailErrorCode } from './errors.js';
 export { isMailError, MAIL_ERROR_CODES, MailError } from './errors.js';
+export { MailExpired, MailInvalidInput, MailQuotaExhausted, MailRejected, MailUncertain } from './failures.js';
 export type { MailTemplate } from './template.js';
 export { defineTemplate, renderTemplate } from './template.js';
 export type { Mailer, MailerOptions, RawMail } from './mailer.js';

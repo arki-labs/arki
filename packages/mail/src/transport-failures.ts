@@ -1,9 +1,13 @@
 /**
- * How every transport turns what a service said into a `MailFailure`. One mapping, so failover
- * and the journal runner see the same `retryable` and `acceptance` whichever service failed.
+ * How every transport turns what a service said into a failure. One mapping, so failover and
+ * the journal runner see the same `retryable` and the same kind whichever service failed.
  */
-import type { MailFailure, MailMessage, MailResult, RecipientOutcome } from './types.js';
-import { MAIL_ERROR_CODES } from './errors.js';
+import type { Result } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
+import type { MailMessage, RecipientOutcome, SentMail, TransportFailure } from './types.js';
+import { MAIL_ERROR_CODES, MailError } from './errors.js';
+import { MailRejected, MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
 import { listOf } from './message.js';
 
@@ -15,51 +19,32 @@ export function rejection(
   transport: string,
   status: number,
   detail: { readonly message?: string; readonly providerCode?: string } = {},
-): MailFailure {
-  const reason = detail.message === undefined || detail.message === '' ? '' : `: ${detail.message}`;
-  return {
-    code: MAIL_ERROR_CODES.rejected,
-    message: `${transport} refused the mail (HTTP ${status})${reason}`,
-    retryable: status === 429 || status >= 500,
-    acceptance: 'none',
+) {
+  return MailRejected({
     transport,
-    status,
+    retryable: status === 429 || status >= 500,
+    upstreamStatus: status,
+    ...(detail.message === undefined || detail.message === '' ? {} : { detail: detail.message }),
     ...(detail.providerCode === undefined ? {} : { providerCode: detail.providerCode }),
-  };
+  });
 }
 
 /** The request failed in transit, timed out or was aborted. The service may have taken the mail. */
-export function uncertain(transport: string, error: unknown): MailFailure {
-  return {
-    code: MAIL_ERROR_CODES.uncertain,
-    message: `${transport}: no answer from the service (${errorField(error).message})`,
-    retryable: true,
-    acceptance: 'unknown',
-    transport,
-  };
+export function uncertain(transport: string, error: unknown) {
+  return MailUncertain(
+    { transport, detail: `no answer from the service (${errorField(error).message})` },
+    { cause: error },
+  );
 }
 
-/** The service answered with success, but the answer could not be read. */
-export function badResponse(transport: string, status: number, problem: string): MailFailure {
-  return {
-    code: MAIL_ERROR_CODES.badResponse,
-    message: `${transport}: unreadable answer (HTTP ${status}): ${problem}`,
-    retryable: true,
-    acceptance: 'unknown',
-    transport,
-    status,
-  };
+/** The service answered with success, but the answer could not be read. It may have taken the mail. */
+export function badResponse(transport: string, status: number, problem: string) {
+  return MailUncertain({ transport, detail: `unreadable answer (HTTP ${status}): ${problem}`, upstreamStatus: status });
 }
 
-/** A field this transport cannot carry. Returned before any request, so nothing was sent. */
-export function unsupported(transport: string, problem: string): MailFailure {
-  return {
-    code: MAIL_ERROR_CODES.unsupported,
-    message: `${transport} cannot send this mail: ${problem}`,
-    retryable: false,
-    acceptance: 'none',
-    transport,
-  };
+/** A field this transport cannot carry. Thrown before any request, so nothing was sent. */
+export function unsupported(transport: string, problem: string): never {
+  throw new MailError(MAIL_ERROR_CODES.unsupported, `${transport} cannot send this mail: ${problem}`);
 }
 
 /** Every recipient of `message`, with one status. */
@@ -68,19 +53,14 @@ export function everyRecipient(message: MailMessage, status: RecipientOutcome['s
 }
 
 /** Logs the outcome of one send at debug level and returns it unchanged. */
-export function logged(transport: string, result: MailResult): MailResult {
-  if (result.error === null) {
-    log.debug('{transport} sent id={id} status={status}', {
-      transport,
-      id: result.data.id,
-      status: result.data.status,
-    });
+export function logged(
+  transport: string,
+  result: Result<SentMail, TransportFailure>,
+): Result<SentMail, TransportFailure> {
+  if (isFailure(result)) {
+    log.debug('{transport} failed {code}: {message}', { transport, code: result.code, message: result.message });
   } else {
-    log.debug('{transport} failed {code}: {message}', {
-      transport,
-      code: result.error.code,
-      message: result.error.message,
-    });
+    log.debug('{transport} sent id={id} status={status}', { transport, id: result.id, status: result.status });
   }
   return result;
 }

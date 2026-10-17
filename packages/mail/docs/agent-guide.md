@@ -5,9 +5,9 @@ Read this before changing code that sends mail. The [README](../README.md) is th
 ## The model
 
 - A **template** (`defineTemplate`) is a plain object: a `name`, an `input` Standard Schema, and `subject`, `text` and optional `html` renderers. Callers pass the schema's input; renderers get its output.
-- A **transport** sends one mail through one service and never throws. Every failure is a `MailFailure` with a `code`, `retryable` and `acceptance` (`none`: the service did not take it; `unknown`: it may have).
+- A **transport** sends one mail through one service. It returns the sent mail or a failure value from `@arki/failure`: `MailRejected` (the service refused it, so it surely did not take it; `data.retryable` is true for 429 and 5xx) or `MailUncertain` (no readable answer, so it may have taken it). It throws only `MailError` `E005`, for a field it cannot carry.
 - **`failover([...])`** is a transport made of transports. It skips one over its monthly quota and moves on only after a definite, retryable refusal.
-- A **mailer** (`mailer({ transport, from })`) renders, checks the message (no header injection, a recipient present), sends, and reports events. It returns `{ data, error }`.
+- A **mailer** (`mailer({ transport, from })`) renders, checks the message (no header injection, a recipient present), sends, and reports events. It returns the `SentMail` itself, or a failure; check with `isFailure` or a definition's `is`.
 - **`mailOutbox`** (`@arki/mail/pg`) stores a rendered mail as one `@arki/journal` queue row inside the caller's transaction. The journal worker sends, retries and dead-letters it.
 
 ## Task map
@@ -17,6 +17,7 @@ Read this before changing code that sends mail. The [README](../README.md) is th
 ```ts
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
 import { defineTemplate, logTransport, mailer } from '@arki/mail';
 
 const invite = defineTemplate({
@@ -28,7 +29,7 @@ const invite = defineTemplate({
 
 const mail = mailer({ transport: logTransport(), from: 'Acme <hi@acme.dev>' });
 const result = await mail.send(invite, { team: 'Core', url: 'https://acme.dev/i/1' }, { to: 'ada@example.com' });
-if (result.error !== null) throw new Error(result.error.message);
+if (isFailure(result)) throw new Error(result.message);
 ```
 
 ### Use several providers
@@ -84,29 +85,34 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 
 ## Rules that bite
 
-- `send` and `sendRaw` return failures; they do not throw them. Only configuration mistakes (`E001`) and `mailOutbox.enqueue` throw `MailError`.
+- `send`, `sendRaw`, `compose` and `render` return failures; they do not throw them. Misuse throws `MailError`: bad configuration (`E001`), a message that cannot be sent as written (`E002`), a field the transport cannot carry (`E005`).
+- Retry only `MailUncertain`, or `MailRejected` with `data.retryable`. After `MailUncertain` never send through a second provider: the first may already be delivering it.
 - `text` is required on every template and every raw mail.
-- All transports over quota means nothing is sent (`E004`). There is no silent overrun.
+- All transports over quota means nothing is sent (`MailQuotaExhausted`). There is no silent overrun.
 - Never wrap a transport in your own retry loop. Queue the mail; the journal is the only retrier.
 - A queued mail has one `to` recipient and no Cc or Bcc. Queue one job per recipient.
 - Set `expiresAt` on queued sign-in links, so a late retry does not send a stale link.
 - `SentMail.id` is `null` when the service returns no id.
 
-## Errors
+## Failures (returned)
 
-| Code             | Meaning                                                 | Retryable        |
-| ---------------- | ------------------------------------------------------- | ---------------- |
-| `ARKI_MAIL_E001` | Bad configuration. Thrown.                              | no               |
-| `ARKI_MAIL_E002` | Bad message: no recipient, line break, reserved header. | no               |
-| `ARKI_MAIL_E003` | The template's schema refused the input.                | no               |
-| `ARKI_MAIL_E004` | Every transport is over quota. Nothing sent.            | no               |
-| `ARKI_MAIL_E005` | The transport cannot carry a field. Nothing sent.       | no               |
-| `ARKI_MAIL_E006` | The service refused the mail.                           | 429 and 5xx only |
-| `ARKI_MAIL_E007` | No answer. The mail may have been sent.                 | yes              |
-| `ARKI_MAIL_E008` | The answer could not be read.                           | yes              |
-| `ARKI_MAIL_E009` | `enqueue` got the root database. Thrown.                | no               |
-| `ARKI_MAIL_E010` | Queued mail too large, or a stored row unreadable.      | no               |
-| `ARKI_MAIL_E011` | A queued mail expired before it was sent.               | no               |
+| Definition           | Code                   | Status | Meaning                                                    | Retryable                 |
+| -------------------- | ---------------------- | ------ | ---------------------------------------------------------- | ------------------------- |
+| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. Carries `issues`. | no                        |
+| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing sent.               | no                        |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail.                              | when `data.retryable`     |
+| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent.           | yes, never on another one |
+| `MailExpired`        | `mail.expired`         | 410    | A queued mail expired before it was sent.                  | no                        |
+
+## Errors (thrown)
+
+| Code             | Meaning                                                 |
+| ---------------- | ------------------------------------------------------- |
+| `ARKI_MAIL_E001` | Bad configuration, or a transport SDK that cannot load. |
+| `ARKI_MAIL_E002` | Bad message: no recipient, line break, reserved header. |
+| `ARKI_MAIL_E005` | The transport cannot carry a field. Nothing sent.       |
+| `ARKI_MAIL_E009` | `enqueue` got the root database.                        |
+| `ARKI_MAIL_E010` | Queued mail too large, or a stored row unreadable.      |
 
 ## Verify
 

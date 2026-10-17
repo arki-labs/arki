@@ -11,7 +11,7 @@ import { z } from 'zod';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { SchemaRunError } from '@arki/schema';
 
-import { MAIL_ERROR_CODES } from './errors.js';
+import { MailInvalidInput } from './failures.js';
 import { defineTemplate, renderTemplate } from './template.js';
 
 const welcome = defineTemplate({
@@ -31,7 +31,7 @@ describe('types flow from the schema', () => {
     await renderTemplate(welcome, { name: 'Ada', trialDays: '3' });
 
     const rendered = await renderTemplate(welcome, { name: 'Ada' });
-    expect(rendered.data).toEqual({
+    expect(rendered).toEqual({
       subject: 'Welcome, Ada',
       text: 'Your trial lasts 14 days.',
       html: '<p>Your trial lasts <b>14</b> days.</p>',
@@ -58,20 +58,20 @@ describe('any Standard Schema drives a template', () => {
   };
 
   for (const [vendor, schema] of Object.entries(schemas)) {
-    it(`${vendor}: renders good input and returns E003 for bad input`, async () => {
+    it(`${vendor}: renders good input and returns MailInvalidInput for bad input`, async () => {
       const signIn = defineTemplate({
         name: 'sign-in-code',
         input: schema,
         subject: () => 'Your code',
         text: data => `Code: ${data.code}`,
       });
-      await expect(renderTemplate(signIn, { code: '123456' })).resolves.toMatchObject({
-        data: { text: 'Code: 123456' },
-      });
+      await expect(renderTemplate(signIn, { code: '123456' })).resolves.toMatchObject({ text: 'Code: 123456' });
       // @ts-expect-error -- a number where the schema wants a string: refused at compile time and at run time
       const bad = await renderTemplate(signIn, { code: 7 });
-      expect(bad.error).toMatchObject({ code: MAIL_ERROR_CODES.invalidInput, retryable: false });
-      expect(bad.error?.issues?.length).toBeGreaterThan(0);
+      if (!MailInvalidInput.is(bad)) throw new Error('expected MailInvalidInput');
+      expect(bad.data.issues.length).toBeGreaterThan(0);
+      // Plain keys only, so the failure survives JSON (a queue, a log) and `revive`.
+      expect(bad.data.issues.every(issue => issue.path.every(key => typeof key !== 'object'))).toBe(true);
     });
   }
 });
@@ -88,8 +88,8 @@ describe('validation', () => {
       text: data => data.user.email,
     });
     const result = await renderTemplate(verify, { user: { email: 'not-an-email' } });
-    expect(result.error?.code).toBe(MAIL_ERROR_CODES.invalidInput);
-    expect(result.error?.issues?.[0]?.path).toEqual(['user', 'email']);
+    if (!MailInvalidInput.is(result)) throw new Error('expected MailInvalidInput');
+    expect(result.data.issues[0]?.path).toEqual(['user', 'email']);
   });
 
   it('a schema that throws is a bug and is thrown, not returned as bad input', async () => {

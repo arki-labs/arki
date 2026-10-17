@@ -2,16 +2,19 @@
  * Several transports as one. Two rules decide where a mail goes:
  *
  * - A transport over its monthly quota is skipped. When every transport is, nothing is sent
- *   (`ARKI_MAIL_E004`): a quota is a budget. Add a transport without a quota as a deliberate
+ *   (`MailQuotaExhausted`): a quota is a budget. Add a transport without a quota as a deliberate
  *   unlimited fallback.
  * - After a send fails, the next transport is tried only when the provider surely did not take
- *   the mail (`acceptance: 'none'`) and trying again can help. After a timeout the first provider
+ *   the mail (`MailRejected`) and trying again can help (`retryable`). After a timeout the first provider
  *   may already be delivering it; a second provider would send a duplicate. That failure is
  *   returned, and the caller (the journal worker for queued mail) retries later.
  */
+import { isFailure } from '@arki/failure';
+
 import type { QuotaStore } from './quota-store.js';
-import type { MailFailure, MailTransport } from './types.js';
-import { failed, invalidConfig, MAIL_ERROR_CODES, permanent } from './errors.js';
+import type { MailTransport, TransportFailure } from './types.js';
+import { invalidConfig } from './errors.js';
+import { MailQuotaExhausted, MailRejected } from './failures.js';
 import { errorField, log } from './log.js';
 import { inMemoryQuotaStore } from './quota-store.js';
 
@@ -70,32 +73,27 @@ export function failover(transports: readonly MailTransport[], options: Failover
     id: transports.map(transport => transport.id).join('|'),
     async send(message, sendOptions) {
       const month = monthOf(now());
-      let lastFailure: MailFailure | undefined;
+      let lastFailure: TransportFailure | undefined;
       for (const transport of transports) {
         if (await overQuota(transport, month)) {
           log.debug('skipping {transport}: over its quota for {month}', { transport: transport.id, month });
           continue;
         }
         const result = await transport.send(message, sendOptions);
-        if (result.error === null) {
+        if (!isFailure(result)) {
           if (transport.quotaPerMonth !== undefined) await count(transport.id, month);
           return result;
         }
-        lastFailure = result.error;
-        const nextMayHelp = result.error.retryable && result.error.acceptance === 'none';
+        lastFailure = result;
+        // Only a refusal surely left the mail untaken; an uncertain send may already be delivering it.
+        const nextMayHelp = MailRejected.is(result) && result.data.retryable;
         if (!nextMayHelp) return result;
         log.debug('{transport} refused the mail ({code}); trying the next transport', {
           transport: transport.id,
-          code: result.error.code,
+          code: result.code,
         });
       }
-      return failed(
-        lastFailure ??
-          permanent(
-            MAIL_ERROR_CODES.quotaExhausted,
-            `Every transport is over its quota for ${month}. Nothing was sent.`,
-          ),
-      );
+      return lastFailure ?? MailQuotaExhausted({ month });
     },
   };
 }

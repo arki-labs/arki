@@ -3,9 +3,10 @@
  * Carries every message field, and forwards `idempotencyKey` as the `Idempotency-Key` header:
  * Resend keeps a key for 24 hours and refuses a reused key with a different payload.
  */
+import { isFailure } from '@arki/failure';
+
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
-import { failed, ok } from '../errors.js';
 import { listOf } from '../message.js';
 import { fieldOf, stringOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection } from '../transport-failures.js';
@@ -60,31 +61,26 @@ export function resend(options: ResendOptions): MailTransport {
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
       });
-      if (answer.error !== null) return logged(id, answer);
-      const { status, body } = answer.data;
+      if (isFailure(answer)) return logged(id, answer);
+      const { status, body } = answer;
       if (status >= 400) {
         return logged(
           id,
-          failed(
-            rejection(id, status, {
-              message: stringOf(fieldOf(body, 'message')),
-              providerCode: stringOf(fieldOf(body, 'name')),
-            }),
-          ),
+          rejection(id, status, {
+            message: stringOf(fieldOf(body, 'message')),
+            providerCode: stringOf(fieldOf(body, 'name')),
+          }),
         );
       }
       if (status < 200 || status >= 300 || typeof body !== 'object' || body === null) {
-        return logged(id, failed(badResponse(id, status, 'expected a JSON object')));
+        return logged(id, badResponse(id, status, 'expected a JSON object'));
       }
-      return logged(
-        id,
-        ok({
-          id: stringOf(fieldOf(body, 'id')) ?? null,
-          transport: id,
-          status: 'accepted',
-          recipients: everyRecipient(message, 'accepted'),
-        }),
-      );
+      return logged(id, {
+        id: stringOf(fieldOf(body, 'id')) ?? null,
+        transport: id,
+        status: 'accepted',
+        recipients: everyRecipient(message, 'accepted'),
+      });
     },
   };
 }

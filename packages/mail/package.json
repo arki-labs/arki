@@ -105,8 +105,10 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
-    "@arki/schema": "workspace:*"
+    "@arki/schema": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/dot": "workspace:*",
@@ -126,8 +128,7 @@
     "react": "catalog:react",
     "react-email": "catalog:",
     "valibot": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",

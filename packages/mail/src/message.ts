@@ -2,8 +2,8 @@
  * Checks on a message before any transport sees it. A line break in a header or an address
  * would let input add headers of its own (header injection), so it is refused, not cleaned.
  */
-import type { Addresses, MailFailure, MailMessage } from './types.js';
-import { MAIL_ERROR_CODES, permanent } from './errors.js';
+import type { Addresses, MailMessage } from './types.js';
+import { MAIL_ERROR_CODES, MailError } from './errors.js';
 
 /** Headers the message fields own. Setting them through `headers` would contradict those fields. */
 const RESERVED_HEADERS = new Set([
@@ -26,23 +26,27 @@ export function listOf(addresses: Addresses | undefined): readonly string[] {
   return typeof addresses === 'string' ? [addresses] : addresses;
 }
 
-const invalid = (message: string): MailFailure => permanent(MAIL_ERROR_CODES.invalidMessage, message);
+const invalid = (message: string): never => {
+  throw new MailError(MAIL_ERROR_CODES.invalidMessage, message);
+};
 
-/** The first problem with `message`, or `undefined` when it can be sent. */
-export function checkMessage(message: MailMessage): MailFailure | undefined {
+/**
+ * Throws `ARKI_MAIL_E002` on the first problem with `message`. Addresses and headers come from
+ * the caller's code, so a bad one is a bug to fix (validate user input first), not an outcome.
+ */
+export function checkMessage(message: MailMessage): void {
   const recipients = [...listOf(message.to), ...listOf(message.cc), ...listOf(message.bcc)];
-  if (recipients.length === 0) return invalid('A mail needs at least one recipient in to, cc or bcc.');
+  if (recipients.length === 0) invalid('A mail needs at least one recipient in to, cc or bcc.');
   const addresses = [message.from, ...recipients, ...listOf(message.replyTo)];
-  if (addresses.some(address => address.trim() === '')) return invalid('An address is empty.');
-  if (addresses.some(address => LINE_BREAK.test(address))) return invalid('An address contains a line break.');
-  if (LINE_BREAK.test(message.subject)) return invalid('The subject contains a line break.');
+  if (addresses.some(address => address.trim() === '')) invalid('An address is empty.');
+  if (addresses.some(address => LINE_BREAK.test(address))) invalid('An address contains a line break.');
+  if (LINE_BREAK.test(message.subject)) invalid('The subject contains a line break.');
   for (const [name, value] of Object.entries(message.headers ?? {})) {
-    if (LINE_BREAK.test(name) || LINE_BREAK.test(value)) return invalid(`Header "${name}" contains a line break.`);
+    if (LINE_BREAK.test(name) || LINE_BREAK.test(value)) invalid(`Header "${name}" contains a line break.`);
     if (RESERVED_HEADERS.has(name.toLowerCase())) {
-      return invalid(`Header "${name}" is set by the message itself; use the matching field instead.`);
+      invalid(`Header "${name}" is set by the message itself; use the matching field instead.`);
     }
   }
-  return undefined;
 }
 
 /**

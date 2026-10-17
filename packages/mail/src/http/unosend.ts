@@ -3,9 +3,10 @@
  * Unosend has no tags: a message with `tags` is refused (`ARKI_MAIL_E005`) before any request.
  * No idempotency header is sent, as Unosend documents none.
  */
+import { isFailure } from '@arki/failure';
+
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
-import { failed, ok } from '../errors.js';
 import { listOf } from '../message.js';
 import { fieldOf, stringOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
@@ -48,7 +49,7 @@ export function unosend(options: UnosendOptions): MailTransport {
     ...(options.quotaPerMonth === undefined ? {} : { quotaPerMonth: options.quotaPerMonth }),
     async send(message, sendOptions) {
       if (message.tags !== undefined && Object.keys(message.tags).length > 0) {
-        return logged(id, failed(unsupported(id, 'Unosend has no tags.')));
+        unsupported(id, 'Unosend has no tags.');
       }
       const replyTo = listOf(message.replyTo);
       const answer = await postJson({
@@ -69,21 +70,18 @@ export function unosend(options: UnosendOptions): MailTransport {
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
       });
-      if (answer.error !== null) return logged(id, answer);
-      const { status, body } = answer.data;
-      if (status >= 400) return logged(id, failed(rejection(id, status, errorDetail(body))));
+      if (isFailure(answer)) return logged(id, answer);
+      const { status, body } = answer;
+      if (status >= 400) return logged(id, rejection(id, status, errorDetail(body)));
       if (status < 200 || status >= 300 || typeof body !== 'object' || body === null) {
-        return logged(id, failed(badResponse(id, status, 'expected a JSON object')));
+        return logged(id, badResponse(id, status, 'expected a JSON object'));
       }
-      return logged(
-        id,
-        ok({
-          id: stringOf(fieldOf(body, 'id')) ?? stringOf(fieldOf(fieldOf(body, 'data'), 'id')) ?? null,
-          transport: id,
-          status: 'accepted',
-          recipients: everyRecipient(message, 'accepted'),
-        }),
-      );
+      return logged(id, {
+        id: stringOf(fieldOf(body, 'id')) ?? stringOf(fieldOf(fieldOf(body, 'data'), 'id')) ?? null,
+        transport: id,
+        status: 'accepted',
+        recipients: everyRecipient(message, 'accepted'),
+      });
     },
   };
 }

@@ -3,8 +3,10 @@
 // or a cancelled send keeps running.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { MailMessage } from '../types.js';
-import { MAIL_ERROR_CODES } from '../errors.js';
+import { MailRejected, MailUncertain } from '../failures.js';
 import { ses } from './ses.js';
 
 type SesSendOptions = { readonly abortSignal?: AbortSignal };
@@ -55,16 +57,15 @@ describe('ses', () => {
     expect(sdk.send.mock.calls[0]?.[1]).toEqual({ abortSignal: controller.signal });
   });
 
-  it('an abort (no HTTP status) is E007: SES may have taken the mail', async () => {
+  it('an abort (no HTTP status) is uncertain: SES may have taken the mail', async () => {
     sdk.send.mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
-    const { error } = await ses({ region: 'eu-west-1' }).send(message, {});
-    expect(error).toMatchObject({ code: MAIL_ERROR_CODES.uncertain, acceptance: 'unknown', retryable: true });
+    expect(MailUncertain.is(await ses({ region: 'eu-west-1' }).send(message, {}))).toBe(true);
   });
 
   it('carries tags as EmailTags, and no MessageId means id null', async () => {
     sdk.send.mockResolvedValue({});
-    const { data } = await ses({ region: 'eu-west-1' }).send({ ...message, tags: { kind: 'auth' } }, {});
-    expect(data?.id).toBeNull();
+    const data = orThrow(await ses({ region: 'eu-west-1' }).send({ ...message, tags: { kind: 'auth' } }, {}));
+    expect(data.id).toBeNull();
     expect(sdk.send.mock.calls[0]?.[0].input).toMatchObject({ EmailTags: [{ Name: 'kind', Value: 'auth' }] });
   });
 
@@ -75,7 +76,8 @@ describe('ses', () => {
         $metadata: { httpStatusCode: 400 },
       }),
     );
-    const { error } = await ses({ region: 'eu-west-1' }).send(message, {});
-    expect(error).toMatchObject({ code: MAIL_ERROR_CODES.rejected, retryable: false, providerCode: 'MessageRejected' });
+    const result = await ses({ region: 'eu-west-1' }).send(message, {});
+    expect(MailRejected.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { retryable: false, providerCode: 'MessageRejected' } });
   });
 });

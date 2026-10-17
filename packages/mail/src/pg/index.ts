@@ -2,7 +2,8 @@
  * Mail that commits with the business write. `enqueue` renders the mail and inserts one journal
  * queue row in the caller's transaction: a rollback drops the mail with the write, a commit
  * makes it durable. The journal worker sends it through `runner`, retries failures that can
- * succeed later, and dead-letters the rest. It is the only thing that retries.
+ * succeed later (`MailUncertain`, a `retryable` `MailRejected`), and dead-letters the rest. It
+ * is the only thing that retries.
  *
  * The row stores the rendered message, not the template input, so every retry sends the same
  * bytes and a template changed after the enqueue cannot change a mail already queued.
@@ -13,17 +14,21 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 
+import type { Failure, FailureOf } from '@arki/failure';
 import type { DbHandle, JobRunner, JournalTables } from '@arki/journal';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+import { isFailure } from '@arki/failure';
 import { jobId } from '@arki/journal';
 import { backoff } from '@arki/resilience';
 
+import type { MailInvalidInput } from '../failures.js';
 import type { Mailer } from '../mailer.js';
 import type { MailTemplate } from '../template.js';
 import type { SendOptions } from '../types.js';
 import type { QueuedArgs } from './args.js';
-import { isMailError, MAIL_ERROR_CODES, MailError, permanent } from '../errors.js';
+import { isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
+import { MailExpired, MailRejected, MailUncertain } from '../failures.js';
 import { listOf } from '../message.js';
 import { MAIL_JOB, queuedArgs } from './args.js';
 
@@ -47,25 +52,44 @@ export type MailOutboxOptions = {
 };
 
 export type EnqueueOptions = Omit<SendOptions, 'signal'> & {
-  /** After this moment the mail is not sent; the job is dead with `ARKI_MAIL_E011`. */
+  /** After this moment the mail is not sent; the job is dead with `MailExpired`. */
   readonly expiresAt?: Date;
 };
 
 export type MailOutbox = {
   /**
-   * Queues one mail inside `tx`. Throws {@link MailError}: `E009` for the root database, `E002`
-   * unless there is exactly one `to` recipient, `E003` for bad input, `E010` when too large.
-   * The same `idempotencyKey` while a job is still queued returns that job (`deduped: true`).
+   * Queues one mail inside `tx`. Returns `MailInvalidInput` when the template's schema refuses
+   * the input; nothing is queued. Throws {@link MailError}: `E009` for the root database, `E002`
+   * unless there is exactly one `to` recipient, `E010` when too large. The same `idempotencyKey`
+   * while a job is still queued returns that job (`deduped: true`).
    */
   enqueue<S extends StandardSchemaV1>(
     tx: MailTx,
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     options: EnqueueOptions,
-  ): Promise<{ readonly jobId: string; readonly deduped: boolean }>;
+  ): Promise<{ readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof MailInvalidInput>>;
   /** Runs queued mail: pass it to `journal.worker(db, { jobs })`, or combine it with `combineRunners`. */
   readonly runner: JobRunner;
 };
+
+/**
+ * A queued send that returned a failure. The journal fails a try only when the runner throws, so
+ * the runner throws this; the message is the failure as JSON, so `lastError` keeps its code.
+ */
+class QueuedSendFailed extends Error {
+  readonly failure: Failure;
+
+  constructor(failure: Failure) {
+    super(JSON.stringify(failure), { cause: failure.cause });
+    this.name = 'QueuedSendFailed';
+    this.failure = failure;
+  }
+}
+
+/** A later try can help: the service may not have taken the mail, or refused it for now (429, 5xx). */
+const worthRetrying = (failure: Failure): boolean =>
+  MailUncertain.is(failure) || (MailRejected.is(failure) && failure.data.retryable);
 
 export function mailOutbox(options: MailOutboxOptions): MailOutbox {
   const { mailer, tables } = options;
@@ -78,26 +102,29 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
   const enqueue: MailOutbox['enqueue'] = async (tx, template, input, enqueueOptions) => {
     if (typeof Reflect.get(tx, 'rollback') !== 'function') {
       throw new MailError(
-        permanent(MAIL_ERROR_CODES.needsTransaction, 'enqueue needs the transaction of the write it belongs to.'),
+        MAIL_ERROR_CODES.needsTransaction,
+        'enqueue needs the transaction of the write it belongs to.',
       );
     }
     if (listOf(enqueueOptions.to).length !== 1 || enqueueOptions.cc !== undefined || enqueueOptions.bcc !== undefined) {
       throw new MailError(
-        permanent(MAIL_ERROR_CODES.invalidMessage, 'A queued mail has exactly one `to` recipient and no cc or bcc.'),
+        MAIL_ERROR_CODES.invalidMessage,
+        'A queued mail has exactly one `to` recipient and no cc or bcc.',
       );
     }
     const composed = await mailer.compose(template, input, enqueueOptions);
-    if (composed.error !== null) throw new MailError(composed.error);
+    if (isFailure(composed)) return composed;
 
     const args: QueuedArgs = {
       version: 1,
-      message: composed.data,
+      message: composed,
       ...(enqueueOptions.expiresAt === undefined ? {} : { expiresAt: enqueueOptions.expiresAt.toISOString() }),
     };
     const bytes = new TextEncoder().encode(JSON.stringify(args)).byteLength;
     if (bytes > maxBytes) {
       throw new MailError(
-        permanent(MAIL_ERROR_CODES.badQueuedData, `The queued mail is ${bytes} bytes; the limit is ${maxBytes}.`),
+        MAIL_ERROR_CODES.badQueuedData,
+        `The queued mail is ${bytes} bytes; the limit is ${maxBytes}.`,
       );
     }
 
@@ -127,15 +154,16 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
     run: async (job, { signal }) => {
       const queued = queuedArgs(job);
       if (queued.expiresAt !== undefined && Date.parse(queued.expiresAt) <= Date.now()) {
-        throw new MailError(
-          permanent(MAIL_ERROR_CODES.expired, `The mail expired at ${queued.expiresAt} before it could be sent.`),
-        );
+        throw new QueuedSendFailed(MailExpired({ expiresAt: queued.expiresAt }));
       }
       const result = await mailer.sendRaw(queued.message, { idempotencyKey: job.id, signal });
-      if (result.error !== null) throw new MailError(result.error);
+      if (isFailure(result)) throw new QueuedSendFailed(result);
     },
-    // A failure no retry can fix is dead now; anything else waits for the next try.
-    retryDelay: (job, error) => (isMailError(error) && !error.retryable ? undefined : retry.delay(job.attempt, error)),
+    // Misuse and a failure no retry can fix are dead now; anything else waits for the next try.
+    retryDelay: (job, error) => {
+      const dead = isMailError(error) || (error instanceof QueuedSendFailed && !worthRetrying(error.failure));
+      return dead ? undefined : retry.delay(job.attempt, error);
+    },
   };
 
   return { enqueue, runner };

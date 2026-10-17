@@ -9,9 +9,11 @@
  *
  * It cannot carry tags or more than one Reply-To; such a message is refused before any request.
  */
-import type { MailFailure, MailTransport, RecipientOutcome } from '../types.js';
+import { isFailure } from '@arki/failure';
+
+import type { MailTransport, RecipientOutcome } from '../types.js';
 import type { FetchFn } from './post-json.js';
-import { failed, MAIL_ERROR_CODES, ok } from '../errors.js';
+import { MailRejected } from '../failures.js';
 import { listOf } from '../message.js';
 import { fieldOf, stringOf, stringsOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
@@ -70,11 +72,11 @@ export function cloudflare(options: CloudflareOptions): MailTransport {
     ...(options.quotaPerMonth === undefined ? {} : { quotaPerMonth: options.quotaPerMonth }),
     async send(message, sendOptions) {
       if (message.tags !== undefined && Object.keys(message.tags).length > 0) {
-        return logged(id, failed(unsupported(id, 'Cloudflare Email Service has no tags.')));
+        unsupported(id, 'Cloudflare Email Service has no tags.');
       }
       const replyTo = listOf(message.replyTo);
       if (replyTo.length > 1) {
-        return logged(id, failed(unsupported(id, 'Cloudflare Email Service takes one Reply-To address.')));
+        unsupported(id, 'Cloudflare Email Service takes one Reply-To address.');
       }
       const answer = await postJson({
         transport: id,
@@ -94,45 +96,37 @@ export function cloudflare(options: CloudflareOptions): MailTransport {
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
       });
-      if (answer.error !== null) return logged(id, answer);
-      const { status, body } = answer.data;
+      if (isFailure(answer)) return logged(id, answer);
+      const { status, body } = answer;
       if (status >= 400 || fieldOf(body, 'success') === false) {
-        return logged(id, failed(rejection(id, status, firstError(body))));
+        return logged(id, rejection(id, status, firstError(body)));
       }
       const result = fieldOf(body, 'result');
       if (status < 200 || status >= 300 || typeof result !== 'object' || result === null) {
-        return logged(id, failed(badResponse(id, status, 'expected a JSON object with a `result` object')));
+        return logged(id, badResponse(id, status, 'expected a JSON object with a `result` object'));
       }
       const messageId = stringOf(fieldOf(result, 'message_id')) ?? null;
       const outcomes = outcomesOf(result);
       if (outcomes.length === 0) {
         // Accepted, but Cloudflare said nothing per recipient: report each as unknown.
-        return logged(
-          id,
-          ok({ id: messageId, transport: id, status: 'accepted', recipients: everyRecipient(message, 'unknown') }),
-        );
+        return logged(id, {
+          id: messageId,
+          transport: id,
+          status: 'accepted',
+          recipients: everyRecipient(message, 'unknown'),
+        });
       }
       const refused = outcomes.filter(outcome => outcome.status !== 'accepted');
       if (refused.length === outcomes.length) {
-        const everyoneRefused: MailFailure = {
-          code: MAIL_ERROR_CODES.rejected,
-          message: `${id}: every recipient bounced or is suppressed: ${refused.map(outcome => outcome.address).join(', ')}`,
-          retryable: false,
-          acceptance: 'none',
-          transport: id,
-          status,
-        };
-        return logged(id, failed(everyoneRefused));
+        const detail = `every recipient bounced or is suppressed: ${refused.map(outcome => outcome.address).join(', ')}`;
+        return logged(id, MailRejected({ transport: id, retryable: false, upstreamStatus: status, detail }));
       }
-      return logged(
-        id,
-        ok({
-          id: messageId,
-          transport: id,
-          status: refused.length === 0 ? 'accepted' : 'partial',
-          recipients: outcomes,
-        }),
-      );
+      return logged(id, {
+        id: messageId,
+        transport: id,
+        status: refused.length === 0 ? 'accepted' : 'partial',
+        recipients: outcomes,
+      });
     },
   };
 }

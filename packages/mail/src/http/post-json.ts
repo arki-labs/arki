@@ -1,6 +1,7 @@
 /** One JSON POST, shared by the fetch transports. Never throws. */
-import type { MailResult } from '../types.js';
-import { failed, ok } from '../errors.js';
+import type { FailureOf } from '@arki/failure';
+
+import type { MailUncertain } from '../failures.js';
 import { uncertain } from '../transport-failures.js';
 
 export type FetchFn = typeof globalThis.fetch;
@@ -10,7 +11,7 @@ export type JsonAnswer = { readonly status: number; readonly body: unknown };
 
 /**
  * POSTs `body` as JSON. A request that fails in transit, times out or is aborted, or whose
- * answer cannot be read to the end, is `ARKI_MAIL_E007`: the service may have taken the mail.
+ * answer cannot be read to the end, is `MailUncertain`: the service may have taken the mail.
  */
 export async function postJson(request: {
   readonly transport: string;
@@ -19,7 +20,7 @@ export async function postJson(request: {
   readonly headers: Readonly<Record<string, string>>;
   readonly body: unknown;
   readonly signal?: AbortSignal;
-}): Promise<MailResult<JsonAnswer>> {
+}): Promise<JsonAnswer | FailureOf<typeof MailUncertain>> {
   let status: number;
   let text: string;
   try {
@@ -32,12 +33,12 @@ export async function postJson(request: {
     status = response.status;
     text = await response.text();
   } catch (error) {
-    return failed(uncertain(request.transport, error));
+    return uncertain(request.transport, error);
   }
   try {
     const body: unknown = text === '' ? undefined : JSON.parse(text);
-    return ok({ status, body });
+    return { status, body };
   } catch {
-    return ok({ status, body: undefined });
+    return { status, body: undefined };
   }
 }

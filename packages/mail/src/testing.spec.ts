@@ -3,8 +3,10 @@
 // for reasons that have nothing to do with the app.
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { SentRecord } from './testing.js';
-import { MAIL_ERROR_CODES } from './errors.js';
+import { MailUncertain } from './failures.js';
 import { mailer } from './mailer.js';
 import { magicLink, signInCode } from './templates/auth.js';
 import { mailSink } from './testing.js';
@@ -19,12 +21,8 @@ function setup() {
 describe('mailSink', () => {
   it('records the rendered message, the template name and the idempotency key', async () => {
     const { sink, mail } = setup();
-    const { data } = await mail.send(
-      magicLink,
-      { appName: 'Notes', url },
-      { to: 'ada@example.com', idempotencyKey: 'k1' },
-    );
-    expect(data?.status).toBe('simulated');
+    const sent = await mail.send(magicLink, { appName: 'Notes', url }, { to: 'ada@example.com', idempotencyKey: 'k1' });
+    expect(sent).toMatchObject({ status: 'simulated' });
     expect(sink.sent).toHaveLength(1);
     expect(sink.last()).toMatchObject({
       template: 'auth.magic-link',
@@ -53,11 +51,11 @@ describe('mailSink', () => {
 
   it('failNext fails exactly the next send, which is not recorded', async () => {
     const { sink, mail } = setup();
-    sink.failNext({ code: MAIL_ERROR_CODES.uncertain, retryable: true, acceptance: 'unknown' });
+    sink.failNext(MailUncertain({ transport: 'sink', detail: 'timed out' }));
     const first = await mail.sendRaw({ to: 'ada@example.com', subject: 'a', text: 'a' });
     const second = await mail.sendRaw({ to: 'ada@example.com', subject: 'b', text: 'b' });
-    expect(first.error).toMatchObject({ code: MAIL_ERROR_CODES.uncertain, retryable: true, transport: 'sink' });
-    expect(second.error).toBeNull();
+    expect(MailUncertain.is(first)).toBe(true);
+    expect(isFailure(second)).toBe(false);
     expect(sink.sent.map(record => record.message.subject)).toEqual(['b']);
   });
 
@@ -66,8 +64,8 @@ describe('mailSink', () => {
     await mail.sendRaw({ to: 'ada@example.com', subject: 'a', text: 'a' });
     sink.failNext();
     sink.clear();
-    const { error } = await mail.sendRaw({ to: 'ada@example.com', subject: 'b', text: 'b' });
-    expect(error).toBeNull();
+    const sent = await mail.sendRaw({ to: 'ada@example.com', subject: 'b', text: 'b' });
+    expect(isFailure(sent)).toBe(false);
     expect(sink.sent).toHaveLength(1);
   });
 });

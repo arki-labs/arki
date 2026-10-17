@@ -43,10 +43,7 @@ function recording() {
     id: 'rec',
     send: message => {
       sent.push(message);
-      return Promise.resolve({
-        data: { id: 'm1', transport: 'rec', status: 'accepted' as const, recipients: [] },
-        error: null,
-      });
+      return Promise.resolve({ id: 'm1', transport: 'rec', status: 'accepted' as const, recipients: [] });
     },
   };
   return { transport, sent };
@@ -66,7 +63,7 @@ describe('mail()', () => {
       .use(mail({ transport, from: 'hi@app.dev' }))
       .boot();
     const result = await app.services.mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
-    expect(result.error).toBeNull();
+    expect(result).toMatchObject({ id: 'm1' });
     expect(sent[0]?.subject).toBe('Welcome, Ada');
     await app.dispose();
   });

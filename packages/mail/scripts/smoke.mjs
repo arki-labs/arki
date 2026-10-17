@@ -3,7 +3,15 @@
 // the unit tests cover the details.
 
 import { resend } from '../dist/http/resend.js';
-import { defineTemplate, failover, inMemoryQuotaStore, logTransport, MAIL_ERROR_CODES, mailer } from '../dist/index.js';
+import {
+  defineTemplate,
+  failover,
+  inMemoryQuotaStore,
+  logTransport,
+  mailer,
+  MailInvalidInput,
+  MailQuotaExhausted,
+} from '../dist/index.js';
 import { magicLink } from '../dist/templates/auth.js';
 
 /** A hand-written Standard Schema: the smoke test needs no validator library. */
@@ -60,14 +68,15 @@ const badLink = await mailer({ transport: logTransport(), from: 'hi@app.dev' }).
 });
 
 const checks = [
-  ['log transport reports simulated', logged.data?.status, 'simulated'],
-  ['schema refusal is E003', refused.error?.code, MAIL_ERROR_CODES.invalidInput],
-  ['resend returns the provider id', viaResend.data?.id, 're_123'],
+  ['log transport reports simulated', logged.status, 'simulated'],
+  ['schema refusal is MailInvalidInput', MailInvalidInput.is(refused), true],
+  ['resend returns the provider id', viaResend.id, 're_123'],
   ['resend forwards the idempotency key', requests[0]?.key, 'k1'],
-  ['over quota sends nothing (E004)', overQuota.error?.code, MAIL_ERROR_CODES.quotaExhausted],
+  ['over quota sends nothing (MailQuotaExhausted)', MailQuotaExhausted.is(overQuota), true],
   ['over quota made no request', requests.length, 1],
-  ['magic link renders a text part with the url', link.data?.text.includes('https://acme.dev/l/1'), true],
-  ['magic link refuses a javascript: url', badLink.error?.code, MAIL_ERROR_CODES.invalidInput],
+  ['magic link renders a text part with the url', link.text?.includes('https://acme.dev/l/1'), true],
+  ['magic link refuses a javascript: url', MailInvalidInput.is(badLink), true],
+  ['a failure survives JSON with its code', JSON.parse(JSON.stringify(refused)).code, 'mail.invalid_input'],
 ];
 
 const runtime =

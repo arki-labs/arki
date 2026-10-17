@@ -3,9 +3,12 @@
 // recipient address), and a bounce is never hidden behind a plain success.
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { MailMessage } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { MAIL_ERROR_CODES } from '../errors.js';
+import { MailRejected, MailUncertain } from '../failures.js';
 import { cloudflare } from './cloudflare.js';
 
 const message: MailMessage = {
@@ -61,7 +64,7 @@ describe('cloudflare response shapes', () => {
         suppressed_recipients: ['b@example.com'],
       }),
     );
-    const { data } = await transport.send(message, {});
+    const data = orThrow(await transport.send(message, {}));
     expect(data).toEqual({
       id: 'cf-msg-1',
       transport: 'cloudflare',
@@ -78,16 +81,16 @@ describe('cloudflare response shapes', () => {
       200,
       envelope({ delivered: ['a@example.com'], queued: ['b@example.com'], permanent_bounces: [] }),
     );
-    const { data } = await transport.send(message, {});
-    expect(data?.id).toBeNull();
-    expect(data?.status).toBe('accepted');
-    expect(data?.recipients.every(recipient => recipient.status === 'accepted')).toBe(true);
+    const data = orThrow(await transport.send(message, {}));
+    expect(data.id).toBeNull();
+    expect(data.status).toBe('accepted');
+    expect(data.recipients.every(recipient => recipient.status === 'accepted')).toBe(true);
   });
 
   it('a success with no per-recipient lists reports each recipient as unknown, not delivered', async () => {
     const { transport } = answeredWith(200, envelope({}));
-    const { data } = await transport.send(message, {});
-    expect(data?.recipients).toEqual([
+    const data = orThrow(await transport.send(message, {}));
+    expect(data.recipients).toEqual([
       { address: 'a@example.com', status: 'unknown' },
       { address: 'b@example.com', status: 'unknown' },
     ]);
@@ -100,13 +103,12 @@ describe('cloudflare bounces', () => {
       200,
       envelope({ delivered: ['a@example.com'], queued: [], permanent_bounces: ['b@example.com'] }),
     );
-    const { data, error } = await transport.send(message, {});
-    expect(error).toBeNull();
-    expect(data?.status).toBe('partial');
-    expect(data?.recipients).toContainEqual({ address: 'b@example.com', status: 'rejected' });
+    const data = orThrow(await transport.send(message, {}));
+    expect(data.status).toBe('partial');
+    expect(data.recipients).toContainEqual({ address: 'b@example.com', status: 'rejected' });
   });
 
-  it('all bounced or suppressed: permanent E006, so no transport tries it again', async () => {
+  it('all bounced or suppressed: a MailRejected that is not retryable, so no transport tries it again', async () => {
     const { transport } = answeredWith(
       200,
       envelope({
@@ -116,10 +118,10 @@ describe('cloudflare bounces', () => {
         suppressed_recipients: ['b@example.com'],
       }),
     );
-    const { data, error } = await transport.send(message, {});
-    expect(data).toBeNull();
-    expect(error).toMatchObject({ code: MAIL_ERROR_CODES.rejected, retryable: false, acceptance: 'none' });
-    expect(error?.message).toContain('a@example.com');
+    const result = await transport.send(message, {});
+    if (!MailRejected.is(result)) throw new Error('expected MailRejected');
+    expect(result.data.retryable).toBe(false);
+    expect(result.message).toContain('a@example.com');
   });
 });
 
@@ -131,31 +133,28 @@ describe('cloudflare errors', () => {
       messages: [],
       result: null,
     });
-    const { error } = await transport.send(message, {});
-    expect(error).toMatchObject({
-      code: MAIL_ERROR_CODES.rejected,
-      retryable: true,
-      providerCode: '10004',
-      status: 429,
-    });
+    const result = await transport.send(message, {});
+    expect(MailRejected.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { retryable: true, providerCode: '10004', upstreamStatus: 429 } });
   });
 
-  it('a 2xx body that is not JSON: E008, acceptance unknown', async () => {
+  it('a 2xx body that is not JSON: uncertain, because Cloudflare may have taken the mail', async () => {
     const { transport } = answeredWith(200, '<html>gateway</html>');
-    const { error } = await transport.send(message, {});
-    expect(error).toMatchObject({ code: MAIL_ERROR_CODES.badResponse, acceptance: 'unknown' });
+    const result = await transport.send(message, {});
+    expect(MailUncertain.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { upstreamStatus: 200 } });
   });
 
-  it('a 2xx JSON body without a result: E008', async () => {
+  it('a 2xx JSON body without a result: uncertain', async () => {
     const { transport } = answeredWith(200, { success: true });
-    const { error } = await transport.send(message, {});
-    expect(error?.code).toBe(MAIL_ERROR_CODES.badResponse);
+    expect(MailUncertain.is(await transport.send(message, {}))).toBe(true);
   });
 
   it('tags are refused before any request', async () => {
     const { transport, calls } = answeredWith(200, envelope({}));
-    const { error } = await transport.send({ ...message, tags: { kind: 'digest' } }, {});
-    expect(error?.code).toBe(MAIL_ERROR_CODES.unsupported);
+    await expect(transport.send({ ...message, tags: { kind: 'digest' } }, {})).rejects.toMatchObject({
+      code: MAIL_ERROR_CODES.unsupported,
+    });
     expect(calls).toHaveLength(0);
   });
 });

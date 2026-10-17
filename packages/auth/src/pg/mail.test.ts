@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { MailRejected } from '@arki/mail';
+
 import { PASSWORD, post } from '../__fixtures__/http.js';
 import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
@@ -15,7 +17,9 @@ describe('auth mail failures', () => {
     const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['magicLink'] });
     const { auth, mail, dispose } = await testAuth(definition, { tables: authTables });
     try {
-      mail.failNext({ message: 'resend: invalid api key re_live_123' });
+      mail.failNext(
+        MailRejected({ transport: 'sink', retryable: false, detail: 'resend: invalid api key re_live_123' }),
+      );
       const response = await post(auth, '/sign-in/magic-link', { email: 'ada@notes.test' });
       expect(response.status).toBe(500);
       const body: unknown = await response.json();

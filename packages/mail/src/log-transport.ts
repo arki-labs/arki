@@ -1,5 +1,4 @@
 import type { MailTransport } from './types.js';
-import { ok } from './errors.js';
 import { log } from './log.js';
 import { listOf } from './message.js';
 
@@ -19,14 +18,12 @@ export function logTransport(options: { readonly id?: string } = {}): MailTransp
         to: to.join(', '),
         text: message.text,
       });
-      return Promise.resolve(
-        ok({
-          id: null,
-          transport: id,
-          status: 'simulated',
-          recipients: to.map(address => ({ address, status: 'accepted' })),
-        }),
-      );
+      return Promise.resolve({
+        id: null,
+        transport: id,
+        status: 'simulated',
+        recipients: to.map(address => ({ address, status: 'accepted' })),
+      });
     },
   };
 }

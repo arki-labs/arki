@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import type { MailEvent, MailMessage, MailTransport } from './types.js';
-import { MAIL_ERROR_CODES } from './errors.js';
+import { MAIL_ERROR_CODES, MailError } from './errors.js';
+import { MailInvalidInput, MailQuotaExhausted, MailUncertain } from './failures.js';
 import { logTransport } from './log-transport.js';
 import { mailer } from './mailer.js';
 import { defineTemplate } from './template.js';
@@ -31,10 +32,7 @@ function recording(id = 'rec', quotaPerMonth?: number) {
   const sent: MailMessage[] = [];
   const send = vi.fn((message: MailMessage) => {
     sent.push(message);
-    return Promise.resolve({
-      data: { id: `m${sent.length}`, transport: id, status: 'accepted' as const, recipients: [] },
-      error: null,
-    });
+    return Promise.resolve({ id: `m${sent.length}`, transport: id, status: 'accepted' as const, recipients: [] });
   });
   const transport: MailTransport = { id, quotaPerMonth, send };
   return { transport, sent, send };
@@ -60,20 +58,49 @@ describe('sender', () => {
   });
 });
 
-describe('failures are results', () => {
-  it('bad input returns E003 and the transport is never called', async () => {
+describe('an unsent mail is a returned failure; misuse throws', () => {
+  it('bad input is returned as MailInvalidInput for the caller to branch on, and no transport is called', async () => {
     const { transport, send } = recording();
     const mail = mailer({ transport, from: 'hi@app.dev' });
     // @ts-expect-error -- total must be a string
     const result = await mail.send(receipt, { total: 5 }, { to: 'ada@example.com' });
-    expect(result.error?.code).toBe(MAIL_ERROR_CODES.invalidInput);
+    expect(MailInvalidInput.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { template: 'receipt', issues: [{ path: ['total'] }] } });
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('a transport that throws is reported as uncertain: the request may have gone out', async () => {
+  it('a transport that throws is returned as uncertain: the request may have gone out', async () => {
     const transport: MailTransport = { id: 'flaky', send: () => Promise.reject(new Error('socket hang up')) };
     const result = await mailer({ transport, from: 'hi@app.dev' }).sendRaw({ to: 'a@b.c', subject: 's', text: 't' });
-    expect(result.error).toMatchObject({ code: MAIL_ERROR_CODES.uncertain, acceptance: 'unknown', retryable: true });
+    expect(MailUncertain.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { transport: 'flaky' } });
+  });
+
+  it('a message with no recipient is a bug in the calling code, so it throws E002 before any transport', async () => {
+    const { transport, send } = recording();
+    const mail = mailer({ transport, from: 'hi@app.dev' });
+    await expect(mail.sendRaw({ to: [], subject: 's', text: 't' })).rejects.toMatchObject({
+      code: MAIL_ERROR_CODES.invalidMessage,
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a field the transport cannot carry is misuse: its MailError reaches the caller, not an uncertain send', async () => {
+    const transport: MailTransport = {
+      id: 'strict',
+      send: () => Promise.reject(new MailError(MAIL_ERROR_CODES.unsupported, 'strict cannot carry tags')),
+    };
+    const mail = mailer({ transport, from: 'hi@app.dev' });
+    await expect(mail.sendRaw({ to: 'a@b.c', subject: 's', text: 't' })).rejects.toThrow(MailError);
+  });
+
+  it('a failed send is reported to onEvent as the failure value', async () => {
+    const events: MailEvent[] = [];
+    const transport: MailTransport = { id: 'flaky', send: () => Promise.reject(new Error('socket hang up')) };
+    const mail = mailer({ transport, from: 'hi@app.dev', onEvent: event => void events.push(event) });
+    await mail.sendRaw({ to: 'a@b.c', subject: 's', text: 't' });
+    const failed = events.find(event => event.type === 'failed');
+    expect(failed?.type === 'failed' && MailUncertain.is(failed.failure)).toBe(true);
   });
 });
 
@@ -102,7 +129,7 @@ describe('events', () => {
       },
     });
     const result = await mail.send(note, { body: 'x' }, { to: 'ada@example.com' });
-    expect(result.data?.id).toBe('m1');
+    expect(result).toMatchObject({ id: 'm1' });
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
@@ -115,7 +142,7 @@ describe('local and staging safety', () => {
       { body: 'x' },
       { to: 'ada@example.com' },
     );
-    expect(result.data).toMatchObject({ status: 'simulated', id: null, transport: 'log' });
+    expect(result).toMatchObject({ status: 'simulated', id: null, transport: 'log' });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -133,10 +160,8 @@ describe('quota on a single transport', () => {
   it('a lone transport with a quota stops at it, like one inside failover', async () => {
     const { transport, send } = recording('resend', 1);
     const mail = mailer({ transport, from: 'hi@app.dev' });
-    await expect(mail.send(note, { body: 'x' }, { to: 'a@b.c' })).resolves.toMatchObject({ error: null });
-    await expect(mail.send(note, { body: 'x' }, { to: 'a@b.c' })).resolves.toMatchObject({
-      error: { code: MAIL_ERROR_CODES.quotaExhausted },
-    });
+    await expect(mail.send(note, { body: 'x' }, { to: 'a@b.c' })).resolves.toMatchObject({ id: 'm1' });
+    expect(MailQuotaExhausted.is(await mail.send(note, { body: 'x' }, { to: 'a@b.c' }))).toBe(true);
     expect(send).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,8 +10,8 @@
  * (200 mails a day, verified recipients only). Bounces and complaints arrive through SNS or a
  * configuration set, not in the response.
  */
-import type { MailFailure, MailTransport } from '../types.js';
-import { failed, MAIL_ERROR_CODES, ok } from '../errors.js';
+import type { MailTransport } from '../types.js';
+import { MAIL_ERROR_CODES, MailError } from '../errors.js';
 import { errorField } from '../log.js';
 import { listOf } from '../message.js';
 import { fieldOf, stringOf } from '../narrow.js';
@@ -54,7 +54,7 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
  * An SDK error with an HTTP status came from SES. Without one, the request never got an answer
  * (network failure, timeout, abort), and SES may have taken the mail.
  */
-function sdkFailure(transport: string, error: unknown): MailFailure {
+function sdkFailure(transport: string, error: unknown) {
   const status = fieldOf(fieldOf(error, '$metadata'), 'httpStatusCode');
   if (typeof status !== 'number') return uncertain(transport, error);
   const providerCode = stringOf(fieldOf(error, 'name'));
@@ -88,15 +88,11 @@ export function ses(options: SesOptions): MailTransport {
       try {
         sdk = await loadSdk();
       } catch (error) {
-        return logged(
-          id,
-          failed({
-            code: MAIL_ERROR_CODES.invalidConfig,
-            message: `${id}: @aws-sdk/client-sesv2 could not be loaded (${errorField(error).message})`,
-            retryable: false,
-            acceptance: 'none',
-            transport: id,
-          }),
+        // A missing peer is a setup mistake, not an answer from SES.
+        throw new MailError(
+          MAIL_ERROR_CODES.invalidConfig,
+          `${id}: @aws-sdk/client-sesv2 could not be loaded (${errorField(error).message})`,
+          { cause: error },
         );
       }
       const replyTo = listOf(message.replyTo);
@@ -130,17 +126,14 @@ export function ses(options: SesOptions): MailTransport {
           command,
           sendOptions.signal === undefined ? {} : { abortSignal: sendOptions.signal },
         );
-        return logged(
-          id,
-          ok({
-            id: response.MessageId ?? null,
-            transport: id,
-            status: 'accepted',
-            recipients: everyRecipient(message, 'accepted'),
-          }),
-        );
+        return logged(id, {
+          id: response.MessageId ?? null,
+          transport: id,
+          status: 'accepted',
+          recipients: everyRecipient(message, 'accepted'),
+        });
       } catch (error) {
-        return logged(id, failed(sdkFailure(id, error)));
+        return logged(id, sdkFailure(id, error));
       }
     },
   };

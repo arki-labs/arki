@@ -2,11 +2,15 @@
  * Templates are plain objects. One Standard Schema types both sides: callers pass its input,
  * renderers receive its output (defaults applied, values coerced).
  */
+import type { FailureOf } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { parseAsync, SchemaError } from '@arki/schema';
+import { parseAsync, pathOf, SchemaError } from '@arki/schema';
 
-import type { Address, Addresses, Awaitable, MailContent, MailResult, RenderContext } from './types.js';
-import { failed, MAIL_ERROR_CODES, ok, permanent } from './errors.js';
+import type { Address, Addresses, Awaitable, MailContent, RenderContext } from './types.js';
+import { MailInvalidInput } from './failures.js';
+
+/** A path key as JSON can hold it: a symbol key becomes its description. */
+const plainKey = (key: PropertyKey): string | number => (typeof key === 'symbol' ? String(key) : key);
 
 export type MailTemplate<S extends StandardSchemaV1 = StandardSchemaV1, Name extends string = string> = {
   /** Stable name, for logs, the test sink and queued mail. */
@@ -42,32 +46,31 @@ export function defineTemplate<S extends StandardSchemaV1, const Name extends st
 
 /**
  * Validates `input` with the template's schema (sync or async) and renders the content.
- * Needs no transport: use it for previews and content tests. Bad input is `ARKI_MAIL_E003`
+ * Needs no transport: use it for previews and content tests. Bad input is `MailInvalidInput`
  * with the schema's issues.
  */
 export async function renderTemplate<S extends StandardSchemaV1>(
   template: MailTemplate<S>,
   input: NoInfer<SchemaInput<S>>,
   context: RenderContext = {},
-): Promise<MailResult<MailContent>> {
+): Promise<MailContent | FailureOf<typeof MailInvalidInput>> {
   let data: SchemaOutput<S>;
   try {
     data = await parseAsync(template.input, input);
   } catch (error) {
     // Bad data is a result. A schema that cannot run (`SchemaRunError`) is a bug and is rethrown.
     if (!(error instanceof SchemaError)) throw error;
-    return failed(
-      permanent(MAIL_ERROR_CODES.invalidInput, `Input for template "${template.name}" is invalid: ${error.message}`, {
-        issues: error.issues,
-      }),
-    );
+    return MailInvalidInput({
+      template: template.name,
+      issues: error.issues.map(issue => ({ path: pathOf(issue).map(key => plainKey(key)), message: issue.message })),
+    });
   }
   const [text, html] = await Promise.all([template.text(data, context), template.html?.(data, context)]);
-  return ok({
+  return {
     subject: template.subject(data, context),
     text,
     ...(html === undefined ? {} : { html }),
     ...(template.defaults?.headers === undefined ? {} : { headers: template.defaults.headers }),
     ...(template.defaults?.tags === undefined ? {} : { tags: template.defaults.tags }),
-  });
+  };
 }

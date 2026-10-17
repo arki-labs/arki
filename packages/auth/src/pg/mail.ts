@@ -6,6 +6,7 @@
 import { APIError } from 'better-auth/api';
 
 import type { Mailer } from '@arki/mail';
+import { isFailure } from '@arki/failure';
 import { magicLink, resetPassword, verifyEmail } from '@arki/mail/templates/auth';
 
 import type {
@@ -86,7 +87,7 @@ export function authMail(options: {
     async send(kind, to, url, request) {
       const template: AuthLinkTemplate = templates[kind];
       const brand = await brandOf(kind, request);
-      const { error } = await options.mail.send(
+      const sent = await options.mail.send(
         template,
         {
           appName: brand.appName ?? options.appName,
@@ -96,11 +97,12 @@ export function authMail(options: {
         },
         { to, ...(brand.from !== undefined && { from: brand.from }) },
       );
-      if (error === null) {
+      if (!isFailure(sent)) {
         log.debug('Sent the {kind} mail', { kind });
         return;
       }
-      log.error('The {kind} mail failed ({code})', { kind, code: error.code, transport: error.transport });
+      const transport = 'transport' in sent.data ? sent.data.transport : undefined;
+      log.error('The {kind} mail failed ({code})', { kind, code: sent.code, transport });
       throw mailFailed();
     },
   };

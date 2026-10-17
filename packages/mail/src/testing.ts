@@ -11,8 +11,8 @@
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { MailTemplate } from './template.js';
-import type { MailFailure, MailMessage, MailTransport } from './types.js';
-import { failed, MAIL_ERROR_CODES, ok } from './errors.js';
+import type { MailMessage, MailTransport, TransportFailure } from './types.js';
+import { MailRejected } from './failures.js';
 import { listOf } from './message.js';
 import { everyRecipient } from './transport-failures.js';
 
@@ -40,8 +40,8 @@ export type MailSink = MailTransport & {
   sentTo(address: string): readonly SentRecord[];
   /** The latest mail taken. */
   last(): SentRecord | undefined;
-  /** The next send fails with this failure (default: a permanent `ARKI_MAIL_E006`). Only the next one. */
-  failNext(failure?: Partial<MailFailure>): void;
+  /** The next send returns this failure (default: a `MailRejected` that is not retryable). Only the next one. */
+  failNext(failure?: TransportFailure): void;
   /** Forgets every mail and any pending `failNext`. */
   clear(): void;
 };
@@ -53,7 +53,7 @@ const mailboxOf = (address: string): string => (/<([^>]+)>/.exec(address)?.[1] ?
 export function mailSink(): MailSink {
   const id = 'sink';
   let records: SentRecord[] = [];
-  let pendingFailure: MailFailure | undefined;
+  let pendingFailure: TransportFailure | undefined;
 
   return {
     id,
@@ -64,12 +64,15 @@ export function mailSink(): MailSink {
       if (pendingFailure !== undefined) {
         const failure = pendingFailure;
         pendingFailure = undefined;
-        return Promise.resolve(failed(failure));
+        return Promise.resolve(failure);
       }
       records = [...records, { message, template: message.template, idempotencyKey: options.idempotencyKey }];
-      return Promise.resolve(
-        ok({ id: null, transport: id, status: 'simulated', recipients: everyRecipient(message, 'accepted') }),
-      );
+      return Promise.resolve({
+        id: null,
+        transport: id,
+        status: 'simulated',
+        recipients: everyRecipient(message, 'accepted'),
+      });
     },
     sentWith<S extends StandardSchemaV1, Name extends string>(template: MailTemplate<S, Name>) {
       return records.filter((record): record is SentRecord<Name> => record.template === template.name);
@@ -83,15 +86,8 @@ export function mailSink(): MailSink {
       );
     },
     last: () => records.at(-1),
-    failNext(failure = {}) {
-      pendingFailure = {
-        code: MAIL_ERROR_CODES.rejected,
-        message: 'mailSink: failNext',
-        retryable: false,
-        acceptance: 'none',
-        transport: id,
-        ...failure,
-      };
+    failNext(failure = MailRejected({ transport: id, retryable: false, detail: 'mailSink: failNext' })) {
+      pendingFailure = failure;
     },
     clear() {
       records = [];

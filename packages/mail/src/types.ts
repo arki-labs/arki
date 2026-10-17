@@ -2,9 +2,9 @@
  * The shapes every part of `@arki/mail` shares: what a template renders, who a mail goes to,
  * what a transport returns. Written once here; everything else infers from them.
  */
-import type { StandardSchemaV1 } from '@arki/schema';
+import type { FailureOf, Result } from '@arki/failure';
 
-import type { MailErrorCode } from './errors.js';
+import type { MailInvalidInput, MailQuotaExhausted, MailRejected, MailUncertain } from './failures.js';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -60,23 +60,12 @@ export type SentMail = {
   readonly recipients: readonly RecipientOutcome[];
 };
 
-export type MailFailure = {
-  readonly code: MailErrorCode;
-  readonly message: string;
-  /** Sending the same mail again later may succeed. */
-  readonly retryable: boolean;
-  /** `none`: the provider did not take the mail. `unknown`: it may have (timeout, unreadable answer). */
-  readonly acceptance: 'none' | 'unknown';
-  readonly transport?: string;
-  /** The provider's own error code or name. */
-  readonly providerCode?: string;
-  readonly status?: number;
-  /** What the template's schema reported (`ARKI_MAIL_E003` only). */
-  readonly issues?: readonly StandardSchemaV1.Issue[];
-};
+/** What a transport returns in place of a sent mail. `failover` adds the quota failure. */
+export type TransportFailure =
+  FailureOf<typeof MailRejected> | FailureOf<typeof MailUncertain> | FailureOf<typeof MailQuotaExhausted>;
 
-export type MailResult<T = SentMail> =
-  { readonly data: T; readonly error: null } | { readonly data: null; readonly error: MailFailure };
+/** What a send returns in place of a sent mail: a transport failure, or input the template refused. */
+export type SendFailure = TransportFailure | FailureOf<typeof MailInvalidInput>;
 
 /** Sends one mail through one service. */
 export type MailTransport = {
@@ -84,15 +73,18 @@ export type MailTransport = {
   readonly id: string;
   /** Monthly budget, counted per UTC month by `failover`. Omit for none. */
   readonly quotaPerMonth?: number;
-  /** Never throws: every failure is a `MailFailure`. */
+  /**
+   * The sent mail, or a returned failure for what the service answered. Throws only `MailError`
+   * (`ARKI_MAIL_E005`) for a field it cannot carry, before any request.
+   */
   send(
     message: MailMessage,
     options: { readonly idempotencyKey?: string; readonly signal?: AbortSignal },
-  ): Promise<MailResult>;
+  ): Promise<Result<SentMail, TransportFailure>>;
 };
 
 /** What the mailer reports to `onEvent`. Observe only. */
 export type MailEvent =
   | { readonly type: 'sending'; readonly transport: string; readonly template?: string }
   | { readonly type: 'sent'; readonly result: SentMail; readonly template?: string }
-  | { readonly type: 'failed'; readonly failure: MailFailure; readonly template?: string };
+  | { readonly type: 'failed'; readonly failure: SendFailure; readonly template?: string };

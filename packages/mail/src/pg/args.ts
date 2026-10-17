@@ -2,7 +2,7 @@
 import type { ScheduledJob } from '@arki/journal';
 
 import type { MailMessage } from '../types.js';
-import { MAIL_ERROR_CODES, MailError, permanent } from '../errors.js';
+import { MAIL_ERROR_CODES, MailError } from '../errors.js';
 
 /** The queue row's job name. The version is part of the stored shape. */
 export const MAIL_JOB = 'mail.deliver.v1';
@@ -44,7 +44,5 @@ export function queuedArgs(job: ScheduledJob): QueuedArgs {
     const expiresAt = typeof args.expiresAt === 'string' ? args.expiresAt : undefined;
     return { version: 1, message: args.message, ...(expiresAt === undefined ? {} : { expiresAt }) };
   }
-  throw new MailError(
-    permanent(MAIL_ERROR_CODES.badQueuedData, `Queued mail ${job.id} does not hold a ${MAIL_JOB} message.`),
-  );
+  throw new MailError(MAIL_ERROR_CODES.badQueuedData, `Queued mail ${job.id} does not hold a ${MAIL_JOB} message.`);
 }

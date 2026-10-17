@@ -1,6 +1,6 @@
 /**
  * The promises every `MailTransport` keeps, as one vitest suite. Failover and the journal runner
- * decide what to do from `code`, `retryable` and `acceptance`; a transport that maps a failure
+ * decide what to do from the failure's kind and `retryable`; a transport that maps a failure
  * differently would make them resend a delivered mail or drop a mail that could still go out.
  *
  * Run it once per transport, with a harness that fakes the service (an injected `fetch`, a mocked
@@ -8,8 +8,11 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { MailMessage, MailTransport } from '../types.js';
 import { MAIL_ERROR_CODES } from '../errors.js';
+import { MailRejected, MailUncertain } from '../failures.js';
 
 export type TransportHarness = {
   /** Name for the describe block. */
@@ -62,11 +65,11 @@ export function transportContract(harness: TransportHarness): void {
     it("success: returns the service's own id (or null) and every recipient", async () => {
       harness.succeed();
       const result = await harness.create().send(message, {});
-      expect(result.error).toBeNull();
-      expect(result.data?.id).toBe(harness.expectedId);
-      expect(result.data?.transport).toBe(harness.defaultId);
-      expect(result.data?.status).toBe('accepted');
-      expect(result.data?.recipients.map(recipient => recipient.address)).toEqual(
+      if (isFailure(result)) throw new Error(`expected a sent mail, got ${result.code}`);
+      expect(result.id).toBe(harness.expectedId);
+      expect(result.transport).toBe(harness.defaultId);
+      expect(result.status).toBe('accepted');
+      expect(result.recipients.map(recipient => recipient.address)).toEqual(
         expect.arrayContaining(['reader@example.com', 'second@example.com']),
       );
       expect(harness.requestCount()).toBe(1);
@@ -74,50 +77,39 @@ export function transportContract(harness: TransportHarness): void {
 
     it('429: rejected and retryable, so failover may try the next transport', async () => {
       harness.respondWith(429);
-      const { data, error } = await harness.create().send(message, {});
-      expect(data).toBeNull();
-      expect(error).toMatchObject({
-        code: MAIL_ERROR_CODES.rejected,
-        retryable: true,
-        acceptance: 'none',
-        status: 429,
-        transport: harness.defaultId,
+      const result = await harness.create().send(message, {});
+      expect(MailRejected.is(result)).toBe(true);
+      expect(result).toMatchObject({
+        data: { retryable: true, upstreamStatus: 429, transport: harness.defaultId },
       });
     });
 
     it('5xx: rejected and retryable', async () => {
       harness.respondWith(503);
-      const { error } = await harness.create().send(message, {});
-      expect(error).toMatchObject({ code: MAIL_ERROR_CODES.rejected, retryable: true, status: 503 });
+      const result = await harness.create().send(message, {});
+      expect(MailRejected.is(result)).toBe(true);
+      expect(result).toMatchObject({ data: { retryable: true, upstreamStatus: 503 } });
     });
 
     it('400: rejected and permanent, so the same mail is not tried again', async () => {
       harness.respondWith(400);
-      const { error } = await harness.create().send(message, {});
-      expect(error).toMatchObject({
-        code: MAIL_ERROR_CODES.rejected,
-        retryable: false,
-        acceptance: 'none',
-        status: 400,
-      });
+      const result = await harness.create().send(message, {});
+      expect(MailRejected.is(result)).toBe(true);
+      expect(result).toMatchObject({ data: { retryable: false, upstreamStatus: 400 } });
     });
 
-    it('network failure: never throws; uncertain, retryable, acceptance unknown', async () => {
+    it('network failure: never throws; uncertain, because the service may have taken the mail', async () => {
       harness.failInTransit('socket hang up');
-      const { data, error } = await harness.create().send(message, {});
-      expect(data).toBeNull();
-      expect(error).toMatchObject({
-        code: MAIL_ERROR_CODES.uncertain,
-        retryable: true,
-        acceptance: 'unknown',
-        transport: harness.defaultId,
-      });
-      expect(error?.message).toContain('socket hang up');
+      const result = await harness.create().send(message, {});
+      expect(MailUncertain.is(result)).toBe(true);
+      expect(result).toMatchObject({ data: { transport: harness.defaultId } });
+      expect(isFailure(result) ? result.message : '').toContain('socket hang up');
     });
 
-    it.skipIf(harness.unsupported === undefined)('a field it cannot carry: E005 and no request made', async () => {
-      const { error } = await harness.create().send({ ...message, ...harness.unsupported }, {});
-      expect(error).toMatchObject({ code: MAIL_ERROR_CODES.unsupported, retryable: false, acceptance: 'none' });
+    it.skipIf(harness.unsupported === undefined)('a field it cannot carry: throws E005, no request made', async () => {
+      await expect(harness.create().send({ ...message, ...harness.unsupported }, {})).rejects.toMatchObject({
+        code: MAIL_ERROR_CODES.unsupported,
+      });
       expect(harness.requestCount()).toBe(0);
     });
 

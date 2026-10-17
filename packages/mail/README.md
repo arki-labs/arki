@@ -17,6 +17,7 @@ Typed mail for TypeScript. Templates are plain objects typed by any Standard Sch
 ```ts
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
 import { defineTemplate, mailer } from '@arki/mail';
 import { resend } from '@arki/mail/http/resend';
 
@@ -32,12 +33,12 @@ const mail = mailer({
   from: 'Acme <hello@acme.dev>',
 });
 
-const { data, error } = await mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
-if (error !== null) console.error(error.code, error.message, error.retryable);
-else console.info(data.id);
+const sent = await mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
+if (isFailure(sent)) console.error(sent.code, sent.message);
+else console.info(sent.id);
 ```
 
-`send` never throws for a failed mail. It returns `{ data, error }`. `error.code` is stable (`ARKI_MAIL_E006`), `error.retryable` says whether trying later can help, and `error.acceptance` says whether the provider may have taken the mail anyway.
+`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](../failure/README.md): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected` or `MailUncertain` (see [Errors](#errors)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
 
 The sender comes from the call, then the template's `defaults.from`, then the mailer's `from`.
 
@@ -50,13 +51,14 @@ Two options guard non-production setups:
 
 ## Templates
 
-`defineTemplate({ name, input, subject, text, html?, defaults? })`. `input` is any Standard Schema: Zod, Valibot, ArkType or your own. Callers pass the schema's input type; renderers get its output, with defaults applied. Wrong data does not compile, and data the schema refuses comes back as `ARKI_MAIL_E003` with the schema's issues, before anything is sent.
+`defineTemplate({ name, input, subject, text, html?, defaults? })`. `input` is any Standard Schema: Zod, Valibot, ArkType or your own. Callers pass the schema's input type; renderers get its output, with defaults applied. Wrong data does not compile, and data the schema refuses comes back as `MailInvalidInput` with the schema's issues, before anything is sent.
 
 `text` is required: every mail has a plain-text part. `html` is optional and may be async.
 
 ```ts
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
 import { defineTemplate, renderTemplate } from '@arki/mail';
 
 const receipt = defineTemplate({
@@ -70,7 +72,7 @@ const receipt = defineTemplate({
 
 // No transport needed: previews and content tests.
 const preview = await renderTemplate(receipt, { total: '5 EUR' });
-console.info(preview.data?.subject);
+if (!isFailure(preview)) console.info(preview.subject);
 ```
 
 Sign-in mail is ready made in `@arki/mail/templates/auth`: `magicLink`, `verifyEmail`, `resetPassword` (`{ appName, url, expiresInMinutes? }`) and `signInCode` (`{ appName, code }`). They escape every value and refuse a URL that is not `http(s)`.
@@ -87,12 +89,12 @@ await mail.sendRaw({ to, subject: 'Your sign-in link', html, text });
 
 ## Transports
 
-A transport sends one mail through one service. Each one maps the service's answer to the same failures, so `failover` and the journal treat every service alike.
+A transport sends one mail through one service. It returns the sent mail or a failure, and each one maps the service's answer to the same failures, so `failover` and the journal treat every service alike.
 
 | Transport        | Entry                        | Options                                           | Idempotency key | Notes                                                                 |
 | ---------------- | ---------------------------- | ------------------------------------------------- | --------------- | --------------------------------------------------------------------- |
 | `resend()`       | `@arki/mail/http/resend`     | `apiKey`                                          | yes             | Plain `fetch`, no SDK. Tags and several Reply-To addresses supported. |
-| `unosend()`      | `@arki/mail/http/unosend`    | `apiKey`                                          | no              | Plain `fetch`. Tags are refused (`E005`).                             |
+| `unosend()`      | `@arki/mail/http/unosend`    | `apiKey`                                          | no              | Plain `fetch`. Tags throw `E005`.                                     |
 | `cloudflare()`   | `@arki/mail/http/cloudflare` | `accountId`, `apiToken`                           | no              | Beta service. Reports each recipient; some bounced is `partial`.      |
 | `ses()`          | `@arki/mail/node/ses`        | `region`, `credentials?`, `configurationSetName?` | no              | Needs the `@aws-sdk/client-sesv2` peer. SDK retries are off.          |
 | `logTransport()` | `@arki/mail`                 | `id?`                                             | —               | Sends nothing.                                                        |
@@ -101,13 +103,15 @@ Every transport takes `id` (default: its name) and `quotaPerMonth`. HTTP transpo
 
 How a service's answer maps:
 
-| Answer                           | Code   | `retryable` | `acceptance` |
-| -------------------------------- | ------ | ----------- | ------------ |
-| 429 or 5xx                       | `E006` | yes         | `none`       |
-| any other 4xx                    | `E006` | no          | `none`       |
-| network failure, timeout, abort  | `E007` | yes         | `unknown`    |
-| 2xx that cannot be read          | `E008` | yes         | `unknown`    |
-| a field the service cannot carry | `E005` | no          | `none`       |
+| Answer                           | Result                                        | May the service have taken it? |
+| -------------------------------- | --------------------------------------------- | ------------------------------ |
+| 429 or 5xx                       | `MailRejected`, `data.retryable: true`        | no                             |
+| any other 4xx                    | `MailRejected`, `data.retryable: false`       | no                             |
+| network failure, timeout, abort  | `MailUncertain`                               | yes                            |
+| 2xx that cannot be read          | `MailUncertain`, with `data.upstreamStatus`   | yes                            |
+| a field the service cannot carry | throws `MailError` `E005`, before any request | no                             |
+
+`MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, and what it said as `data.detail`.
 
 A message id is the provider's, or `null` when it gives none. It is never made up.
 
@@ -136,7 +140,7 @@ const mail = mailer({
 `failover` tries its transports in order:
 
 - A transport over its quota for the UTC month is skipped. When every transport is over quota, nothing is sent (`E004`). A quota is a budget; add a transport without one if you want an unlimited fallback.
-- After a failure it tries the next transport only when the provider surely did not take the mail (`acceptance: 'none'`) and a retry can help. After a timeout the first provider may already be delivering it, and a second provider would send a duplicate, so the failure is returned instead.
+- After a failure it tries the next transport only when the provider surely did not take the mail (`MailRejected`) and a retry can help (`data.retryable`). After a timeout the first provider may already be delivering it, and a second provider would send a duplicate, so the failure is returned instead.
 - A permanent refusal (a bad address) stops the chain.
 
 A mailer with one transport that has a quota counts it the same way. `kvQuotaStore` shares counters between replicas; `inMemoryQuotaStore` (the default) counts in one process. Counts are advisory: two replicas can both send the last mail of a quota. A counter that cannot be read or written is logged and never stops or fails a send.
@@ -162,10 +166,10 @@ await journal.worker(db, { jobs: outbox.runner });
 - The row stores the rendered message, so every retry sends the same bytes.
 - The job id is the idempotency key on every try. Resend drops a repeat within 24 hours; other services may deliver a retry twice. Delivery is at least once.
 - The same `idempotencyKey` while a mail is still queued returns that job (`deduped: true`).
-- `expiresAt` stops a stale mail: past it, the job is dead with `E011` and nothing is sent. Use it for sign-in links.
+- `expiresAt` stops a stale mail: past it, the job is dead with `MailExpired` and nothing is sent. Use it for sign-in links.
 - A queued mail has exactly one `to` recipient and no Cc or Bcc.
-- `retry` sets the waits (default 5 s doubling to 1 h, 5 tries); a failure with `retryable: false` is dead on its first try.
-- `enqueue` throws `MailError`: `E009` for the root database instead of a transaction, `E003` for bad input, `E010` when the message is over `maxBytes` (256 KiB).
+- `retry` sets the waits (default 5 s doubling to 1 h, 5 tries). Only `MailUncertain` and a `MailRejected` with `data.retryable` are tried again; any other failure is dead on its first try.
+- `enqueue` returns `MailInvalidInput` for bad input, and queues nothing; your code decides whether the write still commits. It throws `MailError`: `E009` for the root database instead of a transaction, `E002` unless there is exactly one `to` recipient, `E010` when the message is over `maxBytes` (256 KiB).
 
 ## Dot
 
@@ -187,7 +191,7 @@ defineApp('shop')
 ```ts
 import { z } from 'zod';
 
-import { defineTemplate, mailer } from '@arki/mail';
+import { defineTemplate, mailer, MailRejected } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
@@ -197,7 +201,7 @@ const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 
 await mail.send(ping, {}, { to: 'ada@example.com' });
 console.info(sink.sentWith(ping).length, sink.sentTo('ada@example.com').length, sink.last()?.message.subject);
 
-sink.failNext({ retryable: false }); // the next send fails once
+sink.failNext(MailRejected({ transport: 'sink', retryable: false })); // the next send fails once
 ```
 
 - `mailSink()` records each message with its template name and idempotency key.
@@ -206,19 +210,25 @@ sink.failNext({ retryable: false }); // the next send fails once
 
 ## Errors
 
-| Code             | Name               | When                                                                  |
-| ---------------- | ------------------ | --------------------------------------------------------------------- |
-| `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender. Thrown.    |
-| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header. |
-| `ARKI_MAIL_E003` | `invalidInput`     | The template's schema refused the input. Carries `issues`.            |
-| `ARKI_MAIL_E004` | `quotaExhausted`   | Every transport is over quota. Nothing was sent.                      |
-| `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Nothing was sent.                 |
-| `ARKI_MAIL_E006` | `rejected`         | The service refused the mail.                                         |
-| `ARKI_MAIL_E007` | `uncertain`        | No answer: timeout or network failure. The mail may have been sent.   |
-| `ARKI_MAIL_E008` | `badResponse`      | The service's answer could not be read.                               |
-| `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database. Thrown.                              |
-| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.           |
-| `ARKI_MAIL_E011` | `expired`          | A queued mail passed its `expiresAt`. Nothing was sent.               |
+A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
+
+| Failure              | Code                   | Status | When                                                                              |
+| -------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------- |
+| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.            |
+| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                 |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`. |
+| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`.   |
+| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.      |
+
+A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
+
+| Code             | Name               | When                                                                   |
+| ---------------- | ------------------ | ---------------------------------------------------------------------- |
+| `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender, no SES SDK. |
+| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header.  |
+| `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Thrown before any request.         |
+| `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database.                                       |
+| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.            |
 
 ## Runtimes
 
