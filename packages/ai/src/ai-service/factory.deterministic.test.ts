@@ -11,7 +11,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { z } from '@arki/contracts';
+
 import { createLLMProvider } from './factory';
+import { OllamaService } from './ollama-service';
 
 const model = process.env['AI_TEST_MODEL'] ?? 'gemma4:latest';
 const prompt = 'Write one short, unusual sentence about a lighthouse keeper.';
@@ -25,5 +28,17 @@ describe('deterministic mode on a real local model', () => {
 
     expect(first.trim().length, `no answer from Ollama model ${model}; is the daemon running?`).toBeGreaterThan(0);
     expect(second).toBe(first);
+  });
+
+  // Apps also build `OllamaService` directly (Avocabo's citation judge does): the seed must reach it too.
+  it('makes OllamaService structured output repeatable too', { timeout: 180_000 }, async () => {
+    const service = new OllamaService({ model, deterministicSeed: 7 });
+    const schema = z.object({ sentence: z.string() });
+
+    const first = await service.generateStructuredData(prompt, schema, { temperature: 1.5 });
+    const second = await service.generateStructuredData(prompt, schema, { temperature: 1.5 });
+
+    expect(first.sentence.trim().length, `no answer from Ollama model ${model}; is the daemon running?`).toBeGreaterThan(0);
+    expect(second).toEqual(first);
   });
 });

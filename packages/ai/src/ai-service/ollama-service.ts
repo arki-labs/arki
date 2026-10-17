@@ -37,6 +37,7 @@ import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import { debugService } from '../debug.ts';
+import { env } from '../env';
 import { GenerationError, getErrorMessage } from '../errors';
 import { modelSchema } from './model-schema';
 
@@ -71,6 +72,11 @@ export type OllamaServiceConfig = {
    * unloads between calls. A longer keep-alive amortizes that cost.
    */
   keepAlive?: string | number;
+  /**
+   * Run every call at temperature 0 with this seed, overriding any per-call temperature, so the
+   * same input gets the same answer. Defaults to `AI_DETERMINISTIC_SEED`; meant for tests.
+   */
+  deterministicSeed?: number;
 };
 
 export type OllamaGenerationOptions = {
@@ -141,6 +147,7 @@ export class OllamaService {
   private readonly provider: ReturnType<typeof createOllama>;
   private readonly model: string;
   private readonly defaultTemperature: number;
+  private readonly deterministicSeed: number | undefined;
   private readonly defaultMaxRetries: number;
   private readonly keepAlive: string | number | undefined;
   private readonly think: boolean | undefined;
@@ -148,6 +155,7 @@ export class OllamaService {
   constructor(config: OllamaServiceConfig = {}) {
     this.model = config.model ?? DEFAULT_MODEL;
     this.defaultTemperature = config.temperature ?? DEFAULT_TEMPERATURE;
+    this.deterministicSeed = config.deterministicSeed ?? env.AI_DETERMINISTIC_SEED;
     this.defaultMaxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.keepAlive = config.keepAlive;
     this.think = config.think;
@@ -165,6 +173,14 @@ export class OllamaService {
         keepAlive: this.keepAlive ?? 'default',
       },
     );
+  }
+
+  /** The sampling settings of one call: the asked temperature, or temperature 0 + the seed in deterministic mode. */
+  private sampling(options: { readonly temperature?: number }): { temperature: number; seed: number | undefined } {
+    if (this.deterministicSeed === undefined) {
+      return { temperature: options.temperature ?? this.defaultTemperature, seed: undefined };
+    }
+    return { temperature: 0, seed: this.deterministicSeed };
   }
 
   /**
@@ -203,7 +219,7 @@ export class OllamaService {
     schema: S,
     options: OllamaGenerationOptions = {},
   ): Promise<SchemaOutput<S>> {
-    const temperature = options.temperature ?? this.defaultTemperature;
+    const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
     const output = Output.object({ schema: modelSchema(schema, 'Ollama structured generation') });
 
@@ -222,6 +238,7 @@ export class OllamaService {
           messages,
           output,
           temperature,
+          seed,
           maxRetries,
           abortSignal: options.signal,
         });
@@ -243,6 +260,7 @@ export class OllamaService {
         messages,
         output,
         temperature,
+        seed,
         maxRetries,
         abortSignal: options.signal,
       });
@@ -269,7 +287,7 @@ export class OllamaService {
    * threaded via `options.systemPrompt`.
    */
   async generateConversation(messages: ChatMessage[], options: OllamaGenerationOptions = {}): Promise<string> {
-    const temperature = options.temperature ?? this.defaultTemperature;
+    const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
     debugService.debug(
@@ -283,6 +301,7 @@ export class OllamaService {
         instructions: options.systemPrompt,
         messages,
         temperature,
+        seed,
         maxRetries,
         abortSignal: options.signal,
       });
@@ -311,7 +330,7 @@ export class OllamaService {
     messages: ChatMessage[],
     options: OllamaStreamOptions = {},
   ): AsyncGenerator<string, void, unknown> {
-    const temperature = options.temperature ?? this.defaultTemperature;
+    const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
     debugService.debug('[Ollama] streamConversation (model={model}, messages={messages}, temperature={temperature})', {
@@ -328,6 +347,7 @@ export class OllamaService {
         instructions: options.systemPrompt,
         messages,
         temperature,
+        seed,
         maxRetries,
         abortSignal: options.signal,
       });
