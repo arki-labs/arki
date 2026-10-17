@@ -8,6 +8,7 @@
     "build": "bun run with-env vite build",
     "clean": "git clean -xdf .cache dist node_modules",
     "content:generate": "arki-content generate",
+    "content:snapshot": "arki-content snapshot",
     "dev": "bun run with-env vite",
     "format": "prettier --check . --ignore-path ../../../.gitignore",
     "lint": "eslint",

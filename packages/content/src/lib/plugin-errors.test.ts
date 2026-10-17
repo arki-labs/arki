@@ -36,12 +36,11 @@ describe('async MDX plugins', () => {
     await expect(processor.run(processor.parse('![missing](missing.png)'), postFile())).rejects.toThrow('ENOENT');
   });
 
-  it('mdxEmbedder rejects when an embed cannot be fetched', { timeout: 5000 }, async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
-    const processor = unified().use(remarkParse).use(mdxEmbedder, {});
+  it('mdxEmbedder rejects when an embed has no snapshot', { timeout: 5000 }, async () => {
+    const processor = unified().use(remarkParse).use(mdxEmbedder);
 
     await expect(
       processor.run(processor.parse('https://github.com/acme/widgets/issues/1'), postFile()),
-    ).rejects.toThrow('network down');
+    ).rejects.toThrow('has no snapshot');
   });
 });

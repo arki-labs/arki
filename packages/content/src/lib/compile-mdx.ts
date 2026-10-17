@@ -6,6 +6,8 @@ import type { CollectionContext, Meta } from '@content-collections/core';
 import type { Options as MdxOptions } from '@content-collections/mdx';
 import { compileMDX as compileUpstreamMDX } from '@content-collections/mdx';
 
+import { EMBEDS_FOLDER } from './mdxEmbedder/embeds.js';
+
 type MdxDocument = { _meta: Meta; content: string };
 type FileAppender = Parameters<NonNullable<MdxOptions['files']>>[0];
 
@@ -43,8 +45,9 @@ function appendedFiles(options: MdxOptions | undefined): {
 
 /**
  * Upstream keys compiled MDX on the document text alone. This hash adds what else changes the output: the options
- * (plugin names and their settings), the appended files, and every file in the document's own folder (its images
- * and components). Code changes inside `@arki/content` plugins are not seen: clear `.content-collections/cache`.
+ * (plugin names and their settings), the appended files, every file in the document's own folder (its images
+ * and components), and the embed snapshots. Code changes inside `@arki/content` plugins are not seen: clear
+ * `.content-collections/cache`.
  */
 async function fingerprint(collectionDirectory: string, document: MdxDocument, options?: MdxOptions): Promise<string> {
   const hash = createHash('sha256');
@@ -55,6 +58,8 @@ async function fingerprint(collectionDirectory: string, document: MdxDocument, o
   const appended = appendedFiles(options);
   const files = [...appended.paths];
   for (const directory of appended.directories) files.push(...(await filesBelow(directory)));
+  // A refreshed embed snapshot must recompile the documents that embed it.
+  files.push(...(await filesBelow(EMBEDS_FOLDER)));
   if (document._meta.directory !== '.') {
     files.push(...(await filesBelow(path.join(collectionDirectory, document._meta.directory))));
   }
