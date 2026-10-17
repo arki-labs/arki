@@ -1,11 +1,15 @@
 import type { Instant } from '@arki/date';
 import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
+import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentId, SubscriptionId } from '../types.js';
 import { paymentAmount } from '../money.js';
+
+const logger = getLogger('arki:payments:dunning');
 
 export type DunningRule = {
   id: string;
@@ -325,6 +329,14 @@ export class DunningService {
 
       // Attempt to retry the payment through the provider
       const retryResult = await this.paymentProvider.confirmPayment(event.paymentId);
+      if (isFailure(retryResult)) {
+        logger.warn('Payment retry failed for {paymentId}: {code}', {
+          paymentId: event.paymentId,
+          code: retryResult.code,
+          failure: retryResult,
+        });
+        return;
+      }
 
       if (retryResult.status === 'succeeded') {
         // Payment recovered - update subscription status.
@@ -348,7 +360,16 @@ export class DunningService {
    */
   private async pauseSubscription(event: DunningEvent): Promise<void> {
     try {
-      await this.paymentProvider.pauseSubscription(event.subscriptionId);
+      const paused = await this.paymentProvider.pauseSubscription(event.subscriptionId);
+      // The provider did not pause it, so the row must not say paused
+      if (isFailure(paused)) {
+        logger.warn('Could not pause subscription {subscriptionId}: {code}', {
+          subscriptionId: event.subscriptionId,
+          code: paused.code,
+          failure: paused,
+        });
+        return;
+      }
 
       // Update local database
       await this.writes.pauseSubscription({ subscriptionId: event.subscriptionId });
@@ -364,10 +385,19 @@ export class DunningService {
    */
   private async cancelSubscription(event: DunningEvent, config: Record<string, unknown>): Promise<void> {
     try {
-      await this.paymentProvider.cancelSubscription(event.subscriptionId, {
+      const canceled = await this.paymentProvider.cancelSubscription(event.subscriptionId, {
         immediately: true,
         reason: config['reason'] as string || 'payment_failure',
       });
+      // The provider did not cancel it, so the row must not say canceled
+      if (isFailure(canceled)) {
+        logger.warn('Could not cancel subscription {subscriptionId}: {code}', {
+          subscriptionId: event.subscriptionId,
+          code: canceled.code,
+          failure: canceled,
+        });
+        return;
+      }
 
       // Update local database
       await this.writes.cancelSubscription({

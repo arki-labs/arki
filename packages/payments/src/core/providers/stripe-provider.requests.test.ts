@@ -8,12 +8,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId, createPlanId, createSubscriptionId } from '../primitives.js';
-import { PaymentProviderError } from './provider-error.js';
+import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
@@ -118,14 +119,16 @@ describe('createSubscription', () => {
       body: stripeSubscription({ status: 'trialing', trial_start: PERIOD_START, trial_end: PERIOD_END }),
     }));
 
-    const subscription = await stripe.createSubscription({
-      customerId: customer.id,
-      planId: proPlan.id,
-      paymentMethodId: 'pm_1',
-      trialPeriodDays: 14,
-      metadata: { source: 'checkout' },
-      idempotencyKey: 'key-1',
-    });
+    const subscription = await orThrow(
+      stripe.createSubscription({
+        customerId: customer.id,
+        planId: proPlan.id,
+        paymentMethodId: 'pm_1',
+        trialPeriodDays: 14,
+        metadata: { source: 'checkout' },
+        idempotencyKey: 'key-1',
+      }),
+    );
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
@@ -156,7 +159,7 @@ describe('createSubscription', () => {
     expect(subscription.trialEnd?.epochMilliseconds).toBe(PERIOD_END * 1000);
   });
 
-  it('fails before any request when the plan has no Stripe price', async () => {
+  it('returns ReferenceNotFound before any request when the plan has no Stripe price', async () => {
     const noPrice = planRow(null);
     const http = createFakeStripeHttp(() => ({ body: stripeSubscription() }));
     const direct = new StripeProvider(
@@ -164,9 +167,10 @@ describe('createSubscription', () => {
       { references: { ...references, findPlanById: () => Promise.resolve(noPrice) }, httpClient: http.client },
     );
 
-    await expect(direct.createSubscription({ customerId: customer.id, planId: noPrice.id })).rejects.toMatchObject({
-      code: 'reference_not_found',
-    });
+    const result = await direct.createSubscription({ customerId: customer.id, planId: noPrice.id });
+
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { kind: 'plan', id: noPrice.id, missing: 'provider_id' } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -179,18 +183,46 @@ describe('createSubscription', () => {
     });
   });
 
-  it('maps a declined card to card_declined with the Stripe code', async () => {
+  /** A declined card is an answer the caller must branch on (ask for another card), so it is returned, not thrown. */
+  it('returns a declined card as CardDeclined with the Stripe codes', async () => {
     const { stripe } = provider(() => ({
       status: 402,
-      body: { error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } },
+      body: {
+        error: {
+          type: 'card_error',
+          code: 'card_declined',
+          decline_code: 'insufficient_funds',
+          message: 'Your card was declined.',
+        },
+      },
     }));
 
-    const failure = await stripe
-      .createSubscription({ customerId: customer.id, planId: proPlan.id, paymentMethodId: 'pm_bad' })
-      .catch((error: unknown) => error);
+    const result = await stripe.createSubscription({
+      customerId: customer.id,
+      planId: proPlan.id,
+      paymentMethodId: 'pm_bad',
+    });
 
-    expect(failure).toBeInstanceOf(PaymentProviderError);
-    expect(failure).toMatchObject({ code: 'card_declined', providerCode: 'card_declined', retryable: false });
+    expect(CardDeclined.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      status: 402,
+      data: { providerCode: 'card_declined', declineCode: 'insufficient_funds' },
+    });
+  });
+
+  it('returns a reused idempotency key as IdempotencyConflict', async () => {
+    const { stripe } = provider(() => ({
+      status: 400,
+      body: { error: { type: 'idempotency_error', message: 'Keys for idempotent requests can only be used once.' } },
+    }));
+
+    const result = await stripe.createSubscription({
+      customerId: customer.id,
+      planId: proPlan.id,
+      idempotencyKey: 'key-1',
+    });
+
+    expect(IdempotencyConflict.is(result)).toBe(true);
   });
 
   it('marks a Stripe server error as retryable', async () => {
@@ -209,7 +241,9 @@ describe('cancelSubscription', () => {
       body: stripeSubscription({ status: 'canceled', canceled_at: PERIOD_START + 10 }),
     }));
 
-    const canceled = await stripe.cancelSubscription(subscriptionRow.id, { immediately: true, reason: 'too pricey' });
+    const canceled = await orThrow(
+      stripe.cancelSubscription(subscriptionRow.id, { immediately: true, reason: 'too pricey' }),
+    );
 
     expect(requests[0]).toMatchObject({
       method: 'DELETE',
@@ -236,11 +270,16 @@ describe('cancelSubscription', () => {
     expect(canceled).toMatchObject({ status: 'active', cancelAtPeriodEnd: true });
   });
 
-  it('fails for an unknown subscription without calling Stripe', async () => {
+  it('returns ReferenceNotFound for an unknown subscription without calling Stripe', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeSubscription() }));
+    const subscriptionId = createSubscriptionId();
 
-    await expect(stripe.cancelSubscription(createSubscriptionId(), {})).rejects.toMatchObject({
-      code: 'reference_not_found',
+    const result = await stripe.cancelSubscription(subscriptionId, {});
+
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      status: 404,
+      data: { kind: 'subscription', id: subscriptionId, missing: 'row' },
     });
     expect(requests).toHaveLength(0);
   });
@@ -250,10 +289,12 @@ describe('updateSubscription', () => {
   it('swaps the item price with the proration setting and returns the new plan', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeSubscription() }));
 
-    const updated = await stripe.updateSubscription(subscriptionRow.id, {
-      planId: teamPlan.id,
-      prorationBehavior: 'none',
-    });
+    const updated = await orThrow(
+      stripe.updateSubscription(subscriptionRow.id, {
+        planId: teamPlan.id,
+        prorationBehavior: 'none',
+      }),
+    );
 
     expect(requests.map(request => `${request.method} ${request.path}`)).toEqual([
       'GET /v1/subscriptions/sub_stripe_1',
@@ -271,10 +312,12 @@ describe('updateSubscription', () => {
   it('sets cancelAtPeriodEnd without touching the price', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeSubscription({ cancel_at_period_end: true }) }));
 
-    const updated = await stripe.updateSubscription(subscriptionRow.id, {
-      cancelAtPeriodEnd: true,
-      metadata: { note: 'win-back' },
-    });
+    const updated = await orThrow(
+      stripe.updateSubscription(subscriptionRow.id, {
+        cancelAtPeriodEnd: true,
+        metadata: { note: 'win-back' },
+      }),
+    );
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.form).toMatchObject({ cancel_at_period_end: 'true', 'metadata[note]': 'win-back' });

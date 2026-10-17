@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer } from '../types.js';
@@ -68,14 +69,16 @@ describe('createTaxTransaction', () => {
           },
     );
 
-    const result = await stripe.createTaxTransaction({
-      reference: 'order_7',
-      type: 'sale',
-      customerId: customer.id,
-      currency: 'USD',
-      lineItems: [{ amount: money('10.00', 'USD'), quantity: 2, reference: 'plan' }],
-      customerDetails: { address: { country: 'DE', postalCode: '10115' } },
-    });
+    const result = await orThrow(
+      stripe.createTaxTransaction({
+        reference: 'order_7',
+        type: 'sale',
+        customerId: customer.id,
+        currency: 'USD',
+        lineItems: [{ amount: money('10.00', 'USD'), quantity: 2, reference: 'plan' }],
+        customerDetails: { address: { country: 'DE', postalCode: '10115' } },
+      }),
+    );
 
     expect(requests[0]).toMatchObject({
       method: 'POST',
@@ -107,12 +110,14 @@ describe('createTaxTransaction', () => {
         : { body: transaction('tax_txn_2', 'eur', [{ amount: 1200, amount_tax: 200, tax_behavior: 'inclusive' }]) },
     );
 
-    const result = await stripe.createTaxTransaction({
-      reference: 'order_8',
-      type: 'sale',
-      currency: 'EUR',
-      lineItems: [{ amount: money('12.00', 'EUR'), reference: 'plan' }],
-    });
+    const result = await orThrow(
+      stripe.createTaxTransaction({
+        reference: 'order_8',
+        type: 'sale',
+        currency: 'EUR',
+        lineItems: [{ amount: money('12.00', 'EUR'), reference: 'plan' }],
+      }),
+    );
 
     expect(result.amountTotal.toString()).toBe('12.00 EUR');
     expect(result.taxAmountInclusive.toString()).toBe('2.00 EUR');
@@ -124,13 +129,15 @@ describe('createTaxTransaction', () => {
       body: transaction('tax_txn_r', 'usd', [{ amount: -2000, amount_tax: -400, tax_behavior: 'exclusive' }]),
     }));
 
-    const result = await stripe.createTaxTransaction({
-      reference: 'refund_7',
-      type: 'refund',
-      currency: 'USD',
-      originalTransactionId: 'tax_txn_1',
-      lineItems: [],
-    });
+    const result = await orThrow(
+      stripe.createTaxTransaction({
+        reference: 'refund_7',
+        type: 'refund',
+        currency: 'USD',
+        originalTransactionId: 'tax_txn_1',
+        lineItems: [],
+      }),
+    );
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({

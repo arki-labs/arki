@@ -30,6 +30,7 @@ import {
 } from '../../service-test-support.js';
 import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support.js';
 import { createPaymentId } from '../primitives.js';
+import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { DunningService } from './dunning-service.js';
 
 type Provider = ConstructorParameters<typeof DunningService>[0];
@@ -174,6 +175,44 @@ describe('processDunningEvents', () => {
       'SubscriptionPastDue',
       'SubscriptionPaused',
     ]);
+  });
+
+  /** The row follows the provider: when the provider says no, the subscription must not read paused or canceled. */
+  it.each(['pause_subscription', 'cancel_subscription'] as const)(
+    'a %s step the provider refuses leaves the subscription past due and writes no event',
+    async step => {
+      const refusing = (subscriptionId: string) =>
+        Promise.resolve(ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' }));
+      const service = new DunningService(
+        { ...providerWhereRetryEnds('succeeded'), pauseSubscription: refusing, cancelSubscription: refusing },
+        reads,
+        writes,
+        { rules: [ruleDoing(step)] },
+      );
+      const id = await failedPaymentOn(service);
+      const eventsBefore = await countEvents(db);
+
+      await service.processDunningEvents();
+
+      expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+      expect(await countEvents(db)).toBe(eventsBefore);
+    },
+  );
+
+  it('a retry the card declines changes nothing: the subscription stays past due and no event is written', async () => {
+    const service = new DunningService(
+      { ...providerWhereRetryEnds('succeeded'), confirmPayment: () => Promise.resolve(CardDeclined({})) },
+      reads,
+      writes,
+      { rules: [ruleDoing('retry_payment')] },
+    );
+    const id = await failedPaymentOn(service);
+    const eventsBefore = await countEvents(db);
+
+    await service.processDunningEvents();
+
+    expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+    expect(await countEvents(db)).toBe(eventsBefore);
   });
 
   it('the cancel step ends the subscription with a cancellation time and records the event', async () => {

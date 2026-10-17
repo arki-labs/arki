@@ -1,10 +1,14 @@
 import type { Instant } from '@arki/date';
 import { add, isSameOrBefore, now, toMillis } from '@arki/date';
+import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId } from '../types.js';
+
+const logger = getLogger('arki:payments:retry');
 
 export type RetryStrategy = {
   name: string;
@@ -235,6 +239,13 @@ export class PaymentRetryService {
       console.log(`Executing retry attempt ${attempt.attemptNumber} for payment ${attempt.paymentId}`);
 
       const result = await this.paymentProvider.confirmPayment(attempt.paymentId);
+      if (isFailure(result)) {
+        // A declined card or a missing payment row: this attempt failed, as when the provider threw
+        attempt.status = 'failed';
+        attempt.failureReason = result.message;
+        logger.warn('Retry {attemptId} failed: {code}', { attemptId: attempt.id, code: result.code, failure: result });
+        return;
+      }
 
       if (result.status === 'succeeded') {
         attempt.status = 'succeeded';

@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
 import { instant, isInstant } from '@arki/date';
+import { isFailure, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { CoreWrites } from '../core/journal.js';
@@ -26,6 +27,7 @@ import type { RefundReason } from './primitives.js';
 import type { RefundAutoApproveLimits } from './service.js';
 import { toMinorColumn } from '../core/money.js';
 import { createPaymentId } from '../core/primitives.js';
+import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
 import {
   adminId,
@@ -38,6 +40,14 @@ import {
   typed,
   userId,
 } from '../test-support.js';
+import {
+  DuplicatePendingRefund,
+  RefundAmountExceeded,
+  RefundInvalidState,
+  RefundNotFound,
+  RefundWindowExceeded,
+  TransactionNotFound,
+} from './failures.js';
 import { createRefundId } from './primitives.js';
 import { RefundService } from './service.js';
 
@@ -107,19 +117,23 @@ async function askFor(
 ) {
   const payment = await seedPayment(coreWrites, null, '5000', amount.currency.code);
 
-  return serviceWith(providerThatRefunds, autoApproveLimits).requestRefund({
-    paymentId: payment.id,
-    amount,
-    reason,
-    requestedBy: userId,
-  });
+  return orThrow(
+    serviceWith(providerThatRefunds, autoApproveLimits).requestRefund({
+      paymentId: payment.id,
+      amount,
+      reason,
+      requestedBy: userId,
+    }),
+  );
 }
 
 /** A request above the auto-approve limit, for a reason that needs a person to approve. */
 async function pendingRefund(service: RefundService, amount = money(40, 'USD')) {
   const payment = await seedPayment(coreWrites, null, '100');
 
-  return service.requestRefund({ paymentId: payment.id, amount, reason: 'customer_request', requestedBy: userId });
+  return orThrow(
+    service.requestRefund({ paymentId: payment.id, amount, reason: 'customer_request', requestedBy: userId }),
+  );
 }
 
 beforeAll(async () => {
@@ -144,12 +158,14 @@ describe('requestRefund', () => {
   it('a small refund is approved by the system and paid back at once: four steps, four events', async () => {
     const payment = await seedPayment(coreWrites, null, '100');
 
-    const refund = await serviceWith(providerThatRefunds).requestRefund({
-      paymentId: payment.id,
-      amount: money(5, 'USD'),
-      reason: 'customer_request',
-      requestedBy: userId,
-    });
+    const refund = await orThrow(
+      serviceWith(providerThatRefunds).requestRefund({
+        paymentId: payment.id,
+        amount: money(5, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
 
     expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
     expect(refund.providerRefundId).toBe(refundedAs);
@@ -161,19 +177,41 @@ describe('requestRefund', () => {
     ]);
   });
 
-  it('a refund for a payment we do not know is turned down and writes nothing', async () => {
+  it('a refund for a payment we do not know is an answer the caller branches on, and writes nothing', async () => {
     const eventsBefore = await countEvents(db);
+    const paymentId = createPaymentId();
 
-    const error = await rejectionOf(
-      serviceWith(providerThatRefunds).requestRefund({
-        paymentId: createPaymentId(),
-        amount: money(5, 'USD'),
-        reason: 'customer_request',
-        requestedBy: userId,
-      }),
-    );
+    const refused = await serviceWith(providerThatRefunds).requestRefund({
+      paymentId,
+      amount: money(5, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
 
-    expect(error).toMatchObject({ message: 'Payment not found' });
+    expect(TransactionNotFound.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ status: 404, data: { paymentId } });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('a refund for a payment past the refund window is returned as RefundWindowExceeded and pays nothing back', async () => {
+    const payment = await seedPayment(coreWrites, null, '100');
+    const eventsBefore = await countEvents(db);
+    const asked = askedToRefund.length;
+    const noWindow = new RefundService(refundReads(db), writes, providerThatRefunds, coreReads(db), {
+      systemUserId: adminId,
+      refundWindowMs: -1,
+    });
+
+    const refused = await noWindow.requestRefund({
+      paymentId: payment.id,
+      amount: money(5, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+
+    expect(RefundWindowExceeded.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ status: 422, data: { paymentId: payment.id } });
+    expect(askedToRefund).toHaveLength(asked);
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -181,16 +219,18 @@ describe('requestRefund', () => {
     const payment = await seedPayment(coreWrites, null, '30');
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(
-      serviceWith(providerThatRefunds).requestRefund({
-        paymentId: payment.id,
-        amount: money('30.01', 'USD'),
-        reason: 'customer_request',
-        requestedBy: userId,
-      }),
-    );
+    const refused = await serviceWith(providerThatRefunds).requestRefund({
+      paymentId: payment.id,
+      amount: money('30.01', 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
 
-    expect(error).toMatchObject({ code: 'AMOUNT_EXCEEDED', message: 'Refund amount exceeds payment amount' });
+    expect(RefundAmountExceeded.is(refused)).toBe(true);
+    expect(refused).toMatchObject({
+      status: 422,
+      data: { paymentId: payment.id, requested: '30.01', refundable: '30.00', currency: 'USD' },
+    });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -211,7 +251,7 @@ describe('requestRefund', () => {
       requestedBy: userId,
     });
 
-    expect(second).toMatchObject({ status: 'completed' });
+    expect(second).toMatchObject({ status: 'completed', refundAmountMinor: 20 });
   });
 
   it("a refund keeps the payment's currency: a EUR payment is refunded in EUR, not stored as USD", async () => {
@@ -314,7 +354,7 @@ describe('approveRefund', () => {
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
 
-    const refund = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
+    const refund = await orThrow(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
 
     expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
     expect(isInstant(refund.completedAt)).toBe(true);
@@ -346,15 +386,40 @@ describe('approveRefund', () => {
     ]);
   });
 
+  /** A returned "no" from the provider must leave the refund exactly where a thrown one did: failed, not processing. */
+  it('when the provider returns a failure, the refund ends failed with its message, and the failure reaches the caller', async () => {
+    const providerWithoutThePayment: Provider = {
+      refundPayment: paymentId =>
+        Promise.resolve(ReferenceNotFound({ kind: 'payment', id: paymentId, missing: 'row' })),
+    };
+    const service = serviceWith(providerWithoutThePayment);
+    const pending = await pendingRefund(service);
+
+    const result = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
+
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(await refundRow(db, pending.id)).toMatchObject({
+      status: 'failed',
+      providerResponse: JSON.stringify({ error: `payment ${pending.paymentId} not found` }),
+    });
+    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
+      'RefundRequestedV2',
+      'RefundApproved',
+      'RefundProcessed',
+      'RefundFailed',
+    ]);
+  });
+
   it('a refund that was already decided cannot be approved again: refused, nothing written', async () => {
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
     await service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' });
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
+    const refused = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
 
-    expect(error).toMatchObject({ message: `Invalid refund state for ${pending.id}` });
+    expect(RefundInvalidState.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ status: 409, data: { refundId: pending.id, status: 'rejected' } });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await refundRow(db, pending.id)).toMatchObject({ status: 'rejected' });
   });
@@ -365,7 +430,9 @@ describe('rejectRefund', () => {
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
 
-    const refund = await service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' });
+    const refund = await orThrow(
+      service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' }),
+    );
 
     expect(refund).toMatchObject({ status: 'rejected', rejectedBy: adminId, rejectionReason: 'outside policy' });
     expect(await eventTypesOf(db, 'refund', pending.id)).toEqual(['RefundRequestedV2', 'RefundRejected']);
@@ -377,11 +444,13 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
 
-    const refund = await service.approveRefund({
-      refundId: pending.id,
-      approvedBy: adminId,
-      notes: 'checked with the customer',
-    });
+    const refund = await orThrow(
+      service.approveRefund({
+        refundId: pending.id,
+        approvedBy: adminId,
+        notes: 'checked with the customer',
+      }),
+    );
 
     expect(refund).toMatchObject({ status: 'completed', approvalNotes: 'checked with the customer' });
     expect(await refundRow(db, pending.id)).toMatchObject({ approvalNotes: 'checked with the customer' });
@@ -391,28 +460,30 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
 
-    const refund = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
+    const refund = await orThrow(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
 
     expect(refund.approvalNotes).toBeNull();
   });
 
-  it('approving a refund that does not exist is a REFUND_NOT_FOUND error, not a plain failure', async () => {
+  it('approving a refund that does not exist returns RefundNotFound, which the caller can tell from an outage', async () => {
     const eventsBefore = await countEvents(db);
+    const refundId = createRefundId();
 
-    const error = await rejectionOf(
-      serviceWith(providerThatRefunds).approveRefund({ refundId: createRefundId(), approvedBy: adminId }),
-    );
+    const refused = await serviceWith(providerThatRefunds).approveRefund({ refundId, approvedBy: adminId });
 
-    expect(error).toMatchObject({ name: 'RefundError', code: 'REFUND_NOT_FOUND' });
+    expect(RefundNotFound.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ status: 404, data: { refundId } });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
-  it('rejecting a refund that does not exist is a REFUND_NOT_FOUND error', async () => {
-    const error = await rejectionOf(
-      serviceWith(providerThatRefunds).rejectRefund({ refundId: createRefundId(), rejectedBy: adminId, reason: 'no' }),
-    );
+  it('rejecting a refund that does not exist returns RefundNotFound', async () => {
+    const refused = await serviceWith(providerThatRefunds).rejectRefund({
+      refundId: createRefundId(),
+      rejectedBy: adminId,
+      reason: 'no',
+    });
 
-    expect(error).toMatchObject({ name: 'RefundError', code: 'REFUND_NOT_FOUND' });
+    expect(RefundNotFound.is(refused)).toBe(true);
   });
 
   it.each(['', '   '])('a rejection with the reason %j is refused and the refund stays pending', async reason => {
@@ -438,28 +509,29 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     });
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(
-      service.requestRefund({
-        paymentId: payment.id,
-        amount: money(20, 'USD'),
-        reason: 'customer_request',
-        requestedBy: userId,
-      }),
-    );
+    const refused = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(20, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
 
-    expect(error).toMatchObject({ name: 'RefundError', code: 'DUPLICATE_PENDING_REFUND' });
+    expect(DuplicatePendingRefund.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ status: 409, data: { paymentId: payment.id } });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
   it('once the first refund is decided, the payment can be refunded again', async () => {
     const service = serviceWith(providerThatRefunds);
     const payment = await seedPayment(coreWrites, null, '100');
-    const first = await service.requestRefund({
-      paymentId: payment.id,
-      amount: money(40, 'USD'),
-      reason: 'customer_request',
-      requestedBy: userId,
-    });
+    const first = await orThrow(
+      service.requestRefund({
+        paymentId: payment.id,
+        amount: money(40, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
     await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
 
     const second = await service.requestRefund({
@@ -475,7 +547,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
 
 describe('what a payment can still refund', () => {
   it.each(['approved', 'processing'] as const)(
-    'a %s refund already counts: a request over the rest is refused with AMOUNT_EXCEEDED',
+    'a %s refund already counts: a request over the rest is refused with RefundAmountExceeded',
     async stage => {
       const payment = await seedPayment(coreWrites, null, '100');
       const earlier = await writes.requestRefund({
@@ -491,16 +563,14 @@ describe('what a payment can still refund', () => {
       }
       const eventsBefore = await countEvents(db);
 
-      const error = await rejectionOf(
-        serviceWith(providerThatRefunds).requestRefund({
-          paymentId: payment.id,
-          amount: money(30, 'USD'),
-          reason: 'customer_request',
-          requestedBy: userId,
-        }),
-      );
+      const refused = await serviceWith(providerThatRefunds).requestRefund({
+        paymentId: payment.id,
+        amount: money(30, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      });
 
-      expect(error).toMatchObject({ name: 'RefundError', code: 'AMOUNT_EXCEEDED' });
+      expect(refused).toMatchObject({ code: 'payments.refund_amount_exceeded', data: { refundable: '20.00' } });
       expect(await countEvents(db)).toBe(eventsBefore);
     },
   );
@@ -508,12 +578,14 @@ describe('what a payment can still refund', () => {
   it('a rejected or failed refund frees its amount again', async () => {
     const service = serviceWith(providerThatRefunds);
     const payment = await seedPayment(coreWrites, null, '100');
-    const first = await service.requestRefund({
-      paymentId: payment.id,
-      amount: money(80, 'USD'),
-      reason: 'customer_request',
-      requestedBy: userId,
-    });
+    const first = await orThrow(
+      service.requestRefund({
+        paymentId: payment.id,
+        amount: money(80, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
     await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
 
     const second = await service.requestRefund({
@@ -547,30 +619,29 @@ describe('two requests at once for one payment', () => {
     const payment = await seedPayment(coreWrites, null, '100');
     await blind.requestRefund(request(payment.id, money(40, 'USD')));
 
-    const error = await rejectionOf(blind.requestRefund(request(payment.id, money(20, 'USD'))));
+    const refused = await blind.requestRefund(request(payment.id, money(20, 'USD')));
 
-    expect(error).toMatchObject({ name: 'RefundError', code: 'DUPLICATE_PENDING_REFUND' });
+    expect(DuplicatePendingRefund.is(refused)).toBe(true);
     const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
     expect(rows).toHaveLength(1);
   });
 
   /**
    * PGlite has one connection, so its transactions run one after the other: this proves that exactly one
-   * of two simultaneous requests wins and the other gets the typed error, not that two connections wait
+   * of two simultaneous requests wins and the other gets DuplicatePendingRefund, not that two connections wait
    * on the payment's row lock. The lock itself needs a real Postgres.
    */
   it('of two simultaneous requests exactly one is stored', async () => {
     const service = serviceWith(providerThatRefunds);
     const payment = await seedPayment(coreWrites, null, '100');
 
-    const results = await Promise.allSettled([
+    const results = await Promise.all([
       service.requestRefund(request(payment.id, money(40, 'USD'))),
       service.requestRefund(request(payment.id, money(40, 'USD'))),
     ]);
 
-    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-    const failed = results.find(result => result.status === 'rejected');
-    expect(failed?.reason).toMatchObject({ code: 'DUPLICATE_PENDING_REFUND' });
+    expect(results.filter(result => DuplicatePendingRefund.is(result))).toHaveLength(1);
+    expect(results.filter(result => !isFailure(result))).toHaveLength(1);
     const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
     expect(rows).toHaveLength(1);
   });

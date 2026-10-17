@@ -1,11 +1,12 @@
 import type { UserId } from '../user-id.js';
 import type { Instant } from '@arki/date';
 import { fromDate } from '@arki/date';
+import { isFailure } from '@arki/failure';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
-import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview, SubscriptionStatus } from '../types.js';
+import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from '../types.js';
 import { paymentAmount } from '../money.js';
 
 // Utility functions to convert between database and domain types
@@ -96,7 +97,7 @@ export class SubscriptionManager {
     userId: UserId,
     planId: PlanId,
     options: SubscriptionCreationOptions = {},
-  ): Promise<Subscription> {
+  ) {
     try {
       // Get or create customer
       const customer = await this.paymentRepository.findCustomerByUserId(userId);
@@ -136,10 +137,7 @@ export class SubscriptionManager {
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ): Promise<{
-    subscription: Subscription;
-    preview: SubscriptionPreview;
-  }> {
+  ) {
     try {
       // Validate subscription exists
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -163,12 +161,15 @@ export class SubscriptionManager {
         planId: newPlanId,
         prorationBehavior: options.prorationBehavior || 'create_prorations',
       });
+      if (isFailure(preview)) return preview;
 
       // Update the subscription
       const updatedSubscription = await this.paymentProvider.updateSubscription(subscriptionId, {
         planId: newPlanId,
         prorationBehavior: options.prorationBehavior || 'create_prorations',
       });
+      // A refused change stored nothing: the row keeps the old plan
+      if (isFailure(updatedSubscription)) return updatedSubscription;
 
       // The provider moved the plan; store it. The provider's answer says which plan it is on now.
       await this.writes.changeSubscriptionPlan({ subscriptionId, planId: updatedSubscription.planId });
@@ -188,7 +189,7 @@ export class SubscriptionManager {
    * Set or clear "ends when the paid period ends". The provider changes the flag, then the row follows.
    * Unlike `cancelSubscription` it never cancels now, and `false` undoes an earlier `true`.
    */
-  async setCancelAtPeriodEnd(subscriptionId: SubscriptionId, cancelAtPeriodEnd: boolean): Promise<Subscription> {
+  async setCancelAtPeriodEnd(subscriptionId: SubscriptionId, cancelAtPeriodEnd: boolean) {
     try {
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
       if (!currentSubscription) {
@@ -200,6 +201,7 @@ export class SubscriptionManager {
       }
 
       const updatedSubscription = await this.paymentProvider.updateSubscription(subscriptionId, { cancelAtPeriodEnd });
+      if (isFailure(updatedSubscription)) return updatedSubscription;
 
       await this.writes.setSubscriptionCancelAtPeriodEnd({
         subscriptionId,
@@ -218,7 +220,7 @@ export class SubscriptionManager {
   async cancelSubscription(
     subscriptionId: SubscriptionId,
     options: SubscriptionCancellationOptions = {},
-  ): Promise<Subscription> {
+  ) {
     try {
       // Validate subscription exists
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -235,6 +237,7 @@ export class SubscriptionManager {
         immediately: options.immediately || false,
         reason: options.reason,
       });
+      if (isFailure(canceledSubscription)) return canceledSubscription;
 
       // Update our database
       await this.writes.cancelSubscription({
@@ -252,7 +255,7 @@ export class SubscriptionManager {
     }
   }
 
-  async reactivateSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async reactivateSubscription(subscriptionId: SubscriptionId) {
     try {
       // Validate subscription exists and can be reactivated
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -266,6 +269,7 @@ export class SubscriptionManager {
 
       // Reactivate with the payment provider
       const reactivatedSubscription = await this.paymentProvider.reactivateSubscription(subscriptionId);
+      if (isFailure(reactivatedSubscription)) return reactivatedSubscription;
 
       // Update our database. The event clears the cancellation.
       await this.writes.reactivateSubscription({ subscriptionId, status: reactivatedSubscription.status });
@@ -278,7 +282,7 @@ export class SubscriptionManager {
     }
   }
 
-  async pauseSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async pauseSubscription(subscriptionId: SubscriptionId) {
     try {
       // Validate subscription exists and is active
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -292,6 +296,7 @@ export class SubscriptionManager {
 
       // Pause with the payment provider
       const pausedSubscription = await this.paymentProvider.pauseSubscription(subscriptionId);
+      if (isFailure(pausedSubscription)) return pausedSubscription;
 
       // Update our database
       await this.writes.pauseSubscription({ subscriptionId, status: pausedSubscription.status });
@@ -304,7 +309,7 @@ export class SubscriptionManager {
     }
   }
 
-  async resumeSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async resumeSubscription(subscriptionId: SubscriptionId) {
     try {
       // Validate subscription exists and is paused
       const currentSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -318,6 +323,7 @@ export class SubscriptionManager {
 
       // Resume with the payment provider
       const resumedSubscription = await this.paymentProvider.resumeSubscription(subscriptionId);
+      if (isFailure(resumedSubscription)) return resumedSubscription;
 
       // Update our database
       await this.writes.resumeSubscription({ subscriptionId, status: resumedSubscription.status });
@@ -349,7 +355,7 @@ export class SubscriptionManager {
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ): Promise<SubscriptionPreview> {
+  ) {
     try {
       // Validate subscription and plan exist
       const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);

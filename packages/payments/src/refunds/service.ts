@@ -3,6 +3,7 @@ import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { toMillis } from '@arki/date';
+import { isFailure } from '@arki/failure';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 
@@ -16,6 +17,14 @@ import type { RefundRepository, RefundsDatabase } from './repository.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
 import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
+import {
+  DuplicatePendingRefund,
+  RefundAmountExceeded,
+  RefundInvalidState,
+  RefundNotFound,
+  RefundWindowExceeded,
+  TransactionNotFound,
+} from './failures.js';
 import { createRefundRepository, refundAmountOf } from './repository.js';
 import { pendingRefundIndexName } from './tables.js';
 import { RefundError } from './types.js';
@@ -113,8 +122,9 @@ export class RefundService {
     );
   }
 
-  async requestRefund(data: RefundRequestData): Promise<Refund> {
-    await this.validateRefundEligibility(data.paymentId, data.amount);
+  async requestRefund(data: RefundRequestData) {
+    const refused = await this.validateRefundEligibility(data.paymentId, data.amount);
+    if (isFailure(refused)) return refused;
 
     const refund = await this.writes
       .requestRefund({
@@ -130,15 +140,12 @@ export class RefundService {
       .catch((error: unknown) => {
         // Two requests can pass the check above together; the database lets only one stay pending
         if (isPendingRefundConflict(error)) {
-          throw new RefundError(
-            `Payment ${data.paymentId} already has a refund waiting for a decision`,
-            'DUPLICATE_PENDING_REFUND',
-            error,
-          );
+          return DuplicatePendingRefund({ paymentId: data.paymentId }, { cause: error });
         }
 
         throw error;
       });
+    if (isFailure(refund)) return refund;
 
     if (await this.shouldAutoApprove(refund)) {
       return this.approveRefund({ refundId: refund.id, approvedBy: this.systemUserId as UserId });
@@ -151,8 +158,9 @@ export class RefundService {
     return refund;
   }
 
-  async approveRefund(data: RefundApprovalData): Promise<Refund> {
-    await this.requirePending(data.refundId);
+  async approveRefund(data: RefundApprovalData) {
+    const pending = await this.requirePending(data.refundId);
+    if (isFailure(pending)) return pending;
 
     const approvedRefund = await this.writes.approveRefund({
       refundId: data.refundId,
@@ -163,12 +171,13 @@ export class RefundService {
     return this.processRefund(approvedRefund);
   }
 
-  async rejectRefund(data: RefundRejectionData): Promise<Refund> {
+  async rejectRefund(data: RefundRejectionData) {
     if (data.reason.trim() === '') {
       throw new RefundError('A rejection needs a reason', 'REASON_REQUIRED');
     }
 
-    await this.requirePending(data.refundId);
+    const pending = await this.requirePending(data.refundId);
+    if (isFailure(pending)) return pending;
 
     const rejectedRefund = await this.writes.rejectRefund({
       refundId: data.refundId,
@@ -183,69 +192,83 @@ export class RefundService {
     return rejectedRefund;
   }
 
-  /** A refund that can still be approved or rejected. A missing one and one past `pending` are different errors. */
-  private async requirePending(refundId: RefundId): Promise<Refund> {
+  /** A refund that can still be approved or rejected. A missing one and one past `pending` are different failures. */
+  private async requirePending(refundId: RefundId) {
     const refund = await this.refundRepository.findById(refundId);
     if (!refund) {
-      throw new RefundError(`Refund ${refundId} not found`, 'REFUND_NOT_FOUND');
+      return RefundNotFound({ refundId });
     }
 
     if (refund.status !== 'pending') {
-      throw new RefundError(`Invalid refund state for ${refundId}`, 'INVALID_STATE');
+      return RefundInvalidState({ refundId, status: refund.status });
     }
 
     return refund;
   }
 
-  private async processRefund(refund: Refund): Promise<Refund> {
-    // Outside the `try`: a refund that could not start has nothing to mark as failed
+  /**
+   * Pays an approved refund back. Whether the provider throws or returns a failure, the refund
+   * ends `failed` and support is told; a thrown error is thrown again, a failure is returned.
+   */
+  private async processRefund(refund: Refund) {
+    // Before the payback: a refund that could not start has nothing to mark as failed
     await this.writes.processRefund({ refundId: refund.id });
 
-    try {
-      const payment = await this.paymentRepository.findPaymentById(refund.paymentId as PaymentId);
-      if (!payment) {
-        throw new Error(`Payment ${refund.paymentId} not found`);
-      }
-
-      // The provider resolves its own payment from our payment id
-      const providerResult = await this.paymentProvider.refundPayment(payment.id, {
-        amount: refundAmountOf(refund),
-        reason: refund.reason,
-        metadata: {
-          refundId: refund.id,
-          internalReason: refund.reason,
-        },
-      });
-
-      const completedRefund = await this.writes.completeRefund({
-        refundId: refund.id,
-        providerRefundId: providerResult.providerRefundId,
-        providerResponse: JSON.stringify(providerResult),
-      });
-
-      if (this.notificationService) {
-        await this.notifyCustomer(completedRefund, 'completed');
-      }
-
-      return completedRefund;
-    } catch (error) {
-      await this.writes.failRefund({
-        refundId: refund.id,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-      });
-
-      if (this.notificationService) {
-        await this.notifySupportTeam(refund, error);
-      }
-
+    const outcome = await this.payBack(refund).catch(async (error: unknown) => {
+      await this.markFailed(refund, error instanceof Error ? error.message : 'Unknown error', error);
       throw error;
+    });
+    if (isFailure(outcome)) {
+      await this.markFailed(refund, outcome.message, outcome);
+    }
+
+    return outcome;
+  }
+
+  /** Refunds the money through the provider, then completes the refund. */
+  private async payBack(refund: Refund) {
+    const payment = await this.paymentRepository.findPaymentById(refund.paymentId as PaymentId);
+    if (!payment) {
+      throw new Error(`Payment ${refund.paymentId} not found`);
+    }
+
+    // The provider resolves its own payment from our payment id
+    const providerResult = await this.paymentProvider.refundPayment(payment.id, {
+      amount: refundAmountOf(refund),
+      reason: refund.reason,
+      metadata: {
+        refundId: refund.id,
+        internalReason: refund.reason,
+      },
+    });
+    if (isFailure(providerResult)) return providerResult;
+
+    const completedRefund = await this.writes.completeRefund({
+      refundId: refund.id,
+      providerRefundId: providerResult.providerRefundId,
+      providerResponse: JSON.stringify(providerResult),
+    });
+
+    if (this.notificationService) {
+      await this.notifyCustomer(completedRefund, 'completed');
+    }
+
+    return completedRefund;
+  }
+
+  private async markFailed(refund: Refund, errorMessage: string, cause: unknown): Promise<void> {
+    await this.writes.failRefund({ refundId: refund.id, errorMessage });
+
+    if (this.notificationService) {
+      await this.notifySupportTeam(refund, cause);
     }
   }
 
-  private async validateRefundEligibility(paymentId: PaymentId, amount: Money): Promise<void> {
+  /** Nothing when the payment can give back `amount`, or the failure that says why not. */
+  private async validateRefundEligibility(paymentId: PaymentId, amount: Money) {
     const payment = await this.paymentRepository.findPaymentById(paymentId);
     if (!payment) {
-      throw new Error('Payment not found');
+      return TransactionNotFound({ paymentId });
     }
 
     const paid = paymentAmount(payment);
@@ -256,12 +279,12 @@ export class RefundService {
     }
 
     if (payment.createdAt && Date.now() - toMillis(payment.createdAt) > this.refundWindow) {
-      throw new Error('Refund window exceeded');
+      return RefundWindowExceeded({ paymentId });
     }
 
     const existingRefunds = await this.refundRepository.findByPaymentId(paymentId);
     if (existingRefunds.some(existing => existing.status === 'pending')) {
-      throw new RefundError(`Payment ${paymentId} already has a refund waiting for a decision`, 'DUPLICATE_PENDING_REFUND');
+      return DuplicatePendingRefund({ paymentId });
     }
 
     // Money already promised back counts, not only money already sent: an approved or processing
@@ -272,8 +295,15 @@ export class RefundService {
     );
 
     if (totalRefunded.plus(amount).gt(paid)) {
-      throw new RefundError('Refund amount exceeds payment amount', 'AMOUNT_EXCEEDED');
+      return RefundAmountExceeded({
+        paymentId,
+        requested: amount.toDecimalString(),
+        refundable: paid.minus(totalRefunded).toDecimalString(),
+        currency: paid.currency.code,
+      });
     }
+
+    return;
   }
 
   /**

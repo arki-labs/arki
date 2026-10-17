@@ -11,6 +11,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant, now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer } from '../core/types.js';
@@ -161,7 +162,7 @@ describe('getCustomerTaxSummary', () => {
 
   it('records a transaction once: the same reference again changes nothing and does not call the provider', async () => {
     const before = requests.length;
-    const again = await service.createTaxTransaction({
+    const again = await orThrow(service.createTaxTransaction({
       reference: 'pay_1',
       type: 'sale',
       customerId,
@@ -169,7 +170,7 @@ describe('getCustomerTaxSummary', () => {
       currency: 'EUR',
       breakdown: [{ ...germany, amount: money('99', 'EUR') }],
       occurredAt: instant('2031-03-10T12:00:00Z'),
-    });
+    }));
 
     expect(requests).toHaveLength(before);
     expect(again.taxAmount.toDecimalString()).toBe('20.00');

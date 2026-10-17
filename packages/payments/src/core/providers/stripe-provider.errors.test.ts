@@ -63,6 +63,19 @@ describe('Stripe failures', () => {
     ).rejects.toMatchObject({ name: 'PaymentProviderError', code: 'unknown' });
   });
 
+  it('a card error from a call that charges nothing is thrown as invalid_request: the same call fails again', async () => {
+    const { stripe } = provider(() => ({
+      status: 402,
+      body: { error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } },
+    }));
+
+    await expect(stripe.createCustomer({ userId: 'usr_a', email: 'a@example.com' })).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      code: 'invalid_request',
+      providerCode: 'card_declined',
+    });
+  });
+
   it('detachPaymentMethod', async () => {
     const { stripe } = provider(invalid);
 

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer, Payment, Plan, Subscription } from '../types.js';
@@ -210,7 +211,9 @@ describe('customers', () => {
   it('updateCustomer sends only the changed fields and merges metadata into ours', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeCustomer() }));
 
-    const result = await stripe.updateCustomer(customer.id, { email: 'new@example.com', metadata: { vip: true } });
+    const result = await orThrow(
+      stripe.updateCustomer(customer.id, { email: 'new@example.com', metadata: { vip: true } }),
+    );
 
     expect(requests[0]).toMatchObject({
       method: 'POST',
@@ -303,7 +306,7 @@ describe('plans', () => {
         : { body: stripePrice({ product: 'prod_pro' }) },
     );
 
-    const plan = await stripe.updatePlan(planId, { name: 'Renamed', metadata: { badge: 'new' } });
+    const plan = await orThrow(stripe.updatePlan(planId, { name: 'Renamed', metadata: { badge: 'new' } }));
 
     expect(requests.map(request => request.path)).toEqual(['/v1/prices/price_pro', '/v1/products/prod_pro']);
     expect(requests[0]?.form).toEqual({ 'metadata[badge]': 'new' });
@@ -365,7 +368,7 @@ describe('subscriptions', () => {
   it('reactivateSubscription turns off the scheduled cancellation', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeSubscription() }));
 
-    const subscription = await stripe.reactivateSubscription(subscriptionRow.id);
+    const subscription = await orThrow(stripe.reactivateSubscription(subscriptionRow.id));
 
     expect(requests[0]).toMatchObject({
       method: 'POST',
@@ -409,11 +412,13 @@ describe('subscriptions', () => {
         : { body: stripeSubscription() },
     );
 
-    const preview = await stripe.previewSubscriptionChange({
-      subscriptionId: subscriptionRow.id,
-      planId,
-      prorationBehavior: 'create_prorations',
-    });
+    const preview = await orThrow(
+      stripe.previewSubscriptionChange({
+        subscriptionId: subscriptionRow.id,
+        planId,
+        prorationBehavior: 'create_prorations',
+      }),
+    );
 
     expect(requests[1]).toMatchObject({
       method: 'POST',
@@ -537,15 +542,16 @@ describe('payments', () => {
     expect(payment.status).toBe('canceled');
   });
 
-  it('maps a Stripe error to PaymentProviderError', async () => {
+  it('returns a declined retry as CardDeclined, so dunning can count it as a failed attempt', async () => {
     const { stripe } = provider(() => ({
       status: 402,
       body: { error: { type: 'card_error', code: 'card_declined', message: 'Declined' } },
     }));
 
-    await expect(stripe.confirmPayment(paymentRow.id)).rejects.toMatchObject({
-      name: 'PaymentProviderError',
-      code: 'card_declined',
+    expect(await stripe.confirmPayment(paymentRow.id)).toMatchObject({
+      code: 'payments.card_declined',
+      status: 402,
+      data: { providerCode: 'card_declined' },
     });
   });
 });
@@ -588,7 +594,7 @@ describe('payment methods', () => {
         : { body: stripeCustomer() },
     );
 
-    const methods = await stripe.listPaymentMethods(customer.id);
+    const methods = await orThrow(stripe.listPaymentMethods(customer.id));
 
     expect(requests[0]).toMatchObject({ method: 'GET', path: '/v1/payment_methods', form: { customer: 'cus_alice' } });
     expect(methods.map(method => [method.id, method.isDefault])).toEqual([

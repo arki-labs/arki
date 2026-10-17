@@ -1,8 +1,11 @@
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
+import type { FailureOf, Result } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { Money, sum } from '@arki/money';
 
+import type { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 import type { TaxExemptionId } from './primitives.js';
@@ -300,7 +303,7 @@ export class TaxService {
     occurredAt?: Instant;
     /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
     originalReference?: string;
-  }): Promise<TaxTransaction> {
+  }): Promise<Result<TaxTransaction, FailureOf<typeof ReferenceNotFound>>> {
     const currency = params.currency.toUpperCase();
     const taxCode = params.lineItems[0]?.taxCode;
 
@@ -378,6 +381,8 @@ export class TaxService {
       currency: params.currency,
       customerDetails: params.customerDetails,
     });
+    // An unknown customer is refused before Stripe is asked, so nothing was recorded anywhere
+    if (isFailure(transaction)) return transaction;
 
     // The provider worked the tax out itself; the records are the caller's breakdown. They should agree.
     const recorded = transaction.taxAmountExclusive.plus(transaction.taxAmountInclusive).abs();

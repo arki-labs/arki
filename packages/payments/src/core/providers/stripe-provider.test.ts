@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
@@ -144,7 +145,7 @@ describe('refundPayment', () => {
     // 1000 JPY were refunded before; this refund adds 1500
     const { stripe } = provider(row, refundAnswers({ amount: 1500 }, { amount: 5000, refunded: 2500 }));
 
-    const result = await stripe.refundPayment(row.id, { amount: money(1500, 'JPY') });
+    const result = await orThrow(stripe.refundPayment(row.id, { amount: money(1500, 'JPY') }));
 
     expect(result.providerRefundId).toBe('re_test');
     expect(result.payment).toMatchObject({
@@ -163,10 +164,12 @@ describe('refundPayment', () => {
     });
   });
 
-  it('throws for an unknown payment id without calling Stripe', async () => {
+  it('returns ReferenceNotFound for an unknown payment id without calling Stripe: no money moves', async () => {
     const { stripe, requests } = provider(paymentRow(), refundAnswers({ amount: 1 }, { amount: 1, refunded: 0 }));
 
-    await expect(stripe.refundPayment(createPaymentId(), {})).rejects.toMatchObject({ code: 'reference_not_found' });
+    const result = await stripe.refundPayment(createPaymentId(), {});
+
+    expect(result).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'payment', missing: 'row' } });
     expect(requests).toHaveLength(0);
   });
 

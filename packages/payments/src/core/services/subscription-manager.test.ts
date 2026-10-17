@@ -13,6 +13,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { Money } from '@arki/money';
 
 import type { AppDb } from '../../test-support.js';
@@ -21,6 +22,7 @@ import type { Subscription, SubscriptionId } from '../types.js';
 import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
 import { core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
 import { createPlanId } from '../primitives.js';
+import { CardDeclined } from '../providers/provider-error.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 type Provider = ConstructorParameters<typeof SubscriptionManager>[0];
@@ -137,11 +139,34 @@ describe('updateSubscription', () => {
     await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
     const manager = managerWith(current => ({ ...current, planId: premium }));
 
-    const result = await manager.updateSubscription(id, premium);
+    const result = await orThrow(manager.updateSubscription(id, premium));
 
     expect(result.subscription).toMatchObject({ id, planId: premium });
     expect(await subscriptionRow(db, id)).toMatchObject({ planId: premium });
     expect(await eventTypesOf(db, 'subscription', id)).toEqual(['SubscriptionCreated', 'SubscriptionPlanChanged']);
+  });
+
+  /** The provider did not move the plan, so the row must not either: the caller gets the decline to show. */
+  it('a plan change the card declines is returned as CardDeclined, and the row keeps its plan', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const premium = createPlanId();
+    await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
+    const rowBefore = await subscriptionRow(db, id);
+    const eventsBefore = await countEvents(db);
+    const manager = new SubscriptionManager(
+      {
+        ...providerReporting(current => current),
+        updateSubscription: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
+      },
+      reads,
+      writes,
+    );
+
+    const result = await manager.updateSubscription(id, premium);
+
+    expect(CardDeclined.is(result)).toBe(true);
+    expect(await subscriptionRow(db, id)).toEqual(rowBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
   });
 });
 

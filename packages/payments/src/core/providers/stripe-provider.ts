@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
 import { fromUnix, now } from '@arki/date';
+import { isFailure } from '@arki/failure';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
 
@@ -22,16 +23,23 @@ import type {
   WebhookEventType,
   WebhookValidationResult,
 } from '../types.js';
-import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
+import type { PaymentProviderConfig } from './base-provider.js';
 import { toMinorColumn } from '../money.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { BasePaymentProvider } from './base-provider.js';
-import { PaymentProviderError, mapStripeError } from './provider-error.js';
+import {
+  PaymentProviderError,
+  ReferenceNotFound,
+  cardDeclinedOf,
+  idempotencyConflictOf,
+  mapStripeError,
+} from './provider-error.js';
 import { mapStripeEventType } from './stripe-event-types.js';
 
 /**
  * The rows the provider reads to turn our ids into Stripe ids. A `PaymentRepository` fits.
  * Without it, the calls that take a customer, plan, subscription or payment id throw `not_configured`.
+ * An id with no row, or a row with no Stripe id, is returned as `ReferenceNotFound` before any request.
  */
 export type StripeReferenceReads = {
   findCustomerById(id: CustomerId): Promise<Customer | null>;
@@ -47,6 +55,11 @@ export type StripeProviderOptions = {
   /** Retries of network failures and 5xx answers. Stripe's default is 1. */
   maxNetworkRetries?: number;
 };
+
+/** A call that can decline a card and takes an idempotency key: both answers come back as failures. */
+function declinedOrConflictOf(error: unknown) {
+  return cardDeclinedOf(error) ?? idempotencyConflictOf(error);
+}
 
 /** Metadata Stripe accepts: strings only. Objects become JSON, null and undefined are left out. */
 function toStripeMetadata(metadata: Record<string, unknown> | undefined): Stripe.MetadataParam | undefined {
@@ -77,6 +90,24 @@ type TaxCustomerDetails = {
     type: string;
     value: string;
   }[];
+};
+
+/** What `createTaxTransaction` takes. */
+type TaxTransactionParams = {
+  reference: string;
+  type: 'sale' | 'refund';
+  /** Every line item is in `currency`. A refund with no line items reverses the whole original transaction. */
+  lineItems: {
+    amount: Money;
+    quantity?: number;
+    reference: string;
+    taxCode?: string;
+  }[];
+  currency: string;
+  customerId?: CustomerId;
+  /** The Stripe tax transaction a `refund` reverses (the `id` `createTaxTransaction` returned for the sale). */
+  originalTransactionId?: string;
+  customerDetails?: TaxCustomerDetails;
 };
 
 /** The Stripe tax calculation params for line items in one currency. Shared by quotes and recorded transactions. */
@@ -151,11 +182,19 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  /** Runs a Stripe call and turns a Stripe error into a `PaymentProviderError`. */
-  private async call<T>(request: () => Promise<T>): Promise<T> {
+  /**
+   * Runs a Stripe call. `answer` turns the errors the call expects (a declined card, a reused
+   * idempotency key) into returned failures; any other Stripe error is thrown as a `PaymentProviderError`.
+   */
+  private async call<T, Answer = never>(
+    request: () => Promise<T>,
+    answer?: (error: unknown) => Answer | undefined,
+  ): Promise<T | Answer> {
     try {
       return await request();
     } catch (error) {
+      const expected = answer?.(error);
+      if (expected !== undefined) return expected;
       throw mapStripeError(error);
     }
   }
@@ -170,45 +209,39 @@ export class StripeProvider extends BasePaymentProvider {
     return this.references;
   }
 
-  private async customerRef(customerId: CustomerId): Promise<Customer> {
+  private async customerRef(customerId: CustomerId) {
     const customer = await this.requireReferences().findCustomerById(customerId);
-    if (!customer) throw new PaymentProviderError('reference_not_found', `Customer ${customerId} not found`);
-    return customer;
+    return customer ?? ReferenceNotFound({ kind: 'customer', id: customerId, missing: 'row' });
   }
 
-  private async planRef(planId: PlanId): Promise<Plan> {
+  private async planRef(planId: PlanId) {
     const plan = await this.requireReferences().findPlanById(planId);
-    if (!plan) throw new PaymentProviderError('reference_not_found', `Plan ${planId} not found`);
-    return plan;
+    return plan ?? ReferenceNotFound({ kind: 'plan', id: planId, missing: 'row' });
   }
 
-  private priceIdOf(plan: Plan): string {
+  /** The plan's Stripe price id, from `metadata.stripePriceId`. */
+  private priceIdOf(plan: Plan) {
     const priceId = plan.metadata?.stripePriceId;
     if (typeof priceId !== 'string' || priceId === '') {
-      throw new PaymentProviderError(
-        'reference_not_found',
-        `Plan ${plan.id} has no Stripe price id (metadata.stripePriceId)`,
-      );
+      return ReferenceNotFound({ kind: 'plan', id: plan.id, missing: 'provider_id' });
     }
     return priceId;
   }
 
-  private async priceRef(planId: PlanId): Promise<string> {
-    return this.priceIdOf(await this.planRef(planId));
+  private async priceRef(planId: PlanId) {
+    const plan = await this.planRef(planId);
+    if (isFailure(plan)) return plan;
+    return this.priceIdOf(plan);
   }
 
-  private async paymentRef(paymentId: PaymentId): Promise<Payment> {
+  private async paymentRef(paymentId: PaymentId) {
     const payment = await this.requireReferences().findPaymentById(paymentId);
-    if (!payment) throw new PaymentProviderError('reference_not_found', `Payment ${paymentId} not found`);
-    return payment;
+    return payment ?? ReferenceNotFound({ kind: 'payment', id: paymentId, missing: 'row' });
   }
 
-  private async subscriptionRef(subscriptionId: SubscriptionId): Promise<Subscription> {
+  private async subscriptionRef(subscriptionId: SubscriptionId) {
     const subscription = await this.requireReferences().findSubscriptionById(subscriptionId);
-    if (!subscription) {
-      throw new PaymentProviderError('reference_not_found', `Subscription ${subscriptionId} not found`);
-    }
-    return subscription;
+    return subscription ?? ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
   }
 
   /** Our subscription shape from Stripe's. `base` carries what Stripe does not know: our ids. */
@@ -298,8 +331,9 @@ export class StripeProvider extends BasePaymentProvider {
   async updateCustomer(
     customerId: CustomerId,
     params: { email?: string; name?: string; metadata?: Record<string, unknown> },
-  ): Promise<Customer> {
+  ) {
     const row = await this.customerRef(customerId);
+    if (isFailure(row)) return row;
 
     const stripeCustomer = await this.call(() =>
       this.stripe.customers.update(row.providerCustomerId, {
@@ -313,9 +347,11 @@ export class StripeProvider extends BasePaymentProvider {
     return params.metadata === undefined ? updated : { ...updated, metadata: { ...row.metadata, ...params.metadata } };
   }
 
-  async deleteCustomer(customerId: CustomerId): Promise<void> {
+  async deleteCustomer(customerId: CustomerId) {
     const row = await this.customerRef(customerId);
+    if (isFailure(row)) return row;
     await this.call(() => this.stripe.customers.del(row.providerCustomerId));
+    return;
   }
 
   /** Our plan row, refreshed with the price and product Stripe holds now. */
@@ -403,22 +439,25 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  async getPlan(planId: PlanId): Promise<Plan | null> {
+  /** `null` when the plan has no row; `ReferenceNotFound` when its row has no Stripe price. */
+  async getPlan(planId: PlanId) {
     const row = await this.requireReferences().findPlanById(planId);
     if (!row) return null;
+    const priceId = this.priceIdOf(row);
+    if (isFailure(priceId)) return priceId;
 
-    const price = await this.call(() =>
-      this.stripe.prices.retrieve(this.priceIdOf(row), { expand: ['product'] }),
-    );
+    const price = await this.call(() => this.stripe.prices.retrieve(priceId, { expand: ['product'] }));
     return this.toPlan(row, price, this.expandedProductName(price));
   }
 
   async updatePlan(
     planId: PlanId,
     params: { name?: string; metadata?: Record<string, unknown> },
-  ): Promise<Plan> {
+  ) {
     const row = await this.planRef(planId);
+    if (isFailure(row)) return row;
     const priceId = this.priceIdOf(row);
+    if (isFailure(priceId)) return priceId;
     const metadata = toStripeMetadata(params.metadata);
 
     const price = await this.call(() =>
@@ -439,11 +478,13 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Stripe prices cannot be deleted, so a deleted plan is archived: the price and its product stop being sold. */
-  async deletePlan(planId: PlanId): Promise<void> {
+  async deletePlan(planId: PlanId) {
     const priceId = await this.priceRef(planId);
+    if (isFailure(priceId)) return priceId;
 
     const price = await this.call(() => this.stripe.prices.update(priceId, { active: false }));
     await this.call(() => this.stripe.products.update(this.productIdOf(price), { active: false }));
+    return;
   }
 
   /**
@@ -475,27 +516,32 @@ export class StripeProvider extends BasePaymentProvider {
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
     idempotencyKey?: string;
-  }): Promise<Subscription> {
+  }) {
     const customer = await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
     const priceId = await this.priceRef(params.planId);
+    if (isFailure(priceId)) return priceId;
 
-    const stripeSubscription = await this.call(() =>
-      this.stripe.subscriptions.create(
-        {
-          customer: customer.providerCustomerId,
-          items: [{ price: priceId }],
-          default_payment_method: params.paymentMethodId,
-          trial_period_days: params.trialPeriodDays,
-          metadata: toStripeMetadata({
-            ...params.metadata,
-            userId: customer.userId,
-            customerId: customer.id,
-            planId: params.planId,
-          }),
-        },
-        params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
-      ),
+    const stripeSubscription = await this.call(
+      () =>
+        this.stripe.subscriptions.create(
+          {
+            customer: customer.providerCustomerId,
+            items: [{ price: priceId }],
+            default_payment_method: params.paymentMethodId,
+            trial_period_days: params.trialPeriodDays,
+            metadata: toStripeMetadata({
+              ...params.metadata,
+              userId: customer.userId,
+              customerId: customer.id,
+              planId: params.planId,
+            }),
+          },
+          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
+        ),
+      declinedOrConflictOf,
     );
+    if (isFailure(stripeSubscription)) return stripeSubscription;
 
     return this.toSubscription(stripeSubscription, {
       id: createSubscriptionId(),
@@ -525,9 +571,11 @@ export class StripeProvider extends BasePaymentProvider {
       prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
       idempotencyKey?: string;
     },
-  ): Promise<Subscription> {
+  ) {
     const current = await this.subscriptionRef(subscriptionId);
+    if (isFailure(current)) return current;
     const priceId = params.planId === undefined ? undefined : await this.priceRef(params.planId);
+    if (isFailure(priceId)) return priceId;
 
     const update: Stripe.SubscriptionUpdateParams = {
       default_payment_method: params.paymentMethodId,
@@ -546,13 +594,16 @@ export class StripeProvider extends BasePaymentProvider {
       update.proration_behavior = params.prorationBehavior;
     }
 
-    const stripeSubscription = await this.call(() =>
-      this.stripe.subscriptions.update(
-        current.providerSubscriptionId,
-        update,
-        params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
-      ),
+    const stripeSubscription = await this.call(
+      () =>
+        this.stripe.subscriptions.update(
+          current.providerSubscriptionId,
+          update,
+          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
+        ),
+      declinedOrConflictOf,
     );
+    if (isFailure(stripeSubscription)) return stripeSubscription;
 
     return this.toSubscription(stripeSubscription, {
       id: current.id,
@@ -567,24 +618,28 @@ export class StripeProvider extends BasePaymentProvider {
   async cancelSubscription(
     subscriptionId: SubscriptionId,
     options: { immediately?: boolean; reason?: string; idempotencyKey?: string },
-  ): Promise<Subscription> {
+  ) {
     const current = await this.subscriptionRef(subscriptionId);
+    if (isFailure(current)) return current;
     const requestOptions = options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey };
     const cancellationDetails = options.reason === undefined ? undefined : { comment: options.reason };
 
-    const stripeSubscription = await this.call(() =>
-      options.immediately
-        ? this.stripe.subscriptions.cancel(
-            current.providerSubscriptionId,
-            { cancellation_details: cancellationDetails },
-            requestOptions,
-          )
-        : this.stripe.subscriptions.update(
-            current.providerSubscriptionId,
-            { cancel_at_period_end: true, cancellation_details: cancellationDetails },
-            requestOptions,
-          ),
+    const stripeSubscription = await this.call(
+      () =>
+        options.immediately
+          ? this.stripe.subscriptions.cancel(
+              current.providerSubscriptionId,
+              { cancellation_details: cancellationDetails },
+              requestOptions,
+            )
+          : this.stripe.subscriptions.update(
+              current.providerSubscriptionId,
+              { cancel_at_period_end: true, cancellation_details: cancellationDetails },
+              requestOptions,
+            ),
+      idempotencyConflictOf,
     );
+    if (isFailure(stripeSubscription)) return stripeSubscription;
 
     return this.toSubscription(stripeSubscription, {
       id: current.id,
@@ -600,8 +655,9 @@ export class StripeProvider extends BasePaymentProvider {
   private async updateStripeSubscription(
     subscriptionId: SubscriptionId,
     update: Stripe.SubscriptionUpdateParams,
-  ): Promise<Subscription> {
+  ) {
     const current = await this.subscriptionRef(subscriptionId);
+    if (isFailure(current)) return current;
     const stripeSubscription = await this.call(() =>
       this.stripe.subscriptions.update(current.providerSubscriptionId, update),
     );
@@ -609,16 +665,16 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Undoes a cancellation that is set to happen at the end of the paid period. */
-  async reactivateSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async reactivateSubscription(subscriptionId: SubscriptionId) {
     return this.updateStripeSubscription(subscriptionId, { cancel_at_period_end: false });
   }
 
   /** Stops charging and keeps the subscription: invoices are voided until `resumeSubscription`. */
-  async pauseSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async pauseSubscription(subscriptionId: SubscriptionId) {
     return this.updateStripeSubscription(subscriptionId, { pause_collection: { behavior: 'void' } });
   }
 
-  async resumeSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+  async resumeSubscription(subscriptionId: SubscriptionId) {
     // An empty string clears `pause_collection` in Stripe's API
     return this.updateStripeSubscription(subscriptionId, { pause_collection: '' });
   }
@@ -632,10 +688,13 @@ export class StripeProvider extends BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<SubscriptionPreview> {
+  }) {
     const current = await this.subscriptionRef(params.subscriptionId);
+    if (isFailure(current)) return current;
     const priceId = await this.priceRef(params.planId);
+    if (isFailure(priceId)) return priceId;
     const customer = await this.customerRef(current.customerId);
+    if (isFailure(customer)) return customer;
 
     const existing = await this.call(() => this.stripe.subscriptions.retrieve(current.providerSubscriptionId));
     const item = existing.items.data[0];
@@ -669,7 +728,7 @@ export class StripeProvider extends BasePaymentProvider {
     }
     const net = charged.minus(credited);
 
-    return {
+    const preview: SubscriptionPreview = {
       planId: params.planId,
       proration: {
         immediateTotal: (net.isNegative() ? Money.zero(currency.toUpperCase()) : net).toJSON(),
@@ -679,6 +738,7 @@ export class StripeProvider extends BasePaymentProvider {
       trialEnd: existing.trial_end === null ? undefined : fromUnix(existing.trial_end),
       nextBillingDate: fromUnix(item.current_period_end),
     };
+    return preview;
   }
 
   /** Our payment from a Stripe payment intent fetched with `expand: ['payment_method', 'latest_charge']`. */
@@ -752,24 +812,28 @@ export class StripeProvider extends BasePaymentProvider {
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Payment> {
+  }) {
     const customer = await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
 
-    const intent = await this.call(() =>
-      this.stripe.paymentIntents.create({
-        // Stripe's own units: JPY is sent as yen, not yen x 100
-        amount: toStripeAmount(params.amount),
-        currency: params.amount.currency.code.toLowerCase(),
-        customer: customer.providerCustomerId,
-        payment_method: params.paymentMethodId,
-        confirm: true,
-        // Redirect methods need a return page this call does not have
-        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
-        description: params.description,
-        metadata: toStripeMetadata({ ...params.metadata, userId: customer.userId, customerId: customer.id }),
-        expand: ['payment_method', 'latest_charge'],
-      }),
+    const intent = await this.call(
+      () =>
+        this.stripe.paymentIntents.create({
+          // Stripe's own units: JPY is sent as yen, not yen x 100
+          amount: toStripeAmount(params.amount),
+          currency: params.amount.currency.code.toLowerCase(),
+          customer: customer.providerCustomerId,
+          payment_method: params.paymentMethodId,
+          confirm: true,
+          // Redirect methods need a return page this call does not have
+          automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+          description: params.description,
+          metadata: toStripeMetadata({ ...params.metadata, userId: customer.userId, customerId: customer.id }),
+          expand: ['payment_method', 'latest_charge'],
+        }),
+      cardDeclinedOf,
     );
+    if (isFailure(intent)) return intent;
 
     return this.toPayment(intent, {
       id: createPaymentId(),
@@ -794,16 +858,20 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Confirms the payment intent: also how a failed payment is tried again. */
-  async confirmPayment(paymentId: PaymentId): Promise<Payment> {
+  async confirmPayment(paymentId: PaymentId) {
     const row = await this.paymentRef(paymentId);
-    const intent = await this.call(() =>
-      this.stripe.paymentIntents.confirm(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+    if (isFailure(row)) return row;
+    const intent = await this.call(
+      () => this.stripe.paymentIntents.confirm(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+      cardDeclinedOf,
     );
+    if (isFailure(intent)) return intent;
     return this.toPayment(intent, row);
   }
 
-  async cancelPayment(paymentId: PaymentId): Promise<Payment> {
+  async cancelPayment(paymentId: PaymentId) {
     const row = await this.paymentRef(paymentId);
+    if (isFailure(row)) return row;
     const intent = await this.call(() =>
       this.stripe.paymentIntents.cancel(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
     );
@@ -818,8 +886,9 @@ export class StripeProvider extends BasePaymentProvider {
   async refundPayment(
     paymentId: PaymentId,
     params: { amount?: Money; reason?: string; metadata?: Record<string, unknown> },
-  ): Promise<ProviderRefundResult> {
+  ) {
     const row = await this.paymentRef(paymentId);
+    if (isFailure(row)) return row;
     if (params.amount !== undefined && params.amount.currency.code !== row.currency.toUpperCase()) {
       throw new PaymentProviderError(
         'invalid_request',
@@ -875,12 +944,15 @@ export class StripeProvider extends BasePaymentProvider {
   async attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<PaymentMethodInfo> {
+  }) {
     const customer = await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
 
-    const method = await this.call(() =>
-      this.stripe.paymentMethods.attach(params.paymentMethodId, { customer: customer.providerCustomerId }),
+    const method = await this.call(
+      () => this.stripe.paymentMethods.attach(params.paymentMethodId, { customer: customer.providerCustomerId }),
+      cardDeclinedOf,
     );
+    if (isFailure(method)) return method;
     return this.toPaymentMethodInfo(method, await this.defaultPaymentMethodOf(customer.providerCustomerId));
   }
 
@@ -888,8 +960,9 @@ export class StripeProvider extends BasePaymentProvider {
     await this.call(() => this.stripe.paymentMethods.detach(paymentMethodId));
   }
 
-  async listPaymentMethods(customerId: CustomerId): Promise<PaymentMethodInfo[]> {
+  async listPaymentMethods(customerId: CustomerId) {
     const customer = await this.customerRef(customerId);
+    if (isFailure(customer)) return customer;
 
     const methods = await this.call(() =>
       this.stripe.paymentMethods
@@ -900,14 +973,16 @@ export class StripeProvider extends BasePaymentProvider {
     return methods.map(method => this.toPaymentMethodInfo(method, defaultMethodId));
   }
 
-  async setDefaultPaymentMethod(params: { customerId: CustomerId; paymentMethodId: string }): Promise<void> {
+  async setDefaultPaymentMethod(params: { customerId: CustomerId; paymentMethodId: string }) {
     const customer = await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
 
     await this.call(() =>
       this.stripe.customers.update(customer.providerCustomerId, {
         invoice_settings: { default_payment_method: params.paymentMethodId },
       }),
     );
+    return;
   }
 
   async validateWebhook(
@@ -951,23 +1026,24 @@ export class StripeProvider extends BasePaymentProvider {
   async createSetupIntent(
     customerId: CustomerId,
     options: { idempotencyKey?: string } = {},
-  ): Promise<{
-    clientSecret: string;
-    setupIntentId: string;
-  }> {
+  ) {
     const customer = await this.customerRef(customerId);
+    if (isFailure(customer)) return customer;
 
-    const setupIntent = await this.call(() =>
-      this.stripe.setupIntents.create(
-        {
-          customer: customer.providerCustomerId,
-          usage: 'off_session',
-          automatic_payment_methods: { enabled: true },
-          metadata: toStripeMetadata({ userId: customer.userId, customerId: customer.id }),
-        },
-        options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey },
-      ),
+    const setupIntent = await this.call(
+      () =>
+        this.stripe.setupIntents.create(
+          {
+            customer: customer.providerCustomerId,
+            usage: 'off_session',
+            automatic_payment_methods: { enabled: true },
+            metadata: toStripeMetadata({ userId: customer.userId, customerId: customer.id }),
+          },
+          options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey },
+        ),
+      idempotencyConflictOf,
     );
+    if (isFailure(setupIntent)) return setupIntent;
 
     if (!setupIntent.client_secret) {
       throw new PaymentProviderError('unknown', `Stripe setup intent ${setupIntent.id} has no client secret`);
@@ -981,31 +1057,32 @@ export class StripeProvider extends BasePaymentProvider {
     paymentMethodId?: string;
     automatic: boolean;
     idempotencyKey?: string;
-  }): Promise<{
-    clientSecret: string;
-    paymentIntentId: string;
-  }> {
+  }) {
     if (params.automatic && params.paymentMethodId === undefined) {
       throw new PaymentProviderError('invalid_request', 'An automatic payment needs a payment method id');
     }
     const customer = await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
 
-    const paymentIntent = await this.call(() =>
-      this.stripe.paymentIntents.create(
-        {
-          // Stripe's own units: JPY is sent as yen, not yen x 100
-          amount: toStripeAmount(params.amount),
-          currency: params.amount.currency.code.toLowerCase(),
-          customer: customer.providerCustomerId,
-          payment_method: params.paymentMethodId,
-          metadata: toStripeMetadata({ userId: customer.userId, customerId: customer.id }),
-          ...(params.automatic
-            ? { confirm: true, off_session: true }
-            : { automatic_payment_methods: { enabled: true } }),
-        },
-        params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
-      ),
+    const paymentIntent = await this.call(
+      () =>
+        this.stripe.paymentIntents.create(
+          {
+            // Stripe's own units: JPY is sent as yen, not yen x 100
+            amount: toStripeAmount(params.amount),
+            currency: params.amount.currency.code.toLowerCase(),
+            customer: customer.providerCustomerId,
+            payment_method: params.paymentMethodId,
+            metadata: toStripeMetadata({ userId: customer.userId, customerId: customer.id }),
+            ...(params.automatic
+              ? { confirm: true, off_session: true }
+              : { automatic_payment_methods: { enabled: true } }),
+          },
+          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
+        ),
+      declinedOrConflictOf,
     );
+    if (isFailure(paymentIntent)) return paymentIntent;
 
     if (!paymentIntent.client_secret) {
       throw new PaymentProviderError('unknown', `Stripe payment intent ${paymentIntent.id} has no client secret`);
@@ -1147,29 +1224,10 @@ export class StripeProvider extends BasePaymentProvider {
    *
    * The totals are read from the line items of the recorded transaction: negative for a refund.
    */
-  async createTaxTransaction(params: {
-    reference: string;
-    type: 'sale' | 'refund';
-    /** Every line item is in `currency`. A refund with no line items reverses the whole original transaction. */
-    lineItems: {
-      amount: Money;
-      quantity?: number;
-      reference: string;
-      taxCode?: string;
-    }[];
-    currency: string;
-    customerId?: CustomerId;
-    /** The Stripe tax transaction a `refund` reverses (the `id` `createTaxTransaction` returned for the sale). */
-    originalTransactionId?: string;
-    customerDetails?: TaxCustomerDetails;
-  }): Promise<{
-    id: string;
-    amountTotal: Money;
-    taxAmountExclusive: Money;
-    taxAmountInclusive: Money;
-  }> {
+  async createTaxTransaction(params: TaxTransactionParams) {
     const transaction =
       params.type === 'refund' ? await this.reverseTaxTransaction(params) : await this.recordTaxSale(params);
+    if (isFailure(transaction)) return transaction;
 
     const lines = transaction.line_items?.data;
     if (!lines) {
@@ -1197,10 +1255,9 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  private async recordTaxSale(
-    params: Parameters<StripeProvider['createTaxTransaction']>[0],
-  ): Promise<Stripe.Tax.Transaction> {
+  private async recordTaxSale(params: TaxTransactionParams) {
     const customer = params.customerId === undefined ? undefined : await this.customerRef(params.customerId);
+    if (isFailure(customer)) return customer;
 
     const calculation = await this.call(() =>
       this.stripe.tax.calculations.create({
@@ -1222,9 +1279,7 @@ export class StripeProvider extends BasePaymentProvider {
     );
   }
 
-  private async reverseTaxTransaction(
-    params: Parameters<StripeProvider['createTaxTransaction']>[0],
-  ): Promise<Stripe.Tax.Transaction> {
+  private async reverseTaxTransaction(params: TaxTransactionParams): Promise<Stripe.Tax.Transaction> {
     if (params.originalTransactionId === undefined) {
       throw new PaymentProviderError('invalid_request', 'A tax refund needs originalTransactionId: the sale it reverses');
     }

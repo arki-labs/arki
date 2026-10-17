@@ -19,6 +19,7 @@ import type { PaymentStatus, SubscriptionStatus } from '../types.js';
 import type { RetryStrategy } from './payment-retry-service.js';
 import { coreReads, runnerOn, seedPayment, seedSubscription, subscriptionRow } from '../../service-test-support.js';
 import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
+import { CardDeclined } from '../providers/provider-error.js';
 import { PaymentRetryService } from './payment-retry-service.js';
 
 type Provider = ConstructorParameters<typeof PaymentRetryService>[0];
@@ -120,5 +121,27 @@ describe('the last retry fails', () => {
 
     expect(eventsWritten).toBe(0);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+  });
+});
+
+/** A decline is now returned, not thrown. The attempt must end exactly as it did when the provider threw. */
+describe('a retry the card declines', () => {
+  it('fails the attempt with the decline, and leaves the subscription and the journal alone', async () => {
+    const subscription = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, subscription.id);
+    const declining: Provider = {
+      confirmPayment: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
+    };
+    const service = new PaymentRetryService(declining, reads, writes, [oneRetryNow]);
+    await service.scheduleRetries(payment.id, 'card_declined');
+    const eventsBefore = await countEvents(db);
+
+    await service.processRetries();
+
+    expect(service.getRetryAttempts(payment.id)).toMatchObject([
+      { status: 'failed', failureReason: 'The card was declined (card_declined)' },
+    ]);
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await subscriptionRow(db, subscription.id)).toMatchObject({ status: 'active' });
   });
 });

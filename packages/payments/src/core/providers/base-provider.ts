@@ -1,3 +1,4 @@
+import type { FailureOf, Result } from '@arki/failure';
 import type { Money } from '@arki/money';
 
 import type {
@@ -18,6 +19,11 @@ import type {
   SubscriptionStatus,
   WebhookValidationResult,
 } from '../types.js';
+import type { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './provider-error.js';
+
+type Declined = FailureOf<typeof CardDeclined>;
+type Conflict = FailureOf<typeof IdempotencyConflict>;
+type NotFound = FailureOf<typeof ReferenceNotFound>;
 
 export type PaymentProviderConfig = {
   apiKey: string;
@@ -58,9 +64,9 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Customer>;
+  ): Promise<Result<Customer, NotFound>>;
 
-  abstract deleteCustomer(customerId: CustomerId): Promise<void>;
+  abstract deleteCustomer(customerId: CustomerId): Promise<Result<undefined, NotFound>>;
 
   // Plan Management
   abstract createPlan(params: {
@@ -75,7 +81,8 @@ export abstract class BasePaymentProvider {
     metadata?: Record<string, unknown>;
   }): Promise<Plan>;
 
-  abstract getPlan(planId: PlanId): Promise<Plan | null>;
+  /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
+  abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound>>;
 
   abstract updatePlan(
     planId: PlanId,
@@ -83,9 +90,9 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Plan>;
+  ): Promise<Result<Plan, NotFound>>;
 
-  abstract deletePlan(planId: PlanId): Promise<void>;
+  abstract deletePlan(planId: PlanId): Promise<Result<undefined, NotFound>>;
 
   abstract listPlans(): Promise<Plan[]>;
 
@@ -98,7 +105,7 @@ export abstract class BasePaymentProvider {
     metadata?: Record<string, unknown>;
     /** Same key, same parameters: the provider returns the first result instead of creating a second subscription. */
     idempotencyKey?: string;
-  }): Promise<Subscription>;
+  }): Promise<Result<Subscription, Declined | Conflict | NotFound>>;
 
   abstract getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null>;
 
@@ -113,7 +120,7 @@ export abstract class BasePaymentProvider {
       prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
       idempotencyKey?: string;
     },
-  ): Promise<Subscription>;
+  ): Promise<Result<Subscription, Declined | Conflict | NotFound>>;
 
   abstract cancelSubscription(
     subscriptionId: SubscriptionId,
@@ -123,19 +130,19 @@ export abstract class BasePaymentProvider {
       reason?: string;
       idempotencyKey?: string;
     },
-  ): Promise<Subscription>;
+  ): Promise<Result<Subscription, Conflict | NotFound>>;
 
-  abstract reactivateSubscription(subscriptionId: SubscriptionId): Promise<Subscription>;
+  abstract reactivateSubscription(subscriptionId: SubscriptionId): Promise<Result<Subscription, NotFound>>;
 
-  abstract pauseSubscription(subscriptionId: SubscriptionId): Promise<Subscription>;
+  abstract pauseSubscription(subscriptionId: SubscriptionId): Promise<Result<Subscription, NotFound>>;
 
-  abstract resumeSubscription(subscriptionId: SubscriptionId): Promise<Subscription>;
+  abstract resumeSubscription(subscriptionId: SubscriptionId): Promise<Result<Subscription, NotFound>>;
 
   abstract previewSubscriptionChange(params: {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<SubscriptionPreview>;
+  }): Promise<Result<SubscriptionPreview, NotFound>>;
 
   // Payment Management
   abstract createPayment(params: {
@@ -144,13 +151,13 @@ export abstract class BasePaymentProvider {
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Payment>;
+  }): Promise<Result<Payment, Declined | NotFound>>;
 
   abstract getPayment(paymentId: PaymentId): Promise<Payment | null>;
 
-  abstract confirmPayment(paymentId: PaymentId): Promise<Payment>;
+  abstract confirmPayment(paymentId: PaymentId): Promise<Result<Payment, Declined | NotFound>>;
 
-  abstract cancelPayment(paymentId: PaymentId): Promise<Payment>;
+  abstract cancelPayment(paymentId: PaymentId): Promise<Result<Payment, NotFound>>;
 
   abstract refundPayment(
     paymentId: PaymentId,
@@ -160,22 +167,22 @@ export abstract class BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<ProviderRefundResult>;
+  ): Promise<Result<ProviderRefundResult, NotFound>>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<PaymentMethodInfo>;
+  }): Promise<Result<PaymentMethodInfo, Declined | NotFound>>;
 
   abstract detachPaymentMethod(paymentMethodId: string): Promise<void>;
 
-  abstract listPaymentMethods(customerId: CustomerId): Promise<PaymentMethodInfo[]>;
+  abstract listPaymentMethods(customerId: CustomerId): Promise<Result<PaymentMethodInfo[], NotFound>>;
 
   abstract setDefaultPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<void>;
+  }): Promise<Result<undefined, NotFound>>;
 
   // Webhook Validation
   abstract validateWebhook(
@@ -189,10 +196,15 @@ export abstract class BasePaymentProvider {
   abstract createSetupIntent(
     customerId: CustomerId,
     options?: { idempotencyKey?: string },
-  ): Promise<{
-    clientSecret: string;
-    setupIntentId: string;
-  }>;
+  ): Promise<
+    Result<
+      {
+        clientSecret: string;
+        setupIntentId: string;
+      },
+      Conflict | NotFound
+    >
+  >;
 
   abstract createPaymentIntent(params: {
     customerId: CustomerId;
@@ -204,10 +216,15 @@ export abstract class BasePaymentProvider {
      */
     automatic: boolean;
     idempotencyKey?: string;
-  }): Promise<{
-    clientSecret: string;
-    paymentIntentId: string;
-  }>;
+  }): Promise<
+    Result<
+      {
+        clientSecret: string;
+        paymentIntentId: string;
+      },
+      Declined | Conflict | NotFound
+    >
+  >;
 
   // Health Check
   abstract healthCheck(): Promise<{ status: 'healthy' | 'degraded' | 'unhealthy'; details?: string }>;
