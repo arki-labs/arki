@@ -23,7 +23,9 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { jobId } from './id.js';
+import { createJobOps } from './outbox.js';
 import { journalTables } from './pg.js';
+import { resolveRetention } from './retention.js';
 
 const tables = journalTables();
 
@@ -116,5 +118,19 @@ describe('the T13 migration on an app with old job rows', () => {
     expect(await db.select().from(tables.jobAttempts)).toEqual([]);
     expect(await db.select().from(tables.jobArchive)).toEqual([]);
     expect(await db.select().from(tables.jobOperations)).toEqual([]);
+  });
+});
+
+describe('the new verbs on old rows', () => {
+  it('an app on the pre-T13 schema migrates and its old dead rows stay retryable', async () => {
+    const ops = createJobOps({ tables, retention: resolveRetention(undefined), wake: () => {} });
+    expect((await ops.jobs(db, { status: 'dead' })).map(row => [row.id, row.state])).toEqual([[deadId, 'dead']]);
+
+    const { operationId } = await ops.retry(db, deadId, { actor: 'upgrade-test' });
+
+    expect(await ops.job(db, deadId)).toMatchObject({ state: 'ready', attempts: 0, lastError: null, attemptLog: [] });
+    expect(await db.select().from(tables.jobOperations)).toMatchObject([
+      { id: operationId, action: 'retry', jobIds: [deadId] },
+    ]);
   });
 });
