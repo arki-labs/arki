@@ -23,6 +23,7 @@
     "arki-content": "./dist/src/cli.js"
   },
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
@@ -51,6 +52,7 @@
     "vfile": "^6.0.3"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
@@ -58,7 +60,9 @@
     "@types/hast": "^3.0.4",
     "@types/mdast": "^4.0.4",
     "@types/unist": "^3.0.3",
+    "contentlayer2": "0.5.8",
     "remark-rehype": "catalog:content",
+    "velite": "0.4.0",
     "vite": "catalog:build-tools",
     "vitest": "catalog:"
   },
