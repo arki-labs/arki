@@ -128,3 +128,14 @@ describe('validateConfig notYet', () => {
     expect(validateConfig(baseConfig).notYet).toEqual(baseConfig.notYet);
   });
 });
+
+describe('validateConfig tiers', () => {
+  it('keeps valid tiers and rejects a package listed twice or outside @arki', () => {
+    // Why: tiers are the one source for readiness and leaf libraries; a package in both tiers has no defined checklist.
+    const tiers = { stack: ['@arki/dot'], libraries: ['@arki/math'] };
+    expect(validateConfig({ ...baseConfig, tiers }).tiers).toEqual(tiers);
+    expect(() => validateConfig({ ...baseConfig, tiers: { stack: ['@arki/math'], libraries: ['@arki/math'] } })).toThrow(/twice/);
+    expect(() => validateConfig({ ...baseConfig, tiers: { stack: ['dot'], libraries: [] } })).toThrow(/@arki/);
+    expect(() => validateConfig({ ...baseConfig, tiers: { stack: [] } })).toThrow(/libraries/);
+  });
+});

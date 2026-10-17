@@ -21,6 +21,8 @@
 
 import debugFactory from 'debug';
 
+import { defaultNpmRunner, type NpmRunner, type RunOutput } from './runners';
+
 import type {
   NpmPackEntry,
   NpmPackFileEntry,
@@ -162,40 +164,6 @@ export type NpmPackResult =
   | { readonly ok: true; readonly entries: readonly NpmPackEntry[] }
   | { readonly ok: false; readonly error: string };
 
-/** Result of invoking the underlying npm process. */
-export interface NpmPackRunOutput {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly code: number;
-}
-
-/** A runner callback — injectable so tests don't spawn real npm. */
-export type NpmPackRunner = (
-  args: readonly string[],
-  options: { readonly cwd: string },
-) => Promise<NpmPackRunOutput>;
-
-/**
- * Default runner that shells out to `npm`. Uses `Bun.spawn` for native
- * Bun parity. Tests inject a fake runner.
- *
- * Captures both stdout and stderr; the auditor surfaces stderr as part
- * of the failure reason if the JSON parse fails.
- */
-const defaultRunner: NpmPackRunner = async (args, { cwd }) => {
-  const proc = Bun.spawn(['npm', ...args], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { stdout, stderr, code };
-};
-
 /**
  * Run `npm pack --dry-run --json` in the given package directory and
  * parse the result.
@@ -204,15 +172,15 @@ const defaultRunner: NpmPackRunner = async (args, { cwd }) => {
  * emit an array of {@link NpmPackEntry}.
  *
  * Inject `runner` in tests; production omits it and uses
- * {@link defaultRunner} which invokes the real npm CLI.
+ * {@link defaultNpmRunner} which invokes the real npm CLI.
  */
 export async function runNpmPack(
   packageDir: string,
-  options?: { readonly runner?: NpmPackRunner },
+  options?: { readonly runner?: NpmRunner },
 ): Promise<NpmPackResult> {
-  const runner = options?.runner ?? defaultRunner;
+  const runner = options?.runner ?? defaultNpmRunner;
   debug('runNpmPack: cwd=%s', packageDir);
-  let output: NpmPackRunOutput;
+  let output: RunOutput;
   try {
     output = await runner(['pack', '--dry-run', '--json'], { cwd: packageDir });
   } catch (cause) {
@@ -380,7 +348,7 @@ export async function auditPack(
     readonly manifest: { readonly name: string; readonly version: string };
     readonly isSourceDistributed: boolean;
     readonly rules?: readonly PackAuditRule[];
-    readonly runner?: NpmPackRunner;
+    readonly runner?: NpmRunner;
   },
 ): Promise<{ readonly ok: true; readonly result: PackAuditResult } | { readonly ok: false; readonly error: string }> {
   const packResult = await runNpmPack(packageDir, { runner: options.runner });

@@ -84,7 +84,9 @@ export {
   PACK_ERROR_CODES,
   runNpmPack,
 } from './pack';
-export type { NpmPackResult, NpmPackRunner, NpmPackRunOutput } from './pack';
+export type { NpmPackResult } from './pack';
+export type { ExecRunner, GitRunner, NpmRunner, RunOutput } from './runners';
+export { defaultGitRunner, defaultNpmRunner, execRunner } from './runners';
 
 export { renderScorecardText, runScorecard, SCORECARD_ERROR_CODES } from './scorecard';
 export type { ScorecardOptions } from './scorecard';

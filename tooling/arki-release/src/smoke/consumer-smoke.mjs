@@ -25,7 +25,7 @@ for (const dir of readdirSync(root).sort()) {
       await import(spec);
       console.log(`PASS ${runtime} ${spec}`);
     } catch (error) {
-      const message = String(error?.message ?? error).split('\n')[0];
+      const message = (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '';
       const missingPeer = optionalPeers.find(peer => message.includes(`'${peer}'`));
       if (missingPeer) {
         console.log(`SKIP ${runtime} ${spec} (optional peer ${missingPeer} not installed)`);

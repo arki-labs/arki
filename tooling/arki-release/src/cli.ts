@@ -12,7 +12,9 @@ import path from 'node:path';
 
 import debugFactory from 'debug';
 
+import { readCandidate, runCandidate, type CandidateTarget } from './candidate';
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
+import { demosUsing, loadDemos } from './demos';
 import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 import {
   DEFAULT_PACKAGE_MANAGERS,
@@ -20,11 +22,16 @@ import {
   runFixtureMatrix,
 } from './fixture';
 import { renderHistoryText, runHistory } from './history';
-import { runInventory, type InventoryItem } from './inventory';
+import { runImpact, type ImpactPackage } from './impact';
+import { discoverManifests, runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
+import { npmVersionLookup, ORDER_ERROR_CODES, pendingPackages, runOrder } from './order';
 import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
+import { renderReadinessTable } from './readiness';
+import { defaultGitRunner, defaultNpmRunner } from './runners';
 import { renderScorecardText, runScorecard } from './scorecard';
+import { runSmoke } from './smoke';
 import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
 import { renderSyncPackageReposText, runSyncPackageRepos } from './sync-package-repos';
 import type {
@@ -43,6 +50,12 @@ import type {
 } from './types';
 
 const debug = debugFactory('arki:release:cli');
+
+/** Stable error codes of the CLI itself. */
+const CLI_ERROR_CODES = {
+  /** A required flag is missing or flags conflict (exit 2). */
+  usage: 'CLI_E001',
+} as const;
 
 /**
  * Known subcommands and their implementation task references.
@@ -93,6 +106,26 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'sync-package-repos',
     task: 'post-Task-12',
     description: 'Mirror each published @arki/* into an archived arki-labs/<name> repo.',
+  },
+  {
+    name: 'order',
+    task: 'T1.1',
+    description: 'Publish order for a wave: --wave <id>. Lists unpublished @arki deps first.',
+  },
+  {
+    name: 'candidate',
+    task: 'T1.1',
+    description: 'Freeze tarballs + candidate.json: --wave <id> | --affected <ref>.',
+  },
+  {
+    name: 'smoke',
+    task: 'T1.2',
+    description: 'Install a candidate into a clean consumer and import every export: --candidate <dir> [--keep].',
+  },
+  {
+    name: 'impact',
+    task: 'T1.4',
+    description: 'docs-impact + demo-impact for a wave\'s pending changesets: --wave <id> [--candidate <dir>].',
   },
 ];
 
@@ -213,6 +246,19 @@ function renderHelpText(): string {
   lines.push('  --json   Emit a ReleaseCommandEnvelope as JSON on stdout.');
   lines.push('  --help   Show this message.');
   lines.push('');
+  lines.push('scorecard flags:');
+  lines.push('  --package <name>           Score one package.');
+  lines.push('  --allow-deferred           Deferred DOT / agent-native gates do not block.');
+  lines.push('  --full-fixture             Run the fixture matrix in install mode (CI).');
+  lines.push('  --candidate <dir>          Read checks and versions from a frozen candidate.');
+  lines.push('  --allow-demo-lag "<why>"   A blocking demo lag becomes a warning.');
+  lines.push('  --table                    Print the readiness table instead of the dimension list.');
+  lines.push('');
+  lines.push('Exit codes:');
+  lines.push('  0  open: the command succeeded (scorecard: stable release gate open).');
+  lines.push('  1  blocked: the command ran and found blocking problems (or the config is invalid).');
+  lines.push('  2  tool error: bad flags (CLI_E001) or an unexpected crash.');
+  lines.push('');
   return `${lines.join('\n')}\n`;
 }
 
@@ -290,6 +336,22 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runSyncPackageReposHandler(args);
   }
 
+  if (args.command === 'order') {
+    return runOrderHandler(args);
+  }
+
+  if (args.command === 'candidate') {
+    return runCandidateHandler(args);
+  }
+
+  if (args.command === 'smoke') {
+    return runSmokeHandler(args);
+  }
+
+  if (args.command === 'impact') {
+    return runImpactHandler(args);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
@@ -306,6 +368,9 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
  *                        Used post-Task-9/10 to validate the flip.
  *   --package <name>     Score a single package by name.
  *   --full-fixture       Run the fixture matrix in install mode (CI default).
+ *   --candidate <dir>    Read candidate.json checks + versions (never rebuilds).
+ *   --allow-demo-lag "<reason>"  A blocking demo lag becomes a warning.
+ *   --table              Print the readiness table (text mode).
  *
  * Exit codes:
  *   - 0 when `stableReleaseGate === 'open'`.
@@ -317,6 +382,8 @@ async function runScorecardHandler(args: ParsedCliArgs): Promise<number> {
   const packageFilter = extractOption(args.rest, 'package');
   const allowDeferred = args.rest.includes('--allow-deferred');
   const fullFixtureMatrix = args.rest.includes('--full-fixture');
+  const candidateDir = extractOption(args.rest, 'candidate');
+  const allowDemoLag = extractOption(args.rest, 'allow-demo-lag');
 
   try {
     const config = await loadConfig(configPath);
@@ -324,11 +391,18 @@ async function runScorecardHandler(args: ParsedCliArgs): Promise<number> {
       cwd,
       config,
       ...(packageFilter !== null ? { packageName: packageFilter } : {}),
+      ...(candidateDir !== null ? { candidateDir: path.resolve(cwd, candidateDir) } : {}),
+      ...(allowDemoLag !== null ? { allowDemoLag } : {}),
       allowDeferred,
       fullFixtureMatrix,
     });
     if (args.json) {
       emitEnvelope(envelope, { json: true });
+    } else if (args.rest.includes('--table')) {
+      const rows = envelope.items.flatMap(pkg =>
+        pkg.readiness === undefined ? [] : [{ name: pkg.name, ...pkg.readiness, dimension: pkg.dimensions.readiness }],
+      );
+      process.stdout.write(`${renderReadinessTable(rows)}\n${envelope.summary.message}\n`);
     } else {
       process.stdout.write(renderScorecardText(envelope));
     }
@@ -439,6 +513,131 @@ async function runSyncPackageReposHandler(args: ParsedCliArgs): Promise<number> 
     }
     throw cause;
   }
+}
+
+/** Emit a CLI_E001 usage envelope and return exit code 2. */
+function usageError(command: ReleaseCommand, message: string, json: boolean): number {
+  emitEnvelope(
+    createEnvelope({
+      command,
+      status: 'failure',
+      summary: { message },
+      errors: [{ code: CLI_ERROR_CODES.usage, severity: 'error', message, remediation: 'Run `bun release:arki --help` for the flags.' }],
+    }),
+    { json },
+  );
+  return 2;
+}
+
+/** Load the config, run `body`, and turn a config error into a failure envelope (exit 1). */
+async function withConfig(command: ReleaseCommand, json: boolean, body: (config: ReleaseConfig) => Promise<number>): Promise<number> {
+  try {
+    return await body(await loadConfig(defaultConfigPath(process.cwd())));
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      emitEnvelope(buildConfigErrorEnvelope(command, cause), { json });
+      return 1;
+    }
+    throw cause;
+  }
+}
+
+/** `order --wave <id>`: publish order for the wave's pending changesets. */
+async function runOrderHandler(args: ParsedCliArgs): Promise<number> {
+  const wave = extractOption(args.rest, 'wave');
+  if (wave === null) return usageError('order', 'order needs `--wave <id>`.', args.json);
+  return withConfig('order', args.json, async config => {
+    const envelope = await runOrder({ cwd: process.cwd(), config, wave });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  });
+}
+
+/** `candidate --wave <id> | --affected <ref>`: freeze tarballs; prints the folder. */
+async function runCandidateHandler(args: ParsedCliArgs): Promise<number> {
+  const wave = extractOption(args.rest, 'wave');
+  const ref = extractOption(args.rest, 'affected');
+  const target: CandidateTarget | null =
+    wave !== null && ref === null ? { kind: 'wave', id: wave } : ref !== null && wave === null ? { kind: 'affected', ref } : null;
+  if (target === null) return usageError('candidate', 'candidate needs exactly one of `--wave <id>` or `--affected <ref>`.', args.json);
+  return withConfig('candidate', args.json, async config => {
+    const envelope = await runCandidate({ cwd: process.cwd(), config, target });
+    emitEnvelope(envelope, { json: args.json });
+    if (!args.json && envelope.summary.directory !== null) process.stdout.write(`${envelope.summary.directory}\n`);
+    return envelope.status === 'failure' ? 1 : 0;
+  });
+}
+
+/** `smoke --candidate <dir> [--keep]`: install the tarballs in a clean consumer. */
+async function runSmokeHandler(args: ParsedCliArgs): Promise<number> {
+  const candidateDir = extractOption(args.rest, 'candidate');
+  if (candidateDir === null) return usageError('smoke', 'smoke needs `--candidate <dir>`.', args.json);
+  return withConfig('smoke', args.json, async config => {
+    const cwd = process.cwd();
+    const envelope = await runSmoke({ candidateDir: path.resolve(cwd, candidateDir), repoRoot: cwd, config, keep: args.rest.includes('--keep') });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  });
+}
+
+/**
+ * `impact --wave <id> [--candidate <dir>]`: docs-impact and demo-impact for
+ * the wave packages a pending changeset bumps. Demo checks come from the
+ * candidate; without one, demos that use a package report no passing check.
+ */
+async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
+  const waveId = extractOption(args.rest, 'wave');
+  if (waveId === null) return usageError('impact', 'impact needs `--wave <id>`.', args.json);
+  const candidateDir = extractOption(args.rest, 'candidate');
+  return withConfig('impact', args.json, async config => {
+    const cwd = process.cwd();
+    const wave = config.waves.find(w => w.id === waveId);
+    if (wave === undefined) {
+      return usageError('impact', `Wave \`${waveId}\` is not in arki.release.config.ts (${config.waves.map(w => w.id).join(', ')}).`, args.json);
+    }
+    const errors: ReleaseError[] = [];
+    const registry = await loadDemos(cwd, config);
+    errors.push(...registry.errors);
+    let candidateChecks = {};
+    if (candidateDir !== null) {
+      const read = await readCandidate(path.resolve(cwd, candidateDir));
+      if (read.ok) candidateChecks = read.candidate.checks;
+      else errors.push(...read.errors);
+    }
+    const pending = await pendingPackages(cwd);
+    const { manifests } = await discoverManifests(cwd);
+    const lookup = npmVersionLookup(defaultNpmRunner, cwd);
+    const packages: ImpactPackage[] = [];
+    for (const manifest of manifests.filter(m => wave.packages.includes(m.name) && pending.names.has(m.name))) {
+      const found = await lookup(manifest.name);
+      if ('error' in found) {
+        errors.push({
+          code: ORDER_ERROR_CODES.npmViewFailed,
+          severity: 'warning',
+          message: `${found.error} ${manifest.name} is treated as never published.`,
+          remediation: 'Check the network and npm access, then rerun impact.',
+          target: manifest.name,
+        });
+      }
+      packages.push({
+        name: manifest.name,
+        dir: path.basename(path.dirname(manifest.manifestPath)),
+        version: manifest.version,
+        npmVersion: 'versions' in found ? (found.versions.at(-1) ?? null) : null,
+        lastShippedCommit: null,
+      });
+    }
+    const envelope = await runImpact({
+      root: cwd,
+      packages,
+      git: defaultGitRunner,
+      demosUsing: pkg => demosUsing(registry, pkg).map(use => use.demo),
+      candidateChecks,
+    });
+    const merged = { ...envelope, errors: [...errors, ...envelope.errors] };
+    emitEnvelope(merged, { json: args.json });
+    return merged.errors.some(e => e.severity === 'error') ? 1 : 0;
+  });
 }
 
 /**

@@ -4,8 +4,8 @@
  * The scorecard is the integration layer that runs the inventory, leak
  * scanner, pack auditor, public-tree exporter, and fixture matrix
  * programmatically (NOT via subprocess), aggregates their outputs, and
- * decides per-package PASS / FAIL / WARN / DEFERRED across eight
- * dimensions. The "stable release gate" is `'open'` iff every
+ * decides per-package PASS / FAIL / WARN / DEFERRED across every
+ * `SCORECARD_DIMENSIONS` entry. The "stable release gate" is `'open'` iff every
  * public-candidate package passes every dimension (with `--allow-deferred`
  * relaxing the deferred DOT/agent-native gates).
  *
@@ -19,6 +19,11 @@
  *      for the metadata / dependencies dimensions).
  *   5. Run fixture matrix (with `--skip-install` by default — full matrix
  *      in CI mode).
+ *   5.5 Run the DOT probe once.
+ *   5.6 Read the release inputs once: changesets, demo registry, the
+ *      `--candidate` folder, `npm view` versions, docs files, readiness
+ *      baseline. A missing input makes its dimension `warn` or `deferred`,
+ *      never a silent pass.
  *   6. Per package, evaluate each dimension and roll up the worst.
  *   7. Decide the stable-release gate.
  *
@@ -36,9 +41,24 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { checkDocs } from '@arki/library-tooling/src/docs';
+import { readManifest } from '@arki/library-tooling/src/manifest';
 import debugFactory from 'debug';
+import { z } from 'zod';
 
 import { evaluateAdmission, isAdmissionFailure } from './admission';
+import { readCandidate, type Candidate } from './candidate';
+import { demosUsing, evaluateDemoLag, loadDemos, type DemoRegistry, type DemoUse } from './demos';
+import {
+  evaluateBenchFresh,
+  evaluateDocsFresh,
+  exportedNames,
+  FRESH_ERROR_CODES,
+  loadDocsFiles,
+  unmentionedExports,
+  type DocExamplesReport,
+  type DocsFreshFiles,
+} from './docs-fresh';
 import { runDotProbe } from './dot-probe';
 import { exportPublicTree, EXPORT_ERROR_CODES } from './export-public';
 import {
@@ -49,10 +69,30 @@ import {
   type FixtureOptions,
   type ProcessRunner,
 } from './fixture';
+import {
+  bumpedPackages,
+  changedSince,
+  checkBumps,
+  evaluateDemoImpact,
+  evaluateDocsImpact,
+  loadChangesets,
+  resolveBase,
+  type Changeset,
+} from './impact';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
-import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES, type NpmPackRunner } from './pack';
+import { npmVersionLookup } from './order';
+import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
+import {
+  evaluateReadiness,
+  isLeafLibrary,
+  loadReadinessBaseline,
+  READINESS_ERROR_CODES,
+  type ExternalResults,
+  type ReadinessBaseline,
+} from './readiness';
+import { defaultGitRunner, defaultNpmRunner, type GitRunner, type NpmRunner } from './runners';
 import type {
   DotProbeResult,
   FixtureRun,
@@ -64,6 +104,7 @@ import type {
   ScorecardDimension,
   ScorecardDimensionResult,
   ScorecardPackageResult,
+  ScorecardReadiness,
   ScorecardStatus,
   ScorecardSummary,
   WaveBuildOutput,
@@ -77,7 +118,16 @@ export const SCORECARD_ERROR_CODES = {
   upstreamThrew: 'SCORE_E001',
   packageNotInInventory: 'SCORE_E002',
   noPublicCandidates: 'SCORE_E003',
+  /** `npm view` failed for some packages (offline, auth); dependent checks are deferred or unverified. */
+  npmUnavailable: 'SCORE_E004',
 } as const;
+
+/** The dimensions that read release inputs (changesets, git, npm, demos, candidate). */
+const RELEASE_DIMENSIONS = ['docs-fresh', 'docs-impact', 'demo-impact', 'demo-lag', 'bench-fresh', 'readiness'] as const;
+type ReleaseDimension = (typeof RELEASE_DIMENSIONS)[number];
+
+/** Readiness gaps excused today; may only shrink. Relative to the workspace root. */
+export const READINESS_BASELINE_PATH = path.join('tooling', 'arki-release', 'readiness-baseline.json');
 
 /**
  * Options accepted by {@link runScorecard}.
@@ -106,8 +156,25 @@ export interface ScorecardOptions {
    * this to `true`.
    */
   readonly fullFixtureMatrix?: boolean;
-  /** Injectable npm pack runner for tests. */
-  readonly npmPackRunner?: NpmPackRunner;
+  /** Injectable npm runner (`npm pack` and `npm view`) for tests. */
+  readonly npmRunner?: NpmRunner;
+  /** Injectable git runner (docs-impact base commit, changed files, bench provenance). */
+  readonly gitRunner?: GitRunner;
+  /**
+   * Frozen candidate folder (`candidate --wave`). Its `candidate.json`
+   * checks (smoke, demos) and versions feed demo-impact, demo-lag,
+   * docs-fresh and readiness. The scorecard only reads it; it never
+   * rebuilds or re-exports a candidate.
+   */
+  readonly candidateDir?: string;
+  /** `--allow-demo-lag "<reason>"`: a blocking demo lag becomes a warning. */
+  readonly allowDemoLag?: string;
+  /**
+   * `arki-doc-examples --json` reports by package name. The scorecard never
+   * runs `test:docs` itself; a package without a report fails docs-fresh
+   * with FRESH_E002 until one is passed in.
+   */
+  readonly docExamples?: Readonly<Record<string, DocExamplesReport>>;
   /** Injectable fixture process runner for tests. */
   readonly fixtureRunner?: ProcessRunner;
   /**
@@ -218,7 +285,7 @@ export async function runScorecard(
       const result = await auditPack(dir, {
         manifest: { name: item.name, version: item.version },
         isSourceDistributed: isSourceDistributedManifest(rawManifest),
-        ...(opts.npmPackRunner !== undefined ? { runner: opts.npmPackRunner } : {}),
+        ...(opts.npmRunner !== undefined ? { runner: opts.npmRunner } : {}),
       });
       if (result.ok) {
         packResultsByPackage.set(item.name, result.result);
@@ -278,10 +345,16 @@ export async function runScorecard(
   // `opts.dotProbe`; production spawns `dot-probe-runner.ts` via `bun`.
   const dotProbe = await resolveDotProbe(opts);
 
+  // 5.6. Release inputs, read once: changesets, demo registry, candidate,
+  // npm versions, docs files, readiness baseline.
+  const releaseInputs = await gatherReleaseInputs(opts, candidates, envelopeErrors);
+
   // 6. Per-package evaluation.
   const results: ScorecardPackageResult[] = [];
   for (const item of candidates) {
+    const release = await evaluateReleaseDimensions(item, opts, releaseInputs);
     const result = await evaluatePackage({
+      release,
       item,
       cwd: opts.cwd,
       leakHits: leakHitsByPackage.get(item.name) ?? [],
@@ -347,6 +420,12 @@ function admissionFailureRow(item: InventoryItem): ScorecardPackageResult {
     'dot-gates': skipped,
     'agent-native-gates': skipped,
     admission: evaluateAdmission(item.name, item.status),
+    'docs-fresh': skipped,
+    'docs-impact': skipped,
+    'demo-impact': skipped,
+    'demo-lag': skipped,
+    'bench-fresh': skipped,
+    readiness: skipped,
   };
   return {
     name: item.name,
@@ -364,6 +443,7 @@ function admissionFailureRow(item: InventoryItem): ScorecardPackageResult {
  * status. Pure once the inputs have been gathered.
  */
 async function evaluatePackage(input: {
+  readonly release: ReleaseEvaluation;
   readonly item: InventoryItem;
   readonly cwd: string;
   readonly leakHits: readonly LeakHit[];
@@ -389,6 +469,7 @@ async function evaluatePackage(input: {
     'dot-gates': evaluateDotGates(input.dotProbe),
     'agent-native-gates': evaluateAgentNativeGates(input.dotProbe),
     admission: evaluateAdmission(input.item.name, input.item.status),
+    ...input.release.dimensions,
   };
 
   const overall = rollUpStatus(Object.values(dimensions).map(d => d.status));
@@ -402,7 +483,301 @@ async function evaluatePackage(input: {
     dimensions,
     overall,
     blockers,
+    readiness: input.release.readiness,
   };
+}
+
+/** Inputs the release dimensions share, read once per scorecard run. */
+type ReleaseInputs = {
+  readonly changesets: readonly Changeset[];
+  /** Packages a pending changeset bumps. */
+  readonly pending: ReadonlySet<string>;
+  readonly registry: DemoRegistry;
+  /** `null` when `--candidate` was not passed or the candidate is unusable. */
+  readonly candidate: Candidate | null;
+  /** Published versions per package name; `null` when `npm view` failed. */
+  readonly npmVersions: ReadonlyMap<string, readonly string[] | null>;
+  /** `name@version` on npm or in the candidate. */
+  readonly knownVersions: ReadonlySet<string>;
+  readonly docsFiles: ReadonlyMap<string, DocsFreshFiles>;
+  readonly baseline: ReadinessBaseline;
+  readonly git: GitRunner;
+};
+
+type ReleaseEvaluation = {
+  readonly dimensions: Readonly<Record<ReleaseDimension, ScorecardDimensionResult>>;
+  readonly readiness: ScorecardReadiness;
+};
+
+function packageDirOf(cwd: string, item: InventoryItem): string {
+  return path.dirname(path.join(cwd, item.manifestPath));
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+async function gatherReleaseInputs(
+  opts: ScorecardOptions,
+  items: readonly InventoryItem[],
+  errors: ReleaseError[],
+): Promise<ReleaseInputs> {
+  const { changesets, errors: changesetErrors } = await loadChangesets(opts.cwd);
+  errors.push(...changesetErrors, ...checkBumps(changesets, Object.fromEntries(items.map(i => [i.name, i.version]))));
+
+  const registry = await loadDemos(opts.cwd, opts.config);
+  errors.push(...registry.errors);
+
+  let candidate: Candidate | null = null;
+  if (opts.candidateDir !== undefined) {
+    const read = await readCandidate(opts.candidateDir);
+    if (read.ok) candidate = read.candidate;
+    else errors.push(...read.errors);
+  }
+
+  const docsFiles = new Map<string, DocsFreshFiles>();
+  for (const item of items) docsFiles.set(item.name, await loadDocsFiles(packageDirOf(opts.cwd, item)));
+
+  // One `npm view` per name: the scored packages plus every package a doc names.
+  const names = new Set([...items.map(i => i.name), ...[...docsFiles.values()].flatMap(f => f.versionRefs.map(r => r.name))]);
+  const lookup = npmVersionLookup(opts.npmRunner ?? defaultNpmRunner, opts.cwd);
+  const npmVersions = new Map(
+    await Promise.all(
+      [...names].map(async name => {
+        const found = await lookup(name);
+        return [name, 'versions' in found ? found.versions : null] as const;
+      }),
+    ),
+  );
+  const unreachable = [...npmVersions].filter(([, versions]) => versions === null).map(([name]) => name);
+  if (unreachable.length > 0) {
+    debug('npm view failed for %d packages', unreachable.length);
+    errors.push({
+      code: SCORECARD_ERROR_CODES.npmUnavailable,
+      severity: 'warning',
+      message: `npm view failed for ${unreachable.length.toString()} package(s) (${unreachable.slice(0, 5).join(', ')}${unreachable.length > 5 ? ', ...' : ''}); docs-impact is deferred for them and their documented versions are unverified.`,
+      remediation: 'Check the network and npm access (`npm view @arki/log versions`), then rerun the scorecard.',
+    });
+  }
+  const knownVersions = new Set([
+    ...[...npmVersions].flatMap(([name, versions]) => (versions ?? []).map(v => `${name}@${v}`)),
+    ...(candidate?.packages.map(p => `${p.name}@${p.version}`) ?? []),
+  ]);
+
+  let baseline: ReadinessBaseline = {};
+  try {
+    baseline = loadReadinessBaseline(path.join(opts.cwd, READINESS_BASELINE_PATH));
+  } catch (cause) {
+    errors.push({
+      code: READINESS_ERROR_CODES.baselineInvalid,
+      severity: 'error',
+      message: messageOf(cause),
+      remediation: 'Regenerate the baseline with the one-off command in tooling/arki-release/src/readiness.ts.',
+      target: READINESS_BASELINE_PATH,
+    });
+  }
+
+  return {
+    changesets,
+    pending: bumpedPackages(changesets),
+    registry,
+    candidate,
+    npmVersions,
+    knownVersions,
+    docsFiles,
+    baseline,
+    git: opts.gitRunner ?? defaultGitRunner,
+  };
+}
+
+const scoredManifestSchema = z
+  .object({
+    name: z.string(),
+    version: z.string(),
+    dependencies: z.record(z.string(), z.string()).optional(),
+    peerDependencies: z.record(z.string(), z.string()).optional(),
+    exports: z.unknown().optional(),
+  })
+  .loose();
+
+/** The six release dimensions plus the readiness checklist for one package. */
+async function evaluateReleaseDimensions(
+  item: InventoryItem,
+  opts: ScorecardOptions,
+  inputs: ReleaseInputs,
+): Promise<ReleaseEvaluation> {
+  const packageDir = packageDirOf(opts.cwd, item);
+  const dir = path.basename(packageDir);
+  const parsed = scoredManifestSchema.safeParse(JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8')));
+  const manifest = parsed.success ? parsed.data : { name: item.name, version: item.version };
+  const uses = demosUsing(inputs.registry, item.name);
+  const checks = inputs.candidate?.checks ?? {};
+  const published = inputs.npmVersions.get(item.name) ?? null;
+  // A package releases when a changeset bumps it or its version is not on npm.
+  // Unknown npm state counts as releasing, so nothing passes on missing data.
+  const releasing = inputs.pending.has(item.name) || published === null || !published.includes(item.version);
+  const notReleasing: ScorecardDimensionResult = {
+    status: 'pass',
+    details: `nothing to release: ${item.version} is on npm and no changeset is pending`,
+    evidence: [],
+  };
+
+  const docsFresh = await evaluateDocsFreshFor(item, packageDir, manifest, inputs, opts.docExamples);
+  const demoLag = evaluateDemoLag({
+    pkg: item.name,
+    candidateVersion: inputs.candidate?.packages.find(p => p.name === item.name)?.version ?? manifest.version,
+    uses,
+    blocking: opts.config.demoLagBlocking ?? false,
+    ...(opts.allowDemoLag !== undefined ? { allowReason: opts.allowDemoLag } : {}),
+  });
+  const readme = await readFile(path.join(packageDir, 'README.md'), 'utf8').catch(() => '');
+  const benchFresh = await evaluateBenchFresh({
+    root: opts.cwd,
+    pkg: item.name,
+    dir,
+    leaf: isLeafLibrary(opts.config, manifest),
+    readme,
+    git: inputs.git,
+  });
+
+  const readiness = evaluateReadiness({
+    config: opts.config,
+    dir: packageDir,
+    external: readinessExternal(item.name, uses, docsFresh, opts.docExamples?.[item.name] === undefined, inputs.candidate),
+    baseline: inputs.baseline[item.name] ?? [],
+  });
+
+  return {
+    dimensions: {
+      'docs-fresh': docsFresh,
+      'docs-impact': releasing ? await evaluateDocsImpactFor(item.name, dir, published, opts.cwd, inputs) : notReleasing,
+      'demo-impact': releasing ? evaluateDemoImpactFor(item.name, uses, checks, inputs) : notReleasing,
+      'demo-lag': demoLag,
+      'bench-fresh': benchFresh,
+      readiness: readiness.dimension,
+    },
+    readiness: { tier: readiness.tier, items: readiness.items },
+  };
+}
+
+async function evaluateDocsImpactFor(
+  pkg: string,
+  dir: string,
+  published: readonly string[] | null,
+  cwd: string,
+  inputs: ReleaseInputs,
+): Promise<ScorecardDimensionResult> {
+  if (published === null) {
+    return { status: 'deferred', details: 'npm view failed: no last release to diff the docs against', evidence: [] };
+  }
+  const npmVersion = published.at(-1) ?? null;
+  const base = await resolveBase({ root: cwd, dir, npmVersion, lastShippedCommit: null, git: inputs.git });
+  if (npmVersion !== null && base === null) {
+    return { status: 'deferred', details: `git found no commit that set version ${npmVersion}`, evidence: [] };
+  }
+  const changedFiles = base === null ? null : await changedSince(cwd, base, dir, inputs.git);
+  return evaluateDocsImpact({ pkg, dir, changedFiles, changesets: inputs.changesets });
+}
+
+function evaluateDemoImpactFor(
+  pkg: string,
+  uses: readonly DemoUse[],
+  checks: Candidate['checks'],
+  inputs: ReleaseInputs,
+): ScorecardDimensionResult {
+  const demos = uses.map(u => u.demo);
+  const result = evaluateDemoImpact({ pkg, demos, candidateChecks: checks, changesets: inputs.changesets });
+  // Demo checks live in candidate.json; without one they are unknown, not failed.
+  if (result.status === 'fail' && demos.length > 0 && inputs.candidate === null) {
+    return { status: 'deferred', details: `demo checks unknown for ${demos.join(', ')}: pass --candidate <dir>`, evidence: [] };
+  }
+  return result;
+}
+
+async function evaluateDocsFreshFor(
+  item: InventoryItem,
+  packageDir: string,
+  manifest: { readonly version: string; readonly exports?: unknown },
+  inputs: ReleaseInputs,
+  docExamples: ScorecardOptions['docExamples'],
+): Promise<ScorecardDimensionResult> {
+  const files = inputs.docsFiles.get(item.name) ?? { changelogVersion: null, versionRefs: [], docsText: '' };
+  // A version string can only be judged when npm answered for its package.
+  const unverified = files.versionRefs.filter(
+    ref => !inputs.knownVersions.has(`${ref.name}@${ref.version}`) && (inputs.npmVersions.get(ref.name) ?? null) === null,
+  );
+  const libraryErrors = libraryDocErrors(packageDir);
+  const result = evaluateDocsFresh({
+    pkg: item.name,
+    packageVersion: manifest.version,
+    libraryCheckErrors: libraryErrors ?? [],
+    docExamples: docExamples?.[item.name] ?? null,
+    changelogVersion: files.changelogVersion,
+    versionRefs: files.versionRefs.filter(ref => !unverified.includes(ref)),
+    knownVersions: inputs.knownVersions,
+    undocumentedExports: unmentionedExports(await exportedNames(packageDir, manifest.exports), files.docsText),
+  });
+  const extra: ReleaseError[] = [];
+  if (libraryErrors === null) {
+    extra.push({
+      code: FRESH_ERROR_CODES.llmsImportPaths,
+      severity: 'warning',
+      message: `${item.name}: the library docs check could not run, so llms.txt import paths are unchecked.`,
+      remediation: `Run \`arki-library-check\` in packages/${path.basename(packageDir)} and fix what it reports.`,
+      target: item.name,
+    });
+  }
+  if (unverified.length > 0) {
+    extra.push({
+      code: FRESH_ERROR_CODES.versionUnverified,
+      severity: 'warning',
+      message: `${item.name}: npm was unreachable, so ${unverified.map(r => `${r.name}@${r.version}`).join(', ')} could not be checked.`,
+      remediation: 'Rerun the scorecard with network access to npm.',
+      target: item.name,
+    });
+  }
+  if (extra.length === 0) return result;
+  const evidence = [...result.evidence, ...extra];
+  return {
+    status: result.status === 'fail' ? 'fail' : 'warn',
+    details: `${evidence.length.toString()} finding(s)`,
+    evidence,
+  };
+}
+
+/** Error lines of the library docs rules (DOC_E0xx); `null` when the check cannot run. */
+function libraryDocErrors(packageDir: string): readonly string[] | null {
+  try {
+    return checkDocs(packageDir, readManifest(packageDir)).errors;
+  } catch (cause) {
+    debug('library docs check threw for %s: %s', packageDir, cause);
+    return null;
+  }
+}
+
+/** Readiness items other modules produce. Absent = no result yet (READY_E002). */
+function readinessExternal(
+  pkg: string,
+  uses: readonly DemoUse[],
+  docsFresh: ScorecardDimensionResult,
+  docExamplesMissing: boolean,
+  candidate: Candidate | null,
+): ExternalResults {
+  const external: ExternalResults = {};
+  const smoke = candidate?.packages.some(p => p.name === pkg) === true ? candidate.checks['smoke'] : undefined;
+  if (smoke?.status === 'success') external['install-smoke'] = 'pass';
+  if (smoke?.status === 'failure') external['install-smoke'] = 'fail';
+  // A docs-fresh fail caused only by the missing doc-examples report is a
+  // missing input, not a readiness failure: leave the item without a result.
+  const realErrors = docsFresh.evidence.filter(
+    e => e.severity === 'error' && !(docExamplesMissing && e.code === FRESH_ERROR_CODES.docExamples),
+  );
+  if (realErrors.length > 0) external['docs-fresh'] = 'fail';
+  else if (!docExamplesMissing && docsFresh.status !== 'deferred') external['docs-fresh'] = 'pass';
+  const demoStatuses = uses.map(u => candidate?.checks[`demo:${u.demo}`]?.status);
+  if (uses.length === 0 || demoStatuses.includes('failure')) external['demo-proof'] = 'fail';
+  else if (demoStatuses.every(s => s === 'success')) external['demo-proof'] = 'pass';
+  return external;
 }
 
 /**

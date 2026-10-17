@@ -5,6 +5,8 @@
  * envelope, and the implementation modules introduced in later tasks.
  */
 
+import type { ReadinessResult } from './readiness';
+
 /**
  * The complete set of CLI subcommands supported by `arki-release`.
  *
@@ -19,6 +21,10 @@
  *   - sync-package-repos (post-Task-12): ensure each published `@arki/<name>` has an
  *                                        archived read-only mirror at `arki-labs/<name>`,
  *                                        with one commit per published version + matching tags.
+ *   - candidate          (T1.1): freeze a wave into `.release/candidates/<id>/` (tarballs + candidate.json)
+ *   - order              (T1.1): publish order of a wave, with unpublished @arki deps
+ *   - smoke              (T1.2): install a candidate's tarballs into a clean consumer and import every export
+ *   - impact             (T1.4): docs-impact and demo-impact for the packages a wave releases
  */
 export type ReleaseCommand =
   | 'inventory'
@@ -28,7 +34,11 @@ export type ReleaseCommand =
   | 'fixture'
   | 'scorecard'
   | 'history'
-  | 'sync-package-repos';
+  | 'sync-package-repos'
+  | 'candidate'
+  | 'order'
+  | 'smoke'
+  | 'impact';
 
 /**
  * Lifecycle status of a release command run.
@@ -347,6 +357,39 @@ export type ReleaseConfig = {
    * here; the `admission` scorecard dimension enforces it.
    */
   readonly notYet?: readonly NotYetEntry[];
+  /**
+   * Package tiers (docs/arki/core-packages.md). Decides which readiness
+   * items bind a package and which packages are leaf libraries. Omitted =
+   * no package is tiered, so readiness is not evaluated.
+   */
+  readonly tiers?: ReleaseTiers;
+  /** Nested demo repos; `loadDemos` reads each one's `arki.deps.json`. */
+  readonly demos?: readonly DemoEntry[];
+  /** Behavioural mappings on top of real imports: `{ '@arki/x': [{ demo, scenario }] }`. */
+  readonly proofs?: Readonly<Record<string, readonly ProofEntry[]>>;
+  /** When false (default), demo-lag failures are reported as warnings. */
+  readonly demoLagBlocking?: boolean;
+};
+
+/** Tier 1 = the stack, Tier 2 = standalone libraries. Full `@arki/*` names. */
+export type ReleaseTiers = {
+  readonly stack: readonly string[];
+  readonly libraries: readonly string[];
+};
+
+/** One nested demo repo. */
+export type DemoEntry = {
+  readonly name: string;
+  /** GitHub `owner/repo` of the demo. */
+  readonly repo: string;
+  /** Path of the demo folder, relative to the workspace root. */
+  readonly path: string;
+};
+
+/** A behavioural mapping: this demo exercises a package in a named scenario. */
+export type ProofEntry = {
+  readonly demo: string;
+  readonly scenario: string;
 };
 
 /** One deliberately-unadmitted public package and why. */
@@ -691,6 +734,18 @@ export type FixtureMatrix = {
  *   - `admission`          — every public (`private: false`) package is
  *                            either in exactly one wave or listed in
  *                            `ReleaseConfig.notYet` (ADMIT_E001 / E002).
+ *   - `docs-fresh`         — llms.txt import paths, doc examples, CHANGELOG
+ *                            top version and every `@arki/x@ver` string
+ *                            match what ships (FRESH_E001..E006).
+ *   - `docs-impact`        — docs changed since the last release, or a
+ *                            changeset says `no docs impact: <reason>`.
+ *   - `demo-impact`        — every demo using the package passed its
+ *                            candidate check, or `no demo impact: <reason>`.
+ *   - `demo-lag`           — demo pins trail the candidate by at most one
+ *                            minor (warning-only unless `demoLagBlocking`).
+ *   - `bench-fresh`        — leaf libraries: README bench provenance is at
+ *                            or after the last source change.
+ *   - `readiness`          — Tier 1/2 per-package checklist (READY_E001..E004).
  */
 export const SCORECARD_DIMENSIONS = [
   'metadata',
@@ -703,6 +758,12 @@ export const SCORECARD_DIMENSIONS = [
   'dot-gates',
   'agent-native-gates',
   'admission',
+  'docs-fresh',
+  'docs-impact',
+  'demo-impact',
+  'demo-lag',
+  'bench-fresh',
+  'readiness',
 ] as const;
 
 export type ScorecardDimension = (typeof SCORECARD_DIMENSIONS)[number];
@@ -786,7 +847,15 @@ export type ScorecardPackageResult = {
   readonly dimensions: Readonly<Record<ScorecardDimension, ScorecardDimensionResult>>;
   readonly overall: ScorecardStatus;
   readonly blockers: readonly string[];
+  /**
+   * The readiness checklist behind the `readiness` dimension (absent for
+   * unscored admission rows). Feeds `scorecard --table`.
+   */
+  readonly readiness?: ScorecardReadiness;
 };
+
+/** Tier and per-item results of one package's readiness checklist. */
+export type ScorecardReadiness = Pick<ReadinessResult, 'tier' | 'items'>;
 
 /**
  * Aggregate scorecard summary for the envelope.

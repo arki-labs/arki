@@ -114,6 +114,30 @@ export const config: ReleaseConfig = {
       packages: ['@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
     },
   ],
+  // Package tiers, mirroring docs/arki/core-packages.md. Tier 1 is the stack,
+  // Tier 2 the standalone libraries; they decide which readiness items bind a
+  // package, and a Tier 2 package with no @arki deps is a leaf library
+  // (runtimes + bench-fresh). `@arki/live` is not tiered yet (notYet).
+  tiers: {
+    stack: [
+      '@arki/dot', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
+      '@arki/log', '@arki/mail', '@arki/auth', '@arki/payments', '@arki/ui', '@arki/design-systems',
+      '@arki/theme', '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
+      '@arki/ai', '@arki/chat-ui',
+    ],
+    libraries: [
+      '@arki/math', '@arki/money', '@arki/date', '@arki/string', '@arki/clock', '@arki/resilience',
+      '@arki/assert', '@arki/ts', '@arki/bench', '@arki/react-hooks', '@arki/icons', '@arki/async',
+      '@arki/schema', '@arki/expr', '@arki/cas',
+    ],
+  },
+  // Nested demo repos. `loadDemos` reads each one's arki.deps.json; a missing
+  // folder (CI clones) is a warning, not a crash.
+  demos: [{ name: 'drop-studio', repo: 'arki-labs/drop-studio', path: 'demos/drop-studio' }],
+  // Behavioural mappings on top of real imports: { '@arki/x': [{ demo, scenario }] }.
+  proofs: {},
+  // Demo lag is warning-only until two waves have shipped with the dimension.
+  demoLagBlocking: false,
   // Public packages deliberately outside every wave. The `admission`
   // scorecard dimension fails a public package that is in no wave and not
   // listed here (ADMIT_E001), or in both (ADMIT_E002).

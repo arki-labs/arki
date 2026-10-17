@@ -21,10 +21,12 @@ import path from 'node:path';
 
 import debugFactory from 'debug';
 
+import { validateDemoConfig } from './demos';
 import type {
   LeakPattern,
   NotYetEntry,
   PublicMetadataDefaults,
+  ReleaseTiers,
   ReleaseConfig,
   ReleaseWave,
   ReleaseWaveId,
@@ -46,6 +48,8 @@ export const CONFIG_ERROR_CODES = {
   duplicatePackage: 'CFG_E005',
   /** A `notYet` package is also listed in a wave. */
   notYetInWave: 'CFG_E006',
+  /** `demos`, `proofs` or `demoLagBlocking` is malformed (details carry DEMO_E001). */
+  invalidDemos: 'CFG_E007',
 } as const;
 
 /** Thrown when validation fails. The CLI catches and converts to envelope. */
@@ -136,13 +140,58 @@ export function validateConfig(raw: unknown): ReleaseConfig {
   const leakPatterns = validateLeakPatterns(record['leakPatterns']);
   const notYet = validateNotYet(record['notYet'], waves);
 
+  const tiers = validateTiers(record['tiers']);
+  // Demo fields are validated in demos.ts, next to the code that reads them.
+  const demoFields = validateDemoConfig(record);
+  if (Array.isArray(demoFields)) {
+    throw new ReleaseConfigError(
+      CONFIG_ERROR_CODES.invalidDemos,
+      demoFields.map(e => `${e.code}: ${e.message}`).join(' '),
+    );
+  }
+
   return {
     publicTreePath,
     publicMetadataDefaults,
     waves,
+    ...demoFields,
     ...(leakPatterns !== undefined ? { leakPatterns } : {}),
     ...(notYet !== undefined ? { notYet } : {}),
+    ...(tiers !== undefined ? { tiers } : {}),
   };
+}
+
+/**
+ * Validate the optional `tiers` block: `stack` and `libraries` are lists of
+ * `@arki/*` names, and no package sits in both tiers or twice in one.
+ */
+function validateTiers(raw: unknown): ReleaseTiers | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== 'object') {
+    throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, '`tiers` must be an object `{ stack, libraries }`.');
+  }
+  const record = raw as Record<string, unknown>;
+  const seen = new Set<string>();
+  const list = (key: 'stack' | 'libraries'): readonly string[] => {
+    const value = record[key];
+    if (!Array.isArray(value)) {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, `\`tiers.${key}\` must be an array of package names.`);
+    }
+    return value.map(name => {
+      if (typeof name !== 'string' || !name.startsWith('@arki/')) {
+        throw new ReleaseConfigError(
+          CONFIG_ERROR_CODES.invalidWavePackage,
+          `\`tiers.${key}\` lists \`${String(name)}\`, which is not an \`@arki/*\` package.`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new ReleaseConfigError(CONFIG_ERROR_CODES.duplicatePackage, `\`tiers\` lists \`${name}\` twice.`);
+      }
+      seen.add(name);
+      return name;
+    });
+  };
+  return { stack: list('stack'), libraries: list('libraries') };
 }
 
 /**

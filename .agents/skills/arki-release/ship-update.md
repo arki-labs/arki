@@ -77,7 +77,7 @@ Why: `@arki/journal@0.1.0` shipped with `"@arki/log": "0.0.3"`, but its code cal
 1. **Drift check.** Look at the `@arki/*` dependencies in each wave package's `.release/arki-public/packages/<pkg>/package.json`. Each pinned version must be in this wave, or already on npm with the same code. If a dependency changed since its npm publish (it has a pending changeset, or `git log` shows code commits since the publish), add it to the wave.
 2. **Pack.** Pack every wave package from the public tree. For each unchanged `@arki/*` dependency, take the published tarball (`npm pack @arki/<dep>@<version>`). Put them all in one folder outside the workspace.
 3. **Install.** In a clean folder outside the workspace, list the wave packages as `file:<tarball>` dependencies. Add an `overrides` block that maps every `@arki/*` name to its tarball, so nested dependencies use the tarballs too. Run `npm install`.
-4. **Smoke.** Copy [consumer-smoke.mjs](./consumer-smoke.mjs) into that folder and run `node consumer-smoke.mjs` (Node 26) and `bun consumer-smoke.mjs`. It imports every `exports` entry of every installed `@arki/*` package. Any FAIL blocks the publish.
+4. **Smoke.** Run `bun release:arki smoke --candidate <dir>` (it copies `tooling/arki-release/src/smoke/consumer-smoke.mjs` into the clean folder and runs it with Node 26 and Bun). It imports every `exports` entry of every installed `@arki/*` package. Any FAIL blocks the publish.
 5. **One copy.** `npm ls @arki/log` shows one version, and `ls node_modules/@arki/*/node_modules/@arki` finds nothing.
 6. **If `@arki/dot` is in the wave:** with the packed CLI, run `npx dot new e2e --target <dir>`. Add the same `overrides` to the new app, then run `bun install`, typecheck, test and build.
 

@@ -16,8 +16,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { NpmPackRunner } from './pack';
-import { renderScorecardText, runScorecard, SCORECARD_ERROR_CODES } from './scorecard';
+import type { GitRunner, NpmRunner } from './runners';
+import { renderScorecardText, runScorecard, SCORECARD_ERROR_CODES, type ScorecardOptions } from './scorecard';
 import type { DotProbeOk, ReleaseConfig } from './types';
 import type { ProcessResult, ProcessRunner } from './fixture';
 
@@ -134,7 +134,7 @@ function writeAssertPackage(
 function makeNpmPackRunner(opts: {
   readonly extraFiles?: ReadonlyArray<{ readonly path: string; readonly size: number }>;
   readonly fail?: boolean;
-} = {}): NpmPackRunner {
+} = {}): NpmRunner {
   return async (args, { cwd }) => {
     if (opts.fail === true) {
       return { stdout: '', stderr: 'simulated pack failure', code: 1 };
@@ -195,6 +195,28 @@ function makeNpmPackRunner(opts: {
     };
     return { stdout: JSON.stringify([entry]), stderr: '', code: 0 };
   };
+}
+
+/**
+ * Every release input a clean `@arki/assert` 1.0.0 needs to pass the release
+ * dimensions: npm has 0.9.0 (so 1.0.0 is a release), git shows the README
+ * changed since 0.9.0, a changeset records why no demo is affected, the
+ * CHANGELOG tops at 1.0.0, docs mention the `ok` export, and the doc
+ * examples report is clean. Returns the scorecard options that inject them.
+ */
+function releaseReady(root: string): Pick<ScorecardOptions, 'npmRunner' | 'gitRunner' | 'docExamples'> {
+  writeFile(root, 'packages/assert/CHANGELOG.md', '# @arki/assert\n\n## 1.0.0\n\n- First stable.\n');
+  writeFile(root, 'packages/assert/docs/usage.md', 'Check with `ok`.\n');
+  writeFile(root, '.changeset/assert.md', "---\n'@arki/assert': minor\n---\n\nno demo impact: assertions are not used by any registered demo\n");
+  const pack = makeNpmPackRunner();
+  const npmRunner: NpmRunner = async (args, options) =>
+    args[0] === 'view' ? { stdout: '["0.9.0"]', stderr: '', code: 0 } : pack(args, options);
+  const gitRunner: GitRunner = async args => {
+    if (args[0] === 'log') return { stdout: 'abc123\n', stderr: '', code: 0 };
+    if (args[0] === 'diff') return { stdout: 'packages/assert/README.md\n', stderr: '', code: 0 };
+    return { stdout: '', stderr: 'unexpected git call', code: 1 };
+  };
+  return { npmRunner, gitRunner, docExamples: { '@arki/assert': { examples: 1, modules: 1, skipped: 0, failures: [] } } };
 }
 
 /**
@@ -262,7 +284,8 @@ describe('runScorecard — happy path', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
+      ...releaseReady(tmp),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -276,6 +299,10 @@ describe('runScorecard — happy path', () => {
     expect(pkg?.dimensions.packlist.status).toBe('pass');
     expect(pkg?.dimensions.docs.status).toBe('pass');
     expect(pkg?.dimensions.fixtures.status).toBe('pass');
+    // Release dimensions pass only because releaseReady() supplied every input.
+    for (const dim of ['docs-fresh', 'docs-impact', 'demo-impact', 'demo-lag', 'bench-fresh', 'readiness'] as const) {
+      expect(pkg?.dimensions[dim].status, dim).toBe('pass');
+    }
     // DOT + agent-native stay deferred until Tasks 9/10/11.5 ship.
     expect(pkg?.dimensions['dot-gates'].status).toBe('deferred');
     expect(pkg?.dimensions['agent-native-gates'].status).toBe('deferred');
@@ -292,7 +319,8 @@ describe('runScorecard — happy path', () => {
       cwd: tmp,
       config: makeConfig(),
       allowDeferred: true,
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
+      ...releaseReady(tmp),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -318,7 +346,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -334,7 +362,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -359,7 +387,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(['@arki/assert']),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -377,7 +405,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -393,7 +421,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -413,7 +441,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: runner,
+      npmRunner: runner,
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -429,7 +457,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -444,7 +472,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -459,7 +487,7 @@ describe('runScorecard — dimension failures', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner({ packFail: true }),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -485,7 +513,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -503,7 +531,8 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
+      ...releaseReady(tmp),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       dotProbe: passingDotProbe(),
@@ -524,7 +553,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       dotProbe: { ...probe, manifestArrays: 4 },
@@ -541,7 +570,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       dotProbe: { ...probe, pluginCount: 2 },
@@ -558,7 +587,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       dotProbe: { ...probe, newRequiredFilesPresent: ['package.json'] },
@@ -575,7 +604,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       dotProbe: { status: 'fail', reason: 'kv adapter could not boot' },
@@ -609,7 +638,8 @@ describe('runScorecard — stable release gate', () => {
       cwd: tmp,
       config: makeConfig(['@arki/assert', '@arki/date']),
       allowDeferred: true, // remove DOT noise to isolate the dimension fails
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
+      ...releaseReady(tmp),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -627,7 +657,7 @@ describe('runScorecard — stable release gate', () => {
       cwd: tmp,
       config: makeConfig(),
       allowDeferred: false, // explicit
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -651,7 +681,7 @@ describe('runScorecard — stable release gate', () => {
       cwd: tmp,
       config: makeConfig(['@arki/assert']),
       allowDeferred: true,
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -673,7 +703,7 @@ describe('runScorecard — stable release gate', () => {
       cwd: tmp,
       config: { ...makeConfig(['@arki/assert']), notYet: [{ name: '@arki/lock', reason: 'awaiting docs batch' }] },
       allowDeferred: true,
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -704,7 +734,7 @@ describe('runScorecard — edge cases', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: { ...makeConfig(['@arki/assert']) },
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -720,7 +750,7 @@ describe('runScorecard — edge cases', () => {
       cwd: tmp,
       config: makeConfig(),
       packageName: '@arki/does-not-exist',
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -747,7 +777,7 @@ describe('renderScorecardText', () => {
     const envelope = await runScorecard({
       cwd: tmp,
       config: makeConfig(),
-      npmPackRunner: makeNpmPackRunner(),
+      npmRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
       skipDotProbe: true,
@@ -763,5 +793,70 @@ describe('renderScorecardText', () => {
     expect(text).toContain('fixtures');
     expect(text).toContain('dot-gates');
     expect(text).toContain('agent-native-gates');
+  });
+});
+
+describe('runScorecard — release dimensions', () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'arki-scorecard-'));
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const run = (overrides: Partial<ScorecardOptions> = {}) =>
+    runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: passingDotProbe(),
+      ...overrides,
+    });
+
+  it('never passes a release dimension whose input is missing', async () => {
+    // Why: offline npm or a missing doc-examples report must block or warn; a silent pass would ship stale docs.
+    const envelope = await run();
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['docs-impact'].status).toBe('deferred');
+    expect(pkg?.dimensions['docs-fresh'].status).toBe('fail');
+    expect(pkg?.dimensions['docs-fresh'].evidence.some(e => e.code === 'FRESH_E002')).toBe(true);
+    expect(envelope.errors.some(e => e.code === SCORECARD_ERROR_CODES.npmUnavailable && e.severity === 'warning')).toBe(true);
+    expect(envelope.summary.stableReleaseGate).toBe('blocked');
+  });
+
+  it('passes docs-impact and demo-impact when the package has nothing to release', async () => {
+    // Why: a package already on npm with no pending changeset is not being released, so impact gates must not block it.
+    const ready = releaseReady(tmp);
+    rmSync(path.join(tmp, '.changeset'), { recursive: true });
+    const pack = makeNpmPackRunner();
+    const envelope = await run({
+      ...ready,
+      npmRunner: async (args, options) => (args[0] === 'view' ? { stdout: '["1.0.0"]', stderr: '', code: 0 } : pack(args, options)),
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['docs-impact'].details).toMatch(/nothing to release/);
+    expect(pkg?.dimensions['demo-impact'].status).toBe('pass');
+  });
+
+  it('surfaces demo registry problems in the envelope errors', async () => {
+    // Why: a demo folder that is missing (CI clone) must be visible, not silently treated as "no demo uses this".
+    const config: ReleaseConfig = { ...makeConfig(), demos: [{ name: 'shop', repo: 'acme/shop', path: 'demos/shop' }] };
+    const envelope = await run({ ...releaseReady(tmp), config });
+    expect(envelope.errors.some(e => e.code === 'DEMO_E002')).toBe(true);
+  });
+
+  it('reads tiers from config: a Tier 2 leaf gets readiness items and needs bench provenance', async () => {
+    // Why: tiers live once in arki.release.config.ts; readiness and bench-fresh must both follow them.
+    const config: ReleaseConfig = { ...makeConfig(), tiers: { stack: [], libraries: ['@arki/assert'] } };
+    const envelope = await run({ ...releaseReady(tmp), config });
+    const pkg = envelope.items[0];
+    expect(pkg?.readiness?.tier).toBe(2);
+    expect(pkg?.readiness?.items.length).toBeGreaterThan(0);
+    expect(pkg?.dimensions['bench-fresh'].evidence[0]?.code).toBe('FRESH_E011');
   });
 });
