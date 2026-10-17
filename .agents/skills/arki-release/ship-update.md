@@ -6,7 +6,7 @@ Most common release operation. A package that's already published gets a new ver
 
 | Situation | Path |
 |---|---|
-| Normal change (any kind, on the 0.0.x track) | **A — Changesets-driven patch bump** |
+| Normal change (patch, or minor if breaking, below 1.0) | **A — Changesets-driven bump** |
 | You need a non-monotonic version (downgrade, custom semver) | **B — Manual edit** |
 | Multiple packages changed together; cascade desired | **A — Changesets with multi-package entry** |
 
@@ -17,9 +17,12 @@ Most common release operation. A package that's already published gets a new ver
 bunx -p @changesets/cli changeset
 # Or write it manually at .changeset/<slug>.md:
 #   ---
-#   '@arki/<name>': patch    # always patch on 0.0.x experimental track
+#   '@arki/<name>': patch    # patch for fixes and additions; minor for any breaking change (below 1.0)
 #   ---
 #   Short description of what changed and why.
+#
+# Changeset rule: the package name and the bump must be right. The prose is free.
+# Explain a breaking change in docs/upgrades/<from>-to-<to>.md, not in the changeset.
 
 # 2. Apply the changeset — bumps source manifests + consumes the entry
 bunx -p @changesets/cli changeset version

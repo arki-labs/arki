@@ -15,23 +15,26 @@ Every `@arki/*` package goes into exactly one tier. The tier decides its licence
 
 | Area | Packages | Today | Work before launch |
 | --- | --- | --- | --- |
-| Kernel | `dot`, `feature`, `env` | public | `dot new` must scaffold a deployable app |
-| HTTP / API | `http`, `contracts`, `tanstack-start` | `tanstack-start` private | publish `tanstack-start` |
+| Kernel | `dot`, `env` (`feature` is an `@arki/dot` subpath, not a package) | public | `dot new` must scaffold a deployable app |
+| HTTP / API | `http`, `contracts` (`tanstack-start` returns when it exists) | public | — |
 | Data | `db`, `journal`, `kv` | public | — |
 | Auth | `auth` | **private** | publish; fix README (still says pnpm / Next.js) |
 | Jobs | `queue`, `schedule` | **private** | publish; add a Postgres-backed queue option next to BullMQ (A-11); failed-job inspection + retries documented |
-| Mail | `emails` | **private** | publish |
+| Mail | `mail` | public | — |
 | Billing | `payments` | public | security review before selling (see strategy § 8) |
 | Observability | `log` | public | — |
+| Reliability | `failure`, `lock` | public | — |
 | Testing | `testing` | **private** | publish |
 | UI | `ui`, `design-systems`, `theme` | public | Stack default is **workbench** (A-10) |
 | AI (A-12) | `ai`, `chat-ui` | **private** | publish; wire into `dot new` (frontend chat + backend AI route); scope set by research round 03 |
 
 Phase 2 candidates (Laravel parity gaps buyers ask for): `fs` (storage), `intl` (localisation), a notifications package (does not exist yet).
 
-## Tier 2 — Libraries (11)
+## Tier 2 — Libraries (15)
 
-`math`, `money`, `date`, `string`, `clock`, `resilience`, `assert`, `ts`, `bench`, `react-hooks`, `icons`.
+`math`, `money`, `date`, `string`, `clock`, `resilience`, `assert`, `ts`, `bench`, `react-hooks`, `icons`, `async`, `schema`, `expr`, `cas`.
+
+Not yet: `live` (public flag, no tier).
 
 Usable on their own in any TS project. They are the top of the funnel: benchmarks and npm downloads bring people to the Stack. `money`, `date`, `clock` and `resilience` are also used by the Stack.
 

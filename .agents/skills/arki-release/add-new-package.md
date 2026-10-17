@@ -45,7 +45,8 @@ bun tooling/arki-release/src/cli.ts scorecard | grep "@arki/<name>"
 bun tooling/arki-release/src/cli.ts scorecard | tail -3
 # Expected: Stable release gate: OPEN
 
-# 6. Write a changeset entry — initial publication is patch on 0.0.x (we don't use 0.1.0 as initial)
+# 6. Write a changeset entry — initial publication is a patch on the package's current 0.x version
+#    (below 1.0 a breaking change is a minor; see decisions.md "Reconciled guidance")
 cat > .changeset/<slug>.md <<'EOF'
 ---
 '@arki/<name>': patch

@@ -49,24 +49,11 @@ The pre-0.1 legacy surface (`createDot`, `definePlugin`, the
 `defineApp`/`plugin` for composition and `@arki/journal` for
 event-sourced writes (its `@arki/journal/dot` plugin connects it to a Dot app).
 
-## Deprecation cycle
+## Breaking changes below 1.0
 
-1. **Deprecate** — mark with `@deprecated` JSDoc, log a one-time
-   `console.warn` when the deprecated symbol is used at runtime, document
-   the replacement.
-2. **One minor** — leave the deprecated symbol in place for at least one
-   minor release.
-3. **Remove** — remove in the next major.
-
-Example timeline:
-
-| Version | Action                                     |
-| ------- | ------------------------------------------ |
-| `0.3.0` | Deprecate `someApi`. Document replacement. |
-| `0.4.0` | Deprecation still active.                  |
-| `1.0.0` | Remove `someApi`.                          |
-
-Deprecations and removals are listed in the [upgrade guide](./upgrade-guide.md).
+There is no deprecation cycle below 1.0. A breaking change is a minor bump.
+It updates every caller in the same change. It adds an entry to
+`docs/upgrades/<from>-to-<to>.md`. See the [upgrade guide](./upgrade-guide.md).
 
 ## Public vs experimental imports
 
