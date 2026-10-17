@@ -9,6 +9,7 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { UnsafeUrlError } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 
@@ -177,6 +178,24 @@ describe('delivery', () => {
     ]);
     expect(await journal.jobs(db, { status: 'dead' })).toHaveLength(1);
     expect(await subscriptionRow(id)).toMatchObject({ status: 'active', deadLetters: 1 });
+  });
+
+  it('a refused URL is dead on its first try: publicFetch refuses it the same way every time', async () => {
+    // The host turned private after subscribe (a DNS change); three retries would all be refused too.
+    const webhooks = sender(() => Promise.reject(new UnsafeUrlError('Private network addresses are not allowed.')), {
+      retry: backoff.constant(0).upTo(3),
+    });
+    const { id } = await webhooks.subscribe(db, {
+      partner: 'p-refused',
+      url: 'https://hooks.example.com/refused',
+      events: ['order.placed'],
+    });
+    await dispatchOne(webhooks, 'p-refused');
+    await drainAll(webhooks.runner);
+
+    expect(await attemptsOf(id)).toEqual([{ status: 'dead', attempt: 1, response: null }]);
+    expect(await journal.jobs(db, { status: 'dead' })).toHaveLength(1);
+    expect(await subscriptionRow(id)).toMatchObject({ deadLetters: 1 });
   });
 
   it('dead deliveries in a row disable the subscription; a success in between resets the count', async () => {

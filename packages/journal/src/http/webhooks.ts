@@ -22,7 +22,8 @@
  *
  * Secrets are sealed at rest with AES-GCM under `encryptionKey`, bound to their subscription id.
  * Delivery goes through `publicFetch()` by default, so a subscriber URL cannot reach a private
- * address, at subscribe time or after a DNS change.
+ * address, at subscribe time or after a DNS change. A refused URL (`UnsafeUrlError`) is dead at
+ * once: it is refused the same way on every try, so retrying it only fills `webhook_attempts`.
  */
 import type { PgSchema, PgTableFn } from 'drizzle-orm/pg-core';
 import { createId } from '@paralleldrive/cuid2';
@@ -31,7 +32,7 @@ import { bigserial, getTableConfig, index, integer, pgTable, text, timestamp, va
 import { z } from 'zod';
 
 import type { Backoff } from '@arki/resilience';
-import { publicFetch, validatePublicURL } from '@arki/http/public-fetch';
+import { publicFetch, UnsafeUrlError, validatePublicURL } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 
@@ -146,7 +147,7 @@ export type WebhookSenderOptions = {
   readonly fetch?: (input: string, init: RequestInit) => Promise<Response>;
   /** One delivery try, in milliseconds. Default 10 000. */
   readonly timeoutMs?: number;
-  /** When a failed delivery is tried again, and when it is dead. Default: from 5 s doubling to 1 h, 10 retries. */
+  /** When a failed delivery is tried again, and when it is dead. Default: from 5 s doubling to 1 h, 10 retries. A refused URL is never retried. */
   readonly retry?: Backoff;
   /** Dead deliveries in a row that disable a subscription. Default 5. */
   readonly disableAfter?: number;
@@ -204,6 +205,9 @@ export function webhookSender(options: WebhookSenderOptions) {
   const send = options.fetch ?? publicFetch();
   const timeoutMs = options.timeoutMs ?? 10_000;
   const retry = options.retry ?? backoff.exponential({ base: 5000, max: 3_600_000, jitter: 0.25 }).upTo(10);
+  /** The wait before the next try, or `undefined` for dead. A refused URL is dead whatever `retry` says. */
+  const nextDelay = (attempt: number, error: unknown) =>
+    error instanceof UnsafeUrlError ? undefined : retry.delay(attempt, error);
   const disableAfter = options.disableAfter ?? 5;
   const maxPayloadBytes = options.maxPayloadBytes ?? 1_048_576;
   // The journal's wake channel: every journal worker of this table hears it.
@@ -291,7 +295,7 @@ export function webhookSender(options: WebhookSenderOptions) {
     responseStatus: number | undefined,
     error: unknown,
   ): Promise<void> => {
-    const delay = retry.delay(job.attempt, error);
+    const delay = nextDelay(job.attempt, error);
     await db.insert(attempts).values({
       ...delivery,
       attempt: job.attempt,
@@ -376,7 +380,7 @@ export function webhookSender(options: WebhookSenderOptions) {
       await recordFailure(db, job, delivery, response.status, error);
       throw error;
     },
-    retryDelay: (job, error) => retry.delay(job.attempt, error),
+    retryDelay: (job, error) => nextDelay(job.attempt, error),
   };
 
   return {
