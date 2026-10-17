@@ -44,11 +44,11 @@
 import type { AnyFeatureCore, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
 import type { DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
 import type { Lazy } from '@arki/ts';
-import { driver, sliceOf } from '@arki/dot/feature';
+import { driver, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 import { resolveLazy } from '@arki/ts';
 
-import type { RouteBundle } from './bundle.js';
+import type { RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
 import type { HttpMiddleware } from './engine.js';
 import type { ListenHandle } from './listen.js';
@@ -104,7 +104,52 @@ export type HttpOptions<TBundles extends readonly BundleToken[] = readonly []> =
   readonly middleware?: readonly HttpMiddleware[];
   /** Milliseconds `stop` waits for in-flight requests. Default 10 000. */
   readonly drainTimeoutMs?: number;
+  /**
+   * Where a feature INSTANCE's routes live (`feature.instance('eu', …)`):
+   * `(instance, path)` maps a route, mount or rpc path written once in the
+   * feature to the path served for that copy. Default puts the copy under
+   * `/<instance>` (`GET /reports` -> `GET /eu/reports`; `/` -> `/eu`).
+   * Plain features are never rewritten.
+   */
+  readonly instancePath?: (instance: string, path: string) => string;
 };
+
+const defaultInstancePath = (instance: string, path: string): string =>
+  path === '/' ? `/${instance}` : `/${instance}${path}`;
+
+/** The same bundle with every route, mount and rpc path moved by `place`. */
+function placeBundle(bundle: RouteBundle, place: (path: string) => string): RouteBundle {
+  return {
+    ...bundle,
+    bindings: bundle.bindings.map(binding => ({
+      ...binding,
+      contract: { ...binding.contract, path: place(binding.contract.path) },
+    })),
+    mounts: bundle.mounts.map(mount => ({ ...mount, path: place(mount.path) })),
+    ...(bundle.rpcs === undefined ? {} : { rpcs: bundle.rpcs.map(rpc => placeRpc(rpc, place)) }),
+  };
+}
+
+/**
+ * An rpc handler matches its OWN prefix (the one written in the feature), but
+ * `replaceRequest: false` hands it the original URL, so the instance prefix
+ * is stripped back off before `context`/`handle` see the request.
+ */
+function placeRpc(rpc: RpcBinding, place: (path: string) => string): RpcBinding {
+  const placed = place(rpc.path);
+  const unplace = (req: Request): Request => {
+    const url = new URL(req.url);
+    if (url.pathname !== placed && !url.pathname.startsWith(`${placed}/`)) return req;
+    url.pathname = rpc.path + url.pathname.slice(placed.length);
+    return new Request(url, req);
+  };
+  return {
+    ...rpc,
+    path: placed,
+    context: (req, ctx) => rpc.context(unplace(req), ctx),
+    handle: (req, ctx) => rpc.handle(unplace(req), ctx),
+  };
+}
 
 /** Wire-needs record derived from the bundle tokens. */
 export type BundleNeeds<TBundles extends readonly BundleToken[]> = {
@@ -293,7 +338,13 @@ function bindHttp(
         }
         for (const f of features) {
           const routes = featureRoutes(ctx, f);
-          if (routes !== undefined) bundles.push(routes);
+          if (routes === undefined) continue;
+          const instance = instanceOf(f.name);
+          bundles.push(
+            instance === undefined
+              ? routes
+              : placeBundle(routes, path => (options.instancePath ?? defaultInstancePath)(instance, path)),
+          );
         }
 
         const engine = buildEngine(bundles);
@@ -369,7 +420,6 @@ function bindHttp(
       }
     },
   });
-
 }
 
 /**

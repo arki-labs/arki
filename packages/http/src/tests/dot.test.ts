@@ -11,12 +11,12 @@
 
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, service, token, plugin } from '@arki/dot/plugin';
+import { defineApp, rename, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { RouteBundle } from '../bundle.js';
-import { endpoints, routes } from '../bundle.js';
+import { endpoints, routes, rpcMount } from '../bundle.js';
 import { route } from '../contract.js';
 import { endpoints as coreEndpoints, HTTP_PLUGIN_ERROR_CODES, http, registerRoutes } from '../dot.js';
 import { HTTP_ERROR_CODES } from '../error.js';
@@ -309,5 +309,112 @@ describe('http() plugin', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
     }
+  });
+});
+
+describe('http() with feature instances', () => {
+  // Why: a route contract is written once in the feature, so two copies of one
+  // feature would claim the same `GET /reports`. Each copy is served under its
+  // instance name instead, and each copy answers from its own database.
+  const regionDb = (region: string) => plugin({ name: 'database', provides: { db: () => ({ region }) } });
+  const database = regionDb('us');
+  const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
+  const listReports = route.get('/reports', { id: 'reports.list', output: z.object({ region: z.string() }) });
+  const reportsHome = route.get('/', { id: 'reports.home', output: z.object({ region: z.string() }) });
+
+  const reportsCore = defineFeature('reports')
+    .needs({ db: database.provides.db })
+    .usecases({
+      region:
+        ({ db }) =>
+        () =>
+          db.region,
+    });
+  const reports = reportsCore.entrypoints(
+    coreEndpoints(
+      reportsCore,
+      ({ usecases }) =>
+        routes()
+          .bind(listReports, () => ({ region: usecases.region() }))
+          .bind(reportsHome, () => ({ region: usecases.region() })),
+      { contracts: [listReports, reportsHome] },
+    ),
+  );
+
+  const get = async (
+    app: { readonly services: { readonly httpServer: { fetch(req: Request): Promise<Response> } } },
+    path: string,
+  ) => app.services.httpServer.fetch(new Request(`http://in-process${path}`));
+
+  it('serves each instance under /<instance>, each on its own rebound need', async () => {
+    const app = await defineApp('http-instances')
+      .infra(database)
+      .infra(databaseEu)
+      .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
+      .entrypoints(http({ port: 0 }))
+      .boot();
+    expect(await (await get(app, '/eu/reports')).json()).toEqual({ region: 'eu' });
+    expect(await (await get(app, '/us/reports')).json()).toEqual({ region: 'us' });
+    expect(await (await get(app, '/eu')).json()).toEqual({ region: 'eu' });
+    expect((await get(app, '/reports')).status).toBe(404);
+    await app.dispose();
+  });
+
+  it('honours a custom instancePath', async () => {
+    const app = await defineApp('http-instances-custom')
+      .infra(database)
+      .infra(databaseEu)
+      .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
+      .entrypoints(http({ port: 0, instancePath: (instance, path) => `/v1${path}.${instance}` }))
+      .boot();
+    expect(await (await get(app, '/v1/reports.eu')).json()).toEqual({ region: 'eu' });
+    expect(await (await get(app, '/v1/reports.us')).json()).toEqual({ region: 'us' });
+    await app.dispose();
+  });
+
+  it('leaves a plain feature unprefixed, and still refuses the same plain feature twice', async () => {
+    const plain = await defineApp('http-plain')
+      .infra(database)
+      .features([reports])
+      .entrypoints(http({ port: 0 }))
+      .boot();
+    expect(await (await get(plain, '/reports')).json()).toEqual({ region: 'us' });
+    await plain.dispose();
+
+    const other = defineFeature('reports-two').entrypoints(
+      coreEndpoints(defineFeature('reports-two'), () => routes().bind(listReports, () => ({ region: 'x' })), {
+        contracts: [listReports],
+      }),
+    );
+    // Boot wraps the engine's refusal in its lifecycle error; the cause keeps the code.
+    await expect(
+      defineApp('http-collide')
+        .infra(database)
+        .features([reports, other])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    ).rejects.toThrow(/duplicate route GET \/reports/);
+  });
+
+  it('serves an instance rpc mount under /<instance> and hands the handler the un-prefixed URL', async () => {
+    // Why: an oRPC/tRPC handler matches the prefix written in the feature, so it
+    // must never see the instance segment, or the copy would answer 404.
+    const gatewayRpc = rpcMount('/rpc', { id: 'gateway.rpc' });
+    const gatewayCore = defineFeature('gateway');
+    const gateway = gatewayCore.entrypoints(
+      coreEndpoints(gatewayCore, () =>
+        routes().rpc(gatewayRpc, {
+          context: () => ({}),
+          handle: req => Response.json({ path: new URL(req.url).pathname }),
+        }),
+      ),
+    );
+    const app = await defineApp('http-instances-rpc')
+      .features([gateway.instance('eu')])
+      .entrypoints(http({ port: 0 }))
+      .boot();
+    expect(await (await get(app, '/eu/rpc/orders.list')).json()).toEqual({ path: '/rpc/orders.list' });
+    expect((await get(app, '/rpc/orders.list')).status).toBe(404);
+    await app.dispose();
   });
 });
