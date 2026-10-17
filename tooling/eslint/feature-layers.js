@@ -401,7 +401,7 @@ const plugin = {
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 
 /**
- * @param {{ src?: string, legacy?: string[], clients?: string[] }} [options]
+ * @param {{ src?: string, legacy?: string[], clients?: string[], pure?: string[] }} [options]
  *   `src`: the backend's source folder (default `'src'`).
  *   `legacy`: files (app-level, or inside a feature's layers) that still build router-first
  *   procedures and may import `@orpc/server` until they are deleted
