@@ -12,28 +12,7 @@ import { mailSink } from '@arki/mail/testing';
 import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { createAuth } from '../pg/index.js';
-import { assertAuthBoots, assertEmailPasswordEnabled } from './production-boot';
-
-// @story workspace/cross-app-auth-prod-fix/US-01
-describe('production-boot helper (C1 regression self-test)', () => {
-  it('passes for a defineAuthBackend config WITH explicit emailAndPassword', async () => {
-    await expect(
-      assertEmailPasswordEnabled(async () => {
-        const { authWithExplicit } = await import('./__fixtures__/auth-fixtures');
-        return { auth: authWithExplicit };
-      }),
-    ).resolves.toBeDefined();
-  });
-
-  it('fails for a defineAuthBackend config WITHOUT explicit emailAndPassword', async () => {
-    await expect(
-      assertEmailPasswordEnabled(async () => {
-        const { authWithoutExplicit } = await import('./__fixtures__/auth-fixtures');
-        return { auth: authWithoutExplicit };
-      }),
-    ).rejects.toThrow();
-  });
-});
+import { assertAuthBoots } from './production-boot.js';
 
 describe('assertAuthBoots', () => {
   const store = { getRateLimiter: () => new RateLimiterMemory({ points: 100, duration: 10 }) };

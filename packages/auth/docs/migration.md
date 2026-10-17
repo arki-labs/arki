@@ -54,7 +54,7 @@ Do these in order. Each step leaves the app compiling.
 Open the app's auth tables file (often `backend/src/features/auth/model/tables.ts` or `schema.ts`).
 
 1. Build the tables with `createAuthTables(schema, { naming, fill, ids, columns })` from `@arki/auth/pg`. Match the existing columns: `naming: 'camel'` for `emailVerified`, `'snake'` for `email_verified`; `fill: 'database'` when the database fills timestamps, `'app'` when Drizzle does.
-2. Make sure every id column has a `$defaultFn`. An `@arki/auth/ids` factory or a `createIdFactory` result has one. The engine no longer makes ids.
+2. Make sure every id column has a `$defaultFn`. The `*IdColumns` helpers on `@arki/auth/pg` (or an `idColumns` / `createIdFactory` result from `@arki/db`) have one. The engine no longer makes ids.
 3. With workspaces: add `session: { activeOrganizationId: text(...), activeTeamId: text(...) }` and the tables from `createWorkspaceTables` (`@arki/auth/pg/workspaces`).
 4. Run `drizzle-kit generate`. The migration must be empty. If it is not, fix `naming` or `columns`. Never apply a non-empty diff to make it pass.
 

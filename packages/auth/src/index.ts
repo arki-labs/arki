@@ -1,12 +1,9 @@
-export { AUTH_SECRET_MIN_LENGTH, assertAuthSecret, betterAuth } from './create-auth';
-export { defineAuthBackend, createPrefixedIdHook } from './define-auth-backend';
-export type { DefineAuthBackendOptions, DefinedAuth, GenerateIdHook } from './define-auth-backend';
-export { ResendProvider } from './email/resendAuthProvider';
-export * from './ids';
-export { tweaksColumn, EMPTY_TWEAKS } from './tweaks-column';
-export { PASSWORD_MIN_LENGTH } from './constants';
-
-export { defineAuth } from './definition';
+/**
+ * `@arki/auth` — the browser-safe vocabulary: `defineAuth`, the error codes, the constants and the
+ * principal and definition types. No engine, no Drizzle, no Zod: a client bundle can import it.
+ * The server builds the auth with `createAuth` from `@arki/auth/pg`.
+ */
+export { defineAuth } from './definition.js';
 export type {
   AccountOptions,
   AuthDefinition,
@@ -17,7 +14,9 @@ export type {
   SocialMethod,
   VerifyEmailMode,
   WorkspacesOption,
-} from './definition';
-export type { AnyPrincipal, AuthContext, Principal, PrincipalOf, PrincipalSession, PrincipalVia } from './principal';
-export { AUTH_ERROR_CODES, AuthError, isAuthError } from './errors';
-export type { AuthErrorCode } from './errors';
+} from './definition.js';
+export type { AnyPrincipal, AuthContext, Principal, PrincipalOf, PrincipalSession, PrincipalVia } from './principal.js';
+export { AUTH_ERROR_CODES, AuthError, isAuthError } from './errors.js';
+export type { AuthErrorCode } from './errors.js';
+export { AUTH_SECRET_MIN_LENGTH, PASSWORD_MIN_LENGTH } from './constants.js';
+export type { UserId } from '@arki/contracts';

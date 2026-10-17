@@ -1,7 +1,7 @@
 import { hashPassword as betterAuthHash, verifyPassword as betterAuthVerify } from 'better-auth/crypto';
 import { describe, expect, it } from 'vitest';
 
-import { hashPassword, verifyPassword } from './password';
+import { hashPassword, verifyPassword } from './password.js';
 
 const PASSWORD = 'correct horse battery staple';
 

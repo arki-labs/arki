@@ -7,9 +7,10 @@ import {
   resetWorkspaceRegistry,
   resolveWriteScope,
   workspaceReadFilter,
-} from './kernel';
-import { WorkspaceScopeError } from './types';
-import type { WorkspaceContext, WorkspaceResourceConfig } from './types';
+} from './kernel.js';
+import type { WorkspaceContext } from '../../workspaces.js';
+import type { WorkspaceResourceConfig } from './kernel.js';
+import { WorkspaceScopeError } from '../../workspaces.js';
 
 // A team-scopable resource (id + actor + nullable org + nullable team).
 const sourceTable = pgTable('test_source', {
@@ -232,7 +233,7 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
 
 describe('registry', () => {
   it('throws when looking up an unregistered table', async () => {
-    const { getWorkspaceResource } = await import('./kernel');
+    const { getWorkspaceResource } = await import('./kernel.js');
     expect(() => getWorkspaceResource(orgOnlyTable)).toThrow(/not registered/i);
   });
 });

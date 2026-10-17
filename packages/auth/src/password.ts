@@ -13,7 +13,7 @@ import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/
 
 import { z } from '@arki/contracts';
 
-import { debugPassword } from './debug';
+import { log } from './log.js';
 
 const SCRYPT = { N: 16_384, r: 16, p: 1, dkLen: 64 } as const;
 const SALT_BYTES = 16;
@@ -49,7 +49,7 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
 export async function hashPassword(password: string): Promise<string> {
   const salt = bytesToHex(randomBytes(SALT_BYTES));
   const key = await deriveKey(password, salt);
-  debugPassword.debug('[hashPassword] Hashed password with scrypt');
+  log.debug('[hashPassword] Hashed password with scrypt');
   return `${salt}:${bytesToHex(key)}`;
 }
 
@@ -60,7 +60,7 @@ export async function hashPassword(password: string): Promise<string> {
 export async function verifyPassword({ hash, password }: { hash: string; password: string }): Promise<boolean> {
   const parsed = storedHashSchema.safeParse(hash);
   if (!parsed.success || !password) {
-    debugPassword.debug('[verifyPassword] Invalid input (hasPassword: {hasPassword}, validHash: {validHash})', {
+    log.debug('[verifyPassword] Invalid input (hasPassword: {hasPassword}, validHash: {validHash})', {
       hasPassword: !!password,
       validHash: parsed.success,
     });

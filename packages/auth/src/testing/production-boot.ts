@@ -1,28 +1,15 @@
 /**
- * Shared production-boot assertion for the C1 regression (workspace feature
- * cross-app-auth-prod-fix, D-03). `defineAuthBackend` only auto-enables
- * email/password when NODE_ENV !== 'production'; an app that forgets an explicit
- * `emailAndPassword` block silently loses credential auth in production. This
- * helper boots an app's auth module under NODE_ENV=production and asserts the
- * email/password feature RESOLVED as enabled.
- *
- * Why not assert `auth.api.signUpEmail` is defined (D-08): better-auth always
- * materializes that endpoint; it throws at request time when disabled. The
- * faithful check is `auth.options.emailAndPassword?.enabled === true` — the same
- * flag the endpoint gates on (better-auth `api/routes/sign-up.mjs:144`).
- *
- * Shape rationale (vitest hoisting): `vi.mock(...)` is hoisted to the top of the
- * *consuming* file and cannot be authored here, so the email mock is exposed as
- * `emailModuleMock` for the consumer to wire. The NODE_ENV flip does NOT need
- * hoisting — every consumer imports its auth module DYNAMICALLY, so flipping env
- * synchronously right before that import (inside `assertEmailPasswordEnabled`)
- * is sufficient.
+ * Production-boot checks for app test suites (the C1 regression class: a sign-in method that
+ * silently disappears in production). `assertAuthBoots` boots an app's auth module under
+ * `NODE_ENV=production` and checks that every method the definition declares is live in the
+ * engine. `applyProductionBootEnv` is the env flip it uses, and `emailModuleMock` is the
+ * `@arki/mail` mock an app wires through vitest's hoisted `vi.mock`: `vi.mock(...)` is hoisted to
+ * the top of the consuming file, so it cannot be authored here.
  */
 import { expect, vi } from 'vitest';
 
 import type * as MailModule from '@arki/mail';
 
-import type { DefinedAuth } from '../define-auth-backend';
 import type { AuthDefinition } from '../definition.js';
 import type { AuthEngine } from '../pg/engine.js';
 import { isSocialMethod } from '../definition.js';
@@ -92,28 +79,6 @@ export async function emailModuleMock(): Promise<typeof MailModule> {
   const actual = await vi.importActual<typeof MailModule>('@arki/mail');
   const { mailSink } = await import('@arki/mail/testing');
   return { ...actual, mailer: options => actual.mailer({ ...options, transport: mailSink() }) };
-}
-
-/**
- * Boot an app's auth module in production mode and assert email/password
- * RESOLVED as enabled. Throws (fails the test) when it didn't — the exact C1
- * bug (missing explicit `emailAndPassword` block ⇒ not auto-enabled in prod).
- *
- * @param importAuth dynamic importer for the app's auth module, e.g.
- *   `() => import('../../../core/auth')`. MUST be dynamic so the env flip lands
- *   before the module's top-level `defineAuthBackend` call evaluates.
- */
-export async function assertEmailPasswordEnabled(
-  importAuth: () => Promise<{ auth: DefinedAuth }>,
-): Promise<DefinedAuth> {
-  const restoreEnv = applyProductionBootEnv();
-  try {
-    const { auth } = await importAuth();
-    expect(auth.options.emailAndPassword?.enabled).toBe(true);
-    return auth;
-  } finally {
-    restoreEnv();
-  }
 }
 
 /** What `assertAuthBoots` reads: the definition and the engine it was built into. */

@@ -7,19 +7,19 @@ import { jsonb, pgSchema, text } from 'drizzle-orm/pg-core';
 
 import { createIdFactory } from '@arki/db/id-factory';
 
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '../ids.js';
-import { createAuthTables } from '../schema/index.js';
-import { createWorkspaceTables } from '../workspaces/server/schema.js';
+import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from '../pg/ids.js';
+import { createAuthTables } from '../pg/schema/index.js';
+import { createWorkspaceTables } from '../pg/workspaces/schema.js';
 
 const schema = pgSchema('notes');
 
 export const authTables = createAuthTables(schema, {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {

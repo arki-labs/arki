@@ -1,7 +1,6 @@
 // Cross-runtime smoke test, run by `bun run test:runtimes` under Node, Bun, Deno and a browser.
-// It loads the portable entries through the package's own export map, so it checks what a
-// consumer gets. `./ids` and `./zod` are not here: they load Drizzle through `@arki/db/id-factory`,
-// so they are not portable yet. The unit tests cover the details.
+// It loads the portable entries (`.`, `./ids`, `./zod`, `./password`, `./workspaces`) through the
+// package's own export map, so it checks what a consumer gets. The unit tests cover the details.
 
 import {
   AUTH_ERROR_CODES,
@@ -11,8 +10,10 @@ import {
   isAuthError,
   PASSWORD_MIN_LENGTH,
 } from '@arki/auth';
+import { createUserId } from '@arki/auth/ids';
 import { hashPassword, verifyPassword } from '@arki/auth/password';
 import { rankRole, roleAtLeast, scopeLevel, WorkspaceScopeError } from '@arki/auth/workspaces';
+import { userIdSchema } from '@arki/auth/zod';
 
 const errorOf = run => {
   try {
@@ -33,6 +34,8 @@ const rightPassword = await verifyPassword({ hash, password: 'correct horse batt
 const wrongPassword = await verifyPassword({ hash, password: 'correct horse battery stable' });
 const malformedHash = await verifyPassword({ hash: 'not-a-hash', password: 'anything' });
 
+const userId = createUserId();
+
 const illegalScope = errorOf(() => scopeLevel({ organizationId: null, teamId: 'team_1' }));
 
 const checks = [
@@ -51,6 +54,9 @@ const checks = [
   ['no role ranks below member', rankRole(null) < rankRole('member'), true],
   ['an empty scope is personal', scopeLevel({ organizationId: null, teamId: null }), 'personal'],
   ['a team without an organization is refused', illegalScope instanceof WorkspaceScopeError, true],
+  ['a user id is usr_ and 24 letters and digits', /^usr_[a-z][a-z0-9]{23}$/.test(userId), true],
+  ['userIdSchema accepts a made user id', userIdSchema.parse(userId), userId],
+  ['userIdSchema refuses another kind', userIdSchema.safeParse('sess_abc').success, false],
 ];
 
 const runtime =

@@ -1,4 +1,10 @@
-import type { AnyPgColumn, AnyPgColumnBuilder, PgSchema } from 'drizzle-orm/pg-core';
+import type {
+  AnyPgColumn,
+  AnyPgColumnBuilder,
+  PgBuildColumns,
+  PgSchema,
+  PgTableWithColumns,
+} from 'drizzle-orm/pg-core';
 import { boolean, text, timestamp } from 'drizzle-orm/pg-core';
 
 import type { AuthColumnFill, AuthColumnOptions, PrimaryColumnSource } from './column-options.js';
@@ -165,6 +171,27 @@ export function authVerificationColumns<TId extends AnyPgColumnBuilder, TFill ex
  * the standard column. `id` is named on its own so that the factory can read
  * `Table.id` while the extras are still a type parameter.
  */
+/**
+ * One auth table, typed exactly as `schema.table(name, columns)` returns it. Written out because
+ * the compiler's declaration output otherwise loses the table name inside the column types
+ * (`tableName: TTableName`), and a select over the published table then reads every column as
+ * nullable.
+ */
+type AuthTable<TName extends string, TColumns extends Record<string, AnyPgColumnBuilder>> = PgTableWithColumns<{
+  name: TName;
+  schema: string;
+  columns: PgBuildColumns<TName, TColumns>;
+  dialect: 'pg';
+}>;
+
+function authTable<TName extends string, TColumns extends Record<string, AnyPgColumnBuilder>>(
+  schema: PgSchema,
+  name: TName,
+  columns: TColumns,
+): AuthTable<TName, TColumns> {
+  return schema.table(name, columns);
+}
+
 function withColumns<
   TBase extends ColumnMap & { id: AnyPgColumnBuilder },
   TExtra extends ExtraColumns<TExtra> | undefined,
@@ -262,7 +289,8 @@ export function createAuthTables<
 ) {
   const name = columnNamer(naming);
 
-  const User = schema.table(
+  const User = authTable(
+    schema,
     'users',
     withColumns(authUserColumns({ id: ids.user.primaryColumn(), naming, fill }), columns?.user),
   );
@@ -275,7 +303,8 @@ export function createAuthTables<
       .$type<typeof User.id._.data>()
       .references(() => User.id, { onDelete: 'cascade' });
 
-  const Account = schema.table(
+  const Account = authTable(
+    schema,
     'accounts',
     withColumns(
       authAccountColumns({ id: ids.account.primaryColumn(), userId: userReference(), naming, fill }),
@@ -283,7 +312,8 @@ export function createAuthTables<
     ),
   );
 
-  const Session = schema.table(
+  const Session = authTable(
+    schema,
     'sessions',
     withColumns(
       authSessionColumns({ id: ids.session.primaryColumn(), userId: userReference(), naming, fill }),
@@ -291,7 +321,8 @@ export function createAuthTables<
     ),
   );
 
-  const Verification = schema.table(
+  const Verification = authTable(
+    schema,
     'verifications',
     withColumns(authVerificationColumns({ id: ids.verification.primaryColumn(), naming, fill }), columns?.verification),
   );

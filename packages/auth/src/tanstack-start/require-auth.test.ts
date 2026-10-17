@@ -1,7 +1,7 @@
 import { redirect } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
-import { createRequireAuth } from './require-auth';
+import { createRequireAuth } from './require-auth.js';
 
 // The guard decides who reaches a protected route: no session must end in the app's own
 // sign-in redirect, and a session must pass untouched.

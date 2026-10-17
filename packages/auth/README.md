@@ -6,7 +6,7 @@ The engine is [Better Auth](https://www.better-auth.com) 1.7.7. It stays behind 
 
 What it is not: a general Better Auth wrapper, a user-management UI, or an identity provider for other apps.
 
-Status: version 0.x, still `private` in this workspace. The old API (`defineAuthBackend`, `@arki/auth/schema`, `@arki/auth/create-auth` and the rest) is still exported while apps move. [docs/migration.md](./docs/migration.md) maps every old name to the new one.
+Status: version 0.x, public. The old API (`defineAuthBackend`, `@arki/auth/schema`, `@arki/auth/create-auth` and the rest) is gone. [docs/migration.md](./docs/migration.md) maps every old name to the new one.
 
 ## The first 15 minutes
 
@@ -20,18 +20,23 @@ This builds sign-in for an app called Notes: password, magic link and Google, on
 // backend/src/features/auth/model/tables.ts
 import { pgSchema, text } from 'drizzle-orm/pg-core';
 
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '@arki/auth/ids';
-import { createAuthTables } from '@arki/auth/pg';
+import {
+  accountIdColumns,
+  createAuthTables,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from '@arki/auth/pg';
 
 const schema = pgSchema('notes');
 
 export const authTables = createAuthTables(schema, {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {
@@ -185,17 +190,22 @@ The form shows only the methods the definition enables.
 import { pgSchema, text } from 'drizzle-orm/pg-core';
 
 import { defineAuth } from '@arki/auth';
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '@arki/auth/ids';
-import { createAuthTables } from '@arki/auth/pg';
+import {
+  accountIdColumns,
+  createAuthTables,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from '@arki/auth/pg';
 import { actingAs, testAuth } from '@arki/auth/testing';
 
 const tables = createAuthTables(pgSchema('notes'), {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {
@@ -245,26 +255,26 @@ it('the auth boots as declared in production', () => assertAuthBoots(() => impor
 
 ## Entries
 
-| Entry                                        | Runtime                  | What it gives you                                                                                                                                                                                              |
-| -------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@arki/auth`                                 | Node, Bun, Deno, browser | `defineAuth`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`; types `AuthDefinition`, `AuthMethod`, `SocialMethod`, `Principal`, `PrincipalOf`, `AuthContext` |
-| `@arki/auth/ids`                             | Node, Bun                | id types, `create*Id`, `*IdFactory`                                                                                                                                                                            |
-| `@arki/auth/zod`                             | Node, Bun                | `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`                                                                            |
-| `@arki/auth/password`                        | Node, Bun, Deno, browser | `hashPassword`, `verifyPassword`                                                                                                                                                                               |
-| `@arki/auth/pg`                              | Node, Bun                | `createAuth`, `createAuthTables`, `auth*Columns`, `assertAuthSecret`, `additionalFieldsFromColumns`                                                                                                            |
-| `@arki/auth/pg/workspaces`                   | Node, Bun                | `createWorkspaceTables`, `createWorkspaceForeignKeys`, `registerWorkspaceResource`, `workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`                                                   |
-| `@arki/auth/workspaces`                      | Node, Bun                | `WorkspaceRole`, `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`, and today also the database parts                                                                                             |
-| `@arki/auth/dot`                             | Node, Bun                | `auth`, `AuthOf`                                                                                                                                                                                               |
-| `@arki/auth/orpc`                            | Node, Bun                | `guards`, `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`                                                                                                                                     |
-| `@arki/auth/http`                            | Node, Bun                | `withPrincipal`, `withOptionalPrincipal`                                                                                                                                                                       |
-| `@arki/auth/react`                           | browser                  | `createAuthClient`, `SignInForm`, `createSignInHandlers`, `resolveAuthClientBaseUrl`                                                                                                                           |
-| `@arki/auth/react/templates`                 | browser                  | page templates                                                                                                                                                                                                 |
-| `@arki/auth/tanstack-start`                  | Node, Bun, browser       | `tanstackStart`, `createRequireAuth`, `ArkiAuthProvider`, `TanStackAuthProvider`                                                                                                                               |
-| `@arki/auth/testing`                         | Node, Bun                | `testAuth`, `actingAs`, `lastLink`, `lastMagicLink`                                                                                                                                                            |
-| `@arki/auth/testing/tanstack-start`          | Node, Bun                | `createE2EHandler`                                                                                                                                                                                             |
-| `@arki/auth/testing/production-boot`         | Node                     | `assertAuthBoots`                                                                                                                                                                                              |
-| `@arki/auth/testing/playwright`              | Node                     | Playwright global setup and fixtures                                                                                                                                                                           |
-| `@arki/auth/env`, `@arki/auth/tweaks-column` | Node, Bun                | unchanged helpers                                                                                                                                                                                              |
+| Entry                                        | Runtime                              | What it gives you                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@arki/auth`                                 | Node, Bun, Deno, browser             | `defineAuth`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`; types `AuthDefinition`, `AccountOptions`, `AuthMethod`, `SocialMethod`, `IdTokenMethod`, `Seconds`, `VerifyEmailMode`, `WorkspacesOption`, `Principal`, `PrincipalOf`, `AnyPrincipal`, `AuthContext`, `PrincipalSession`, `PrincipalVia`, `AuthErrorCode`, `UserId` |
+| `@arki/auth/ids`                             | Node, Bun, Deno, browser             | types `UserId`, `SessionId`, `AccountId`, `VerificationId`, `RoleId`, `PermissionId`; `createUserId`, `createSessionId`, `createAccountId`, `createVerificationId`, `createRoleId`, `createPermissionId`                                                                                                                                                                           |
+| `@arki/auth/zod`                             | Node, Bun, Deno, browser (needs Zod) | `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `roleIdSchema`, `permissionIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`                                                                                                                                                                                                          |
+| `@arki/auth/password`                        | Node, Bun, Deno, browser             | `hashPassword`, `verifyPassword`                                                                                                                                                                                                                                                                                                                                                   |
+| `@arki/auth/workspaces`                      | Node, Bun, Deno, browser             | `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`; types `WorkspaceRole`, `WorkspaceContext`, `Scope`, `RowScope`, `ScopeLevel`, `OrganizationId`, `TeamId`                                                                                                                                                                                                           |
+| `@arki/auth/pg`                              | Node, Bun                            | `createAuth`, `createAuthTables`, `auth*Columns`, `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns`, `roleIdColumns`, `permissionIdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, `authLinkInput`; types `Auth`, `AuthBindings`, `AuthRuntime`, `RateLimitBinding`, …                                                                 |
+| `@arki/auth/pg/workspaces`                   | Node, Bun                            | `createWorkspaceTables`, `createWorkspaceForeignKeys`, `registerWorkspaceResource`, `getWorkspaceResource`, `resetWorkspaceRegistry`, `workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`                                                                                                                                                                     |
+| `@arki/auth/dot`                             | Node, Bun                            | `auth`, `AuthOf`                                                                                                                                                                                                                                                                                                                                                                   |
+| `@arki/auth/orpc`                            | Node, Bun                            | `guards`, `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`                                                                                                                                                                                                                                                                                                         |
+| `@arki/auth/http`                            | Node, Bun                            | `withPrincipal`, `withOptionalPrincipal`                                                                                                                                                                                                                                                                                                                                           |
+| `@arki/auth/react`                           | browser                              | `createAuthClient`, `SignInForm`, `createSignInHandlers`, `resolveAuthClientBaseUrl`; types `AuthClient`, `AuthCapabilities`, `SignInFormProps`, `SignInLocalization`, …                                                                                                                                                                                                           |
+| `@arki/auth/react/templates`                 | browser                              | `AuthErrorPageTemplate`, `SignOutTemplate`, `VerifyRequestTemplate`, `LoginTemplate1`                                                                                                                                                                                                                                                                                              |
+| `@arki/auth/tanstack-start`                  | Node, Bun, browser                   | `tanstackStart`, `createRequireAuth`, `ArkiAuthProvider`, `TanStackAuthProvider`; type `SignInRedirect`                                                                                                                                                                                                                                                                            |
+| `@arki/auth/testing`                         | Node, Bun                            | `testAuth`, `actingAs`, `lastLink`, `lastMagicLink`, `TEST_AUTH_SECRET`                                                                                                                                                                                                                                                                                                            |
+| `@arki/auth/testing/tanstack-start`          | Node, Bun                            | `createE2EHandler`                                                                                                                                                                                                                                                                                                                                                                 |
+| `@arki/auth/testing/production-boot`         | Node                                 | `assertAuthBoots`, `emailModuleMock`, `applyProductionBootEnv`                                                                                                                                                                                                                                                                                                                     |
+| `@arki/auth/testing/playwright`              | Node                                 | Playwright global setup and fixtures                                                                                                                                                                                                                                                                                                                                               |
+| `@arki/auth/env`, `@arki/auth/tweaks-column` | Node, Bun                            | unchanged helpers                                                                                                                                                                                                                                                                                                                                                                  |
 
 Optional peers: `@arki/dot` for `./dot`, `@orpc/server` for `./orpc`, `@arki/http` for `./http`, React, `@arki/ui`, `@arki/icons` and TanStack for the UI entries, `@electric-sql/pglite`, `drizzle-kit` and `vitest` for the testing entries, `@playwright/test` for `./testing/playwright`.
 
@@ -539,15 +549,9 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 
 ## Runtimes
 
-`@arki/auth` and `@arki/auth/password` are pure: no engine, no database, no Node built-ins. The password hash is scrypt in pure JavaScript (`@noble/hashes`). `scripts/smoke.mjs` loads `.`, `./password` and `./workspaces` through the export map and checks them.
+`@arki/auth` and `@arki/auth/password` are pure: no engine, no database, no Node built-ins. The password hash is scrypt in pure JavaScript (`@noble/hashes`). `scripts/smoke.mjs` loads `.`, `./ids`, `./zod`, `./password` and `./workspaces` through the export map and checks them.
 
-What is true today:
-
-- The smoke script passes on Bun, which loads the TypeScript source.
-- Node, Deno and the browser need the built JavaScript in `dist/`. The build emits only type declarations, so `bun run test:runtimes` does not pass yet.
-- The root entry still exports the old server helpers (`defineAuthBackend`, `betterAuth`, `ResendProvider`), which load the engine.
-- `./ids` and `./zod` load Drizzle through `@arki/db/id-factory`, so they are Node and Bun only.
-- `./workspaces` still holds the database parts next to the pure ones.
+`./ids` and `./workspaces` are pure too: `./ids` declares its ids with `defineId` (`@arki/contracts`), and the workspace database parts live on `./pg/workspaces`. `./zod` is pure and needs Zod. `bun run test:runtimes` runs the smoke script on Node, Bun, Deno and in a browser against the built `dist/`.
 
 Every other entry is Node and Bun.
 
@@ -559,7 +563,7 @@ A database made with the old setup works unchanged: `pg/upgrade.test.ts` signs i
    - `naming: 'camel'` when the columns are `emailVerified`; `'snake'` (default) when they are `email_verified`.
    - `fill: 'database'` when the database fills `createdAt`, `updatedAt` and `emailVerified` (`DEFAULT now()`); `fill: 'app'` when Drizzle's `$defaultFn` does.
    - `columns.<table>` adds your own columns. A standard key replaces that column, for example `account: { accessTokenExpiresAt: timestamp('expiresAt') }`.
-2. Give every id column a `$defaultFn`. The engine runs with `generateId: false`, so the old `createPrefixedIdHook` is gone. An `@arki/auth/ids` factory (or any `createIdFactory` result) has one. Old ids stay valid: they are just strings to read.
+2. Give every id column a `$defaultFn`. The engine runs with `generateId: false`, so the old `createPrefixedIdHook` is gone. The `*IdColumns` helpers on `@arki/auth/pg` (or any `idColumns` / `createIdFactory` result from `@arki/db`) have one. Old ids stay valid: they are just strings to read.
 3. Run `drizzle-kit generate`. The migration must be empty. If it is not, adjust `naming` and `columns` until it is.
 4. With `workspaces`, add the workspace tables from `createWorkspaceTables` (`@arki/auth/pg/workspaces`) and two session columns: `session: { activeOrganizationId: text(...), activeTeamId: text(...) }`. Without them the auth refuses to boot (`ARKI_AUTH_E007`).
 5. Expose extra user columns by name in `user.fields`. Delete the old `user.additionalFields` object: it is derived from the table now.

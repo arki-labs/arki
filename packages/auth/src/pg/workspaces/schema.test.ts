@@ -1,7 +1,7 @@
 import { getTableConfig, pgSchema, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { createWorkspaceTables } from './schema';
+import { createWorkspaceTables } from './schema.js';
 
 const schema = pgSchema('test_app');
 

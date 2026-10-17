@@ -16,9 +16,7 @@ import type { AuthOf } from './dot.js';
 import type { Auth } from './pg/index.js';
 import type { AuthDb } from './pg/types.js';
 import { authTables } from './__fixtures__/tables.js';
-import { initAuth } from './better-auth.config.js';
 import { defineAuth } from './definition.js';
-import { initAuth as legacyInitAuth } from './dot.config.js';
 import { auth } from './dot.js';
 import { actingAs, testAuth } from './testing/index.js';
 
@@ -88,9 +86,5 @@ describe('auth Dot plugin', () => {
     });
     expect(authn.name).toBe('auth');
     expectTypeOf<AuthOf<typeof authn>>().toEqualTypeOf<Auth<typeof definition, typeof authTables>>();
-  });
-
-  it('keeps the legacy dot.config initAuth export as a compatibility shim', () => {
-    expect(legacyInitAuth).toBe(initAuth);
   });
 });

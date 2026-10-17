@@ -21,7 +21,7 @@ import { cn } from '@arki/ui/cn';
 import { Input } from '@arki/ui/input';
 import { Label } from '@arki/ui/label';
 
-import type { AuthDefinition } from '../definition.js';
+import type { AuthDefinition, SocialMethod } from '../definition.js';
 import { authCapabilities } from './capabilities.js';
 
 /**
@@ -30,8 +30,8 @@ import { authCapabilities } from './capabilities.js';
  * Email-first, magic-link-by-default. The password field is revealed *in
  * place* (no navigation) when the user opts into password sign-in, so a
  * typed email is preserved across the transition. Which controls render is
- * driven entirely by `config` (the deployment's live auth capabilities) so
- * no dead buttons ever appear.
+ * driven entirely by the app's auth `definition` (the same object the server
+ * boots from), so no dead buttons ever appear.
  *
  * Security: there is intentionally no pre-submit "does this email have a
  * password?" lookup — that would leak account existence (email enumeration).
@@ -39,22 +39,8 @@ import { authCapabilities } from './capabilities.js';
  * errors.
  */
 
-export type SocialProviderId = 'google' | 'apple' | 'microsoft' | 'facebook' | 'github';
-
-/** Deployment auth capabilities — the source of truth for what renders. */
-export interface AuthUiConfig {
-  /** Social providers the live backend has credentials for. */
-  socialProviders: SocialProviderId[];
-  /** Email + password sign-in is enabled. */
-  credentials: boolean;
-  /** Passwordless magic-link sign-in is enabled. */
-  magicLink: boolean;
-  /** Verification emails are actually sent (informational; optional). */
-  emailVerification?: boolean;
-}
-
 /** Async actions the form delegates to (wired per-app to the auth client). */
-export interface SignInHandlers {
+export type SignInHandlers = {
   /** Send a magic sign-in link to `email`. Resolves on send. */
   onMagicLink: (email: string) => Promise<void>;
   /**
@@ -63,10 +49,10 @@ export interface SignInHandlers {
    */
   onPasswordSignIn: (email: string, password: string) => Promise<void>;
   /** Start an OAuth flow. The browser is redirected to the provider. */
-  onSocialSignIn: (provider: SocialProviderId) => Promise<void> | void;
-}
+  onSocialSignIn: (provider: SocialMethod) => Promise<void> | void;
+};
 
-export interface SignInLocalization {
+export type SignInLocalization = {
   title: string;
   /** Optional sub-title under the title. */
   description: string;
@@ -99,7 +85,7 @@ export interface SignInLocalization {
   /** Action that returns to the form to edit the email. */
   changeEmailAction: string;
   genericError: string;
-}
+};
 
 const DEFAULT_LOCALIZATION: SignInLocalization = {
   title: 'Sign in',
@@ -127,7 +113,7 @@ const DEFAULT_LOCALIZATION: SignInLocalization = {
   genericError: 'Something went wrong. Please try again.',
 };
 
-const SOCIAL_PROVIDERS: Record<SocialProviderId, { label: string; Icon: Icon }> = {
+const SOCIAL_PROVIDERS: Record<SocialMethod, { label: string; Icon: Icon }> = {
   google: { label: 'Google', Icon: GoogleLogo },
   apple: { label: 'Apple', Icon: AppleLogo },
   microsoft: { label: 'Microsoft', Icon: WindowsLogo },
@@ -153,28 +139,8 @@ function renderSentDescription(template: string, email: string): ReactNode {
   ));
 }
 
-/**
- * What the form renders from: the app's auth definition (the same object the server boots from).
- * `config` is the older hand-written form of the same facts.
- */
-export type SignInFormSource =
-  | { definition: AuthDefinition; config?: never }
-  | {
-      /** @deprecated Pass `definition` instead. */
-      config: AuthUiConfig;
-      definition?: never;
-    };
-
-/** The methods the form renders, read from either source. */
-function formMethods(source: SignInFormSource): {
-  social: readonly SocialProviderId[];
-  password: boolean;
-  magicLink: boolean;
-} {
-  if (source.definition !== undefined) return authCapabilities(source.definition);
-  const { config } = source;
-  return { social: config.socialProviders, password: config.credentials, magicLink: config.magicLink };
-}
+/** What the form renders from: the app's auth definition (the same object the server boots from). */
+export type SignInFormSource = { definition: AuthDefinition };
 
 export type SignInFormProps = SignInFormSource & {
   handlers: SignInHandlers;
@@ -202,11 +168,11 @@ export function SignInForm({
   header,
   footer,
   className,
-  ...source
+  definition,
 }: SignInFormProps) {
   const l = { ...DEFAULT_LOCALIZATION, ...localization };
 
-  const methods = formMethods(source);
+  const methods = authCapabilities(definition);
   const canMagicLink = methods.magicLink;
   const canPassword = methods.password;
   const bothModes = canMagicLink && canPassword;
@@ -219,7 +185,7 @@ export function SignInForm({
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [socialPending, setSocialPending] = useState<SocialProviderId | null>(null);
+  const [socialPending, setSocialPending] = useState<SocialMethod | null>(null);
   const [resendIn, setResendIn] = useState(0);
   const [resent, setResent] = useState(false);
   const sentHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -251,7 +217,7 @@ export function SignInForm({
     setError(null);
     setMode(next);
     if (next === 'password') {
-      requestAnimationFrame(() => document.getElementById(passwordId)?.focus());
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`#${passwordId}`)?.focus());
     }
   }
 
@@ -277,21 +243,21 @@ export function SignInForm({
       setResent(false);
       setResendIn(RESEND_COOLDOWN_SECONDS);
       setStatus('sent');
-    } catch (err) {
-      setError(resolveErrorMessage(err));
+    } catch (error_) {
+      setError(resolveErrorMessage(error_));
       setStatus('idle');
     }
   }
 
-  async function handleSocial(provider: SocialProviderId) {
+  async function handleSocial(provider: SocialMethod) {
     if (busy) return;
     setError(null);
     try {
       setStatus('social');
       setSocialPending(provider);
       await handlers.onSocialSignIn(provider);
-    } catch (err) {
-      setError(resolveErrorMessage(err));
+    } catch (error_) {
+      setError(resolveErrorMessage(error_));
       setStatus('idle');
       setSocialPending(null);
     }
@@ -309,8 +275,8 @@ export function SignInForm({
     try {
       await handlers.onMagicLink(email.trim());
       setResent(true);
-    } catch (err) {
-      setError(resolveErrorMessage(err));
+    } catch (error_) {
+      setError(resolveErrorMessage(error_));
     }
   }
 
@@ -548,16 +514,16 @@ type AuthClientResult = { error?: { message?: string | null } | null };
  * an app's concrete client (with a narrower `provider` union and extra
  * optional args) stays assignable without `any` or unsafe casts.
  */
-export interface SignInCapableAuthClient {
+export type SignInCapableAuthClient = {
   signIn: {
     email(params: { email: string; password: string; callbackURL?: string }): Promise<AuthClientResult>;
     /** Absent when the definition does not enable magic links. */
     magicLink?(params: { email: string; callbackURL?: string }): Promise<AuthClientResult>;
-    social(params: { provider: SocialProviderId; callbackURL?: string }): Promise<AuthClientResult>;
+    social(params: { provider: SocialMethod; callbackURL?: string }): Promise<AuthClientResult>;
   };
-}
+};
 
-export interface SignInHandlerOptions {
+export type SignInHandlerOptions = {
   /** Where to send the user after a successful sign-in. */
   redirectTo: string;
   /**
@@ -565,7 +531,7 @@ export interface SignInHandlerOptions {
    * navigation to `redirectTo` so the SSR session cookie is picked up.
    */
   onSignedIn?: () => void;
-}
+};
 
 function assertOk(result: AuthClientResult) {
   if (result.error) {

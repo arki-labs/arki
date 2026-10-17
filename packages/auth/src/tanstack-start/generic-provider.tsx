@@ -6,6 +6,11 @@ import { useEffect, useState } from 'react';
 import { AuthQueryProvider } from '@daveyplate/better-auth-tanstack';
 import { AuthUIProviderTanstack } from '@daveyplate/better-auth-ui/tanstack';
 
+/** The fallback for a navigation hook that has no router to call: it does nothing. */
+const noop = (): void => {
+  // Nothing to do without a router.
+};
+
 /**
  * Props for a framework-agnostic Link component
  */
@@ -14,7 +19,7 @@ export type LinkComponentProps = {
   children: ReactNode;
   className?: string;
   [key: string]: unknown;
-}
+};
 
 /**
  * Props for a framework-agnostic Image component
@@ -26,7 +31,7 @@ export type ImageComponentProps = {
   height?: number;
   className?: string;
   [key: string]: unknown;
-}
+};
 
 /**
  * Default Image component that wraps native img element.
@@ -38,16 +43,7 @@ function DefaultImage({ src, alt, width, height, className, ...props }: ImageCom
   if (!src || src === '') {
     return null;
   }
-  return (
-    <img
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      className={className}
-      {...props}
-    />
-  );
+  return <img src={src} alt={alt} width={width} height={height} className={className} {...props} />;
 }
 
 /**
@@ -95,7 +91,7 @@ function useDeferredRouter() {
       forward: () => {
         window.history.forward();
       },
-      prefetch: () => {},
+      prefetch: noop,
     });
   }, []);
 
@@ -131,7 +127,7 @@ export type TanStackAuthProviderProps = {
    * Custom refresh function. If not provided, uses window.location.reload.
    */
   refresh?: () => void;
-} & Omit<AuthUIProviderProps, 'Link' | 'avatar'>
+} & Omit<AuthUIProviderProps, 'Link' | 'avatar'>;
 
 /**
  * TanStack Start-compatible auth provider for better-auth.
@@ -176,9 +172,9 @@ export function TanStackAuthProvider({
   }
 
   // Use custom functions or fall back to deferred router
-  const navigate = customNavigate ?? router?.push ?? (() => {});
-  const replace = customReplace ?? router?.replace ?? (() => {});
-  const refresh = customRefresh ?? router?.refresh ?? (() => {});
+  const navigate = customNavigate ?? router?.push ?? noop;
+  const replace = customReplace ?? router?.replace ?? noop;
+  const refresh = customRefresh ?? router?.refresh ?? noop;
 
   // Create a safe Image wrapper component
   const SafeImageComponent = ({ src, ...imageProps }: ImageComponentProps) => {
@@ -212,10 +208,7 @@ export function TanStackAuthProvider({
         credentials={true}
         account={true}
         social={{
-          providers: [
-            'google',
-            'facebook',
-          ],
+          providers: ['google', 'facebook'],
         }}
         {...props}
       >

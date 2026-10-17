@@ -1,7 +1,6 @@
 {
   "name": "@arki/auth",
   "version": "0.1.3",
-  "private": true,
   "description": "Sign-in for Arki apps: one definition, one Postgres-backed engine, and the principal, guards and client types inferred from your own tables.",
   "repository": {
     "type": "git",
@@ -13,213 +12,103 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
-    },
-    "./dot": {
-      "types": "./dist/src/dot.d.ts",
-      "import": "./src/dot.ts",
-      "node": "./src/dot.ts"
-    },
-    "./orpc": {
-      "types": "./dist/src/orpc.d.ts",
-      "import": "./src/orpc.ts",
-      "node": "./src/orpc.ts"
-    },
-    "./tanstack-start": {
-      "types": "./dist/src/tanstack-start/index.d.ts",
-      "import": "./src/tanstack-start/index.ts",
-      "node": "./src/tanstack-start/index.ts"
-    },
-    "./react": {
-      "types": "./dist/src/react/index.d.ts",
-      "import": "./src/react/index.ts",
-      "browser": "./src/react/index.ts"
-    },
-    "./react/templates": {
-      "types": "./dist/src/react/templates/index.d.ts",
-      "import": "./src/react/templates/index.ts",
-      "browser": "./src/react/templates/index.ts"
-    },
-    "./workspaces": {
-      "types": "./dist/src/workspaces/server/index.d.ts",
-      "import": "./src/workspaces/server/index.ts",
-      "node": "./src/workspaces/server/index.ts"
-    },
-    "./email/schema": {
-      "types": "./dist/src/email/schema.d.ts",
-      "import": "./src/email/schema.ts",
-      "node": "./src/email/schema.ts"
-    },
-    "./schema": {
-      "types": "./dist/src/schema/index.d.ts",
-      "import": "./src/schema/index.ts",
-      "node": "./src/schema/index.ts"
-    },
-    "./tweaks-column": {
-      "types": "./dist/src/tweaks-column.d.ts",
-      "import": "./src/tweaks-column.ts",
-      "node": "./src/tweaks-column.ts"
-    },
-    "./better-auth.config": {
-      "types": "./dist/src/better-auth.config.d.ts",
-      "import": "./src/better-auth.config.ts",
-      "node": "./src/better-auth.config.ts"
-    },
-    "./client-base-url": {
-      "types": "./dist/src/client-base-url.d.ts",
-      "import": "./src/client-base-url.ts",
-      "node": "./src/client-base-url.ts"
-    },
-    "./constants": {
-      "types": "./dist/src/constants.d.ts",
-      "import": "./src/constants.ts",
-      "node": "./src/constants.ts"
-    },
-    "./create-auth": {
-      "types": "./dist/src/create-auth.d.ts",
-      "import": "./src/create-auth.ts",
-      "node": "./src/create-auth.ts"
-    },
-    "./debug": {
-      "types": "./dist/src/debug.d.ts",
-      "import": "./src/debug.ts",
-      "node": "./src/debug.ts"
-    },
-    "./define-auth-backend": {
-      "types": "./dist/src/define-auth-backend.d.ts",
-      "import": "./src/define-auth-backend.ts",
-      "node": "./src/define-auth-backend.ts"
-    },
-    "./dot.config": {
-      "types": "./dist/src/dot.config.d.ts",
-      "import": "./src/dot.config.ts",
-      "node": "./src/dot.config.ts"
-    },
-    "./email/resendAuthProvider": {
-      "types": "./dist/src/email/resendAuthProvider.d.ts",
-      "import": "./src/email/resendAuthProvider.ts",
-      "node": "./src/email/resendAuthProvider.ts"
-    },
-    "./email/sendVerificationRequest": {
-      "types": "./dist/src/email/sendVerificationRequest.d.ts",
-      "import": "./src/email/sendVerificationRequest.ts",
-      "node": "./src/email/sendVerificationRequest.ts"
-    },
-    "./env": {
-      "types": "./dist/src/env.d.ts",
-      "import": "./src/env.ts",
-      "node": "./src/env.ts"
-    },
-    "./errors": {
-      "types": "./dist/src/errors.d.ts",
-      "import": "./src/errors.ts",
-      "node": "./src/errors.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./ids": {
-      "types": "./dist/src/ids.d.ts",
-      "import": "./src/ids.ts",
-      "node": "./src/ids.ts"
-    },
-    "./password": {
-      "types": "./dist/src/password.d.ts",
-      "import": "./src/password.ts",
-      "node": "./src/password.ts"
-    },
-    "./security/rate-limit": {
-      "types": "./dist/src/security/rate-limit.d.ts",
-      "import": "./src/security/rate-limit.ts",
-      "node": "./src/security/rate-limit.ts"
-    },
-    "./security/timing-attacks": {
-      "types": "./dist/src/security/timing-attacks.d.ts",
-      "import": "./src/security/timing-attacks.ts",
-      "node": "./src/security/timing-attacks.ts"
-    },
-    "./tanstack-start/e2e-handler": {
-      "types": "./dist/src/tanstack-start/e2e-handler.d.ts",
-      "import": "./src/tanstack-start/e2e-handler.ts",
-      "node": "./src/tanstack-start/e2e-handler.ts"
-    },
-    "./tanstack-start/require-auth": {
-      "types": "./dist/src/tanstack-start/require-auth.d.ts",
-      "import": "./src/tanstack-start/require-auth.ts",
-      "node": "./src/tanstack-start/require-auth.ts"
-    },
-    "./testing/playwright": {
-      "types": "./dist/src/testing/playwright.d.ts",
-      "import": "./src/testing/playwright.ts",
-      "node": "./src/testing/playwright.ts"
-    },
-    "./testing/production-boot": {
-      "types": "./dist/src/testing/production-boot.d.ts",
-      "import": "./src/testing/production-boot.ts",
-      "node": "./src/testing/production-boot.ts"
-    },
-    "./token": {
-      "types": "./dist/src/token.d.ts",
-      "import": "./src/token.ts",
-      "node": "./src/token.ts"
-    },
-    "./workspaces/server": {
-      "types": "./dist/src/workspaces/server/index.d.ts",
-      "import": "./src/workspaces/server/index.ts",
-      "node": "./src/workspaces/server/index.ts"
-    },
-    "./workspaces/server/kernel": {
-      "types": "./dist/src/workspaces/server/kernel.d.ts",
-      "import": "./src/workspaces/server/kernel.ts",
-      "node": "./src/workspaces/server/kernel.ts"
-    },
-    "./workspaces/server/plugin": {
-      "types": "./dist/src/workspaces/server/plugin.d.ts",
-      "import": "./src/workspaces/server/plugin.ts",
-      "node": "./src/workspaces/server/plugin.ts"
-    },
-    "./workspaces/server/schema": {
-      "types": "./dist/src/workspaces/server/schema.d.ts",
-      "import": "./src/workspaces/server/schema.ts",
-      "node": "./src/workspaces/server/schema.ts"
-    },
-    "./workspaces/server/types": {
-      "types": "./dist/src/workspaces/server/types.d.ts",
-      "import": "./src/workspaces/server/types.ts",
-      "node": "./src/workspaces/server/types.ts"
-    },
-    "./pg": {
-      "types": "./dist/src/pg/index.d.ts",
-      "import": "./src/pg/index.ts",
-      "node": "./src/pg/index.ts"
-    },
-    "./pg/workspaces": {
-      "types": "./dist/src/pg/workspaces/index.d.ts",
-      "import": "./src/pg/workspaces/index.ts",
-      "node": "./src/pg/workspaces/index.ts"
-    },
-    "./http": {
-      "types": "./dist/src/http.d.ts",
-      "import": "./src/http.ts",
-      "node": "./src/http.ts"
-    },
-    "./testing": {
-      "types": "./dist/src/testing/index.d.ts",
-      "import": "./src/testing/index.ts",
-      "node": "./src/testing/index.ts"
-    },
-    "./testing/tanstack-start": {
-      "types": "./dist/src/testing/tanstack-start.d.ts",
-      "import": "./src/testing/tanstack-start.ts",
-      "node": "./src/testing/tanstack-start.ts"
+      "types": "./dist/ids.d.ts",
+      "import": "./dist/ids.js",
+      "default": "./dist/ids.js"
     },
     "./zod": {
-      "types": "./dist/src/zod.d.ts",
-      "import": "./src/zod.ts",
-      "default": "./src/zod.ts"
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
+    "./password": {
+      "types": "./dist/password.d.ts",
+      "import": "./dist/password.js",
+      "default": "./dist/password.js"
+    },
+    "./workspaces": {
+      "types": "./dist/workspaces.d.ts",
+      "import": "./dist/workspaces.js",
+      "default": "./dist/workspaces.js"
+    },
+    "./pg": {
+      "types": "./dist/pg/index.d.ts",
+      "import": "./dist/pg/index.js",
+      "default": "./dist/pg/index.js"
+    },
+    "./pg/workspaces": {
+      "types": "./dist/pg/workspaces/index.d.ts",
+      "import": "./dist/pg/workspaces/index.js",
+      "default": "./dist/pg/workspaces/index.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "default": "./dist/http.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
+    },
+    "./react/templates": {
+      "types": "./dist/react/templates/index.d.ts",
+      "import": "./dist/react/templates/index.js",
+      "default": "./dist/react/templates/index.js"
+    },
+    "./tanstack-start": {
+      "types": "./dist/tanstack-start/index.d.ts",
+      "import": "./dist/tanstack-start/index.js",
+      "default": "./dist/tanstack-start/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    },
+    "./testing/tanstack-start": {
+      "types": "./dist/testing/tanstack-start.d.ts",
+      "import": "./dist/testing/tanstack-start.js",
+      "default": "./dist/testing/tanstack-start.js"
+    },
+    "./testing/playwright": {
+      "types": "./dist/testing/playwright.d.ts",
+      "import": "./dist/testing/playwright.js",
+      "default": "./dist/testing/playwright.js"
+    },
+    "./testing/production-boot": {
+      "types": "./dist/testing/production-boot.d.ts",
+      "import": "./dist/testing/production-boot.js",
+      "default": "./dist/testing/production-boot.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
+    "./tweaks-column": {
+      "types": "./dist/tweaks-column.d.ts",
+      "import": "./dist/tweaks-column.js",
+      "default": "./dist/tweaks-column.js"
     },
     "./package.json": "./package.json"
   },
-  "types": "./dist/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist/**",
     "src/**",
@@ -236,14 +125,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -257,8 +146,6 @@
     "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",
     "@noble/hashes": "^2.2.0",
-    "@paralleldrive/cuid2": "catalog:utilities",
-    "@t3-oss/env-core": "catalog:env",
     "better-auth": "catalog:better-auth",
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"
@@ -340,6 +227,9 @@
     "vitest": {
       "optional": true
     }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "arki": {
     "runtimes": [

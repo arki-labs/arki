@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { tweaksColumn, EMPTY_TWEAKS } from './tweaks-column';
+import { tweaksColumn, EMPTY_TWEAKS } from './tweaks-column.js';
 
 describe('tweaksColumn', () => {
   it('returns a Drizzle jsonb column with default empty TweakStore', () => {

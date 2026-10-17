@@ -7,6 +7,7 @@
  * authClient.capabilities.social; // ['google'] when the definition enables Google
  */
 import type { BetterAuthClientPlugin } from 'better-auth/client';
+import type { ReactAuthClient } from 'better-auth/react';
 import { magicLinkClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient as createEngineClient } from 'better-auth/react';
 
@@ -98,6 +99,22 @@ export type AuthClientOptions<P extends readonly BetterAuthClientPlugin[]> = {
   readonly plugins?: P;
 };
 
+/** Every engine client plugin of a client: the definition's own and the app's extra ones. */
+type ClientPlugins<D extends AuthDefinition, P extends readonly BetterAuthClientPlugin[]> = (
+  DefinitionClientPlugins<D>[number] | WorkspacesClientPlugins<D['workspaces']>[number] | P[number]
+)[];
+
+/**
+ * The client `createAuthClient` returns for a definition: the engine's React client for exactly
+ * the plugins the definition needs (plus the app's extra ones), and `capabilities` for the UI.
+ * Named through the engine's own `ReactAuthClient`, so the published types refer to it instead of
+ * spelling out every endpoint.
+ */
+export type AuthClient<
+  D extends AuthDefinition,
+  P extends readonly BetterAuthClientPlugin[] = readonly [],
+> = ReactAuthClient<{ plugins: ClientPlugins<D, P> }> & { readonly capabilities: AuthCapabilities<D> };
+
 /**
  * Builds the auth client for a definition. A definition with `workspaces` gets the organization
  * API (`organizationClient()`), typed with or without teams as the definition says.
@@ -105,13 +122,18 @@ export type AuthClientOptions<P extends readonly BetterAuthClientPlugin[]> = {
 export function createAuthClient<
   const D extends AuthDefinition,
   const P extends readonly BetterAuthClientPlugin[] = readonly [],
->(definition: D, options: AuthClientOptions<P> = {}) {
+>(definition: D, options: AuthClientOptions<P> = {}): AuthClient<D, P> {
   resolveDefinition(definition);
   const extra = options.plugins ?? [];
+  const plugins: ClientPlugins<D, P> = [
+    ...definitionClientPlugins(definition),
+    ...workspacesClientPlugins(definition),
+    ...extra,
+  ];
   const engineClient = createEngineClient({
     ...(options.baseURL !== undefined && { baseURL: options.baseURL }),
     ...(options.fetch !== undefined && { fetchOptions: { customFetchImpl: options.fetch } }),
-    plugins: [...definitionClientPlugins(definition), ...workspacesClientPlugins(definition), ...extra],
+    plugins,
   });
   return withCapabilities(engineClient, authCapabilities(definition));
 }
@@ -127,9 +149,3 @@ function withCapabilities<C extends object, D extends AuthDefinition>(client: C,
       property === 'capabilities' ? capabilities : Reflect.get(target, property, receiver),
   });
 }
-
-/** The client `createAuthClient` returns for a definition. */
-export type AuthClient<
-  D extends AuthDefinition,
-  P extends readonly BetterAuthClientPlugin[] = readonly [],
-> = ReturnType<typeof createAuthClient<D, P>>;

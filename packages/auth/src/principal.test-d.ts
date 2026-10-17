@@ -9,16 +9,16 @@ import type { UserId } from './ids.js';
 import type { PrincipalFor } from './pg/types.js';
 import type { PrincipalOf } from './principal.js';
 import { defineAuth } from './definition.js';
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from './ids.js';
-import { createAuthTables } from './schema/index.js';
+import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from './pg/ids.js';
+import { createAuthTables } from './pg/schema/index.js';
 
 const tables = createAuthTables(pgSchema('notes'), {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {

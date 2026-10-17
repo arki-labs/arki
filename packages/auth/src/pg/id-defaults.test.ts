@@ -13,7 +13,7 @@ import { mailSink } from '@arki/mail/testing';
 import { allTables, authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES } from '../errors.js';
-import { authSessionColumns } from '../schema/index.js';
+import { authSessionColumns } from './schema/index.js';
 import { createAuth } from './index.js';
 
 const client = new PGlite('memory://');

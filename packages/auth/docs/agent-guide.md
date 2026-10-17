@@ -30,8 +30,13 @@ import type { AuthOf } from '@arki/auth/dot';
 import type { KV } from '@arki/kv';
 import { defineAuth } from '@arki/auth';
 import { auth } from '@arki/auth/dot';
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '@arki/auth/ids';
-import { createAuthTables } from '@arki/auth/pg';
+import {
+  accountIdColumns,
+  createAuthTables,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from '@arki/auth/pg';
 
 declare const env: { readonly URL: string; readonly AUTH_SECRET: string | undefined; readonly NODE_ENV: string };
 declare const kv: KV;
@@ -39,10 +44,10 @@ declare const kv: KV;
 export const authTables = createAuthTables(pgSchema('notes'), {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {
@@ -111,17 +116,22 @@ A name that is not a column does not compile, and throws `ARKI_AUTH_E001` at boo
 import { pgSchema, text } from 'drizzle-orm/pg-core';
 
 import { defineAuth } from '@arki/auth';
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '@arki/auth/ids';
-import { createAuthTables } from '@arki/auth/pg';
+import {
+  accountIdColumns,
+  createAuthTables,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from '@arki/auth/pg';
 import { actingAs, testAuth } from '@arki/auth/testing';
 
 const tables = createAuthTables(pgSchema('notes'), {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: {
     user: {

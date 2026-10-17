@@ -1,7 +1,7 @@
 import { getTableConfig, jsonb, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { authAccountColumns, authSessionColumns, authUserColumns, authVerificationColumns, createAuthTables } from '.';
+import { authAccountColumns, authSessionColumns, authUserColumns, authVerificationColumns, createAuthTables } from './index.js';
 
 const schema = pgSchema('test_app');
 

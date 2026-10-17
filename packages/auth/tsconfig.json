@@ -1,11 +1,27 @@
 {
-  "extends": "@arki/tsconfig/internal-package.json",
+  "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "dom", "dom.iterable"],
+    /**
+     * Bundler resolution, not NodeNext: `@phosphor-icons/react` (behind `@arki/icons/phosphor`, used
+     * by `./react`) ships extensionless relative imports in its ESM `.d.ts`, so under NodeNext every
+     * icon import fails. Every relative import here still carries `.js`, so the emitted `dist/` is
+     * valid Node ESM; `tsc --noEmit --module NodeNext --moduleResolution NodeNext` reports only those
+     * icon imports.
+     */
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "jsx": "react-jsx",
-    "types": ["node"],
-    "rootDir": "./src"
+    "lib": ["ES2022", "dom", "dom.iterable"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "dist"]
 }

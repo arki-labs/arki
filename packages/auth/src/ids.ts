@@ -1,46 +1,24 @@
-import { createIdFactory } from '@arki/db/id-factory';
-
+/**
+ * `@arki/auth/ids` — the auth id types and their generators. Browser-safe: no Drizzle, no Zod in
+ * the types. Check ids with the schemas on `@arki/auth/zod`; make columns with `@arki/auth/pg`.
+ */
 import type { UserId } from '@arki/contracts';
 
-// ID types. `UserId` is defined in `@arki/contracts`, so packages that refer to a user share it
-// without depending on this package.
+import { accountId, permissionId, roleId, sessionId, userId, verificationId } from './id-declarations.js';
+
+// `UserId` is defined in `@arki/contracts`, so packages that refer to a user share it without
+// depending on this package.
 export type { UserId } from '@arki/contracts';
-export type UserVerificationId = `verif_${string}`;
 export type SessionId = `sess_${string}`;
-export type RoleId = `role_${string}`;
-export type PermissionId = `perm_${string}`;
 export type AccountId = `acc_${string}`;
 export type VerificationId = `verif_${string}`;
+export type RoleId = `role_${string}`;
+export type PermissionId = `perm_${string}`;
 
-// Type-safe ID factories
-const userId = createIdFactory<'usr_', UserId>('usr_');
-const userVerificationId = createIdFactory<'verif_', UserVerificationId>('verif_');
-const sessionId = createIdFactory<'sess_', SessionId>('sess_');
-const roleId = createIdFactory<'role_', RoleId>('role_');
-const permissionId = createIdFactory<'perm_', PermissionId>('perm_');
-const accountId = createIdFactory<'acc_', AccountId>('acc_');
-
-// ID Generation helper functions (backward compatibility)
-export const createUserId = userId.create;
-export const createUserVerificationId = userVerificationId.create;
-export const createSessionId = sessionId.create;
-export const createRoleId = roleId.create;
-export const createPermissionId = permissionId.create;
-export const createAccountId = accountId.create;
-export const createVerificationId = userVerificationId.create;
-
-// ID validation schemas (backward compatibility)
-export const userIdSchema = userId.schema;
-export const userVerificationIdSchema = userVerificationId.schema;
-export const sessionIdSchema = sessionId.schema;
-export const roleIdSchema = roleId.schema;
-export const permissionIdSchema = permissionId.schema;
-export const accountIdSchema = accountId.schema;
-
-// Export ID factories for use in other features
-export const userIdFactory = userId;
-export const userVerificationIdFactory = userVerificationId;
-export const sessionIdFactory = sessionId;
-export const roleIdFactory = roleId;
-export const permissionIdFactory = permissionId;
-export const accountIdFactory = accountId;
+/** A new user id: `usr_` and 24 random letters and digits. */
+export const createUserId: () => UserId = userId.create;
+export const createSessionId: () => SessionId = sessionId.create;
+export const createAccountId: () => AccountId = accountId.create;
+export const createVerificationId: () => VerificationId = verificationId.create;
+export const createRoleId: () => RoleId = roleId.create;
+export const createPermissionId: () => PermissionId = permissionId.create;

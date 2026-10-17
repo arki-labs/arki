@@ -6,20 +6,19 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 
 ## Import paths
 - `@arki/auth`: `defineAuth`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`, and the types `AuthDefinition`, `AuthMethod`, `SocialMethod`, `Principal`, `PrincipalOf`, `AuthContext`.
-- `@arki/auth/pg`: `createAuth`, `createAuthTables`, `auth*Columns`, `assertAuthSecret`, `additionalFieldsFromColumns`, and the types `Auth`, `AuthBindings`, `AuthDb`, `AuthEvents`.
+- `@arki/auth/pg`: `createAuth`, `createAuthTables`, `auth*Columns`, `*IdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, and the types `Auth`, `AuthBindings`, `AuthDb`, `AuthEvents`.
 - `@arki/auth/pg/workspaces`: `createWorkspaceTables` and the scoping kernel (`workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`).
 - `@arki/auth/dot`: `auth`, `AuthOf`.
 - `@arki/auth/orpc`: `guards`, `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`.
 - `@arki/auth/http`: `withPrincipal`, `withOptionalPrincipal`.
-- `@arki/auth/ids`: id types, `create*Id`, `*IdFactory`.
-- `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
+- `@arki/auth/ids`: id types and `create*Id` (browser-safe).
+- `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `roleIdSchema`, `permissionIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
 - `@arki/auth/password`: `hashPassword`, `verifyPassword`.
-- `@arki/auth/workspaces`: `WorkspaceRole`, `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError` (still with the DB parts today).
+- `@arki/auth/workspaces`: `WorkspaceRole`, `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`; types `WorkspaceContext`, `Scope`, `OrganizationId`, `TeamId`.
 - `@arki/auth/testing`: `testAuth`, `actingAs`, `lastLink`, `lastMagicLink`.
 - `@arki/auth/testing/tanstack-start`: `createE2EHandler`. `@arki/auth/testing/production-boot`: `assertAuthBoots`. `@arki/auth/testing/playwright`: browser test helpers.
 - `@arki/auth/tanstack-start`: `tanstackStart`, `createRequireAuth`, `ArkiAuthProvider`, `TanStackAuthProvider`. `@arki/auth/react`: `createAuthClient`, `SignInForm`, `createSignInHandlers`, `resolveAuthClientBaseUrl`. `@arki/auth/react/templates`: page templates.
 - `@arki/auth/env`, `@arki/auth/tweaks-column`: unchanged helpers.
-- Old entries, kept until the app sweep: `@arki/auth/create-auth`, `@arki/auth/define-auth-backend`, `@arki/auth/better-auth.config`, `@arki/auth/dot.config`, `@arki/auth/schema`, `@arki/auth/constants`, `@arki/auth/errors`, `@arki/auth/debug`, `@arki/auth/token`, `@arki/auth/client-base-url`, `@arki/auth/email/schema`, `@arki/auth/email/resendAuthProvider`, `@arki/auth/email/sendVerificationRequest`, `@arki/auth/security/rate-limit`, `@arki/auth/security/timing-attacks`, `@arki/auth/tanstack-start/e2e-handler`, `@arki/auth/tanstack-start/require-auth`, `@arki/auth/workspaces/server`, `@arki/auth/workspaces/server/kernel`, `@arki/auth/workspaces/server/plugin`, `@arki/auth/workspaces/server/schema`, `@arki/auth/workspaces/server/types`.
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.

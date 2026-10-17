@@ -1,10 +1,10 @@
 import type { AnyPgColumn, AnyPgColumnBuilder, PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { integer, text, timestamp } from 'drizzle-orm/pg-core';
 
-import { createIdFactory } from '@arki/db/id';
+import { idColumns } from '@arki/db/id-factory';
 
-import type { OrganizationId, TeamId } from '../../workspaces.js';
 import type { AuthColumnFill, AuthColumnOptions, PrimaryColumnSource } from '../schema/column-options.js';
+import { organizationId, teamId } from '../../id-declarations.js';
 import { byFill, columnNamer, filledAt } from '../schema/column-options.js';
 
 /**
@@ -21,12 +21,8 @@ import { byFill, columnNamer, filledAt } from '../schema/column-options.js';
  */
 export type { OrganizationId, TeamId } from '../../workspaces.js';
 
-const organizationIdFactory = createIdFactory<'organization_', OrganizationId>('organization_');
-const teamIdFactory = createIdFactory<'team_', TeamId>('team_');
-
-/** Zod schemas to validate + narrow a raw string into a branded id at a trust boundary. */
-export const organizationIdSchema = organizationIdFactory.schema;
-export const teamIdSchema = teamIdFactory.schema;
+const organizationIdColumns = idColumns(organizationId);
+const teamIdColumns = idColumns(teamId);
 
 /**
  * Build the workspace scope FK factories bound to an app's `Organization` /
@@ -45,8 +41,8 @@ export const teamIdSchema = teamIdFactory.schema;
  */
 export function createWorkspaceForeignKeys(organizationIdColumn: () => PgColumn, teamIdColumn: () => PgColumn) {
   return {
-    orgForeignKeys: organizationIdFactory.createForeignKeyFactory(organizationIdColumn),
-    teamForeignKeys: teamIdFactory.createForeignKeyFactory(teamIdColumn),
+    orgForeignKeys: organizationIdColumns.createForeignKeyFactory(organizationIdColumn),
+    teamForeignKeys: teamIdColumns.createForeignKeyFactory(teamIdColumn),
   };
 }
 

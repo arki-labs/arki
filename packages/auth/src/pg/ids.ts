@@ -7,18 +7,11 @@
  */
 import { idColumns } from '@arki/db/id-factory';
 
-import {
-  accountIdFactory as accountIdSource,
-  permissionIdFactory as permissionIdSource,
-  roleIdFactory as roleIdSource,
-  sessionIdFactory as sessionIdSource,
-  userIdFactory as userIdSource,
-  userVerificationIdFactory as verificationIdSource,
-} from '../ids.js';
+import { accountId, permissionId, roleId, sessionId, userId, verificationId } from '../id-declarations.js';
 
-export const userIdColumns = idColumns(userIdSource);
-export const sessionIdColumns = idColumns(sessionIdSource);
-export const accountIdColumns = idColumns(accountIdSource);
-export const verificationIdColumns = idColumns(verificationIdSource);
-export const roleIdColumns = idColumns(roleIdSource);
-export const permissionIdColumns = idColumns(permissionIdSource);
+export const userIdColumns = idColumns(userId);
+export const sessionIdColumns = idColumns(sessionId);
+export const accountIdColumns = idColumns(accountId);
+export const verificationIdColumns = idColumns(verificationId);
+export const roleIdColumns = idColumns(roleId);
+export const permissionIdColumns = idColumns(permissionId);

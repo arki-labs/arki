@@ -1,7 +1,8 @@
-import { chromium, test as base, type Page } from '@playwright/test';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Page } from '@playwright/test';
+import { test as base, chromium } from '@playwright/test';
 
 /**
  * Default test session endpoint mounted by `@arki/auth/tanstack-start`'s
@@ -114,10 +115,7 @@ export function createAuthenticatedTest({ authStatePath }: CreateAuthenticatedTe
 export type TwoAccountEmails = { a: string; b: string };
 export type TwoAccountStatePaths = { a: string; b: string };
 
-export type CreateTwoAccountGlobalSetupOptions = Omit<
-  CreateAuthGlobalSetupOptions,
-  'email' | 'authStatePath'
-> & {
+export type CreateTwoAccountGlobalSetupOptions = Omit<CreateAuthGlobalSetupOptions, 'email' | 'authStatePath'> & {
   emails: TwoAccountEmails;
   authStatePaths: TwoAccountStatePaths;
 };

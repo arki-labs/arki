@@ -2,9 +2,9 @@
 
 import type { AuthUIProviderProps } from '@daveyplate/better-auth-ui';
 import type { ReactNode } from 'react';
-import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { AuthQueryProvider } from '@daveyplate/better-auth-tanstack';
 import { AuthUIProviderTanstack } from '@daveyplate/better-auth-ui/tanstack';
+import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 
 import type { AuthCapabilities } from '../react/capabilities.js';
 
@@ -20,7 +20,9 @@ function SafeImage({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElem
 }
 
 /** The UI flags that follow the definition: which sign-in methods the auth screens offer. */
-function methodProps(capabilities: AuthCapabilities): Pick<AuthUIProviderProps, 'credentials' | 'magicLink' | 'social'> {
+function methodProps(
+  capabilities: AuthCapabilities,
+): Pick<AuthUIProviderProps, 'credentials' | 'magicLink' | 'social'> {
   return {
     credentials: capabilities.password,
     magicLink: capabilities.magicLink,
@@ -30,8 +32,7 @@ function methodProps(capabilities: AuthCapabilities): Pick<AuthUIProviderProps, 
 
 /**
  * `capabilities` (from `createAuthClient(definition).capabilities`) decides which sign-in methods
- * the auth screens offer. Without it the provider keeps its older fixed set (password, magic link,
- * Google and Facebook).
+ * the auth screens offer, so they never show a method the server refuses.
  */
 export function ArkiAuthProvider({
   children,
@@ -39,7 +40,7 @@ export function ArkiAuthProvider({
   capabilities,
   disabled = false,
   ...props
-}: AuthUIProviderProps & { children: ReactNode; disabled?: boolean; capabilities?: AuthCapabilities }) {
+}: AuthUIProviderProps & { children: ReactNode; disabled?: boolean; capabilities: AuthCapabilities }) {
   const tsNavigate = useNavigate();
   const router = useRouter();
 
@@ -59,7 +60,7 @@ export function ArkiAuthProvider({
         persistClient={false}
         replace={replace}
         onSessionChange={() => {
-          refresh();
+          void refresh();
         }}
         Link={Link as AuthUIProviderProps['Link']}
         avatar={{
@@ -71,9 +72,7 @@ export function ArkiAuthProvider({
         optimistic={true}
         emailVerification={true}
         account={true}
-        {...(capabilities === undefined
-          ? { magicLink: true, credentials: true, social: { providers: ['google', 'facebook'] } }
-          : methodProps(capabilities))}
+        {...methodProps(capabilities)}
         {...props}
       >
         {children}

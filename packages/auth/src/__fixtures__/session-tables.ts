@@ -4,16 +4,16 @@
  */
 import { pgSchema, varchar } from 'drizzle-orm/pg-core';
 
-import { accountIdFactory, sessionIdFactory, userIdFactory, userVerificationIdFactory } from '../ids.js';
-import { createAuthTables } from '../schema/index.js';
+import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from '../pg/ids.js';
+import { createAuthTables } from '../pg/schema/index.js';
 
 export const sessionTables = createAuthTables(pgSchema('games'), {
   fill: 'app',
   ids: {
-    user: userIdFactory,
-    session: sessionIdFactory,
-    account: accountIdFactory,
-    verification: userVerificationIdFactory,
+    user: userIdColumns,
+    session: sessionIdColumns,
+    account: accountIdColumns,
+    verification: verificationIdColumns,
   },
   columns: { session: { appContext: varchar('app_context', { length: 50 }) } },
 });
