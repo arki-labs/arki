@@ -3,12 +3,13 @@
  * so the collection name, payload shape and vector size have one source of
  * truth. Qdrant when `QDRANT_URL` is set (and `VECTOR_BACKEND` is not `mock`),
  * the in-memory mock otherwise (dev / e2e). The vector size is the embedding
- * runtime's selection, so index-time and query-time vectors share one space.
+ * space's, so index-time and query-time vectors share one space.
  *
  * `durable` says whether a point written here outlives the process — the
  * reconciler acknowledges erasure tombstones only against a durable index.
  */
-import type { EmbeddingRuntime, EnvSource } from '../embeddings/runtime';
+import type { EmbeddingSpace, EnvSource } from '@arki/embeddings';
+
 import type { VectorSearchProvider } from '../types';
 import { debugVector } from '../debug.ts';
 import { MockVectorProvider } from './providers/mock';
@@ -29,15 +30,15 @@ export type VectorIndex<P extends Record<string, unknown>> = {
   durable: boolean;
 };
 
-/** Build the app's vector index over an embedding runtime. */
+/** Build the app's vector index for one embedding space. */
 export function createVectorIndex<P extends Record<string, unknown>>(
-  runtime: EmbeddingRuntime,
+  space: EmbeddingSpace,
   { collection, payloadIndexes, env }: VectorIndexOptions<P>,
 ): VectorIndex<P> {
   const qdrantUrl = env['QDRANT_URL'];
   if (!qdrantUrl || env['VECTOR_BACKEND'] === 'mock') {
     debugVector.debug('[Index] in-memory mock index for collection {collection} (not durable)', { collection });
-    return { provider: new MockVectorProvider<P>(runtime.provider), durable: false };
+    return { provider: new MockVectorProvider<P>({ space }), durable: false };
   }
 
   const apiKey = env['QDRANT_API_KEY'];
@@ -45,7 +46,7 @@ export function createVectorIndex<P extends Record<string, unknown>>(
   debugVector.debug('[Index] Qdrant index for collection {collection} at {url} (dims: {dimensions})', {
     collection,
     url: qdrantUrl,
-    dimensions: runtime.selection.dimensions,
+    dimensions: space.dimensions,
   });
   return {
     provider: new QdrantVectorProvider<P>(
@@ -53,14 +54,12 @@ export function createVectorIndex<P extends Record<string, unknown>>(
         url: qdrantUrl,
         ...(apiKey ? { apiKey } : {}),
         collectionName: collection,
-        // MUST equal the embedding model's dimension — the runtime selection is the single source of that number.
-        vectorSize: runtime.selection.dimensions,
         // Single node by default; override for a cluster.
         replicationFactor: replication ? Number(replication) : 1,
         payloadIndexes: [...payloadIndexes],
         createCollectionIfNotExists: true,
       },
-      runtime.provider,
+      { space },
     ),
     durable: true,
   };

@@ -12,9 +12,9 @@ export {
   type VectorProviderConfig,
   type ProviderConfig as VectorSearchConfig
 } from './factory';
-export type { VectorSearchProvider, VectorSearchResult } from '../types';
+export type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../types';
 
-// The app's one vector index (Qdrant or mock) over an embedding runtime
+// The app's one vector index (Qdrant or mock) for one embedding space
 export { createVectorIndex, type VectorIndex, type VectorIndexOptions } from './vector-index';
 
 // Postgres → index reconciler (tombstone drain + dimension migration + re-upsert)

@@ -2,89 +2,37 @@
  * Mock Vector Search Provider for testing and development
  */
 
-import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
+import type { EmbeddingSpace } from '@arki/embeddings';
+
+import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
 
 export type MockDocument<TMetadata = Record<string, unknown>> = {
   id: string;
-  text: string;
-  embedding?: number[];
+  embedding: number[];
   metadata?: TMetadata;
 }
 
 export class MockVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
+  readonly space: EmbeddingSpace;
   private documents = new Map<string, MockDocument<TMetadata>>();
-  private embeddingProvider: EmbeddingProvider;
 
-  constructor(embeddingProvider: EmbeddingProvider) {
-    this.embeddingProvider = embeddingProvider;
+  constructor({ space }: { space: EmbeddingSpace }) {
+    this.space = space;
   }
 
-  async indexDocument(
-    id: string,
-    text: string,
-    metadata?: TMetadata,
-  ): Promise<void> {
-    const embedding = await this.embeddingProvider.getEmbedding(text);
-
-    this.documents.set(id, {
-      id,
-      text,
-      embedding,
-      metadata,
-    });
-  }
-
-  async indexDocumentsBatch(
-    documents: {
-      id: string;
-      text: string;
-      metadata?: TMetadata;
-    }[],
-  ): Promise<void> {
-    for (const doc of documents) {
-      await this.indexDocument(doc.id, doc.text, doc.metadata);
-    }
-  }
-
-  async searchSimilar(
-    query: string,
-    limit = 10,
-  ): Promise<VectorSearchResult<TMetadata>[]> {
-    const queryEmbedding = await this.embeddingProvider.getEmbedding(query);
-    const results: VectorSearchResult<TMetadata>[] = [];
-
-    // Calculate cosine similarity with all documents
-    for (const doc of this.documents.values()) {
-      if (!doc.embedding) continue;
-
-      const score = this.cosineSimilarity(queryEmbedding, doc.embedding);
-      results.push({
-        id: doc.id,
-        score,
-        metadata: doc.metadata,
-      });
-    }
-
-    // Sort by score and return top results
-    return results
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
-  }
-
-  async upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void> {
-    // No source text on the vector-in path (e.g. a centroid) — store empty text.
-    this.documents.set(id, { id, text: '', embedding: vector, metadata });
+  async upsertVector(id: string, vector: ArrayLike<number>, metadata?: TMetadata): Promise<void> {
+    this.documents.set(id, { id, embedding: Array.from(vector), metadata });
   }
 
   async searchByVector(
-    vector: number[],
+    vector: ArrayLike<number>,
     limit = 10,
     filter?: Record<string, unknown>,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    const query = Array.from(vector);
     const results: VectorSearchResult<TMetadata>[] = [];
 
     for (const doc of this.documents.values()) {
-      if (!doc.embedding) continue;
       // Payload filter: every key in `filter` must equal the doc's metadata.
       // Mirrors Qdrant's `must` match-clauses — this is what enforces tenant
       // isolation (userId) and kind scoping in tests.
@@ -92,12 +40,23 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
 
       results.push({
         id: doc.id,
-        score: this.cosineSimilarity(vector, doc.embedding),
+        score: this.cosineSimilarity(query, doc.embedding),
         metadata: doc.metadata,
       });
     }
 
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  async scroll(
+    filter: Record<string, unknown>,
+    { limit, offset }: { limit: number; offset?: string },
+  ): Promise<VectorScrollPage<TMetadata>> {
+    const matching = [...this.documents.values()].filter(doc => this.matchesFilter(doc.metadata, filter));
+    const start = offset === undefined ? 0 : Number(offset);
+    const items = matching.slice(start, start + limit).map(doc => ({ id: doc.id, metadata: doc.metadata }));
+    const end = start + items.length;
+    return end < matching.length ? { items, next: String(end) } : { items };
   }
 
   private matchesFilter(metadata: TMetadata | undefined, filter: Record<string, unknown>): boolean {
@@ -128,10 +87,6 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
     for (const id of ids) {
       this.documents.delete(id);
     }
-  }
-
-  async getEmbedding(text: string): Promise<number[]> {
-    return this.embeddingProvider.getEmbedding(text);
   }
 
   /**

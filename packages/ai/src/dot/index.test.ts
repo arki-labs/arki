@@ -25,6 +25,8 @@ describe('vectorIndex()', () => {
     const index = app.services.vectorIndex;
     expect(index.provider).toBeInstanceOf(MockVectorProvider);
     expect(index.durable).toBe(false);
+    // The index is sized by the runtime's space, so stored and query vectors agree.
+    expect(index.provider?.space).toMatchObject({ provider: 'fake', dimensions: 4 });
     const embedding = await app.services.embedder.embedQuery('q');
     expect(embedding?.vector).toHaveLength(4);
   });
@@ -42,7 +44,15 @@ describe('vectorIndex()', () => {
     const env = vi.fn(() => ({ QDRANT_URL: 'http://q:6333' }));
     const runtime = await createEmbeddingRuntime({ EMBEDDING_PROVIDER: 'mock' });
     if (!runtime) throw new Error('mock runtime expected');
-    const provider = new MockVectorProvider<Payload>(runtime.provider);
+    const space = {
+      provider: 'fake',
+      model: runtime.selection.model,
+      dimensions: runtime.selection.dimensions,
+      normalized: false,
+      quantization: 'float32',
+      instructionVersion: 0,
+    } as const;
+    const provider = new MockVectorProvider<Payload>({ space });
     const app = await defineApp('vi-injected')
       .use(
         vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], env, runtime, provider, durable: true }),

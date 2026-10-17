@@ -6,6 +6,7 @@
 // Core types and interfaces
 export type {
   EmbeddingProvider,
+  VectorScrollPage,
   VectorSearchProvider,
   VectorSearchResult,
   SearchMode,

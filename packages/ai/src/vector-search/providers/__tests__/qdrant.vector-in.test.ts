@@ -1,7 +1,7 @@
+import type { EmbeddingSpace } from '@arki/embeddings';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { QdrantVectorProvider } from '../qdrant';
-import type { EmbeddingProvider } from '../../../types';
 
 // ── Qdrant client mock ────────────────────────────────────────
 // One shared spy object so assertions can read the calls the provider made.
@@ -11,7 +11,8 @@ const client = {
   createCollection: vi.fn().mockResolvedValue(undefined),
   createPayloadIndex: vi.fn().mockResolvedValue(undefined),
   upsert: vi.fn().mockResolvedValue(undefined),
-  search: vi.fn().mockResolvedValue([]),
+  query: vi.fn().mockResolvedValue({ points: [] }),
+  scroll: vi.fn().mockResolvedValue({ points: [] }),
   delete: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -25,17 +26,18 @@ vi.mock('@qdrant/js-client-rest', () => ({
   },
 }));
 
-// The embedding provider must NEVER be touched on the vector-in path.
-const getEmbedding = vi.fn();
-const embed = {
-  getEmbedding,
-  getDimensions: () => 4,
-} as unknown as EmbeddingProvider;
+const space: EmbeddingSpace = {
+  provider: 'fake',
+  model: 'fake-4',
+  dimensions: 4,
+  normalized: true,
+  quantization: 'float32',
+  instructionVersion: 0,
+};
 
 const config = {
   url: 'http://qdrant.test',
   collectionName: 'c',
-  vectorSize: 4,
   replicationFactor: 1,
   payloadIndexes: ['userId', 'kind'],
 };
@@ -48,7 +50,7 @@ beforeEach(() => {
 
 describe('QdrantVectorProvider — collection setup (R3/R4/C9)', () => {
   it('creates the collection with the configured replication factor and payload indexes', async () => {
-    const p = new QdrantVectorProvider(config, embed);
+    const p = new QdrantVectorProvider(config, { space });
     // Any operation triggers getClient() → ensureCollection().
     await p.upsertVector('a', [1, 0, 0, 0], { userId: 'u1', kind: 'item' });
 
@@ -73,17 +75,16 @@ describe('QdrantVectorProvider — collection setup (R3/R4/C9)', () => {
     client.getCollections.mockResolvedValue({ collections: [{ name: 'c' }] });
     client.getCollection.mockResolvedValue({ config: { params: { vectors: { size: 768 } } } });
 
-    const p = new QdrantVectorProvider(config, embed);
+    const p = new QdrantVectorProvider(config, { space });
     await expect(p.searchByVector([1, 0, 0, 0], 5)).rejects.toThrow(/vectorSize 768.*configured for 4|Failed to ensure/i);
   });
 });
 
 describe('QdrantVectorProvider — vector-in methods', () => {
-  it('upsertVector passes the raw vector through without embedding', async () => {
-    const p = new QdrantVectorProvider(config, embed);
+  it('upsertVector passes the raw vector through', async () => {
+    const p = new QdrantVectorProvider(config, { space });
     await p.upsertVector('itm_a', [0.1, 0.2, 0.3, 0.4], { userId: 'u1', kind: 'item' });
 
-    expect(getEmbedding).not.toHaveBeenCalled();
     expect(client.upsert).toHaveBeenCalledWith(
       'c',
       expect.objectContaining({
@@ -97,38 +98,57 @@ describe('QdrantVectorProvider — vector-in methods', () => {
     );
   });
 
-  it('searchByVector never embeds, maps _sourceId back to the caller id, and passes the filter', async () => {
-    client.search.mockResolvedValue([
-      { id: 12_345, score: 0.91, payload: { _sourceId: 'itm_a', userId: 'u1' } },
-    ]);
-    const p = new QdrantVectorProvider(config, embed);
+  it('searchByVector maps _sourceId back to the caller id and passes the filter', async () => {
+    client.query.mockResolvedValue({
+      points: [{ id: 12_345, score: 0.91, payload: { _sourceId: 'itm_a', userId: 'u1' } }],
+    });
+    const p = new QdrantVectorProvider(config, { space });
     const hits = await p.searchByVector([0.1, 0.2, 0.3, 0.4], 5, { userId: 'u1', kind: 'item' });
 
-    expect(getEmbedding).not.toHaveBeenCalled();
     expect(hits).toEqual([{ id: 'itm_a', score: 0.91, metadata: { _sourceId: 'itm_a', userId: 'u1' } }]);
     // Filter translated to must-clauses.
-    const searchArgs = client.search.mock.calls[0]![1] as { filter?: unknown };
+    const searchArgs = client.query.mock.calls[0]![1] as { filter?: unknown };
     expect(searchArgs.filter).toBeDefined();
   });
 
   it('rejects a dimension mismatch before touching the client', async () => {
-    const p = new QdrantVectorProvider(config, embed);
+    const p = new QdrantVectorProvider(config, { space });
     await expect(p.upsertVector('a', [1, 2, 3], { userId: 'u1', kind: 'item' })).rejects.toThrow(/dimension mismatch/i);
   });
 
   it('translates flat filters to Qdrant-native clauses (value / any / range)', async () => {
-    const p = new QdrantVectorProvider(config, embed);
+    const p = new QdrantVectorProvider(config, { space });
     await p.searchByVector([1, 0, 0, 0], 5, {
       userId: 'u1',
       sourceId: ['src_a', 'src_b'],
       itemDate: { gte: 200 },
     });
 
-    const searchArgs = client.search.mock.calls[0]![1] as { filter: { must: unknown[] } };
+    const searchArgs = client.query.mock.calls[0]![1] as { filter: { must: unknown[] } };
     expect(searchArgs.filter.must).toEqual([
       { key: 'userId', match: { value: 'u1' } },
       { key: 'sourceId', match: { any: ['src_a', 'src_b'] } },
       { key: 'itemDate', range: { gte: 200 } },
     ]);
+  });
+
+  // text-bible read passages with a 384-zero dummy vector; scroll reads by filter with no vector at all.
+  it('scroll returns by filter without a vector', async () => {
+    client.scroll.mockResolvedValue({
+      points: [{ id: 7, payload: { _sourceId: 'ps_a', book: 'John' } }],
+      next_page_offset: 8,
+    });
+    const p = new QdrantVectorProvider(config, { space });
+    const page = await p.scroll({ book: 'John' }, { limit: 1 });
+
+    expect(page).toEqual({ items: [{ id: 'ps_a', metadata: { _sourceId: 'ps_a', book: 'John' } }], next: '8' });
+    const scrollArgs = client.scroll.mock.calls[0]![1] as Record<string, unknown>;
+    expect(scrollArgs).toMatchObject({
+      filter: { must: [{ key: 'book', match: { value: 'John' } }] },
+      limit: 1,
+      with_vector: false,
+    });
+    expect(scrollArgs).not.toHaveProperty('vector');
+    expect(client.query).not.toHaveBeenCalled();
   });
 });

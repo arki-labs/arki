@@ -6,10 +6,11 @@
 import { createHash } from 'node:crypto';
 import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-rest';
 
-import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
+import type { EmbeddingSpace } from '@arki/embeddings';
+
+import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { debugVector } from '../../debug.ts';
 import { getErrorMessage, VectorSearchError } from '../../errors';
-import { TransactionManager } from '../../utils/transaction-manager';
 
 /**
  * Qdrant only accepts point IDs that are an unsigned integer or a UUID. Callers, however, use
@@ -54,7 +55,6 @@ export type QdrantConfig = {
   url: string;
   apiKey?: string;
   collectionName: string;
-  vectorSize?: number;
   createCollectionIfNotExists?: boolean;
   /**
    * Collection replication factor. Requires a Qdrant cluster with at least this
@@ -65,7 +65,7 @@ export type QdrantConfig = {
   /**
    * Payload fields to create a `keyword` index on when the collection is
    * ensured. Filtering on an unindexed payload field forces a full scan, so any
-   * field used in a `searchByVector` / `searchSimilar` filter belongs here
+   * field used in a `searchByVector` / `scroll` filter belongs here
    * (e.g. `['userId', 'kind']`). Idempotent — re-asserted on every startup.
    */
   payloadIndexes?: string[];
@@ -93,21 +93,22 @@ export type QdrantSearchFilter = {
 };
 
 export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
+  readonly space: EmbeddingSpace;
   private client: QdrantClient | null = null;
   private collectionName: string;
   private vectorSize: number;
-  private embeddingProvider: EmbeddingProvider;
   private createIfNotExists: boolean;
   private replicationFactor: number;
   private payloadIndexes: string[];
 
   constructor(
     private config: QdrantConfig,
-    embeddingProvider: EmbeddingProvider,
+    { space }: { space: EmbeddingSpace },
   ) {
+    this.space = space;
     this.collectionName = config.collectionName;
-    this.vectorSize = config.vectorSize || embeddingProvider.getDimensions?.() || 1536;
-    this.embeddingProvider = embeddingProvider;
+    // The collection size IS the space's size: one source for index-time and query-time vectors.
+    this.vectorSize = space.dimensions;
     this.createIfNotExists = config.createCollectionIfNotExists !== false;
     this.replicationFactor = config.replicationFactor ?? 1;
     this.payloadIndexes = config.payloadIndexes ?? [];
@@ -246,181 +247,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     }
   }
 
-  async indexDocument(id: string, text: string, metadata?: TMetadata): Promise<void> {
-    debugVector.debug('[Qdrant] Indexing document (id: {id}, text length: {length})', { id, length: text.length });
-    const client = await this.getClient();
-
-    // Generate embedding
-    const vector = await this.embeddingProvider.getEmbedding(text);
-    debugVector.debug('[Qdrant] Generated embedding for document: {document} (dimensions: {dimensions})', {
-      document: id,
-      dimensions: vector.length,
-    });
-
-    // Prepare point for indexing
-    const point: QdrantSchemas['PointStruct'] = {
-      id: toPointId(id),
-      vector,
-      payload: {
-        text: text.slice(0, 1000), // Store preview of text
-        ...metadata,
-        [SOURCE_ID_KEY]: id,
-        indexedAt: new Date().toISOString(),
-      },
-    };
-
-    // Upsert the point (insert or update)
-    await client.upsert(this.collectionName, {
-      points: [point],
-      wait: true, // Wait for the operation to complete
-    });
-    debugVector.debug('[Qdrant] Document indexed successfully: {successfully}', { successfully: id });
-  }
-
-  async indexDocumentsBatch(
-    documents: {
-      id: string;
-      text: string;
-      metadata?: TMetadata;
-    }[],
-  ): Promise<void> {
-    debugVector.debug('[Qdrant] Indexing documents batch (count: {count})', { count: documents.length });
-    const client = await this.getClient();
-    const transactionManager = new TransactionManager();
-
-    // Keep track of indexed document IDs for rollback
-    const indexedIds: string[] = [];
-
-    try {
-      // Generate embeddings in batch for efficiency
-      const texts = documents.map(d => d.text);
-      debugVector.debug('[Qdrant] Generating embeddings for batch (count: {count})', { count: texts.length });
-      const embeddings =
-        (await this.embeddingProvider.getEmbeddings?.(texts)) ||
-        (await Promise.all(texts.map(t => this.embeddingProvider.getEmbedding(t))));
-      debugVector.debug('[Qdrant] Embeddings generated successfully (count: {count})', { count: embeddings.length });
-
-      // Prepare points for batch indexing
-      const points: QdrantSchemas['PointStruct'][] = documents.map((doc, i) => ({
-        id: toPointId(doc.id),
-        vector: embeddings[i]!,
-        payload: {
-          text: doc.text.slice(0, 1000),
-          ...doc.metadata,
-          [SOURCE_ID_KEY]: doc.id,
-          indexedAt: new Date().toISOString(),
-        },
-      }));
-
-      // Create transaction operations for each batch
-      const batchSize = 100;
-      const operations = [];
-      const numBatches = Math.ceil(points.length / batchSize);
-
-      debugVector.debug('[Qdrant] Splitting into {numBatches} batches of max {batchSize} documents', {
-        numBatches,
-        batchSize,
-      });
-
-      for (let i = 0; i < points.length; i += batchSize) {
-        const batch = points.slice(i, i + batchSize);
-        const batchIds = batch.map(p => p.id as string);
-        const batchNum = Math.floor(i / batchSize) + 1;
-
-        operations.push({
-          name: `Index batch ${batchNum}`,
-          execute: async () => {
-            debugVector.debug('[Qdrant] Executing batch {batchNum}/{numBatches} (documents: {documents})', {
-              batchNum,
-              numBatches,
-              documents: batch.length,
-            });
-            await client.upsert(this.collectionName, {
-              points: batch,
-              wait: true,
-            });
-            indexedIds.push(...batchIds);
-            debugVector.debug('[Qdrant] Batch {batchNum}/{numBatches} indexed successfully', { batchNum, numBatches });
-            return batchIds;
-          },
-          rollback: async () => {
-            // Remove indexed documents on rollback
-            if (batchIds.length > 0) {
-              debugVector.debug('[Qdrant] Rolling back batch {batchNum} (removing {batchIdsLength} documents)', {
-                batchNum,
-                batchIdsLength: batchIds.length,
-              });
-              await client.delete(this.collectionName, {
-                points: batchIds,
-                wait: true,
-              });
-            }
-          },
-        });
-      }
-
-      // Execute all operations with transaction support
-      debugVector.debug('[Qdrant] Executing transaction with {operationsLength} operations', {
-        operationsLength: operations.length,
-      });
-      const result = await transactionManager.executeTransaction(operations);
-
-      if (!result.success) {
-        debugVector.debug('[Qdrant] Transaction failed, rolling back');
-        throw result.error || new VectorSearchError('Batch indexing failed');
-      }
-
-      debugVector.debug('[Qdrant] Batch indexing completed successfully (total documents: {documents})', {
-        documents: documents.length,
-      });
-    } catch (error) {
-      debugVector.debug('[Qdrant] Batch indexing failed: {failed}', { failed: getErrorMessage(error) });
-      throw new VectorSearchError(`Failed to index documents batch: ${getErrorMessage(error)}`, error);
-    }
-  }
-
-  async searchSimilar(
-    query: string,
-    limit = 10,
-    filter?: QdrantSearchFilter,
-  ): Promise<VectorSearchResult<TMetadata>[]> {
-    debugVector.debug(
-      '[Qdrant] Searching similar documents (query length: {length}, limit: {limit}, hasFilter: {hasFilter})',
-      { length: query.length, limit, hasFilter: !!filter },
-    );
-    const client = await this.getClient();
-
-    // Generate query embedding
-    const queryVector = await this.embeddingProvider.getEmbedding(query);
-    debugVector.debug('[Qdrant] Generated query embedding (dimensions: {dimensions})', {
-      dimensions: queryVector.length,
-    });
-
-    // Build QDrant filter from our search filter
-    const qdrantFilter = filter ? this.buildQdrantFilter(filter) : undefined;
-
-    // Perform semantic search
-    const searchResult = (
-      await client.query(this.collectionName, {
-        query: queryVector,
-        limit,
-        filter: qdrantFilter,
-        with_payload: true,
-        score_threshold: 0, // Return all results, let caller filter by score
-      })
-    ).points;
-
-    debugVector.debug('[Qdrant] Search completed (results: {results})', { results: searchResult.length });
-
-    // Transform results
-    return searchResult.map(result => ({
-      id: sourceId(result),
-      score: result.score,
-      metadata: result.payload as TMetadata,
-    }));
-  }
-
-  async upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void> {
+  async upsertVector(id: string, values: ArrayLike<number>, metadata?: TMetadata): Promise<void> {
+    const vector = Array.from(values);
     if (vector.length !== this.vectorSize) {
       throw new VectorSearchError(
         `upsertVector dimension mismatch for "${id}": got ${vector.length}, collection is ${this.vectorSize}.`,
@@ -443,10 +271,11 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   }
 
   async searchByVector(
-    vector: number[],
+    values: ArrayLike<number>,
     limit = 10,
     filter?: Record<string, unknown>,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    const vector = Array.from(values);
     if (vector.length !== this.vectorSize) {
       throw new VectorSearchError(
         `searchByVector dimension mismatch: got ${vector.length}, collection is ${this.vectorSize}.`,
@@ -458,24 +287,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     );
     const client = await this.getClient();
 
-    // Flat provider-agnostic filter → Qdrant-native `must` clauses:
-    //   scalar          → match: { value }   (equality)
-    //   array           → match: { any }     (IN-semantics)
-    //   {gt|gte|lt|lte} → range              (numeric range)
-    const qdrantFilter =
-      filter && Object.keys(filter).length > 0
-        ? this.buildQdrantFilter({
-            must: Object.entries(filter).map(([key, value]) => {
-              if (Array.isArray(value)) {
-                return { key, match: { any: value } };
-              }
-              if (isRangeCondition(value)) {
-                return { key, range: value };
-              }
-              return { key, match: { value } as Record<string, unknown> };
-            }),
-          })
-        : undefined;
+    const qdrantFilter = this.flatFilter(filter);
 
     const searchResult = (
       await client.query(this.collectionName, {
@@ -495,75 +307,25 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     }));
   }
 
-  async hybridSearch(
-    query: string,
-    limit = 10,
-    filter?: QdrantSearchFilter,
-    keywordWeight = 0.3,
-  ): Promise<VectorSearchResult<TMetadata>[]> {
-    debugVector.debug(
-      '[Qdrant] Hybrid search (query length: {length}, limit: {limit}, keywordWeight: {keywordWeight})',
-      { length: query.length, limit, keywordWeight },
-    );
+  async scroll(
+    filter: Record<string, unknown>,
+    { limit, offset }: { limit: number; offset?: string },
+  ): Promise<VectorScrollPage<TMetadata>> {
+    debugVector.debug('[Qdrant] Scrolling by filter (limit: {limit}, hasOffset: {hasOffset})', {
+      limit,
+      hasOffset: offset !== undefined,
+    });
     const client = await this.getClient();
-
-    // Generate query embedding for semantic search
-    const queryVector = await this.embeddingProvider.getEmbedding(query);
-    debugVector.debug('[Qdrant] Generated query embedding (dimensions: {dimensions})', {
-      dimensions: queryVector.length,
+    const page = await client.scroll(this.collectionName, {
+      filter: this.flatFilter(filter),
+      limit,
+      ...(offset === undefined ? {} : { offset: toPointId(offset) }),
+      with_payload: true,
+      with_vector: false,
     });
-
-    // Build filter including text search
-    const baseFilter = filter ? this.buildQdrantFilter(filter) : undefined;
-    const hybridFilter = filter
-      ? {
-          ...baseFilter,
-          must: [
-            ...((baseFilter?.['must'] as unknown[]) || []),
-            {
-              key: 'text',
-              match: {
-                text: query.toLowerCase(),
-              },
-            },
-          ],
-        }
-      : undefined;
-
-    // Perform semantic search
-    debugVector.debug('[Qdrant] Performing semantic search (initial limit: {limit})', { limit: limit * 2 });
-    const searchResult = (
-      await client.query(this.collectionName, {
-        query: queryVector,
-        limit: limit * 2, // Get more results for re-ranking
-        filter: hybridFilter,
-        with_payload: true,
-      })
-    ).points;
-    debugVector.debug('[Qdrant] Semantic search completed (results: {results})', { results: searchResult.length });
-
-    // Re-rank based on combined score (semantic + keyword match)
-    debugVector.debug('[Qdrant] Re-ranking results with keyword scores');
-    const rerankedResults = searchResult.map(result => {
-      const semanticScore = result.score;
-      const text = ((result.payload as Record<string, unknown>)?.['text'] as string) || '';
-      const keywordScore = this.calculateKeywordScore(text, query);
-
-      // Weighted combination of scores
-      const combinedScore = semanticScore * (1 - keywordWeight) + keywordScore * keywordWeight;
-
-      return {
-        id: sourceId(result),
-        score: combinedScore,
-        metadata: result.payload as TMetadata,
-      };
-    });
-
-    // Sort by combined score and return top results
-    const finalResults = rerankedResults.sort((a, b) => b.score - a.score).slice(0, limit);
-
-    debugVector.debug('[Qdrant] Hybrid search completed (final results: {results})', { results: finalResults.length });
-    return finalResults;
+    const items = page.points.map(point => ({ id: sourceId(point), metadata: point.payload as TMetadata }));
+    const next = page.next_page_offset;
+    return typeof next === 'string' || typeof next === 'number' ? { items, next: String(next) } : { items };
   }
 
   async deleteDocument(id: string): Promise<void> {
@@ -586,10 +348,6 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       wait: true,
     });
     debugVector.debug('[Qdrant] Batch deletion completed (count: {count})', { count: ids.length });
-  }
-
-  async getEmbedding(text: string): Promise<number[]> {
-    return this.embeddingProvider.getEmbedding(text);
   }
 
   async getCollectionStats(): Promise<{
@@ -634,6 +392,27 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   // If needed in the future, this would require using the collection update API
   // to modify the collection's indexing configuration
 
+  /**
+   * Flat provider-agnostic filter → Qdrant-native `must` clauses:
+   *   scalar          → match: { value }   (equality)
+   *   array           → match: { any }     (IN-semantics)
+   *   {gt|gte|lt|lte} → range              (numeric range)
+   */
+  private flatFilter(filter: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!filter || Object.keys(filter).length === 0) return undefined;
+    return this.buildQdrantFilter({
+      must: Object.entries(filter).map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return { key, match: { any: value } };
+        }
+        if (isRangeCondition(value)) {
+          return { key, range: value };
+        }
+        return { key, match: { value } as Record<string, unknown> };
+      }),
+    });
+  }
+
   private buildQdrantFilter(filter: QdrantSearchFilter): Record<string, unknown> | undefined {
     const conditions: Record<string, unknown> = {};
 
@@ -653,34 +432,6 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     }
 
     return Object.keys(conditions).length > 0 ? conditions : undefined;
-  }
-
-  private calculateKeywordScore(text: string, query: string): number {
-    const lowerText = text.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-    const words = lowerQuery.split(/\s+/);
-
-    let score = 0;
-    let matchedWords = 0;
-
-    for (const word of words) {
-      if (lowerText.includes(word)) {
-        matchedWords++;
-        // Bonus for exact word match
-        const regex = new RegExp(`\\b${word}\\b`, 'gi');
-        const exactMatches = (lowerText.match(regex) || []).length;
-        score += exactMatches * 0.1;
-      }
-    }
-
-    // Base score from matched words ratio
-    const baseScore = matchedWords / words.length;
-
-    // Add position bonus (earlier matches score higher)
-    const firstMatchIndex = lowerText.indexOf(lowerQuery);
-    const positionBonus = firstMatchIndex === -1 ? 0 : Math.max(0, 1 - firstMatchIndex / 1000) * 0.2;
-
-    return Math.min(1, baseScore + score + positionBonus);
   }
 
   /**

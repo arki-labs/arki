@@ -3,6 +3,9 @@
  * Provides advanced search capabilities with caching, analytics, and hybrid search
  */
 
+import type { EmbedFailure, Embedder } from '@arki/embeddings';
+import { embed, embedMany, isEmbedFailure, isSameSpace, SpaceMismatch } from '@arki/embeddings';
+
 import type { SearchOptions as BaseSearchOptions, SearchMode, VectorSearchProvider } from '../types';
 import type { SearchCache } from './cache';
 import { debugSemantic } from '../debug.ts';
@@ -11,6 +14,8 @@ import { InMemorySearchCache } from './cache';
 
 export type SemanticSearchConfig = {
   vectorProvider: VectorSearchProvider;
+  /** Embeds queries and documents; its space must be the store's (`vectorProvider.space`). */
+  embedder: Embedder;
   cache?: SearchCache;
   analytics?: SearchAnalyticsCollector;
   enableCache?: boolean;
@@ -65,7 +70,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Perform advanced search with multiple strategies
    */
-  async search(options: SearchOptions): Promise<SearchResult<TMetadata>[]> {
+  async search(options: SearchOptions): Promise<SearchResult<TMetadata>[] | EmbedFailure> {
     debugSemantic.debug('[SearchService] Performing search (query: "{query}", mode: {mode}, limit: {limit})', {
       query: options.query,
       mode: options.mode || 'semantic',
@@ -95,7 +100,9 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     // Perform search based on mode
     if (mode === 'semantic' || mode === 'hybrid') {
       debugSemantic.debug('[SearchService] Performing vector search');
-      results = await this.performVectorSearch(options);
+      const vectorResults = await this.performVectorSearch(options);
+      if (isEmbedFailure(vectorResults)) return vectorResults;
+      results = vectorResults;
       debugSemantic.debug('[SearchService] Vector search completed (results: {results})', { results: results.length });
     }
 
@@ -154,12 +161,14 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Perform vector-based semantic search
    */
-  private async performVectorSearch(options: SearchOptions): Promise<SearchResult<TMetadata>[]> {
-    const vectorResults = await this.config.vectorProvider.searchSimilar(
-      options.query,
-      options.limit || 20,
-      options.filters,
-    );
+  private async performVectorSearch(options: SearchOptions): Promise<SearchResult<TMetadata>[] | EmbedFailure> {
+    const { embedder, vectorProvider } = this.config;
+    const query = await embed(embedder, options.query, { purpose: 'query' });
+    if (isEmbedFailure(query)) return query;
+    if (!isSameSpace(vectorProvider.space, query.space)) {
+      return SpaceMismatch({ expected: vectorProvider.space, actual: query.space });
+    }
+    const vectorResults = await vectorProvider.searchByVector(query.vector, options.limit || 20, options.filters);
 
     debugSemantic.debug('[SearchService] Vector provider returned {vectorResultsLength} results', {
       vectorResultsLength: vectorResults.length,
@@ -389,7 +398,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       metadata?: TMetadata;
     }[],
     batchSize = 100,
-  ): Promise<{ success: boolean; count: number }> {
+  ): Promise<{ success: boolean; count: number } | EmbedFailure> {
     debugSemantic.debug('[SearchService] Indexing documents (total: {total}, batchSize: {batchSize})', {
       total: documents.length,
       batchSize,
@@ -409,13 +418,26 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
         documents: batch.length,
       });
 
-      (await this.config.vectorProvider.indexDocumentsBatch?.(
-        batch.map(doc => ({
-          id: doc.id,
-          text: doc.text,
-          metadata: doc.metadata as Record<string, unknown>,
-        })),
-      )) || Promise.resolve();
+      // All or nothing per batch: a failed embed writes none of the batch's points.
+      const embedded = await embedMany(
+        this.config.embedder,
+        batch.map(doc => doc.text),
+        { purpose: 'document' },
+      );
+      if (isEmbedFailure(embedded)) return embedded;
+      // A vector from another space would sit in the index unfindable: refuse before writing any.
+      if (!isSameSpace(this.config.vectorProvider.space, embedded.space)) {
+        return SpaceMismatch({ expected: this.config.vectorProvider.space, actual: embedded.space });
+      }
+      // `embedMany` answers exactly one vector per input, in input order.
+      await Promise.all(
+        embedded.vectors.flatMap((vector, index) => {
+          const doc = batch[index];
+          if (doc === undefined) return [];
+          // A text preview for result snippets; the caller's metadata wins on a clash.
+          return [this.config.vectorProvider.upsertVector(doc.id, vector, { text: doc.text.slice(0, 1000), ...doc.metadata })];
+        }),
+      );
 
       indexed += batch.length;
     }

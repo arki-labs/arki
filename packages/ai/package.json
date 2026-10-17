@@ -75,6 +75,7 @@
     "@ai-sdk/otel": "catalog:ai",
     "@arki/async": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/embeddings": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",

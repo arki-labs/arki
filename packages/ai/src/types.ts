@@ -2,6 +2,8 @@
  * Core types and interfaces for AI operations
  */
 
+import type { EmbeddingSpace } from '@arki/embeddings';
+
 /**
  * Generic embedding provider interface
  */
@@ -37,50 +39,44 @@ export type VectorSearchResult<TMetadata = Record<string, unknown>> = {
 }
 
 /**
- * Vector search provider interface
+ * A page of points read by payload filter alone (no query vector).
+ */
+export type VectorScrollPage<TMetadata = Record<string, unknown>> = {
+  items: { id: string; metadata?: TMetadata }[];
+  /** Pass back as `offset` for the next page; absent on the last page. */
+  next?: string;
+};
+
+/**
+ * Vector search provider interface. Vectors in, vectors out: the caller embeds
+ * (`@arki/embeddings`) and the store only stores and ranks. `space` is the one
+ * embedding space every vector in this store belongs to.
  */
 export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
-  /**
-   * Index a document with its embedding
-   */
-  indexDocument(id: string, text: string, metadata?: TMetadata): Promise<void>;
+  readonly space: EmbeddingSpace;
 
   /**
-   * Index multiple documents in batch
+   * Upsert a document by its precomputed vector.
    */
-  indexDocumentsBatch?(documents: {
-    id: string;
-    text: string;
-    metadata?: TMetadata;
-  }[]): Promise<void>;
+  upsertVector(id: string, vector: ArrayLike<number>, metadata?: TMetadata): Promise<void>;
 
   /**
-   * Search for similar documents
-   */
-  searchSimilar(
-    query: string,
-    limit?: number,
-    filter?: Record<string, unknown>
-  ): Promise<VectorSearchResult<TMetadata>[]>;
-
-  /**
-   * Upsert a document by a PRECOMPUTED vector (no re-embedding).
-   * Use when the caller already holds the embedding (e.g. a batch cron that
-   * computes vectors once) or when the vector has no source text (e.g. a
-   * cluster centroid). Contrast with `indexDocument`, which embeds `text`.
-   */
-  upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void>;
-
-  /**
-   * Search by a PRECOMPUTED query vector (no re-embedding).
+   * Search by a precomputed query vector.
    * `filter` is a provider-agnostic payload filter (e.g. `{ userId, kind }`).
-   * Contrast with `searchSimilar`, which embeds the `query` string.
    */
   searchByVector(
-    vector: number[],
+    vector: ArrayLike<number>,
     limit?: number,
     filter?: Record<string, unknown>
   ): Promise<VectorSearchResult<TMetadata>[]>;
+
+  /**
+   * Read points by payload filter only, in pages. Same flat filter as `searchByVector`.
+   */
+  scroll(
+    filter: Record<string, unknown>,
+    page: { limit: number; offset?: string }
+  ): Promise<VectorScrollPage<TMetadata>>;
 
   /**
    * Delete a document from the index
@@ -91,11 +87,6 @@ export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
    * Delete multiple documents
    */
   deleteDocumentsBatch?(ids: string[]): Promise<void>;
-
-  /**
-   * Get embedding for text (may delegate to embedding provider)
-   */
-  getEmbedding(text: string): Promise<number[]>;
 }
 
 /**

@@ -2,7 +2,9 @@
  * Factory for creating Vector Search Providers
  */
 
-import type { EmbeddingProvider, VectorSearchProvider } from '../types';
+import type { EmbeddingSpace } from '@arki/embeddings';
+
+import type { VectorSearchProvider } from '../types';
 import type { QdrantConfig } from '../validation';
 import { debugVector } from '../debug.ts';
 import { MockVectorProvider } from './providers/mock';
@@ -12,7 +14,8 @@ export type VectorProviderType = 'mock' | 'qdrant';
 
 export type VectorProviderConfig = {
   type: VectorProviderType;
-  embeddingProvider: EmbeddingProvider;
+  /** The embedding space every vector in the store belongs to; its `dimensions` sizes the collection. */
+  space: EmbeddingSpace;
   config?: unknown; // Provider-specific config
 };
 
@@ -43,12 +46,12 @@ export function createVectorProvider<TMetadata = Record<string, unknown>>(
         throw new Error('Qdrant provider requires configuration');
       }
       debugVector.debug('[Factory] Initializing Qdrant provider');
-      return new QdrantVectorProvider<TMetadata>(config.config, config.embeddingProvider);
+      return new QdrantVectorProvider<TMetadata>(config.config, { space: config.space });
     }
 
     case 'mock': {
       debugVector.debug('[Factory] Initializing Mock provider');
-      return new MockVectorProvider<TMetadata>(config.embeddingProvider);
+      return new MockVectorProvider<TMetadata>({ space: config.space });
     }
 
     default: {
@@ -66,18 +69,18 @@ export function createVectorProvider<TMetadata = Record<string, unknown>>(
  */
 export function createQdrantProvider<TMetadata = Record<string, unknown>>(
   config: QdrantConfig,
-  embeddingProvider: EmbeddingProvider,
+  space: EmbeddingSpace,
 ): QdrantVectorProvider<TMetadata> {
   debugVector.debug('[Factory] Creating Qdrant provider via helper function');
-  return new QdrantVectorProvider<TMetadata>(config, embeddingProvider);
+  return new QdrantVectorProvider<TMetadata>(config, { space });
 }
 
 /**
  * Helper function to create a Mock provider for testing
  */
 export function createMockProvider<TMetadata = Record<string, unknown>>(
-  embeddingProvider: EmbeddingProvider,
+  space: EmbeddingSpace,
 ): MockVectorProvider<TMetadata> {
   debugVector.debug('[Factory] Creating Mock provider via helper function');
-  return new MockVectorProvider<TMetadata>(embeddingProvider);
+  return new MockVectorProvider<TMetadata>({ space });
 }
