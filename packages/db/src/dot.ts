@@ -75,11 +75,26 @@ import { initDbRuntimeLocal } from './runtime-local.js';
  * of the API") and principle 4 ("agent-discoverable everywhere").
  */
 export const DB_PLUGIN_ERROR_CODES = {
-  /** The `db` factory ran without a URL (`url` thunk or DB_URL, pg driver). */
+  /**
+   * The `db` factory ran without a database URL: no `url` thunk and no `DB_URL`.
+   *
+   * @fix Set `DB_URL`, or pass a `url` thunk to `db()`.
+   * @verify bun run test -- src/dot.test.ts
+   */
   dbUrlNotConfigured: 'ARKI_DB_PLUGIN_E001',
-  /** `repos({ withTx: … })`: `withTx` is the rebinding helper on every repos set, not a repository name. */
+  /**
+   * `repos({ withTx })` used `withTx` as a repository name. `withTx` is the helper that rebinds every repos set.
+   *
+   * @fix Rename the repository.
+   * @verify bun run test -- src/repos.test.ts
+   */
   reservedRepoName: 'ARKI_DB_PLUGIN_E002',
-  /** `reader(repo, ['x'])` named something that is not a method of the repository. */
+  /**
+   * `reader(repo, [name])` named something that is not a method of the repository.
+   *
+   * @fix List only method names of the repository.
+   * @verify bun run test -- src/repos.test.ts
+   */
   readerNotAMethod: 'ARKI_DB_PLUGIN_E003',
 } as const;
 
@@ -259,7 +274,7 @@ export type RepoFactories = Readonly<Record<string, (database: never) => object>
 
 /**
  * The database type the factories take, read from their own parameter
- * (Avocabo: `Db | Transaction`). Written once — in the factories.
+ * (for example `Db | Transaction`). Written once — in the factories.
  */
 export type DatabaseOf<F extends RepoFactories> = Parameters<F[keyof F]>[0];
 

@@ -50,9 +50,19 @@ import { KV } from './index.js';
  * coding agents can match against them — never parse the message.
  */
 export const KV_PLUGIN_ERROR_CODES = {
-  /** boot was called without a configured URL. */
+  /**
+   * `kv()` booted without a configured URL: no `url` option and no `KV_URL`.
+   *
+   * @fix Set `KV_URL`, pass `url`, or use `kv.optional()` for an app that runs without Redis.
+   * @verify bun run test -- src/dot.test.ts
+   */
   urlNotConfigured: 'ARKI_KV_PLUGIN_E001',
-  /** `probe: true` and the set/get/delete round trip at boot failed. */
+  /**
+   * `probe: true` was set and the set, get and delete round trip at boot failed or timed out.
+   *
+   * @fix Check the URL, the network and the credentials. Raise `probeTimeoutMs` for a slow link.
+   * @verify bun run test -- src/dot.test.ts
+   */
   probeFailed: 'ARKI_KV_PLUGIN_E002',
 } as const;
 

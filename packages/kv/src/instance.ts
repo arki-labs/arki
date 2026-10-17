@@ -1,3 +1,4 @@
+/** Lazy-singleton helpers that build a `KV` from the environment. */
 import { debugKV } from './debug.js';
 import { env } from './env.js';
 import { KV_INITIALIZATION_ERROR_CODES, KVInitializationError } from './errors.js';

@@ -10,6 +10,64 @@ semantics.
 No decorators, no controller scanning, no runtime DI container. Contracts
 are plain values; wiring is checked at compile time.
 
+## Install
+
+```sh
+bun add @arki/http
+# or
+npm install @arki/http
+```
+
+Dependencies: `zod`, `hono`, `@hono/node-server`. `@arki/http/dot` has the peer `@arki/dot`. Install it only for the Dot adapter.
+
+## Quick start
+
+Declare a route, bind a handler, and call the engine. There is no socket in this example.
+
+```ts run expect
+import { buildEngine, route, routes } from '@arki/http';
+import { z } from 'zod';
+
+const Order = z.object({ id: z.string(), total: z.number() });
+
+const getOrder = route.get('/orders/:id', {
+  id: 'orders.get',
+  params: { id: z.string() },
+  output: Order,
+});
+
+const engine = buildEngine([routes().bind(getOrder, ({ params }) => ({ id: params.id, total: 12 }))]);
+
+const response = await engine.fetch(new Request('http://localhost/orders/ord_1'));
+console.log(response.status);
+console.log(JSON.stringify(await response.json()));
+```
+
+```text
+200
+{"id":"ord_1","total":12}
+```
+
+To serve it, pass `engine.fetch` to `listen`. See [Without DOT](#without-dot).
+
+## When not to use this
+
+- You want decorators, controller scanning or a runtime DI container. Routes here are plain values.
+- You need a schema library that is not Standard Schema. Any Standard Schema works. Others do not.
+- You need GraphQL, gRPC or WebSockets. This package serves HTTP request and response, and SSE.
+- You want to expose a database to the browser. Handlers validate input, but access rules are yours to write.
+- Your app already has oRPC contracts. Use oRPC for those procedures. Mount it here with [Mounting foreign handlers](#mounting-foreign-handlers).
+
+## Runtime support
+
+| Entry | Node | Bun | Deno | Browser | Hermes |
+| --- | --- | --- | --- | --- | --- |
+| `@arki/http/client` | yes | yes | yes | yes | yes (needs `AbortController` and `fetch`) |
+| `@arki/http` (server) | yes | yes | no | no | no |
+| `@arki/http/dot` | yes | yes | no | no | no |
+
+`listen` uses `Bun.serve` under Bun and `@hono/node-server` under Node. The server entry loads `node:async_hooks`. `bun run test:runtimes` runs the client smoke test on every runtime, and `scripts/server-smoke.mjs` runs the engine on Node and Bun.
+
 ## The model
 
 A route is split in two:
@@ -22,7 +80,7 @@ A route is split in two:
   plugin's typed needs are already injected. Handlers close over real
   services; no service locator exists.
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { optional, route, routes } from '@arki/http';
 import { z } from 'zod';
 
@@ -56,7 +114,7 @@ arrives with it and encodes what leaves with it. When the forms differ, pair
 two schemas with `codec`. `decode` reads the wire, `encode` writes it, and the
 pair must reverse each other's types or the call does not compile:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { codec } from '@arki/http';
 
 const isoDate = codec(
@@ -81,7 +139,7 @@ and `query` are records with one field per key: a schema, a `codec()`, or
 `optional(...)` around either. `responses` lists the other statuses a handler
 may answer with.
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 export const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
   params: { id: OrderId }, // keys must match the :placeholders
@@ -119,7 +177,7 @@ routes().bind(getOrder, async ({ params, headers }) => {
   input the handler gets. Return issues to answer `400`; give each a path such
   as `['query', 'to']` and the message reads `query.to: …`:
 
-  ```ts
+  ```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
   route.get('/range', {
     id: 'range',
     query: { from: z.coerce.number(), to: z.coerce.number() },
@@ -145,7 +203,7 @@ return. The handler returns a failure like any value; the engine answers
 with the failure's status and the same envelope (`code`, `message`,
 `remediation`, `data`). The output schema never runs on a failure.
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 export const OrderNotFound = defineFailure('order.not_found', {
   status: 404,
   data: z.object({ id: z.string() }),
@@ -167,7 +225,7 @@ its schema must be JSON-safe: a `Date` field fails `revive` on the client.
 A feature declares its HTTP surface with `endpoints(build)`. The builder
 runs once at boot with the feature's typed needs:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { feature } from '@arki/dot/feature';
 import { service } from '@arki/dot/plugin';
 import { endpoints, routes } from '@arki/http';
@@ -192,7 +250,7 @@ core, so the routes file needs no annotation and no runtime import of the
 feature. `contracts` are the feature's manifest actions (a chain feature has no
 `actions` list of its own):
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 // features/orders/entrypoints/routes.ts
 import { routes } from '@arki/http';
 import { endpoints } from '@arki/http/dot';
@@ -215,7 +273,7 @@ routes, fewer places for them to hide.)
 features. It serves the routes of every mounted feature, in mount order —
 the app lists its features once:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { defineApp, hookSignals } from '@arki/dot';
 import { http } from '@arki/http/dot';
 
@@ -237,7 +295,7 @@ Route bundles published as plain token services (not by a feature) go in
 to typecheck when no earlier unit provides it. Bundles come first in the
 route table, then feature routes:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 export const AdminRoutes = token<RouteBundle>()('admin.routes');
 
 defineApp('shop-api')
@@ -265,7 +323,7 @@ Derivers run in declaration order; each adds a key later handlers (and
 later derivers) see typed. A deriver that throws `HttpError` is the whole
 "guard" story:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { derive, HttpError, HTTP_ERROR_CODES } from '@arki/http';
 
 // inside a `provides` factory — `auth` is an injected singleton
@@ -294,7 +352,7 @@ request/response — CORS, request logging — pass fetch-shaped middleware
 to `http()` (first = outermost). A middleware that throws `HttpError`
 short-circuits into the coded envelope:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 http({ port: 3000, bundles: [OrdersRoutes], middleware: [requestLog(logger), cors(origins)] })
 ```
 
@@ -306,7 +364,7 @@ users compose the same way with `composeMiddleware(engine.fetch, [...])`.
 
 `idempotent(...)` from `@arki/http/idempotency` is an `HttpMiddleware`. It runs each listed request once per `Idempotency-Key` and answers a repeat with the stored response. It is portable (Web Crypto only). The store is a `ResponseCache`: `@arki/journal/http` (Postgres) or `@arki/kv/redis/idempotency` (Redis).
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { idempotent } from '@arki/http/idempotency';
 import { responseCache } from '@arki/journal/http';
 
@@ -335,7 +393,7 @@ http({
 
 `@arki/http/webhooks` checks that a webhook comes from the sender who holds the secret. It is portable (Web Crypto only), and `subtle.verify` compares in constant time.
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
 
 const partnerEvents = routes()
@@ -362,7 +420,7 @@ binding is an async generator. Every yield is encoded with the event
 schema and framed as a `data:` message; client disconnect aborts
 `ctx.signal` and runs the generator's `finally`:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 const progress = route.sse('/orders/:id/progress', {
   id: 'orders.progress',
   event: z.discriminatedUnion('type', [Queued, Shipped]),
@@ -385,13 +443,13 @@ fetch-native end to end.
 An oRPC router, a tRPC fetch adapter, or any fetch-shaped handler mounts
 as one manifest route — the migration on-ramp for existing backends:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 routes().mount('/rpc', rpcHandler, { id: 'rpc', transport: 'orpc' });
 ```
 
 ## OpenAPI
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { toOpenApi } from '@arki/http';
 
 const document = toOpenApi([listOrders, createOrder, progress], {
@@ -422,7 +480,7 @@ without booting anything.
 `createClient` builds a fetch client from the same contracts the server binds.
 Pass one contract for one call, or an object of contracts for one call per key:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { createClient } from '@arki/http/client';
 
 const orders = createClient({ listOrders, getOrder }, { baseUrl: 'https://api.example.com' });
@@ -454,7 +512,7 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
 
 ### Retries, timeouts, and calling URLs you do not control
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { backoff, createRetryPolicy } from '@arki/resilience';
 import { createClient } from '@arki/http/client';
 import { publicFetch } from '@arki/http/public-fetch';
@@ -468,7 +526,7 @@ const partner = createClient(partnerRoutes, {
 ```
 
 - **`policy`** runs each attempt; any `@arki/resilience` policy fits (one with a
-  fallback does not: its result might not be a response). The client, not the
+  fallback does not: its result may not be a response). The client, not the
   policy, decides what is retried: only an outcome `retryOn` accepts goes back
   into the policy. Anything else leaves it at once, even if the policy would
   retry every error. When the policy gives up, the last answer is decoded as
@@ -498,7 +556,7 @@ const partner = createClient(partnerRoutes, {
 
 The core is framework-agnostic:
 
-```ts
+```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
 import { buildEngine, listen, routes } from '@arki/http';
 
 const engine = buildEngine([bundle]);
@@ -507,6 +565,37 @@ const handle = await listen(engine.fetch, { port: 3000 });
 
 `listen` uses `Bun.serve` under Bun and `@hono/node-server` under Node.
 Routing is Hono internally; no Hono type appears in the public API.
+
+## Public imports
+
+| Import | What it holds |
+| --- | --- |
+| `@arki/http` | `route`, `routes`, `buildEngine`, `listen`, `derive`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
+| `@arki/http/dot` | `http()`, the Dot driver, and `endpoints()` |
+| `@arki/http/client` | the typed fetch client |
+| `@arki/http/idempotency` | `idempotent(...)`, an idempotency-key middleware |
+| `@arki/http/webhooks` | signature schemes for signed webhooks |
+| `@arki/http/context` | the ambient request context, a last resort |
+| `@arki/http/projection` | the `dot explain --as openapi` projection |
+| `@arki/http/public-fetch` | a fetch that refuses private addresses |
+
+## Failure behaviour
+
+Handlers and derivers fail with an `HttpError` or return a failure. The engine turns both into a coded envelope on the wire:
+
+```text
+{ "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }
+```
+
+Rules:
+
+- Match on `error.code`, never on the message.
+- Validation failures answer 400 with `ARKI_HTTP_E400` and the failing fields in `data`.
+- A handler that throws something else answers 500 with `ARKI_HTTP_E500`. In production the message is redacted.
+- Boot and shutdown problems (`E0NN`) do not reach the wire. They surface in `app.diagnostics`.
+- `listen` and `stop` reject with a coded error you can catch.
+
+See [Error codes](#error-codes) for the full list.
 
 ## Error codes
 
@@ -539,6 +628,24 @@ Stable API — match on codes, never parse messages.
 `E4xx`/`E5xx` codes surface on the wire in the error envelope (`E510` and
 `E511` answer 500). Unexpected
 error messages are redacted when `NODE_ENV=production`.
+
+## Limits
+
+- **Request bodies.** A body larger than the route allows answers 413 (`ARKI_HTTP_E413`). A webhook route reads at most `maxBodyBytes`.
+- **Idempotency.** A key is remembered by the store you give it. A key reused with a different body answers 422. A request still running answers 409.
+- **Webhooks.** A signed time outside the window answers 401 (`ARKI_HTTP_E422`). Keep your clock in sync.
+- **Drain.** `stop` waits `drainTimeoutMs` (10 s by default), then rejects with `ARKI_HTTP_E005`.
+- **Output.** Output is validated against the schema. A schema that keeps undeclared keys lets them out. Pick the fields you return.
+- **OpenAPI.** A schema without a JSON Schema form throws `ARKI_HTTP_E013`. Wrap it with `withJsonSchema`.
+- **Outbound URLs.** `public-fetch` refuses private, loopback and link-local addresses, also after DNS and redirects.
+
+## Documentation
+
+The [agent guide](docs/agent-guide.md) has the model, a task map and the rules. The Dot docs (`packages/dot/docs/`) cover plugin authoring and lifecycle.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, your runtime and the error `code`.
 
 <!-- bench:start -->
 ## Benchmarks

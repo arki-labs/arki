@@ -161,9 +161,19 @@ export type BundleNeeds<TBundles extends readonly BundleToken[]> = {
  * Exported so consumers and coding agents can match against them.
  */
 export const HTTP_PLUGIN_ERROR_CODES = {
-  /** A bundle token's service was missing from the boot context (erased composition only). */
+  /**
+   * A bundle token service was missing from the boot context (erased composition only).
+   *
+   * @fix Provide the service in the plugin that the route bundle needs.
+   * @verify bun run test -- src/tests/bundle.test.ts
+   */
   bundleMissing: 'ARKI_HTTP_E008',
-  /** A feature's `routes` slice is not a route bundle (hand-minted slice, not `endpoints()`). */
+  /**
+   * A feature `routes` slice is not a route bundle (a hand-made slice, not `endpoints()`).
+   *
+   * @fix Build the slice with `endpoints()`.
+   * @verify bun run test -- src/tests/dot.test.ts
+   */
   routesSliceInvalid: 'ARKI_HTTP_E010',
 } as const;
 

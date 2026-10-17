@@ -2,7 +2,7 @@
 
 Key-value store abstraction with pluggable adapters for ARKI. Wraps [Keyv](https://keyv.org/) for general key-value access and [`rate-limiter-flexible`](https://github.com/animir/node-rate-limiter-flexible) for Redis-backed rate limiting. Provides automatic TLS handling (via `rediss://` URLs), Upstash support, and a graceful in-memory fallback when Redis is unreachable.
 
-## Installation
+## Install
 
 ```sh
 npm install @arki/kv
@@ -11,6 +11,36 @@ bun add @arki/kv
 # or
 pnpm add @arki/kv
 ```
+
+## Quick start
+
+Open a store, write a value with a TTL, read it back, and close.
+
+```ts
+import { KV } from '@arki/kv';
+
+export async function demo(): Promise<string | undefined> {
+  const kv = new KV('redis://localhost:6379', 'my-app');
+  await kv.set('hello', 'world', 60); // 60-second TTL
+  const value = await kv.get<string>('hello');
+  await kv.close();
+  return value; // 'world'
+}
+```
+
+This needs a Redis at that URL, so the block is compiled and not run. In an app, read the URL from `KV_URL` with `createKV('my-app')`.
+
+## When not to use this
+
+- You need a store that is not Redis. The adapter is Redis through Keyv. There is no other backend.
+- You need a durable database. Keys expire and Redis can lose data. Keep records of truth in Postgres.
+- You need strict global rate limits when Redis is down. The limiter falls back to memory, per process. Limits are then per instance.
+- You need transactions across keys. `KV` is get, set and delete, with a TTL.
+- You need pub/sub or queues. Use a queue library.
+
+## Runtime support
+
+Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which need sockets. It does not run in a browser, Deno or Hermes. `@arki/kv/errors` has no Redis import. `RateLimitExceededError` can be matched anywhere.
 
 ## Usage
 
@@ -48,6 +78,7 @@ import { createKV } from '@arki/kv';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
 const kv = createKV('my-app');
+const userId = 'usr_1';
 const limiter = kv.getRateLimiter('login', { points: 5, duration: 60 });
 
 try {
@@ -66,23 +97,18 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
 `@arki/kv/redis/idempotency` stores replayable HTTP responses for the `idempotent()` middleware of `@arki/http/idempotency`. It uses the `ioredis` client you already have.
 
 ```ts
+import { Redis } from 'ioredis';
+
 import { idempotent } from '@arki/http/idempotency';
 import { redisResponseCache } from '@arki/kv/redis/idempotency';
+
+const redis = new Redis(process.env.KV_URL ?? 'redis://localhost:6379');
+const scope = (): string => 'tenant-1';
 
 idempotent({ cache: redisResponseCache(redis), scope, routes: ['POST /orders'], ttl: 86_400_000 });
 ```
 
 `begin` is `SET key value NX PX ttl`, so only one first request starts. `finish` and `abandon` are Lua scripts that check the request's owner token and write in one step: a slow request whose key expired and was taken by another cannot touch the new entry. The TTL counts from `begin`; `finish` keeps the remaining time (`KEEPTTL`, Redis 6 or newer). Keys use the prefix `idem:` unless you pass `{ prefix }`. `@arki/http` is an optional peer.
-
-## API
-
-- `@arki/kv`
-  - `KV` — Redis-backed key-value + rate-limiter client.
-  - `createKV(namespace?, rateLimitPrefix?)` — env-driven KV factory.
-  - `createRateLimitKV(namespace?)` — env-driven KV factory tuned for rate limiting.
-- `@arki/kv/env` — `env` object holding the validated KV/Redis env vars.
-- `@arki/kv/errors` — `RateLimitExceededError` with HTTP-header helpers.
-- `@arki/kv/instance` — `initializeKV`, `createKVInstance` lazy-singleton helpers.
 
 ## Environment variables
 
@@ -93,6 +119,36 @@ idempotent({ cache: redisResponseCache(redis), scope, routes: ['POST /orders'], 
 | `RATE_LIMIT_REDIS_URL`    | Dedicated Redis URL for rate limiting.        |
 | `RATE_LIMIT_PREFIX`       | Prefix for rate-limit keys (default `rl`).    |
 | `CACHE_TTL_DEFAULT`       | Default TTL in seconds (default `3600`).      |
+
+## Public imports
+
+| Import | What it holds |
+| --- | --- |
+| `@arki/kv` | `KV`, `createKV`, `createRateLimitKV` |
+| `@arki/kv/env` | `env`, the validated variables |
+| `@arki/kv/errors` | `RateLimitExceededError`, `KV_INITIALIZATION_ERROR_CODES`, `KVInitializationError` |
+| `@arki/kv/instance` | `initializeKV`, `createKVInstance` |
+| `@arki/kv/redis/idempotency` | `redisResponseCache`, the response cache for `@arki/http/idempotency` |
+| `@arki/kv/dot` | `kv()`, `kv.optional()`, the Dot plugin |
+
+## Failure behaviour
+
+- A rate limit hit throws `RateLimitExceededError`. Answer 429 and send `cause.getHttpHeaders(points)`.
+- A missing URL: `createKV` throws. `createKVInstance` returns `null` in development and throws a `KVInitializationError` in production. Match on `error.code` (`KV_INIT_E001` to `KV_INIT_E003`).
+- The Dot plugin fails boot with `ARKI_KV_PLUGIN_E001` (no URL) or `ARKI_KV_PLUGIN_E002` (the probe failed).
+- If the rate-limiter Redis client is not ready, the limiter uses memory instead of throwing. Your code keeps working. Persistence is briefly lost.
+- `get` returns `undefined` for a missing or expired key. It does not throw.
+
+Never match on the message.
+
+## Limits
+
+- **TTL units.** `set(key, value, ttl)` takes seconds. The idempotency cache takes milliseconds (`ttl: 86_400_000`).
+- **Rate-limit fallback.** In memory, per process. With 3 instances and 5 points per minute, a user can make up to 15 attempts while Redis is down.
+- **Idempotency cache.** Needs Redis 6 or newer (`KEEPTTL`). The TTL counts from `begin`.
+- **Lookup cost.** `getRateLimiter(id, options)` builds a cache key by serialising the options on every call. Hold the limiter if the call is hot.
+- **Probe.** `probe: true` gives up after `probeTimeoutMs` (default 5000).
+- **Values.** Values go through Keyv serialisation. Store JSON-safe data.
 
 ## Documentation
 
@@ -117,6 +173,8 @@ as `kv()` and publishes `kv` as `KV | null`:
 import type { Provided } from '@arki/dot/plugin';
 import { kv } from '@arki/kv/dot';
 
+const env = { KV_URL: process.env.KV_URL };
+
 export const cache = kv.optional(() => ({ url: env.KV_URL, namespace: 'my-app', probe: true }));
 export type Kv = Provided<typeof cache.provides.kv>; // KV | null
 ```
@@ -134,6 +192,10 @@ request. An unreachable Redis never answers, so the probe gives up after
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the Redis version and the error `code`.
 
 <!-- bench:start -->
 ## Benchmarks

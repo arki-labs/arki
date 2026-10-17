@@ -1,3 +1,4 @@
+/** Open a node-postgres pool and wrap it in Drizzle: `initDb`. */
 import type { AnyRelations } from 'drizzle-orm';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 import type { PoolConfig } from 'pg';

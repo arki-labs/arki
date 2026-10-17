@@ -1,0 +1,43 @@
+# @arki/http
+
+> Typed HTTP for ARKI: route contracts as data, handlers validated by any Standard Schema, request-scope derivers, SSE, deterministic OpenAPI, and a Dot driver. It is not a decorator framework and has no service locator.
+
+Match errors on `error.code`, never on the message. Output is only as narrow as its schema.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/http`: typed HTTP for ARKI. `BASE_CTX_KEYS`, `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `UnsafeUrlError`, `buildEngine`, `codec`, `composeMiddleware`, `contractMeta`, `derive`, `describeInternalError`, `endpoints`; and 61 more.
+- `@arki/http/dot`: DOT adapter for @arki/http — the `http()` driving adapter. `HTTP_PLUGIN_ERROR_CODES`, `endpoints`, `http`, `registerRoutes`; types `BundleNeeds`, `BundleToken`, `EndpointsEntrypoint`, `HttpOptions`, `HttpServer`, `HttpServices`.
+- `@arki/http/projection`: DOT projection entry point for `dot explain --as openapi`. `project`.
+- `@arki/http/client`: A typed fetch client built from the same route contracts the server binds. `createClient`, `retryTransient`; types `ClientCall`, `ClientInput`, `ClientOptions`, `ClientOutput`, `ClientPolicy`, `RetryOutcome`.
+- `@arki/http/idempotency`: Idempotency keys for HTTP: `idempotent(...)` is an `HttpMiddleware` that runs a request once per key and answers a repeat with the stored response. `idempotent`, `storedResponse`; types `BeginResult`, `IdempotentOptions`, `ResponseCache`, `StoredResponse`.
+- `@arki/http/webhooks`: Signed webhooks in: check that a request comes from the sender who holds the secret. `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `hmac`, `standardWebhooks`, `stripe`, `verifyWebhook`; types `HmacSchemeOptions`, `SignOptions`, `VerifiedWebhook`, `VerifyOptions`, `VerifyWebhookOptions`; and 4 more.
+- `@arki/http/context`: Ambient request context — the last resort. `requestContext`, `runWithRequestContext`.
+- `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `UnsafeUrlError`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`, `systemTransport`, `validatePublicURL`; types `PublicFetchTransport`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview and the examples.
+
+## By task
+
+- [Add a route](docs/agent-guide.md#add-a-route)
+- [Return a typed failure](docs/agent-guide.md#return-a-typed-failure)
+- [Add a deriver](docs/agent-guide.md#add-a-deriver)
+- [Make a write safe to repeat](docs/agent-guide.md#make-a-write-safe-to-repeat)
+- [Receive a signed webhook](docs/agent-guide.md#receive-a-signed-webhook)
+- [Publish OpenAPI](docs/agent-guide.md#publish-openapi)
+- [Call a route from a client](docs/agent-guide.md#call-a-route-from-a-client)
+
+## Rules that bite
+
+- A handler that returns a `Response` needs `output: raw()`, or the engine answers 500.
+- A zod object drops undeclared keys on output. An arktype object keeps them. Never return a whole database row.
+- A contract must agree with itself: params match the path. It throws at declaration.
+- Derivers run before the handler. Throw `HttpError` to reject.
+- `public-fetch` refuses private addresses after DNS and redirects. Do not work around it.
+- Boot codes (`E0NN`) appear in `app.diagnostics`. Wire codes appear in the envelope.

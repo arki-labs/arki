@@ -1,15 +1,36 @@
 # @arki/contracts
 
-> Shared Zod schemas for arki apps: prefixed ids, keyset pagination, Drizzle-derived branded schemas, and one typed identity per oRPC contract procedure.
+> Shared Zod schemas for arki apps: prefixed ids, keyset pagination, Drizzle-derived branded schemas, and one typed identity per oRPC contract procedure. It is not a database layer and not a replacement for Zod.
 
-## Entries
-- @arki/contracts — z (zod), formData, defineId(prefix), keyset(order), pageInput(keyset), page(item), Page<T>. Portable (Node, Bun, Deno, browser, Hermes).
-- @arki/contracts/drizzle — createSelectSchema, createInsertSchema, createUpdateSchema (branded, from a Drizzle table). Peer: drizzle-orm.
-- @arki/contracts/orpc — operations(contract) → a frozen tree with an Operation { path, name, meta } at each leaf; operationAt(contract, path) → Operation | undefined; OPERATION ('~op'), Identified<Op>, operationOf(carrier) (throws TypeError without one); types Operation, AnyOperation, OperationOf<C>, Operations<C>, InputOf, OutputOf, ErrorOf, MetaOf. Portable. Peer: @orpc/contract.
+Match errors on `error.code`, never on the message. The main entry never loads Drizzle or oRPC.
 
-## Rules
-- Policy goes on the contract, once. Mark it in the contract meta (e.g. offlineSafe(p) from @arki/offline/orpc); read it from the operation. Never restate it on the client.
-- name === path.join('.') — the same string the server stores (offline_idempotency_keys.procedure_path).
-- A contract key may not contain "." or be one of ~op, key, call, queryKey, queryOptions, infiniteKey, infiniteOptions, mutationKey, mutationOptions: operations() throws TypeError naming the path.
-- Input types are the client side of the schema (before transforms); output types the parsed side.
-- Works on minifyContractRouter output (reads path and meta only).
+## Import paths
+
+<!-- llms:start -->
+- `@arki/contracts`: Browser-safe schema tools: Zod, form data, prefixed ids, keyset pagination and coded errors. `$brand`, `$input`, `$output`, `CONTRACTS_ERROR_CODES`, `ContractsError`, `INVALID`, `NEVER`, `TimePrecision`, `ZodAny`, `ZodArray`, `ZodBase64`, `ZodBase64URL`; and 311 more.
+- `@arki/contracts/drizzle`: Branded select, insert and update schemas built from a Drizzle table. `COLUMN_ZOD_SCHEMA`, `bufferSchema`, `createInsertSchema`, `createSchemaFactory`, `createSelectSchema`, `createUpdateSchema`, `jsonSchema`, `literalSchema`.
+- `@arki/contracts/orpc`: Operations: one typed identity per contract procedure. `OPERATION`, `operationAt`, `operationOf`, `operations`; types `AnyOperation`, `ErrorOf`, `Identified`, `InputOf`, `MetaOf`, `Operation`, `OperationOf`, `Operations`; and 1 more.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview and the examples.
+
+## By task
+
+- [Declare an id kind once](docs/agent-guide.md#declare-an-id-kind-once)
+- [Paginate a list with a keyset](docs/agent-guide.md#paginate-a-list-with-a-keyset)
+- [Give a contract procedure a typed identity](docs/agent-guide.md#give-a-contract-procedure-a-typed-identity)
+- [Build branded table schemas](docs/agent-guide.md#build-branded-table-schemas)
+
+## Rules that bite
+
+- Policy goes on the contract, once. Never restate it on the client.
+- `name === path.join('.')`: the same string the server stores as `procedure_path`.
+- A contract key may not contain `.` or be a reserved query-utils name. `operations()` throws.
+- End a keyset on a unique key and order by NOT NULL columns.
+- A cursor only works with the keyset that made it. It is opaque, not secret.
+- `defineId().create()` needs `crypto.getRandomValues`. React Native needs a polyfill.
+- No two id prefixes in one app may be equal or start one another. Call `assertUniqueIdPrefixes` in a test.

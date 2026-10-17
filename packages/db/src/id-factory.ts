@@ -1,3 +1,4 @@
+/** Prefixed id factories (`createIdFactory`) and `idColumns` for ids declared with `defineId`. */
 import { createId as createCuid } from '@paralleldrive/cuid2';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { varchar } from 'drizzle-orm/pg-core';

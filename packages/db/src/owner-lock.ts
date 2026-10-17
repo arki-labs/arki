@@ -29,7 +29,12 @@ import { debugInit } from './debug.js';
 
 /** Stable error codes of `@arki/db/runtime-local`. Match on them, never on the message. */
 export const DB_RUNTIME_LOCAL_ERROR_CODES = {
-  /** The PGlite data directory is open in a live process (or already open in this one). */
+  /**
+   * The PGlite data directory is open in a live process, or already open in this one.
+   *
+   * @fix Stop the other process, or give this one its own data directory.
+   * @verify bun run test -- src/owner-lock.test.ts
+   */
   dataDirInUse: 'ARKI_DB_LOCAL_E001',
 } as const;
 

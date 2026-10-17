@@ -1,3 +1,4 @@
+/** Branded select, insert and update schemas built from a Drizzle table. */
 import { getColumns } from 'drizzle-orm';
 import {
   createInsertSchema as drizzleCreateInsertSchema,

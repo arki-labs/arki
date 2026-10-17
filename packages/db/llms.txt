@@ -1,37 +1,56 @@
 # @arki/db
 
-> Drizzle ORM helpers for ARKI: Postgres and PGlite runtimes, branded ids, feature-owned schema, repositories for Dot features, and serializable transactional procedures for oRPC.
+> Drizzle ORM helpers for ARKI: Postgres and PGlite runtimes, branded ids, feature-owned schema, repositories for Dot features, and serializable transactional procedures for oRPC. It is not a query builder and not a migration tool.
+
+Only SQLSTATE `40001` and `40P01` are retried. Effects inside a transaction run once per attempt.
 
 ## Import paths
-- `@arki/db` / `@arki/db/init`: `createDb`, `initDb`. Imports node-postgres; server only.
-- `@arki/db/dot`: the Dot plugins `db()`, `dbMigrations()`, `repos()`, `reader()`, `advisoryLocks()`.
-- `@arki/db/transaction`: `runTransaction`, `retryableSqlState`, `DbTransactionError`, `isDbTransactionError`, `DB_TRANSACTION_ERROR_CODES`. Portable.
-- `@arki/db/orpc`: `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`, `TransactionContext`. Portable; optional peer `@orpc/server`.
-- `@arki/db/eslint`: the rule `db/no-effects-in-transaction`. Tooling only; needs typed linting.
-- `@arki/db/id`, `@arki/db/id-factory`, `@arki/db/temporal`, `@arki/db/pagination`, `@arki/db/orm`, `@arki/db/pg`, `@arki/db/runtime-local`: see the README.
+
+<!-- llms:start -->
+- `@arki/db`: Open a node-postgres pool and wrap it in Drizzle: `initDb`. `DB_COMPOSITION_ERROR_CODES`, `DbCompositionError`, `composeSchema`, `createDb`, `createUnitOfWork`, `getDbConnectionOptions`, `getDbConnectionParams`, `initDb`, `initDbWithOptions`; types `ComposedSchema`, `TransactionalDb`, `UnitOfWork`; and 1 more.
+- `@arki/db/env`: Validated database environment variables (`DB_URL`, pool sizes and timeouts). `env`.
+- `@arki/db/init`: Open a node-postgres pool and wrap it in Drizzle: `initDb`. `DB_COMPOSITION_ERROR_CODES`, `DbCompositionError`, `composeSchema`, `createDb`, `createUnitOfWork`, `getDbConnectionOptions`, `getDbConnectionParams`, `initDb`, `initDbWithOptions`; types `ComposedSchema`, `TransactionalDb`, `UnitOfWork`; and 1 more.
+- `@arki/db/factory`: Build a Drizzle database from the environment: `createDb` and the connection-option helpers. `createDb`, `getDbConnectionOptions`, `getDbConnectionParams`.
+- `@arki/db/builder`: A typed builder for event-sourced projections (read models). `initDb`; types `DbBuilder`, `InitialBuilder`, `ProjectionBuilder`, `ProjectionBuilderRoot`, `ProjectionBuilderWithEvents`, `ProjectionBuilderWithName`, `ProjectionDefinition`, `ProjectionHandler`, `ProjectionHandlerContext`, `ProjectionMiddleware`, `ProjectionMiddlewareContext`; and 1 more.
+- `@arki/db/client`: types-only client surface.
+- `@arki/db/runtime-local`: An embedded PGlite database with an owner lock on its data directory. `DB_RUNTIME_LOCAL_ERROR_CODES`, `DbRuntimeLocalError`, `initDbRuntimeLocal`; types `DbRuntimeLocalErrorCode`, `PgliteInitOptions`.
+- `@arki/db/id`: Prefixed cuid2 ids and the column helpers that store them. `AggregatedField`, `CONSTANTS`, `Column`, `ColumnAliasProxyHandler`, `ColumnBuilder`, `ColumnTableAliasProxyHandler`, `ConsoleLogWriter`, `Count`, `DefaultLogger`, `DrizzleError`, `DrizzleQueryError`, `FakePrimitiveParam`; and 328 more.
+- `@arki/db/id-factory`: Prefixed id factories (`createIdFactory`) and `idColumns` for ids declared with `defineId`. `AggregatedField`, `CONSTANTS`, `Column`, `ColumnAliasProxyHandler`, `ColumnBuilder`, `ColumnTableAliasProxyHandler`, `ConsoleLogWriter`, `Count`, `DefaultLogger`, `DrizzleError`, `DrizzleQueryError`, `FakePrimitiveParam`; and 328 more.
+- `@arki/db/orm`: Re-exports of `drizzle-orm` and its zod helpers, plus `mergeRelations`. `AggregatedField`, `CONSTANTS`, `Column`, `ColumnAliasProxyHandler`, `ColumnBuilder`, `ColumnTableAliasProxyHandler`, `ConsoleLogWriter`, `Count`, `DefaultLogger`, `DrizzleError`, `DrizzleQueryError`, `FakePrimitiveParam`; and 324 more.
+- `@arki/db/pg`: Re-export of `drizzle-orm/pg-core`, so a table file imports from one place. `Check`, `CheckBuilder`, `DefaultViewBuilderCore`, `ExtraConfigColumn`, `ForeignKey`, `ForeignKeyBuilder`, `Index`, `IndexBuilder`, `IndexBuilderOn`, `IndexedColumn`, `ManualMaterializedViewBuilder`, `ManualViewBuilder`; and 382 more.
+- `@arki/db/temporal`: Postgres columns that read and write `@arki/date` values instead of `Date`. `instant`, `instantFromDriver`, `instantToDriver`, `plainDate`, `plainDateFromDriver`, `plainDateToDriver`; types `InstantColumnConfig`.
+- `@arki/db/bun`: The Bun SQL driver entry, used through the `bun` export condition. `BunSQLDatabase`, `createDb`, `getDbConnectionOptions`, `getDbConnectionParams`, `initDb`.
+- `@arki/db/dot`: DOT adapter for @arki/db. `DB_PLUGIN_ERROR_CODES`, `db`, `dbMigrations`, `reader`, `repos`, `transactions`, `txRepos`; types `DatabaseOf`, `DbDotOptions`, `DbServices`, `OpenTransaction`, `PgDbDotOptions`; and 7 more.
+- `@arki/db/migrate`: Apply Drizzle migrations to a handle opened by @arki/db, whichever driver produced it. `migrateDb`, `pendingMigrations`, `readMigrations`; types `MigratableDb`, `MigrateDbOptions`, `MigrationMeta`.
+- `@arki/db/pagination`: Keyset pagination, the server half. `keysetQuery`; types `KeysetColumns`, `KeysetQuery`.
+- `@arki/db/transaction`: run work in one SERIALIZABLE transaction, and run it again when PostgreSQL says the transaction lost a race. `DB_TRANSACTION_ERROR_CODES`, `DbTransactionError`, `isDbTransactionError`, `parseTransactionSettings`, `retryableSqlState`, `runTransaction`; types `DbTransactionErrorCode`, `ResolvedTransactionSettings`, `RetryableSqlState`, `TransactionOptions`, `TransactionSettings`, `TransactionalDb`.
+- `@arki/db/errors`: Questions about a Postgres error, answered the same way for every driver (node-postgres, PGlite, Bun SQL) and through Drizzle's `DrizzleQueryError`. `isUniqueViolation`.
+- `@arki/db/orpc`: one oRPC middleware that makes a contract-first procedure a SERIALIZABLE Postgres transaction. `transactionalProcedure`, `transactionalProcedureConfig`; types `TransactionContext`, `TransactionRepositorySource`, `TransactionScopeOf`, `TransactionalMiddleware`, `TransactionalProcedureOptions`.
+- `@arki/db/eslint`: the `no-effects-in-transaction` rule. `default`, `noEffectsInTransaction`.
+<!-- llms:end -->
 
 ## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): usage, Dot features, transactional procedures.
-- [Agent guide](docs/agent-guide.md): transactions in depth. File map, decision table, the SQLSTATE allowlist, the error codes, words easy to mix up.
 
 ## By task
-- [Make a procedure transactional](README.md#transactional-procedures-transactionalprocedure), and [in a Dot feature](README.md#transactional-procedures-in-a-feature)
-- [Handle a 409 from a transactional procedure](docs/agent-guide.md#decide-what-to-do-with-a-failure)
-- [Run a journal command inside one](docs/agent-guide.md#ambiguous-commit-recovery)
-- [Read a `db/no-effects-in-transaction` report](docs/agent-guide.md#lint-reports)
-- [Retry outside oRPC (jobs, scripts)](README.md#serializable-retry-outside-orpc-runtransaction)
 
-## Files
-- `src/transaction.ts`: settings, `runTransaction`, the SQLSTATE classifier, `DbTransactionError`.
-- `src/orpc.ts`: the middleware, its pipeline checks, `transactionalProcedureConfig`.
-- `src/eslint.ts`: the lint rule.
-- `src/composition.ts`: `TransactionalDb`, `createUnitOfWork`, `composeSchema`.
-- `src/dot.ts`: the Dot plugins, `Repos<F>`, `RepoSet<F>`.
+- [Make a procedure transactional](docs/agent-guide.md#make-a-procedure-transactional)
+- [Retry a transaction outside oRPC](docs/agent-guide.md#retry-a-transaction-outside-orpc)
+- [Handle a 409 from a transactional procedure](docs/agent-guide.md#decide-what-to-do-with-a-failure)
+- [Recover from an ambiguous commit](docs/agent-guide.md#ambiguous-commit-recovery)
+- [Read a lint report](docs/agent-guide.md#lint-reports)
+- [Declare an id and its columns](docs/agent-guide.md#declare-an-id-and-its-columns)
+- [Paginate with a keyset](docs/agent-guide.md#paginate-with-a-keyset)
+- [Back up and restore a database](docs/recipes/backup-restore.md)
 
 ## Rules that bite
+
 - `transact` is the last `.use()` of the procedure. Anything after it reruns on every retry (`ARKI_DB_TX_E004`).
-- `implement(contract, transactionalProcedureConfig)`, or output is validated after the commit (`ARKI_DB_TX_E004`).
-- No `fetch`, queue writes or `.effect()` inside transactional code: they run once per attempt and do not roll back.
-- Only `40001` and `40P01` are retried. A lost connection around `COMMIT` is never retried; recover with an idempotency key and a journal receipt.
+- Pass `transactionalProcedureConfig` to `implement`, or output is validated after the commit.
+- No `fetch`, queue writes or `.effect()` inside transactional code. They run once per attempt and do not roll back.
+- A lost connection around `COMMIT` is never retried. Recover with an idempotency key and a journal receipt.
 - PGlite never conflicts (one connection). Prove retry behaviour on real PostgreSQL.
-- In a Dot feature, rename the pool-bound repos source to `repositories`; the bound set is `repos`.
+- In a Dot feature, rename the pool-bound repos source to `repositories`. The bound set is `repos`.

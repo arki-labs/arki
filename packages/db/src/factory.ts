@@ -1,3 +1,4 @@
+/** Build a Drizzle database from the environment: `createDb` and the connection-option helpers. */
 import type { AnyRelations, Logger } from 'drizzle-orm';
 
 import { getPoolOptions } from './connection-options.js';

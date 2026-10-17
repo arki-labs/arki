@@ -1,0 +1,38 @@
+# @arki/kv
+
+> A Redis key-value store and rate limiter for ARKI, built on Keyv and rate-limiter-flexible, with a Dot plugin and a Redis cache for HTTP idempotency. It is not a database and has no other backend than Redis.
+
+A TTL on `KV` is seconds. A TTL on the idempotency cache is milliseconds.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/kv`: A Redis-backed key-value store and rate-limiter client (`KV`) with an in-memory fallback. `KV`, `createKV`, `createRateLimitKV`.
+- `@arki/kv/env`: The validated KV and Redis environment variables (`KV_URL`, `RATE_LIMIT_REDIS_URL`, ...). `env`.
+- `@arki/kv/errors`: `RateLimitExceededError` and the initialization error codes. `KVInitializationError`, `KV_INITIALIZATION_ERROR_CODES`, `RateLimitExceededError`.
+- `@arki/kv/instance`: Lazy-singleton helpers that build a `KV` from the environment. `createKVInstance`, `initializeKV`, `kv`.
+- `@arki/kv/redis/idempotency`: The HTTP response cache on Redis: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `redisResponseCache`; types `RedisResponseCacheOptions`.
+- `@arki/kv/dot`: DOT adapter for @arki/kv. `KV_PLUGIN_ERROR_CODES`, `kv`; types `KvDotOptions`, `KvServices`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview and the examples.
+
+## By task
+
+- [Store a value with a TTL](docs/agent-guide.md#store-a-value-with-a-ttl)
+- [Rate limit an action](docs/agent-guide.md#rate-limit-an-action)
+- [Use Redis for idempotency keys](docs/agent-guide.md#use-redis-for-idempotency-keys)
+- [Run an app without Redis in dev](docs/agent-guide.md#run-an-app-without-redis-in-dev)
+- [Catch a bad URL at boot](docs/agent-guide.md#catch-a-bad-url-at-boot)
+
+## Rules that bite
+
+- `set` takes seconds. The idempotency cache takes milliseconds.
+- The memory fallback is per process. It does not share counts between instances.
+- Hold the limiter returned by `getRateLimiter`. Each call serialises the options.
+- `kv.optional()` can give `null`. Handle it in every consumer.
+- Match on `error.code`, never on the message.

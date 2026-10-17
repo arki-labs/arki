@@ -1,7 +1,55 @@
-# @arki/db agent guide: transactions
+# @arki/db agent guide
+
+Read `llms.txt` first for the map. When this guide and the code disagree, `src/transaction.ts` and `src/orpc.ts` win.
 
 This guide covers `@arki/db/transaction`, `@arki/db/orpc` and `@arki/db/eslint`, and the listener in `@arki/db/pg`.
 The README has the setup. This page has the rules an agent needs to get them right.
+
+## The model
+
+1. `@arki/db` configures Drizzle for Postgres. It opens the connection, it does not wrap queries.
+2. There are three drivers: node-postgres (`@arki/db/init`), Bun SQL (the `bun` condition) and PGlite (`@arki/db/runtime-local`). All speak Postgres.
+3. A transaction is SERIALIZABLE. When PostgreSQL aborts it with `40001` or `40P01`, the whole handler runs again.
+4. Nothing else is retried. A lost connection around `COMMIT` is recovered with an idempotency key, not a retry.
+5. Ids are declared once with `defineId` from `@arki/contracts`. `idColumns` turns the declaration into columns.
+6. A Dot feature gets its repositories from `repos()`. `repos.withTx(tx)` rebinds them to a transaction.
+7. It does not write migrations (`drizzle-kit` does) and it does not run effects after a commit (the journal does).
+
+## Task map
+
+### Make a procedure transactional
+
+1. Build the middleware once: `const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 })`.
+2. Implement the contract with `implement(contract, transactionalProcedureConfig)`.
+3. Put `.use(transact)` last. Read `context.tx` and `context.repos` in the handler.
+4. See `README.md` ("Transactional procedures").
+
+### Retry a transaction outside oRPC
+
+1. Call `runTransaction(db, async (tx, attempt) => work(tx), { retries: 3 })` from `@arki/db/transaction`.
+2. Catch `DbTransactionError` with `isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)`.
+
+### Handle a 409 from a transactional procedure
+
+See [Decide what to do with a failure](#decide-what-to-do-with-a-failure).
+
+### Recover from an ambiguous commit
+
+See [Ambiguous commit recovery](#ambiguous-commit-recovery).
+
+### Declare an id and its columns
+
+1. Declare the id in a browser-safe file with `defineId('sty_')` from `@arki/contracts`.
+2. Build the columns with `idColumns(storyId)` from `@arki/db/id`.
+
+### Paginate with a keyset
+
+1. Declare the order with `keyset(...)` from `@arki/contracts`.
+2. Build the query with `keysetQuery(order, columns)` from `@arki/db/pagination`.
+
+### Back up and restore a database
+
+See the recipe [Back up and restore](recipes/backup-restore.md).
 
 ## File map
 
@@ -58,7 +106,18 @@ even when an older `40001` sits deeper. Cycles, a throwing getter and an
 purpose: `23505` (unique), `23P01` (exclusion), `25P02` (a SQL error was
 swallowed), `57014` (statement timeout), connection errors.
 
-## Error codes
+## Rules that bite
+
+- `transact` is the last `.use()` of the procedure. Anything after it reruns on every retry (`ARKI_DB_TX_E004`).
+- Pass `transactionalProcedureConfig` to `implement`, or the output is validated after the commit (`ARKI_DB_TX_E004`).
+- No `fetch`, queue writes or `.effect()` inside transactional code. They run once per attempt and do not roll back.
+- Only `40001` and `40P01` are retried.
+- PGlite never conflicts. Prove retry behaviour on real PostgreSQL.
+- Do not catch a database error and carry on inside the handler. The transaction is poisoned (`25P02`).
+- In a Dot feature, name the pool-bound repo source `repositories`. The bound set is `repos`.
+- A PGlite data directory has one owner. Two handles corrupt it.
+
+## Errors
 
 | Code              | Name                | When                                                                                         | Fix                                                                          |
 | ----------------- | ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -111,7 +170,7 @@ per attempt and is not rolled back. Fix it one of these ways:
 
 Never silence it with an alias or `as`: the effect still runs twice.
 
-## Words easy to mix up
+## Words that are mixed up
 
 | Word           | Means                                          | Not                              |
 | -------------- | ---------------------------------------------- | -------------------------------- |
@@ -133,3 +192,20 @@ Never silence it with an alias or `as`: the effect still runs twice.
 - Stop runs `UNLISTEN` and closes the client. It never hands it back: its handlers stay on it.
 - If the first `LISTEN` fails, the start rejects and nothing retries.
 - Tests: `src/pg-listen.test.ts` (scripted pool), `src/pg-listen.pg.test.ts` (Postgres 16).
+
+## Verify
+
+```sh
+bun run build && bun run typecheck && bun run lint && bun run test
+bun run test:docs
+bun run test:runtimes
+```
+
+In an app that mounts the plugin: the static graph, then the booted app's health.
+
+```sh
+dot explain --json | jq '.data'
+dot doctor --json | jq '.data'
+```
+
+`dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it.

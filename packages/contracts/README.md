@@ -2,7 +2,7 @@
 
 Shared Zod schemas and Drizzle contract helpers — branded ID-aware select / insert / update schemas with auto-applied column refinements.
 
-## Installation
+## Install
 
 ```sh
 npm install @arki/contracts
@@ -15,6 +15,42 @@ pnpm add @arki/contracts
 Dependencies: `zod` (v4) and `zod-form-data`.
 
 The `@arki/contracts/drizzle` entry needs `drizzle-orm` (an optional peer dependency). The main entry never loads it.
+
+## Quick start
+
+Declare an id kind and a list order once. Parse with them.
+
+```ts run expect
+import { defineId, keyset, pageInput } from '@arki/contracts';
+
+const storyId = defineId('sty_');
+const order = keyset({ createdAt: 'desc', id: 'desc' });
+
+const id = storyId.create();
+if (!storyId.is(id)) throw new Error('create() made an id that is() rejects');
+
+console.log(storyId.schema.safeParse('pod_123').success);
+console.log(pageInput(order).parse({}).limit);
+```
+
+```text
+false
+20
+```
+
+`'pod_123'` fails because its prefix is not `sty_`. An empty page input gets the default limit of 20.
+
+## When not to use this
+
+- You want a full schema library. This package re-exports Zod and adds ids, pagination and contract helpers. It does not replace Zod.
+- You need offset pagination (`?page=3`). `keyset` only does "after this row".
+- You need secret or signed cursors. A cursor is base64url JSON. It is opaque, not secret.
+- You need ids that cannot be guessed to protect a resource. `defineId` makes random ids, but an id is a name, not a permission. Check access on the server.
+- You do not use oRPC. Then skip `@arki/contracts/orpc`. The other entries still work on their own.
+
+## Runtime support
+
+The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. `defineId().create()` needs `globalThis.crypto.getRandomValues`; Hermes has none, so install `react-native-get-random-values` in React Native. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
 
 ## Why
 
@@ -51,10 +87,11 @@ const schema = formData.zfd.formData({
 
 ### Branded select / insert / update schemas
 
-```ts
+```ts run
 import { jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 
-import { createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';
+import { z } from '@arki/contracts';
+import { createSelectSchema } from '@arki/contracts/drizzle';
 
 const users = pgTable('users', {
   id: varchar('id').$type<`usr_${string}`>().primaryKey(),
@@ -65,20 +102,22 @@ const users = pgTable('users', {
 const userSelect = createSelectSchema(users);
 type User = z.infer<typeof userSelect>;
 // { id: `usr_${string}`; email: string; profile: { displayName: string } | null }
+const user: User = { id: 'usr_1', email: 'a@example.com', profile: null };
+if (userSelect.parse(user).email !== 'a@example.com') throw new Error('select schema changed the row');
 ```
 
 If an ID-factory stashed a Zod schema on a column via `COLUMN_ZOD_SCHEMA`, parsing rejects values with the wrong prefix:
 
-```ts
-userSelect.parse({ id: 'org_42', email: 'a@example.com', profile: null });
-// throws: id must start with "usr_"
+```ts continue
+const wrongPrefix = userSelect.safeParse({ id: 'org_42', email: 'a@example.com', profile: null });
+// With a column-stashed schema, wrongPrefix.success is false: id must start with "usr_".
 ```
 
 User-provided refines override the auto-applied schema:
 
-```ts
+```ts continue
 const strictSelect = createSelectSchema(users, {
-  email: schema => schema.email(),
+  email: z.email(),
 });
 ```
 
@@ -86,16 +125,17 @@ const strictSelect = createSelectSchema(users, {
 
 Write the prefix once; the type, the schema and the generator come from it.
 
-```ts
+```ts run
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 
 export const storyId = defineId('sty_');
 export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
 
-storyId.schema.parse(input.id); // StoryId, or a ZodError for 'pod_…'
-storyId.create(); // 'sty_' + 24 random lowercase letters and digits
-storyId.is(value); // type guard
+const input = { id: storyId.create() };
+const parsed: StoryId = storyId.schema.parse(input.id); // StoryId, or a ZodError for 'pod_…'
+if (!storyId.is(parsed)) throw new Error('is() rejected a parsed id'); // type guard
+if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the prefix plus 24 characters');
 ```
 
 - **Browser-safe.** No Drizzle. A contract, a form and a client can import it.
@@ -120,7 +160,12 @@ Declare how a list is ordered — once, in `model/` — and use it in the
 contract and (through `@arki/db/pagination`) in the repository:
 
 ```ts
-import { keyset, page, pageInput } from '@arki/contracts';
+import { oc } from '@orpc/contract';
+
+import { keyset, page, pageInput, z } from '@arki/contracts';
+
+const storyStatus = z.enum(['draft', 'published']);
+const storySchema = z.object({ id: z.string(), status: storyStatus });
 
 export const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });
 
@@ -149,10 +194,14 @@ and meta. `operations(contract)` turns that into plain data — one
 next to its query utils, and a policy written once on the contract (say,
 `offlineSafe: true`) can be checked by the compiler where it is used.
 
-```ts
+```ts run
 import { oc } from '@orpc/contract';
 
+import { z } from '@arki/contracts';
 import { operations } from '@arki/contracts/orpc';
+
+const post = z.object({ id: z.string(), title: z.string() });
+const createPost = post.omit({ id: true });
 
 const contract = { posts: { create: oc.input(createPost).output(post) } };
 const ops = operations(contract);
@@ -160,6 +209,7 @@ const ops = operations(contract);
 ops.posts.create.name; // 'posts.create' — the string the server stores as procedure_path
 ops.posts.create.path; // ['posts', 'create']
 ops.posts.create.meta; // the contract meta, value and type
+if (ops.posts.create.name !== 'posts.create') throw new Error('operation name changed');
 ```
 
 - **Why on the contract.** Types are written once, on the contract; the
@@ -181,7 +231,13 @@ ops.posts.create.meta; // the contract meta, value and type
 
 `@orpc/contract` is an optional peer: only this entry imports it.
 
-## API
+## Public imports
+
+| Import                    | Needs                  | What it holds                                                                |
+| ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `@arki/contracts`         | `zod`, `zod-form-data` | `z`, `formData`, `defineId`, `keyset`, `pageInput`, `page`, `ContractsError` |
+| `@arki/contracts/drizzle` | peer `drizzle-orm`     | `createSelectSchema`, `createInsertSchema`, `createUpdateSchema`             |
+| `@arki/contracts/orpc`    | peer `@orpc/contract`  | `operations`, `operationAt`, `operationOf`                                   |
 
 Main entry, `@arki/contracts` (no Drizzle):
 
@@ -206,9 +262,28 @@ Drizzle entry, `@arki/contracts/drizzle`:
 - `COLUMN_ZOD_SCHEMA` — `Symbol.for('@arki/contracts/columnZodSchema')` side-channel for ID factories.
 - `bufferSchema`, `jsonSchema`, `literalSchema`, `createSchemaFactory` — re-exported from `drizzle-orm/zod`.
 
-## Errors
+## Failure behaviour
 
-`import { ContractsError, CONTRACTS_ERROR_CODES } from '@arki/contracts'`. Every failure on purpose is a `ContractsError` with a stable `code` and a one-line `remediation`. It extends `TypeError`. Match on `error.code`, never on the message.
+Every failure on purpose is a `ContractsError`. It extends `TypeError`, so older `instanceof TypeError` checks still hold. Match on `error.code`. Never match on the message.
+
+```ts run expect
+import { CONTRACTS_ERROR_CODES, ContractsError, defineId } from '@arki/contracts';
+
+try {
+  defineId('bad prefix!');
+} catch (error) {
+  if (!(error instanceof ContractsError)) throw error;
+  console.log(error.code === CONTRACTS_ERROR_CODES.invalidIdPrefix);
+  console.log(error.remediation);
+}
+```
+
+```text
+true
+Use letters, digits and "_" only, for example "sty_".
+```
+
+Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input from outside.
 
 | Code                  | Raised by                       | Meaning                                                |
 | --------------------- | ------------------------------- | ------------------------------------------------------ |
@@ -220,9 +295,28 @@ Drizzle entry, `@arki/contracts/drizzle`:
 | `ARKI_CONTRACTS_E006` | `operations`, `createOrpcUtils` | A contract key contains "." or uses a reserved name.   |
 | `ARKI_CONTRACTS_E007` | `operationOf`                   | The value carries no operation.                        |
 
-## Runtime support
+## Limits
 
-The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. `defineId().create()` needs `globalThis.crypto.getRandomValues`; Hermes has none, so install `react-native-get-random-values` in React Native. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
+- **Limit per page.** `pageInput` accepts 1 to 100 rows. The default is 20. Change both with `defaultLimit` and `maxLimit`.
+
+  ```ts run expect
+  import { keyset, pageInput } from '@arki/contracts';
+
+  const input = pageInput(keyset({ id: 'asc' }));
+  console.log(input.safeParse({ limit: 100 }).success);
+  console.log(input.safeParse({ limit: 101 }).success);
+  ```
+
+  ```text
+  true
+  false
+  ```
+
+- **Key values.** A keyset key may not be NULL in a row. Order by NOT NULL columns, and end on a unique one.
+- **Cursors.** A cursor works only with the keyset that made it. Changing the order invalidates cursors already handed out.
+- **Prefixes.** Letters, digits and `_`. No two prefixes in one app may be equal or start one another (`sub` and `sub_`).
+- **Ids need randomness.** `create()` needs `globalThis.crypto.getRandomValues`. There is no `Math.random` fallback.
+- **Operations.** A contract key may not contain `.` or use a name the query utils reserve.
 
 ## Documentation
 
@@ -230,6 +324,10 @@ The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and R
 compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, your runtime and the error `code`.
 
 <!-- bench:start -->
 

@@ -1,3 +1,4 @@
+/** Prefixed cuid2 ids and the column helpers that store them. */
 import { createId as createCuid } from '@paralleldrive/cuid2';
 
 export const createId = () => {

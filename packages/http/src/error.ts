@@ -27,55 +27,180 @@
  * answer 500).
  */
 export const HTTP_ERROR_CODES = {
-  /** `start` could not bind the port. */
+  /**
+   * `start` could not bind the port.
+   *
+   * @fix Free the port, or pass another `port`. The error `cause` names the system error.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   listenFailed: 'ARKI_HTTP_E001',
-  /** Two bindings claim the same method + path. */
+  /**
+   * Two bindings claim the same method and path, or a bundle token is listed twice.
+   *
+   * @fix Remove one binding. Each method and path is bound once.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   duplicateRoute: 'ARKI_HTTP_E002',
-  /** `stop` exceeded `drainTimeoutMs` with requests still in flight. */
+  /**
+   * `stop` exceeded `drainTimeoutMs` with requests still in flight.
+   *
+   * @fix Raise `drainTimeoutMs`, or shorten the slow handlers. Check that handlers honour the abort signal.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   drainTimeout: 'ARKI_HTTP_E005',
-  /** A mount path is malformed. */
+  /**
+   * A mount path is malformed.
+   *
+   * @fix Use a path that starts with `/` and has no query or fragment.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   invalidMount: 'ARKI_HTTP_E006',
-  /** A deriver key duplicates an earlier deriver or a base context key. */
+  /**
+   * A deriver key duplicates an earlier deriver or a base context key.
+   *
+   * @fix Rename the deriver key. Each key is set once per request scope.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   duplicateDeriverKey: 'ARKI_HTTP_E007',
-  /** A DOT HTTP action carries missing or incompatible projection metadata. */
+  /**
+   * A Dot HTTP action carries missing or incompatible projection metadata.
+   *
+   * @fix Build the action with the route helpers, not by hand, so its metadata is complete.
+   * @verify bun run test -- src/tests/dot.test.ts
+   */
   invalidActionMeta: 'ARKI_HTTP_E009',
-  /** A route contract is inconsistent: params, headers, or responses do not fit its path or each other. Thrown at declaration. */
+  /**
+   * A route contract is inconsistent: params, headers or responses do not fit its path or each other. Thrown at declaration.
+   *
+   * @fix Make the params schema match the `:name` segments of the path, and declare each response status once.
+   * @verify bun run test -- src/tests/contract.test.ts
+   */
   invalidContract: 'ARKI_HTTP_E011',
-  /** A webhook scheme has no secrets, an empty secret, or a secret it cannot decode. Thrown when the scheme is created. */
+  /**
+   * A webhook scheme has no secrets, an empty secret, or a secret it cannot decode. Thrown when the scheme is created.
+   *
+   * @fix Pass at least one non-empty secret in the format the scheme expects.
+   * @verify bun run test -- src/tests/webhooks.test.ts
+   */
   invalidWebhookScheme: 'ARKI_HTTP_E012',
-  /** A contract schema cannot describe itself as JSON Schema (OpenAPI, manifest). Thrown by `contractMeta`/`toOpenApi`. */
+  /**
+   * A contract schema cannot describe itself as JSON Schema (OpenAPI, manifest). Thrown by `contractMeta` and `toOpenApi`.
+   *
+   * @fix Wrap the schema with `withJsonSchema`, or use a schema library that supports Standard JSON Schema.
+   * @verify bun run test -- src/tests/openapi.test.ts
+   */
   noJsonSchema: 'ARKI_HTTP_E013',
-  /** Request validation failed (params/headers/query/body) or the body is not valid JSON. */
+  /**
+   * Request validation failed (params, headers, query or body), or the body is not valid JSON. Answers 400.
+   *
+   * @fix Send a request that matches the contract. The error `issues` list each failing field.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   badRequest: 'ARKI_HTTP_E400',
-  /** A route that needs an idempotency key got none, or an unusable one. Answers 400. */
+  /**
+   * A route that needs an idempotency key got none, or an unusable one. Answers 400.
+   *
+   * @fix Send an `Idempotency-Key` header with a unique value per logical action.
+   * @verify bun run test -- src/tests/idempotency.test.ts
+   */
   idempotencyKeyMissing: 'ARKI_HTTP_E410',
-  /** An idempotency key was reused with a different method, path, query or body. Answers 422. */
+  /**
+   * An idempotency key was reused with a different method, path, query or body. Answers 422.
+   *
+   * @fix Use a new key for a new request. Reuse a key only to repeat the same request.
+   * @verify bun run test -- src/tests/idempotency.test.ts
+   */
   idempotencyKeyReused: 'ARKI_HTTP_E411',
-  /** A request with this idempotency key is still running. Answers 409 with `retry-after`. */
+  /**
+   * A request with this idempotency key is still running. Answers 409 with `retry-after`.
+   *
+   * @fix Wait for `retry-after` seconds, then send the same request with the same key.
+   * @verify bun run test -- src/tests/idempotency.test.ts
+   */
   idempotencyInProgress: 'ARKI_HTTP_E412',
-  /** `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one. Thrown as {@link UnsafeUrlError}; never sent on the wire. */
+  /**
+   * `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one. Thrown as `UnsafeUrlError`; never sent on the wire.
+   *
+   * @fix Call only public `http` or `https` hosts. Do not follow redirects to internal addresses.
+   * @verify bun run test -- src/tests/public-fetch.test.ts
+   */
   unsafeUrl: 'ARKI_HTTP_E430',
-  /** A request body is larger than the route allows. Answers 413. */
+  /**
+   * A request body is larger than the route allows. Answers 413.
+   *
+   * @fix Send a smaller body, or raise the body limit of the webhook scheme or route.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   payloadTooLarge: 'ARKI_HTTP_E413',
-  /** A client call ran past its `timeoutMs`. Thrown by `@arki/http/client`; never sent on the wire. */
+  /**
+   * A client call ran past its `timeoutMs`. Thrown by `@arki/http/client`; never sent on the wire.
+   *
+   * @fix Raise `timeoutMs`, or retry. Retries are safe only for idempotent calls.
+   * @verify bun run test -- src/tests/client-retry.test.ts
+   */
   requestTimeout: 'ARKI_HTTP_E408',
-  /** A webhook's signature headers are missing or malformed. Answers 401. */
+  /**
+   * A webhook signature header is missing or malformed. Answers 401.
+   *
+   * @fix Send the signature headers the scheme expects.
+   * @verify bun run test -- src/tests/webhooks.test.ts
+   */
   webhookMalformed: 'ARKI_HTTP_E420',
-  /** No webhook signature matches the body with any of the secrets. Answers 401. */
+  /**
+   * No webhook signature matches the body with any of the secrets. Answers 401.
+   *
+   * @fix Check the secret, and that the body reaches the handler unchanged.
+   * @verify bun run test -- src/tests/webhooks.test.ts
+   */
   webhookSignatureMismatch: 'ARKI_HTTP_E421',
-  /** A webhook's signed time is too far from now: a replay, or a clock far off. Answers 401. */
+  /**
+   * A webhook signed time is too far from now: a replay, or a clock far off. Answers 401.
+   *
+   * @fix Fix the sender or server clock, or widen the time window.
+   * @verify bun run test -- src/tests/webhooks.test.ts
+   */
   webhookStale: 'ARKI_HTTP_E422',
-  /** A deriver rejected the request's credentials. */
+  /**
+   * A deriver rejected the request credentials.
+   *
+   * @fix Send valid credentials.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   unauthorized: 'ARKI_HTTP_E401',
-  /** A deriver rejected the request's permissions. */
+  /**
+   * A deriver rejected the request permissions.
+   *
+   * @fix Use an account that has the permission.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   forbidden: 'ARKI_HTTP_E403',
-  /** No route matches the request. */
+  /**
+   * No route matches the request. Answers 404.
+   *
+   * @fix Check the method and path against the contract.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   notFound: 'ARKI_HTTP_E404',
-  /** Handler crash or output-schema violation. */
+  /**
+   * Handler crash or output-schema violation. Answers 500.
+   *
+   * @fix Read the server log. Fix the handler, or make its output match the contract.
+   * @verify bun run test -- src/tests/engine.test.ts
+   */
   internal: 'ARKI_HTTP_E500',
-  /** A handler returned a `Response` without `output: raw()`, or a value from a `raw()` route. Answers 500. */
+  /**
+   * A handler returned a `Response` without `output: raw()`, or a value from a `raw()` route. Answers 500.
+   *
+   * @fix Declare `output: raw()` for a handler that returns a `Response`, and return a `Response` from it.
+   * @verify bun run test -- src/tests/failures.test.ts
+   */
   rawResponseMismatch: 'ARKI_HTTP_E510',
-  /** A handler's result does not fit its contract: undeclared status, malformed `reply`, or a value on a no-output route. Answers 500. */
+  /**
+   * A handler result does not fit its contract: undeclared status, malformed `reply`, or a value on a no-output route. Answers 500.
+   *
+   * @fix Return only the statuses the contract declares.
+   * @verify bun run test -- src/tests/failures.test.ts
+   */
   invalidResponse: 'ARKI_HTTP_E511',
 } as const;
 

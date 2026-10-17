@@ -1,3 +1,4 @@
+/** A Redis-backed key-value store and rate-limiter client (`KV`) with an in-memory fallback. */
 import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import KeyvRedis from '@keyv/redis';
 import { Redis } from 'ioredis'; // Import ioredis for rate limiter

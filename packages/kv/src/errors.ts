@@ -1,3 +1,4 @@
+/** `RateLimitExceededError` and the initialization error codes. */
 import type { IRateLimiterRes } from 'rate-limiter-flexible';
 
 export class RateLimitExceededError extends Error {
@@ -21,8 +22,26 @@ export class RateLimitExceededError extends Error {
 }
 
 export const KV_INITIALIZATION_ERROR_CODES = {
+  /**
+   * Production started without `KV_URL`, so no store can be opened.
+   *
+   * @fix Set `KV_URL` in the production environment.
+   * @verify bun run test -- src/instance.test.ts
+   */
   urlRequiredInProduction: 'KV_INIT_E001',
+  /**
+   * The store did not accept the connection in production.
+   *
+   * @fix Check the URL, the network and the credentials, then restart.
+   * @verify bun run test -- src/instance.test.ts
+   */
   connectionFailed: 'KV_INIT_E002',
+  /**
+   * Creating the KV client threw in production.
+   *
+   * @fix Read the error `cause`. It names the invalid option or the failing call.
+   * @verify bun run test -- src/instance.test.ts
+   */
   creationFailed: 'KV_INIT_E003',
 } as const;
 

@@ -1,3 +1,4 @@
+/** The Bun SQL driver entry, used through the `bun` export condition. */
 import type { AnyRelations } from 'drizzle-orm';
 import type { BunSQLDatabase } from 'drizzle-orm/bun-sql/postgres';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';

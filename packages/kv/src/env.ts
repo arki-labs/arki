@@ -1,3 +1,4 @@
+/** The validated KV and Redis environment variables (`KV_URL`, `RATE_LIMIT_REDIS_URL`, ...). */
 import { defineEnv } from '@arki/env/core';
 
 import { z } from '@arki/contracts';

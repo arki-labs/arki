@@ -6,19 +6,54 @@
 
 /** Stable error codes of `@arki/contracts`. */
 export const CONTRACTS_ERROR_CODES = {
-  /** `defineId` got a prefix that is not letters, digits or `_`. */
+  /**
+   * `defineId` got a prefix that is not letters, digits or `_`.
+   *
+   * @fix Use letters, digits and `_` only, for example `sty_`.
+   * @verify bun run test -- src/ids.test.ts
+   */
   invalidIdPrefix: 'ARKI_CONTRACTS_E001',
-  /** `assertUniqueIdPrefixes` found two prefixes that are equal or start one another. */
+  /**
+   * `assertUniqueIdPrefixes` found two prefixes that are equal or start one another.
+   *
+   * @fix Give each id kind a prefix that does not start another one.
+   * @verify bun run test -- src/ids.test.ts
+   */
   overlappingIdPrefixes: 'ARKI_CONTRACTS_E002',
-  /** `create()` found no `globalThis.crypto.getRandomValues`. */
+  /**
+   * `create()` found no `globalThis.crypto.getRandomValues` on this engine.
+   *
+   * @fix Run on an engine that has it. In React Native, install `react-native-get-random-values`.
+   * @verify bun run test:runtimes
+   */
   noRandomSource: 'ARKI_CONTRACTS_E003',
-  /** `keyset` got no keys, or a row with a NULL key value. */
+  /**
+   * `keyset` got no keys, or a row with a NULL key value.
+   *
+   * @fix Declare at least one key. Order by NOT NULL columns and end on a unique one.
+   * @verify bun run test -- src/pagination.test.ts
+   */
   invalidKeyset: 'ARKI_CONTRACTS_E004',
-  /** A cursor string is not one the keyset made. */
+  /**
+   * A cursor string is not one this keyset made.
+   *
+   * @fix Send back a cursor exactly as the same keyset returned it, or start from the first page.
+   * @verify bun run test -- src/pagination.test.ts
+   */
   invalidCursor: 'ARKI_CONTRACTS_E005',
-  /** A contract key contains "." or uses a reserved name. */
+  /**
+   * A contract key contains `.` or uses a reserved name.
+   *
+   * @fix Rename the contract key: no `.`, and not a name the query utils reserve.
+   * @verify bun run test -- src/orpc.test.ts
+   */
   invalidContractKey: 'ARKI_CONTRACTS_E006',
-  /** `operationOf` got a value that carries no operation. */
+  /**
+   * `operationOf` got a value that carries no operation.
+   *
+   * @fix Pass a leaf of `createOrpcUtils`, or an object built by `operations()`.
+   * @verify bun run test -- src/orpc.test.ts
+   */
   notAnOperation: 'ARKI_CONTRACTS_E007',
 } as const;
 

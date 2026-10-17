@@ -1,3 +1,4 @@
+/** A typed builder for event-sourced projections (read models). */
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PoolConfig } from 'pg';

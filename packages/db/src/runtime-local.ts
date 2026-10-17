@@ -1,3 +1,4 @@
+/** An embedded PGlite database with an owner lock on its data directory. */
 import type { Extension, PGliteOptions } from '@electric-sql/pglite';
 import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';

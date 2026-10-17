@@ -7,7 +7,7 @@ Drizzle ORM repositories and database helpers for ARKI. Provides:
 - A typed projection builder (`initDb.schema(...).create(...).projection`) for event-sourced read models.
 - A branded-ID factory (`createPrefixedId`) for stable, type-safe IDs.
 
-## Installation
+## Install
 
 ```sh
 npm install @arki/db
@@ -17,11 +17,57 @@ bun add @arki/db
 pnpm add @arki/db
 ```
 
+## Quick start
+
+Open an in-memory PGlite database, run a SERIALIZABLE transaction, and read the row back.
+
+```ts run expect
+import { sql } from 'drizzle-orm';
+
+import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { runTransaction } from '@arki/db/transaction';
+
+const { db, pglite } = await initDbRuntimeLocal({ dataDir: 'memory://' }, { relations: {} });
+
+await db.execute(sql`create table note (id serial primary key, body text not null)`);
+await runTransaction(db, async tx => {
+  await tx.execute(sql`insert into note (body) values ('hello')`);
+});
+
+const result = await db.execute(sql`select body from note`);
+console.log(result.rows[0]?.body);
+await pglite.close();
+```
+
+```text
+hello
+```
+
+For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See [Initialize a database from environment](#initialize-a-database-from-environment).
+
+## When not to use this
+
+- You want a query builder or an ORM of your own. This package configures Drizzle. It does not hide it.
+- You need a database other than Postgres. The runtimes are node-postgres, Bun SQL and PGlite. All speak Postgres.
+- You want retries for any error. Only SQLSTATE `40001` and `40P01` are retried. Everything else runs once.
+- You need exactly-once effects inside a transaction. A `fetch` in a retried handler runs again. Move effects after the commit.
+- You need a migration tool. `dbMigrations()` applies pending migrations at boot. Writing them is `drizzle-kit`.
+
+## Runtime support
+
+| Entry | Node | Bun | Deno | Browser | Hermes |
+| --- | --- | --- | --- | --- | --- |
+| `@arki/db/transaction`, `@arki/db/orpc` | yes | yes | yes | yes | yes |
+| `@arki/db/init` (node-postgres) | yes | yes (Bun SQL via the `bun` condition) | no | no | no |
+| `@arki/db/runtime-local` (PGlite) | yes | yes | no | no | no |
+
+`@arki/db/transaction` and `@arki/db/orpc` are portable: no driver. `bun run test:runtimes` runs them on each runtime. The driver entries need a server runtime with sockets or a file system.
+
 ## Usage
 
 ### Initialize a database from environment
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { createDb } from '@arki/db/init';
 import { defineRelations } from '@arki/db/orm';
 
@@ -39,7 +85,7 @@ export const db = createDb({
 
 ### Embedded local development (PGlite)
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 
 const { db, pglite } = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
@@ -56,7 +102,7 @@ A data directory has one owner. PGlite has no lock of its own, and two handles o
 
 ### Projections (event sourcing read models)
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { initDb } from '@arki/db/builder';
 
 const d = initDb.schema(schema).create({ connectionString: env.DB_URL, isDev: true });
@@ -71,7 +117,7 @@ const userProjection = d.projection
 
 ### Branded IDs
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { createIdFactory, createPrefixedId } from '@arki/db/id';
 
 const userId = createPrefixedId('usr_'); // 'usr_…'
@@ -86,7 +132,7 @@ client can import it — and turn the same declaration into columns here. The
 prefix is the one place the id kind is written; the type, the zod schema, the
 generator and the columns all come from it.
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 // features/story/model/ids.ts (browser-safe)
 import { defineId, type IdOf } from '@arki/contracts';
 export const storyId = defineId('sty_');
@@ -113,7 +159,7 @@ code — it re-exports Drizzle; the browser imports the declaration from the
 
 `@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { now } from '@arki/date/clock';
 import { instant, plainDate } from '@arki/db/temporal';
 
@@ -145,7 +191,7 @@ core/relations.ts           — defineRelations(schema, …) — one app-level f
 core/db.ts                  — type only: Db = ReturnType<typeof buildDb>['db']
 ```
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { composeSchema } from '@arki/db';
 
 // Each feature exports a named record from its tables.ts leaf:
@@ -161,7 +207,7 @@ export const schema = composeSchema(ordersTables, billingTables);
 Point `drizzle-kit` at the leaves — no aggregation entrypoint needed, and
 enums are scanned per file (no aliased re-export tricks):
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 // drizzle.config.ts
 export default defineConfig({
   schema: ['./src/features/**/tables.ts'],
@@ -182,7 +228,7 @@ same `(table, relation key)` in two parts throws `DB_COMPOSITION_E004`. The resu
 type is the per-table merge, so `drizzle({ relations })` and
 `db.query.X.findMany({ with })` infer as with one big `defineRelations`.
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { defineRelationsPart, mergeRelations } from '@arki/db/orm';
 
 // features/sources/relations.ts: each feature declares only what it owns.
@@ -201,7 +247,7 @@ Feature services built at boot capture the singleton `db` — calling them
 inside a transaction would silently escape it. Cross-feature writes go
 through a typed unit of work instead:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { createUnitOfWork } from '@arki/db';
 
 // Feature tx factories are STATIC exports: (tx: Database) => scoped repos.
@@ -224,7 +270,7 @@ transaction. Per call it opens the transaction, binds the repositories to it
 the transaction with `40001` or `40P01`, it runs the handler again in a fresh
 transaction. The handler cannot forget the transaction: it never sees the pool.
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
 
 const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 });
@@ -253,7 +299,7 @@ In a Dot feature, see [Transactional procedures in a feature](#transactional-pro
 
 Jobs, scripts and journal effects use the same loop without oRPC:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 import { runTransaction } from '@arki/db/transaction';
 
 const moved = await runTransaction(db, async (tx, attempt) => moveMoney(tx, input), {
@@ -304,7 +350,7 @@ When the connection drops around `COMMIT`, nobody knows whether the commit
 happened. That error is **not** retried: a retry could apply the work twice.
 The client gets a 500. Recovery is an idempotency key and a journal receipt:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 .handler(({ context, input }) =>
   journal.run(context.tx, deposit, { id: input.id, amount: input.amount }, meta, {
     // Scope the key: tenant, actor, operation, version, then the client's key (validated, ≤ 256 chars in all).
@@ -322,7 +368,7 @@ command must cover every write a replay would repeat. Full recipe:
 
 ### Lint: `db/no-effects-in-transaction`
 
-```js
+```js skip="fragment: eslint.config.js of the app, which defines baseConfig"
 // eslint.config.js (needs typed linting: parserOptions.projectService)
 import db from '@arki/db/eslint';
 
@@ -338,7 +384,7 @@ the global `fetch` (also via `globalThis`, an alias or destructuring), BullMQ
 
 Blind spots, by design: dynamic member names, values typed as a plain object
 type, helper functions whose parameters do not carry the scope, and SDK
-wrappers (`stripe.checkout.sessions.create()` is just a method). Review the
+wrappers (`stripe.checkout.sessions.create()` is only a method). Review the
 usecases a transaction calls before you adopt it.
 
 ## In a Dot feature: `repos()`, `transactions()`, `reader()`
@@ -348,7 +394,7 @@ All of these live in `@arki/db/dot` and return plain plugins. In a
 
 ### `repos(factories)` — repositories built once
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 // features/highlights/infra/repository.ts
 export const repository = repos({
   highlights: (db: Database) => new HighlightRepository(db), // Database = Db | Transaction
@@ -385,7 +431,7 @@ export const core = defineFeature('highlights')
 
 ### Transactions: `repos.withTx(tx)`
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 await db.transaction(async tx => {
   const r = repos.withTx(tx); // the same repositories, bound to tx
   await r.highlights.add(itemId);
@@ -402,7 +448,7 @@ forgetting to pass `tx` by hand today.
 
 ### `transactions()` — a usecase may open a transaction, never run SQL
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 // features/digest/feature.ts
 const digestDeps = defineFeature('digest')
   .needs({ db: entrypointOnly(database.provides.db) })
@@ -434,7 +480,7 @@ A middleware cannot rebind them. The pattern that works: mount the repository
 plugin under another name, and let a transaction-aware usecase take the scope
 per call.
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 // feature.ts
 const accountsDeps = defineFeature('accounts')
   .needs({ db: database.provides.db })
@@ -476,7 +522,7 @@ Repositories are the read side; events are written with `write`. Create the
 journal with the app's transaction type, so the `tx` a command receives is
 one the repositories accept:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 const j = initJournal.tx<Transaction>().create({ meta });
 const deposit = j.command('deposit', input, async (data, { write, tx }) => {
   const limit = await repos.withTx(tx).limits.forAccount(data.accountId); // reads see this command's writes
@@ -491,7 +537,7 @@ With plain `initJournal({ meta })`, `tx` is the journal's structural
 
 Hand other features a few bound methods, not the whole repository:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 .provides({ storyReader: ({ repos }) => reader(repos.stories, ['get', 'listByUser']) })
 // another feature: .needs({ stories: story.provides.storyReader }) → context.stories.get(id)
 ```
@@ -511,7 +557,7 @@ that type-check:
 2. **A full fixture whose unused methods throw.** A class repository has
    private fields, so an object literal cannot pose as it; a subclass can:
 
-   ```ts
+   ```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
    const unused = async (): Promise<never> => { throw new Error('not used by this test'); };
    class FakeHighlights extends HighlightRepository {
      override add = unused;
@@ -541,7 +587,7 @@ The order and the cursor are declared once in `@arki/contracts`
 (`keyset({ createdAt: 'desc', id: 'desc' })`); `@arki/db/pagination` turns them
 into the query:
 
-```ts
+```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
 const byNewest = keysetQuery(storyOrder, stories); // columns named like the keys
 
 const rows = await db
@@ -561,7 +607,19 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
   `{ precision: 3 }` (or `mode: 'string'`): a JS `Date` keeps milliseconds,
   Postgres keeps microseconds, and a rounded cursor can skip rows.
 
-## Subpath exports
+## Environment variables
+
+| Variable                                   | Purpose                                      |
+| ------------------------------------------ | -------------------------------------------- |
+| `DB_URL`                                   | Primary Postgres connection URL.             |
+| `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used. |
+| `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`). |
+| `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).   |
+| `DB_POOL_CONNECTION_TIMEOUT`               | Acquire timeout in ms (default `2000`).      |
+| `DB_LOGGING`                               | Enable Drizzle logger when truthy.           |
+| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.    |
+
+## Public imports
 
 - `@arki/db` / `@arki/db/init` — `createDb`, `initDb`, `initDbWithOptions`. Under Bun, `./init` resolves to a Bun-native SQL driver.
 - `@arki/db/factory` — `createDb` + connection-option helpers.
@@ -580,17 +638,34 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
 - `@arki/db/bun` — Bun-SQL driver entry (also routed via the `bun` condition on `./init`).
 - `@arki/db/client` — types-only client surface reserved for future Tier-3 sync work.
 
-## Environment variables
+## Failure behaviour
 
-| Variable                                   | Purpose                                      |
-| ------------------------------------------ | -------------------------------------------- |
-| `DB_URL`                                   | Primary Postgres connection URL.             |
-| `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used. |
-| `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`). |
-| `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).   |
-| `DB_POOL_CONNECTION_TIMEOUT`               | Acquire timeout in ms (default `2000`).      |
-| `DB_LOGGING`                               | Enable Drizzle logger when truthy.           |
-| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.    |
+`runTransaction` and the `transactionalProcedure` middleware throw a `DbTransactionError` with a code from `DB_TRANSACTION_ERROR_CODES`. Match on `error.code`, never on the message. The middleware turns an exhausted retry into `ORPCError('CONFLICT')`, a 409 the client may send again.
+
+```ts
+import { DB_TRANSACTION_ERROR_CODES, isDbTransactionError, runTransaction } from '@arki/db/transaction';
+
+async function transfer(db: Parameters<typeof runTransaction>[0]): Promise<'done' | 'busy'> {
+  try {
+    await runTransaction(db, async () => undefined, { retries: 3 });
+    return 'done';
+  } catch (error) {
+    if (isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)) return 'busy';
+    throw error;
+  }
+}
+```
+
+Every other database error reaches the caller unchanged. A lost connection around `COMMIT` is never retried: use an idempotency key. See [Ambiguous commits and receipts](#ambiguous-commits-and-receipts).
+
+## Limits
+
+- **Retries.** At most 10 extra attempts. The default is 3. `retries: 11` throws `ARKI_DB_TX_E002`. Nothing is clamped.
+- **One data directory, one owner.** A second `initDbRuntimeLocal` on an open directory throws `ARKI_DB_LOCAL_E001`.
+- **PGlite has one connection.** It never produces `40001`. Prove retry behaviour on real PostgreSQL.
+- **Keyset timestamps.** Declare them with `{ precision: 3 }` or `mode: 'string'`. A JS `Date` keeps milliseconds. Postgres keeps microseconds.
+- **Effects.** A call inside transactional code runs once per attempt and is not rolled back.
+- **The lint rule has blind spots.** Dynamic member names and SDK wrappers are not seen. See [Lint](#lint-dbno-effects-in-transaction).
 
 ## Documentation
 
@@ -604,6 +679,10 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, your driver, and the error `code`.
 
 <!-- bench:start -->
 ## Benchmarks

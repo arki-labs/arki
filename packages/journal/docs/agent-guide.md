@@ -2,7 +2,7 @@
 
 Read this file first. [`llms.txt`](../llms.txt) is the index. The [README](../README.md) is the long overview. `src/api.ts` defines every signature. If this guide and `src/api.ts` disagree, `src/api.ts` wins.
 
-Paths that start with `src/` are files of this package. App files are named from the app's own source folder, for example `journal.root.ts` or `features/orders/effects.ts`. The app layout, with a "Which file do I touch" list, is in the [feature layout note](../../../apps/games-platform/backend/src/features/README.md) of the games-platform backend. Read it before you touch an app.
+Paths that start with `src/` are files of this package. App files are named from the app's own source folder, for example `journal.root.ts` or `features/orders/effects.ts`. The app layout puts the journal root, the entities and the commands in separate files per feature. Read the feature layout note of your app before you touch it.
 
 ## The model
 
@@ -36,7 +36,7 @@ The word `create` has two meanings. Neither one builds the journal. `j.compose(.
 
 ## Setup
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { initJournal, need } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
@@ -70,7 +70,7 @@ Library files: `src/entity.ts` (the builder and reducer types), `src/handlers.ts
 4. In the projections file, add a handler under the event's type. It gets `(tx, e)`. Use `tx` for every query.
 5. A new projection must be listed: under `projections` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app.
 
-A full projection, `customerStats`, is in the [README example](../README.md#example).
+A full projection, `customerStats`, is in the [README example](../README.md#quick-start).
 
 ### Add an entity with create and delete
 
@@ -82,7 +82,7 @@ Library files: `src/entity.ts` (the key column checks), `src/fold.ts` (how reduc
 4. To delete, return `null` from a reducer. The row is removed. The events stay. The entity can be created again later, and its version continues.
 5. A soft delete is a normal patch, such as `{ status: 'cancelled' }`. The row stays. The library does nothing special for it.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 export const order = j
   .entity('order', orders)
   .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
@@ -95,7 +95,7 @@ export const order = j
 
 Library files: `src/handlers.ts` (`effectFor` is `j.effect`, `need`, and `bindEffect`, which gives an effect its services), `src/worker.ts` (claims, retries, `drain`, the loop, `wake`), `src/journal.ts` (`createJournal` gives the worker `runOn`, which makes `ctx.run`).
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // features/orders/effects.ts: the effect lists what it needs. Each handler gets it in the context.
 export const orderMail = j.effect(
   'order-mail',
@@ -133,7 +133,7 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 
 Library files: `src/api.ts` (`Command`, `CommandContext`, `bind`), `src/command.ts` (how `journal.run` runs one), `src/errors.ts` (`CommandNotFound` and the other command failures, `JournalError`), `src/rollback.ts` (how a returned failure rolls back), `src/orpc.ts` (the oRPC error mapping).
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // features/orders/commands.ts
 import { CommandConflict, CommandNotFound } from '@arki/journal';
 // core/orpc.ts, in an oRPC app: once, after the app's own error middleware.
@@ -177,7 +177,7 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 
 The job row is written in the caller's transaction. It exists if and only if the business write commits. The typed API is `@arki/queue/outbox`. The journal only stores and claims the row.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // backend/src/schedule.ts: once per app
 import { listenOnPool } from '@arki/db/pg';
 import { outbox } from '@arki/queue/outbox';
@@ -218,7 +218,7 @@ Rules:
 
 A job is `ready`, `delayed`, `running` or `dead`. `pending` is the first three. Reads take the root database and page with an opaque cursor.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const { jobs, next } = await journal.jobs(db, { status: 'dead', limit: 50 }); // pass `next` back as `after`; null on the last page
 const counts = await journal.jobCounts(db);
 const op = { actor: 'alice', reason: 'provider outage' }; // required on every verb; actor is a non-empty free string
@@ -248,7 +248,7 @@ Rules:
 3. Find the code in the [error table](#errors). To see the exact check, search for the code in the file the table names.
 4. Run again with `DEBUG=arki:journal:*`. It prints commands, writes, replays, drains and worker ticks.
 
-## Words that are easy to mix up
+## Words that are mixed up
 
 | Pair                                      | The difference                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -256,6 +256,15 @@ Rules:
 | Pending event and recorded event          | A pending event is `{ type, data }`. `OrderPaid({ amount })` makes one and `events` returns them. A recorded event also has `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt`, the trace `commandId`, `causeSeq`, `correlationId` (library-stamped; see README, Tracing), and `erasedAt` (see README, Erasure). Reducers, projections and effects get recorded events. |
 | Entity version and global sequence        | `version` counts 1, 2, 3 inside one entity. `replay` takes `throughVersion`. `seq` orders all events of all entities in commit order: an advisory lock taken at the start of every write makes a lower `seq` commit first, so `seq > cursor` misses nothing. `rerun` takes `afterSeq`.                                                                                        |
 | `DbHandle`, `RootDb`, `TransactionSource` | `DbHandle` fits a database or a transaction: `replay`, `verify`, `repair`. `RootDb` is the database only: `drain`, `worker`. `TransactionSource<Tx>` is anything that opens a `Tx`: `run`, `rerun`. A root database opens a transaction. A transaction opens a savepoint.                                                                                                     |
+
+## File map
+
+- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the codes and their messages, and the command failures), `src/hooks.ts` (around-hooks on command and effect runs).
+- Definitions: `src/journal.ts` (`initJournal`, `j`, `j.compose`), `src/entity.ts` (entity builder, reducers, key checks), `src/event.ts` (`j.event`), `src/handlers.ts` (`j.projection`, `j.effect`, `need`, and `bindEffect`, which gives an effect its services).
+- Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
+- After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
+- Job operations and retention: `src/outbox.ts` (`createJobOps`: reads, verbs, sweep steps), `src/retention.ts` (`Keep`, defaults, `ndjsonArchiveSink`), `src/foreman/index.ts` (the Foreman module).
+- Edges: `src/pg.ts` (the tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
 
 ## Rules that bite
 
@@ -358,7 +367,7 @@ In feature mode the journal is built before the features, from their `journalHan
 
 This is the pattern to follow. No code in this repo uses it yet. A package that ships journal pieces exports a factory. The factory takes the app's `j` and the tables. It returns entities, commands, projections and effects. An effect that needs a service lists it with `need<T>()`, and the app gives the service in its own `j.compose({ services })`. The package never owns a database, a composed journal or a worker. The app adds the tables to its schema. It calls `billingJournal(j, billingTables())` and lists the returned handlers in its own `j.compose(...)`. `billingTables()` is the package's own table factory, shaped like `journalTables()`: it returns `{ invoices }`, a table with a string `id` and a `version` column.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 export function billingJournal<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -403,3 +412,21 @@ These look odd. Each one is needed.
 - `isUniqueViolation` in `src/write.ts` walks `cause` five levels deep: drivers wrap the Postgres error.
 - `assertRootDb` in `src/storage.ts`: the type check alone cannot stop every transaction, so `drain` and `worker` also check at run time.
 - No `.create` after the first `.on` (`OnOnlyEntityBuilder` in `src/entity.ts`): a later create could leave out a column that an `.on` reducer was promised.
+
+## Verify
+
+```sh
+bun run build && bun run typecheck && bun run lint && bun run test
+bun run test:docs
+bun run test:runtimes
+bun ../../tooling/library/src/llms.ts --check
+```
+
+In an app that mounts the plugin: the static graph, then the booted app's health.
+
+```sh
+dot explain --json | jq '.data'
+dot doctor --json | jq '.data'
+```
+
+`dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it.

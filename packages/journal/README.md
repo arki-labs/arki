@@ -8,7 +8,6 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/errors` (the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, plus `JournalError` and `isJournalError`, with no Drizzle import, for browser code that matches on codes), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules), `@arki/journal/testing` (`openJournalDb(schema)`: an in-memory PGlite with the schema pushed, for tests; `@electric-sql/pglite` and `drizzle-kit` are optional peers).
 
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
@@ -26,9 +25,23 @@ Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions)
 | Watch or stop every command or effect run from a plugin (tracing, logging, a circuit breaker) | [Hooks](#hooks): `journal.hooks.command.around`, `journal.hooks.effect.around`                                             |
 | Change code inside this package                                                               | [Rules that bite](docs/agent-guide.md#rules-that-bite), [Do not clean these up](docs/agent-guide.md#do-not-clean-these-up) |
 
-## Example
+## Install
 
-```ts
+```sh
+bun add @arki/journal
+# or
+npm install @arki/journal
+```
+
+The tables live in your Drizzle schema (`journalTables()` from `@arki/journal/pg`). Create them with your migration tool.
+
+Optional peers: `@arki/dot`, `@orpc/server`, `@arki/http`, `@electric-sql/pglite` and `drizzle-kit` (only for `@arki/journal/testing`).
+
+## Quick start
+
+The example is a sketch of an app, not one runnable file. Each comment names the file the code goes in. It needs your schema, a database and a mailer.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
 import { CommandConflict, CommandNotFound, initJournal, need } from '@arki/journal';
 // src/schema.ts — the two journal tables live in the app's schema.
@@ -119,6 +132,18 @@ const worker = journal.worker(db);
 await worker.start();
 ```
 
+## When not to use this
+
+- You want a general event store with streams you read back. Reads here are plain Drizzle queries. Replay is for checks and repair, not for reading.
+- You do not use Drizzle and Postgres. The tables and transactions assume both.
+- You need exactly-once effects. Effects run at least once, after the commit. Make them safe to repeat with the job id.
+- You need to run work outside a transaction. Every write is one transaction.
+- You want a general job queue. The job table serves effects. For a queue, see `@arki/queue`.
+
+## Runtime support
+
+The core and `@arki/journal/errors` hold no driver. They load on Node, Bun, Deno and in the browser. `bun run test:runtimes` proves that. The write path needs a Drizzle database on Postgres, so it runs where your driver runs (Node, Bun). `@arki/journal/testing` runs an in-memory PGlite for tests.
+
 ## Commands
 
 `j.command(name, inputSchema, handler)` returns a plain value with `name`, `input` (the schema, so a procedure can reuse or `.pick` it) and the handler. Nothing is registered anywhere. The handler gets the parsed input and a context:
@@ -162,7 +187,7 @@ Receipts hold inputs and results, so they can hold personal data, and `forget` d
 
 Command receipts protect a command. A retried HTTP request also wants its whole response back, and that response is not part of the business transaction. For that, `@arki/journal/http` gives a `ResponseCache` on `journal_receipts` for the `idempotent()` middleware of `@arki/http/idempotency`:
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { idempotent } from '@arki/http/idempotency';
 import { responseCache } from '@arki/journal/http';
 
@@ -189,7 +214,7 @@ The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the sam
 
 An effect that needs to write runs a command with `run` from its context:
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/features/orders/effects.ts
 export const closeAfterPayment = j.effect('close-after-payment', order, {
   OrderPaid: (e, { run }) => run(closeOrder, { orderId: e.entityId }, { actorId: 'system' }),
@@ -219,7 +244,7 @@ A row the journal creates gets version 1 from its create event. A row that was t
 
 To bring such a row in properly, adopt it before its first write. `journal.adopt(tx, entity, id, { meta, events })` takes the row at version 0 with no history, calls `events(row)` for exactly one create event built from the stored row, and checks that the event's `.create` reducer rebuilds the row exactly, column by column. If it does, the event is recorded as version 1 and the row moves to version 1: the history is complete, and `replay`, `verify` and `repair` work from then on. If it does not, `VALUE_MISMATCH` names the column and nothing changes. A row the journal already knows, a missing row, or a legacy row that was already written to is `CONFLICT`. Projections run and effects are queued as for any write, because the event is the app's own. Run it once per legacy row, in a migration or a one-off script, before the app writes to the row.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 await db.transaction(tx =>
   journal.adopt(tx, order, id, {
     meta: { actorId: 'migration' },
@@ -296,7 +321,7 @@ A rule of the app that rejects a request returns a failure from `@arki/failure`.
 
 A handler that meets a refusal and still has a good answer says so with `accept(result)`, on the command context and on an effect's context. Check the value first, then accept it. `accept` lifts only this command's own check: a refused child's savepoint stays rolled back, and the fallback's own refusals are tracked too. It returns nothing and commits nothing by itself: a handler that accepts a failure and then returns it still rolls back. Every refusal is tracked by identity, once per return: two refusals with the same code need two `accept` calls, and so does the same object returned twice. Accepting one and ignoring another is still `IGNORED_FAILURE`. An accepted success is stored as the idempotency receipt like any success. `accept` throws `JournalError` `INVALID_ACCEPT` for a value no `write` or `run` of this handler returned (hand-built, from a helper, a copy, or one only the parent received), for a second call on one return, for a call after the handler finished, and for a value that is not a failure. A parent may accept a failure its child passed up, and a child's `authorize` refusal, since both come back from `run` as the same instance.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const placeOrder = j.command('placeOrder', orderInput, async (input, { write, run, accept }) => {
   await write(order, input.orderId, () => [OrderPlaced({ customerId: input.customerId, total: input.total })]);
   const stock = await run(reserveStock, input.line);
@@ -314,7 +339,7 @@ const placeOrder = j.command('placeOrder', orderInput, async (input, { write, ru
 
 An oRPC app maps it once, with `@arki/journal/orpc`. `@orpc/server` is an optional peer. The core entry never imports it.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/core/orpc.ts
 import { commandErrors } from '@arki/journal/orpc';
 
@@ -340,7 +365,7 @@ Adding an optional field, or one with a default, is safe. Old rows still parse.
 
 For any other change to an event's data, such as a rename, a new required field, or a new structure, keep the old schema and add an upcaster:
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const NoteSetV1 = z.object({ text: z.string() });
 
 const NoteSet = j.event('NoteSet', z.object({ note: z.string(), by: z.string() }), {
@@ -376,7 +401,7 @@ An effect runs after the commit, at least once, from a row in `journal_jobs`. A 
 
 An effect that needs a service (a mailer, an in-process emitter) lists it. The list is the third argument:
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 export const orderMail = j.effect(
   'order-mail',
   order,
@@ -421,7 +446,7 @@ A wake ends the sleep, so an effect does not wait for the next poll:
 - A wake that arrives while a pass is running is not lost: one more pass runs right after. Many wakes make one extra pass.
 - The wake works inside one process only. Other processes pick jobs up by polling.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 await db.transaction(async tx => {
   await journal.run(tx, payOrder, input, meta);
   await tx.insert(auditLog).values(entry);
@@ -443,7 +468,7 @@ A tap is a handler that fires from that channel: in-process, after commit, lossy
 
 The one way to watch or stop a run from outside is a hook: a wrapper that receives the context and `next`. Register at boot, before any work.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 journal.hooks.command.around(async (ctx, next) => {
   // ctx: { name, input, meta, commandId, correlationId }, frozen
   const span = tracer.startSpan(`command ${ctx.name}`, { attributes: { 'journal.correlation_id': ctx.correlationId } });
@@ -481,7 +506,7 @@ A job is in one of four states. The state comes from the database clock.
 
 **Reads.** They take the root database. A list returns `{ jobs, next }`. `next` is an opaque cursor: pass it back as `after` for the next page, and never build or read it yourself. It is `null` on the last page. A page has 100 jobs by default and at most 200; a larger `limit` is `BAD_ARGUMENT`. The cursor holds the exact Postgres timestamp, so paging never repeats or skips a row.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const { jobs, next } = await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50 });
 const second = next === null ? undefined : await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50, after: next });
 
@@ -494,7 +519,7 @@ const history = await journal.jobOperations(db, { limit: 20 }); // newest first,
 
 **Verbs.** Every verb that changes a job takes `op` as its last argument: `{ actor, reason?, executionId? }`. `actor` is a free string you own (a user id, a script name) and must not be empty. `executionId` is the Foreman execution that asked, when there was one. Each verb that changes something writes exactly one row to `journal_job_operations` in the same transaction, so the audit and the change commit together or not at all. A verb that changes nothing writes no row.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const op = { actor: user.id, reason: 'provider outage' } as const;
 
 await journal.retry(db, jobId, op); // dead -> pending, due now, attempts and lease cleared, workers woken
@@ -540,7 +565,7 @@ Move on success is one statement under the lease fence: the fenced `DELETE` feed
 
 **The policy.** Give it to `compose` next to `tables`. Every field is optional.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { ndjsonArchiveSink } from '@arki/journal';
 
 export const sendWelcomeMail = j
@@ -606,7 +631,7 @@ Each step takes at most `sweep.batch` rows. A failing step is logged and the nex
 
 **An app that schedules the sweep itself.** Set `sweep: false`, and call the three verbs from your own schedule. Each one is public and takes `op` as its last argument; without it the actor is `system:retention`.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // compose({ tables, retention: { sweep: false, archive: { sink } } })
 await journal.purgeDead(db, { olderThan: new Date(Date.now() - 30 * 86_400_000) }, { actor: 'cron:journal' });
 await journal.exportArchive(db, { limit: 1000 }, { actor: 'cron:journal' });
@@ -632,7 +657,7 @@ A queue row is a job that carries no event. An app writes it in its own transact
 
 The journal only stores and claims queue rows. It does not know what a job does. A `JobRunner` does. It is a small port: `names`, `run(job, { db, signal })` and `retryDelay(job, error)`. The typed way to write and run these rows is `@arki/queue/outbox`: `runAfter(tx, job, args)` writes the row, and `outboxRunner` is the runner. See the `@arki/queue` README.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { listenOnPool } from '@arki/db/pg';
 
 const worker = journal.worker(db, {
@@ -681,7 +706,7 @@ Rules:
 
 `@arki/journal/http/webhooks` sends signed webhooks to your partners' endpoints. Delivery is a queue row in `journal_jobs`, run by the same worker as everything else. It is optional, and it runs on Node or Bun (it needs `@arki/http`).
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { journalTables } from '@arki/journal/pg';
 import { webhookSender, webhookTables } from '@arki/journal/http/webhooks';
 
@@ -719,7 +744,7 @@ Migration: add `webhookTables()` (or `webhookTables(schema)` next to `journalTab
 
 A sender delivers a webhook at least once, and sends it again after a timeout. Make the event id the idempotency key of a journal command. The receipt and the domain write then commit together, so a resent event changes nothing. There is no separate "seen events" table to drift from the data.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const scheme = standardWebhooks({ secrets: [process.env.WEBHOOK_SECRET] });
 const orderPlaced = route.post('/hooks/orders', { id: 'hooks.orders', body: placeOrderInput });
 
@@ -738,7 +763,7 @@ const engine = buildEngine([
 
 To pass an event to a queue or a broker, write an effect. The effect runs after commit, at least once, from the job table. Pass `jobId` on as the queue's own job id. The id is the same on every retry, so a retried effect adds the same queue job once.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import type { Queue } from 'bullmq';
 
 export const relayOrderPaid = j.effect('relayOrderPaid', order, { queue: need<Queue>() }, {
@@ -752,7 +777,7 @@ For a broker that dedupes on a message id, use `jobId` the same way. `kv.publish
 
 `@arki/journal/foreman` is the job console for Foreman. `@arki/admin` is an optional peer. `journalJobsModule` serves the job reads and verbs above, with previews and approvals.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { journalJobsModule } from '@arki/journal/foreman';
 
 const jobsModule = journalJobsModule({ journal, db, payload: 'hidden', jobs: queueRunner });
@@ -795,7 +820,7 @@ The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each wit
 
 **Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/journal.root.ts — the one place that lists handlers.
 export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
 
@@ -808,7 +833,7 @@ await worker.stop();
 
 **Dot app.** Each feature lists its own handlers with `journalHandlers`. The app lists its features once, in `.features([...])`. Both adapters read that list. There is no root file.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/features/orders/feature.ts
 export const orders = feature('orders', {
   needs: { mailer: mailerPlugin.provides.mailer }, // typed handle; service<Mailer>() also works
@@ -845,7 +870,7 @@ await run(payOrder, input);
 
 A chain feature declares the same handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above, for both feature forms side by side.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // features/orders/feature.ts
 export const core = defineFeature('orders')
   .needs({ journal: service<AppJournal>(), db: database.provides.db })
@@ -864,7 +889,7 @@ export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [or
 
 **The actor.** `actorRun(select)` from `@arki/journal/orpc` is a middleware that adds `context.run`, the journal's runner bound to the request's database and actor. The app's `select` says who the actor is; the journal assumes no session shape.
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // core/orpc.ts
 export const asActor = actorRun((context: { session: Session | null; journal: AppJournal }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED');
@@ -883,7 +908,7 @@ The procedure must have `journal` and a `db` the journal can write through on it
 
 **Export every table on its own.** drizzle-kit collects only a schema module's top-level exports, so a table that sits only inside the `journalTables()` object never gets a migration. Export each one, and add `ExportsEveryJournalTable` from `@arki/journal/pg` so a table added in a later version fails the build until you export it:
 
-```ts
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import type * as thisModule from './journal.tables'; // the module itself
 
 const tables = journalTables(schema);
@@ -1010,3 +1035,46 @@ An entity table needs a string key column that is primary or unique (`id` by def
 ## Debugging
 
 `DEBUG=arki:journal:*` prints commands, writes, replays, drains and worker ticks.
+
+## Public imports
+
+| Import | What it holds |
+| --- | --- |
+| `@arki/journal` | the portable core: `initJournal`, `need`, `jobId`, the command failures |
+| `@arki/journal/pg` | `journalTables()`, the table definitions |
+| `@arki/journal/errors` | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
+| `@arki/journal/dot` | the optional `@arki/dot` plugin and feature slice (see Dot) |
+| `@arki/journal/orpc` | the optional oRPC error mapping (see Rejected rules) |
+| `@arki/journal/http` | `responseCache`, the Postgres cache for HTTP idempotency |
+| `@arki/journal/http/webhooks` | outgoing webhooks on the job table |
+| `@arki/journal/foreman` | the Foreman job console |
+| `@arki/journal/projection` | the projection entry for Dot tooling |
+| `@arki/journal/testing` | `openJournalDb(schema)`: in-memory PGlite with the schema pushed, for tests |
+
+## Failure behaviour
+
+Rules and misuse fail in three ways:
+
+- A rule that rejects a request **returns a failure** (`CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, or the app's own). The command rolls back. `journal.run` returns the failure, typed. Check it with `isFailure(result)`.
+- A broken write, a schema error, or a misuse **throws** a `JournalError` with a `code`. Match with `isJournalError(error, 'CONFLICT')`. Never match on the message.
+- App code that throws passes through unchanged.
+
+The agent guide has the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs). With `commandErrors()` from `@arki/journal/orpc`, a returned failure answers the client with its code and status.
+
+## Limits
+
+- **One operation at a time.** One journal operation per transaction. Await every `write` and `run`. `Promise.all` over writes is a misuse.
+- **Effects are at least once.** A job may run twice. Use the `jobId` as the idempotency key of the outside call.
+- **Root database only.** `drain` and `worker` take the root database, never a transaction.
+- **Receipt keys.** A key is at most 256 characters (`journal_receipts.key`). A longer key fails.
+- **Version 1** means the journal created the row. A row that existed before starts at version 2.
+- **Any worker claims any job.** Run the worker in the process that holds what its effects talk to.
+- **The job table holds pending and dead work only.** Finished jobs leave. Retention decides what is kept.
+
+## Documentation
+
+The [agent guide](docs/agent-guide.md) has the model, a task map, the rules and the errors. The [design spec](https://github.com/arki-labs/arki/blob/main/packages/journal/docs/specs/2026-10-09-journal-design.md) explains intent.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the error `code` and the output of `DEBUG=arki:journal:*`.

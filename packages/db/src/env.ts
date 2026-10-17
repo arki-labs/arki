@@ -1,3 +1,4 @@
+/** Validated database environment variables (`DB_URL`, pool sizes and timeouts). */
 import { z } from '@arki/contracts';
 import { defineEnv } from '@arki/env/core';
 
