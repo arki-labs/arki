@@ -7,7 +7,8 @@ import { APIError } from 'better-auth/api';
 import { makeSignature } from 'better-auth/crypto';
 import { getTableColumns } from 'drizzle-orm';
 
-import type { AuthDefinition, AuthMethod, ResolvedDefinition, SocialMethod } from '../definition.js';
+import type { AuthDefinition, AuthMethod, IdTokenMethodsOf, ResolvedDefinition, SocialMethod } from '../definition.js';
+import type { AuthErrorCode } from '../errors.js';
 import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.js';
 import type { SocialProviders } from './assemble.js';
 import type { AuthEngine } from './engine.js';
@@ -18,19 +19,24 @@ import type {
   AuthSessions,
   AuthTables,
   AuthTestingApi,
+  IdTokenSession,
+  IdTokenSignIn,
   PrincipalFor,
   ProviderCredentialsMap,
   SessionValues,
+  SignInFailure,
 } from './types.js';
-import { isSocialMethod, resolveDefinition } from '../definition.js';
+import { ID_TOKEN_METHODS, isIdTokenMethod, isSocialMethod, resolveDefinition } from '../definition.js';
 import { AUTH_ERROR_CODES, AuthError, isAuthError } from '../errors.js';
 import { log } from '../log.js';
 import { isUserId, toPrincipal, toPrincipalSession, toUserRow } from '../principal.js';
 import { engineOptions } from './assemble.js';
 import {
+  AUTH_BASE_PATH,
   createEmitter,
   enginePath,
   failureOf,
+  idTokenMethodOf,
   methodOfSource,
   requestIdOf,
   runObserver,
@@ -51,6 +57,20 @@ export type Auth<D extends AuthDefinition, T extends AuthTables> = {
   /** Who is calling, or `null` for a guest. A cookie and a bearer token together are `ARKI_AUTH_E401`. */
   readonly principal: (headers: Headers) => Promise<PrincipalFor<D, T> | null>;
   readonly sessions: AuthSessions<PrincipalFor<D, T>, SessionIdOf<T>, UserIdOf<T>>;
+  /**
+   * Whether the definition enables `provider` and the engine can verify its id tokens. Narrows
+   * `provider` for `signInWithIdToken`, so app code can branch without naming a disabled method.
+   */
+  readonly supportsIdToken: (provider: SocialMethod) => provider is IdTokenMethodsOf<D>;
+  /**
+   * Native sign-in: verifies the provider's id token, signs the user in (creating them on first
+   * use) and returns the bearer token with its principal. `null` when the sign-in is refused: a
+   * token that fails verification (signature, audience, issuer, age, nonce), no email from the
+   * provider, an unverified email, or an existing user while `account.linking` is off. Needs
+   * `sessions: { bearer: true }` (`ARKI_AUTH_E001` otherwise). Rate limited like the sign-in routes:
+   * `ARKI_AUTH_E429` over the limit, `ARKI_AUTH_E503` when the store fails.
+   */
+  readonly signInWithIdToken: (input: IdTokenSignIn<D>) => Promise<IdTokenSession<PrincipalFor<D, T>> | null>;
   /** The engine itself: for the E2E handler, tests and the escape hatch. Not for app code. */
   readonly engine: AuthEngine;
   /** Test-only helpers. Every call throws `ARKI_AUTH_E005` in production. */
@@ -220,6 +240,24 @@ function closedAccountPaths(account: ResolvedDefinition['account']): ReadonlySet
   ]);
 }
 
+const AUTH_ERROR_CODE_NAMES: ReadonlySet<string> = new Set(Object.values(AUTH_ERROR_CODES));
+const isAuthErrorCode = (value: unknown): value is AuthErrorCode =>
+  typeof value === 'string' && AUTH_ERROR_CODE_NAMES.has(value);
+
+/**
+ * The caller's headers for an in-process engine call. Browser-only headers are dropped: they would
+ * make the engine treat a server call as a form post and check its origin. The rest, the client-IP
+ * header and user agent included, pass as they are.
+ */
+function engineHeadersOf(headers: Headers): Headers {
+  const result = new Headers(headers);
+  for (const name of headers.keys()) {
+    if (/^(?:cookie|origin|referer|authorization|content-length|sec-fetch-.*)$/.test(name)) result.delete(name);
+  }
+  result.set('content-type', 'application/json');
+  return result;
+}
+
 const jsonError = (error: AuthError): Response =>
   Response.json({ code: error.code, message: error.message }, { status: error.status });
 
@@ -349,8 +387,11 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
             : async event => {
                 await bindings.on?.beforeUserCreate?.(event);
               },
-        userCreated: async (user, path) => {
-          const method = path === undefined ? undefined : signInMethodOf(path, resolved.methods);
+        userCreated: async (user, path, body) => {
+          const method =
+            path === undefined
+              ? undefined
+              : (signInMethodOf(path, resolved.methods) ?? idTokenMethodOf(path, body, resolved.methods));
           if (method === undefined) return;
           await emit.userCreated({ user: toUserRow<U>(user, resolved.fields), method });
         },
@@ -440,7 +481,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     }
 
     if (method !== undefined) {
-      const requestId = requestIdOf(request);
+      const requestId = requestIdOf(request.headers);
       const cookie = sessionCookieOf(response, await sessionCookieName());
       const token = response.headers.get('set-auth-token');
       const signedIn =
@@ -461,6 +502,66 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
       else await emit.passwordChanged({ userId: before.user.id, reason: 'change' });
     }
     return response;
+  }
+
+  const supportsIdToken = (provider: SocialMethod): provider is IdTokenMethodsOf<D> =>
+    isIdTokenMethod(provider) && resolved.methods.includes(provider);
+
+  async function signInWithIdToken(input: IdTokenSignIn<D>): Promise<IdTokenSession<P> | null> {
+    const { provider, idToken, nonce, headers } = input;
+    // Read as a plain string: a caller without the types can pass anything.
+    const name: string = provider;
+    if (!isSocialMethod(name) || !supportsIdToken(name)) {
+      invalid(`"${name}" is not an enabled id-token method (${ID_TOKEN_METHODS.join(', ')}).`);
+    }
+    if (!resolved.sessions.bearer) {
+      invalid('`signInWithIdToken` needs `sessions: { bearer: true }`: the native app keeps a bearer token.');
+    }
+    const requestId = requestIdOf(headers);
+    const refused = async (reason: SignInFailure) => {
+      await emit.signInFailed({ method: provider, reason, requestId });
+      return null;
+    };
+
+    // Through the engine's own router, so the sign-in rate limit applies exactly as on the HTTP
+    // routes: the same store, rule and client-IP header. A failing store throws `E503` from here.
+    const response = await engine.handler(
+      new Request(new URL(`${AUTH_BASE_PATH}/sign-in/social`, runtime.url), {
+        method: 'POST',
+        headers: engineHeadersOf(headers),
+        body: JSON.stringify({ provider, idToken: { token: idToken, ...(nonce !== undefined && { nonce }) } }),
+      }),
+    );
+    if (!response.ok) {
+      const body: unknown = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      const code: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'code') : undefined;
+      const message: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'message') : undefined;
+      // `sessionCreating` refused the session with the app's own code.
+      if (isAuthErrorCode(code)) throw new AuthError(code, typeof message === 'string' ? message : code);
+      const reason = await failureOf(response);
+      if (reason === 'rateLimited') {
+        await emit.signInFailed({ method: provider, reason, requestId });
+        const retryAfter = Number(response.headers.get('x-retry-after'));
+        throw new AuthError(AUTH_ERROR_CODES.rateLimited, 'Too many sign-in attempts.', {
+          ...(Number.isFinite(retryAfter) && retryAfter > 0 && { retryAfter }),
+        });
+      }
+      if (reason === 'credentials' || reason === 'unverified') return refused(reason);
+      throw new Error(
+        `[@arki/auth] The engine answered an id-token sign-in with ${response.status}${typeof code === 'string' ? ` ${code}` : ''}.`,
+      );
+    }
+    const token = response.headers.get('set-auth-token');
+    const signedIn = token === null ? null : await principal(new Headers({ authorization: `Bearer ${token}` }));
+    if (token === null || signedIn === null) {
+      throw new Error('[@arki/auth] The engine accepted the id token but returned no usable bearer token.');
+    }
+    await emit.signIn({ principal: signedIn, method: provider, requestId });
+    log.debug('Signed in with a {provider} id token', { provider: name });
+    return { token, principal: signedIn };
   }
 
   const testing: AuthTestingApi<U> = {
@@ -523,6 +624,8 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     handler,
     principal,
     sessions: createSessions<P, SessionIdOf<T>, UserIdOf<T>>(engineContext),
+    supportsIdToken,
+    signInWithIdToken,
     engine,
     testing,
   };

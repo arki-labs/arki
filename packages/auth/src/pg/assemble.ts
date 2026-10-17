@@ -34,7 +34,8 @@ export type EngineCallbacks = {
   /** Refuses a user creation by throwing `AuthError`. Absent: no gate (and no engine validation hook). */
   readonly beforeUserCreate:
     ((event: { email: string; method: AuthMethod; request?: Request }) => Promise<void>) | undefined;
-  readonly userCreated: (user: object, path: string | undefined) => Promise<void>;
+  /** `body` is the request body: an id-token sign-in names its provider there, not in the path. */
+  readonly userCreated: (user: object, path: string | undefined, body: unknown) => Promise<void>;
   readonly passwordReset: (userId: string) => Promise<void>;
   /** The app's values for a new session's own columns. Absent: no hook. */
   readonly sessionCreating:
@@ -147,7 +148,7 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
     },
     account: { accountLinking: { enabled: account.linking } },
     databaseHooks: {
-      user: { create: { after: (user, ctx) => callbacks.userCreated(user, ctx?.path) } },
+      user: { create: { after: (user, ctx) => callbacks.userCreated(user, ctx?.path, ctx?.body) } },
       // Every session the engine writes goes through here: every sign-in path and `actingAs`.
       session: {
         create: {

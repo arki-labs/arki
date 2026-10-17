@@ -11,6 +11,8 @@ export type {
   AccountOptions,
   AuthDefinition,
   AuthMethod,
+  IdTokenMethod,
+  IdTokenMethodsOf,
   Seconds,
   SocialMethod,
   VerifyEmailMode,

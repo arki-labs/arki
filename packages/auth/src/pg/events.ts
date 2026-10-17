@@ -32,6 +32,17 @@ function signInMethodOfPath(path: string): AuthMethod | undefined {
   return provider !== undefined && isSocialMethod(provider) ? provider : undefined;
 }
 
+/**
+ * The method of an id-token sign-in: `/sign-in/social` with an `idToken` in the body. It signs in
+ * (and may create the user) in place, with the provider named in the body, not the path.
+ */
+export function idTokenMethodOf(path: string, body: unknown, methods: readonly AuthMethod[]): AuthMethod | undefined {
+  if (path !== '/sign-in/social' || typeof body !== 'object' || body === null) return undefined;
+  if (Reflect.get(body, 'idToken') === undefined) return undefined;
+  const provider: unknown = Reflect.get(body, 'provider');
+  return typeof provider === 'string' && isSocialMethod(provider) && methods.includes(provider) ? provider : undefined;
+}
+
 /** The method behind a user creation, from the engine's provisioning source. */
 export function methodOfSource(source: { readonly method: string; readonly oauth?: { readonly providerId: string } }) {
   if (source.method === 'email-password') return 'password';
@@ -60,7 +71,7 @@ export async function failureOf(response: Response): Promise<SignInFailure | und
 }
 
 /** The request id events carry: the inbound `x-request-id`, else a fresh one. */
-export const requestIdOf = (request: Request): string => request.headers.get('x-request-id') ?? crypto.randomUUID();
+export const requestIdOf = (headers: Headers): string => headers.get('x-request-id') ?? crypto.randomUUID();
 
 type Events<P, U> = Required<AuthEvents<P, U>>;
 type EventOf<P, U, K extends keyof Events<P, U>> = Parameters<Events<P, U>[K]>[0];

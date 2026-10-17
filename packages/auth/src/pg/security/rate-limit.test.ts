@@ -2,37 +2,16 @@
  * Rate limits reach the wire, are shared by replicas, fail closed, and key on the trusted client
  * address only. Brute force on sign-in is the attack these tests stand in for.
  */
-import type { RateLimiterRes } from 'rate-limiter-flexible';
-import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { describe, expect, it } from 'vitest';
 
-import type { RateLimitStore } from '../types.js';
 import { PASSWORD, post } from '../../__fixtures__/http.js';
+import { failingStore, sharedStore } from '../../__fixtures__/rate-limit-store.js';
 import { authTables } from '../../__fixtures__/tables.js';
 import { defineAuth } from '../../definition.js';
 import { AUTH_ERROR_CODES } from '../../errors.js';
 import { testAuth } from '../../testing/index.js';
 
 const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], verifyEmail: 'none' });
-
-/** One shared counter per limiter shape, like Redis behind `@arki/kv`. */
-function sharedStore(): RateLimitStore {
-  const limiters = new Map<string, RateLimiterMemory>();
-  return {
-    getRateLimiter: (id, { points = 1, duration = 1 }) => {
-      const key = `${id}:${points}:${duration}`;
-      const limiter = limiters.get(key) ?? new RateLimiterMemory({ points, duration, keyPrefix: key });
-      limiters.set(key, limiter);
-      return limiter;
-    },
-  };
-}
-
-class FailingLimiter extends RateLimiterMemory {
-  override consume(): Promise<RateLimiterRes> {
-    return Promise.reject(new Error('redis is down'));
-  }
-}
 
 const signIn = (auth: { handler: (request: Request) => Promise<Response> }, headers?: HeadersInit) =>
   post(
@@ -85,7 +64,7 @@ describe('rate limits', () => {
   it('answers 503 E503 when the store fails, never a pass', async () => {
     const { auth, dispose } = await testAuth(definition, {
       tables: authTables,
-      rateLimit: { store: { getRateLimiter: () => new FailingLimiter({ points: 1, duration: 1 }) } },
+      rateLimit: { store: failingStore() },
     });
     try {
       const response = await signIn(auth);

@@ -61,12 +61,15 @@ const STATUS_BY_CODE: Readonly<Record<AuthErrorCode, number>> = {
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
   readonly status: number;
+  /** Seconds before a rate-limited (`E429`) attempt may be retried, when the limiter says. */
+  readonly retryAfter: number | undefined;
 
-  constructor(code: AuthErrorCode, message: string, options?: ErrorOptions) {
+  constructor(code: AuthErrorCode, message: string, options?: ErrorOptions & { readonly retryAfter?: number }) {
     super(message, options);
     this.name = 'AuthError';
     this.code = code;
     this.status = STATUS_BY_CODE[code];
+    this.retryAfter = options?.retryAfter;
   }
 }
 

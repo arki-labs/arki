@@ -35,6 +35,8 @@ export type {
   AuthTables,
   AuthTemplates,
   AuthTestingApi,
+  IdTokenSession,
+  IdTokenSignIn,
   PrincipalFor,
   ProviderCredentials,
   ProviderCredentialsMap,

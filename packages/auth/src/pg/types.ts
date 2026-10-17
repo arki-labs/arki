@@ -9,7 +9,14 @@ import type { KV } from '@arki/kv';
 import type { Mailer, MailTemplate } from '@arki/mail';
 import type { AuthLinkData, AuthLinkInput, magicLink } from '@arki/mail/templates/auth';
 
-import type { AuthDefinition, AuthMethod, ExposedFields, SocialMethod, SocialMethodsOf } from '../definition.js';
+import type {
+  AuthDefinition,
+  AuthMethod,
+  ExposedFields,
+  IdTokenMethodsOf,
+  SocialMethod,
+  SocialMethodsOf,
+} from '../definition.js';
 import type {
   Principal,
   PrincipalSession,
@@ -58,7 +65,14 @@ type ClientCredentials = {
 /** Credentials per social provider. */
 export type ProviderCredentialsMap = {
   readonly google: ClientCredentials;
-  readonly apple: ClientCredentials & { readonly appBundleIdentifier?: string };
+  readonly apple: ClientCredentials & {
+    /**
+     * The native app's bundle id. Native Apple id tokens name it as their audience, so
+     * `signInWithIdToken` needs it; without it the audience checked is `clientId` (the Services ID
+     * of web sign-in).
+     */
+    readonly appBundleIdentifier?: string;
+  };
   readonly facebook: ClientCredentials;
   readonly microsoft: ClientCredentials & { readonly tenantId?: string };
   readonly github: ClientCredentials;
@@ -290,6 +304,21 @@ export type AuthSessions<P, SId extends string, UId extends string> = {
   /** Revokes every session of a user. A trusted server call: no principal is checked. */
   revokeUser(userId: UId): Promise<void>;
 };
+
+/** What `auth.signInWithIdToken` takes. */
+export type IdTokenSignIn<D> = {
+  /** An enabled method whose id tokens the engine verifies. `auth.supportsIdToken` narrows to it. */
+  readonly provider: IdTokenMethodsOf<D>;
+  /** The id token the platform SDK returned (Apple's `identityToken`). */
+  readonly idToken: string;
+  /** The raw nonce the app put in the provider request, when it used one. */
+  readonly nonce?: string;
+  /** The request's headers: the session records its IP address and user agent from them. */
+  readonly headers: Headers;
+};
+
+/** A native sign-in: the bearer token the app keeps, and the principal it stands for. */
+export type IdTokenSession<P> = { readonly token: string; readonly principal: P };
 
 /** A test user: the email, and any of the row's other columns. */
 export type TestUserInput<U> = { readonly email: string; readonly name?: string } & Partial<Omit<U, 'id' | 'email'>>;

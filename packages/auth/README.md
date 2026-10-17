@@ -324,6 +324,29 @@ type Principal<User> = {
 - `revokeOthers(principal)`: every session but the current one.
 - `revokeUser(userId)`: every session of a user. A trusted server call.
 
+## Native sign-in with an id token
+
+A native app signs in with the platform SDK (Sign in with Apple, Google Sign-In) and gets an id token. The backend trades it for a session:
+
+```ts skip="a route fragment, needs an app"
+if (!auth.supportsIdToken('apple')) {
+  return Response.json({ error: 'Apple sign-in is not configured.' }, { status: 501 });
+}
+const session = await auth.signInWithIdToken({ provider: 'apple', idToken, nonce, headers: request.headers });
+if (session === null) return Response.json({ error: 'Sign-in failed.' }, { status: 401 });
+// The app keeps session.token and sends `Authorization: Bearer <token>`.
+return Response.json({ token: session.token, userId: session.principal.user.id });
+```
+
+- `provider` is typed: only the definition's enabled methods whose id tokens the engine verifies (`google`, `apple`, `facebook`, `microsoft`; GitHub has none). A disabled one does not compile.
+- `auth.supportsIdToken(method)` answers the same question at run time and narrows `method`, so shared code can branch without naming a disabled provider.
+- The engine checks the signature against the provider's published keys, the audience, the issuer, the age (one hour) and, when given, the nonce.
+- Apple's native tokens name the app's bundle id as audience: set `runtime().providers.apple.appBundleIdentifier`. Without it the audience checked is `clientId` (the web Services ID).
+- It needs `sessions: { bearer: true }`. Without it the call throws `ARKI_AUTH_E001`.
+- `null` means refused: a token that fails a check, no email from the provider, an unverified email, or an existing user while `account.linking` is off. Nothing is written.
+- `beforeUserCreate`, `sessionCreating`, `userCreated` and `signIn`/`signInFailed` run as for any sign-in. A `sessionCreating` refusal throws its `AuthError`.
+- It is rate limited like sign-in: the same `rateLimit` store, rule and `runtime().clientIp.header` as the HTTP routes. Over the limit it throws `ARKI_AUTH_E429` (with `retryAfter` seconds) before the token is checked, and fires `signInFailed` with `'rateLimited'`. A failing store throws `ARKI_AUTH_E503`.
+
 ## Events
 
 `on` takes plain functions. They run after the fact and never change the response. A throwing observer is logged. Events never carry tokens, cookies, headers or bodies.

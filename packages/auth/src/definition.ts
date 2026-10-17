@@ -16,6 +16,13 @@ import { AUTH_ERROR_CODES, AuthError } from './errors.js';
 export const SOCIAL_METHODS = ['google', 'apple', 'facebook', 'microsoft', 'github'] as const;
 export type SocialMethod = (typeof SOCIAL_METHODS)[number];
 
+/**
+ * Social methods whose id tokens the engine can verify, so a native app can sign in with the token
+ * its platform SDK returned (`auth.signInWithIdToken`). GitHub has no id tokens.
+ */
+export const ID_TOKEN_METHODS = ['google', 'apple', 'facebook', 'microsoft'] as const satisfies readonly SocialMethod[];
+export type IdTokenMethod = (typeof ID_TOKEN_METHODS)[number];
+
 /** Every sign-in method. Email OTP and passkeys are later work and are not accepted yet. */
 export const AUTH_METHODS = ['password', 'magicLink', ...SOCIAL_METHODS] as const;
 export type AuthMethod = (typeof AUTH_METHODS)[number];
@@ -95,6 +102,9 @@ export type SocialMethodsOf<D> = D extends { readonly methods: infer M }
     : never
   : never;
 
+/** The social methods a definition enables whose id tokens the engine can verify. */
+export type IdTokenMethodsOf<D> = Extract<SocialMethodsOf<D>, IdTokenMethod>;
+
 const DAY: Seconds = 24 * 60 * 60;
 
 /** A definition with every default filled in. */
@@ -120,6 +130,10 @@ const SOCIAL_METHOD_NAMES = new Set<string>(SOCIAL_METHODS);
 const isAuthMethod = (value: string): value is AuthMethod => AUTH_METHOD_NAMES.has(value);
 
 export const isSocialMethod = (value: string): value is SocialMethod => SOCIAL_METHOD_NAMES.has(value);
+
+const ID_TOKEN_METHOD_NAMES = new Set<string>(ID_TOKEN_METHODS);
+
+export const isIdTokenMethod = (value: string): value is IdTokenMethod => ID_TOKEN_METHOD_NAMES.has(value);
 
 function invalid(message: string): never {
   throw new AuthError(AUTH_ERROR_CODES.invalidConfig, `[@arki/auth] ${message}`);
