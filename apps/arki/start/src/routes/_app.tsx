@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
 
-import { WorkspaceLayout } from '@arki/sitekit/layout/workspace/layout.tsx';
+import { WorkspaceLayout } from '@fleet/sitekit/layout/workspace/layout.tsx';
 
 export const Route = createFileRoute('/_app')({
   component: AppLayout,

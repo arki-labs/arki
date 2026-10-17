@@ -175,7 +175,7 @@ ops.posts.create.meta; // the contract meta, value and type
 - **Bundles.** The walk reads only path and meta, so a
   `minifyContractRouter` output works the same: an app can later ship a
   minified contract to the browser without its Zod schemas.
-- **Carrying it.** `createOrpcUtils` (in `@arki/tanstack-start/orpc/client`)
+- **Carrying it.** `createOrpcUtils` (in `@fleet/tanstack-start/orpc/client`)
   puts each leaf's operation under `'~op'`; `operationOf(leaf)` reads it
   back, and throws for a value without one (a raw client, a forged object).
 

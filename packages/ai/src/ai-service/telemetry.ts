@@ -16,7 +16,7 @@
  *
  * Gated on `OTEL_EXPORTER_OTLP_ENDPOINT`: with no OTel backend configured it
  * returns an empty object, so the SDK call is untouched and nothing is
- * recorded — same no-op discipline as `@arki/meter/otel` and the DOT kernel.
+ * recorded — same no-op discipline as `@fleet/meter/otel` and the DOT kernel.
  * The recorded inputs/outputs are exactly what makes a silent mid-chain
  * generation failure visible in the trace instead of a guessing game.
  */

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scripts } from '@tanstack/react-router';
 
-import { DevTools } from '@arki/sitekit/devtools';
+import { DevTools } from '@fleet/sitekit/devtools';
 import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/theme/script';
 import { Toaster } from '@arki/ui/sonner';
 

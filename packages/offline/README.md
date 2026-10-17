@@ -44,7 +44,7 @@ export function ORPCReactProvider({ children }) {
 
 ```ts
 // src/service-worker.ts
-import '@arki/tanstack-start/pwa/sw';
+import '@fleet/tanstack-start/pwa/sw';
 import { registerOfflineRoutes } from '@arki/offline/pwa';
 
 registerOfflineRoutes({
@@ -139,7 +139,7 @@ It acts only on procedures whose contract meta says `offlineSafe: true`; every o
 4. Not found → runs the handler and stores its output on success.
 5. On error → stores nothing (the client can safely retry).
 
-On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@arki/tanstack-start/orpc/client`), so it carries the procedure's identity:
+On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@fleet/tanstack-start/orpc/client`), so it carries the procedure's identity:
 
 ```tsx
 // lib/orpc/client.tsx

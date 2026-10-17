@@ -17,7 +17,7 @@ const BUILTIN_MESSAGES: Record<string, MessageBag> = {
  *
  * Given a `locale`, selects the matching built-in dictionary from `@arki/intl`
  * and mounts the underlying {@link LocaleProvider}, so shared components that
- * call `useTranslations()`/`useLocale()` (e.g. `@arki/sitekit`'s `ComingSoon`,
+ * call `useTranslations()`/`useLocale()` (e.g. `@fleet/sitekit`'s `ComingSoon`,
  * `LocaleSwitcher`, feedback templates) work without each app re-wiring intl.
  *
  * Apps that define their own feature-level messages can merge them via the

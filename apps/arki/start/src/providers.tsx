@@ -1,12 +1,12 @@
 import { createStore, Provider } from 'jotai';
 import { DevTools } from 'jotai-devtools';
 
-import type { NavContextType } from '@arki/sitekit/nav-context.tsx';
+import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
 import { FullscreenProvider } from '@arki/react-fullscreen';
 import { useIsClient } from '@arki/react-hooks/is-client';
-import { AppProvider } from '@arki/sitekit/app-context.tsx';
+import { AppProvider } from '@fleet/sitekit/app-context.tsx';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
-import { NavContextProvider } from '@arki/sitekit/nav-context.tsx';
+import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
 import { useTheme } from '@arki/theme';
 import { TooltipProvider } from '@arki/ui/tooltip';
 

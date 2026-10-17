@@ -40,6 +40,7 @@ FROM deps-installer AS builder
 ARG application_name
 
 COPY --from=pruner /app/out/full/ .
+RUN mkdir -p fleet
 
 ENV NODE_ENV=production \
     NITRO_PRESET=bun
@@ -91,6 +92,7 @@ COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 # Copy workspace packages needed at runtime
 COPY --from=builder --chown=appuser:nodejs /app/apps/${application_name}/backend ./apps/${application_name}/backend
 COPY --from=builder --chown=appuser:nodejs /app/packages ./packages
+COPY --from=builder --chown=appuser:nodejs /app/fleet ./fleet
 
 EXPOSE 3000
 ENV PORT=3000 \

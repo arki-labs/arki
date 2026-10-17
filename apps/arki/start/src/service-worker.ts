@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import '@arki/tanstack-start/pwa/sw';
+import '@fleet/tanstack-start/pwa/sw';
 import { registerOfflineRoutes } from '@arki/offline/pwa';
 
 /**

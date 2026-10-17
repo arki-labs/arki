@@ -336,17 +336,17 @@
       "reason": "lesson 13 wave A|B: docs backlog"
     },
     {
-      "package": "@arki/feedback",
+      "package": "@fleet/feedback",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/feedback",
+      "package": "@fleet/feedback",
       "error": "TYPES_E001 export \"./email\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/feedback",
+      "package": "@fleet/feedback",
       "error": "TYPES_E001 export \"./react\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -856,7 +856,7 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/poetry",
+      "package": "@fleet/poetry",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodEnum",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -906,77 +906,77 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/app-sidebar.tsx\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/app-sidebar\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/layout.tsx\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/layout\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/labels\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/persistence\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/registry\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/server\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/tweaks-button\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/tweaks-panel\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/types.ts\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/types\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/use-persist-tweaks\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/sitekit",
+      "package": "@fleet/sitekit",
       "error": "TYPES_E001 export \"./tweaks/use-tweak\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -1001,17 +1001,17 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/text-bible",
+      "package": "@fleet/text-bible",
       "error": "TYPES_E001 export \".\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/text-bible",
+      "package": "@fleet/text-bible",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/text-bible",
+      "package": "@fleet/text-bible",
       "error": "TYPES_E001 export \"./search\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },

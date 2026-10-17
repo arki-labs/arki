@@ -2,6 +2,8 @@
 
 When a `@arki/*` package matures enough to ship publicly, this is the procedure.
 
+Only `packages/` (`@arki/*`) can be promoted. A `fleet/` (`@fleet/*`) package is never released: first move it into Arki (RFC [`2026-10-17-fleet-packages.md`](../../../docs/rfcs/2026-10-17-fleet-packages.md) § 6), then come back here.
+
 ## Eligibility — must pass before promotion
 
 Run `bun tooling/arki-release/src/cli.ts inventory` to see current classification. The package must:

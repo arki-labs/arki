@@ -17,7 +17,7 @@ export const EMPTY_TWEAKS = {
  *
  *   tweaks: tweaksColumn().notNull().default(EMPTY_TWEAKS),
  *
- * The shape is intentionally opaque at the schema level — the @arki/sitekit
+ * The shape is intentionally opaque at the schema level — the @fleet/sitekit
  * persistence layer is responsible for type-narrowing at read time.
  */
 export function tweaksColumn(name = 'tweaks') {

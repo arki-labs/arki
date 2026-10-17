@@ -6,8 +6,8 @@ import { contentPlugin } from '@arki/content/vite';
 import { devServer, printLocalhostUrl } from '@arki/dev-certs';
 import { nitro } from 'nitro/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
-import { createPwaPlugin } from '@arki/tanstack-start/pwa';
-import { fleetVite } from '@arki/tanstack-start/vite';
+import { createPwaPlugin } from '@fleet/tanstack-start/pwa';
+import { fleetVite } from '@fleet/tanstack-start/vite';
 
 export default defineConfig({
   server: {

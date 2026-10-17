@@ -111,7 +111,7 @@ export function readTagRules(root: string): TagRules {
 }
 
 /** Workspaces we never walk: their source is huge data. They still count as import targets. */
-const SKIP_WALK = new Set(['@arki/dictionary', '@arki/dictionaries']);
+const SKIP_WALK = new Set(['@fleet/dictionary', '@fleet/dictionaries']);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.cache', '.turbo', '.output', 'coverage', '.git']);
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
 /** A wildcard export never counts tests, specs or benches as entries. */

@@ -8,7 +8,7 @@ Use `@arki/contracts/orpc` when client code needs to know WHICH procedure it hol
 2. **Declare policy on the contract**, not on the client. Offline safety:
    `create: offlineSafe(oc.input(createPost).output(post))` (`@arki/offline/orpc`).
 3. **Build the client utils from the contract value**:
-   `export const orpc = createOrpcUtils(rpcContract, client)` (`@arki/tanstack-start/orpc/client`).
+   `export const orpc = createOrpcUtils(rpcContract, client)` (`@fleet/tanstack-start/orpc/client`).
    Each leaf is oRPC's own utils plus `'~op'` — same keys as `createTanstackQueryUtils(client)`.
 4. **Read the identity** with `operationOf(orpc.posts.create)` → `{ path, name, meta }`, or let a
    typed consumer read it (`useOfflineMutation(orpc.posts.create)` compiles only when the meta says

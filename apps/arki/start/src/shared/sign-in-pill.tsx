@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import { SignInIcon } from '@arki/icons/phosphor';
-import { SignInPillFrame } from '@arki/sitekit/layout/workspace/app-sidebar.tsx';
+import { SignInPillFrame } from '@fleet/sitekit/layout/workspace/app-sidebar.tsx';
 
 export const signInPill = (
   <SignInPillFrame>

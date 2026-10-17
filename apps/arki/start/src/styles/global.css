@@ -28,9 +28,9 @@
 @source "../../../../../packages/ui/src";
 @source "../../../../../packages/ui/components/src";
 @source "../../../../../packages/theme/src";
-@source "../../../../../packages/sitekit/src";
+@source "../../../../../fleet/sitekit/src";
 @source "../../../../../packages/seo/src";
-@source "../../../../../packages/feedback/src";
+@source "../../../../../fleet/feedback/src";
 @source "../../../../../packages/auth/src";
 @source "../../../../../packages/design-systems/src";
 

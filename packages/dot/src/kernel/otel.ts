@@ -16,7 +16,7 @@ import { nowMs } from './now.js';
  * compatible with principle 5 (zero optional dependencies in the kernel).
  *
  * Consumers wire the SDK however they like (`@opentelemetry/sdk-node`,
- * `@arki/meter`, etc.); the kernel never touches the SDK directly.
+ * `@fleet/meter`, etc.); the kernel never touches the SDK directly.
  *
  * Span / attribute conventions:
  *

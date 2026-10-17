@@ -7,7 +7,7 @@ const LocaleContext = createContext<string>('en');
  * Provides locale to TanStack Start apps.
  *
  * Mounts `use-intl`'s `IntlProvider` so shared components that call
- * `useLocale()` / `useTranslations()` from `use-intl` (e.g. `@arki/sitekit`)
+ * `useLocale()` / `useTranslations()` from `use-intl` (e.g. `@fleet/sitekit`)
  * resolve context correctly under Vite SSR.
  */
 export const LocaleProvider = ({

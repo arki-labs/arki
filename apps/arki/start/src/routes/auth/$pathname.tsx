@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { AuthView } from '@daveyplate/better-auth-ui';
 
-import { PageContainer } from '@arki/sitekit/layout/workspace/page-container.tsx';
-import { WorkspaceLayout } from '@arki/sitekit/layout/workspace/layout.tsx';
+import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
+import { WorkspaceLayout } from '@fleet/sitekit/layout/workspace/layout.tsx';
 
 import { signInPill } from '~/shared/sign-in-pill';
 

@@ -1,8 +1,8 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
 
 import { Article } from '@arki/content/react';
-import { Shell } from '@arki/sitekit/components/shell';
-import { PageContainer } from '@arki/sitekit/layout/workspace/page-container.tsx';
+import { Shell } from '@fleet/sitekit/components/shell';
+import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 
 import { posts } from '~/content/util';
 import { getDefaultMeta } from '~/shared-metadata';

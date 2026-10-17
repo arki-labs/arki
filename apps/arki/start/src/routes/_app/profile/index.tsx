@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import { PageContainer } from '@arki/sitekit/layout/workspace/page-container.tsx';
+import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 
 import { authClient } from '~/features/auth/client';
 import { getDefaultMeta } from '~/shared-metadata';

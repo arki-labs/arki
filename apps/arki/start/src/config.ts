@@ -1,6 +1,6 @@
-import type { ProjectKey } from '@arki/sitekit/projects.ts';
-import type { AppContextType } from '@arki/sitekit/types.ts';
-import { getProjectByKey } from '@arki/sitekit/projects.ts';
+import type { ProjectKey } from '@fleet/sitekit/projects.ts';
+import type { AppContextType } from '@fleet/sitekit/types.ts';
+import { getProjectByKey } from '@fleet/sitekit/projects.ts';
 
 import packageJSON from '../package.json';
 import { env } from './env';
