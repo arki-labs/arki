@@ -15,7 +15,7 @@ Every `@arki/*` package goes into exactly one tier. The tier decides its licence
 
 | Area | Packages | Today | Work before launch |
 | --- | --- | --- | --- |
-| Kernel | `dot`, `env` (`feature` is an `@arki/dot` subpath, not a package) | public | `dot new` must scaffold a deployable app |
+| Kernel | `dot`, `cli` (A-32), `env` (`feature` is an `@arki/dot` subpath, not a package) | public | `dot new` must scaffold a deployable app |
 | HTTP / API | `http`, `contracts` (`tanstack-start` returns when it exists) | public | — |
 | Data | `db`, `journal`, `kv` | public | — |
 | Auth | `auth` | **private** | publish; fix README (still says pnpm / Next.js) |

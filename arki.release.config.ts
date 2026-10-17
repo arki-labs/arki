@@ -74,7 +74,8 @@ export const config: ReleaseConfig = {
     {
       id: 'dot-kernel',
       label: 'Wave 2 — DOT Kernel',
-      packages: ['@arki/dot'],
+      // @arki/cli publishes first: the dot CLI runs on it (A-32).
+      packages: ['@arki/cli', '@arki/dot'],
     },
     {
       id: 'infrastructure-adapters',
@@ -124,7 +125,7 @@ export const config: ReleaseConfig = {
   // (runtimes + bench-fresh). `@arki/live` joined the stack 2026-10-17 (A-31).
   tiers: {
     stack: [
-      '@arki/dot', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
+      '@arki/dot', '@arki/cli', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
       '@arki/log', '@arki/mail', '@arki/auth', '@arki/payments', '@arki/ui', '@arki/design-systems',
       '@arki/theme', '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
       '@arki/ai', '@arki/chat-ui', '@arki/live',
