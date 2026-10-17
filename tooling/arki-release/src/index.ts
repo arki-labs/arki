@@ -100,10 +100,14 @@ export type {
 } from './history';
 
 export {
-  renderSyncPackageReposText,
-  runSyncPackageRepos,
-  SYNC_REPO_ERROR_CODES,
-} from './sync-package-repos';
+  loadMirrorReadiness,
+  mirrorReadiness,
+  runSyncApply,
+  runSyncPrepare,
+  SYNC_ERROR_CODES,
+  syncPlanSchema,
+} from './sync';
+export type { SyncEnvelope, SyncItem, SyncPlan } from './sync';
 
 export type {
   CatalogTables,
@@ -148,9 +152,5 @@ export type {
   ScorecardPackageResult,
   ScorecardStatus,
   ScorecardSummary,
-  SyncRepoItem,
-  SyncRepoOptions,
-  SyncRepoStatus,
-  SyncRepoSummary,
   HistoryRepoStatus,
 } from './types';

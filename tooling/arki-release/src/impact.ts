@@ -20,7 +20,6 @@ import type { GitRunner } from './runners';
 import type {
   ReleaseCommandEnvelope,
   ReleaseError,
-  ReleaseStatus,
   ScorecardDimensionResult,
   ScorecardStatus,
 } from './types';
@@ -132,6 +131,20 @@ export function checkBumps(
   return errors;
 }
 
+/**
+ * IMPACT_E004 blocks the release: a major bump below 1.0 fails docs-impact
+ * (the changeset dimension) whatever the docs say, so the gate closes
+ * instead of the error sitting unread in the envelope.
+ */
+export function withBumpErrors(result: ScorecardDimensionResult, bumpErrors: readonly ReleaseError[]): ScorecardDimensionResult {
+  if (bumpErrors.length === 0) return result;
+  return {
+    status: 'fail',
+    details: `${String(bumpErrors.length)} major bump(s) below 1.0; ${result.details}`,
+    evidence: [...result.evidence, ...bumpErrors],
+  };
+}
+
 export type ImpactKind = 'docs' | 'demo';
 
 export type ReasonScan = {
@@ -228,7 +241,7 @@ export type DemoImpactInput = {
   /** Names of registered demos that use the package (from the demo registry). */
   readonly demos: readonly string[];
   /** `candidate.json` `checks`, keyed `demo:<name>`. */
-  readonly candidateChecks: Readonly<Record<string, { readonly status: ReleaseStatus }>>;
+  readonly candidateChecks: Readonly<Record<string, { readonly status: string }>>;
   readonly changesets: readonly Changeset[];
 };
 
@@ -290,7 +303,7 @@ export type ImpactOptions = {
   readonly packages: readonly ImpactPackage[];
   readonly git: GitRunner;
   readonly demosUsing: (pkg: string) => readonly string[];
-  readonly candidateChecks: Readonly<Record<string, { readonly status: ReleaseStatus }>>;
+  readonly candidateChecks: Readonly<Record<string, { readonly status: string }>>;
 };
 
 export type ImpactItem = {
@@ -305,12 +318,15 @@ export type ImpactEnvelope = ReleaseCommandEnvelope<ImpactItem, ImpactSummary>;
 /** `impact` command: evaluate docs-impact and demo-impact for every package in the release set. */
 export async function runImpact(options: ImpactOptions): Promise<ImpactEnvelope> {
   const { changesets, errors } = await loadChangesets(options.root);
-  errors.push(...checkBumps(changesets, Object.fromEntries(options.packages.map(p => [p.name, p.version]))));
+  const bumpErrors = checkBumps(changesets, Object.fromEntries(options.packages.map(p => [p.name, p.version])));
   const items: ImpactItem[] = [];
   for (const pkg of options.packages) {
     const base = await resolveBase({ root: options.root, dir: pkg.dir, npmVersion: pkg.npmVersion, lastShippedCommit: pkg.lastShippedCommit, git: options.git });
     const changedFiles = base === null ? null : await changedSince(options.root, base, pkg.dir, options.git);
-    const docs = evaluateDocsImpact({ pkg: pkg.name, dir: pkg.dir, changedFiles, changesets });
+    const docs = withBumpErrors(
+      evaluateDocsImpact({ pkg: pkg.name, dir: pkg.dir, changedFiles, changesets }),
+      bumpErrors.filter(e => e.target === pkg.name),
+    );
     const demo = evaluateDemoImpact({ pkg: pkg.name, demos: options.demosUsing(pkg.name), candidateChecks: options.candidateChecks, changesets });
     errors.push(...docs.evidence, ...demo.evidence);
     items.push({ name: pkg.name, dimensions: { 'docs-impact': docs, 'demo-impact': demo } });

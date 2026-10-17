@@ -1,0 +1,313 @@
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { readCandidate, type Candidate } from './candidate';
+import { createEnvelope } from './json-output';
+import type { RunOutput } from './runners';
+import { integrityOf, runShip, SHIP_ERROR_CODES, type ShipDeps, type ShipMode } from './ship';
+import type { ReleaseConfig } from './types';
+
+const config: ReleaseConfig = {
+  publicTreePath: '.release/public',
+  publicMetadataDefaults: {
+    license: 'MIT',
+    repository: { type: 'git', url: 'https://example.com/r.git' },
+    bugs: { url: 'https://example.com/i' },
+    homepage: 'https://example.com',
+    keywords: [],
+    publishConfig: { access: 'public' },
+  },
+  waves: [
+    { id: 'foundation', label: 'Foundation', packages: ['@arki/a', '@arki/b'] },
+    { id: 'specialized', label: 'Specialized', packages: ['@arki/x'] },
+  ],
+};
+
+const COMMIT = 'abcdef1234567890abcdef1234567890abcdef12';
+const ok = (stdout = ''): RunOutput => ({ code: 0, stdout, stderr: '' });
+
+/** Every process call `ship` makes, whatever runner it went through. */
+type Call = { readonly via: 'exec' | 'npm' | 'git'; readonly command: string };
+
+let root: string;
+let calls: Call[];
+/** `name@version` -> what `npm view ... dist.integrity --json` prints; absent = not published. */
+let published: Map<string, string>;
+
+function writePackage(name: string, version: string, scripts: Record<string, string> = {}): void {
+  mkdirSync(path.join(root, 'packages', name), { recursive: true });
+  writeFileSync(path.join(root, 'packages', name, 'package.json'), JSON.stringify({ name: `@arki/${name}`, version, scripts }));
+  writeFileSync(path.join(root, 'packages', name, 'CHANGELOG.md'), `# @arki/${name}\n`);
+}
+
+function writeChangeset(file: string, bumps: Record<string, string>): void {
+  const front = Object.entries(bumps).map(([pkg, bump]) => `'${pkg}': ${bump}`).join('\n');
+  writeFileSync(path.join(root, '.changeset', file), `---\n${front}\n---\n\nA change.\n`);
+}
+
+beforeEach(() => {
+  root = mkdtempSync(path.join(tmpdir(), 'arki-ship-'));
+  calls = [];
+  published = new Map();
+  writePackage('a', '0.1.0', { 'test:docs': 'arki-doc-examples' });
+  writePackage('b', '0.1.0');
+  writePackage('x', '0.1.0');
+  mkdirSync(path.join(root, '.changeset'));
+  writeChangeset('a-feature.md', { '@arki/a': 'minor' });
+  writeChangeset('x-feature.md', { '@arki/x': 'patch' });
+  mkdirSync(path.join(root, 'node_modules', '.bin'), { recursive: true });
+  writeFileSync(path.join(root, 'node_modules', '.bin', 'changeset'), '');
+  mkdirSync(path.join(root, 'apps', 'arki', 'docs'), { recursive: true });
+  writeFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), '# ARKI Release Ledger\n\nIntro.\n\n---\n\n## v0.0.1 — older\n');
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+/** Freezes a candidate the way `runCandidate` would: real files, real sha512. */
+function freeze(): string {
+  const dir = path.join(root, '.release', 'candidates', `foundation-${COMMIT.slice(0, 7)}`);
+  mkdirSync(path.join(dir, 'tarballs'), { recursive: true });
+  const bytes = Buffer.from('frozen tarball bytes of @arki/a');
+  writeFileSync(path.join(dir, 'tarballs', 'arki-a-0.2.0.tgz'), bytes);
+  const candidate: Candidate = {
+    wave: 'foundation',
+    sourceCommit: COMMIT,
+    createdAt: '2026-10-17T00:00:00.000Z',
+    packages: [
+      { name: '@arki/a', version: '0.2.0', tarball: 'tarballs/arki-a-0.2.0.tgz', sha512: createHash('sha512').update(bytes).digest('hex'), publishOrder: 1 },
+    ],
+    checks: {},
+  };
+  writeFileSync(path.join(dir, 'candidate.json'), JSON.stringify(candidate));
+  return dir;
+}
+
+function deps(overrides: Partial<ShipDeps> = {}): Partial<ShipDeps> {
+  return {
+    exec: async (command, args, opts) => {
+      calls.push({ via: 'exec', command: [command, ...args].join(' ') });
+      if (args[1] === 'version') {
+        // What `changeset version` does: bump @arki/a, consume its changeset.
+        writePackage('a', '0.2.0', { 'test:docs': 'arki-doc-examples' });
+        rmSync(path.join(root, '.changeset', 'a-feature.md'));
+      }
+      if (args.includes('test:docs')) {
+        expect(opts.cwd).toBe(path.join(root, 'packages', 'a'));
+        return ok(JSON.stringify({ examples: 3, modules: 1, skipped: 0, failures: [] }));
+      }
+      return ok();
+    },
+    npm: async args => {
+      calls.push({ via: 'npm', command: ['npm', ...args].join(' ') });
+      const integrity = published.get(args[1] ?? '');
+      return integrity === undefined ? { code: 1, stdout: '', stderr: 'npm error code E404' } : ok(JSON.stringify(integrity));
+    },
+    git: async args => {
+      calls.push({ via: 'git', command: ['git', ...args].join(' ') });
+      return ok(COMMIT);
+    },
+    order: async () =>
+      createEnvelope({
+        command: 'order',
+        status: 'success',
+        summary: { message: 'ok', wave: 'foundation', candidates: 1, publishedDeps: 0 },
+        items: [{ name: '@arki/a', version: '0.1.0', kind: 'candidate', publishOrder: 1 }],
+      }),
+    candidate: async () => {
+      const directory = freeze();
+      return createEnvelope({
+        command: 'candidate',
+        status: 'success',
+        summary: { message: 'frozen', wave: 'foundation', sourceCommit: COMMIT, directory, packages: 1 },
+      });
+    },
+    smoke: async () =>
+      createEnvelope({ command: 'smoke', status: 'success', summary: { packages: 1, checks: 4, failed: 0, skipped: 0 } }),
+    scorecard: async () =>
+      createEnvelope({
+        command: 'scorecard',
+        status: 'success',
+        summary: {
+          message: 'open',
+          totalPackages: 1,
+          pass: 1,
+          fail: 0,
+          warn: 0,
+          deferred: 0,
+          stableReleaseGate: 'open',
+          stableReleaseBlockers: [],
+          allowDeferred: false,
+        },
+      }),
+    env: {},
+    isTTY: true,
+    now: () => new Date('2026-10-17T12:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+const ship = (mode: ShipMode, overrides: Partial<ShipDeps> = {}) => runShip({ cwd: root, config, mode, deps: deps(overrides) });
+
+/** A remote write or a commit, in any spelling a runner could receive it. */
+function forbidden(call: Call): boolean {
+  return /\bpublish\b/.test(call.command) || /\bpush\b/.test(call.command) || /\bcommit\b/.test(call.command) || /\bgh\b/.test(call.command);
+}
+
+describe('ship', () => {
+  it('never publishes, pushes or commits, from start through resume and finish', async () => {
+    // Why: A-26/A-27 make npm publish, git push and git commit founder or
+    // orchestrator acts. If ship ever ran one, an agent could release
+    // unreviewed bytes or commit over a twin session's work.
+    const started = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    expect(started.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.commitNeeded]);
+    const resumed = await ship({ kind: 'resume', wave: 'foundation', dryRun: false });
+    expect(resumed.status).toBe('success');
+    const dir = resumed.summary.candidateDir ?? '';
+    published.set('@arki/a@0.2.0', integrityOf((await candidateOf(dir)).packages[0]?.sha512 ?? ''));
+    const finished = await ship({ kind: 'finish', candidateDir: dir });
+    expect(finished.status).toBe('warning'); // sync is not wired: deferred, not faked
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.filter(forbidden)).toEqual([]);
+  });
+
+  it('stops after version and build with the exact pathspec commit line', async () => {
+    // Why: the orchestrator commits by pathspec in a shared tree; a wrong
+    // path list would commit another agent's files or miss a bump.
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    const stop = envelope.errors[0];
+    expect(stop?.code).toBe(SHIP_ERROR_CODES.commitNeeded);
+    expect(envelope.summary.next).toBe(
+      'git -c commit.gpgsign=false commit -- packages/a/package.json packages/a/CHANGELOG.md .changeset/a-feature.md',
+    );
+    // Other waves' changesets are left pending, never versioned by this ship.
+    const version = calls.find(c => c.command.includes(' version'));
+    expect(version?.command).toContain('--ignore @arki/x');
+    expect(existsSync(path.join(root, '.changeset', 'x-feature.md'))).toBe(true);
+  });
+
+  it('refuses a changeset that also bumps a package outside the wave, before changing anything', async () => {
+    // Why: `changeset version` would bump @arki/x, which this ship never
+    // publishes, leaving source versions npm has never seen.
+    writeChangeset('mixed.md', { '@arki/a': 'patch', '@arki/x': 'patch' });
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.foreignChangeset]);
+    expect(envelope.errors[0]?.target).toBe('@arki/x');
+    expect(calls.filter(c => c.via === 'exec')).toEqual([]);
+  });
+
+  it('dry run prints the plan and runs neither changeset version nor the build', async () => {
+    // Why: agents run the dry run freely; it must leave the tree untouched.
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: true });
+    expect(envelope.status).toBe('success');
+    expect(envelope.items.find(i => i.id === 'version')?.status).toBe('planned');
+    expect(calls.filter(c => c.via === 'exec')).toEqual([]);
+    expect(JSON.parse(readFileSync(path.join(root, 'packages', 'a', 'package.json'), 'utf8'))).toMatchObject({ version: '0.1.0' });
+  });
+
+  it('resume records doc examples and defers demo checks instead of passing them', async () => {
+    // Why: docs-fresh needs a producer, and a demo check that never ran must
+    // not count as proof that the demos still work.
+    const resumed = await ship({ kind: 'resume', wave: 'foundation', dryRun: false });
+    const candidate = await candidateOf(resumed.summary.candidateDir ?? '');
+    expect(candidate.checks['docs:@arki/a']).toMatchObject({ status: 'success', envelope: { kind: 'report' } });
+    expect(candidate.checks['scorecard']?.status).toBe('success');
+    const packet = readFileSync(resumed.summary.packet ?? '', 'utf8');
+    expect(packet).toContain(`npm publish --access public ${path.join(resumed.summary.candidateDir ?? '', 'tarballs/arki-a-0.2.0.tgz')}`);
+    expect(packet).toContain('npm view @arki/a@0.2.0 version dist.integrity');
+    expect(packet).toContain('ship --finish --candidate');
+  });
+
+  it('writes no packet when the scorecard gate is blocked', async () => {
+    // Why: the packet is what the founder publishes from; it must only exist for a passing candidate.
+    const blocked: Partial<ShipDeps> = {
+      scorecard: async () =>
+        createEnvelope({
+          command: 'scorecard',
+          status: 'failure',
+          summary: {
+            message: 'blocked',
+            totalPackages: 1,
+            pass: 0,
+            fail: 1,
+            warn: 0,
+            deferred: 0,
+            stableReleaseGate: 'blocked',
+            stableReleaseBlockers: ['@arki/a: docs-impact'],
+            allowDeferred: false,
+          },
+        }),
+    };
+    const envelope = await ship({ kind: 'resume', wave: 'foundation', dryRun: false }, blocked);
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => e.code)).toContain(SHIP_ERROR_CODES.checksFailed);
+    expect(existsSync(path.join(envelope.summary.candidateDir ?? '', 'packet.md'))).toBe(false);
+  });
+});
+
+describe('ship --finish', () => {
+  it('refuses inside an agent (CLAUDECODE) and without a TTY, before any npm call', async () => {
+    // Why: --finish records a release and syncs the public mirror; only the founder may run it.
+    const dir = freeze();
+    const agent = await ship({ kind: 'finish', candidateDir: dir }, { env: { CLAUDECODE: '1' } });
+    expect(agent.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.founderOnly]);
+    const piped = await ship({ kind: 'finish', candidateDir: dir }, { isTTY: false });
+    expect(piped.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.founderOnly]);
+    expect(calls).toEqual([]);
+  });
+
+  it('skips a version already published with matching integrity, records shipped and the ledger', async () => {
+    // Why: a rerun after a partial finish must not try to publish again (npm
+    // forbids republishing) and must still complete the remaining steps.
+    const dir = freeze();
+    const candidate = await candidateOf(dir);
+    published.set('@arki/a@0.2.0', integrityOf(candidate.packages[0]?.sha512 ?? ''));
+    const synced: string[] = [];
+    const envelope = await ship(
+      { kind: 'finish', candidateDir: dir },
+      { syncApply: async d => (synced.push(d), createEnvelope({ command: 'history', status: 'success', summary: {} })) },
+    );
+    expect(envelope.status).toBe('success');
+    expect(envelope.items.find(i => i.id === 'verify:@arki/a')?.status).toBe('skipped');
+    expect(calls.filter(c => c.via === 'npm').every(c => c.command.startsWith('npm view'))).toBe(true);
+    const after = await candidateOf(dir);
+    expect(after.checks['shipped']?.status).toBe('success');
+    expect(synced).toEqual([dir]);
+    const ledger = readFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), 'utf8');
+    expect(ledger.indexOf('@arki/a | 0.2.0')).toBeLessThan(ledger.indexOf('## v0.0.1'));
+
+    // A second run adds no second ledger entry.
+    await ship({ kind: 'finish', candidateDir: dir });
+    const again = readFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), 'utf8');
+    expect(again.split('<!-- candidate: foundation-abcdef1 -->').length).toBe(2);
+  });
+
+  it('fails loudly on an integrity mismatch and records nothing as shipped', async () => {
+    // Why: different bytes on npm than the ones that passed the checks is the
+    // exact failure the candidate exists to catch; it must never look shipped.
+    const dir = freeze();
+    published.set('@arki/a@0.2.0', 'sha512-somethingElse==');
+    const envelope = await ship({ kind: 'finish', candidateDir: dir });
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.integrityMismatch]);
+    expect((await candidateOf(dir)).checks['shipped']).toBeUndefined();
+  });
+
+  it('reports a version not yet on npm with its publish line, and does not publish it', async () => {
+    // Why: finish verifies; publishing stays a founder act from the packet.
+    const dir = freeze();
+    const envelope = await ship({ kind: 'finish', candidateDir: dir });
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.notPublished]);
+    expect(envelope.errors[0]?.remediation).toContain('npm publish --access public');
+    expect(calls.filter(forbidden)).toEqual([]);
+  });
+});
+
+async function candidateOf(dir: string): Promise<Candidate> {
+  const read = await readCandidate(dir);
+  if (!read.ok) throw new Error(read.errors.map(e => e.message).join('; '));
+  return read.candidate;
+}

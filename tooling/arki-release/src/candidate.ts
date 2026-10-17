@@ -11,20 +11,22 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
 import debugFactory from 'debug';
 import { z } from 'zod';
 
+import { docExamplesReportSchema } from './docs-fresh';
 import { exportPublicTree } from './export-public';
 import { discoverManifests } from './inventory';
 import { createEnvelope } from './json-output';
-import { pendingPackages, planOrder } from './order';
+import { npmVersionLookup, pendingPackages, planOrder } from './order';
 import type { OrderItem } from './order';
 import { createSourceSnapshot } from './snapshot';
 import { defaultGitRunner, defaultNpmRunner, type GitRunner, type NpmRunner } from './runners';
-import type { ExportOptions, ReleaseCommandEnvelope, ReleaseConfig, ReleaseError, ReleaseStatus } from './types';
+import type { ExportOptions, NpmPackFileEntry, ReleaseCommandEnvelope, ReleaseConfig, ReleaseError } from './types';
 
 const debug = debugFactory('arki:release:candidate');
 
@@ -46,7 +48,33 @@ export const CANDIDATE_ERROR_CODES = {
   nothingToRelease: 'CAND_E006',
 } as const;
 
-export const CHECK_STATUSES = ['success', 'warning', 'failure', 'pending'] as const satisfies readonly ReleaseStatus[];
+/**
+ * `deferred` marks a check that cannot run yet (its tool lands in a later
+ * task). It is never read as a pass: every reader asks for `success`.
+ */
+export const CHECK_STATUSES = ['success', 'warning', 'failure', 'pending', 'deferred'] as const;
+export type CheckStatus = (typeof CHECK_STATUSES)[number];
+
+/** Payload of `checks["docs:<pkg>"]`: what `test:docs` (`arki-doc-examples --json`) produced. */
+export const docsCheckSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('report'), report: docExamplesReportSchema }),
+  /** The package has no `test:docs` script, so nothing could run. */
+  z.object({ kind: z.literal('no-script') }),
+  /** The script ran but printed no readable report. */
+  z.object({ kind: z.literal('error'), message: z.string() }),
+]);
+export type DocsCheck = z.infer<typeof docsCheckSchema>;
+
+/** Check id under which `ship --resume` records a package's doc examples. */
+export function docsCheckId(pkg: string): string {
+  return `docs:${pkg}`;
+}
+
+/** Reads a package's doc-examples check from a candidate; `null` when none was recorded. */
+export function docsCheckOf(candidate: Candidate, pkg: string): DocsCheck | null {
+  const parsed = docsCheckSchema.safeParse(candidate.checks[docsCheckId(pkg)]?.envelope);
+  return parsed.success ? parsed.data : null;
+}
 
 export const candidateCheckSchema = z.object({
   status: z.enum(CHECK_STATUSES),
@@ -198,7 +226,13 @@ const exportCommittedTree: TreeExporter = async options => {
 export type CandidateTarget =
   | { readonly kind: 'wave'; readonly id: string }
   /** Public packages changed since this git ref; used by CI. */
-  | { readonly kind: 'affected'; readonly ref: string };
+  | { readonly kind: 'affected'; readonly ref: string }
+  /**
+   * Wave packages whose `package.json` version is not on npm yet. `ship
+   * --resume` uses it: `changeset version` has consumed the changesets by
+   * then, so the pending-changeset seeds of `wave` would be empty.
+   */
+  | { readonly kind: 'versioned'; readonly id: string };
 
 export interface RunCandidateOptions {
   readonly cwd: string;
@@ -244,7 +278,7 @@ export async function runCandidate(options: RunCandidateOptions): Promise<Candid
   const npm = options.npmRunner ?? defaultNpmRunner;
   const exportTree = options.exportTree ?? exportCommittedTree;
   const now = options.now ?? (() => new Date());
-  const label = target.kind === 'wave' ? target.id : 'affected';
+  const label = target.kind === 'affected' ? 'affected' : target.id;
 
   // 1. Which packages go in.
   const { manifests } = await discoverManifests(cwd);
@@ -345,7 +379,7 @@ async function pickSeeds(
   manifests: Awaited<ReturnType<typeof discoverManifests>>['manifests'],
 ): Promise<{ readonly seeds: readonly string[] } | { readonly error: ReleaseError }> {
   const { cwd, config, target } = options;
-  if (target.kind === 'wave') {
+  if (target.kind === 'wave' || target.kind === 'versioned') {
     const wave = config.waves.find(w => w.id === target.id);
     if (wave === undefined) {
       return {
@@ -357,6 +391,19 @@ async function pickSeeds(
           remediation: `Use one of: ${config.waves.map(w => w.id).join(', ')}.`,
         },
       };
+    }
+    if (target.kind === 'versioned') {
+      const lookup = npmVersionLookup(options.npmRunner ?? defaultNpmRunner, cwd);
+      const versionOf = new Map(manifests.map(m => [m.name, m.version]));
+      const seeds: string[] = [];
+      for (const name of wave.packages) {
+        const version = versionOf.get(name);
+        if (version === undefined) continue;
+        const found = await lookup(name);
+        if ('error' in found) return { error: buildError(found.error, name, 'Check the network and npm access, then rerun.') };
+        if (!found.versions.includes(version)) seeds.push(name);
+      }
+      return { seeds };
     }
     const pending = await pendingPackages(cwd);
     return { seeds: wave.packages.filter(name => pending.names.has(name)) };
@@ -400,4 +447,111 @@ async function packOne(
   return {
     pkg: { name: item.name, version: item.version, tarball: path.join('tarballs', filename), sha512, publishOrder: item.publishOrder },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Reading a frozen tarball
+// ---------------------------------------------------------------------------
+
+/** What a candidate tarball holds: its file list and its `package/package.json`. */
+export interface TarballContents {
+  readonly files: readonly NpmPackFileEntry[];
+  /** Parsed `package/package.json`; `null` when absent or not JSON. */
+  readonly manifest: unknown;
+  /** Size of the `.tgz` on disk. */
+  readonly packedSize: number;
+}
+
+const BLOCK = 512;
+
+function tarString(block: Buffer, start: number, length: number): string {
+  const raw = block.subarray(start, start + length);
+  const end = raw.indexOf(0);
+  return raw.subarray(0, end === -1 ? raw.length : end).toString('utf8');
+}
+
+function tarOctal(block: Buffer, start: number, length: number): number {
+  const text = tarString(block, start, length).trim();
+  return text === '' ? 0 : Number.parseInt(text, 8);
+}
+
+/** The `path=` record of a pax extended header, if any. */
+function paxPath(body: Buffer): string | null {
+  for (const record of body.toString('utf8').split('\n')) {
+    const match = /^\d+ path=(.*)$/.exec(record);
+    if (match?.[1] !== undefined) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Lists a `.tgz` the way `npm pack --json` does (paths without the
+ * `package/` prefix) without unpacking it to disk or re-packing. The scorecard
+ * audits these bytes, which are the ones the founder publishes.
+ */
+export async function readTarball(file: string): Promise<TarballContents> {
+  const packed = await readFile(file);
+  const tar = gunzipSync(packed);
+  const files: NpmPackFileEntry[] = [];
+  let manifest: unknown = null;
+  let nextPath: string | null = null;
+  for (let offset = 0; offset + BLOCK <= tar.length; ) {
+    const header = tar.subarray(offset, offset + BLOCK);
+    if (header.every(byte => byte === 0)) break;
+    const size = tarOctal(header, 124, 12);
+    const type = tarString(header, 156, 1);
+    const body = tar.subarray(offset + BLOCK, offset + BLOCK + size);
+    offset += BLOCK + Math.ceil(size / BLOCK) * BLOCK;
+    if (type === 'x') {
+      nextPath = paxPath(body);
+      continue;
+    }
+    const prefix = tarString(header, 345, 155);
+    const name = nextPath ?? (prefix === '' ? tarString(header, 0, 100) : `${prefix}/${tarString(header, 0, 100)}`);
+    nextPath = null;
+    if (type !== '0' && type !== '') continue;
+    const relative = name.replace(/^package\//, '');
+    files.push({ path: relative, size, mode: tarOctal(header, 100, 8) });
+    if (relative === 'package.json') {
+      try {
+        manifest = JSON.parse(body.toString('utf8')) as unknown;
+      } catch {
+        manifest = null;
+      }
+    }
+  }
+  return { files, manifest, packedSize: packed.length };
+}
+
+// ---------------------------------------------------------------------------
+// Shipped history
+// ---------------------------------------------------------------------------
+
+/**
+ * `sourceCommit` of the most recent candidate whose `checks.shipped`
+ * succeeded, per package it contains. docs-impact diffs from there, so docs
+ * edited after the last real release are what counts. Tarballs are not
+ * hashed here: only `candidate.json` metadata is read.
+ */
+export async function lastShippedCommits(candidatesRoot: string): Promise<ReadonlyMap<string, string>> {
+  const entries = await readdir(candidatesRoot).catch(() => []);
+  const latest = new Map<string, { readonly at: string; readonly commit: string }>();
+  for (const entry of entries) {
+    const raw = await readFile(path.join(candidatesRoot, entry, CANDIDATE_FILE), 'utf8').catch(() => null);
+    if (raw === null) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(raw) as unknown;
+    } catch {
+      continue;
+    }
+    const parsed = candidateSchema.safeParse(json);
+    const shipped = parsed.success ? parsed.data.checks['shipped'] : undefined;
+    if (!parsed.success || shipped?.status !== 'success') continue;
+    for (const pkg of parsed.data.packages) {
+      const seen = latest.get(pkg.name);
+      if (seen === undefined || seen.at < shipped.at) latest.set(pkg.name, { at: shipped.at, commit: parsed.data.sourceCommit });
+    }
+  }
+  return new Map([...latest].map(([name, { commit }]) => [name, commit]));
 }

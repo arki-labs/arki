@@ -2,6 +2,21 @@
 
 Battle-tested traps from real release sessions. Each one cost time; documented here so you don't pay again.
 
+## Error codes from `ship`
+
+| Code | Meaning | Do this |
+|---|---|---|
+| SHIP_E001 | Versions bumped and built (a stop, not a failure) | Review the diff, run the printed commit line, then `ship --wave <id> --resume` |
+| SHIP_E002 | A changeset bumps a package outside the wave, or `changeset version` bumped one | Split the changeset; restore any stray `package.json` / `CHANGELOG.md` |
+| SHIP_E003 | `changeset version`, the build or `node_modules/.bin/changeset` failed or is missing | Fix the step; `@changesets/cli` must be a workspace dev dependency (never `bunx`) |
+| SHIP_E004 | `--finish` run by an agent or without a TTY | The founder runs it in a terminal |
+| SHIP_E005 | npm has the version with a different `dist.integrity` | Do not republish. Find what was published; ship a new patch from a fresh candidate |
+| SHIP_E006 | The version is not on npm yet | Run its publish line from `packet.md`, then rerun `--finish` |
+| SHIP_E007 | A candidate check failed; no packet | `bun release:arki scorecard --candidate <dir>` and fix each blocker |
+| SHIP_E008 | Bad flags, unknown wave, nothing to release | Fix the command or add a changeset |
+| SHIP_E009 | Mirror sync failed or is not wired | Fix, then rerun `--finish` (npm, `shipped` and the ledger are already done) |
+| SHIP_E010 | `npm view` failed (network, auth) | Check `npm whoami` and the network, rerun |
+
 ## The npm OTP wall
 
 **Symptom:** `npm publish` fails with `npm error code EOTP — This operation requires a one-time password from your authenticator.`
@@ -10,14 +25,7 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 
 **Three solutions, ordered by appropriateness:**
 
-1. **Manual loop in user's terminal** (best for one-shot publications):
-   ```bash
-   for p in <pkg-list>; do
-     echo "=== Publishing @arki/$p ==="
-     (cd .release/arki-public/packages/$p && npm publish --access public)
-   done
-   ```
-   User runs this; npm prompts for OTP each time. ~30 seconds per OTP, ~5 minutes for 10 packages.
+1. **The packet, in the founder's terminal** (best for one-shot publications): run the `npm publish --access public <abs tarball>` lines of `.release/candidates/<dir>/packet.md` from `/tmp`. npm prompts for an OTP each time. ~30 seconds per OTP, ~5 minutes for 10 packages.
 
 2. **Automation token** (best for repeat ships):
    ```bash
@@ -32,7 +40,7 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 3. **Lower 2FA mode** (last resort):
    `npmjs.com → Account Settings → Two-Factor Authentication → "Authorization only"`. Permanently weakens write security. Avoid.
 
-**Agent contract:** when you hit EOTP, **stop and surface the manual-loop command**. Don't try to retry, don't ask for OTP-pass-through (each OTP is single-use ~30s, impractical for 10 packages).
+**Agent contract:** agents never publish. Point the founder at `packet.md`. Don't try to retry, don't ask for OTP-pass-through (each OTP is single-use ~30s, impractical for 10 packages).
 
 ## The `git add -A` parent-walk trap
 
@@ -45,7 +53,7 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 cd /Users/afurculita/Developer/workspace/.release/arki-mirror
 git rev-parse --git-dir
 # MUST be:  /Users/afurculita/Developer/workspace/.release/arki-mirror/.git
-# If it's the monorepo's path, STOP: clone the mirror there first (sync-github.md step 3).
+# If it's the monorepo's path, STOP: clone the mirror there first (sync.md: `sync --prepare` clones it).
 ```
 
 **Recover after damaging:** the index pollution is reversible via `git reset HEAD <path>`, but the workspace's "only-touch-own-edits" rule forbids `reset` on sibling-agent files. So:
@@ -130,7 +138,7 @@ npm view @arki/<pkg> version
 
 **Root cause:** `export-public` calls `removeDirectory(outputPath)`, which wipes `.release/arki-public/` entirely, `.git/` included. Moving `.git/` out and back is fragile (a `mv` into an existing dir nests it).
 
-**Fix (since 2026-10-13):** never keep git state in the export folder. The mirror checkout lives in `.release/arki-mirror/` and receives the export via `rsync --delete --exclude .git`; see [sync-github.md](./sync-github.md).
+**Fix (since 2026-10-13):** never keep git state in the export folder. The mirror checkout lives in `.release/arki-mirror/` and is rebuilt by `sync --prepare`; see [sync.md](./sync.md).
 
 ## Chicken-and-egg: transitive `@arki/*` deps in pre-publication state
 
@@ -143,7 +151,7 @@ npm view @arki/<pkg> version
 1. **Ship in waves** — publish Wave 1 to npm first, then Wave 2 (its `@arki/*` deps now exist on npm), then Wave 3. Natural ordering that dissolves the cycle.
 2. **Satellite tarball cache** — future fixture-matrix improvement. The matrix would stage all packed tarballs in a temp dir and tell the PM (via `overrides` or `--registry file://`) to resolve `@arki/*` from there. ~4-8 hours of tooling work, not done yet.
 
-Until then, verify pre-publication packages by hand with the consumer smoke in [ship-update.md § Before publish](./ship-update.md#before-publish-dependency-drift-and-consumer-smoke). It does the satellite-tarball install with npm `overrides`.
+`ship --resume` covers this: `smoke --candidate` installs all candidate tarballs together in a clean consumer, so unpublished `@arki/*` deps resolve from the candidate.
 
 ## Fixture matrix probes assume a root `.` export
 
@@ -159,21 +167,7 @@ Until then, verify pre-publication packages by hand with the consumer smoke in [
 
 **Symptom:** Scorecard says BLOCKED; gate decision shows multiple packages with multiple blockers.
 
-**Diagnostic incantation:**
-```bash
-# Get a machine-readable blocker breakdown
-bun tooling/arki-release/src/cli.ts scorecard --json 2>/dev/null | \
-  python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for it in data.get('items', []):
-    if it.get('overall') != 'pass':
-        print(f\"{it['name']} [{it['overall']}]\")
-        for dim, d in it.get('dimensions', {}).items():
-            if d.get('status') not in ('pass',):
-                print(f\"  {dim}: {d['status']} — {d.get('details', '')}\")
-"
-```
+**Diagnostic:** `bun release:arki scorecard --candidate <dir>` prints each failing dimension with its details; `--table` adds the readiness table (`FAIL` blocks, `warn` does not).
 
 Most common blockers:
 
@@ -207,35 +201,21 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 
 **Rule (founder, 2026-10-13):** the mirror keeps one commit per release on top of the last. Syncs use a plain `git push`. Before that date every sync was `git init` + `git push --force`, which reset `main` to a single commit and broke every clone's `git pull`.
 
-**If a plain push is rejected:** `origin/main` moved since your fetch. Inspect `git log --oneline main..origin/main` in `.release/arki-mirror/`; if you don't recognize it, STOP and surface it to the user. Otherwise redo the fetch → rsync → commit steps in [sync-github.md](./sync-github.md). Do not force.
+**If a plain push is rejected:** `origin/main` moved since your fetch. Inspect `git log --oneline main..origin/main` in `.release/arki-mirror/`; if you don't recognize it, STOP and surface it to the user. Otherwise run `sync --prepare` again, then `sync --apply` ([sync.md](./sync.md)). Do not force.
 
-## Per-package mirror description-stamp failures
+## Per-package mirror repo or Release creation fails
 
-**Symptom 1:** `sync-package-repos` emits a `SYNC_E001 gh repo edit (description) failed` warning.
+**Symptom:** `sync --apply` fails with `MSYNC_E010` (a `gh` command failed).
 
-**Cause:** The `gh` CLI token lacks repo-edit permission, or GitHub rejected the description (e.g. exceeded 350-char limit — the tool already truncates, but custom org policies can be stricter).
+**Cause:** The `gh` token lacks permission to create repos or Releases in `arki-labs`, or GitHub rate-limited the run.
 
-**Fix:** Re-auth with `gh auth login -s repo` (broad scope). Confirm with `gh auth status -h github.com` showing `Token scopes:` containing `repo`. Re-run the sync; the description stamp will succeed.
+**Fix:** Re-auth with `gh auth login -s repo`, check `gh auth status -h github.com`, wait a minute if it was a rate limit, then run `sync --apply` again. It skips every tag and Release that already exists, so a rerun only does what is left.
 
----
+**Symptom:** `sync --prepare` fails with `MSYNC_E006` (dirty mirror) or `MSYNC_E007` (not its own checkout).
 
-**Symptom 2:** The mirror's description does NOT start with `[Read-only mirror]` even after a successful sync.
-
-**Cause:** Either (a) the npm `description` field is empty and you're looking at the default GitHub auto-description, or (b) the `gh repo edit` warning was suppressed in non-`--json` mode.
-
-**Fix:** Run `bun release:arki sync-package-repos --json --package "@arki/<name>" | jq '.errors'` to surface any warnings. If empty, verify with `gh api repos/arki-labs/<name> --jq '.description'`. If still wrong, `gh repo edit arki-labs/<name> --description "[Read-only mirror] <desc>"` manually.
+**Fix:** See [sync.md](./sync.md). Delete the directory it names and prepare again; the checkouts under `.release/` are disposable.
 
 ---
-
-**Symptom 3:** `sync-package-repos` reports `failed` mid-batch and the workspace temp dir is full of `arki-mirror-*` directories.
-
-**Cause:** A `failed` exit from `syncOnePackage` returns before the `await rm(workDir, ...)` cleanup. The orchestrator continues to the next package, but the failed package's temp dir leaks.
-
-**Fix:** `\rm -rf /tmp/arki-mirror-*` (escape `rm` to bypass the workspace `-i` alias). Re-run the sync with `--package "@arki/<failed-name>"` to retry just that one.
-
----
-
-**Note on the previous archive doctrine (decommissioned 2026-05-21):** earlier versions of `sync-package-repos` archived each mirror at the end of every run. The unarchive→push→re-archive dance was operationally expensive (3 gh calls per sync per package) and added a failure mode where a mid-sync error could leave the mirror unarchived for days. The current doctrine drops archiving entirely; the read-only signal is the `[Read-only mirror]` description prefix plus disabled Issues/Wiki. If you find an old mirror that's still archived, run `gh api repos/arki-labs/<name> -X PATCH -F archived=false` once (or just re-run the sync — it auto-unarchives any archived mirror it touches).
 
 ## Per-package mirror tag-drift after a yank
 
@@ -243,37 +223,6 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 
 **Cause:** Tags are sticky — the mirror was synced before the yank, so it carries a `v<yanked-version>` tag that npm no longer has. The classifier compares published-versions ⊆ mirror-tags, but the inverse leak (mirror has versions npm doesn't) only shows up as a *warning* not a failure.
 
-**Fix:** `bun release:arki sync-package-repos --package "@arki/<name>" --force` — the force-rebuild deletes the local tag set and rebuilds from npm's current published list, so the yanked tag disappears on the next `git push --force --tags`.
+**Fix:** Published tags never move and `sync` never force-pushes. A yanked version's tag stays on the mirror. If it must go, the founder deletes it by hand (`git push origin :v<version>` in the mirror, plus `gh release delete`), with explicit approval.
 
 **Note:** GitHub keeps abandoned tags in dangling-tag GC for ~30-90 days; if you yanked by mistake, the tag is recoverable via reflog during that window.
-
-## Bulk-sync rate-limited by GitHub API
-
-**Symptom:** Mid-batch, `sync-package-repos` starts failing with `SYNC_E001 gh api ...` mentioning `secondary rate limit` or `403`.
-
-**Cause:** The sync makes 2-5 `gh api` calls per package (probe + unarchive + archive + repo create + repo edit). For 14 packages this is ~30-50 calls. GitHub's secondary rate limits kick in around 30 mutating requests / minute.
-
-**Fix:** Wait 60 seconds, then re-run with `--package` flags for just the packages that didn't finish (look at the `failed` items in the envelope). The sync is fully resumable — successful packages skip on the next run because they're now `in-sync`.
-
-**Prevention:** For the first bulk-create of all 14 packages, expect this and plan two passes 60 seconds apart. Subsequent incremental syncs (one new version on one package) won't hit the limit.
-
-## External install fails on a dependency the package never declared
-
-**Symptom (2026-10-09, `@arki/ui` 0.1.3):** a clean clone of an external consumer
-installs from npm, then `vite build` dies with
-`Rolldown failed to resolve import "class-variance-authority" from node_modules/@arki/ui/src/button.tsx`.
-Inside the monorepo the import works because the hoisted `node_modules` happens
-to contain the package through some other workspace.
-
-**Why the scorecard let it through:** the `dependencies` dimension checks that
-*declared* deps resolve (no private `@arki/*`, no unresolved `catalog:`). It does
-not compare the imports in `src/` against the manifest.
-
-**Fix:** declare the dependency (same `catalog:` spec the siblings use), changeset,
-republish. **Before promoting a package, run the undeclared-import scan** (compare
-every bare specifier in `src/**/*.{ts,tsx,css}` with `dependencies` +
-`peerDependencies`; `~icons/*` and doc-comment imports are false positives).
-Candidate for a scorecard dimension (`imports`); not implemented yet.
-
-**The real gate is a clean clone outside the workspace** installing from the
-registry: it is the only check that cannot see the monorepo's `node_modules`.

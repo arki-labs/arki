@@ -47,7 +47,16 @@ import debugFactory from 'debug';
 import { z } from 'zod';
 
 import { evaluateAdmission, isAdmissionFailure } from './admission';
-import { readCandidate, type Candidate } from './candidate';
+import {
+  CANDIDATES_DIR,
+  docsCheckOf,
+  lastShippedCommits,
+  readCandidate,
+  readTarball,
+  type Candidate,
+  type CandidatePackage,
+  type TarballContents,
+} from './candidate';
 import { demosUsing, evaluateDemoLag, loadDemos, type DemoRegistry, type DemoUse } from './demos';
 import {
   evaluateBenchFresh,
@@ -77,13 +86,14 @@ import {
   evaluateDocsImpact,
   loadChangesets,
   resolveBase,
+  withBumpErrors,
   type Changeset,
 } from './impact';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { npmVersionLookup } from './order';
-import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
+import { auditPack, auditPackEntry, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
 import {
   evaluateReadiness,
   isLeafLibrary,
@@ -93,6 +103,8 @@ import {
   type ReadinessBaseline,
 } from './readiness';
 import { defaultGitRunner, defaultNpmRunner, type GitRunner, type NpmRunner } from './runners';
+import { SMOKE_CHECK_STATUSES } from './smoke';
+import { loadMirrorReadiness } from './sync';
 import type {
   DotProbeResult,
   FixtureRun,
@@ -120,6 +132,14 @@ export const SCORECARD_ERROR_CODES = {
   noPublicCandidates: 'SCORE_E003',
   /** `npm view` failed for some packages (offline, auth); dependent checks are deferred or unverified. */
   npmUnavailable: 'SCORE_E004',
+  /** A frozen tarball's package.json lacks a public metadata field. */
+  frozenMetadata: 'SCORE_E005',
+  /** A frozen tarball's package.json still has a `workspace:` / `catalog:` range. */
+  frozenDependency: 'SCORE_E006',
+  /** The package has no `test:docs` script, so its doc examples are unchecked. */
+  docsScriptMissing: 'SCORE_E007',
+  /** A frozen tarball cannot be read. */
+  tarballUnreadable: 'SCORE_E008',
 } as const;
 
 /** The dimensions that read release inputs (changesets, git, npm, demos, candidate). */
@@ -161,10 +181,11 @@ export interface ScorecardOptions {
   /** Injectable git runner (docs-impact base commit, changed files, bench provenance). */
   readonly gitRunner?: GitRunner;
   /**
-   * Frozen candidate folder (`candidate --wave`). Its `candidate.json`
-   * checks (smoke, demos) and versions feed demo-impact, demo-lag,
-   * docs-fresh and readiness. The scorecard only reads it; it never
-   * rebuilds or re-exports a candidate.
+   * Frozen candidate folder (`candidate --wave`). With it the scorecard
+   * scores exactly the candidate's packages from the candidate's bytes:
+   * packlist and metadata/dependencies from the tarballs, fixtures from
+   * `checks.smoke`, doc examples from `checks["docs:<pkg>"]`, demo checks
+   * from `checks["demo:<name>"]`. It never re-exports or re-packs.
    */
   readonly candidateDir?: string;
   /** `--allow-demo-lag "<reason>"`: a blocking demo lag becomes a warning. */
@@ -233,6 +254,17 @@ export async function runScorecard(
     candidates = [requested];
   }
 
+  // Candidate mode scores the frozen bytes of exactly the candidate's packages.
+  let candidate: Candidate | null = null;
+  if (opts.candidateDir !== undefined) {
+    const read = await readCandidate(opts.candidateDir);
+    if (!read.ok) return buildFailureEnvelope([...envelopeErrors, ...read.errors], opts.allowDeferred === true);
+    candidate = read.candidate;
+    const frozenNames = new Set(candidate.packages.map(p => p.name));
+    candidates = candidates.filter(c => frozenNames.has(c.name));
+  }
+  const frozenOf = (name: string): CandidatePackage | undefined => candidate?.packages.find(p => p.name === name);
+
   // Public packages that are in no wave (and not in `notYet`), or in both,
   // are never scored below; they get one failing row so the gap is loud.
   const scoredNames = new Set(candidates.map(c => c.name));
@@ -240,6 +272,7 @@ export async function runScorecard(
     item =>
       isAdmissionFailure(item.status) &&
       !scoredNames.has(item.name) &&
+      candidate === null &&
       (opts.packageName === undefined || item.name === opts.packageName),
   );
 
@@ -273,8 +306,20 @@ export async function runScorecard(
   // etc.) and the dimension will report deferred.
   const packResultsByPackage = new Map<string, PackAuditResult>();
   const packErrorsByPackage = new Map<string, string>();
+  const tarballs = new Map<string, TarballContents>();
   for (const item of candidates) {
     const dir = path.dirname(path.join(opts.cwd, item.manifestPath));
+    const frozen = frozenOf(item.name);
+    if (frozen !== undefined && opts.candidateDir !== undefined) {
+      try {
+        const contents = await readTarball(path.join(opts.candidateDir, frozen.tarball));
+        tarballs.set(item.name, contents);
+        packResultsByPackage.set(item.name, auditFrozenTarball(frozen, contents, dir));
+      } catch (cause) {
+        packErrorsByPackage.set(item.name, `${SCORECARD_ERROR_CODES.tarballUnreadable}: cannot read ${frozen.tarball}: ${messageOf(cause)}`);
+      }
+      continue;
+    }
     try {
       // Source distribution is declared in the manifest itself: a `files`
       // array carrying `src` opts the package into shipping raw `.ts`.
@@ -303,35 +348,42 @@ export async function runScorecard(
 
   // 4. Materialize the public tree so we have post-materialization
   // manifests available for the metadata / dependencies dimensions.
-  const exportEnv = await exportPublicTree({
-    rootCwd: opts.cwd,
-    config: opts.config,
-    leakScan: false, // leak gate is already covered by step 2 — avoid double-scanning
-  });
+  // Candidate mode skips it: the tarball manifests are the materialized ones.
+  const exportEnv =
+    candidate === null
+      ? await exportPublicTree({
+          rootCwd: opts.cwd,
+          config: opts.config,
+          leakScan: false, // leak gate is already covered by step 2 — avoid double-scanning
+        })
+      : null;
   // The exporter carries its own per-package errors which we need to
   // associate with the right package. Build an index by `target`.
-  const exportErrorsByPackage = indexErrorsByTarget(exportEnv.items.flatMap(i => i.errors));
+  const exportErrorsByPackage = indexErrorsByTarget(exportEnv?.items.flatMap(i => i.errors) ?? []);
 
   // 5. Fixture matrix. Uses the materialized tree from step 4.
   const fixtureRunsByPackage = new Map<string, readonly FixtureRun[]>();
   const candidateNames = new Set(candidates.map(c => c.name));
+  // Candidate mode: `smoke --candidate` already installed the frozen tarballs.
   try {
-    const fixtureOpts: FixtureOptions = {
-      rootCwd: opts.cwd,
-      publicTreePath: path.resolve(opts.cwd, opts.config.publicTreePath),
-      packageManagers: DEFAULT_PACKAGE_MANAGERS,
-      skipInstall: opts.fullFixtureMatrix !== true,
-      ...(opts.fixtureRunner !== undefined
-        ? { runner: opts.fixtureRunner }
-        : { runner: defaultProcessRunner }),
-      ...(opts.fixtureTempRoot !== undefined ? { tempRoot: opts.fixtureTempRoot } : {}),
-      ...(opts.packageName !== undefined ? { packageNames: [opts.packageName] } : {}),
-    };
-    const fixtureEnv = await runFixtureMatrix(fixtureOpts);
-    for (const run of fixtureEnv.items) {
-      if (!candidateNames.has(run.packageName)) continue;
-      const prior = fixtureRunsByPackage.get(run.packageName) ?? [];
-      fixtureRunsByPackage.set(run.packageName, [...prior, run]);
+    if (candidate === null) {
+      const fixtureOpts: FixtureOptions = {
+        rootCwd: opts.cwd,
+        publicTreePath: path.resolve(opts.cwd, opts.config.publicTreePath),
+        packageManagers: DEFAULT_PACKAGE_MANAGERS,
+        skipInstall: opts.fullFixtureMatrix !== true,
+        ...(opts.fixtureRunner !== undefined
+          ? { runner: opts.fixtureRunner }
+          : { runner: defaultProcessRunner }),
+        ...(opts.fixtureTempRoot !== undefined ? { tempRoot: opts.fixtureTempRoot } : {}),
+        ...(opts.packageName !== undefined ? { packageNames: [opts.packageName] } : {}),
+      };
+      const fixtureEnv = await runFixtureMatrix(fixtureOpts);
+      for (const run of fixtureEnv.items) {
+        if (!candidateNames.has(run.packageName)) continue;
+        const prior = fixtureRunsByPackage.get(run.packageName) ?? [];
+        fixtureRunsByPackage.set(run.packageName, [...prior, run]);
+      }
     }
   } catch (cause) {
     debug('fixture matrix threw: %s', cause);
@@ -347,7 +399,7 @@ export async function runScorecard(
 
   // 5.6. Release inputs, read once: changesets, demo registry, candidate,
   // npm versions, docs files, readiness baseline.
-  const releaseInputs = await gatherReleaseInputs(opts, candidates, envelopeErrors);
+  const releaseInputs = await gatherReleaseInputs(opts, candidates, candidate, envelopeErrors);
 
   // 6. Per-package evaluation.
   const results: ScorecardPackageResult[] = [];
@@ -365,6 +417,7 @@ export async function runScorecard(
       fullFixtureMatrix: opts.fullFixtureMatrix === true,
       dotProbe,
       buildOutput: opts.config.waves.find(wave => wave.id === item.wave)?.buildOutput ?? 'dist',
+      frozen: candidate === null ? undefined : frozenDimensions(item.name, tarballs.get(item.name), candidate),
     });
     results.push(result);
   }
@@ -455,17 +508,19 @@ async function evaluatePackage(input: {
   readonly dotProbe: DotProbeResult | undefined;
   /** From the package's wave; decides what `build-output` requires. */
   readonly buildOutput: WaveBuildOutput;
+  /** Candidate mode: dimensions judged from the frozen tarball instead of the source tree. */
+  readonly frozen: FrozenDimensions | undefined;
 }): Promise<ScorecardPackageResult> {
   const packageDir = path.dirname(path.join(input.cwd, input.item.manifestPath));
 
   const dimensions: Record<ScorecardDimension, ScorecardDimensionResult> = {
-    metadata: evaluateMetadata(input.item.name, input.materializationErrors),
+    metadata: input.frozen?.metadata ?? evaluateMetadata(input.item.name, input.materializationErrors),
     privacy: evaluatePrivacy(input.item.name, input.leakHits),
-    dependencies: evaluateDependencies(input.item.name, input.materializationErrors),
+    dependencies: input.frozen?.dependencies ?? evaluateDependencies(input.item.name, input.materializationErrors),
     'build-output': await evaluateBuildOutput(input.item.name, packageDir, input.buildOutput),
     packlist: evaluatePacklist(input.item.name, input.packResult, input.packError),
     docs: await evaluateDocs(input.item.name, packageDir),
-    fixtures: evaluateFixtures(input.item.name, input.fixtureRuns, input.fullFixtureMatrix),
+    fixtures: input.frozen?.fixtures ?? evaluateFixtures(input.item.name, input.fixtureRuns, input.fullFixtureMatrix),
     'dot-gates': evaluateDotGates(input.dotProbe),
     'agent-native-gates': evaluateAgentNativeGates(input.dotProbe),
     admission: evaluateAdmission(input.item.name, input.item.status),
@@ -495,6 +550,8 @@ type ReleaseInputs = {
   readonly registry: DemoRegistry;
   /** `null` when `--candidate` was not passed or the candidate is unusable. */
   readonly candidate: Candidate | null;
+  /** Per-package mirror outcomes from `.release/sync-plan.json`; `null` without a plan. */
+  readonly mirror: Awaited<ReturnType<typeof loadMirrorReadiness>>;
   /** Published versions per package name; `null` when `npm view` failed. */
   readonly npmVersions: ReadonlyMap<string, readonly string[] | null>;
   /** `name@version` on npm or in the candidate. */
@@ -502,6 +559,10 @@ type ReleaseInputs = {
   readonly docsFiles: ReadonlyMap<string, DocsFreshFiles>;
   readonly baseline: ReadinessBaseline;
   readonly git: GitRunner;
+  /** IMPACT_E004 errors (major below 1.0) by package; they fail docs-impact. */
+  readonly bumpErrors: readonly ReleaseError[];
+  /** `sourceCommit` of the last shipped candidate per package; the docs-impact base. */
+  readonly lastShipped: ReadonlyMap<string, string>;
 };
 
 type ReleaseEvaluation = {
@@ -520,20 +581,18 @@ function messageOf(cause: unknown): string {
 async function gatherReleaseInputs(
   opts: ScorecardOptions,
   items: readonly InventoryItem[],
+  candidate: Candidate | null,
   errors: ReleaseError[],
 ): Promise<ReleaseInputs> {
   const { changesets, errors: changesetErrors } = await loadChangesets(opts.cwd);
-  errors.push(...changesetErrors, ...checkBumps(changesets, Object.fromEntries(items.map(i => [i.name, i.version]))));
+  errors.push(...changesetErrors);
+  const bumpErrors = checkBumps(changesets, Object.fromEntries(items.map(i => [i.name, i.version])));
+  // Scored packages carry their bump errors in docs-impact; the rest stay visible here.
+  const scored = new Set(items.map(i => i.name));
+  errors.push(...bumpErrors.filter(e => e.target === undefined || !scored.has(e.target)));
 
   const registry = await loadDemos(opts.cwd, opts.config);
   errors.push(...registry.errors);
-
-  let candidate: Candidate | null = null;
-  if (opts.candidateDir !== undefined) {
-    const read = await readCandidate(opts.candidateDir);
-    if (read.ok) candidate = read.candidate;
-    else errors.push(...read.errors);
-  }
 
   const docsFiles = new Map<string, DocsFreshFiles>();
   for (const item of items) docsFiles.set(item.name, await loadDocsFiles(packageDirOf(opts.cwd, item)));
@@ -582,11 +641,14 @@ async function gatherReleaseInputs(
     pending: bumpedPackages(changesets),
     registry,
     candidate,
+    mirror: await loadMirrorReadiness(opts.cwd),
     npmVersions,
     knownVersions,
     docsFiles,
     baseline,
     git: opts.gitRunner ?? defaultGitRunner,
+    bumpErrors,
+    lastShipped: await lastShippedCommits(path.join(opts.cwd, CANDIDATES_DIR)),
   };
 }
 
@@ -622,7 +684,9 @@ async function evaluateReleaseDimensions(
     evidence: [],
   };
 
-  const docsFresh = await evaluateDocsFreshFor(item, packageDir, manifest, inputs, opts.docExamples);
+  const docsCheck = inputs.candidate === null ? null : docsCheckOf(inputs.candidate, item.name);
+  const docExamples = opts.docExamples?.[item.name] ?? (docsCheck?.kind === 'report' ? docsCheck.report : null);
+  const docsFresh = await evaluateDocsFreshFor(item, packageDir, manifest, inputs, docExamples, docsCheck?.kind === 'no-script');
   const demoLag = evaluateDemoLag({
     pkg: item.name,
     candidateVersion: inputs.candidate?.packages.find(p => p.name === item.name)?.version ?? manifest.version,
@@ -643,14 +707,17 @@ async function evaluateReleaseDimensions(
   const readiness = evaluateReadiness({
     config: opts.config,
     dir: packageDir,
-    external: readinessExternal(item.name, uses, docsFresh, opts.docExamples?.[item.name] === undefined, inputs.candidate),
+    external: readinessExternal(item.name, uses, docsFresh, docExamples === null, inputs.candidate, inputs.mirror),
     baseline: inputs.baseline[item.name] ?? [],
   });
 
   return {
     dimensions: {
       'docs-fresh': docsFresh,
-      'docs-impact': releasing ? await evaluateDocsImpactFor(item.name, dir, published, opts.cwd, inputs) : notReleasing,
+      'docs-impact': withBumpErrors(
+        releasing ? await evaluateDocsImpactFor(item.name, dir, published, opts.cwd, inputs) : notReleasing,
+        inputs.bumpErrors.filter(e => e.target === item.name),
+      ),
       'demo-impact': releasing ? evaluateDemoImpactFor(item.name, uses, checks, inputs) : notReleasing,
       'demo-lag': demoLag,
       'bench-fresh': benchFresh,
@@ -667,11 +734,12 @@ async function evaluateDocsImpactFor(
   cwd: string,
   inputs: ReleaseInputs,
 ): Promise<ScorecardDimensionResult> {
-  if (published === null) {
+  const lastShippedCommit = inputs.lastShipped.get(pkg) ?? null;
+  if (published === null && lastShippedCommit === null) {
     return { status: 'deferred', details: 'npm view failed: no last release to diff the docs against', evidence: [] };
   }
-  const npmVersion = published.at(-1) ?? null;
-  const base = await resolveBase({ root: cwd, dir, npmVersion, lastShippedCommit: null, git: inputs.git });
+  const npmVersion = published?.at(-1) ?? null;
+  const base = await resolveBase({ root: cwd, dir, npmVersion, lastShippedCommit, git: inputs.git });
   if (npmVersion !== null && base === null) {
     return { status: 'deferred', details: `git found no commit that set version ${npmVersion}`, evidence: [] };
   }
@@ -699,7 +767,8 @@ async function evaluateDocsFreshFor(
   packageDir: string,
   manifest: { readonly version: string; readonly exports?: unknown },
   inputs: ReleaseInputs,
-  docExamples: ScorecardOptions['docExamples'],
+  docExamples: DocExamplesReport | null,
+  noDocsScript: boolean,
 ): Promise<ScorecardDimensionResult> {
   const files = inputs.docsFiles.get(item.name) ?? { changelogVersion: null, versionRefs: [], docsText: '' };
   // A version string can only be judged when npm answered for its package.
@@ -711,13 +780,28 @@ async function evaluateDocsFreshFor(
     pkg: item.name,
     packageVersion: manifest.version,
     libraryCheckErrors: libraryErrors ?? [],
-    docExamples: docExamples?.[item.name] ?? null,
+    docExamples,
     changelogVersion: files.changelogVersion,
     versionRefs: files.versionRefs.filter(ref => !unverified.includes(ref)),
     knownVersions: inputs.knownVersions,
     undocumentedExports: unmentionedExports(await exportedNames(packageDir, manifest.exports), files.docsText),
   });
   const extra: ReleaseError[] = [];
+  // No script is a known gap (T2.2 adds `test:docs` everywhere), not a run that
+  // was skipped: say so instead of the generic "no doc-examples result".
+  const fromScript = noDocsScript && docExamples === null;
+  const base: ScorecardDimensionResult = fromScript
+    ? { ...result, evidence: result.evidence.filter(e => e.code !== FRESH_ERROR_CODES.docExamples) }
+    : result;
+  if (fromScript) {
+    extra.push({
+      code: SCORECARD_ERROR_CODES.docsScriptMissing,
+      severity: 'warning',
+      message: `${item.name}: no \`test:docs\` script, so doc examples are not checked.`,
+      remediation: `Add \`"test:docs": "arki-doc-examples"\` to packages/${path.basename(packageDir)}/package.json.`,
+      target: item.name,
+    });
+  }
   if (libraryErrors === null) {
     extra.push({
       code: FRESH_ERROR_CODES.llmsImportPaths,
@@ -736,10 +820,10 @@ async function evaluateDocsFreshFor(
       target: item.name,
     });
   }
-  if (extra.length === 0) return result;
-  const evidence = [...result.evidence, ...extra];
+  if (extra.length === 0) return base;
+  const evidence = [...base.evidence, ...extra];
   return {
-    status: result.status === 'fail' ? 'fail' : 'warn',
+    status: evidence.some(e => e.severity === 'error') ? 'fail' : 'warn',
     details: `${evidence.length.toString()} finding(s)`,
     evidence,
   };
@@ -762,8 +846,9 @@ function readinessExternal(
   docsFresh: ScorecardDimensionResult,
   docExamplesMissing: boolean,
   candidate: Candidate | null,
+  mirror: Awaited<ReturnType<typeof loadMirrorReadiness>>,
 ): ExternalResults {
-  const external: ExternalResults = {};
+  const external: ExternalResults = { ...mirror?.[pkg] };
   const smoke = candidate?.packages.some(p => p.name === pkg) === true ? candidate.checks['smoke'] : undefined;
   if (smoke?.status === 'success') external['install-smoke'] = 'pass';
   if (smoke?.status === 'failure') external['install-smoke'] = 'fail';
@@ -778,6 +863,147 @@ function readinessExternal(
   if (uses.length === 0 || demoStatuses.includes('failure')) external['demo-proof'] = 'fail';
   else if (demoStatuses.every(s => s === 'success')) external['demo-proof'] = 'pass';
   return external;
+}
+
+// ---------------------------------------------------------------------------
+// Candidate mode: dimensions judged from the frozen tarball
+// ---------------------------------------------------------------------------
+
+/** The dimensions candidate mode reads from the candidate instead of the source tree. */
+export type FrozenDimensions = Readonly<Record<'metadata' | 'dependencies' | 'fixtures', ScorecardDimensionResult>>;
+
+const frozenManifestSchema = z
+  .object({
+    description: z.string().optional(),
+    license: z.string().optional(),
+    repository: z.unknown().optional(),
+    homepage: z.string().optional(),
+    bugs: z.unknown().optional(),
+    files: z.unknown().optional(),
+    dependencies: z.record(z.string(), z.string()).optional(),
+    peerDependencies: z.record(z.string(), z.string()).optional(),
+    optionalDependencies: z.record(z.string(), z.string()).optional(),
+  })
+  .loose();
+
+const METADATA_FIELDS = ['description', 'license', 'repository', 'homepage', 'bugs'] as const;
+
+/** Runs the pack-audit rules over the tarball's file list: the published bytes, not a fresh `npm pack`. */
+export function auditFrozenTarball(frozen: CandidatePackage, contents: TarballContents, packageDir: string): PackAuditResult {
+  const manifest = frozenManifestSchema.safeParse(contents.manifest);
+  return auditPackEntry(
+    {
+      id: `${frozen.name}@${frozen.version}`,
+      name: frozen.name,
+      version: frozen.version,
+      filename: path.basename(frozen.tarball),
+      files: contents.files,
+      entryCount: contents.files.length,
+      bundled: [],
+      size: contents.packedSize,
+      unpackedSize: contents.files.reduce((sum, f) => sum + f.size, 0),
+    },
+    {
+      packageDir,
+      manifest: { name: frozen.name, version: frozen.version },
+      isSourceDistributed: manifest.success && isSourceDistributedManifest(manifest.data),
+    },
+  );
+}
+
+const smokeCheckEnvelopeSchema = z.object({
+  items: z.array(
+    z.object({
+      name: z.string(),
+      checks: z.array(z.object({ id: z.string(), status: z.enum(SMOKE_CHECK_STATUSES), detail: z.string() })),
+    }),
+  ),
+});
+
+/** metadata, dependencies and fixtures for one package of a candidate. */
+export function frozenDimensions(pkg: string, contents: TarballContents | undefined, candidate: Candidate): FrozenDimensions {
+  const manifest = frozenManifestSchema.safeParse(contents?.manifest);
+  const unreadable: ScorecardDimensionResult = {
+    status: 'fail',
+    details: 'The frozen tarball has no readable package.json.',
+    evidence: [
+      {
+        code: SCORECARD_ERROR_CODES.tarballUnreadable,
+        severity: 'error',
+        message: `${pkg}: the candidate tarball has no readable package/package.json.`,
+        remediation: 'Build a fresh candidate with `bun release:arki candidate --wave <id>`.',
+        target: pkg,
+      },
+    ],
+  };
+  return {
+    metadata: manifest.success ? frozenMetadata(pkg, manifest.data) : unreadable,
+    dependencies: manifest.success ? frozenDependencies(pkg, manifest.data) : unreadable,
+    fixtures: frozenFixtures(pkg, candidate),
+  };
+}
+
+function frozenMetadata(pkg: string, manifest: z.infer<typeof frozenManifestSchema>): ScorecardDimensionResult {
+  const missing = METADATA_FIELDS.filter(field => manifest[field] === undefined || manifest[field] === '');
+  if (missing.length === 0) return { status: 'pass', details: 'The tarball manifest carries description, license, repository, homepage, bugs.', evidence: [] };
+  return {
+    status: 'warn',
+    details: `The tarball manifest lacks ${missing.join(', ')}.`,
+    evidence: [
+      {
+        code: SCORECARD_ERROR_CODES.frozenMetadata,
+        severity: 'warning',
+        message: `${pkg}: the tarball package.json lacks ${missing.join(', ')}.`,
+        remediation: 'Set the fields in the package manifest or `publicMetadataDefaults`, then build a fresh candidate.',
+        target: pkg,
+      },
+    ],
+  };
+}
+
+function frozenDependencies(pkg: string, manifest: z.infer<typeof frozenManifestSchema>): ScorecardDimensionResult {
+  const leaked = [manifest.dependencies, manifest.peerDependencies, manifest.optionalDependencies]
+    .flatMap(deps => Object.entries(deps ?? {}))
+    .filter(([, range]) => range.startsWith('workspace:') || range.startsWith('catalog:'))
+    .map(([name, range]) => `${name}@${range}`);
+  if (leaked.length === 0) return { status: 'pass', details: 'Every dependency range in the tarball is resolved.', evidence: [] };
+  return {
+    status: 'fail',
+    details: `${String(leaked.length)} unresolved range(s) in the tarball.`,
+    evidence: [
+      {
+        code: SCORECARD_ERROR_CODES.frozenDependency,
+        severity: 'error',
+        message: `${pkg}: the tarball still depends on ${leaked.join(', ')}; npm consumers cannot install it.`,
+        remediation: 'Fix the materializer rewrite for these ranges, then build a fresh candidate.',
+        target: pkg,
+      },
+    ],
+  };
+}
+
+/** `smoke --candidate` installed these exact tarballs in a clean consumer; that is the fixture run. */
+function frozenFixtures(pkg: string, candidate: Candidate): ScorecardDimensionResult {
+  const smoke = smokeCheckEnvelopeSchema.safeParse(candidate.checks['smoke']?.envelope);
+  if (!smoke.success) {
+    return { status: 'deferred', details: 'No smoke result in candidate.json: run `smoke --candidate <dir>` first.', evidence: [] };
+  }
+  const checks = smoke.data.items.filter(i => i.name === pkg || i.name === '(wave)').flatMap(i => i.checks);
+  const failed = checks.filter(c => c.status === 'fail');
+  if (failed.length === 0) {
+    return { status: 'pass', details: `${String(checks.length)} smoke check(s) on the frozen tarballs, none failed.`, evidence: [] };
+  }
+  return {
+    status: 'fail',
+    details: `${String(failed.length)} smoke check(s) failed on the frozen tarballs.`,
+    evidence: failed.map(c => ({
+      code: FIXTURE_ERROR_CODES.installFailed,
+      severity: 'error' as const,
+      message: `${pkg}: smoke ${c.id} failed: ${c.detail}`,
+      remediation: 'Run `bun release:arki smoke --candidate <dir> --keep` and inspect the consumer folder.',
+      target: pkg,
+    })),
+  };
 }
 
 /**

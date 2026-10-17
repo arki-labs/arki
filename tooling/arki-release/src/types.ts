@@ -18,13 +18,12 @@ import type { ReadinessResult } from './readiness';
  *   - fixture            (Task 6): drive external install fixtures
  *   - scorecard          (Task 7): emit release scorecard (publication gate)
  *   - history            (post-Task-12): reconcile npm / GitHub tags / source / CHANGELOG / per-package repos
- *   - sync-package-repos (post-Task-12): ensure each published `@arki/<name>` has an
- *                                        archived read-only mirror at `arki-labs/<name>`,
- *                                        with one commit per published version + matching tags.
+ *   - sync               (T1.7): prepare and apply the GitHub mirrors (arki-labs/arki + one repo per package)
  *   - candidate          (T1.1): freeze a wave into `.release/candidates/<id>/` (tarballs + candidate.json)
  *   - order              (T1.1): publish order of a wave, with unpublished @arki deps
  *   - smoke              (T1.2): install a candidate's tarballs into a clean consumer and import every export
  *   - impact             (T1.4): docs-impact and demo-impact for the packages a wave releases
+ *   - ship               (T1.6): one command from a wave to a founder packet, then `--finish`
  */
 export type ReleaseCommand =
   | 'inventory'
@@ -34,11 +33,12 @@ export type ReleaseCommand =
   | 'fixture'
   | 'scorecard'
   | 'history'
-  | 'sync-package-repos'
+  | 'sync'
   | 'candidate'
   | 'order'
   | 'smoke'
-  | 'impact';
+  | 'impact'
+  | 'ship';
 
 /**
  * Lifecycle status of a release command run.
@@ -411,14 +411,7 @@ export type NotYetEntry = {
  * - `unadmitted` — public, in no wave and not in `notYet` (ADMIT_E001)
  * - `conflict` — in a wave AND in `notYet` (ADMIT_E002)
  */
-export const PACKAGE_STATUSES = [
-  'private',
-  'not-yet',
-  'candidate',
-  'published',
-  'unadmitted',
-  'conflict',
-] as const;
+export const PACKAGE_STATUSES = ['private', 'not-yet', 'candidate', 'published', 'unadmitted', 'conflict'] as const;
 
 export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
 
@@ -892,106 +885,6 @@ export type ScorecardSummary = {
  * - `unchecked`   — `--skip-network` or per-package repo check was disabled.
  *
  * `tag-drift` and `missing` are warning-severity drifts — remediable by
- * running `bun release:arki sync-package-repos`.
+ * running `bun release:arki sync --prepare` then `sync --apply`.
  */
 export type HistoryRepoStatus = 'in-sync' | 'missing' | 'tag-drift' | 'unchecked';
-
-/**
- * Status of a single per-package repo sync attempt — answers "what did
- * `sync-package-repos` DO for this package."
- *
- * - `created`  — repo did not exist; created it, pushed history, stamped description.
- * - `updated`  — repo existed; pushed new versions / tags or restamped description.
- * - `in-sync`  — repo existed; everything already aligned; nothing pushed.
- * - `failed`   — irrecoverable error mid-sync (gh API failure, npm fetch
- *                failure, git push failure). Errors carry stable codes.
- * - `skipped`  — operator filter excluded this package (e.g. via
- *                `--package` selector) or `--dry-run` was requested.
- */
-export type SyncRepoStatus = 'created' | 'updated' | 'in-sync' | 'failed' | 'skipped';
-
-/** One row in the sync-package-repos envelope's `items[]`. */
-export type SyncRepoItem = {
-  /** Full `@arki/<name>` package name. */
-  readonly packageName: string;
-  /** Short repo name under arki-labs (`assert`, `dot`, …). */
-  readonly repoName: string;
-  /** Browser URL of the repo. */
-  readonly repoUrl: string;
-  /** SSH git remote used for push. */
-  readonly gitRemote: string;
-  /** Outcome of this sync attempt. */
-  readonly status: SyncRepoStatus;
-  /** Every published version on npm at the time of the sync. */
-  readonly publishedVersions: readonly string[];
-  /** Versions actually committed + tagged in this run. */
-  readonly pushedVersions: readonly string[];
-  /** Versions that already had a matching tag on the mirror. */
-  readonly skippedVersions: readonly string[];
-  /**
-   * Whether the mirror is archived at the end of the run.
-   *
-   * Always `false` under the current model — mirrors carry their
-   * read-only signal in the description (`[Read-only mirror] …`) rather
-   * than via the archive flag. Kept on the envelope for downstream
-   * observability ("is the mirror archived?" is still a useful question
-   * to answer from the JSON output without an extra gh round-trip).
-   */
-  readonly archived: boolean;
-  /** Optional one-line reason (used for `skipped` / `failed`). */
-  readonly reason?: string;
-  /** Per-item structured errors (gh API, npm fetch, git push). */
-  readonly errors: readonly ReleaseError[];
-};
-
-/** Aggregate summary for the sync-package-repos envelope. */
-export type SyncRepoSummary = {
-  readonly message: string;
-  /** Wave-listed packages considered in this run. */
-  readonly totalPackages: number;
-  /** New repos created in this run. */
-  readonly created: number;
-  /** Existing repos that received new commits/tags. */
-  readonly updated: number;
-  /** Repos already in sync (no work needed). */
-  readonly inSync: number;
-  /** Repos where sync failed irrecoverably. */
-  readonly failed: number;
-  /** Packages filtered out (`--package`, `--dry-run`). */
-  readonly skipped: number;
-  /** GitHub org repos were synced under (default `arki-labs`). */
-  readonly githubOrg: string;
-  /** True when `--dry-run` was passed — no side effects executed. */
-  readonly dryRun: boolean;
-};
-
-/**
- * Public options for the `sync-package-repos` command.
- *
- * - `cwd`         — workspace root (used to locate the materialized tree
- *                   when reading package descriptions).
- * - `config`      — the release config; wave membership drives which
- *                   packages get a mirror.
- * - `runner`      — injectable {@link ProcessRunner}; defaults to
- *                   `defaultProcessRunner` (Bun.spawn). Tests pass a fake.
- * - `githubOrg`   — target org for the mirrors (default `arki-labs`).
- * - `packages`    — optional filter: when non-empty, only these
- *                   `@arki/<name>` packages are synced. Useful for
- *                   single-package re-runs after a partial failure.
- * - `dryRun`      — when `true`, every external side effect is suppressed
- *                   and the envelope reports the PLANNED actions only.
- *                   The envelope's `status` is still `success` so CI can
- *                   gate on it.
- * - `force`       — when `true`, re-push ALL published versions (rebuilding
- *                   the per-package commit history from scratch). Without
- *                   `--force`, only versions missing from the mirror tags
- *                   are pushed (incremental sync).
- */
-export type SyncRepoOptions = {
-  readonly cwd: string;
-  readonly config: ReleaseConfig;
-  readonly githubOrg?: string;
-  readonly packages?: readonly string[];
-  readonly dryRun?: boolean;
-  readonly force?: boolean;
-};

@@ -248,7 +248,7 @@ function classifyPackageRepo(
     return { status: 'tag-drift', tags: tagsSorted, archived: probe.archived };
   }
   // Archive state is informational only — the read-only signal is the
-  // description prefix stamped by `sync-package-repos`, not the archive
+  // description prefix stamped by the mirror sync, not the archive
   // flag. So a mirror with the right tags is in-sync regardless of
   // whether GitHub's archive bit is set.
   return { status: 'in-sync', tags: tagsSorted, archived: probe.archived };
@@ -576,7 +576,7 @@ export async function runHistory(
             severity: 'warning',
             message: `${item.name}: per-package mirror at ${packageReposOrg}/${shortRepoName(item.name)} does not exist`,
             target: item.name,
-            remediation: 'Run `bun release:arki sync-package-repos` to create it.',
+            remediation: 'Run `bun release:arki sync --prepare`, then `sync --apply` (founder), to create it.',
           });
           break;
         case 'tag-drift':
@@ -586,7 +586,7 @@ export async function runHistory(
             severity: 'warning',
             message: `${item.name}: per-package mirror missing tag(s) for published version(s)`,
             target: item.name,
-            remediation: 'Run `bun release:arki sync-package-repos` to backfill the tags.',
+            remediation: 'Run `bun release:arki sync --prepare`, then `sync --apply` (founder), to backfill the tags.',
           });
           break;
         case 'unchecked':

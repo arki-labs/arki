@@ -468,11 +468,13 @@ export function renderReadinessTable(results: readonly ReadinessResult[]): strin
     const cells = READINESS_ITEM_IDS.map((id) => {
       const item = r.items.find((i) => i.id === id);
       if (!item) return '-';
-      return item.baselined ? 'base' : CELL[item.status];
+      if (item.baselined) return 'base';
+      // An optional item (funding, demo proof) never blocks, so its fail reads as a warning.
+      return item.status === 'fail' && !item.blocking ? 'warn' : CELL[item.status];
     });
     out.push(`${r.name.padEnd(nameWidth)} ${String(r.tier ?? '-')}  ${cells.map((c, i) => c.padEnd(widths[i] ?? 5)).join(' ')}`.trimEnd());
   }
-  out.push('', 'ok pass, FAIL blocking gap, base baselined gap, stale baseline entry to delete, miss no result, - n/a');
+  out.push('', 'ok pass, FAIL blocking gap, warn non-blocking gap, base baselined gap, stale baseline entry to delete, miss no result, - n/a');
   out.push(READINESS_ITEM_IDS.map((id, i) => `${i + 1}=${id}`).join('  '));
   return out.join('\n');
 }

@@ -1,7 +1,7 @@
 ---
 name: arki-release
 user-invocable: false
-description: End-to-end release pipeline for the `@arki/*` npm scope and the `arki-labs/arki` public GitHub mirror. Use when the user mentions "ship arki", "publish @arki", "update the arki repo", "release a wave", "promote a package to public", or any release-tooling-related task. Encapsulates the full release doctrine (deterministic public tree → npm + GitHub mirror) and the 5-stage scorecard gate. Sub-procedures live alongside this file for deep dives (`ship-update.md`, `add-new-package.md`, `sync-github.md`, `troubleshooting.md`).
+description: End-to-end release pipeline for the `@arki/*` npm scope and the `arki-labs/arki` public GitHub mirror. Use when the user mentions "ship arki", "publish @arki", "update the arki repo", "release a wave", "promote a package to public", or any release-tooling-related task. Encapsulates the full release doctrine (deterministic public tree → npm + GitHub mirror) and the 5-stage scorecard gate. Sub-procedures live alongside this file for deep dives (`ship-update.md`, `add-new-package.md`, `sync.md`, `troubleshooting.md`).
 ---
 
 # arki-release
@@ -34,8 +34,8 @@ Don't invoke for: general npm questions, generic monorepo work, or tasks that ar
                                              │          └──────────────┘
                                              │
                             bun release:arki │
-                            sync-package-    │
-                            repos            │
+                            sync --apply     │
+                                             │
                                              ▼
                                       ┌──────────────────────────────────┐
                                       │ arki-labs/<name>                 │
@@ -52,79 +52,55 @@ Don't invoke for: general npm questions, generic monorepo work, or tasks that ar
 
 ## The release-doctrine non-negotiables
 
-These come from `apps/arki/docs/plans/2026-05-20-arki-dot-public-release.md` and are encoded as scorecard checks:
+These are encoded as scorecard dimensions; the tool enforces them, this list only names them:
 
-- **No private leaks** — no personal names, emails, domains, private app names, internal monorepo docs.
-- **No `workspace:*` / `catalog:`** — materializer must resolve every dep to a concrete semver.
-- **Compiled artifacts** — every package ships `dist/*.js` + `dist/*.d.ts` (npm requires these).
-- **README + LICENSE present** — every public package.
-- **`publishConfig.access: public`** — every public manifest.
-- **Scorecard gate OPEN** — `bun release:arki scorecard` must report `Stable release gate: OPEN` before any publish.
-- **Consumer smoke passes** — the wave's tarballs install and import outside the monorepo under Node and Bun, with one copy of each `@arki/*` package ([ship-update.md § Before publish](./ship-update.md#before-publish-dependency-drift-and-consumer-smoke)).
+- **No private leaks**, **no `workspace:*` / `catalog:`** in published manifests, **compiled `dist/`**, **README + LICENSE**, **`publishConfig.access: public`**.
+- **Scorecard gate OPEN on the frozen candidate**, and **consumer smoke passes** on the same tarballs.
+- **The bytes published are the bytes checked**: the founder publishes the candidate tarballs, never a fresh `npm publish <dir>`.
 
-Run `bun release:arki scorecard` whenever in doubt. If `BLOCKED`, fix what's blocking before touching `npm publish` or `git push`.
+## Versioning convention — 0.x while experimental
 
-## Versioning convention — 0.0.x while experimental
+`1.0.0` is reserved until "no breaking changes except in a major bump" is a credible promise. Below 1.0, a **breaking** change is a **minor** changeset with every monorepo call site updated in the same slice and no shim; any other change is a **patch**. A major bump below 1.0 is refused (IMPACT_E004 fails the gate). (Founder rule, `docs/rfcs/2026-10-14-arki-structure.md` P8.)
 
-Decided 2026-05-21 by the founder: every `@arki/*` package ships under the **0.0.x experimental track** until the public API is stable enough to commit to semver guarantees. `1.0.0` is reserved for when "no breaking changes except in a major bump" is a credible promise — which we earn through the scorecard + adoption, not by fiat.
+## The workflow — one command, three phases
 
-Below 1.0, a **breaking** change is a **minor** changeset (0.0.8 → 0.1.0), with every monorepo call site updated in the same slice and no compatibility shim. Any other change is a **patch** changeset. Never a major bump below 1.0. (Founder rule, restated 2026-10-14 in `docs/rfcs/2026-10-14-arki-structure.md` P8; it supersedes the earlier "patch for any change".)
+`ship` never runs `npm publish`, `git push` or `git commit` (founder decisions A-26/A-27). Every step records its result in `.release/candidates/<dir>/candidate.json` `checks`, so each phase can be rerun.
 
-## Top-level procedures — pick the right one
+| Phase | Who | Command | Stops with |
+|---|---|---|---|
+| 0. Plan | agent | `bun release:arki ship --wave <id> --dry-run` | the plan; refusals (SHIP_E002 mixed changeset, IMPACT_E004) |
+| 1. Version + build | agent | `bun release:arki ship --wave <id>` | SHIP_E001 and the exact `git -c commit.gpgsign=false commit -- <paths>` line |
+| — Commit | orchestrator | the printed commit line | |
+| 2. Freeze + check + packet | agent | `bun release:arki ship --wave <id> --resume` | `packet.md` path, or SHIP_E007 with the blockers |
+| — Publish | **founder** | the `npm publish` lines in `packet.md`, from `/tmp` | |
+| 3. Finish | **founder** | `bun release:arki ship --finish --candidate <dir>` | ledger entry written, mirror synced, demo pin bumps printed |
 
-| Procedure | When to use | Sub-doc |
-|---|---|---|
-| **Ship update to existing wave package** (most common) | A package in a published wave changed; ship a new version. | [ship-update.md](./ship-update.md) |
-| **Promote a private package to a public wave** | A new `@arki/*` package is ready for first publication. | [add-new-package.md](./add-new-package.md) |
-| **Sync the GitHub monorepo mirror** | After any source change that should land on `arki-labs/arki`. | [sync-github.md](./sync-github.md) |
-| **Sync the per-package mirrors** (`arki-labs/<name>`) | After any new npm publish, OR when `history` reports `missing` / `tag-drift` / `unarchived` on the mirror dimension. | [sync-package-repos.md](./sync-package-repos.md) |
-| **Diagnose a release issue** | `npm publish` fails, scorecard blocks, fixture matrix breaks, etc. | [troubleshooting.md](./troubleshooting.md) |
+Details per phase: [ship-update.md](./ship-update.md). Error codes and fixes: [troubleshooting.md](./troubleshooting.md#error-codes-from-ship).
+
+Other procedures:
+
+| Procedure | Sub-doc |
+|---|---|
+| Promote a private package to a public wave | [add-new-package.md](./add-new-package.md) |
+| Sync the GitHub mirrors (`arki-labs/arki` and `arki-labs/<name>`) | [sync.md](./sync.md) |
+| Diagnose a release issue | [troubleshooting.md](./troubleshooting.md) |
 
 ## Hard rules
 
-- **Apps and non-wave packages are NEVER versioned or released** (founder rule, 2026-07-04). Enforced structurally: `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, and every workspace package outside the release waves carries `"private": true`. The pre-approved release set is therefore machine-checkable: `private: false` ⟺ listed in `arki.release.config.ts` waves. If `changeset version` ever bumps an `apps/**` manifest or a non-wave package, a `private: true` flag is missing — fix the flag and revert the bump; do not commit it. Promoting a package to public = flipping its flag via [add-new-package.md](./add-new-package.md), never ad hoc.
-- **Never commit `.release/arki-public/`** — it's gitignored in the monorepo; the materializer regenerates it on demand.
-- **Never run `git add -A` inside `.release/arki-public/` without confirming a local `.git/` exists there** — git walks UP to find a parent `.git` and will pollute the monorepo's index with sibling agents' work. See [troubleshooting.md](./troubleshooting.md#the-git-add-a-parent-walk-trap).
-- **Force-push to `arki-labs/arki` is allowed** — the tree is deterministic. Just confirm with the user before destructive remote operations.
-- **`npm publish` requires user OTP** — the agent **cannot** generate 2FA codes. Surface the manual loop and let the user run it. See [troubleshooting.md](./troubleshooting.md#the-npm-otp-wall).
-- **Source manifests have `private: true` or `private: false`** — flipping that flag is gate-relevant. Only do it when promoting a package per [add-new-package.md](./add-new-package.md).
-- **`arki.release.config.ts` is the source of truth for which packages are in which wave** — editing it changes scorecard candidate set immediately.
+- **Agents run only `--dry-run`, phase 1 and `--resume`.** `ship --finish` refuses with SHIP_E004 when `CLAUDECODE` is set or stdin is not a TTY. Never work around it.
+- **Apps and non-wave packages are never versioned.** `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, every package outside the waves is `private: true`, and `ship` runs `changeset version --ignore <every package outside the set>`. If a bump still lands outside the set, `ship` stops with SHIP_E002; restore those files, do not commit them.
+- **`arki.release.config.ts` is the source of truth** for which packages are in which wave.
+- **Never commit `.release/`** — candidates, the public tree and the mirror checkout are regenerated.
+- **`npm publish` needs the founder's OTP** — see [troubleshooting.md](./troubleshooting.md#the-npm-otp-wall).
+- **Never force-push `arki-labs/arki`** — see [troubleshooting.md](./troubleshooting.md#never-force-push-arki-labsarki).
 
-## Sanity-check incantations
+## Sanity checks
 
 ```bash
-# What's the release scorecard say right now?
-bun tooling/arki-release/src/cli.ts scorecard | tail -20
-
-# Compare source versions to what's on npm
-for p in assert clock contracts date env log resilience string ts; do
-  s=$(python3 -c "import json; print(json.load(open('packages/$p/package.json'))['version'])")
-  n=$(npm view @arki/$p version 2>&1 | head -1)
-  printf "%-25s source=%s  npm=%s\n" "@arki/$p" "$s" "$n"
-done
-
-# Is the materialized tree current?
-bun tooling/arki-release/src/cli.ts export-public
-
-# What's on the GitHub monorepo mirror?
-git ls-remote git@github.com:arki-labs/arki.git
-
-# Reconcile all five surfaces (source / npm / changelog / monorepo-mirror tags / per-package repos)
-bun tooling/arki-release/src/cli.ts history
-
-# Sync the per-package mirrors (dry-run shows the plan)
-bun tooling/arki-release/src/cli.ts sync-package-repos --dry-run
+bun release:arki ship --wave foundation --dry-run        # what would ship, and what refuses
+bun release:arki scorecard --candidate <dir>             # gate on a frozen candidate
+bun release:arki scorecard --candidate <dir> --table     # readiness table (warn = non-blocking gap)
+bun release:arki history                                 # reconcile source / npm / CHANGELOG / mirrors
 ```
 
-## What this skill replaces
-
-- The expectation that you remember the release flow from memory.
-- The expectation that the doctrine lives only in the plan doc (which is long and getting stale).
-
-This skill is the canonical, lived-experience version. When it drifts from `tooling/arki-release/src/*` or `arki.release.config.ts`, update the skill — those files are the implementation.
-
-## Memory hooks for this session
-
-- See `auto memory` for: project_arki_release_pipeline (procedures + commits map).
-- See `auto memory` for: feedback_no_commit_without_review (commit discipline).
-- See `auto memory` for: feedback_only_track_own_changes (sibling-agent isolation).
+This skill describes the workflow only. The logic lives in `tooling/arki-release/src/*` (`ship.ts`, `candidate.ts`, `scorecard.ts`, `ledger.ts`); when they disagree, the code wins and this file gets fixed.

@@ -7,6 +7,7 @@ import {
   parseChangeset,
   resolveBase,
   runImpact,
+  withBumpErrors,
   type Changeset,
 } from './impact';
 import type { GitRunner } from './runners';
@@ -153,5 +154,17 @@ describe('base and runImpact', () => {
     });
     expect(env.status).toBe('failure');
     expect(env.items[0]?.dimensions['docs-impact'].status).toBe('fail');
+  });
+
+  it('a major bump below 1.0 fails docs-impact even when the docs were updated', async () => {
+    // Why: IMPACT_E004 must close the gate. As a loose envelope error it was
+    // ignored by the gate, and `changeset version` would ship 1.0.0 by accident.
+    const passing = { status: 'pass' as const, details: 'docs touched', evidence: [] };
+    const [bump] = checkBumps([{ file: 'a.md', bumps: { '@arki/math': 'major' }, body: '' }], { '@arki/math': '0.4.0' });
+    expect(bump?.code).toBe('IMPACT_E004');
+    const result = withBumpErrors(passing, bump === undefined ? [] : [bump]);
+    expect(result.status).toBe('fail');
+    expect(result.evidence.map(e => e.code)).toEqual(['IMPACT_E004']);
+    expect(withBumpErrors(passing, [])).toBe(passing);
   });
 });

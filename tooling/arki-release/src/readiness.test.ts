@@ -140,4 +140,23 @@ describe('baseline and table', () => {
     expect(lines[1]).toContain('miss');
     expect(lines[0]?.split(/\s+/).length).toBe(lines[1]?.split(/\s+/).length);
   });
+
+  it('shows a non-blocking failure as warn, a blocking one as FAIL', () => {
+    // Why: FAIL in the table means "this blocks the release"; an optional item
+    // (funding) shown as FAIL sends the founder after a gap that blocks nothing.
+    const table = renderReadinessTable([
+      {
+        name: '@arki/x',
+        tier: 1,
+        items: [
+          { id: 'pkg-funding', status: 'fail', blocking: false, baselined: false, detail: 'no funding' },
+          { id: 'install-smoke', status: 'fail', blocking: true, baselined: false, detail: 'smoke failed' },
+        ],
+        dimension: { status: 'fail', details: '', evidence: [] },
+      },
+    ]);
+    const row = table.split('\n')[1] ?? '';
+    expect(row).toContain('warn');
+    expect(row.match(/FAIL/g)?.length).toBe(1);
+  });
 });

@@ -4,7 +4,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { appendCandidateCheck, CANDIDATE_ERROR_CODES, readCandidate, runCandidate } from './candidate';
+import { execFileSync } from 'node:child_process';
+
+import { appendCandidateCheck, CANDIDATE_ERROR_CODES, lastShippedCommits, readCandidate, readTarball, runCandidate } from './candidate';
 import type { TreeExporter } from './candidate';
 import type { GitRunner, NpmRunner } from './runners';
 import type { ReleaseConfig } from './types';
@@ -185,5 +187,49 @@ describe('readCandidate and appendCandidateCheck', () => {
     const read = await readCandidate(root);
     expect(read.ok).toBe(false);
     if (!read.ok) expect(read.errors[0]?.code).toBe(CANDIDATE_ERROR_CODES.unreadable);
+  });
+});
+
+describe('readTarball and lastShippedCommits', () => {
+  it('lists a real .tgz like npm pack does, with its package.json, without unpacking', async () => {
+    // Why: scorecard --candidate audits the frozen bytes; a wrong file list
+    // would pass a packlist the published tarball does not have.
+    const pkg = path.join(root, 'pack', 'package');
+    const deep = 'dist/a/very/long/folder/name/that/goes/past/the/one/hundred/byte/ustar/name/field/limit';
+    mkdirSync(path.join(pkg, deep), { recursive: true });
+    writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@arki/a', version: '1.0.0' }));
+    writeFileSync(path.join(pkg, deep, 'index-with-a-long-file-name.js'), 'export {};\n');
+    const tgz = path.join(root, 'a.tgz');
+    // COPYFILE_DISABLE: macOS tar would add AppleDouble `._*` entries npm never writes.
+    execFileSync('tar', ['-czf', tgz, '-C', path.join(root, 'pack'), 'package'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+    const contents = await readTarball(tgz);
+    expect(contents.files.map(f => f.path).sort()).toEqual([`${deep}/index-with-a-long-file-name.js`, 'package.json']);
+    expect(contents.manifest).toEqual({ name: '@arki/a', version: '1.0.0' });
+    expect(contents.files.find(f => f.path === 'package.json')?.size).toBeGreaterThan(0);
+  });
+
+  it('takes the newest shipped candidate per package and ignores unshipped ones', async () => {
+    // Why: docs-impact diffs from the last real release; an unshipped or older candidate would hide doc changes.
+    const write = (id: string, commit: string, names: string[], shippedAt: string | null) => {
+      mkdirSync(path.join(root, 'cands', id), { recursive: true });
+      const checks = shippedAt === null ? {} : { shipped: { status: 'success', at: shippedAt, envelope: {} } };
+      writeFileSync(
+        path.join(root, 'cands', id, 'candidate.json'),
+        JSON.stringify({
+          wave: 'foundation',
+          sourceCommit: commit,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          packages: names.map((name, i) => ({ name, version: '1.0.0', tarball: 'tarballs/x.tgz', sha512: 'x', publishOrder: i + 1 })),
+          checks,
+        }),
+      );
+    };
+    write('old', 'c-old', ['@arki/a', '@arki/b'], '2026-01-01T00:00:00.000Z');
+    write('new', 'c-new', ['@arki/a'], '2026-02-01T00:00:00.000Z');
+    write('unshipped', 'c-unshipped', ['@arki/a', '@arki/b'], null);
+    const commits = await lastShippedCommits(path.join(root, 'cands'));
+    expect(commits.get('@arki/a')).toBe('c-new');
+    expect(commits.get('@arki/b')).toBe('c-old');
+    expect((await lastShippedCommits(path.join(root, 'missing'))).size).toBe(0);
   });
 });

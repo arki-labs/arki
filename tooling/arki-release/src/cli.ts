@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import debugFactory from 'debug';
 
-import { readCandidate, runCandidate, type CandidateTarget } from './candidate';
+import { CANDIDATES_DIR, lastShippedCommits, readCandidate, runCandidate, type CandidateTarget } from './candidate';
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
 import { demosUsing, loadDemos } from './demos';
 import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
@@ -31,9 +31,10 @@ import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack
 import { renderReadinessTable } from './readiness';
 import { defaultGitRunner, defaultNpmRunner } from './runners';
 import { renderScorecardText, runScorecard } from './scorecard';
+import { runShip, type ShipMode } from './ship';
 import { runSmoke } from './smoke';
 import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
-import { renderSyncPackageReposText, runSyncPackageRepos } from './sync-package-repos';
+import { runSyncApply, runSyncPrepare } from './sync';
 import type {
   ExportItem,
   ExportSummary,
@@ -103,9 +104,9 @@ const SUBCOMMANDS: ReadonlyArray<{
     description: 'Reconcile source / npm / CHANGELOG / GitHub tags; detect drift.',
   },
   {
-    name: 'sync-package-repos',
-    task: 'post-Task-12',
-    description: 'Mirror each published @arki/* into an archived arki-labs/<name> repo.',
+    name: 'sync',
+    task: 'T1.7',
+    description: 'GitHub mirrors: --prepare [--candidate <dir>] (local) | --apply [--plan <path>] (founder only).',
   },
   {
     name: 'order',
@@ -126,6 +127,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'impact',
     task: 'T1.4',
     description: 'docs-impact + demo-impact for a wave\'s pending changesets: --wave <id> [--candidate <dir>].',
+  },
+  {
+    name: 'ship',
+    task: 'T1.6',
+    description: 'Wave to founder packet: --wave <id> [--dry-run] | --wave <id> --resume | --finish --candidate <dir> (founder only).',
   },
 ];
 
@@ -332,8 +338,8 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runHistoryHandler(args);
   }
 
-  if (args.command === 'sync-package-repos') {
-    return runSyncPackageReposHandler(args);
+  if (args.command === 'sync') {
+    return runSyncHandler(args);
   }
 
   if (args.command === 'order') {
@@ -350,6 +356,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
 
   if (args.command === 'impact') {
     return runImpactHandler(args);
+  }
+
+  if (args.command === 'ship') {
+    return runShipHandler(args);
   }
 
   const envelope = buildStubEnvelope(args.command);
@@ -461,58 +471,29 @@ async function runHistoryHandler(args: ParsedCliArgs): Promise<number> {
 }
 
 /**
- * `sync-package-repos` subcommand handler — create + populate the
- * per-package read-only mirrors at `arki-labs/<name>`, one git commit
- * per published npm version, with `v<version>` tags and an archived
- * final state.
- *
- * Flags:
- *   --json               Emit the {@link ReleaseCommandEnvelope} as JSON.
- *   --dry-run            Plan only — no gh creates, no git pushes, no description stamps.
- *                        Recommended for the first run; the envelope shows what
- *                        WOULD happen.
- *   --force              Re-push the full history (all published versions)
- *                        instead of an incremental sync. Uses force-push.
- *   --org <name>         Override the GitHub org (default `arki-labs`).
- *   --package <@arki/x>  Restrict the run to a single wave-listed package.
- *                        Repeat for multiple (e.g. `--package @arki/dot --package @arki/db`).
- *
- * Exit codes:
- *   - 0 when every package returned `created`, `updated`, `in-sync`, or `skipped`.
- *   - 1 when any package shows `failed`.
+ * `sync --prepare [--candidate <dir>]`: local, agent-safe; writes `.release/sync-plan.json`.
+ * `sync --apply [--plan <path>]`: founder only; pushes, tags, creates GitHub Releases.
+ * Exit 1 on failure.
  */
-async function runSyncPackageReposHandler(args: ParsedCliArgs): Promise<number> {
+async function runSyncHandler(args: ParsedCliArgs): Promise<number> {
+  const prepare = args.rest.includes('--prepare');
+  const apply = args.rest.includes('--apply');
+  const candidateDir = extractOption(args.rest, 'candidate');
+  const planPath = extractOption(args.rest, 'plan');
+  if (prepare === apply) return usageError('sync', 'sync needs exactly one of `--prepare` or `--apply`.', args.json);
+  if (apply && candidateDir !== null) return usageError('sync', '`--candidate` belongs to `--prepare`; `--apply` reads the plan.', args.json);
+  if (prepare && planPath !== null) return usageError('sync', '`--plan` belongs to `--apply`; `--prepare` writes the plan.', args.json);
   const cwd = process.cwd();
-  const configPath = defaultConfigPath(cwd);
-  const dryRun = args.rest.includes('--dry-run');
-  const force = args.rest.includes('--force');
-  const orgOverride = extractOption(args.rest, 'org');
-  const packages = extractAllOptions(args.rest, 'package');
-
-  try {
-    const config = await loadConfig(configPath);
-    const envelope = await runSyncPackageRepos({
-      cwd,
-      config,
-      dryRun,
-      force,
-      ...(orgOverride !== null ? { githubOrg: orgOverride } : {}),
-      ...(packages.length > 0 ? { packages } : {}),
-    });
-    if (args.json) {
-      emitEnvelope(envelope, { json: true });
-    } else {
-      process.stdout.write(renderSyncPackageReposText(envelope));
-    }
+  if (apply) {
+    const envelope = await runSyncApply({ cwd, ...(planPath === null ? {} : { planPath }) });
+    emitEnvelope(envelope, { json: args.json });
     return envelope.status === 'failure' ? 1 : 0;
-  } catch (cause) {
-    if (cause instanceof ReleaseConfigError) {
-      const envelope = buildConfigErrorEnvelope('sync-package-repos', cause);
-      emitEnvelope(envelope, { json: args.json });
-      return 1;
-    }
-    throw cause;
   }
+  return withConfig('sync', args.json, async config => {
+    const envelope = await runSyncPrepare({ cwd, config, ...(candidateDir === null ? {} : { candidateDir }) });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  });
 }
 
 /** Emit a CLI_E001 usage envelope and return exit code 2. */
@@ -606,6 +587,7 @@ async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
     }
     const pending = await pendingPackages(cwd);
     const { manifests } = await discoverManifests(cwd);
+    const lastShipped = await lastShippedCommits(path.join(cwd, CANDIDATES_DIR));
     const lookup = npmVersionLookup(defaultNpmRunner, cwd);
     const packages: ImpactPackage[] = [];
     for (const manifest of manifests.filter(m => wave.packages.includes(m.name) && pending.names.has(m.name))) {
@@ -624,7 +606,7 @@ async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
         dir: path.basename(path.dirname(manifest.manifestPath)),
         version: manifest.version,
         npmVersion: 'versions' in found ? (found.versions.at(-1) ?? null) : null,
-        lastShippedCommit: null,
+        lastShippedCommit: lastShipped.get(manifest.name) ?? null,
       });
     }
     const envelope = await runImpact({
@@ -637,6 +619,50 @@ async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
     const merged = { ...envelope, errors: [...errors, ...envelope.errors] };
     emitEnvelope(merged, { json: args.json });
     return merged.errors.some(e => e.severity === 'error') ? 1 : 0;
+  });
+}
+
+/**
+ * `ship --wave <id> [--dry-run] [--allow-demo-lag "<reason>"]`: order, version,
+ * build, then stop with SHIP_E001 for the commit.
+ * `ship --wave <id> --resume [--allow-deferred]`: candidate, checks, packet.
+ * `ship --finish --candidate <dir>`: founder only; verify on npm, ledger, sync.
+ * Exit 1 on failure; SHIP_E001 (commit needed) is a warning and exits 0.
+ */
+async function runShipHandler(args: ParsedCliArgs): Promise<number> {
+  const wave = extractOption(args.rest, 'wave');
+  const candidateDir = extractOption(args.rest, 'candidate');
+  const finish = args.rest.includes('--finish');
+  const dryRun = args.rest.includes('--dry-run');
+  const mode: ShipMode | null = finish
+    ? candidateDir !== null && wave === null && !dryRun
+      ? { kind: 'finish', candidateDir }
+      : null
+    : wave !== null
+      ? { kind: args.rest.includes('--resume') ? 'resume' : 'start', wave, dryRun }
+      : null;
+  if (mode === null) {
+    return usageError('ship', 'ship needs `--wave <id> [--resume] [--dry-run]` or `--finish --candidate <dir>`.', args.json);
+  }
+  const allowDemoLag = extractOption(args.rest, 'allow-demo-lag');
+  return withConfig('ship', args.json, async config => {
+    const envelope = await runShip({
+      cwd: process.cwd(),
+      config,
+      mode,
+      allowDeferred: args.rest.includes('--allow-deferred'),
+      ...(allowDemoLag === null ? {} : { allowDemoLag }),
+      deps: {
+        // The founder runs --finish, so apply's own TTY and CLAUDECODE guard is the gate.
+        syncApply: async dir => {
+          const cwd = process.cwd();
+          const prepared = await runSyncPrepare({ cwd, config, candidateDir: dir });
+          return prepared.status === 'failure' ? prepared : runSyncApply({ cwd });
+        },
+      },
+    });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
   });
 }
 
