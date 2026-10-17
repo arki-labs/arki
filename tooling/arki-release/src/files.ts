@@ -161,7 +161,8 @@ export interface BuildCopyPlanOptions {
  *   1. Discover every file under `packageSourceDir` (sorted).
  *   2. Drop any file whose source-relative path matches an exclude pattern.
  *   3. Keep any file whose source-relative path matches an include pattern
- *      OR a `manifestFiles` entry.
+ *      OR a `manifestFiles` entry, unless a `!` entry in `manifestFiles`
+ *      negates it (npm drops those from the tarball, so the mirror does too).
  *
  * Returns a sorted-by-dest list of {@link CopyPlanEntry} — guaranteeing
  * the second run over the same source produces the same plan.
@@ -175,14 +176,19 @@ export async function buildCopyPlan(opts: BuildCopyPlanOptions): Promise<CopyPla
   const allFiles = await listFilesRecursive(packageSourceDir);
   const excludeMatchers = excludes.map(globToRegExp);
   const includeMatchers = includes.map(globToRegExp);
-  const manifestMatchers = manifestFiles.map(entry => globToRegExp(normalizeManifestFileEntry(entry)));
+  const manifestMatchers = manifestFiles
+    .filter(entry => !entry.startsWith('!'))
+    .map(entry => globToRegExp(normalizeManifestFileEntry(entry)));
+  const negatedMatchers = manifestFiles
+    .filter(entry => entry.startsWith('!'))
+    .map(entry => globToRegExp(normalizeManifestFileEntry(entry.slice(1))));
 
   const plan: CopyPlanEntry[] = [];
   for (const file of allFiles) {
     const rel = path.relative(packageSourceDir, file.absolutePath);
     const relPosix = toPosix(rel);
 
-    if (matchesAny(relPosix, excludeMatchers)) {
+    if (matchesAny(relPosix, excludeMatchers) || matchesAny(relPosix, negatedMatchers)) {
       debug('exclude %s', relPosix);
       continue;
     }

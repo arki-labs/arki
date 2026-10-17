@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DEFAULT_LEAK_PATTERNS, scanDirectory, scanFile, scanText } from './leaks';
+import { DEFAULT_LEAK_PATTERNS, scanDirectory, scanFile, scanPackage, scanText } from './leaks';
 import type { LeakPattern } from './types';
 
 const patterns = DEFAULT_LEAK_PATTERNS;
@@ -117,6 +117,17 @@ describe('scanFile + scanDirectory (temp fixtures)', () => {
     const hits = await scanFile(file, patterns, { displayPath: 'doc.md' });
     expect(hits.length).toBeGreaterThanOrEqual(1);
     expect(hits[0]?.sourcePath).toBe('doc.md');
+  });
+
+  it('scanPackage audits what ships, not files negated in package.json files', async () => {
+    // Why: a private plan kept out of the tarball with "!docs/plans/**" reaches no
+    // one, so flagging it blocks a release for nothing; a shipped doc must still be caught.
+    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: '@arki/x', files: ['dist', 'docs', '!docs/plans/**'] }));
+    mkdirSync(path.join(tmp, 'docs', 'plans'), { recursive: true });
+    writeFileSync(path.join(tmp, 'docs', 'guide.md'), 'has hyphenate');
+    writeFileSync(path.join(tmp, 'docs', 'plans', 'next.md'), 'has ekuation');
+    const hits = await scanPackage(tmp, { patterns });
+    expect(hits.map(h => h.sourcePath)).toEqual([path.join('docs', 'guide.md')]);
   });
 
   it('scanDirectory walks recursively', async () => {

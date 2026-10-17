@@ -61,7 +61,7 @@ import { loadCatalogs } from './catalogs';
 import { buildCopyPlan, executeCopyPlan, removeDirectory } from './files';
 import { INVENTORY_ERROR_CODES, runInventory } from './inventory';
 import { createEnvelope } from './json-output';
-import { DEFAULT_LEAK_PATTERNS, scanDirectory } from './leaks';
+import { DEFAULT_LEAK_PATTERNS, scanPackage } from './leaks';
 import { materializeManifest } from './manifest';
 
 const debug = debugFactory('arki:release:export');
@@ -384,10 +384,10 @@ async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSin
     };
   }
 
-  // c. Pre-output leak gate over the SOURCE directory.
+  // c. Pre-output leak gate over the files the package ships.
   if (opts.leakScan) {
     const patterns = opts.leakPatterns ?? DEFAULT_LEAK_PATTERNS;
-    const hits = await scanDirectory(packageSourceDir, { patterns });
+    const hits = await scanPackage(packageSourceDir, { patterns });
     const blockingHits = hits.filter(h => h.severity === 'error');
     if (blockingHits.length > 0) {
       const summary = buildLeakGateError(opts.item.name, blockingHits);

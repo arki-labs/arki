@@ -38,6 +38,8 @@ let root: string;
 let calls: Call[];
 /** `name@version` -> what `npm view ... dist.integrity --json` prints; absent = not published. */
 let published: Map<string, string>;
+/** Package names `npm view <name> versions` knows; others answer E404 (never published). */
+let released: Set<string>;
 
 function writePackage(name: string, version: string, scripts: Record<string, string> = {}): void {
   mkdirSync(path.join(root, 'packages', name), { recursive: true });
@@ -54,6 +56,7 @@ beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'arki-ship-'));
   calls = [];
   published = new Map();
+  released = new Set(['@arki/a']);
   writePackage('a', '0.1.0', { 'test:docs': 'arki-doc-examples' });
   writePackage('b', '0.1.0');
   writePackage('x', '0.1.0');
@@ -104,6 +107,9 @@ function deps(overrides: Partial<ShipDeps> = {}): Partial<ShipDeps> {
     },
     npm: async args => {
       calls.push({ via: 'npm', command: ['npm', ...args].join(' ') });
+      if (args[0] === 'view' && args[2] === 'versions') {
+        return released.has(args[1] ?? '') ? ok(JSON.stringify(['0.1.0'])) : { code: 1, stdout: '', stderr: 'npm error code E404' };
+      }
       const integrity = published.get(args[1] ?? '');
       return integrity === undefined ? { code: 1, stdout: '', stderr: 'npm error code E404' } : ok(JSON.stringify(integrity));
     },
@@ -357,6 +363,7 @@ describe('ship upgrade guide', () => {
     execFileSync('tar', ['-czf', tgz, '-C', path.join(root, 'prev'), 'package'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
     const npm: ShipDeps['npm'] = async args => {
       calls.push({ via: 'npm', command: ['npm', ...args].join(' ') });
+      if (args[0] === 'view' && args[2] === 'versions') return ok(JSON.stringify(['0.1.0']));
       if (args[0] !== 'pack' || args[1] !== '@arki/a@0.1.0') return { code: 1, stdout: '', stderr: 'npm error code E404' };
       copyFileSync(tgz, path.join(args[args.indexOf('--pack-destination') + 1] ?? '', 'arki-a-0.1.0.tgz'));
       return ok(JSON.stringify([{ filename: 'arki-a-0.1.0.tgz' }]));
@@ -367,6 +374,16 @@ describe('ship upgrade guide', () => {
     expect(guide).toContain('Removed:\n- `old` from `@arki/a` (variable)');
     expect(guide).toContain('Added:\n- `added` from `@arki/a` (variable)');
     expect(guide).not.toContain('no api diff was available');
+  });
+
+  it('needs no guide for a Stack minor bump of a package npm has never seen', async () => {
+    // Why: a first release has no users to migrate, so a guide would be noise
+    // and blocking on it would stall every new package's first ship.
+    released.clear();
+    const dry = await shipStack(true);
+    expect(dry.errors.map(e => e.code)).not.toContain('GUIDE_E001');
+    expect(dry.items.find(step => step.id === 'upgrade-guide')?.status).toBe('skipped');
+    expect(existsSync(guideFile())).toBe(false);
   });
 
   it('fails GUIDE_E001 while a skeleton marker is left, and passes once the guide is finished', async () => {

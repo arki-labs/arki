@@ -140,7 +140,10 @@ export const config: ReleaseConfig = {
   // folder (CI clones) is a warning, not a crash.
   demos: [{ name: 'drop-studio', repo: 'arki-labs/drop-studio', path: 'demos/drop-studio' }],
   // Behavioural mappings on top of real imports: { '@arki/x': [{ demo, scenario }] }.
-  proofs: {},
+  proofs: {
+    // The CLI is not imported by any demo, so name the scenario that runs it.
+    '@arki/cli': [{ demo: 'drop-studio', scenario: 'dot doctor --app backend/src/app.ts --json exits 0' }],
+  },
   // Demo lag is warning-only until two waves have shipped with the dimension.
   demoLagBlocking: false,
   // Public packages deliberately outside every wave. The `admission`

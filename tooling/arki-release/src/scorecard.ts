@@ -91,7 +91,7 @@ import {
 } from './impact';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope } from './json-output';
-import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
+import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanPackage } from './leaks';
 import { npmVersionLookup } from './order';
 import { auditPack, auditPackEntry, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
 import {
@@ -292,7 +292,7 @@ export async function runScorecard(
   for (const item of candidates) {
     const dir = path.dirname(path.join(opts.cwd, item.manifestPath));
     try {
-      const hits = await scanDirectory(dir, { patterns: leakPatterns });
+      const hits = await scanPackage(dir, { patterns: leakPatterns });
       leakHitsByPackage.set(item.name, hits);
     } catch (cause) {
       debug('leak scan threw for %s: %s', item.name, cause);

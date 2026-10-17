@@ -27,7 +27,7 @@ import { renderHistoryText, runHistory } from './history';
 import { runImpact, type ImpactPackage } from './impact';
 import { discoverManifests, runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
-import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
+import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanPackage } from './leaks';
 import { npmVersionLookup, ORDER_ERROR_CODES, pendingPackages, runOrder } from './order';
 import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
 import { renderReadinessTable } from './readiness';
@@ -873,7 +873,7 @@ async function runAuditHandler(args: ParsedCliArgs): Promise<number> {
 
     for (const item of filtered) {
       const packageDir = path.dirname(path.join(cwd, item.manifestPath));
-      const hits = await scanDirectory(packageDir, { patterns });
+      const hits = await scanPackage(packageDir, { patterns });
       const errorCount = hits.filter(h => h.severity === 'error').length;
       const warningCount = hits.filter(h => h.severity === 'warning').length;
       totalError += errorCount;

@@ -20,7 +20,10 @@
  * dependencies and `node:` builtins. Generated files go to `.cache/doc-examples/`
  * and nowhere else.
  *
- *   arki-doc-examples [--no-run] [--write] [--json]
+ *   arki-doc-examples [--no-run] [--write] [--json] [--file <path>]...
+ *
+ * `--file` (repeatable) checks only those markdown files, for fast iteration on
+ * one guide; a path that is not one of the package's example files exits 2.
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -617,16 +620,20 @@ function checkFromBlocks(
   return { failures, markdown: lines.join(eol) };
 }
 
-/** Extract, compile and (unless `run` is false) run every example of the package in `dir`. */
+/**
+ * Extract, compile and (unless `run` is false) run every example of the package in `dir`.
+ * `only` limits the check to those files (package-relative, as `docFiles` names them).
+ */
 export function checkExamples(
   dir: string,
-  options: { readonly run: boolean; readonly write?: boolean },
+  options: { readonly run: boolean; readonly write?: boolean; readonly only?: readonly string[] },
 ): ExamplesReport {
   const root = realpathSync(dir);
   const manifest = readManifest(root);
   const examples: Example[] = [];
   const failures: ExampleFailure[] = [];
-  for (const file of docFiles(root, manifest)) {
+  const only = options.only === undefined ? undefined : new Set(options.only);
+  for (const file of docFiles(root, manifest).filter(name => only === undefined || only.has(name))) {
     const full = path.join(root, file);
     const markdown = readFileSync(full, 'utf8');
     const extracted = extractExamples(file, markdown);
@@ -665,9 +672,20 @@ function main(): number {
       'no-run': { type: 'boolean', default: false },
       write: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
+      file: { type: 'string', multiple: true },
     },
   });
-  const report = checkExamples(process.cwd(), { run: !values['no-run'], write: values.write });
+  const root = realpathSync(process.cwd());
+  const known = docFiles(root, readManifest(root));
+  const only = values.file?.map(file => path.relative(root, path.resolve(root, file)).split(path.sep).join('/'));
+  const unknown = only?.filter(file => !known.includes(file)) ?? [];
+  if (unknown.length > 0) {
+    complain(
+      `arki-doc-examples: not an example file of this package: ${unknown.join(', ')} (known: ${known.join(', ')})`,
+    );
+    return 2;
+  }
+  const report = checkExamples(root, { run: !values['no-run'], write: values.write, only });
   if (values.json) {
     // Printed as is: `docExamplesReportSchema` (arki-release) reads exactly these keys, checked by its test-d.
     say(JSON.stringify(report, null, 2));

@@ -5,7 +5,9 @@
  *
  * Each export key (not `./package.json`, not wildcards) becomes one bullet:
  * the specifier, the first line of the entry module's top comment, and the
- * names it exports (values first, then `types ...`, each sorted). The section lives between
+ * names it exports (values first, then `types ...`, each sorted). When those
+ * bullets would push the file over the `DOC_E007` budget, the keys are grouped
+ * by their first path segment instead (see `groupedLines`). The section lives between
  * `<!-- llms:start -->` and `<!-- llms:end -->`; everything outside the markers
  * stays as written. A section with no markers is replaced whole and gets them.
  *
@@ -94,7 +96,7 @@ function moduleSummary(file: string): string {
     .slice(0, end === -1 ? undefined : end)
     .filter(line => line !== '' && !/^@(?!arki\/)/.test(line))
     .join(' ')
-    .replace(/^`?@arki\/[\w/-]+`?\s+[-\u2014:]\s+/, '');
+    .replace(/^`?@arki\/[\w/-]+`?\s*[-\u2014:]\s+/, '');
   const sentence = /^.*?\.(?=\s|$)/.exec(paragraph)?.[0] ?? paragraph;
   return sentence.replace(/\.$/, '').trim();
 }
@@ -155,8 +157,14 @@ function plain(description: string, packageName: string): string {
   );
 }
 
-/** The bullets of the Import paths section, one per export key, in `exports` order. */
-export function importPathLines(dir: string, manifest: Manifest): string[] {
+interface ImportPath {
+  subpath: string;
+  specifier: string;
+  description: string;
+  bullet: string;
+}
+
+function importPaths(dir: string, manifest: Manifest): ImportPath[] {
   const subpaths = Object.keys(manifest.exports).filter(key => key !== './package.json' && !key.includes('*'));
   const entries = subpaths.map(subpath => ({ subpath, file: entryFile(dir, subpath, manifest) }));
   const files = [...new Set(entries.flatMap(entry => (entry.file === undefined ? [] : [entry.file])))];
@@ -166,8 +174,48 @@ export function importPathLines(dir: string, manifest: Manifest): string[] {
     const description = file === undefined ? '' : plain(moduleSummary(file), manifest.name);
     const list = file === undefined ? '' : nameList(names.get(file) ?? { values: [], types: [] });
     const tail = [description === '' ? '' : `${description}.`, list === '' ? '' : `${list}.`].filter(part => part !== '').join(' ');
-    return `- \`${specifier}\`${tail === '' ? '' : `: ${tail}`}`;
+    return { subpath, specifier, description, bullet: `- \`${specifier}\`${tail === '' ? '' : `: ${tail}`}` };
   });
+}
+
+/** The bullets of the Import paths section, one per export key, in `exports` order. */
+export function importPathLines(dir: string, manifest: Manifest): string[] {
+  return importPaths(dir, manifest).map(entry => entry.bullet);
+}
+
+/** `./core/tables` → `core`; the root key `.` is its own group. */
+const firstSegment = (subpath: string): string => (subpath === '.' ? '.' : (subpath.slice(2).split('/')[0] ?? ''));
+
+/**
+ * The compact Import paths section for packages with too many exports for one
+ * bullet each. The root entry keeps its full bullet. Keys that share a first
+ * path segment become one bullet that names every specifier, led by the
+ * summary of `./<segment>` when that key exists. Keys alone in their segment
+ * are collected into one last bullet, because a flat package (one subpath per
+ * component) would otherwise still need a line per export. Every specifier is
+ * still named, so `DOC_E006` holds.
+ */
+function groupedLines(paths: readonly ImportPath[]): string[] {
+  const groups = new Map<string, ImportPath[]>();
+  for (const entry of paths) {
+    const segment = firstSegment(entry.subpath);
+    groups.set(segment, [...(groups.get(segment) ?? []), entry]);
+  }
+  const lines: string[] = [];
+  const alone: ImportPath[] = [];
+  for (const [segment, members] of groups) {
+    const [only] = members;
+    if (segment === '.') lines.push(...members.map(entry => entry.bullet));
+    else if (members.length === 1 && only !== undefined) alone.push(only);
+    else {
+      const head = members.find(entry => entry.subpath === `./${segment}`);
+      const summary = head === undefined || head.description === '' ? '' : ` ${head.description}.`;
+      const specifiers = code(members.map(entry => entry.specifier));
+      lines.push(`- ${segment}/* (${String(members.length)} paths):${summary} ${specifiers}.`);
+    }
+  }
+  if (alone.length > 0) lines.push(`- one path each: ${code(alone.map(entry => entry.specifier))}.`);
+  return lines;
 }
 
 /**
@@ -197,25 +245,31 @@ export function applyImportPaths(text: string, bullets: readonly string[]): stri
   return next.join('\n');
 }
 
-function checkBudget(text: string): void {
+/** Why `text` breaks the `DOC_E007` budget, or `undefined` when it fits. */
+function overBudget(text: string): string | undefined {
   const lines = text.endsWith('\n') ? splitLines(text).length - 1 : splitLines(text).length;
   const bytes = Buffer.byteLength(text, 'utf8');
-  if (lines > LLMS_MAX_LINES || bytes > LLMS_MAX_BYTES) {
-    const parts = [
-      ...(lines > LLMS_MAX_LINES ? [`${String(lines - LLMS_MAX_LINES)} line(s) over ${String(LLMS_MAX_LINES)}`] : []),
-      ...(bytes > LLMS_MAX_BYTES ? [`${String(bytes - LLMS_MAX_BYTES)} byte(s) over ${String(LLMS_MAX_BYTES)}`] : []),
-    ];
-    throw new LlmsError(
-      `generated llms.txt is ${String(lines)} lines, ${String(bytes)} bytes (${parts.join(', ')}); shorten the hand-written sections or group exports`,
-    );
-  }
+  if (lines <= LLMS_MAX_LINES && bytes <= LLMS_MAX_BYTES) return undefined;
+  const parts = [
+    ...(lines > LLMS_MAX_LINES ? [`${String(lines - LLMS_MAX_LINES)} line(s) over ${String(LLMS_MAX_LINES)}`] : []),
+    ...(bytes > LLMS_MAX_BYTES ? [`${String(bytes - LLMS_MAX_BYTES)} byte(s) over ${String(LLMS_MAX_BYTES)}`] : []),
+  ];
+  return `generated llms.txt is ${String(lines)} lines, ${String(bytes)} bytes (${parts.join(', ')})`;
 }
 
-/** The full `llms.txt` this package should have. Throws `LlmsError` on a problem the author must fix. */
+/**
+ * The full `llms.txt` this package should have: one bullet per export when that
+ * fits the budget, else the grouped section. Throws `LlmsError` when even the
+ * grouped file is over budget, since the hand-written sections must shrink.
+ */
 export function generateLlms(dir: string, manifest: Manifest, current: string): string {
-  const text = applyImportPaths(current, importPathLines(dir, manifest));
-  checkBudget(text);
-  return text;
+  const paths = importPaths(dir, manifest);
+  const flat = applyImportPaths(current, paths.map(entry => entry.bullet));
+  if (overBudget(flat) === undefined) return flat;
+  const grouped = applyImportPaths(current, groupedLines(paths));
+  const problem = overBudget(grouped);
+  if (problem !== undefined) throw new LlmsError(`${problem} even with exports grouped; shorten the hand-written sections`);
+  return grouped;
 }
 
 /** Removed lines with `-`, added lines with `+`; context is left out. */

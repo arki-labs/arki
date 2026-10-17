@@ -41,7 +41,7 @@ import { checkBumps, loadChangesets } from './impact';
 import { discoverManifests } from './inventory';
 import { createEnvelope } from './json-output';
 import { LEDGER_PATH, renderLedgerEntry, writeLedgerEntry } from './ledger';
-import { runOrder } from './order';
+import { npmVersionLookup, runOrder } from './order';
 import { defaultGitRunner, defaultNpmRunner, execRunner, type ExecRunner, type GitRunner, type NpmRunner } from './runners';
 import { runScorecard } from './scorecard';
 import { runSmoke } from './smoke';
@@ -329,7 +329,7 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
 
   const turboBin = path.join(cwd, 'node_modules', '.bin', 'turbo');
   const buildArgs = ['run', 'build', ...[...publishSet].map(name => `--filter=${name}`)];
-  const needGuide = stackMinors(config, publishSet, ours);
+  const needGuide = await onNpm(stackMinors(config, publishSet, ours), versionOf, deps.npm, cwd);
   if (dryRun) {
     // Dry run predicts the new version as the next minor.
     const predicted = new Map(needGuide.map(name => [name, { from: versionOf[name] ?? '', to: nextMinor(versionOf[name] ?? '') }]));
@@ -422,13 +422,13 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
 function guideStep(needGuide: readonly string[], missing: readonly ReleaseError[]): ShipStep {
   if (missing.length > 0) return { id: 'upgrade-guide', status: 'failed', detail: missing.map(e => e.target ?? e.message).join(', ') };
   return needGuide.length === 0
-    ? { id: 'upgrade-guide', status: 'skipped', detail: 'no Tier 1 Stack package bumps minor' }
+    ? { id: 'upgrade-guide', status: 'skipped', detail: 'no published Tier 1 Stack package bumps minor' }
     : { id: 'upgrade-guide', status: 'done', detail: `guide finished for ${needGuide.join(', ')}` };
 }
 
 /**
  * Tier 1 Stack packages in the set whose highest pending bump is `minor`.
- * Each needs a finished upgrade guide (GUIDE_E001).
+ * Each one already on npm needs a finished upgrade guide (GUIDE_E001).
  */
 function stackMinors(config: ReleaseConfig, publishSet: ReadonlySet<string>, ours: readonly { readonly bumps: Readonly<Record<string, string>> }[]): string[] {
   const stack = new Set(config.tiers?.stack ?? []);
@@ -437,6 +437,24 @@ function stackMinors(config: ReleaseConfig, publishSet: ReadonlySet<string>, our
     const bumps = ours.map(c => c.bumps[name]).filter((b): b is string => b !== undefined);
     return bumps.includes('minor') && !bumps.includes('major');
   });
+}
+
+/**
+ * The packages in `names` that have a version on npm. A first release has no
+ * users to migrate, so it needs no upgrade guide. Version `0.0.0` counts as
+ * unpublished without asking; a failed lookup (network, auth) counts as
+ * published, so the guide is still required rather than silently skipped.
+ */
+async function onNpm(names: readonly string[], versionOf: Readonly<Record<string, string>>, npm: NpmRunner, cwd: string): Promise<string[]> {
+  const lookup = npmVersionLookup(npm, cwd);
+  const kept: string[] = [];
+  for (const name of names) {
+    if (versionOf[name] === '0.0.0') continue;
+    const found = await lookup(name);
+    if ('versions' in found && found.versions.length === 0) continue;
+    kept.push(name);
+  }
+  return kept;
 }
 
 /** Writes the skeleton (with `publishedApiDiff`) for each guide that does not exist yet. */

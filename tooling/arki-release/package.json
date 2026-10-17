@@ -42,6 +42,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@changesets/cli": "^3.0.3",
     "@types/bun": "catalog:",
     "@types/debug": "catalog:",
     "drizzle-orm": "catalog:drizzle",

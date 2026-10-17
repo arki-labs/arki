@@ -151,6 +151,17 @@ describe('checkExamples on the fixture', () => {
     expect(checkExamples(fixture(readme), { run: true }).failures).toEqual([]);
   });
 
+  it('checks only the files named in `only`', () => {
+    // Why: --file lets an author iterate on one guide in seconds; a filter that
+    // leaked other files' failures (or dropped the named one) would mislead them.
+    const dir = fixture(fence('ts', "import { greet } from '@arki/doc-package';", '// @ts-expect-error', 'greet(1);'));
+    mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    writeFileSync(path.join(dir, 'docs', 'guide.md'), fence('ts', "import { greet } from '@arki/doc-package';", "greet('a');"));
+    const guide = checkExamples(dir, { run: false, only: ['docs/guide.md'] });
+    expect(guide).toMatchObject({ examples: 1, failures: [] });
+    expect(checkExamples(dir, { run: false, only: ['README.md'] }).failures.map(item => item.rule)).toEqual(['DOCX_E006']);
+  });
+
   it('bans @ts-expect-error, because any error satisfies it and the block proves nothing', () => {
     const readme = fence('ts', "import { greet } from '@arki/doc-package';", '// @ts-expect-error', 'greet(1);');
     expect(checkExamples(fixture(readme), { run: false }).failures).toMatchObject([

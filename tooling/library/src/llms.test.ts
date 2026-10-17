@@ -56,6 +56,12 @@ describe('importPathLines', () => {
     expect(importPathLines(dir, readManifest(dir))).toEqual(['- `@arki/demo`: the core of the demo. `a`.']);
   });
 
+  it('drops a package title written without a space before the dash', () => {
+    // Why: comments like "@arki/x- summary" or "@arki/x: summary" would otherwise repeat the package name in every bullet.
+    const dir = packageDir({ 'src/index.ts': '/**\n * @arki/demo: the core of the demo.\n */\nexport const a = 1;\n' });
+    expect(importPathLines(dir, readManifest(dir))).toEqual(['- `@arki/demo`: the core of the demo. `a`.']);
+  });
+
   it('skips package.json and wildcard keys and keeps exports order', () => {
     // Why: DOC_E006 does not ask for those keys, so naming them would be an "extra" error.
     const dir = packageDir(
@@ -135,16 +141,51 @@ describe('generateLlms', () => {
     expect(next).toContain('`@arki/demo/b`');
   });
 
-  it('fails over the line budget instead of truncating, naming the overflow', () => {
-    // Why: DOC_E007 caps llms.txt at 80 lines; dropping bullets silently would lose import paths.
-    const keys = Array.from({ length: 70 }, (_, index) => `./e${String(index)}`);
+  /** `.` plus `./core` and its `count - 1` children plus `flat` one-segment keys, each with a source file. */
+  function manyExports(count: number, flat: number): string {
+    const keys = [
+      './core',
+      ...Array.from({ length: count - 1 }, (_, index) => `./core/part${String(index)}`),
+      ...Array.from({ length: flat }, (_, index) => `./solo${String(index)}`),
+    ];
     const exports = Object.fromEntries([['.', entry('index')], ...keys.map(key => [key, entry(key.slice(2))])]);
     const files = Object.fromEntries([
-      ['src/index.ts', 'export const a = 1;\n'],
-      ...keys.map(key => [`src/${key.slice(2)}.ts`, 'export const a = 1;\n']),
+      ['src/index.ts', '/** The demo. */\nexport const a = 1;\n'],
+      ['src/core.ts', '/** Tables and services. */\nexport const a = 1;\n'],
+      ...keys.filter(key => key !== './core').map(key => [`src/${key.slice(2)}.ts`, 'export const a = 1;\n']),
+      ['README.md', '# @arki/demo\n'],
+      ['docs/agent-guide.md', '# Guide\n'],
     ]);
-    const dir = packageDir(files, exports);
-    expect(() => generated(dir, llmsTxt('\n- old\n'))).toThrow(/\d+ line\(s\) over 80/);
+    return packageDir(files, exports);
+  }
+
+  it('keeps one bullet per export while that fits the budget', () => {
+    // Why: per-export bullets carry each entry's summary and names; grouping drops them, so it is a fallback only.
+    const dir = manyExports(3, 2);
+    expect(generated(dir, llmsTxt('\n- old\n'))).toContain('- `@arki/demo/core/part0`');
+  });
+
+  it('groups exports by first path segment when one bullet each would overflow, still naming every specifier', () => {
+    // Why: packages like ui (69 exports) and payments (72) cannot fit 80 lines with a bullet per export,
+    // and a hand-grouped section fails --check; the generated group must still satisfy DOC_E006.
+    const dir = manyExports(40, 40);
+    const next = generated(dir, llmsTxt('\n- old\n'));
+    const bullets = next.slice(next.indexOf(LLMS_START), next.indexOf(LLMS_END)).split('\n').slice(1, -1);
+    expect(bullets).toHaveLength(3);
+    expect(bullets[0]).toBe('- `@arki/demo`: The demo. `a`.');
+    expect(bullets[1]).toMatch(/^- core\/\* \(40 paths\): Tables and services\. `@arki\/demo\/core`, `@arki\/demo\/core\/part0`, /);
+    expect(bullets[2]).toMatch(/^- one path each: `@arki\/demo\/solo0`, /);
+    writeFileSync(path.join(dir, 'llms.txt'), next);
+    const result = checkDocs(dir, readManifest(dir));
+    expect([...result.errors, ...result.warnings].filter(line => /DOC_E00[67]/.test(line))).toEqual([]);
+  });
+
+  it('fails when even the grouped file is over budget, naming the overflow', () => {
+    // Why: DOC_E007 caps llms.txt at 80 lines; when the hand-written sections are the problem,
+    // dropping bullets silently would lose import paths, so the author must shorten them.
+    const dir = manyExports(40, 40);
+    const notes = Array.from({ length: 80 }, (_, index) => `- note ${String(index)}`).join('\n');
+    expect(() => generated(dir, llmsTxt('\n- old\n', `${notes}\n`))).toThrow(/\d+ line\(s\) over 80\) even with exports grouped/);
   });
 });
 

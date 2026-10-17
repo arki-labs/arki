@@ -22,7 +22,9 @@ import { access, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import debugFactory from 'debug';
+import { z } from 'zod';
 
+import { buildCopyPlan } from './files';
 import type { LeakHit, LeakPattern } from './types';
 
 const debug = debugFactory('arki:release:leaks');
@@ -202,6 +204,12 @@ export interface ScanDirectoryOptions {
    * walk every nested sub-package and its vendored data.
    */
   readonly skipNestedWorkspaces?: boolean;
+  /**
+   * When set, only files whose path relative to the root (POSIX separators)
+   * passes this test are scanned. {@link scanPackage} uses it to scan only
+   * what the package ships.
+   */
+  readonly include?: (relativePath: string) => boolean;
 }
 
 /** Default maximum scanned file size (1MB). */
@@ -379,6 +387,7 @@ export async function scanDirectory(
 
       const ext = path.extname(entry.name).toLowerCase();
       if (!extensions.includes(ext)) continue;
+      if (options.include && !options.include(path.relative(rootPath, full).split(path.sep).join('/'))) continue;
 
       const displayPath = relative ? path.relative(rootPath, full) : full;
 
@@ -415,4 +424,20 @@ export async function scanDirectory(
 
   await walk(rootPath);
   return allHits;
+}
+
+const manifestFilesSchema = z.object({ files: z.array(z.string()).optional() });
+
+/**
+ * Scan only the files a package ships: the same set `export-public` copies
+ * into the public tree (`package.json` `files`, its `!` negations, and the
+ * default includes and excludes in `./files`). A file kept out of the
+ * tarball, like a `docs/plans/**` folder negated in `files`, reaches no one,
+ * so a private name in it is not a leak.
+ */
+export async function scanPackage(packageDir: string, options: ScanDirectoryOptions): Promise<readonly LeakHit[]> {
+  const manifest = manifestFilesSchema.parse(JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8')));
+  const plan = await buildCopyPlan({ packageSourceDir: packageDir, packageDestDir: packageDir, manifestFiles: manifest.files });
+  const shipped = new Set(plan.map(entry => path.relative(packageDir, entry.src).split(path.sep).join('/')));
+  return scanDirectory(packageDir, { ...options, include: relativePath => shipped.has(relativePath) });
 }
