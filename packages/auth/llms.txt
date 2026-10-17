@@ -12,7 +12,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 - `@arki/auth/orpc`: `guards` (`authed`, `verified`, `role`, `can`), `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`.
 - `@arki/auth/http`: `withPrincipal`, `withOptionalPrincipal`, `authorize`.
 - `@arki/auth/ids`: id types and `create*Id` (browser-safe).
-- `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `roleIdSchema`, `permissionIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
+- `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
 - `@arki/auth/password`: `hashPassword`, `verifyPassword`.
 - `@arki/auth/workspaces`: `WorkspaceRole`, `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`; types `WorkspaceContext`, `Scope`, `OrganizationId`, `TeamId`.
 - `@arki/auth/testing`: `testAuth`, `actingAs`, `lastLink`, `lastMagicLink`.

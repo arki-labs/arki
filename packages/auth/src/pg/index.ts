@@ -53,14 +53,7 @@ export type {
 export { assertAuthSecret } from './secret.js';
 export { additionalFieldsFromColumns } from './fields.js';
 export { authLinkInput } from './mail.js';
-export {
-  accountIdColumns,
-  permissionIdColumns,
-  roleIdColumns,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from './ids.js';
+export { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from './ids.js';
 export {
   authAccountColumns,
   authSessionColumns,

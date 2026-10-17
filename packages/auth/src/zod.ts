@@ -9,16 +9,7 @@
 import type { IdDeclaration } from '@arki/contracts';
 import { z } from '@arki/contracts';
 
-import {
-  accountId,
-  organizationId,
-  permissionId,
-  roleId,
-  sessionId,
-  teamId,
-  userId,
-  verificationId,
-} from './id-declarations.js';
+import { accountId, organizationId, sessionId, teamId, userId, verificationId } from './id-declarations.js';
 
 /** A schema that takes a string and gives the declaration's id type, or fails with the prefix it wanted. */
 function idSchema<const P extends string>(declaration: IdDeclaration<P>) {
@@ -33,8 +24,6 @@ export const userIdSchema = idSchema(userId);
 export const sessionIdSchema = idSchema(sessionId);
 export const accountIdSchema = idSchema(accountId);
 export const verificationIdSchema = idSchema(verificationId);
-export const roleIdSchema = idSchema(roleId);
-export const permissionIdSchema = idSchema(permissionId);
 export const organizationIdSchema = idSchema(organizationId);
 export const teamIdSchema = idSchema(teamId);
 

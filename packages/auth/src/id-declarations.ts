@@ -9,7 +9,5 @@ export const userId = defineId('usr_');
 export const sessionId = defineId('sess_');
 export const accountId = defineId('acc_');
 export const verificationId = defineId('verif_');
-export const roleId = defineId('role_');
-export const permissionId = defineId('perm_');
 export const organizationId = defineId('organization_');
 export const teamId = defineId('team_');

@@ -25,7 +25,7 @@ Entries: `.`, `./ids`, `./zod`, `./password`, `./workspaces`, `./pg`, `./pg/work
 | `ensureRateLimitNotExceeded` | internal: the engine limiter takes `rateLimit: { store }` |
 | `UserEmail` | `emailSchema` (`./zod`) |
 | `*IdSchema` on `.` / `./ids` | same names on `./zod`; `userVerificationIdSchema` → `verificationIdSchema` |
-| `*IdFactory` | `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns`, `roleIdColumns`, `permissionIdColumns` (`./pg`) |
+| `*IdFactory` | `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns` (`./pg`) |
 | `UserVerificationId`, `createUserVerificationId` | `VerificationId`, `createVerificationId` (`./ids`) |
 | `ResendProvider`, `sendVerificationRequest`, `generateSecureToken`, `preventTimingAttacks` | removed |
 | `assertEmailPasswordEnabled` | `assertAuthBoots` (`./testing/production-boot`) |
