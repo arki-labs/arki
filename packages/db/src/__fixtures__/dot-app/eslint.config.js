@@ -4,4 +4,4 @@ import tsParser from '@typescript-eslint/parser';
 
 import { featureLayers } from '@arki/eslint-config/feature-layers';
 
-export default [{ files: ['**/*.ts'], languageOptions: { parser: tsParser } }, ...featureLayers()];
+export default [{ files: ['**/*.ts'], languageOptions: { parser: tsParser } }, ...featureLayers({ root: import.meta.dirname })];
