@@ -15,7 +15,7 @@ import { SchemaError } from '@arki/schema';
 
 import type { OrderId } from './test-support.js';
 import type { DbHandle, Row } from './types.js';
-import { CommandError } from './errors.js';
+import { CommandForbidden } from './errors.js';
 import { initJournal } from './journal.js';
 import {
   accountId,
@@ -686,7 +686,7 @@ describe('authorize', () => {
       {
         authorize: (_input, { meta: who }) => {
           checked.push(who.actorId);
-          if (!allowed.has(who.actorId)) throw new CommandError('FORBIDDEN', 'Not allowed to approve');
+          return allowed.has(who.actorId) ? undefined : CommandForbidden({ detail: 'Not allowed to approve' });
         },
       },
     );
@@ -698,12 +698,13 @@ describe('authorize', () => {
     expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toEqual({ version: 2 });
 
     // The same key from a caller without the permission, and from the owner after it was revoked.
-    await expect(
-      journal.run(db, approve, { orderId: id }, { actorId: 'usr_intruder' }, { idempotencyKey: key }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(
+      await journal.run(db, approve, { orderId: id }, { actorId: 'usr_intruder' }, { idempotencyKey: key }),
+    ).toMatchObject({ code: 'journal.forbidden', status: 403 });
     allowed.delete('usr_owner');
-    await expect(journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+    expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toMatchObject({
+      code: 'journal.forbidden',
+      status: 403,
     });
 
     expect(runs, 'the handler ran once; every other call was a replay or a refusal').toBe(1);
@@ -725,9 +726,8 @@ describe('authorize', () => {
         await write(order, input.orderId, () => [OrderNoted({ note: 'guarded' })]);
       },
       {
-        authorize: (_input, { meta: who }) => {
-          if (who.actorId !== 'usr_test') throw new CommandError('FORBIDDEN', 'Only the test actor');
-        },
+        authorize: (_input, { meta: who }) =>
+          who.actorId === 'usr_test' ? undefined : CommandForbidden({ detail: 'Only the test actor' }),
       },
     );
     const parent = j.command('parentOfGuarded', z.object({ orderId: orderIdSchema }), (input, { run }) =>
@@ -735,14 +735,14 @@ describe('authorize', () => {
     );
     const id = orderId(++next);
     await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
-    await expect(journal.run(db, guarded, { orderId: id }, { actorId: 'usr_other' })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+    expect(await journal.run(db, guarded, { orderId: id }, { actorId: 'usr_other' })).toMatchObject({
+      code: 'journal.forbidden',
     });
-    await expect(journal.run(db, parent, { orderId: id }, { actorId: 'usr_other' })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+    expect(await journal.run(db, parent, { orderId: id }, { actorId: 'usr_other' })).toMatchObject({
+      code: 'journal.forbidden',
     });
     expect(runs).toBe(0);
-    await journal.run(db, parent, { orderId: id }, meta);
+    expect(await journal.run(db, parent, { orderId: id }, meta), 'the test actor is allowed').toBeUndefined();
     expect(runs).toBe(1);
   });
 });

@@ -9,20 +9,10 @@ import { describe, expect, it } from 'vitest';
 
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
-import type { CommandErrorCode } from './errors.js';
-import {
-  CommandConflict,
-  CommandError,
-  CommandForbidden,
-  CommandInvalid,
-  CommandNotFound,
-  JournalError,
-} from './errors.js';
+import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, JournalError } from './errors.js';
 import { commandErrors, toORPCError } from './orpc.js';
 
 const RETRY_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
-
-const STATUS: Record<CommandErrorCode, number> = { BAD_REQUEST: 400, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409 };
 
 /** What an app's own outermost error middleware does: an `ORPCError` passes, everything else is a 500. */
 const appErrors = os.middleware(async ({ next }) => {
@@ -66,18 +56,6 @@ describe('toORPCError', () => {
     },
   );
 
-  it.each(Object.entries(STATUS))(
-    'turns a CommandError %s into the ORPCError with the same code and message, so the client reads the rule that rejected it',
-    (code, status) => {
-      const rejected = new CommandError(code as CommandErrorCode, 'Session already started');
-
-      const mapped = toORPCError(rejected);
-
-      expect(mapped).toBeInstanceOf(ORPCError);
-      expect(mapped).toMatchObject({ code, status, message: 'Session already started' });
-    },
-  );
-
   it('turns a journal CONFLICT into a 409 that asks to try again, so a lost race is not a 500 and no entity id leaks', () => {
     const lost = new JournalError('CONFLICT', 'order', 'ord_secret', 'version 3 already exists');
 
@@ -89,7 +67,7 @@ describe('toORPCError', () => {
 
   it('does not carry the original error along, because a host may log or serialize `cause` and the journal message names the entity id', () => {
     const lost = new JournalError('CONFLICT', 'order', 'ord_secret', 'version 3 already exists');
-    const rejected = new CommandError('FORBIDDEN', 'Not your order');
+    const rejected = CommandForbidden({ detail: 'Not your order' });
 
     const causeOf = (mapped: unknown) => (mapped instanceof Error ? mapped.cause : 'not an error');
 
@@ -111,14 +89,11 @@ describe('toORPCError', () => {
 });
 
 describe('commandErrors()', () => {
-  it('answers a rejected rule with its code and message, so procedures need no try/catch around a command', async () => {
-    const answer = await answerOf(
-      os.use(commandErrors()),
-      new CommandError('FORBIDDEN', 'You do not own this session'),
-    );
+  it('answers a thrown failure with its code, status and message, so procedures need no try/catch around a command', async () => {
+    const answer = await answerOf(os.use(commandErrors()), CommandForbidden({ detail: 'You do not own this session' }));
 
     expect(answer).toBeInstanceOf(ORPCError);
-    expect(answer).toMatchObject({ code: 'FORBIDDEN', status: 403, message: 'You do not own this session' });
+    expect(answer).toMatchObject({ code: 'journal.forbidden', status: 403, message: 'You do not own this session' });
   });
 
   it('answers a journal CONFLICT with a 409 the client can retry', async () => {
@@ -162,8 +137,8 @@ describe('commandErrors()', () => {
   it('placed inside the app error middleware, a rejected rule is not re-wrapped into a 500 and an unknown error still is', async () => {
     const builder = os.use(appErrors).use(commandErrors());
 
-    expect(await answerOf(builder, new CommandError('CONFLICT', 'Username is already taken'))).toMatchObject({
-      code: 'CONFLICT',
+    expect(await answerOf(builder, CommandConflict({ detail: 'Username is already taken' }))).toMatchObject({
+      code: 'journal.conflict',
       status: 409,
       message: 'Username is already taken',
     });
@@ -176,7 +151,7 @@ describe('commandErrors()', () => {
   it('placed outside the app error middleware it is too late: the rule is already a 500, which is why the order matters', async () => {
     const builder = os.use(commandErrors()).use(appErrors);
 
-    expect(await answerOf(builder, new CommandError('CONFLICT', 'Username is already taken'))).toMatchObject({
+    expect(await answerOf(builder, CommandConflict({ detail: 'Username is already taken' }))).toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
     });
   });

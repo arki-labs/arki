@@ -1,9 +1,8 @@
 /**
  * The command door: `journal.bind(source, meta)` fixes where commands run and
- * who runs them, and a rule that rejects a request throws `CommandError`. An
- * app builds its request context and its jobs on these two instead of writing
- * its own runner and its own error class. These tests pin what such an app
- * relies on: the rejection arrives untouched and writes nothing, and a bound
+ * who runs them. An app builds its request context and its jobs on it instead
+ * of writing its own runner. These tests pin what such an app relies on: an
+ * error its code throws arrives untouched and writes nothing, and a bound
  * runner behaves exactly like `journal.run` with the same `source` and `meta`.
  */
 import type { PGlite } from '@electric-sql/pglite';
@@ -15,10 +14,8 @@ import { z } from 'zod';
 import { SchemaError } from '@arki/schema';
 
 import type { CommandRunner } from './api.js';
-import type { CommandErrorCode } from './errors.js';
 import type { OrderId } from './test-support.js';
 import type { DbHandle } from './types.js';
-import { CommandError, isCommandError, isJournalError, JournalError } from './errors.js';
 import { initJournal } from './journal.js';
 import { j, meta, openDb, order, orderId, OrderNoted, OrderPlaced, orders, tables } from './test-support.js';
 
@@ -58,52 +55,24 @@ afterAll(async () => {
   await client.close();
 });
 
-describe('CommandError', () => {
-  it('reaches the caller as the same instance and commits nothing, so the app answers the client with the rule and the data stays as it was', async () => {
+describe('an error thrown by app code', () => {
+  it('reaches the caller as the same instance and commits nothing, so the app sees its own error and the data stays as it was', async () => {
     const id = orderId(next++);
-    const rejected = new CommandError('FORBIDDEN', 'You do not own this order');
-    // The first write succeeds. The rule then rejects inside the second write's
+    const thrown = new Error('the app gave up');
+    // The first write succeeds. The app then throws inside the second write's
     // savepoint, so the error crosses a savepoint and the command's transaction.
-    const placeThenReject = j.command('placeThenReject', z.object({ id: orderIdSchema }), async (input, { write }) => {
+    const placeThenThrow = j.command('placeThenThrow', z.object({ id: orderIdSchema }), async (input, { write }) => {
       await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
       await write(order, input.id, () => {
-        throw rejected;
+        throw thrown;
       });
     });
 
-    const error: unknown = await journal.run(db, placeThenReject, { id }, meta).catch((error_: unknown) => error_);
+    const error: unknown = await journal.run(db, placeThenThrow, { id }, meta).catch((error_: unknown) => error_);
 
-    expect(error).toBe(rejected);
-    expect(rejected.code).toBe('FORBIDDEN');
-    expect(rejected.message).toBe('You do not own this order');
+    expect(error).toBe(thrown);
     expect(await rowsOf(id)).toHaveLength(0);
     expect(await eventsOf(id)).toHaveLength(0);
-  });
-
-  it('is not a JournalError, so a rejected rule is never mistaken for a failure of the library', () => {
-    const rejected = new CommandError('NOT_FOUND', 'Order not found');
-
-    expect(rejected).toBeInstanceOf(Error);
-    expect(rejected).not.toBeInstanceOf(JournalError);
-    expect(rejected.name).toBe('CommandError');
-    expect(isJournalError(rejected)).toBe(false);
-  });
-
-  it('isCommandError narrows by code, so a host can give one kind of rejection its own answer', () => {
-    const rejected: unknown = new CommandError('NOT_FOUND', 'Order not found');
-
-    expect(isCommandError(rejected)).toBe(true);
-    expect(isCommandError(rejected, 'NOT_FOUND')).toBe(true);
-    expect(isCommandError(rejected, 'CONFLICT')).toBe(false);
-    // The journal's own CONFLICT is a different error with the same word as its code.
-    expect(isCommandError(new JournalError('CONFLICT', 'order', 'ord_1'), 'CONFLICT')).toBe(false);
-    expect(isCommandError(new Error('Order not found'))).toBe(false);
-    expect(isCommandError({ code: 'NOT_FOUND', message: 'Order not found' })).toBe(false);
-
-    if (isCommandError(rejected)) {
-      expectTypeOf(rejected).toEqualTypeOf<CommandError>();
-      expectTypeOf(rejected.code).toEqualTypeOf<CommandErrorCode>();
-    }
   });
 });
 

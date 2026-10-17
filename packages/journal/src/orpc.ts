@@ -19,7 +19,7 @@ import { ORPCError, os } from '@orpc/server';
 import { isFailure } from '@arki/failure';
 
 import type { RunOptions } from './api.js';
-import { CommandError, isJournalError } from './errors.js';
+import { isJournalError } from './errors.js';
 
 /**
  * Another request changed the same entity first, or the client's `expectedVersion`
@@ -33,7 +33,6 @@ const CONFLICT_MESSAGE = 'This was changed by another request. Reload the curren
  * - A failure (`@arki/failure`), such as `CommandNotFound`, becomes the `ORPCError` with its code,
  *   status, message and data: what `orThrowRpc` from `@arki/failure/orpc` throws for a failure the
  *   contract does not list. A contract that lists it with `errorMap` gets it typed instead.
- * - A `CommandError` becomes the `ORPCError` with the same code and message.
  * - A `JournalError` with code `CONFLICT` becomes an `ORPCError('CONFLICT')`, a 409 the client can retry.
  * - Anything else is returned unchanged: the app decides what it means.
  *
@@ -44,9 +43,6 @@ const CONFLICT_MESSAGE = 'This was changed by another request. Reload the curren
 export function toORPCError(error: unknown): unknown {
   if (isFailure(error)) {
     return new ORPCError(error.code, { status: error.status, message: error.message, data: error.data });
-  }
-  if (error instanceof CommandError) {
-    return new ORPCError(error.code, { message: error.message });
   }
   if (isJournalError(error, 'CONFLICT')) {
     return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE });

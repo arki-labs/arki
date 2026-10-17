@@ -1,6 +1,6 @@
 /**
- * A rule that says no can return a failure (`@arki/failure`) instead of throwing a
- * `CommandError`. These tests pin why that is safe: the command's transaction rolls
+ * A rule that says no returns a failure (`@arki/failure`) instead of throwing.
+ * These tests pin why that is safe: the command's transaction rolls
  * back exactly as for a throw, so a refusal never leaves half a change behind, and
  * the caller gets the very failure the rule made, with a type inferred from the
  * handler. Real PGlite: the rows are checked, not mocks.

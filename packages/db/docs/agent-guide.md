@@ -32,7 +32,7 @@ The receipt recipe for ambiguous commits is tested in `@arki/journal` (`src/orpc
 | --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
 | `40001` / `40P01` within the retry budget                 | `runTransaction`, silently          | Success                                           |
 | `40001` / `40P01` on every attempt                        | `transact`                          | 409 `CONFLICT`: send the same request again later |
-| A business rule says no (`ORPCError`, `CommandError`)     | Your code, once                     | That error                                        |
+| A business rule says no (`ORPCError`, `CommandForbidden`) | Your code, once                     | That error                                        |
 | A journal version conflict (`JournalError` `CONFLICT`)    | `commandErrors()` before `transact` | 409 `CONFLICT`: reload, then retry                |
 | Connection lost around `COMMIT` (ambiguous commit)        | Nobody retries                      | 500. Repeat with the same idempotency key         |
 | Same idempotency key after a real commit (receipt replay) | The journal                         | The first result, no new writes                   |

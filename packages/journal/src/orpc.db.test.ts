@@ -21,8 +21,9 @@ import { z } from 'zod';
 
 import type { TransactionalDb } from '@arki/db/transaction';
 import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
-import { CommandError, initJournal } from './index.js';
+import { CommandForbidden, initJournal } from './index.js';
 import { commandErrors } from './orpc.js';
 import { journalTables } from './pg.js';
 import { openJournalDb } from './testing.js';
@@ -64,9 +65,8 @@ const deposit = j.command(
   },
   {
     // A replay is authorized like a first run: a receipt proves the command ran, not that this caller may see it.
-    authorize: (_input, { meta }) => {
-      if (revoked.has(meta.actorId)) throw new CommandError('FORBIDDEN', 'Not allowed to deposit');
-    },
+    authorize: (_input, { meta }) =>
+      revoked.has(meta.actorId) ? CommandForbidden({ detail: 'Not allowed to deposit' }) : undefined,
   },
 );
 
@@ -86,7 +86,8 @@ type RequestContext = { readonly tenantId: string; readonly actorId: string };
 const contract = {
   deposit: oc
     .input(z.object({ id: accountIdSchema, amount: z.int().positive(), key: z.string() }))
-    .output(z.object({ balance: z.number() })),
+    .output(z.object({ balance: z.number() }))
+    .errors(errorMap(CommandForbidden)),
 };
 
 let client: PGlite;
@@ -100,14 +101,17 @@ function depositProcedure(root: TransactionalDb<Transaction>, afterRun?: (attemp
     .$context<RequestContext>()
     .deposit.use(commandErrors())
     .use(transact)
-    .handler(async ({ context, input }) => {
+    .handler(async ({ context, input, errors }) => {
       attempt += 1;
-      const result = await journal.run(
-        context.tx,
-        deposit,
-        { id: input.id, amount: input.amount },
-        { actorId: context.actorId },
-        { idempotencyKey: receiptKey(context, input.key) },
+      const result = await orThrowRpc(
+        journal.run(
+          context.tx,
+          deposit,
+          { id: input.id, amount: input.amount },
+          { actorId: context.actorId },
+          { idempotencyKey: receiptKey(context, input.key) },
+        ),
+        errors,
       );
       afterRun?.(attempt);
       return result;
@@ -247,14 +251,16 @@ describe('ambiguous commit: recovered by the receipt, never by a blind retry', (
     expect(await rowsFor(id)).toMatchObject({ balance: 6 });
   });
 
-  it('authorization revoked between the call and the replay: the replay is refused', async () => {
+  it('authorization revoked between the call and the replay: the replay is refused with a 403', async () => {
     const id = freshAccount();
     const carol = { tenantId: 'org_1', actorId: 'usr_carol' };
     const procedure = depositProcedure(db);
     await call(procedure, { id, amount: 9, key: 'revoke-key-1' }, { context: carol });
     revoked.add(carol.actorId);
     await expect(call(procedure, { id, amount: 9, key: 'revoke-key-1' }, { context: carol })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'journal.forbidden',
+      status: 403,
+      defined: true,
     });
   });
 

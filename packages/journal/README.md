@@ -8,7 +8,7 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/errors` (the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, plus `CommandError`, `JournalError` and their guards, with no Drizzle import, for browser code that matches on codes), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules), `@arki/journal/testing` (`openJournalDb(schema)`: an in-memory PGlite with the schema pushed, for tests; `@electric-sql/pglite` and `drizzle-kit` are optional peers).
+Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/errors` (the command failures `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, plus `JournalError` and `isJournalError`, with no Drizzle import, for browser code that matches on codes), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules), `@arki/journal/testing` (`openJournalDb(schema)`: an in-memory PGlite with the schema pushed, for tests; `@electric-sql/pglite` and `drizzle-kit` are optional peers).
 
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
@@ -312,8 +312,6 @@ const placeOrder = j.command('placeOrder', orderInput, async (input, { write, ru
 // Inferred: { status: 'backordered' } | { status: 'reserved'; reservationId: ... } | the other failures. No 'stock.out'.
 ```
 
-`throw new CommandError(code, message)` still works the same way (codes `NOT_FOUND`, `BAD_REQUEST`, `FORBIDDEN`, `CONFLICT`; `isCommandError(error, code?)` matches it), but the caller cannot see it in the type. Prefer the failures.
-
 An oRPC app maps it once, with `@arki/journal/orpc`. `@orpc/server` is an optional peer. The core entry never imports it.
 
 ```ts
@@ -324,7 +322,7 @@ import { commandErrors } from '@arki/journal/orpc';
 export const publicProcedure = os.use(appErrors).use(commandErrors());
 ```
 
-`commandErrors()` answers a failure, thrown or returned by the procedure, with the `ORPCError` of its code, status, message and data; a `CommandError` with the `ORPCError` of the same code and message; and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A procedure with an output schema, and every contract-first one, hands the command's result to `orThrowRpc(result, errors)` from `@arki/failure/orpc`, with the failures listed in the contract by `errorMap(CommandNotFound, ...)`; the client then gets them typed. A host without oRPC reads the failure's `status`, or matches with `isCommandError`. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules).
+`commandErrors()` answers a failure, thrown or returned by the procedure, with the `ORPCError` of its code, status, message and data, and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A procedure with an output schema, and every contract-first one, hands the command's result to `orThrowRpc(result, errors)` from `@arki/failure/orpc`, with the failures listed in the contract by `errorMap(CommandNotFound, ...)`; the client then gets them typed. A host without oRPC reads the failure's `status`, or matches it with `CommandNotFound.is(result)` and the like. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules).
 
 Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { afterSeq, batchSize })`, `drain(db, { batchSize, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
 
