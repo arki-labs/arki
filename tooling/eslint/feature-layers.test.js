@@ -12,13 +12,14 @@ const RESTRICT = 'no-restricted-imports';
 const CALLS_USECASES = 'arki-feature-layers/procedures-call-usecases';
 const INFRA = 'arki-feature-layers/infra-runtime-imports';
 const BOUNDARY = 'arki-feature-layers/feature-boundaries';
+const BARREL = 'arki-feature-layers/no-table-barrel';
 
 const linter = new Linter();
 
 /** Lint `code` as if it lived at `filename`; return the rule ids that fired. */
 const ruleIds = (/** @type {string} */ filename, /** @type {string} */ code, /** @type {string[]} */ clients = []) =>
   linter
-    .verify(code, [...featureLayers({ clients }), { files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }], { filename })
+    .verify(code, [...featureLayers({ root: process.cwd(), clients }), { files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }], { filename })
     .map((m) => m.ruleId);
 
 const USECASE = 'src/features/demo/usecases/run.ts';
@@ -232,4 +233,29 @@ test('legacy shapes wait to convert: an importer outside a layer, or a target ou
   assert.deepEqual(ruleIds('src/features/demo/services/x.ts', `import { run } from '../../other/usecases/run';`), []);
   assert.deepEqual(ruleIds(USECASE, `import { service } from '../../other/service';`), []);
   assert.deepEqual(ruleIds(USECASE, `import { helper } from '../../../lib/helper';`), []);
+});
+
+test("a feature never imports the app's table barrel (src/model/tables), at any depth or layer", () => {
+  assert.deepEqual(ruleIds('src/features/demo/infra/store.ts', `import { User } from '../../../model/tables';`), [BARREL]);
+  assert.deepEqual(ruleIds('src/features/demo/usecases/run.ts', `import type { User } from '../../../model/tables';`), [BARREL]);
+  assert.deepEqual(ruleIds('src/features/demo/features/child/infra/store.ts', `import { User } from '../../../../../model/tables';`), [BARREL]);
+});
+
+test("a feature's own model/tables is not the barrel, and the app model/auth/tables is fine", () => {
+  assert.deepEqual(ruleIds('src/features/demo/infra/store.ts', `import { Demo } from '../model/tables';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/infra/store.ts', `import { User } from '../../../model/auth/tables';`), []);
+});
+
+test('the app root src/model/relations.ts and src/model/tables.ts may import their own siblings', () => {
+  assert.deepEqual(
+    ruleIds('src/model/relations.ts', `import { defineRelationsPart } from '@arki/db/orm'; import * as tables from './tables'; import { r } from '../features/demo/model/relations';`),
+    [],
+  );
+  assert.deepEqual(ruleIds('src/model/tables.ts', `export * from './pg-namespace'; export * from '../features/demo/model/tables';`), []);
+});
+
+test('featureLayers needs the app folder, or the barrel check would silently look in the wrong place', () => {
+  // @ts-expect-error -- `root` is required; a config without it must fail at load, not pass every file.
+  assert.throws(() => featureLayers({}), /root must be the backend's absolute folder/);
+  assert.throws(() => featureLayers({ root: 'apps/demo/backend' }), /root must be the backend's absolute folder/);
 });

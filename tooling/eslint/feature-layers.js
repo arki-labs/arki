@@ -59,6 +59,8 @@
  *   export default [...rootConfig, ...featureLayers()];
  */
 
+import nodePath from 'node:path';
+
 /** @typedef {{ group?: string[], regex?: string, message: string }} Pattern */
 
 const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app entrypoints (entrypoints/{middleware,router,gateway,cron}.ts; older layout: core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).' };
@@ -73,15 +75,6 @@ const layer = (/** @type {string[]} */ names, /** @type {string} */ message) => 
   regex: `^\\.{1,2}/(.*/)?(${names.join('|')})(/|$)`,
   message,
 });
-
-/**
- * The app's table barrel (`src/schema.ts`, any `../` depth) hides which feature owns a
- * table. Not `../model/schema` (the pgSchema handle) or a feature's `model/schemas`.
- */
-const SCHEMA_BARREL = {
-  regex: '^(\\.\\./)+schema$',
-  message: "Import the table from its owning feature's model (features/<owner>/model/tables), not the app barrel src/schema.ts: the barrel hides feature dependencies.",
-};
 
 const MODEL_INWARD = layer(['usecases', 'infra', 'entrypoints'], 'model/ is the inside layer: it imports no usecases/, infra/ or entrypoints/.');
 const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoints/: a usecase does not know how it is called.');
@@ -390,6 +383,55 @@ const featureBoundaries = {
   },
 };
 
+/**
+ * The app's table barrel (`<src>/model/tables.ts`) hides which feature owns a table, so no
+ * feature file imports it. A feature's own `model/tables` is the same file name at another
+ * path, so the import is resolved against the importing file rather than matched by depth.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const noTableBarrel = {
+  meta: {
+    type: 'problem',
+    schema: [
+      {
+        type: 'object',
+        properties: { barrel: { type: 'string' }, src: { type: 'string' } },
+        required: ['barrel', 'src'],
+        additionalProperties: false,
+      },
+    ],
+    messages: {
+      barrel:
+        "Import the table from its owning feature's model (features/<owner>/model/tables), not the app barrel {{src}}/model/tables: the barrel hides feature dependencies.",
+    },
+  },
+  create(context) {
+    // `barrel` is absolute (`featureLayers` resolves it from the app's `root`), so the rule
+    // finds it from whatever directory ESLint runs in.
+    const { barrel, src } = /** @type {{ barrel: string, src: string }} */ (context.options[0]);
+    const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
+      if (typeof source !== 'string' || !source.startsWith('.')) return;
+      const target = moduleId(nodePath.resolve(nodePath.dirname(context.filename), source));
+      if (target === barrel) context.report({ node, messageId: 'barrel', data: { src } });
+    };
+    return {
+      ImportDeclaration(node) {
+        check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source) check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        check(node, literalSource(node.source));
+      },
+    };
+  },
+};
+
 const plugin = {
   rules: {
     'usecase-runtime-imports': usecaseRuntimeImports,
@@ -397,14 +439,18 @@ const plugin = {
     'procedures-call-usecases': proceduresCallUsecases,
     'infra-runtime-imports': infraRuntimeImports,
     'feature-boundaries': featureBoundaries,
+    'no-table-barrel': noTableBarrel,
   },
 };
 
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 
 /**
- * @param {{ src?: string, legacy?: string[], clients?: string[], pure?: string[] }} [options]
- *   `src`: the backend's source folder (default `'src'`).
+ * @param {{ root: string, src?: string, legacy?: string[], clients?: string[], pure?: string[] }} options
+ *   `root`: the backend's folder, absolute — pass `import.meta.dirname` from its `eslint.config.js`.
+ *   The table-barrel check resolves imports to real paths, so it must know where the app is
+ *   wherever ESLint runs from (the app folder, the repo root, an editor).
+ *   `src`: the backend's source folder, relative to `root` (default `'src'`).
  *   `legacy`: files (app-level, or inside a feature's layers) that still build router-first
  *   procedures and may import `@orpc/server` until they are deleted
  *   (e.g. `['src/features/highlights/entrypoints/idempotency.ts']`).
@@ -414,7 +460,13 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
  *   such as email templates (e.g. `['/infra/mail/templates/']`) — which a usecase
  *   may still runtime-import.
  */
-export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [] } = {}) {
+export function featureLayers({ root, src = 'src', legacy = [], clients = [], pure = [] }) {
+  if (typeof root !== 'string' || !nodePath.isAbsolute(root)) {
+    throw new TypeError(
+      `featureLayers({ root }): root must be the backend's absolute folder (import.meta.dirname); got ${String(root)}.`,
+    );
+  }
+  const barrel = nodePath.resolve(root, src, 'model', 'tables');
   // `**`: a feature nested under another (`features/a/features/b`) is a root of its own.
   const features = `${src}/features/**`;
   // The app's shared leaves (`model/`), with the same rules as a feature's `model/`.
@@ -437,11 +489,12 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
 
   return [
     {
-      // Every other feature file (feature.ts, ...); the layer configs below repeat the ban in their own lists.
-      name: 'arki/feature-layers/no-schema-barrel',
+      // Every feature file (feature.ts, ...): none imports the app's table barrel.
+      name: 'arki/feature-layers/no-table-barrel',
       files: [`${features}/*.ts`, `${features}/**/*.ts`],
       ignores: TESTS,
-      rules: rule([SCHEMA_BARREL]),
+      plugins: { 'arki-feature-layers': plugin },
+      rules: { 'arki-feature-layers/no-table-barrel': ['error', { barrel, src }] },
     },
     {
       name: 'arki/feature-layers/contracts',
@@ -453,13 +506,13 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       name: 'arki/feature-layers/model',
       files: [`${features}/model/**/*.ts`],
       ignores: [...TESTS, `${features}/model/tables.ts`, `${features}/model/tables/**`, `${features}/model/relations.ts`],
-      rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME, SCHEMA_BARREL]),
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME]),
     },
     {
       name: 'arki/feature-layers/model-tables',
       files: [`${features}/model/tables.ts`, `${features}/model/tables/**/*.ts`, `${features}/model/relations.ts`],
       ignores: TESTS,
-      rules: rule([SERVER, CONTRACT, MODEL_INWARD, SCHEMA_BARREL]),
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD]),
     },
     {
       name: 'arki/feature-layers/usecases',
@@ -467,7 +520,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       ignores: TESTS,
       plugins: { 'arki-feature-layers': plugin },
       rules: {
-        ...rule([SERVER, CONTRACT, USECASES_INWARD, SCHEMA_BARREL]),
+        ...rule([SERVER, CONTRACT, USECASES_INWARD]),
         'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients], allow: pure }],
       },
     },
@@ -488,7 +541,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       name: 'arki/feature-layers/infra-entrypoints',
       files: [`${features}/infra/**/*.ts`, `${features}/entrypoints/**/*.ts`],
       ignores: [...TESTS, ...contracts, ...legacy],
-      rules: rule([SERVER, CONTRACT, SCHEMA_BARREL]),
+      rules: rule([SERVER, CONTRACT]),
     },
     {
       name: 'arki/feature-layers/infra',
