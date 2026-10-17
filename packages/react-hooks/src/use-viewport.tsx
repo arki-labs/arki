@@ -1,3 +1,4 @@
+/** `useViewport`: window size, a mobile / tablet / desktop type and touch capability. */
 'use client';
 
 import { useEffect, useState } from 'react';

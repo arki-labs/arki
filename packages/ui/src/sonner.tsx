@@ -1,3 +1,4 @@
+/** Toasts: the `Toaster` mount point and the `toast` function. */
 'use client';
 
 import type { ToasterProps } from 'sonner';

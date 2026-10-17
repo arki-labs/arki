@@ -1,3 +1,4 @@
+/** Breadcrumb: a path of links to the current page. */
 import * as React from 'react';
 
 import { CaretRight, DotsThree } from '@arki/icons/phosphor';

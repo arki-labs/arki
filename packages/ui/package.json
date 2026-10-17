@@ -25,11 +25,6 @@
   "sideEffects": false,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "browser": "./src/index.ts"
-    },
     "./utils": {
       "types": "./dist/src/cn.d.ts",
       "import": "./src/cn.ts",
@@ -39,11 +34,6 @@
       "types": "./dist/src/cn.d.ts",
       "import": "./src/cn.ts",
       "browser": "./src/cn.ts"
-    },
-    "./toast": {
-      "types": "./dist/src/toast/index.d.ts",
-      "import": "./src/toast/index.ts",
-      "browser": "./src/toast/index.ts"
     },
     "./design-system": {
       "types": "./dist/src/design-system.d.ts",
@@ -396,9 +386,6 @@
       "cn": [
         "src/cn.ts"
       ],
-      "toast": [
-        "src/toast/index.ts"
-      ],
       "design-system": [
         "src/design-system.ts"
       ],
@@ -615,6 +602,8 @@
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
+    "docs/agent-guide.md",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"
@@ -626,6 +615,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

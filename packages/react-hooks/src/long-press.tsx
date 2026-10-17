@@ -1,3 +1,4 @@
+/** `useLongPress`: mouse and touch handlers that tell a long press from a click. */
 'use client';
 
 import { useCallback, useRef } from 'react';

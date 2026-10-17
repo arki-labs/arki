@@ -1,3 +1,4 @@
+/** Color picker: choose a colour from a panel or a hex field. */
 'use client';
 
 import { useMemo, useState } from 'react';

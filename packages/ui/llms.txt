@@ -1,0 +1,80 @@
+# @arki/ui
+> React components for ARKI apps: Base UI primitives on Tailwind v4 semantic tokens. One subpath per component, no root import.
+## Import paths
+<!-- llms:start -->
+- `@arki/ui/utils`: `cn`: join class names and resolve Tailwind conflicts. `cn`.
+- `@arki/ui/cn`: `cn`: join class names and resolve Tailwind conflicts. `cn`.
+- `@arki/ui/design-system`: The design-system ids from `@arki/design-systems`, plus the default id and a safe resolver for this package. `DESIGN_SYSTEMS`, `DESIGN_SYSTEM_IDS`, `defaultUiDesignSystemId`, `designSystemIdSchema`, `getDesignSystemById`, `getDesignSystemByIdSafe`, `isDesignSystemId`, `parseDesignSystemId`, `resolveUiDesignSystemId`; types `DesignSystemId`, `DesignSystemMetadata`.
+- `@arki/ui/accordion`: `Accordion`, `AccordionContent`, `AccordionItem`, `AccordionTrigger`.
+- `@arki/ui/alert`: `Alert`, `AlertDescription`, `AlertTitle`.
+- `@arki/ui/alert-dialog`: `AlertDialog`, `AlertDialogAction`, `AlertDialogCancel`, `AlertDialogContent`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogHeader`, `AlertDialogOverlay`, `AlertDialogPortal`, `AlertDialogTitle`, `AlertDialogTrigger`.
+- `@arki/ui/aspect-ratio`: `AspectRatio`.
+- `@arki/ui/avatar`: `Avatar`, `AvatarFallback`, `AvatarImage`.
+- `@arki/ui/badge`: `Badge`, `badgeVariants`.
+- `@arki/ui/breadcrumb`: `Breadcrumb`, `BreadcrumbEllipsis`, `BreadcrumbItem`, `BreadcrumbLink`, `BreadcrumbList`, `BreadcrumbPage`, `BreadcrumbSeparator`.
+- `@arki/ui/button`: `Button`, `buttonVariants`; types `ButtonProps`.
+- `@arki/ui/calendar`: `Calendar`.
+- `@arki/ui/callout`: `Callout`; types `CalloutProps`.
+- `@arki/ui/card`: `Card`, `CardContent`, `CardDescription`, `CardFooter`, `CardHeader`, `CardTitle`.
+- `@arki/ui/carousel`: `Carousel`, `CarouselContent`, `CarouselItem`, `CarouselNext`, `CarouselPrevious`; types `CarouselApi`.
+- `@arki/ui/chart`: `ChartContainer`, `ChartLegend`, `ChartLegendContent`, `ChartStyle`, `ChartTooltip`, `ChartTooltipContent`; types `ChartConfig`.
+- `@arki/ui/checkbox`: `Checkbox`.
+- `@arki/ui/collapsible`: `Collapsible`, `CollapsibleContent`, `CollapsibleTrigger`.
+- `@arki/ui/color-picker`: `ColorPicker`.
+- `@arki/ui/command`: `Command`, `CommandDialog`, `CommandEmpty`, `CommandGroup`, `CommandInput`, `CommandItem`, `CommandList`, `CommandSeparator`, `CommandShortcut`.
+- `@arki/ui/context-menu`: `ContextMenu`, `ContextMenuCheckboxItem`, `ContextMenuContent`, `ContextMenuGroup`, `ContextMenuItem`, `ContextMenuLabel`, `ContextMenuPortal`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`, `ContextMenuSeparator`, `ContextMenuShortcut`, `ContextMenuSub`; and 3 more.
+- `@arki/ui/control-group`: `ControlGroup`, `ControlGroupItem`; types `ControlGroupProps`.
+- `@arki/ui/date-picker`: `DatePicker`.
+- `@arki/ui/dialog`: `Dialog`, `DialogClose`, `DialogContent`, `DialogDescription`, `DialogFooter`, `DialogHeader`, `DialogOverlay`, `DialogPortal`, `DialogTitle`, `DialogTrigger`.
+- `@arki/ui/drawer`: `Drawer`, `DrawerClose`, `DrawerContent`, `DrawerDescription`, `DrawerFooter`, `DrawerHeader`, `DrawerOverlay`, `DrawerPortal`, `DrawerTitle`, `DrawerTrigger`.
+- `@arki/ui/dropdown-menu`: `DropdownMenu`, `DropdownMenuCheckboxItem`, `DropdownMenuContent`, `DropdownMenuGroup`, `DropdownMenuGroupLabel`, `DropdownMenuItem`, `DropdownMenuLabel`, `DropdownMenuPortal`, `DropdownMenuRadioGroup`, `DropdownMenuRadioItem`, `DropdownMenuSeparator`, `DropdownMenuShortcut`; and 4 more.
+- `@arki/ui/form`: `Form`, `FormControl`, `FormDescription`, `FormField`, `FormHints`, `FormItem`, `FormLabel`, `FormMessage`, `useForm`, `useFormField`, `useWatch`, `zodResolver`; and 1 more.
+- `@arki/ui/glass-card`: `GlassCard`, `GlassCardIcon`, `glassCardIconVariants`, `glassCardVariants`, `glassTones`; types `GlassTone`.
+- `@arki/ui/hover-card`: `HoverCard`, `HoverCardContent`, `HoverCardTrigger`.
+- `@arki/ui/input`: `Input`.
+- `@arki/ui/input-base`: `InputBase`, `InputBaseAdornment`, `InputBaseAdornmentButton`, `InputBaseControl`, `InputBaseFlexWrapper`, `InputBaseInput`; types `InputBaseAdornmentProps`, `InputBaseContextProps`, `InputBaseControlProps`, `InputBaseProps`.
+- `@arki/ui/input-otp`: `InputOTP`, `InputOTPGroup`, `InputOTPSeparator`, `InputOTPSlot`.
+- `@arki/ui/katex`: `BlockMath`, `InlineMath`; types `MathComponentProps`.
+- `@arki/ui/label`: `Label`.
+- `@arki/ui/math-input`: `MathInput`; types `MathInputProps`.
+- `@arki/ui/complex-input`: `ComplexInput`; types `ComplexInputProps`.
+- `@arki/ui/menubar`: `Menubar`, `MenubarCheckboxItem`, `MenubarContent`, `MenubarGroup`, `MenubarItem`, `MenubarLabel`, `MenubarMenu`, `MenubarPortal`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarSeparator`, `MenubarShortcut`; and 4 more.
+- `@arki/ui/navigation-menu`: `NavigationMenu`, `NavigationMenuContent`, `NavigationMenuIndicator`, `NavigationMenuItem`, `NavigationMenuLink`, `NavigationMenuList`, `NavigationMenuTrigger`, `NavigationMenuViewport`, `navigationMenuTriggerStyle`.
+- `@arki/ui/pagination`: `Pagination`, `PaginationContent`, `PaginationEllipsis`, `PaginationItem`, `PaginationLink`, `PaginationNext`, `PaginationPrevious`.
+- `@arki/ui/panel`: `Panel`, `PanelDivider`, `PanelFooter`, `PanelHeader`, `PanelHeadline`, `PanelSection`; types `PanelDividerProps`, `PanelFooterProps`, `PanelHeaderProps`, `PanelHeadlineProps`, `PanelProps`, `PanelSectionProps`.
+- `@arki/ui/popover`: `Popover`, `PopoverClose`, `PopoverContent`, `PopoverTrigger`.
+- `@arki/ui/progress`: `Progress`.
+- `@arki/ui/radio-group`: `RadioGroup`, `RadioGroupItem`.
+- `@arki/ui/resizable`: `ResizableHandle`, `ResizablePanel`, `ResizablePanelGroup`.
+- `@arki/ui/scroll-area`: `ScrollArea`, `ScrollBar`.
+- `@arki/ui/scroll-to-top`: `ScrollToTop`.
+- `@arki/ui/select`: `Select`, `SelectContent`, `SelectGroup`, `SelectItem`, `SelectLabel`, `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator`, `SelectTrigger`, `SelectValue`.
+- `@arki/ui/separator`: `Separator`.
+- `@arki/ui/sheet`: `Sheet`, `SheetClose`, `SheetContent`, `SheetDescription`, `SheetFooter`, `SheetHeader`, `SheetTitle`, `SheetTrigger`.
+- `@arki/ui/sidebar`: `Sidebar`, `SidebarContent`, `SidebarFooter`, `SidebarGroup`, `SidebarGroupAction`, `SidebarGroupContent`, `SidebarGroupLabel`, `SidebarHeader`, `SidebarInput`, `SidebarInset`, `SidebarMenu`, `SidebarMenuAction`; and 12 more.
+- `@arki/ui/skeleton`: `Skeleton`.
+- `@arki/ui/slider`: `Slider`.
+- `@arki/ui/sonner`: `Toaster`, `toast`.
+- `@arki/ui/spinners`: `PulseLoader`, `Spinner`.
+- `@arki/ui/surface`: `Surface`; types `SurfaceProps`.
+- `@arki/ui/switch`: `Switch`.
+- `@arki/ui/table`: `Table`, `TableBody`, `TableCaption`, `TableCell`, `TableFooter`, `TableHead`, `TableHeader`, `TableRow`.
+- `@arki/ui/tabs`: `Tabs`, `TabsContent`, `TabsList`, `TabsTrigger`.
+- `@arki/ui/textarea`: `Textarea`.
+- `@arki/ui/textarea-with-autosize`: `TextareaWithAutoSize`; types `TextareaWithAutosizeProps`.
+- `@arki/ui/timeline`: `Timeline`, `TimelineConnector`, `TimelineContent`, `TimelineDescription`, `TimelineDot`, `TimelineItem`, `TimelineSeparator`, `TimelineTitle`; types `TimelineDotProps`, `TimelineProps`.
+- `@arki/ui/toggle`: `Toggle`, `toggleVariants`.
+- `@arki/ui/toggle-group`: `ToggleGroup`, `ToggleGroupItem`.
+- `@arki/ui/tool-panels`: `PanelExpandButton`, `PanelSkeleton`, `ToolPanel`, `ToolPanelGroup`, `ToolPanelHandle`, `useToolPanelGroup`.
+- `@arki/ui/toolbar`: `Toolbar`; types `ToolbarButtonProps`, `ToolbarDividerProps`, `ToolbarWrapperProps`.
+- `@arki/ui/tooltip`: `Tooltip`, `TooltipContent`, `TooltipProvider`, `TooltipTrigger`, `WithTooltip`.
+- `@arki/ui/styles/animations.css`
+- `@arki/ui/as-child`: `withAsChild`; types `AsChildProp`.
+- `@arki/ui/math-input/complex-input`: `ComplexInput`; types `ComplexInputProps`.
+- `@arki/ui/math-input/index`: `MathInput`; types `MathInputProps`.
+- `@arki/ui/slot`: `Slot`.
+<!-- llms:end -->
+## Start here
+- [Agent guide](docs/agent-guide.md): read first for tasks and rules. No root import; unstyled output means `@source` is missing; one design system per app.
+## By task
+## Rules that bite

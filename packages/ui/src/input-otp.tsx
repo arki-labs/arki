@@ -1,3 +1,4 @@
+/** Input OTP: a one-time code field with separate slots. */
 'use client';
 
 import * as React from 'react';

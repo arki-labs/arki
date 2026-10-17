@@ -1,3 +1,4 @@
+/** Pagination: page links with previous and next. */
 import * as React from 'react';
 
 import { CaretLeftIcon, CaretRightIcon, DotsThreeIcon } from '@arki/icons/phosphor';

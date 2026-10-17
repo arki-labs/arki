@@ -1,3 +1,4 @@
+/** Tool panels: resizable side panels for tool-style apps. */
 'use client';
 
 import type { ImperativePanelGroupHandle, ImperativePanelHandle } from 'react-resizable-panels';

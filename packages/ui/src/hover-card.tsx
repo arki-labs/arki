@@ -1,3 +1,4 @@
+/** Hover card: a preview card that opens on hover. */
 'use client';
 
 import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card';

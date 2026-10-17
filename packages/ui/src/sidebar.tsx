@@ -1,3 +1,4 @@
+/** Sidebar: an app sidebar with groups, menus and a collapse state. */
 'use client';
 
 import type { VariantProps } from 'class-variance-authority';

@@ -1,3 +1,4 @@
+/** Collapsible: one section that opens and closes. */
 'use client';
 
 import * as React from 'react';

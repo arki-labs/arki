@@ -1,3 +1,4 @@
+/** Navigation menu: top-level links with fly-out panels. */
 'use client';
 
 import * as React from 'react';

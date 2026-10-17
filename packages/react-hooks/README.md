@@ -1,28 +1,75 @@
 # @arki/react-hooks
 
-Curated React hooks for ARKI apps. Thin, typed wrappers over Mantine hooks, usehooks-ts, react-hotkeys-hook and friends, so an app imports one package and gets one consistent API.
+Curated React hooks for ARKI apps. Thin, typed wrappers over Mantine hooks, usehooks-ts, react-hotkeys-hook and @rehooks/local-storage, so an app imports one package and gets one consistent API.
 
-> **Source-first package.** Ships TypeScript source as the runtime entry plus `.d.ts`. Your bundler (Vite, TanStack Start, Next.js, Bun) compiles it.
-
-## Installation
+## Install
 
 ```sh
 bun add @arki/react-hooks react
 ```
 
-Peer dependency: `react` 19.
+`react` 19 is a peer dependency. There is no root import. Each hook has its own subpath.
 
-## Usage
+## Quick start
 
-One hook per subpath:
+A search box that waits for the user to stop typing, remembers the last query, and focuses on a key press.
 
 ```tsx
-import { useDebounce } from '@arki/react-hooks/debounce';
+import { useDebouncedValue } from '@arki/react-hooks/debounce';
+import { useHotkeys } from '@arki/react-hooks/hotkeys';
 import { useLocalStorage } from '@arki/react-hooks/local-storage';
-import { useMediaQuery } from '@arki/react-hooks/media-query';
+
+export function SearchBox({ onSearch }: { onSearch: (query: string) => void }) {
+  const [query, setQuery] = useLocalStorage<string>('search-query', '');
+  const [debounced] = useDebouncedValue(query, 300);
+
+  useHotkeys('mod+k', () => document.getElementById('search')?.focus());
+
+  return (
+    <input
+      id="search"
+      value={query}
+      onChange={event => setQuery(event.target.value)}
+      onBlur={() => onSearch(debounced)}
+    />
+  );
+}
 ```
 
-Available subpaths: `async-memo`, `copy-to-clipboard`, `debounce`, `hotkeys`, `is-client`, `local-storage`, `long-press`, `media-query`, `pagination`, `timeout`, `toggle`, `touch`, `use-swipe-gesture`, `use-touch-feedback`, `use-viewport`.
+## When not to use this
+
+- You want one hook that is not here. Import it from `@mantine/hooks` or `usehooks-ts` directly. This package adds no logic to most of them.
+- You need the hook outside React. These are React hooks and need a component or another hook to call them.
+- You need server-side data fetching. Use your router's loader or a query library. `useAsyncMemo` runs in the browser after render.
+
+## Runtime support
+
+Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
+
+## Public imports
+
+One subpath per hook. Each file starts with a one-line summary, and `llms.txt` lists them all.
+
+- `@arki/react-hooks/debounce`: `useDebouncedValue`, `useDebouncedCallback`, `useDebouncedState`.
+- `@arki/react-hooks/local-storage`: `useLocalStorage`, `writeStorage`, `deleteFromStorage`.
+- `@arki/react-hooks/media-query`: `useMediaQuery`, `useIsMobile`, `useIsTablet`, `useIsDesktop`, `useIsTabletOrDesktop`, `useIsTouchDevice`.
+- `@arki/react-hooks/hotkeys`, `copy-to-clipboard`, `timeout`, `toggle`, `pagination`: one re-exported hook each.
+- `@arki/react-hooks/async-memo`, `is-client`, `long-press`, `touch`, `use-viewport`, `use-swipe-gesture`, `use-touch-feedback`: hooks written in this package.
+
+## Failure behaviour
+
+Hooks do not throw for bad input. They return a value and you check it.
+
+- `useAsyncMemo` returns `undefined` (or your `initial`) until the promise resolves. A rejected promise is not caught here: the value stays as it was, and the rejection reaches the console as an unhandled rejection. Catch inside the factory.
+- On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop. They update after the first effect on the client.
+- `useLocalStorage` takes a default value and returns it until a stored value exists.
+
+## Limits
+
+- Server-rendered pages first render with the server values above, then change on the client. Do not branch markup on `useViewport()` without accepting one extra render.
+- `useViewport` calls anything under 640px mobile and under 1024px tablet. `useIsMobile` calls anything under 768px mobile. Boundary: at 700px, `useViewport().isMobile` is `false` and `useIsMobile()` is `true`. Pick one family per component.
+- `useAsyncMemo` drops a result when its dependencies change before it resolves. It does not cancel the request. Pass an `AbortSignal` yourself if you need that.
+- `useLongPress` times with `setTimeout`. A press shorter than `delay` (500 ms by default) is a click, not a long press.
 
 <!-- bench:start -->
 ## Benchmarks
@@ -97,6 +144,15 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 <!-- bench:meta {"schema":1,"suite":"@arki/react-hooks","specHash":"f9a0fce18134febd","profile":"publish","date":"2026-10-13T11:41:15.770Z","harness":"0.0.2"} -->
 <!-- bench:end -->
 
+## Documentation
+
+- [docs/agent-guide.md](./docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
+- [llms.txt](./llms.txt): the short form for agents.
+
+## Support
+
+Report bugs and questions at <https://github.com/arki-labs/arki/issues>.
+
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).

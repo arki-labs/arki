@@ -1,3 +1,4 @@
+/** `withAsChild`: let a component render its child element instead of its own. */
 'use client';
 
 import * as React from 'react';

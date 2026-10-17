@@ -1,3 +1,4 @@
+/** Calendar: a month grid to pick days. */
 'use client';
 
 import * as React from 'react';

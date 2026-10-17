@@ -34,6 +34,8 @@
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
+    "docs/agent-guide.md",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"
@@ -59,6 +61,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

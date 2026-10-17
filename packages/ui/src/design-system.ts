@@ -1,3 +1,4 @@
+/** The design-system ids from `@arki/design-systems`, plus the default id and a safe resolver for this package. */
 import { resolveDesignSystemId } from '@arki/design-systems/registry';
 import type { DesignSystemId } from '@arki/design-systems/registry';
 

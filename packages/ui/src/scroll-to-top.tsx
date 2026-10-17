@@ -1,3 +1,4 @@
+/** Scroll to top: a button that returns to the top of the page. */
 'use client';
 
 import { ArrowCircleUp } from '@arki/icons/phosphor';

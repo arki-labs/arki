@@ -1,3 +1,4 @@
+/** Progress: a progress bar. */
 'use client';
 
 import * as React from 'react';

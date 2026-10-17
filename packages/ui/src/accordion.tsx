@@ -1,3 +1,4 @@
+/** Accordion: stacked sections that open and close. */
 'use client';
 
 import { Accordion as AccordionPrimitive } from '@base-ui/react/accordion';

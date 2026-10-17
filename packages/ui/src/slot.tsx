@@ -1,3 +1,4 @@
+/** `Slot`: merge props onto a child element. */
 import * as React from 'react';
 
 import { cn } from './cn';

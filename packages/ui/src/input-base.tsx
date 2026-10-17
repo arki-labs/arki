@@ -1,3 +1,4 @@
+/** Input base: the shared frame for inputs with adornments. */
 'use client';
 
 import * as React from 'react';

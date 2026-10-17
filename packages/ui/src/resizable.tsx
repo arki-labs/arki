@@ -1,3 +1,4 @@
+/** Resizable: panels the user can drag to resize. */
 'use client';
 
 import * as React from 'react';

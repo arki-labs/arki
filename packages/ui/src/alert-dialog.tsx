@@ -1,3 +1,4 @@
+/** Alert dialog: a modal that asks the user to confirm before an action. */
 'use client';
 
 import * as React from 'react';

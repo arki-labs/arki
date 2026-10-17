@@ -1,0 +1,25 @@
+# @arki/theme
+
+> Light, dark and system theme for React: a provider, a `useTheme` hook, and an inline script that applies the stored theme before first paint.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/theme`: Light, dark and system theme for React: `ThemeProvider` and the `useTheme` hook. `ThemeProvider`, `useTheme`; types `ResolvedTheme`, `Theme`, `ThemeProviderProps`, `UseThemeReturn`.
+- `@arki/theme/script`: Inline script that applies the stored theme before first paint, so the page does not flash. `THEME_STORAGE_KEY`, `themeDetectionFn`, `themeScript`; types `ThemeDetectionOptions`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Add a theme to an app](docs/agent-guide.md#add-a-theme-to-an-app)
+- [Add a custom theme name](docs/agent-guide.md#add-a-custom-theme-name)
+- [Use a data attribute instead of a class](docs/agent-guide.md#use-a-data-attribute-instead-of-a-class)
+
+## Rules that bite
+- `useTheme()` outside a provider returns `theme: undefined`; it does not throw.
+- `setTheme` of a name not in `themes` stores `defaultTheme`.
+- Give the script and the provider the same options, or the page flashes.
+- The server renders `defaultTheme`; put `suppressHydrationWarning` on `<html>`.

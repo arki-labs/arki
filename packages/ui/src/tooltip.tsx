@@ -1,3 +1,4 @@
+/** Tooltip: a short hint on hover or focus. */
 'use client';
 
 import type { FC } from 'react';

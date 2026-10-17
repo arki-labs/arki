@@ -1,3 +1,4 @@
+/** `useIsTouchDevice`: true when the main pointer is coarse (a finger). */
 import { useEffect, useState } from 'react';
 
 export function useIsTouchDevice() {

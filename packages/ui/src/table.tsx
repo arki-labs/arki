@@ -1,3 +1,4 @@
+/** Table: styled table parts. */
 'use client';
 
 import * as React from 'react';

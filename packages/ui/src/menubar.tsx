@@ -1,3 +1,4 @@
+/** Menubar: a row of menus, like an app menu bar. */
 'use client';
 
 import * as React from 'react';

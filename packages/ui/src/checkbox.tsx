@@ -1,3 +1,4 @@
+/** Checkbox: a tick box. */
 'use client';
 
 import * as React from 'react';

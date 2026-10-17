@@ -1,3 +1,4 @@
+/** Avatar: a user picture with a fallback. */
 'use client';
 
 import * as React from 'react';

@@ -1,3 +1,4 @@
+/** Drawer: a panel that slides in from an edge, with drag to close. */
 'use client';
 
 import * as React from 'react';

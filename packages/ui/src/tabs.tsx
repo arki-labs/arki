@@ -1,3 +1,4 @@
+/** Tabs: switch between views. */
 'use client';
 
 import * as React from 'react';

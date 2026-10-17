@@ -1,3 +1,4 @@
+/** Toolbar: a bar of buttons and dividers. */
 import type { ButtonHTMLAttributes, ComponentProps } from 'react';
 
 import type { ButtonProps } from './button';

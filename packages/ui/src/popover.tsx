@@ -1,3 +1,4 @@
+/** Popover: a floating panel anchored to a button. */
 'use client';
 
 import * as React from 'react';

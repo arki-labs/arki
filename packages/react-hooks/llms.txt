@@ -1,0 +1,40 @@
+# @arki/react-hooks
+
+> Curated React hooks under one package: debounce, local storage, media query, hotkeys, clipboard, toggle, pagination, touch and viewport. One subpath per hook, no root import.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/react-hooks/async-memo`: `useAsyncMemo`.
+- `@arki/react-hooks/copy-to-clipboard`: `useCopyToClipboard`.
+- `@arki/react-hooks/debounce`: `useDebouncedCallback`, `useDebouncedState`, `useDebouncedValue`.
+- `@arki/react-hooks/hotkeys`: `useHotkeys`.
+- `@arki/react-hooks/is-client`: Hook to detect if we're on the client side after hydration. `useIsClient`.
+- `@arki/react-hooks/local-storage`: `deleteFromStorage`, `useLocalStorage`, `writeStorage`.
+- `@arki/react-hooks/long-press`: `useLongPress`.
+- `@arki/react-hooks/media-query`: `useIsDesktop`, `useIsMobile`, `useIsTablet`, `useIsTabletOrDesktop`, `useIsTouchDevice`, `useMediaQuery`.
+- `@arki/react-hooks/pagination`: `usePagination`.
+- `@arki/react-hooks/timeout`: `useTimeout`.
+- `@arki/react-hooks/toggle`: `useToggle`, `useToggleState`.
+- `@arki/react-hooks/touch`: `useIsTouchDevice`.
+- `@arki/react-hooks/use-swipe-gesture`: `useNumberSwipeGesture`, `useSwipeGesture`; types `SwipeDirection`.
+- `@arki/react-hooks/use-touch-feedback`: `useTouchFeedback`; types `HapticFeedbackType`.
+- `@arki/react-hooks/use-viewport`: `useViewport`; types `ViewportInfo`, `ViewportType`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Wait for the user to stop typing](docs/agent-guide.md#wait-for-the-user-to-stop-typing)
+- [Load something async when inputs change](docs/agent-guide.md#load-something-async-when-inputs-change)
+- [Show a different layout on phones](docs/agent-guide.md#show-a-different-layout-on-phones)
+- [Remember a value between visits](docs/agent-guide.md#remember-a-value-between-visits)
+- [Add a new hook](docs/agent-guide.md#add-a-new-hook)
+
+## Rules that bite
+- There is no root import. Use a subpath such as `@arki/react-hooks/debounce`.
+- `useAsyncMemo` does not catch a rejected promise. Catch inside the factory.
+- `useViewport` calls under 640px mobile, `useIsMobile` calls under 768px mobile.
+- On the server the `useIs*` hooks return `false`; the client value arrives after the first effect.

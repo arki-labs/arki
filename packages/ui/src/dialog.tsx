@@ -1,3 +1,4 @@
+/** Dialog: a modal window. */
 'use client';
 
 import * as React from 'react';

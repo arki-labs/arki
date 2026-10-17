@@ -1,3 +1,4 @@
+/** Input: a text field. */
 import * as React from 'react';
 
 import { cn } from './cn';

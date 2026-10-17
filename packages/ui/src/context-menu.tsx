@@ -1,3 +1,4 @@
+/** Context menu: a menu on right click. */
 'use client';
 
 import * as React from 'react';

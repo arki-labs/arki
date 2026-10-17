@@ -1,4 +1,6 @@
 /**
+ * Inline script that applies the stored theme before first paint, so the page does not flash.
+ *
  * Theme detection script for FOUC prevention.
  *
  * This script should be executed before React hydration to prevent

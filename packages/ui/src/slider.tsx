@@ -1,3 +1,4 @@
+/** Slider: pick a value or range by dragging. */
 'use client';
 
 import * as React from 'react';

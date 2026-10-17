@@ -1,3 +1,4 @@
+/** Toggle: a button that stays pressed. */
 'use client';
 
 import type { VariantProps } from 'class-variance-authority';

@@ -1,3 +1,4 @@
+/** Spinners: loading indicators. */
 import type { ComponentProps } from 'react';
 
 import { cn } from './cn';

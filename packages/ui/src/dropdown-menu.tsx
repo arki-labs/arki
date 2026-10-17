@@ -1,3 +1,4 @@
+/** Dropdown menu: a menu that opens from a button. */
 'use client';
 
 import * as React from 'react';

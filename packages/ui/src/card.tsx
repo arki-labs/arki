@@ -1,3 +1,4 @@
+/** Card: a surface with header, content and footer. */
 import * as React from 'react';
 
 import { cn } from './cn';

@@ -1,3 +1,4 @@
+/** Skeleton: a grey placeholder while content loads. */
 import { cn } from './cn';
 
 function Skeleton({ className, ...props }: React.ComponentProps<'div'>) {

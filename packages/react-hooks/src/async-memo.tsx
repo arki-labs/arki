@@ -1,3 +1,4 @@
+/** `useAsyncMemo`: the result of an async function, recomputed when its dependencies change, with stale results dropped. */
 import type { DependencyList } from 'react';
 import { useEffect, useState } from 'react';
 

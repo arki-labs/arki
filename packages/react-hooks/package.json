@@ -33,6 +33,8 @@
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
+    "docs/agent-guide.md",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"
@@ -117,12 +119,13 @@
   },
   "scripts": {
     "bench": "bun run build && arki-bench",
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "test:docs": "arki-doc-examples",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

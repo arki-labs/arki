@@ -1,3 +1,4 @@
+/** Providers that set the default Phosphor size, colour and weight for a design system or a subtree. */
 'use client';
 
 import { useContext } from 'react';

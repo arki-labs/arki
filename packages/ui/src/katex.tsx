@@ -1,3 +1,4 @@
+/** KaTeX math, as `BlockMath` and `InlineMath`. */
 import React, { useMemo, type ReactNode, type ComponentType } from 'react';
 import KaTeX from 'katex';
 

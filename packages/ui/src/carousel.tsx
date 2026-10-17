@@ -1,3 +1,4 @@
+/** Carousel: slides the user can swipe or step through. */
 'use client';
 
 import type { UseEmblaCarouselType } from 'embla-carousel-react';

@@ -1,3 +1,4 @@
+/** Switch: an on and off toggle. */
 'use client';
 
 import * as React from 'react';

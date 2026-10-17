@@ -1,3 +1,4 @@
+/** Alert: a boxed message with a title and a description. */
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { cva } from 'class-variance-authority';

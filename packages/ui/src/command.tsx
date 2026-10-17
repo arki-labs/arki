@@ -1,3 +1,4 @@
+/** Command: a searchable list of actions, in a panel or a dialog. */
 'use client';
 
 import * as React from 'react';

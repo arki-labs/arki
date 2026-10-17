@@ -1,3 +1,4 @@
+/** Chart: Recharts wrappers that take colours from the design tokens. */
 'use client';
 
 import * as React from 'react';

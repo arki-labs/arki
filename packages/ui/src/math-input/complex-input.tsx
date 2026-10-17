@@ -1,3 +1,4 @@
+/** Complex input: a field for complex numbers. */
 'use client';
 
 import { cn } from '../cn';

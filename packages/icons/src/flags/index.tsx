@@ -1,3 +1,4 @@
+/** `Flag`: a country flag from a two-letter code, loaded from `/flags/<size>/<code>.svg` on your server. */
 import type { Flags } from 'flagpack-core';
 import * as React from 'react';
 

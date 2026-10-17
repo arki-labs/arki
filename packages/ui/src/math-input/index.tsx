@@ -1,3 +1,4 @@
+/** Math input: a field for typing maths with a keypad. */
 'use client';
 
 import * as React from 'react';

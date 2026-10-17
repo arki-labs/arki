@@ -1,3 +1,4 @@
+/** Toggle group: a set of toggles with single or multiple choice. */
 'use client';
 
 import type { VariantProps } from 'class-variance-authority';

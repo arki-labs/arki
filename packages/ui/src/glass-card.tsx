@@ -1,3 +1,4 @@
+/** Glass card: a translucent card with tone variants. */
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { cva } from 'class-variance-authority';

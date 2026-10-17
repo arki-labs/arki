@@ -1,3 +1,4 @@
+/** `useTouchFeedback`: haptic, visual and audio feedback for a touch. */
 'use client';
 
 import { useCallback, useRef } from 'react';

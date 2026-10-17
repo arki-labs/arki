@@ -1,3 +1,4 @@
+/** Callout: a highlighted note with an icon. */
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 

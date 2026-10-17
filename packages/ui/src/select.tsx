@@ -1,3 +1,4 @@
+/** Select: a dropdown to choose one value. */
 'use client';
 
 import * as React from 'react';

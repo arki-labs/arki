@@ -1,3 +1,4 @@
+/** `useSwipeGesture` and `useNumberSwipeGesture`: swipe and tap detection for touch screens. */
 'use client';
 
 import { useCallback, useRef, useState } from 'react';

@@ -1,3 +1,4 @@
+/** `useIsClient`: false on the server and during hydration, true after the first effect. */
 import { useEffect, useState } from 'react';
 
 /**

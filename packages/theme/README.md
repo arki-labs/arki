@@ -2,40 +2,84 @@
 
 Light / dark / system theme for ARKI React apps: a provider, a hook, and a tiny inline script that applies the stored theme before first paint so there is no flash.
 
-> **Source-first package.** Ships TypeScript source as the runtime entry plus `.d.ts`. Your bundler (Vite, TanStack Start, Next.js, Bun) compiles it.
-
-## Installation
+## Install
 
 ```sh
 bun add @arki/theme react
 ```
 
-Peer dependency: `react` 19.
+`react` 19 is a peer dependency.
 
-## Usage
+## Quick start
 
-Render the no-flash script in `<head>`, then wrap the app:
+Put the script in `<head>`, then wrap the app in the provider. Any component below can read and set the theme.
 
 ```tsx
+import type { ReactNode } from 'react';
+
 import { ThemeProvider, useTheme } from '@arki/theme';
 import { themeScript } from '@arki/theme/script';
 
-// In your document head (server-rendered):
-<script dangerouslySetInnerHTML={{ __html: themeScript() }} />;
+export function Document({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript() }} />
+      </head>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  );
+}
 
-// Around the app:
-<ThemeProvider>
-  <App />
-</ThemeProvider>;
-
-// Anywhere below:
-function ThemeToggle() {
+export function ThemeToggle() {
   const { theme, resolvedTheme, setTheme } = useTheme();
   return <button onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{theme}</button>;
 }
 ```
 
-The theme is stored under `localStorage['theme']` (`THEME_STORAGE_KEY`) and applied as the `dark` class / `data-theme` attribute, which is what `@arki/design-systems` tokens respond to.
+The choice is stored in `localStorage['theme']` (`THEME_STORAGE_KEY`). It is applied as the `dark` class on `<html>`, which is what the `@arki/design-systems` tokens respond to.
+
+## When not to use this
+
+- You need more than a class or attribute on `<html>`, such as per-subtree themes or a theme stored in a cookie. The provider sets one value for the whole document.
+- You render on the server and need the theme known before the page is sent. This package reads `localStorage` in the browser, so the server always renders the default.
+- You do not use React. The script works anywhere, but the provider and hook are React only.
+
+## Runtime support
+
+Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
+
+## Public imports
+
+- `@arki/theme`: `ThemeProvider`, `useTheme`, and the types `Theme`, `ResolvedTheme`, `ThemeProviderProps`, `UseThemeReturn`.
+- `@arki/theme/script`: `themeScript`, `themeDetectionFn`, `THEME_STORAGE_KEY`, and the type `ThemeDetectionOptions`.
+
+## Failure behaviour
+
+Nothing here throws.
+
+- `useTheme()` outside a `ThemeProvider` returns a no-op default: `theme` is `undefined` and `setTheme` does nothing. Server rendering and tests work without a provider.
+- If `localStorage` is blocked (private mode, a strict browser setting), reads return nothing and writes are dropped. The theme then lasts until the page reloads.
+- A stored value that is not in `themes` is replaced by `defaultTheme`.
+
+## Limits
+
+- The server renders `defaultTheme`. The inline script fixes the page before paint, but React state first matches the server render. Put `suppressHydrationWarning` on `<html>`.
+- The script and the provider are separate. Give both the same `storageKey`, `attribute`, `themes` and `defaultTheme`, or the page flashes.
+- `setTheme` only accepts a name in `themes`. Boundary: with the default themes, `setTheme('sepia')` stores `system`, not `sepia`. Add `'sepia'` to `themes` first.
+
+```ts run expect
+import { themeScript } from '@arki/theme/script';
+
+const script = themeScript({ storageKey: 'app-theme', themes: ['light', 'dark', 'sepia'] });
+console.log(script.includes('"storageKey":"app-theme"'), script.includes('"sepia"'));
+```
+
+```text
+true true
+```
 
 <!-- bench:start -->
 ## Benchmarks
@@ -74,6 +118,15 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 <!-- bench:meta {"schema":1,"suite":"@arki/theme","specHash":"176520ffefeedbeb","profile":"publish","date":"2026-10-13T08:58:51.936Z","harness":"0.0.1"} -->
 <!-- bench:end -->
 
+## Documentation
+
+- [docs/agent-guide.md](./docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
+- [llms.txt](./llms.txt): the short form for agents.
+
+## Support
+
+Report bugs and questions at <https://github.com/arki-labs/arki/issues>.
+
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).

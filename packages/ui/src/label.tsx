@@ -1,3 +1,4 @@
+/** Label: a form label. */
 'use client';
 
 import * as React from 'react';

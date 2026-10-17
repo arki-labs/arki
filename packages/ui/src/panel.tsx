@@ -1,3 +1,4 @@
+/** Panel: a titled work area with sections and dividers. */
 import type { ComponentProps } from 'react';
 import { cn } from './cn';
 import { Slot } from './slot';

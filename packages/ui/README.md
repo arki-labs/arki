@@ -1,20 +1,18 @@
 # @arki/ui
 
-React component library for ARKI apps: Base UI primitives styled with Tailwind v4 semantic tokens. Forms, overlays, navigation, data display, charts — one import per component.
+React component library for ARKI apps: Base UI primitives styled with Tailwind v4 semantic tokens. Forms, overlays, navigation, data display and charts. One import per component.
 
-> **Source-first package.** `@arki/ui` ships TypeScript source (`src/*.tsx`) as its runtime entry plus `.d.ts` declarations. Your bundler compiles it: Vite, TanStack Start, Next.js and Bun all do. Plain Node without a bundler is not supported.
-
-## Installation
+## Install
 
 ```sh
 bun add @arki/ui @arki/design-systems @arki/theme react react-dom
 ```
 
-Peer dependencies: `react` and `react-dom` 19.
+`react` and `react-dom` 19 are peer dependencies. `@arki/design-systems` supplies the tokens the components read, and `@arki/theme` sets light and dark mode.
 
-## Setup
+## Quick start
 
-Components read semantic tokens (`--background`, `--primary`, `--muted`, …) from a design system. Pick one from `@arki/design-systems` and let Tailwind see the component classes:
+Pick one design system and let Tailwind scan the component sources.
 
 ```css
 /* src/styles/global.css */
@@ -23,11 +21,11 @@ Components read semantic tokens (`--background`, `--primary`, `--muted`, …) fr
 @import '@arki/design-systems/atelier/tokens.css';
 @import '@arki/design-systems/atelier/theme-bridge.css';
 
-/* Tailwind must scan the component sources; adjust the path to where the package is installed. */
+/* Adjust the path to where @arki/ui is installed. */
 @source '../node_modules/@arki/ui/src';
 ```
 
-## Usage
+Then import each component from its own subpath.
 
 ```tsx
 import { Button } from '@arki/ui/button';
@@ -48,14 +46,53 @@ export function Example() {
 }
 ```
 
-Every component is its own subpath (`@arki/ui/dialog`, `@arki/ui/select`, `@arki/ui/table`, `@arki/ui/chart`, …). See the `exports` map in `package.json` for the full list.
+## When not to use this
 
-## Related packages
+- Your app does not use Tailwind v4. The components are styled with Tailwind classes and have no stylesheet of their own.
+- You need a headless library to style yourself. Use `@base-ui/react` directly. This package is the styled layer on top of it.
+- You mix design systems in one app. These components read one set of tokens (see `@arki/design-systems`).
+- You build for React Native. Use `@arki/native-ui`.
 
-- `@arki/design-systems` — tokens, Tailwind bridge and fonts for `atelier`, `workbench`, `arena`.
-- `@arki/theme` — light / dark / system provider and no-flash script.
-- `@arki/icons` — icon sets behind one React entry point.
-- `@arki/react-hooks` — the hooks the components use, reusable on their own.
+## Runtime support
+
+Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
+
+## Public imports
+
+There is no root import. Every component is its own subpath: `@arki/ui/button`, `@arki/ui/dialog`, `@arki/ui/select`, `@arki/ui/table`, `@arki/ui/chart`. [`llms.txt`](./llms.txt) lists all of them with their names.
+
+| Group | Subpaths |
+| --- | --- |
+| Actions | `button`, `toggle`, `toggle-group`, `toolbar`, `control-group` |
+| Forms | `form`, `input`, `input-base`, `input-otp`, `textarea`, `textarea-with-autosize`, `select`, `checkbox`, `radio-group`, `switch`, `slider`, `label`, `date-picker`, `color-picker`, `math-input`, `complex-input` |
+| Overlays | `dialog`, `alert-dialog`, `drawer`, `sheet`, `popover`, `hover-card`, `tooltip`, `command`, `sonner` (toasts) |
+| Menus and navigation | `dropdown-menu`, `context-menu`, `menubar`, `navigation-menu`, `breadcrumb`, `pagination`, `tabs`, `sidebar` |
+| Layout and surfaces | `card`, `glass-card`, `panel`, `surface`, `separator`, `scroll-area`, `resizable`, `tool-panels`, `aspect-ratio`, `accordion`, `collapsible` |
+| Data display | `table`, `chart`, `badge`, `avatar`, `alert`, `callout`, `progress`, `skeleton`, `spinners`, `timeline`, `carousel`, `calendar`, `katex` |
+| Helpers | `cn`, `design-system`, `slot`, `as-child`, `scroll-to-top` |
+
+## Failure behaviour
+
+Components do not return failure values. Mistakes in how you compose them show up in three ways.
+
+- Some compound parts need their parent. These hooks throw a plain `Error` when the parent is missing: `useFormField` (inside `FormField`), `useSidebar` (inside `SidebarProvider`), and the hooks for `Chart`, `Carousel`, `ControlGroup` and `Timeline`. Fix the tree; do not catch the error.
+- A missing token gives a wrong colour, not an error. If a page looks unstyled, check the `@source` line and the token imports first.
+- `Toaster` reads the theme from `@arki/theme`. Without a `ThemeProvider` it uses `system`.
+
+## Limits
+
+- Tailwind only sees classes it can scan. If `@source` does not point at the installed `@arki/ui/src`, components render with no styling and no error.
+- Pick one design system per app. Boundary: loading `atelier` tokens and `workbench` tokens in one stylesheet makes the later file win for every shared name, so components mix two palettes.
+- `katex` does not load KaTeX's stylesheet. Import `katex/dist/katex.min.css` yourself, or maths renders unstyled.
+- Imports must name a subpath. `import { Button } from '@arki/ui'` fails: the package has no root entry.
+- Some components rely on browser APIs (`matchMedia`, `ResizeObserver`). Render them on the client; in tests use a DOM environment.
+
+## Design-system rules
+
+1. Style with semantic classes: `bg-background`, `bg-card`, `text-muted-foreground`, `border-border`.
+2. One design system per app: `atelier`, `workbench` or `arena`. Never mix them.
+3. App-specific colours get new token names. Do not redefine a shared name.
+4. If a component needs a token the contract does not have, propose the smallest extension and get confirmation before you change `@arki/design-systems`.
 
 <!-- bench:start -->
 ## Benchmarks
@@ -138,6 +175,22 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 <!-- bench:meta {"schema":1,"suite":"@arki/ui","specHash":"90948ea457b5d678","profile":"publish","date":"2026-10-13T09:02:32.088Z","harness":"0.0.1"} -->
 <!-- bench:end -->
 
+## Related packages
+
+- `@arki/design-systems`: tokens, Tailwind bridge and fonts for `atelier`, `workbench`, `arena`.
+- `@arki/theme`: light, dark and system provider and the no-flash script.
+- `@arki/icons`: icon sets behind one React entry point.
+- `@arki/react-hooks`: the hooks the components use, reusable on their own.
+
+## Documentation
+
+- [docs/agent-guide.md](./docs/agent-guide.md): the model, a task map, the rules that bite, and how to verify.
+- [llms.txt](./llms.txt): the short form for agents.
+
+## Support
+
+Report bugs and questions at <https://github.com/arki-labs/arki/issues>.
+
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).

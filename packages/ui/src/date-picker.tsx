@@ -1,3 +1,4 @@
+/** Date picker: an input that opens a calendar. */
 'use client';
 
 import type { ComponentProps } from 'react';

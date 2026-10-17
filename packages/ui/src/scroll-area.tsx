@@ -1,3 +1,4 @@
+/** Scroll area: a scroll region with styled scrollbars. */
 'use client';
 
 import * as React from 'react';

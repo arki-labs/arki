@@ -1,3 +1,4 @@
+/** Separator: a divider line. */
 'use client';
 
 import * as React from 'react';

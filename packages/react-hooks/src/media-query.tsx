@@ -1,3 +1,4 @@
+/** `useMediaQuery` and the ready-made `useIsMobile`, `useIsTablet`, `useIsDesktop` hooks, safe for server rendering. */
 import { useMediaQuery } from '@mantine/hooks';
 
 const MOBILE_BREAKPOINT = 768;

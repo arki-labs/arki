@@ -1,3 +1,4 @@
+/** Form: React Hook Form fields with labels, hints and error text. */
 'use client';
 
 import type { ComponentProps } from 'react';

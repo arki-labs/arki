@@ -1,3 +1,4 @@
+/** Radio group: choose one option from a list. */
 'use client';
 
 import * as React from 'react';
