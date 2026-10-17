@@ -16,7 +16,7 @@ import NodeGeocoder from 'node-geocoder';
 import type { FailureOf } from '@arki/failure';
 
 import { GeocodingAbortedError, GeocodingError } from '../core/errors';
-import { AddressNotFound } from '../core/failures';
+import { AddressNotFound, NoAddressAtLocation } from '../core/failures';
 import type {
   AddressComponents,
   GeocodeResult,
@@ -199,14 +199,18 @@ export class GeocodingService {
   }
 
   /**
-   * Reverse geocode coordinates to an address
+   * Reverse geocode coordinates to an address.
+   *
+   * Returns `NoAddressAtLocation` when every provider that answered found no
+   * address there (a provider with no results passes to the next one). Throws
+   * `GeocodingError` when no provider answered at all.
    */
   async reverseGeocode(
     lat: number,
     lon: number,
     preferredProvider?: GeocodingProvider,
     options: GeocodingOptions = {},
-  ): Promise<GeocodeResult> {
+  ) {
     const { signal } = options;
     throwIfAborted(signal);
 
@@ -223,6 +227,7 @@ export class GeocodingService {
     const providerOrder = this.getProviderOrder(preferredProvider);
 
     let lastError: Error | null = null;
+    let answeredWithNoResults = false;
 
     for (const providerName of providerOrder) {
       const geocoder = this.geocoders.get(providerName);
@@ -233,19 +238,10 @@ export class GeocodingService {
         const results = await geocoder.reverse({ lat, lon });
         throwIfAborted(signal);
 
-        if (!results || results.length === 0) {
-          throw new GeocodingError(
-            `No results found for coordinates: ${lat}, ${lon}`,
-            providerName,
-          );
-        }
-
         const firstResult = results[0];
         if (!firstResult) {
-          throw new GeocodingError(
-            `No results found for coordinates: ${lat}, ${lon}`,
-            providerName,
-          );
+          answeredWithNoResults = true;
+          continue;
         }
 
         const result = this.transformResult(firstResult, providerName);
@@ -264,6 +260,8 @@ export class GeocodingService {
         continue;
       }
     }
+
+    if (answeredWithNoResults) return NoAddressAtLocation({ latitude: lat, longitude: lon });
 
     throw new GeocodingError(
       `All reverse geocoding providers failed. Last error: ${lastError?.message}`,

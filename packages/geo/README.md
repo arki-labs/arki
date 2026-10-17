@@ -69,7 +69,7 @@ if (AddressNotFound.is(result)) return result; // no provider knows this address
 
 `geocode` returns `AddressNotFound` (`geo.address_not_found`, status 404, data `{ address }`) when every provider that answered found nothing. A provider with no results passes to the next one first. A missing address is not cached. When no provider answers at all (down, refused key), `geocode` throws `GeocodingError`. Import `AddressNotFound` from `@arki/geo`. `batchGeocode` maps each address to its result, its `AddressNotFound`, or the error it threw.
 
-`reverseGeocode` still throws `GeocodingError` when no provider finds an address at the coordinates.
+`reverseGeocode(lat, lon)` follows the same rules. It returns `NoAddressAtLocation` (`geo.no_address_at_location`, status 404, data `{ latitude, longitude }`) when every provider that answered found no address there, such as a point at sea. It is not cached either. Import it from `@arki/geo`. Google and Nominatim, through node-geocoder, report "nothing here" as an error and not as an empty list, so with them it still throws `GeocodingError`.
 
 ### Backend: Distance
 

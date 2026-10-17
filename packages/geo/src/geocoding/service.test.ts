@@ -2,7 +2,7 @@ import { http, HttpResponse, setupMswServer } from '@arki/testing/msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GeocodingAbortedError, GeocodingError } from '../core/errors';
-import { AddressNotFound } from '../core/failures';
+import { AddressNotFound, NoAddressAtLocation } from '../core/failures';
 import type { GeocodingCache } from './service';
 import { createGeocodingService, GeocodingService } from './service';
 import type { GeocodeResult, GeocodingConfig } from './types';
@@ -141,8 +141,7 @@ describe('GeocodingService', () => {
 
       const result = await service.reverseGeocode(38.8977, -77.0365);
 
-      expect(result.provider).toBe('nominatim');
-      expect(result.addressComponents.locality).toBe('Washington');
+      expect(result).toMatchObject({ provider: 'nominatim', addressComponents: { locality: 'Washington' } });
     });
   });
 
@@ -272,7 +271,45 @@ describe('GeocodingService', () => {
 
       const result = await service.reverseGeocode(51.5, -0.12);
 
-      expect(result.provider).toBe('google');
+      expect(result).toMatchObject({ provider: 'google' });
+    });
+
+    // "No address here" (a point at sea) is an answer the caller must branch on, so it
+    // is returned. Only "no provider could answer" is a fault, and that stays thrown.
+    it('reverse geocoding returns NoAddressAtLocation when every provider answers with no results', async () => {
+      server.use(http.get(`${NOMINATIM}/reverse`, () => HttpResponse.json([])));
+      const service = new GeocodingService(baseConfig({ fallbackProviders: [], cache: noCache }));
+
+      const result = await service.reverseGeocode(0, -30);
+
+      expect(NoAddressAtLocation.is(result)).toBe(true);
+      expect(result).toMatchObject({
+        code: 'geo.no_address_at_location',
+        status: 404,
+        data: { latitude: 0, longitude: -30 },
+      });
+    });
+
+    it('reverse geocoding returns NoAddressAtLocation when one provider found nothing and the other was down', async () => {
+      server.use(
+        http.get(`${NOMINATIM}/reverse`, () => HttpResponse.json([])),
+        http.get(GOOGLE, () => new HttpResponse(null, { status: 503 })),
+      );
+      const service = new GeocodingService(
+        baseConfig({ provider: 'google', fallbackProviders: ['nominatim'], cache: noCache }),
+      );
+
+      expect(NoAddressAtLocation.is(await service.reverseGeocode(0, -30))).toBe(true);
+    });
+
+    it('reverse geocoding throws GeocodingError when every provider fails', async () => {
+      server.use(
+        http.get(`${NOMINATIM}/reverse`, () => new HttpResponse(null, { status: 503 })),
+        http.get(GOOGLE, () => HttpResponse.json({ status: 'REQUEST_DENIED', error_message: 'bad key', results: [] })),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+
+      await expect(service.reverseGeocode(0, -30)).rejects.toBeInstanceOf(GeocodingError);
     });
   });
 
@@ -366,6 +403,16 @@ describe('GeocodingService', () => {
       const service = new GeocodingService(baseConfig({ fallbackProviders: [] }), cache);
 
       expect(AddressNotFound.is(await service.geocode('nowhere'))).toBe(true);
+
+      expect(writes).toEqual([]);
+    });
+
+    it('does not cache NoAddressAtLocation', async () => {
+      server.use(http.get(`${NOMINATIM}/reverse`, () => HttpResponse.json([])));
+      const { cache, writes } = createFakeCache();
+      const service = new GeocodingService(baseConfig({ fallbackProviders: [] }), cache);
+
+      expect(NoAddressAtLocation.is(await service.reverseGeocode(0, -30))).toBe(true);
 
       expect(writes).toEqual([]);
     });

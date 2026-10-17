@@ -3,3 +3,5 @@
 ---
 
 `geocode` returns `AddressNotFound` (`geo.address_not_found`, 404, data `{ address }`) when every provider that answered found nothing, in place of throwing `GeocodingError`. A caller can now tell "this address does not exist" from "the provider is down": the second one still throws `GeocodingError`. `batchGeocode` records `AddressNotFound` for a missing address. Import `AddressNotFound` from `@arki/geo`.
+
+- `reverseGeocode` returns `NoAddressAtLocation` (`geo.no_address_at_location`, 404, data `{ latitude, longitude }`) when every provider that answered found no address at the coordinates, in place of throwing `GeocodingError`. Import it from `@arki/geo`.
