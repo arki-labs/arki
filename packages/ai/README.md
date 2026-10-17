@@ -83,16 +83,18 @@ const results = await searchService.search({
 ### AI Generation
 
 ```typescript
-import { OpenAIService, StructuredGenerator } from '@arki/ai';
+import { createLLMProvider, OpenAIService, RateLimited, StructuredGenerator } from '@arki/ai';
 
 const ai = new OpenAIService({ model: 'gpt-4o-mini' });
-const generator = new StructuredGenerator(ai);
+const generator = new StructuredGenerator(createLLMProvider());
 
 // Generate structured data
 const summary = await generator.generateSummary('Long text to summarize...');
 
-// Stream responses
-for await (const chunk of ai.streamText('Tell me a story')) {
+// Stream responses: the call takes a rate-limit slot first, so check for RateLimited before iterating
+const stream = await ai.streamText('Tell me a story');
+if (RateLimited.is(stream)) return stream; // data: { retryAfterMs }
+for await (const chunk of stream) {
   console.log(chunk);
 }
 ```
@@ -321,8 +323,10 @@ OpenAI integration using Vercel AI SDK.
 
 - `generateStructuredData(prompt, schema)`: Generate structured data. `schema` is any Standard Schema (zod, valibot, arktype). The model is shown its input JSON Schema; you get its output type back (transforms have run). A schema that cannot emit JSON Schema throws a `ConfigurationError` that names `withJsonSchema`.
 - `generateText(prompt)`: Generate text
-- `streamText(prompt)`: Stream text generation
+- `streamText(prompt)`: Stream text generation. Resolves to the chunk generator, or `RateLimited`.
 - `generateConversation(messages)`: Generate conversation response
+
+Each method checks a local rate limiter first. When it has no free slot, the method returns the `RateLimited` failure (code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) instead of calling the model. It never throws for this. Provider faults still throw `GenerationError`.
 
 #### `StructuredGenerator`
 

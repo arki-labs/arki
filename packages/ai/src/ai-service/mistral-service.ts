@@ -11,8 +11,8 @@ import { generateText, streamText } from 'ai';
 import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.ts';
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, getErrorMessage, RateLimitError } from '../errors.ts';
-import { RateLimited } from '../failures.ts';
+import { GenerationError, getErrorMessage } from '../errors.ts';
+import type { RateLimited } from '../failures.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
 
 export type MistralServiceConfig = {
@@ -59,7 +59,7 @@ export class MistralService implements LLMProvider {
   /**
    * Generate text from a single prompt
    */
-  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string | RateLimited> {
     if (!this.isAvailable()) {
       throw new GenerationError('Mistral API key not configured');
     }
@@ -86,20 +86,13 @@ export class MistralService implements LLMProvider {
       }
     });
 
-    if (RateLimited.is(rateLimitResult)) {
-      throw new RateLimitError(
-        `Rate limit exceeded: retry after ${rateLimitResult.data.retryAfterMs}ms`,
-        rateLimitResult.data.retryAfterMs,
-      );
-    }
-
     return rateLimitResult;
   }
 
   /**
    * Generate text from conversation messages
    */
-  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string> {
+  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string | RateLimited> {
     if (!this.isAvailable()) {
       throw new GenerationError('Mistral API key not configured');
     }
@@ -129,13 +122,6 @@ export class MistralService implements LLMProvider {
         throw new GenerationError(`Failed to generate conversation: ${getErrorMessage(error)}`, error);
       }
     });
-
-    if (RateLimited.is(rateLimitResult)) {
-      throw new RateLimitError(
-        `Rate limit exceeded: retry after ${rateLimitResult.data.retryAfterMs}ms`,
-        rateLimitResult.data.retryAfterMs,
-      );
-    }
 
     return rateLimitResult;
   }

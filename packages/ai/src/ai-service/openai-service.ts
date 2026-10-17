@@ -13,7 +13,7 @@ import { z } from '@arki/contracts';
 
 import type { SanitizerConfig } from '../safety/types';
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { GenerationError, getErrorMessage } from '../errors';
 import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
@@ -97,7 +97,7 @@ export class OpenAIService {
     prompt: string,
     schema: S,
     options: GenerationOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | RateLimited> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -109,7 +109,7 @@ export class OpenAIService {
     messages: ChatMessage[],
     schema: S,
     options: GenerationOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | RateLimited> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
     debugService.debug('[OpenAI] Generating structured data (messages: {messages}, temperature: {temperature})', {
@@ -145,7 +145,7 @@ export class OpenAIService {
   /**
    * Generate text completion.
    */
-  async generateText(prompt: string, options: GenerationOptions = {}): Promise<string> {
+  async generateText(prompt: string, options: GenerationOptions = {}): Promise<string | RateLimited> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
 
     debugService.debug('[OpenAI] Generating text (prompt length: {length})', { length: sanitizedPrompt.length });
@@ -175,7 +175,7 @@ export class OpenAIService {
   /**
    * Generate text with conversation context.
    */
-  async generateConversation(messages: ChatMessage[], options: GenerationOptions = {}): Promise<string> {
+  async generateConversation(messages: ChatMessage[], options: GenerationOptions = {}): Promise<string | RateLimited> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
     return this.withRateLimit('generateConversation', async () => {
@@ -197,14 +197,26 @@ export class OpenAIService {
   }
 
   /**
-   * Stream text generation.
+   * Stream text generation. Takes a rate-limit slot before the stream starts, so an over-limit
+   * caller gets `RateLimited` up front; otherwise resolves to a generator of text chunks.
    */
-  async *streamText(prompt: string, options: OpenAIStreamOptions = {}): AsyncGenerator<string, void, unknown> {
+  async streamText(
+    prompt: string,
+    options: OpenAIStreamOptions = {},
+  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
 
     // Register rate limit slot before starting the stream
-    await this.consumeRateLimitSlot('streamText');
+    const slot = await this.consumeRateLimitSlot('streamText');
+    if (RateLimited.is(slot)) return slot;
 
+    return this.streamTextChunks(sanitizedPrompt, options);
+  }
+
+  private async *streamTextChunks(
+    sanitizedPrompt: string,
+    options: OpenAIStreamOptions,
+  ): AsyncGenerator<string, void, unknown> {
     try {
       if (options.onStart) {
         options.onStart();
@@ -241,17 +253,26 @@ export class OpenAIService {
   }
 
   /**
-   * Stream conversation with context.
+   * Stream conversation with context. Takes a rate-limit slot before the stream starts, so an
+   * over-limit caller gets `RateLimited` up front; otherwise resolves to a generator of text chunks.
    */
-  async *streamConversation(
+  async streamConversation(
     messages: ChatMessage[],
     options: OpenAIStreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
     // Register rate limit slot before starting the stream
-    await this.consumeRateLimitSlot('streamConversation');
+    const slot = await this.consumeRateLimitSlot('streamConversation');
+    if (RateLimited.is(slot)) return slot;
 
+    return this.streamConversationChunks(sanitizedMessages, options);
+  }
+
+  private async *streamConversationChunks(
+    sanitizedMessages: ChatMessage[],
+    options: OpenAIStreamOptions,
+  ): AsyncGenerator<string, void, unknown> {
     try {
       if (options.onStart) {
         options.onStart();
@@ -302,13 +323,14 @@ export class OpenAIService {
   }
 
   /**
-   * Batch process multiple prompts.
+   * Batch process multiple prompts. A prompt the rate limiter refused is `RateLimited` in its slot;
+   * use `partition` from `@arki/failure` to split the answers from the refusals.
    */
   async batchGenerate<S extends StandardSchemaV1>(
     prompts: string[],
     schema?: S,
     options: GenerationOptions = {},
-  ): Promise<(SchemaOutput<S> | string)[]> {
+  ): Promise<(SchemaOutput<S> | string | RateLimited)[]> {
     debugService.debug('[OpenAI] Batch generating {promptsLength} prompts (structured: {structured})', {
       promptsLength: prompts.length,
       structured: !!schema,
@@ -340,11 +362,14 @@ export class OpenAIService {
    * Note: Input sanitization is intentionally skipped here since the
    * purpose is to analyze raw text for safety.
    */
-  async moderateContent(text: string): Promise<{
-    safe: boolean;
-    categories?: string[];
-    confidence?: number;
-  }> {
+  async moderateContent(text: string): Promise<
+    | {
+        safe: boolean;
+        categories?: string[];
+        confidence?: number;
+      }
+    | RateLimited
+  > {
     const moderationSchema = z.object({
       safe: z.boolean(),
       categories: z.array(z.string()).optional(),
@@ -378,9 +403,9 @@ Content: "${text}"`;
   // ── Private helpers ──────────────────────────────────────────────
 
   /**
-   * Wraps an async function with rate limiting and proper error handling.
+   * Wraps an async function with rate limiting. A refused call returns `RateLimited` and never runs `fn`.
    */
-  private async withRateLimit<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  private async withRateLimit<T>(key: string, fn: () => Promise<T>): Promise<T | RateLimited> {
     const result = await rateLimiters.openai.execute(key, fn);
 
     if (RateLimited.is(result)) {
@@ -388,11 +413,6 @@ Content: "${text}"`;
         key,
         after: result.data.retryAfterMs,
       });
-
-      throw new RateLimitError(
-        `Rate limit exceeded for ${key}: retry after ${result.data.retryAfterMs}ms`,
-        result.data.retryAfterMs,
-      );
     }
 
     return result;
@@ -403,8 +423,9 @@ Content: "${text}"`;
    * Used for streaming methods where the rate limit check must happen
    * before the generator starts yielding.
    */
-  private async consumeRateLimitSlot(key: string): Promise<void> {
-    await this.withRateLimit(key, async () => undefined);
+  private async consumeRateLimitSlot(key: string): Promise<RateLimited | undefined> {
+    const slot = await this.withRateLimit(key, () => Promise.resolve());
+    return RateLimited.is(slot) ? slot : undefined;
   }
 
   /**

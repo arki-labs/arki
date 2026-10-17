@@ -26,7 +26,6 @@ export {
   VectorSearchError,
   GenerationError,
   ValidationError,
-  RateLimitError,
   ConfigurationError,
   ToolOutputError,
   isAIError,

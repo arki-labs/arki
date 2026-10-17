@@ -25,6 +25,7 @@ import type {
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
 import { GenerationError, getErrorMessage } from '../errors.ts';
+import { RateLimited } from '../failures.ts';
 import { DEFAULT_ANTHROPIC_MODEL } from './factory.ts';
 import { createGoogleService } from './google-service.ts';
 import { createGroqService } from './groq-service.ts';
@@ -509,11 +510,16 @@ export class ProviderRouter {
   }
 
   /**
-   * Execute an operation with automatic failover
+   * Execute an operation with automatic failover. A provider whose rate limiter refuses the call
+   * counts as failed and the next one is tried. When no provider answers and at least one was
+   * rate limited, the `RateLimited` with the shortest wait is returned.
    */
-  async executeWithFallback<T>(operation: (provider: LLMProvider) => Promise<T>): Promise<ProviderResult<T>> {
+  async executeWithFallback<T>(
+    operation: (provider: LLMProvider) => Promise<T | RateLimited>,
+  ): Promise<ProviderResult<T> | RateLimited> {
     const startTime = Date.now();
     const triedProviders = new Set<string>();
+    let soonestRetry: RateLimited | undefined;
 
     while (triedProviders.size < this.providers.size) {
       const provider = this.getNextProvider();
@@ -537,6 +543,17 @@ export class ProviderRouter {
         });
 
         const data = await operation(provider);
+
+        if (RateLimited.is(data)) {
+          debugService.debug('[ProviderRouter] Provider {providerName} rate limited (retry after {after}ms)', {
+            providerName: provider.name,
+            after: data.data.retryAfterMs,
+          });
+          this.reportFailure(provider.name, new Error(data.message));
+          if (!soonestRetry || data.data.retryAfterMs < soonestRetry.data.retryAfterMs) soonestRetry = data;
+          continue;
+        }
+
         this.reportSuccess(provider.name);
 
         return {
@@ -554,6 +571,8 @@ export class ProviderRouter {
         // Continue to next provider
       }
     }
+
+    if (soonestRetry) return soonestRetry;
 
     throw new GenerationError('All providers failed', new Error(`Tried providers: ${[...triedProviders].join(', ')}`));
   }
@@ -615,14 +634,17 @@ export class ProviderRouter {
   /**
    * Convenience method: Generate text with automatic failover
    */
-  async generateText(prompt: string, options?: GenerateOptions): Promise<ProviderResult<string>> {
+  async generateText(prompt: string, options?: GenerateOptions): Promise<ProviderResult<string> | RateLimited> {
     return this.executeWithFallback(provider => provider.generateText(prompt, options));
   }
 
   /**
    * Convenience method: Generate conversation with automatic failover
    */
-  async generateConversation(messages: Message[], options?: GenerateOptions): Promise<ProviderResult<string>> {
+  async generateConversation(
+    messages: Message[],
+    options?: GenerateOptions,
+  ): Promise<ProviderResult<string> | RateLimited> {
     return this.executeWithFallback(provider => provider.generateConversation(messages, options));
   }
 

@@ -10,7 +10,7 @@ import { generateText, Output, streamText } from 'ai';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { GenerationError, getErrorMessage } from '../errors';
 import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { rateLimiters } from '../utils/rate-limiter';
@@ -27,6 +27,17 @@ type ChatMessage = ModelMessage;
 export type SystemPart = {
   text: string;
   cacheControl?: { type: 'ephemeral' };
+};
+
+/** Options for {@link AnthropicService.streamConversation}. */
+type AnthropicStreamOptions = {
+  temperature?: number;
+  systemPrompt?: string | SystemPart[];
+  signal?: AbortSignal;
+  onStart?: () => void;
+  onToken?: (chunk: string) => void;
+  onComplete?: (text: string) => void;
+  onError?: (error: Error) => void;
 };
 
 export type AnthropicServiceConfig = {
@@ -89,7 +100,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | RateLimited> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -105,7 +116,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | RateLimited> {
     debugService.debug('[Anthropic] Generating structured data (messages: {messages}, temperature: {temperature})', {
       messages: messages.length,
       temperature: options.temperature ?? this.defaultTemperature,
@@ -148,11 +159,6 @@ export class AnthropicService {
 
     if (RateLimited.is(result)) {
       debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
-
-      throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
-        result.data.retryAfterMs,
-      );
     }
 
     return result;
@@ -206,7 +212,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<string> {
+  ): Promise<string | RateLimited> {
     debugService.debug('[Anthropic] generateConversation (messages: {messages})', { messages: messages.length });
 
     const system = buildSystemParam(options.systemPrompt);
@@ -232,36 +238,32 @@ export class AnthropicService {
 
     if (RateLimited.is(result)) {
       debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
-
-      throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
-        result.data.retryAfterMs,
-      );
     }
 
     return result;
   }
 
   /**
-   * Streaming variant of {@link generateConversation}. Consumes a rate-limit
-   * slot before streaming starts (so an over-limit caller fails fast rather than
-   * mid-stream), then yields each text delta for a typing-indicator UX.
+   * Streaming variant of {@link generateConversation}. Takes a rate-limit slot
+   * before streaming starts, so an over-limit caller gets `RateLimited` up front
+   * rather than mid-stream. Otherwise it resolves to a generator that yields each
+   * text delta for a typing-indicator UX.
    */
-  async *streamConversation(
+  async streamConversation(
     messages: ChatMessage[],
-    options: {
-      temperature?: number;
-      systemPrompt?: string | SystemPart[];
-      signal?: AbortSignal;
-      onStart?: () => void;
-      onToken?: (chunk: string) => void;
-      onComplete?: (text: string) => void;
-      onError?: (error: Error) => void;
-    } = {},
+    options: AnthropicStreamOptions = {},
+  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
+    const slot = await this.consumeRateLimitSlot('streamConversation');
+    if (RateLimited.is(slot)) return slot;
+
+    return this.streamConversationChunks(messages, options);
+  }
+
+  private async *streamConversationChunks(
+    messages: ChatMessage[],
+    options: AnthropicStreamOptions,
   ): AsyncGenerator<string, void, unknown> {
     const system = buildSystemParam(options.systemPrompt);
-
-    await this.consumeRateLimitSlot('streamConversation');
 
     try {
       options.onStart?.();
@@ -294,19 +296,16 @@ export class AnthropicService {
    * Reserves a rate-limit slot without wrapping a function — used by streaming
    * methods so the limit is checked before the generator starts yielding.
    */
-  private async consumeRateLimitSlot(key: string): Promise<void> {
-    const result = await rateLimiters.anthropic.execute(key, async () => undefined);
+  private async consumeRateLimitSlot(key: string): Promise<RateLimited | undefined> {
+    const result = await rateLimiters.anthropic.execute(key, () => Promise.resolve());
 
     if (RateLimited.is(result)) {
       debugService.debug('[Anthropic] Rate limit exceeded for {key} (retry after: {after}ms)', {
         key,
         after: result.data.retryAfterMs,
       });
-
-      throw new RateLimitError(
-        `Anthropic rate limit exceeded: retry after ${result.data.retryAfterMs}ms`,
-        result.data.retryAfterMs,
-      );
+      return result;
     }
+    return;
   }
 }

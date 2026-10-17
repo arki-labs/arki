@@ -7,6 +7,8 @@
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
+import type { RateLimited } from '../failures.ts';
+
 /**
  * Message format for conversation-based interactions
  */
@@ -117,21 +119,21 @@ export type LLMProvider = {
    *
    * @param prompt - The input prompt
    * @param options - Generation options
-   * @returns Generated text
+   * @returns Generated text, or `RateLimited` when the provider's local rate limiter refuses the call
    */
-  generateText(prompt: string, options?: GenerateOptions): Promise<string>;
+  generateText(prompt: string, options?: GenerateOptions): Promise<string | RateLimited>;
 
   /**
    * Generate text from a conversation history
    *
    * @param messages - Array of conversation messages
    * @param options - Generation options
-   * @returns Generated response text
+   * @returns Generated response text, or `RateLimited` when the provider's local rate limiter refuses the call
    */
   generateConversation(
     messages: Message[],
     options?: GenerateOptions,
-  ): Promise<string>;
+  ): Promise<string | RateLimited>;
 
   /**
    * Stream text generation from a single prompt

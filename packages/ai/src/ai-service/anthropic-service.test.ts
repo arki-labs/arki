@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { GenerationError, RateLimitError } from '../errors';
+import { orThrow } from '@arki/failure';
+
+import { GenerationError } from '../errors';
 import { RateLimited } from '../failures';
 import { rateLimiters } from '../utils/rate-limiter';
 
@@ -104,20 +106,16 @@ describe('AnthropicService — conversation', () => {
       expect(executeSpy).toHaveBeenCalledWith('generateConversation', expect.any(Function));
     });
 
-    it('throws RateLimitError when the limiter returns RateLimited', async () => {
-      // The service keeps a plain Promise<string> result, so it turns the limiter's failure into its own throw.
+    it('returns RateLimited when the limiter refuses, so the caller can wait instead of catching', async () => {
       const executeSpy = vi.spyOn(rateLimiters.anthropic, 'execute').mockResolvedValue(
         RateLimited({ retryAfterMs: 4000 }),
       );
 
       const svc = new AnthropicService();
-      await expect(svc.generateConversation([{ role: 'user', content: 'hi' }])).rejects.toMatchObject({
-        name: 'RateLimitError',
-        retryAfter: 4000,
-      });
-      await expect(svc.generateConversation([{ role: 'user', content: 'hi' }])).rejects.toThrow(
-        RateLimitError,
-      );
+      const result = await svc.generateConversation([{ role: 'user', content: 'hi' }]);
+
+      expect(RateLimited.is(result) && result.data.retryAfterMs).toBe(4000);
+      expect(mockedGenerateText).not.toHaveBeenCalled();
 
       executeSpy.mockRestore();
     });
@@ -134,9 +132,9 @@ describe('AnthropicService — conversation', () => {
 
       const out: string[] = [];
       let completed: string | undefined;
-      for await (const chunk of svc.streamConversation([{ role: 'user', content: 'tell a story' }], {
+      for await (const chunk of await orThrow(svc.streamConversation([{ role: 'user', content: 'tell a story' }], {
         onComplete: (full) => { completed = full; },
-      })) {
+      }))) {
         out.push(chunk);
       }
 
@@ -150,12 +148,26 @@ describe('AnthropicService — conversation', () => {
 
       let captured: Error | undefined;
       const svc = new AnthropicService();
-      const gen = svc.streamConversation([{ role: 'user', content: 'hi' }], {
+      const gen = await orThrow(svc.streamConversation([{ role: 'user', content: 'hi' }], {
         onError: (e) => { captured = e; },
-      });
+      }));
 
       await expect(gen.next()).rejects.toThrow(GenerationError);
       expect(captured).toBeInstanceOf(Error);
+    });
+
+    it('returns RateLimited before the stream starts when no slot is free', async () => {
+      const executeSpy = vi.spyOn(rateLimiters.anthropic, 'execute').mockResolvedValue(
+        RateLimited({ retryAfterMs: 3000 }),
+      );
+
+      const svc = new AnthropicService();
+      const stream = await svc.streamConversation([{ role: 'user', content: 'hi' }]);
+
+      expect(RateLimited.is(stream)).toBe(true);
+      expect(mockedStreamText).not.toHaveBeenCalled();
+
+      executeSpy.mockRestore();
     });
   });
 });
