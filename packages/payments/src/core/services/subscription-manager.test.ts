@@ -114,7 +114,7 @@ describe('cancelSubscription', () => {
     const canceledAt = instant('2026-01-21T10:00:00.000Z');
     const manager = managerWith(current => ({ ...current, status: 'canceled', canceledAt }));
 
-    await manager.cancelSubscription(id, { immediately: true });
+    await orThrow(manager.cancelSubscription(id, { immediately: true }));
 
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'canceled', canceledAt });
     expect(await eventTypesOf(db, 'subscription', id)).toEqual(['SubscriptionCreated', 'SubscriptionCanceled']);
@@ -174,7 +174,9 @@ describe('setCancelAtPeriodEnd', () => {
   it('sets and clears the flag with the provider, keeps the status, and records one event each time', async () => {
     const { id } = await seedSubscription(writes, 'active');
     const flagged = async (cancelAtPeriodEnd: boolean) => {
-      await managerWith(current => ({ ...current, cancelAtPeriodEnd })).setCancelAtPeriodEnd(id, cancelAtPeriodEnd);
+      await orThrow(
+        managerWith(current => ({ ...current, cancelAtPeriodEnd })).setCancelAtPeriodEnd(id, cancelAtPeriodEnd),
+      );
 
       return subscriptionRow(db, id);
     };
@@ -228,11 +230,11 @@ describe('pauseSubscription and resumeSubscription', () => {
   it('a pause and a resume each store the provider status and record one event', async () => {
     const { id } = await seedSubscription(writes, 'active');
 
-    await managerWith(current => ({ ...current, status: 'paused' })).pauseSubscription(id);
+    await orThrow(managerWith(current => ({ ...current, status: 'paused' })).pauseSubscription(id));
 
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'paused' });
 
-    await managerWith(current => ({ ...current, status: 'active' })).resumeSubscription(id);
+    await orThrow(managerWith(current => ({ ...current, status: 'active' })).resumeSubscription(id));
 
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
     expect(await eventTypesOf(db, 'subscription', id)).toEqual([
@@ -245,7 +247,7 @@ describe('pauseSubscription and resumeSubscription', () => {
   it('only an active subscription can be paused: a paused one is refused, nothing written', async () => {
     const { id } = await seedSubscription(writes, 'active');
     const manager = managerWith(current => ({ ...current, status: 'paused' }));
-    await manager.pauseSubscription(id);
+    await orThrow(manager.pauseSubscription(id));
 
     await expectRefused(
       () => manager.pauseSubscription(id),

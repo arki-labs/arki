@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { PaymentId } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
@@ -55,14 +56,16 @@ let counter = 0;
 async function payment(options: { customer?: typeof customerId; amount: string; description?: string }): Promise<PaymentId> {
   counter += 1;
   const customer = options.customer ?? customerId;
-  const created = await writes.initiatePayment({
-    userId: customer === customerId ? userId : adminId,
-    customerId: customer,
-    providerPaymentId: `pi_cmp_${counter}`,
-    amount: { amount: options.amount, currency: 'EUR' },
-    description: options.description,
-  });
-  await writes.completePayment({ paymentId: created.id });
+  const created = await orThrow(
+    writes.initiatePayment({
+      userId: customer === customerId ? userId : adminId,
+      customerId: customer,
+      providerPaymentId: `pi_cmp_${counter}`,
+      amount: { amount: options.amount, currency: 'EUR' },
+      description: options.description,
+    }),
+  );
+  await orThrow(writes.completePayment({ paymentId: created.id }));
 
   return created.id;
 }

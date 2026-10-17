@@ -172,7 +172,8 @@ export class SubscriptionManager {
       if (isFailure(updatedSubscription)) return updatedSubscription;
 
       // The provider moved the plan; store it. The provider's answer says which plan it is on now.
-      await this.writes.changeSubscriptionPlan({ subscriptionId, planId: updatedSubscription.planId });
+      const stored = await this.writes.changeSubscriptionPlan({ subscriptionId, planId: updatedSubscription.planId });
+      if (isFailure(stored)) return stored;
 
       return {
         subscription: updatedSubscription,
@@ -203,10 +204,11 @@ export class SubscriptionManager {
       const updatedSubscription = await this.paymentProvider.updateSubscription(subscriptionId, { cancelAtPeriodEnd });
       if (isFailure(updatedSubscription)) return updatedSubscription;
 
-      await this.writes.setSubscriptionCancelAtPeriodEnd({
+      const stored = await this.writes.setSubscriptionCancelAtPeriodEnd({
         subscriptionId,
         cancelAtPeriodEnd: updatedSubscription.cancelAtPeriodEnd,
       });
+      if (isFailure(stored)) return stored;
 
       return updatedSubscription;
     } catch (error) {
@@ -240,12 +242,13 @@ export class SubscriptionManager {
       if (isFailure(canceledSubscription)) return canceledSubscription;
 
       // Update our database
-      await this.writes.cancelSubscription({
+      const stored = await this.writes.cancelSubscription({
         subscriptionId,
         status: canceledSubscription.status,
         canceledAt: canceledSubscription.canceledAt,
         cancelAtPeriodEnd: canceledSubscription.cancelAtPeriodEnd,
       });
+      if (isFailure(stored)) return stored;
 
       return canceledSubscription;
     } catch (error) {
@@ -272,7 +275,11 @@ export class SubscriptionManager {
       if (isFailure(reactivatedSubscription)) return reactivatedSubscription;
 
       // Update our database. The event clears the cancellation.
-      await this.writes.reactivateSubscription({ subscriptionId, status: reactivatedSubscription.status });
+      const stored = await this.writes.reactivateSubscription({
+        subscriptionId,
+        status: reactivatedSubscription.status,
+      });
+      if (isFailure(stored)) return stored;
 
       return reactivatedSubscription;
     } catch (error) {
@@ -299,7 +306,8 @@ export class SubscriptionManager {
       if (isFailure(pausedSubscription)) return pausedSubscription;
 
       // Update our database
-      await this.writes.pauseSubscription({ subscriptionId, status: pausedSubscription.status });
+      const stored = await this.writes.pauseSubscription({ subscriptionId, status: pausedSubscription.status });
+      if (isFailure(stored)) return stored;
 
       return pausedSubscription;
     } catch (error) {
@@ -326,7 +334,8 @@ export class SubscriptionManager {
       if (isFailure(resumedSubscription)) return resumedSubscription;
 
       // Update our database
-      await this.writes.resumeSubscription({ subscriptionId, status: resumedSubscription.status });
+      const stored = await this.writes.resumeSubscription({ subscriptionId, status: resumedSubscription.status });
+      if (isFailure(stored)) return stored;
 
       return resumedSubscription;
     } catch (error) {

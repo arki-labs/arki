@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { PaymentId } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
@@ -58,17 +59,20 @@ async function payment(options: {
 }): Promise<PaymentId> {
   paymentCounter += 1;
   const customer = options.customer ?? customerId;
-  const created = await writes.initiatePayment({
-    userId: customer === customerId ? userId : adminId,
-    customerId: customer,
-    providerPaymentId: `pi_tax_${paymentCounter}`,
-    amount: { amount: options.amount, currency: options.currency ?? 'USD' },
-    description: options.description,
-    metadata: options.metadata,
-  });
+  const created = await orThrow(
+    writes.initiatePayment({
+      userId: customer === customerId ? userId : adminId,
+      customerId: customer,
+      providerPaymentId: `pi_tax_${paymentCounter}`,
+      amount: { amount: options.amount, currency: options.currency ?? 'USD' },
+      description: options.description,
+      metadata: options.metadata,
+    }),
+  );
   if (options.settle === undefined || options.settle === 'succeeded')
-    await writes.completePayment({ paymentId: created.id });
-  if (options.settle === 'failed') await writes.failPayment({ paymentId: created.id, failureReason: 'declined' });
+    await orThrow(writes.completePayment({ paymentId: created.id }));
+  if (options.settle === 'failed')
+    await orThrow(writes.failPayment({ paymentId: created.id, failureReason: 'declined' }));
 
   return created.id;
 }

@@ -47,6 +47,8 @@ Answers a correct caller must handle are returned as [`@arki/failure`](https://w
 
 Import the provider failures from `@arki/payments/core/providers/provider-error` and the refund failures from `@arki/payments/refunds`. When the provider returns a failure while a refund is paid back, the refund still ends `failed`, as when the provider throws.
 
+The journal commands (`createCoreJournal(...).commands`, `createRefundsJournal(...).commands`) and the `writes(run)` functions return the journal's own failures when a rule says no, and write nothing: `CommandNotFound` (`journal.not_found`, 404), `CommandConflict` (`journal.conflict`, 409) and `CommandInvalid` (`journal.invalid`, 400), from `@arki/journal`. Their `detail` is the message. `SubscriptionManager`, `DunningService.handlePaymentFailure` and `handleSubscriptionRecovery`, and `RefundService` return them on. The webhook handler throws them with `orThrow`, so a refused write fails the event and the provider's resend tries it again.
+
 ## Consuming app integration
 
 Every consuming app must:

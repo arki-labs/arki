@@ -14,7 +14,8 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { isInstant } from '@arki/date';
-import { CommandError } from '@arki/journal';
+import { orThrow } from '@arki/failure';
+import { CommandConflict } from '@arki/journal';
 
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
@@ -86,7 +87,7 @@ function dunningWith(rule: DunningRule, retryStatus: PaymentStatus = 'succeeded'
 async function failedPaymentOn(service: DunningService) {
   const subscription = await seedSubscription(writes, 'active');
   const payment = await seedPayment(writes, subscription.id);
-  await service.handlePaymentFailure(payment.id, subscription.id, 'card_declined');
+  await orThrow(service.handlePaymentFailure(payment.id, subscription.id, 'card_declined'));
 
   return subscription.id;
 }
@@ -118,7 +119,7 @@ describe('handlePaymentFailure', () => {
     const secondPayment = await seedPayment(writes, id);
     const eventsBefore = await eventTypesOf(db, 'subscription', id);
 
-    await service.handlePaymentFailure(secondPayment.id, id, 'card_declined');
+    await orThrow(service.handlePaymentFailure(secondPayment.id, id, 'card_declined'));
 
     expect(await eventTypesOf(db, 'subscription', id)).toEqual(eventsBefore);
   });
@@ -237,7 +238,7 @@ describe('handleSubscriptionRecovery', () => {
     const service = dunningWith(ruleDoing('email'));
     const id = await failedPaymentOn(service);
 
-    await service.handleSubscriptionRecovery(id);
+    await orThrow(service.handleSubscriptionRecovery(id));
 
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
     expect(await eventTypesOf(db, 'subscription', id)).toEqual([
@@ -256,7 +257,7 @@ describe('handleSubscriptionRecovery', () => {
     const { id } = await seedSubscription(writes, 'active');
     const eventsBefore = await countEvents(db);
 
-    await service.handleSubscriptionRecovery(id);
+    await orThrow(service.handleSubscriptionRecovery(id));
 
     expect(await countEvents(db)).toBe(eventsBefore);
   });
@@ -266,10 +267,10 @@ describe('handleSubscriptionRecovery', () => {
     const { id } = await seedSubscription(writes, 'canceled');
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(service.handleSubscriptionRecovery(id));
+    const refused = await service.handleSubscriptionRecovery(id);
 
-    expect(error).toBeInstanceOf(CommandError);
-    expect(error).toMatchObject({ code: 'CONFLICT', message: `Cannot activate canceled subscription ${id}` });
+    expect(CommandConflict.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ message: `Cannot activate canceled subscription ${id}` });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'canceled' });
   });

@@ -24,7 +24,8 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { CommandError } from '@arki/journal';
+import { isFailure } from '@arki/failure';
+import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal';
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../tables.js';
@@ -88,9 +89,9 @@ export type MarkPaymentRequiresActionInput = z.input<typeof markPaymentRequiresA
 export type RecordPaymentRefundInput = z.input<typeof recordPaymentRefundInputSchema>;
 export type RecordPaymentDisputeInput = z.input<typeof recordPaymentDisputeInputSchema>;
 
-function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow {
+function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow | CommandNotFound {
   if (!row) {
-    throw new CommandError('NOT_FOUND', `Payment ${paymentId} not found`);
+    return CommandNotFound({ detail: `Payment ${paymentId} not found` });
   }
 
   return row;
@@ -203,7 +204,7 @@ export function createPaymentJournal<
 
     return write(payment, paymentId, row => {
       if (row) {
-        throw new CommandError('CONFLICT', `Payment ${paymentId} already exists with status ${row.status}`);
+        return CommandConflict({ detail: `Payment ${paymentId} already exists with status ${row.status}` });
       }
 
       return [
@@ -228,9 +229,10 @@ export function createPaymentJournal<
   const completePayment = j.command('completePayment', completePaymentInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
+      if (isFailure(current)) return current;
 
       if (!isOpen(current.status) && current.status !== 'failed') {
-        throw new CommandError('CONFLICT', `Cannot complete payment with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot complete payment with status ${current.status}` });
       }
 
       return [PaymentCompleted({ receiptUrl: input.receiptUrl ?? null })];
@@ -241,9 +243,10 @@ export function createPaymentJournal<
   const failPayment = j.command('failPayment', failPaymentInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
+      if (isFailure(current)) return current;
 
       if (!isOpen(current.status)) {
-        throw new CommandError('CONFLICT', `Cannot fail payment with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot fail payment with status ${current.status}` });
       }
 
       return [PaymentFailed({ failureReason: input.failureReason })];
@@ -253,9 +256,10 @@ export function createPaymentJournal<
   const cancelPayment = j.command('cancelPayment', cancelPaymentInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
+      if (isFailure(current)) return current;
 
       if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled') {
-        throw new CommandError('CONFLICT', `Cannot cancel payment with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot cancel payment with status ${current.status}` });
       }
 
       return [PaymentCanceled({})];
@@ -269,13 +273,14 @@ export function createPaymentJournal<
     (input, { write }) =>
       write(payment, input.paymentId, row => {
         const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
         if (current.status === 'requires_action') {
           return [];
         }
 
         if (!isOpen(current.status)) {
-          throw new CommandError('CONFLICT', `Cannot mark payment with status ${current.status} as requiring action`);
+          return CommandConflict({ detail: `Cannot mark payment with status ${current.status} as requiring action` });
         }
 
         return [PaymentRequiresAction({})];
@@ -289,20 +294,20 @@ export function createPaymentJournal<
   const recordPaymentRefund = j.command('recordPaymentRefund', recordPaymentRefundInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'succeeded') {
-        throw new CommandError('CONFLICT', `Cannot refund payment with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot refund payment with status ${current.status}` });
       }
       if (input.refundedAmount.currency.code !== current.currency.toUpperCase()) {
-        throw new CommandError(
-          'BAD_REQUEST',
-          `Refund is in ${input.refundedAmount.currency.code}, payment is in ${current.currency}`,
-        );
+        return CommandInvalid({
+          detail: `Refund is in ${input.refundedAmount.currency.code}, payment is in ${current.currency}`,
+        });
       }
 
       const refundedMinor = toMinorColumn(input.refundedAmount);
       if (refundedMinor > current.amountMinor) {
-        throw new CommandError('BAD_REQUEST', `Refund of ${refundedMinor} exceeds the payment of ${current.amountMinor}`);
+        return CommandInvalid({ detail: `Refund of ${refundedMinor} exceeds the payment of ${current.amountMinor}` });
       }
       // Not higher than what is recorded: a resent or out-of-order report
       if (refundedMinor <= current.refundedAmountMinor) {
@@ -320,6 +325,7 @@ export function createPaymentJournal<
     (input, { write }) =>
       write(payment, input.paymentId, row => {
         const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
         if (current.disputeId === input.disputeId && current.disputeStatus === input.status) {
           return [];

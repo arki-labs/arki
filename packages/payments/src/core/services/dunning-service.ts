@@ -187,7 +187,7 @@ export class DunningService {
     paymentId: PaymentId,
     subscriptionId: SubscriptionId,
     failureReason?: string,
-  ): Promise<void> {
+  ) {
     try {
       const payment = await this.paymentRepository.findPaymentById(paymentId);
       const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -224,9 +224,11 @@ export class DunningService {
       }
 
       // Update subscription status to past_due
-      await this.writes.markSubscriptionPastDue({ subscriptionId });
+      const marked = await this.writes.markSubscriptionPastDue({ subscriptionId });
+      if (isFailure(marked)) return marked;
 
       console.log(`Initiated dunning process for payment ${paymentId} on subscription ${subscriptionId}`);
+      return;
     } catch (error) {
       console.error('Error handling payment failure:', error);
       throw error;
@@ -340,8 +342,16 @@ export class DunningService {
 
       if (retryResult.status === 'succeeded') {
         // Payment recovered - update subscription status.
-        // A canceled subscription stays canceled: the command rejects and the catch below logs it.
-        await this.writes.activateSubscription({ subscriptionId: event.subscriptionId });
+        // A canceled subscription stays canceled: the command refuses, and the refusal is logged.
+        const activated = await this.writes.activateSubscription({ subscriptionId: event.subscriptionId });
+        if (isFailure(activated)) {
+          logger.warn('Could not reactivate subscription {subscriptionId}: {code}', {
+            subscriptionId: event.subscriptionId,
+            code: activated.code,
+            failure: activated,
+          });
+          return;
+        }
 
         // Remove remaining dunning events for this subscription
         this.cancelDunningEventsForSubscription(event.subscriptionId);
@@ -372,7 +382,15 @@ export class DunningService {
       }
 
       // Update local database
-      await this.writes.pauseSubscription({ subscriptionId: event.subscriptionId });
+      const stored = await this.writes.pauseSubscription({ subscriptionId: event.subscriptionId });
+      if (isFailure(stored)) {
+        logger.warn('Could not store the pause of subscription {subscriptionId}: {code}', {
+          subscriptionId: event.subscriptionId,
+          code: stored.code,
+          failure: stored,
+        });
+        return;
+      }
 
       console.log(`Paused subscription ${event.subscriptionId} due to payment failure`);
     } catch (error) {
@@ -400,11 +418,19 @@ export class DunningService {
       }
 
       // Update local database
-      await this.writes.cancelSubscription({
+      const stored = await this.writes.cancelSubscription({
         subscriptionId: event.subscriptionId,
         status: 'canceled',
         canceledAt: now(),
       });
+      if (isFailure(stored)) {
+        logger.warn('Could not store the cancellation of subscription {subscriptionId}: {code}', {
+          subscriptionId: event.subscriptionId,
+          code: stored.code,
+          failure: stored,
+        });
+        return;
+      }
 
       // Remove remaining dunning events
       this.cancelDunningEventsForSubscription(event.subscriptionId);
@@ -436,12 +462,14 @@ export class DunningService {
   /**
    * Handle subscription recovery (payment succeeded after failure)
    */
-  async handleSubscriptionRecovery(subscriptionId: SubscriptionId): Promise<void> {
+  /** Nothing, or the failure of the write: a canceled subscription is not brought back. */
+  async handleSubscriptionRecovery(subscriptionId: SubscriptionId) {
     // Cancel remaining dunning events
     this.cancelDunningEventsForSubscription(subscriptionId);
 
-    // Update subscription status. A canceled subscription is not brought back: the command rejects.
-    await this.writes.activateSubscription({ subscriptionId });
+    // Update subscription status. A canceled subscription is not brought back: the command refuses.
+    const activated = await this.writes.activateSubscription({ subscriptionId });
+    if (isFailure(activated)) return activated;
 
     // Create recovery event for analytics
     const recoveryEvent: DunningEvent = {
@@ -456,6 +484,7 @@ export class DunningService {
     this.dunningEvents.set(recoveryEvent.id, recoveryEvent);
 
     console.log(`Subscription ${subscriptionId} recovered from dunning`);
+    return;
   }
 
   /**

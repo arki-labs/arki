@@ -9,6 +9,8 @@ import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { RefundWrites } from './journal.js';
 import { runnerOn, seedPayment } from '../service-test-support.js';
 import { adminId, openDb, refundsTables, typed, userId } from '../test-support.js';
@@ -36,16 +38,18 @@ afterAll(async () => {
 describe('RefundRepository.findByProviderRefundId', () => {
   it('finds the refund that was completed with that Stripe id, and no other', async () => {
     const payment = await seedPayment(coreWrites, null, '25');
-    const refund = await writes.requestRefund({
-      paymentId: payment.id,
-      originalAmount: { amount: '25', currency: 'USD' },
-      refundAmount: { amount: '10', currency: 'USD' },
-      reason: 'customer_request',
-      requestedBy: userId,
-    });
-    await writes.approveRefund({ refundId: refund.id, approvedBy: adminId });
-    await writes.processRefund({ refundId: refund.id });
-    await writes.completeRefund({ refundId: refund.id, providerRefundId: 're_lookup' });
+    const refund = await orThrow(
+      writes.requestRefund({
+        paymentId: payment.id,
+        originalAmount: { amount: '25', currency: 'USD' },
+        refundAmount: { amount: '10', currency: 'USD' },
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
+    await orThrow(writes.approveRefund({ refundId: refund.id, approvedBy: adminId }));
+    await orThrow(writes.processRefund({ refundId: refund.id }));
+    await orThrow(writes.completeRefund({ refundId: refund.id, providerRefundId: 're_lookup' }));
 
     expect(await repo.findByProviderRefundId('re_lookup')).toMatchObject({ id: refund.id });
     expect(await repo.findByProviderRefundId('re_unknown')).toBeNull();

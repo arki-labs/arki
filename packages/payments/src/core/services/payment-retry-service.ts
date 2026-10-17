@@ -209,7 +209,14 @@ export class PaymentRetryService {
 
     for (const attempt of pendingRetries) {
       try {
-        await this.executeRetry(attempt);
+        const executed = await this.executeRetry(attempt);
+        if (isFailure(executed)) {
+          logger.warn('Retry {attemptId} failed: {code}', {
+            attemptId: attempt.id,
+            code: executed.code,
+            failure: executed,
+          });
+        }
       } catch (error) {
         console.error(`Failed to execute retry ${attempt.id}:`, error);
         attempt.status = 'failed';
@@ -218,7 +225,8 @@ export class PaymentRetryService {
     }
   }
 
-  private async executeRetry(attempt: RetryAttempt): Promise<void> {
+  /** Nothing, or the failure of a journal write; `attempt` then says `failed` with its message. */
+  private async executeRetry(attempt: RetryAttempt) {
     attempt.status = 'executing';
     attempt.executedAt = now();
 
@@ -248,7 +256,11 @@ export class PaymentRetryService {
 
         // A declined card is a failed retry like any other: the last one ends dunning
         if (CardDeclined.is(result) && (await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber))) {
-          await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+          const ended = await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+          if (isFailure(ended)) {
+            attempt.failureReason = ended.message;
+            return ended;
+          }
         }
         return;
       }
@@ -258,7 +270,13 @@ export class PaymentRetryService {
         await this.cancelRetries(attempt.paymentId, attempt.id);
 
         if (subscription.status === 'past_due') {
-          await this.writes.activateSubscription({ subscriptionId: subscription.id });
+          const activated = await this.writes.activateSubscription({ subscriptionId: subscription.id });
+          // The money came in, but the row could not follow: the attempt counts as failed, as when the write threw
+          if (isFailure(activated)) {
+            attempt.status = 'failed';
+            attempt.failureReason = activated.message;
+            return activated;
+          }
         }
 
         console.log(`Retry attempt ${attempt.id} succeeded - payment recovered`);
@@ -269,9 +287,14 @@ export class PaymentRetryService {
         console.log(`Retry attempt ${attempt.id} failed: ${attempt.failureReason}`);
 
         if (await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber)) {
-          await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+          const ended = await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+          if (isFailure(ended)) {
+            attempt.failureReason = ended.message;
+            return ended;
+          }
         }
       }
+      return;
     } catch (error) {
       attempt.status = 'failed';
       attempt.failureReason = error instanceof Error ? error.message : 'Retry execution error';
@@ -338,13 +361,13 @@ export class PaymentRetryService {
     return currentAttemptNumber === maxAttemptNumber;
   }
 
-  private async handleFinalFailure(
-    paymentId: PaymentId,
-    subscriptionId: SubscriptionId,
-  ): Promise<void> {
+  /** Nothing, or the failure of the write: a subscription that is not there. */
+  private async handleFinalFailure(paymentId: PaymentId, subscriptionId: SubscriptionId) {
     console.log(`All retry attempts exhausted for payment ${paymentId}`);
 
-    await this.writes.markSubscriptionPastDue({ subscriptionId });
+    const marked = await this.writes.markSubscriptionPastDue({ subscriptionId });
+    if (isFailure(marked)) return marked;
+    return;
   }
 
   async cancelRetries(paymentId: PaymentId, excludeId?: string): Promise<void> {

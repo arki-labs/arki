@@ -13,6 +13,8 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
 import type { PaymentStatus, SubscriptionStatus } from '../types.js';
@@ -60,7 +62,7 @@ function providerWhereRetryEnds(retryStatus: PaymentStatus): Provider {
 async function retryOn(status: SubscriptionStatus, retryStatus: PaymentStatus) {
   const subscription = await seedSubscription(writes, 'active');
   if (status === 'past_due') {
-    await writes.markSubscriptionPastDue({ subscriptionId: subscription.id });
+    await orThrow(writes.markSubscriptionPastDue({ subscriptionId: subscription.id }));
   }
   const payment = await seedPayment(writes, subscription.id);
   const service = new PaymentRetryService(providerWhereRetryEnds(retryStatus), reads, writes, [oneRetryNow]);

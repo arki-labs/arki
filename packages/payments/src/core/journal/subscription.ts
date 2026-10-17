@@ -22,7 +22,8 @@ import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { instantSchema } from '@arki/date/zod';
-import { CommandError } from '@arki/journal';
+import { isFailure } from '@arki/failure';
+import { CommandConflict, CommandNotFound } from '@arki/journal';
 
 import type { CoreTables } from '../tables.js';
 import {
@@ -184,9 +185,9 @@ function snapshotOfDelivery(
   };
 }
 
-function requireSubscription(row: SubscriptionRow | null, subscriptionId: string): SubscriptionRow {
+function requireSubscription(row: SubscriptionRow | null, subscriptionId: string): SubscriptionRow | CommandNotFound {
   if (!row) {
-    throw new CommandError('NOT_FOUND', `Subscription ${subscriptionId} not found`);
+    return CommandNotFound({ detail: `Subscription ${subscriptionId} not found` });
   }
 
   return row;
@@ -280,7 +281,7 @@ export function createSubscriptionJournal<
 
     return write(subscription, subscriptionId, row => {
       if (row) {
-        throw new CommandError('CONFLICT', `Subscription ${subscriptionId} already exists`);
+        return CommandConflict({ detail: `Subscription ${subscriptionId} already exists` });
       }
 
       return [
@@ -321,9 +322,10 @@ export function createSubscriptionJournal<
   const cancelSubscription = j.command('cancelSubscription', cancelSubscriptionInputSchema, (input, { write }) =>
     write(subscription, input.subscriptionId, row => {
       const current = requireSubscription(row, input.subscriptionId);
+      if (isFailure(current)) return current;
 
       if (current.status === 'canceled') {
-        throw new CommandError('CONFLICT', `Subscription ${input.subscriptionId} is already canceled`);
+        return CommandConflict({ detail: `Subscription ${input.subscriptionId} is already canceled` });
       }
 
       return [
@@ -342,9 +344,10 @@ export function createSubscriptionJournal<
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
         if (current.status !== 'canceled' && current.status !== 'past_due') {
-          throw new CommandError('CONFLICT', 'Only canceled or past due subscriptions can be reactivated');
+          return CommandConflict({ detail: 'Only canceled or past due subscriptions can be reactivated' });
         }
 
         return [SubscriptionReactivated({ status: input.status })];
@@ -355,9 +358,10 @@ export function createSubscriptionJournal<
   const pauseSubscription = j.command('pauseSubscription', pauseSubscriptionInputSchema, (input, { write }) =>
     write(subscription, input.subscriptionId, row => {
       const current = requireSubscription(row, input.subscriptionId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'active' && current.status !== 'past_due') {
-        throw new CommandError('CONFLICT', 'Only active or past due subscriptions can be paused');
+        return CommandConflict({ detail: 'Only active or past due subscriptions can be paused' });
       }
 
       return [SubscriptionPaused({ status: input.status })];
@@ -367,9 +371,10 @@ export function createSubscriptionJournal<
   const resumeSubscription = j.command('resumeSubscription', resumeSubscriptionInputSchema, (input, { write }) =>
     write(subscription, input.subscriptionId, row => {
       const current = requireSubscription(row, input.subscriptionId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'paused') {
-        throw new CommandError('CONFLICT', 'Only paused subscriptions can be resumed');
+        return CommandConflict({ detail: 'Only paused subscriptions can be resumed' });
       }
 
       return [SubscriptionResumed({ status: input.status })];
@@ -383,6 +388,7 @@ export function createSubscriptionJournal<
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
         return current.planId === input.planId ? [] : [SubscriptionPlanChanged({ planId: input.planId })];
       }),
@@ -395,9 +401,10 @@ export function createSubscriptionJournal<
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
         if (current.status === 'canceled') {
-          throw new CommandError('CONFLICT', `Subscription ${input.subscriptionId} is already canceled`);
+          return CommandConflict({ detail: `Subscription ${input.subscriptionId} is already canceled` });
         }
 
         return current.cancelAtPeriodEnd === input.cancelAtPeriodEnd
@@ -413,6 +420,7 @@ export function createSubscriptionJournal<
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
         return current.status === 'past_due' ? [] : [SubscriptionPastDue({})];
       }),
@@ -422,9 +430,10 @@ export function createSubscriptionJournal<
   const activateSubscription = j.command('activateSubscription', activateSubscriptionInputSchema, (input, { write }) =>
     write(subscription, input.subscriptionId, row => {
       const current = requireSubscription(row, input.subscriptionId);
+      if (isFailure(current)) return current;
 
       if (current.status === 'canceled') {
-        throw new CommandError('CONFLICT', `Cannot activate canceled subscription ${input.subscriptionId}`);
+        return CommandConflict({ detail: `Cannot activate canceled subscription ${input.subscriptionId}` });
       }
 
       return current.status === 'active' ? [] : [SubscriptionActivated({})];

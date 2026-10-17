@@ -13,10 +13,20 @@
  *   new SubscriptionManager(provider, repo, paymentsJournal.writes(context.runCommand));
  *
  * Every write of `payments` and `subscriptions` goes through one of these
- * commands. A rejected rule throws the `CommandError` of `@arki/journal`.
+ * commands. A rejected rule returns a failure of `@arki/journal`
+ * (`CommandNotFound`, `CommandConflict`, `CommandInvalid`): nothing is written.
  */
 
-import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { Result } from '@arki/failure';
+import type {
+  CommandConflict,
+  CommandInvalid,
+  CommandNotFound,
+  CommandRunner,
+  JournalDefinitions,
+  RootDb,
+  TransactionSource,
+} from '@arki/journal';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type {
@@ -89,32 +99,43 @@ export type {
 
 /**
  * What the services call to change a payment or a subscription. Each function
- * runs one command and returns the row as it is after the write.
+ * runs one command and returns the row as it is after the write, or the
+ * failure the command returned when a rule said no (nothing was written).
  */
 export type CoreWrites = {
-  initiatePayment(input: InitiatePaymentInput): Promise<Payment>;
-  completePayment(input: CompletePaymentInput): Promise<Payment>;
-  failPayment(input: FailPaymentInput): Promise<Payment>;
-  cancelPayment(input: CancelPaymentInput): Promise<Payment>;
+  initiatePayment(input: InitiatePaymentInput): Promise<Result<Payment, CommandConflict>>;
+  completePayment(input: CompletePaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
+  failPayment(input: FailPaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
+  cancelPayment(input: CancelPaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
   /** The customer must act (for example 3-D Secure). A payment that already waits stays as it is. */
-  markPaymentRequiresAction(input: MarkPaymentRequiresActionInput): Promise<Payment>;
+  markPaymentRequiresAction(
+    input: MarkPaymentRequiresActionInput,
+  ): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
   /** The provider refunded the payment. Takes the total refunded so far; a total that is not higher writes nothing. */
-  recordPaymentRefund(input: RecordPaymentRefundInput): Promise<Payment>;
+  recordPaymentRefund(
+    input: RecordPaymentRefundInput,
+  ): Promise<Result<Payment, CommandNotFound | CommandConflict | CommandInvalid>>;
   /** A dispute opened or changed status. The same dispute and status again writes nothing. */
-  recordPaymentDispute(input: RecordPaymentDisputeInput): Promise<Payment>;
-  createSubscription(input: CreateSubscriptionInput): Promise<Subscription>;
+  recordPaymentDispute(input: RecordPaymentDisputeInput): Promise<Result<Payment, CommandNotFound>>;
+  createSubscription(input: CreateSubscriptionInput): Promise<Result<Subscription, CommandConflict>>;
   /** Create or update by the provider's subscription id. A delivery that changes nothing writes no event. */
   syncSubscription(input: SyncSubscriptionInput): Promise<Subscription>;
-  cancelSubscription(input: CancelSubscriptionInput): Promise<Subscription>;
-  reactivateSubscription(input: ReactivateSubscriptionInput): Promise<Subscription>;
-  pauseSubscription(input: PauseSubscriptionInput): Promise<Subscription>;
-  resumeSubscription(input: ResumeSubscriptionInput): Promise<Subscription>;
+  cancelSubscription(input: CancelSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
+  reactivateSubscription(
+    input: ReactivateSubscriptionInput,
+  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
+  pauseSubscription(input: PauseSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
+  resumeSubscription(input: ResumeSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
   /** The provider moved the subscription to another plan. The same plan again writes nothing. */
-  changeSubscriptionPlan(input: ChangeSubscriptionPlanInput): Promise<Subscription>;
+  changeSubscriptionPlan(input: ChangeSubscriptionPlanInput): Promise<Result<Subscription, CommandNotFound>>;
   /** Set or clear "ends at the period end", as the provider reports it. The status does not change. */
-  setSubscriptionCancelAtPeriodEnd(input: SetSubscriptionCancelAtPeriodEndInput): Promise<Subscription>;
-  markSubscriptionPastDue(input: MarkSubscriptionPastDueInput): Promise<Subscription>;
-  activateSubscription(input: ActivateSubscriptionInput): Promise<Subscription>;
+  setSubscriptionCancelAtPeriodEnd(
+    input: SetSubscriptionCancelAtPeriodEndInput,
+  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
+  markSubscriptionPastDue(input: MarkSubscriptionPastDueInput): Promise<Result<Subscription, CommandNotFound>>;
+  activateSubscription(
+    input: ActivateSubscriptionInput,
+  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
 };
 
 export function createCoreJournal<

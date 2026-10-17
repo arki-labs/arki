@@ -167,6 +167,7 @@ export class RefundService {
       approvedBy: data.approvedBy,
       notes: data.notes ?? null,
     });
+    if (isFailure(approvedRefund)) return approvedRefund;
 
     return this.processRefund(approvedRefund);
   }
@@ -184,6 +185,7 @@ export class RefundService {
       rejectedBy: data.rejectedBy,
       rejectionReason: data.reason,
     });
+    if (isFailure(rejectedRefund)) return rejectedRefund;
 
     if (this.notificationService) {
       await this.notifyCustomer(rejectedRefund, 'rejected');
@@ -212,14 +214,17 @@ export class RefundService {
    */
   private async processRefund(refund: Refund) {
     // Before the payback: a refund that could not start has nothing to mark as failed
-    await this.writes.processRefund({ refundId: refund.id });
+    const processing = await this.writes.processRefund({ refundId: refund.id });
+    if (isFailure(processing)) return processing;
 
     const outcome = await this.payBack(refund).catch(async (error: unknown) => {
-      await this.markFailed(refund, error instanceof Error ? error.message : 'Unknown error', error);
+      const marked = await this.markFailed(refund, error instanceof Error ? error.message : 'Unknown error', error);
+      if (isFailure(marked)) return marked;
       throw error;
     });
     if (isFailure(outcome)) {
-      await this.markFailed(refund, outcome.message, outcome);
+      const marked = await this.markFailed(refund, outcome.message, outcome);
+      if (isFailure(marked)) return marked;
     }
 
     return outcome;
@@ -248,6 +253,7 @@ export class RefundService {
       providerRefundId: providerResult.providerRefundId,
       providerResponse: JSON.stringify(providerResult),
     });
+    if (isFailure(completedRefund)) return completedRefund;
 
     if (this.notificationService) {
       await this.notifyCustomer(completedRefund, 'completed');
@@ -256,12 +262,15 @@ export class RefundService {
     return completedRefund;
   }
 
-  private async markFailed(refund: Refund, errorMessage: string, cause: unknown): Promise<void> {
-    await this.writes.failRefund({ refundId: refund.id, errorMessage });
+  /** Nothing when the refund is marked `failed`, or the failure of the write that would mark it. */
+  private async markFailed(refund: Refund, errorMessage: string, cause: unknown) {
+    const failed = await this.writes.failRefund({ refundId: refund.id, errorMessage });
+    if (isFailure(failed)) return failed;
 
     if (this.notificationService) {
       await this.notifySupportTeam(refund, cause);
     }
+    return;
   }
 
   /** Nothing when the payment can give back `amount`, or the failure that says why not. */

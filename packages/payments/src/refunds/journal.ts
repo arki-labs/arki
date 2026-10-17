@@ -24,6 +24,7 @@
  */
 
 import type { Instant } from '@arki/date';
+import type { Result } from '@arki/failure';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../core/user-id.js';
@@ -31,7 +32,8 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { CommandError } from '@arki/journal';
+import { isFailure } from '@arki/failure';
+import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
@@ -96,20 +98,21 @@ export type FailRefundInput = z.input<typeof failRefundInputSchema>;
 
 /**
  * What `RefundService` calls to change a refund. Each function runs one
- * command and returns the row as it is after the write.
+ * command and returns the row as it is after the write, or the failure the
+ * command returned when a rule said no (nothing was written).
  */
 export type RefundWrites = {
-  requestRefund(input: RequestRefundInput): Promise<Refund>;
-  approveRefund(input: ApproveRefundInput): Promise<Refund>;
-  rejectRefund(input: RejectRefundInput): Promise<Refund>;
-  processRefund(input: ProcessRefundInput): Promise<Refund>;
-  completeRefund(input: CompleteRefundInput): Promise<Refund>;
-  failRefund(input: FailRefundInput): Promise<Refund>;
+  requestRefund(input: RequestRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict | CommandInvalid>>;
+  approveRefund(input: ApproveRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
+  rejectRefund(input: RejectRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
+  processRefund(input: ProcessRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
+  completeRefund(input: CompleteRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
+  failRefund(input: FailRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
 };
 
-function requireRefund(row: RefundRow | null, refundId: string): RefundRow {
+function requireRefund(row: RefundRow | null, refundId: string): RefundRow | CommandNotFound {
   if (!row) {
-    throw new CommandError('NOT_FOUND', `Refund ${refundId} not found`);
+    return CommandNotFound({ detail: `Refund ${refundId} not found` });
   }
 
   return row;
@@ -249,7 +252,7 @@ export function createRefundsJournal<
       .where(eq(payments.id, input.paymentId))
       .for('update');
     if (!payment) {
-      throw new CommandError('NOT_FOUND', `Payment ${input.paymentId} not found`);
+      return CommandNotFound({ detail: `Payment ${input.paymentId} not found` });
     }
 
     const refundMinor = toMinorColumn(input.refundAmount);
@@ -271,32 +274,29 @@ export function createRefundsJournal<
 
     return write(refund, refundId, row => {
       if (row) {
-        throw new CommandError('CONFLICT', `Refund ${refundId} already exists`);
+        return CommandConflict({ detail: `Refund ${refundId} already exists` });
       }
 
       if (!input.refundAmount.hasSameCurrency(input.originalAmount)) {
-        throw new CommandError(
-          'BAD_REQUEST',
-          `Refund currency (${input.refundAmount.currency.code}) differs from the original currency (${input.originalAmount.currency.code})`,
-        );
+        return CommandInvalid({
+          detail: `Refund currency (${input.refundAmount.currency.code}) differs from the original currency (${input.originalAmount.currency.code})`,
+        });
       }
 
       if (input.refundAmount.gt(input.originalAmount)) {
-        throw new CommandError(
-          'BAD_REQUEST',
-          `Refund amount (${input.refundAmount.toString()}) cannot exceed original amount (${input.originalAmount.toString()})`,
-        );
+        return CommandInvalid({
+          detail: `Refund amount (${input.refundAmount.toString()}) cannot exceed original amount (${input.originalAmount.toString()})`,
+        });
       }
 
       if (!input.refundAmount.isPositive()) {
-        throw new CommandError('BAD_REQUEST', 'Refund amount must be positive');
+        return CommandInvalid({ detail: 'Refund amount must be positive' });
       }
 
       if (exceedsPayment) {
-        throw new CommandError(
-          'CONFLICT',
-          `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
-        );
+        return CommandConflict({
+          detail: `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
+        });
       }
 
       return [
@@ -317,9 +317,10 @@ export function createRefundsJournal<
   const approveRefund = j.command('approveRefund', approveRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'pending') {
-        throw new CommandError('CONFLICT', `Cannot approve refund with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot approve refund with status ${current.status}` });
       }
 
       return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
@@ -329,9 +330,10 @@ export function createRefundsJournal<
   const rejectRefund = j.command('rejectRefund', rejectRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'pending') {
-        throw new CommandError('CONFLICT', `Cannot reject refund with status ${current.status}`);
+        return CommandConflict({ detail: `Cannot reject refund with status ${current.status}` });
       }
 
       return [RefundRejected({ rejectedBy: input.rejectedBy, rejectionReason: input.rejectionReason })];
@@ -341,12 +343,12 @@ export function createRefundsJournal<
   const processRefund = j.command('processRefund', processRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'approved') {
-        throw new CommandError(
-          'CONFLICT',
-          `Cannot process refund with status ${current.status}. Must be approved first.`,
-        );
+        return CommandConflict({
+          detail: `Cannot process refund with status ${current.status}. Must be approved first.`,
+        });
       }
 
       return [RefundProcessed({})];
@@ -356,6 +358,7 @@ export function createRefundsJournal<
   const completeRefund = j.command('completeRefund', completeRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+      if (isFailure(current)) return current;
 
       // The provider's webhook and the service both report the same refund: the second changes nothing
       if (current.status === 'completed' && current.providerRefundId === input.providerRefundId) {
@@ -363,10 +366,9 @@ export function createRefundsJournal<
       }
 
       if (current.status !== 'processing') {
-        throw new CommandError(
-          'CONFLICT',
-          `Cannot complete refund with status ${current.status}. Must be processing first.`,
-        );
+        return CommandConflict({
+          detail: `Cannot complete refund with status ${current.status}. Must be processing first.`,
+        });
       }
 
       return [
@@ -381,12 +383,12 @@ export function createRefundsJournal<
   const failRefund = j.command('failRefund', failRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+      if (isFailure(current)) return current;
 
       if (current.status !== 'processing') {
-        throw new CommandError(
-          'CONFLICT',
-          `Cannot fail refund with status ${current.status}. Must be processing first.`,
-        );
+        return CommandConflict({
+          detail: `Cannot fail refund with status ${current.status}. Must be processing first.`,
+        });
       }
 
       return [RefundFailed({ errorMessage: input.errorMessage })];

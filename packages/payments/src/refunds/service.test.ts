@@ -238,12 +238,14 @@ describe('requestRefund', () => {
     const service = serviceWith(providerThatRefunds);
     const payment = await seedPayment(coreWrites, null, '0.30');
 
-    await service.requestRefund({
-      paymentId: payment.id,
-      amount: money('0.10', 'USD'),
-      reason: 'billing_error',
-      requestedBy: userId,
-    });
+    await orThrow(
+      service.requestRefund({
+        paymentId: payment.id,
+        amount: money('0.10', 'USD'),
+        reason: 'billing_error',
+        requestedBy: userId,
+      }),
+    );
     const second = await service.requestRefund({
       paymentId: payment.id,
       amount: money('0.20', 'USD'),
@@ -287,12 +289,14 @@ describe('requestRefund', () => {
   it('a JPY refund reaches the provider as 1500 JPY, never divided by 100', async () => {
     const payment = await seedPayment(coreWrites, null, '5000', 'JPY');
 
-    await serviceWith(providerThatRefunds).requestRefund({
-      paymentId: payment.id,
-      amount: money(1500, 'JPY'),
-      reason: 'billing_error',
-      requestedBy: userId,
-    });
+    await orThrow(
+      serviceWith(providerThatRefunds).requestRefund({
+        paymentId: payment.id,
+        amount: money(1500, 'JPY'),
+        reason: 'billing_error',
+        requestedBy: userId,
+      }),
+    );
 
     expect(askedToRefund.at(-1)?.toString()).toBe('1500 JPY');
   });
@@ -413,7 +417,7 @@ describe('approveRefund', () => {
   it('a refund that was already decided cannot be approved again: refused, nothing written', async () => {
     const service = serviceWith(providerThatRefunds);
     const pending = await pendingRefund(service);
-    await service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' });
+    await orThrow(service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' }));
     const eventsBefore = await countEvents(db);
 
     const refused = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
@@ -501,12 +505,14 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
   it('a second request for a payment that already has a pending refund is refused', async () => {
     const service = serviceWith(providerThatRefunds);
     const payment = await seedPayment(coreWrites, null, '100');
-    await service.requestRefund({
-      paymentId: payment.id,
-      amount: money(40, 'USD'),
-      reason: 'customer_request',
-      requestedBy: userId,
-    });
+    await orThrow(
+      service.requestRefund({
+        paymentId: payment.id,
+        amount: money(40, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
     const eventsBefore = await countEvents(db);
 
     const refused = await service.requestRefund({
@@ -532,7 +538,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
         requestedBy: userId,
       }),
     );
-    await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
+    await orThrow(service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' }));
 
     const second = await service.requestRefund({
       paymentId: payment.id,
@@ -550,16 +556,18 @@ describe('what a payment can still refund', () => {
     'a %s refund already counts: a request over the rest is refused with RefundAmountExceeded',
     async stage => {
       const payment = await seedPayment(coreWrites, null, '100');
-      const earlier = await writes.requestRefund({
-        paymentId: payment.id,
-        originalAmount: { amount: '100', currency: 'USD' },
-        refundAmount: { amount: '80', currency: 'USD' },
-        reason: 'customer_request',
-        requestedBy: userId,
-      });
-      await writes.approveRefund({ refundId: earlier.id, approvedBy: adminId });
+      const earlier = await orThrow(
+        writes.requestRefund({
+          paymentId: payment.id,
+          originalAmount: { amount: '100', currency: 'USD' },
+          refundAmount: { amount: '80', currency: 'USD' },
+          reason: 'customer_request',
+          requestedBy: userId,
+        }),
+      );
+      await orThrow(writes.approveRefund({ refundId: earlier.id, approvedBy: adminId }));
       if (stage === 'processing') {
-        await writes.processRefund({ refundId: earlier.id });
+        await orThrow(writes.processRefund({ refundId: earlier.id }));
       }
       const eventsBefore = await countEvents(db);
 
@@ -586,7 +594,7 @@ describe('what a payment can still refund', () => {
         requestedBy: userId,
       }),
     );
-    await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
+    await orThrow(service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' }));
 
     const second = await service.requestRefund({
       paymentId: payment.id,
@@ -617,7 +625,7 @@ describe('two requests at once for one payment', () => {
       { systemUserId: adminId },
     );
     const payment = await seedPayment(coreWrites, null, '100');
-    await blind.requestRefund(request(payment.id, money(40, 'USD')));
+    await orThrow(blind.requestRefund(request(payment.id, money(40, 'USD'))));
 
     const refused = await blind.requestRefund(request(payment.id, money(20, 'USD')));
 

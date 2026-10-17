@@ -19,6 +19,7 @@ import { asc, eq, isNotNull } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { add, fromUnix, now, sub } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { AppDb } from '../../test-support.js';
 import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
@@ -537,7 +538,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
   it('payment.refunded records the total Stripe refunded on a collected payment', async () => {
     const seeded = await seedPayment(writesOn(db), null, '25');
-    await writesOn(db).completePayment({ paymentId: seeded.id });
+    await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
     const charge = stripeCharge(seeded.providerPaymentId, { amount_refunded: 1000, currency: 'usd' });
 
     expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject({ success: true });
@@ -582,17 +583,19 @@ const refundsOn = (): WebhookRefunds => ({ reads: refundReads(db), writes: typed
 /** A collected payment of 25 and a refund of 10 of it that was handed to Stripe and not yet completed. */
 async function refundInFlight() {
   const payment = await seedPayment(writesOn(db), null, '25');
-  await writesOn(db).completePayment({ paymentId: payment.id });
+  await orThrow(writesOn(db).completePayment({ paymentId: payment.id }));
   const refundWrites = typed.refunds.writes(runnerOn(db));
-  const refund = await refundWrites.requestRefund({
-    paymentId: payment.id,
-    originalAmount: { amount: '25', currency: 'USD' },
-    refundAmount: { amount: '10', currency: 'USD' },
-    reason: 'customer_request',
-    requestedBy: userId,
-  });
-  await refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId });
-  await refundWrites.processRefund({ refundId: refund.id });
+  const refund = await orThrow(
+    refundWrites.requestRefund({
+      paymentId: payment.id,
+      originalAmount: { amount: '25', currency: 'USD' },
+      refundAmount: { amount: '10', currency: 'USD' },
+      reason: 'customer_request',
+      requestedBy: userId,
+    }),
+  );
+  await orThrow(refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId }));
+  await orThrow(refundWrites.processRefund({ refundId: refund.id }));
   return { payment, refund };
 }
 
@@ -637,7 +640,9 @@ function chargeWithRefund(providerPaymentId: string, refund: Record<string, unkn
 
     it('a refund the service already completed is left as it is', async () => {
       const { payment, refund } = await refundInFlight();
-      await typed.refunds.writes(runnerOn(db)).completeRefund({ refundId: refund.id, providerRefundId: 're_done' });
+      await orThrow(
+        typed.refunds.writes(runnerOn(db)).completeRefund({ refundId: refund.id, providerRefundId: 're_done' }),
+      );
       const eventsBefore = await eventTypesOf(db, 'refund', refund.id);
       const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_done', metadata: { refundId: refund.id } });
 
@@ -708,7 +713,7 @@ function chargeWithRefund(providerPaymentId: string, refund: Record<string, unkn
 
   it('payment.dispute_created records the dispute on the payment', async () => {
     const seeded = await seedPayment(writesOn(db), null);
-    await writesOn(db).completePayment({ paymentId: seeded.id });
+    await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
     const dispute = {
       id: 'dp_webhook_1',
       object: 'dispute',
@@ -770,7 +775,7 @@ function chargeWithRefund(providerPaymentId: string, refund: Record<string, unkn
 
   it('payment.failed for a payment that already succeeded changes nothing: the money was taken', async () => {
     const seeded = await seedPayment(writesOn(db), null);
-    await writesOn(db).completePayment({ paymentId: seeded.id });
+    await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
     const eventsBefore = await countEvents(db);
     const eventId = freshEventId();
 

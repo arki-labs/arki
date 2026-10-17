@@ -12,6 +12,7 @@ import { and, eq, gte, lte } from 'drizzle-orm';
 import type { UserId } from './core/user-id.js';
 import type { Instant } from '@arki/date';
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { CoreWrites } from './core/journal.js';
 import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from './core/types.js';
@@ -130,16 +131,18 @@ let next = 0;
 export function seedSubscription(writes: CoreWrites, status: SubscriptionStatus): Promise<Subscription> {
   next += 1;
 
-  return writes.createSubscription({
-    userId,
-    planId,
-    customerId,
-    providerSubscriptionId: `psub_service_${next}`,
-    status,
-    currentPeriodStart: instant('2026-01-01T00:00:00.000Z'),
-    currentPeriodEnd: instant('2026-02-01T00:00:00.000Z'),
-    canceledAt: status === 'canceled' ? instant('2026-01-15T00:00:00.000Z') : null,
-  });
+  return orThrow(
+    writes.createSubscription({
+      userId,
+      planId,
+      customerId,
+      providerSubscriptionId: `psub_service_${next}`,
+      status,
+      currentPeriodStart: instant('2026-01-01T00:00:00.000Z'),
+      currentPeriodEnd: instant('2026-02-01T00:00:00.000Z'),
+      canceledAt: status === 'canceled' ? instant('2026-01-15T00:00:00.000Z') : null,
+    }),
+  );
 }
 
 /** A stored `pending` payment, written by the `initiatePayment` command. */
@@ -151,13 +154,15 @@ export function seedPayment(
 ): Promise<Payment> {
   next += 1;
 
-  return writes.initiatePayment({
-    subscriptionId,
-    userId,
-    customerId,
-    providerPaymentId: `pi_service_${next}`,
-    amount: { amount, currency },
-  });
+  return orThrow(
+    writes.initiatePayment({
+      subscriptionId,
+      userId,
+      customerId,
+      providerPaymentId: `pi_service_${next}`,
+      amount: { amount, currency },
+    }),
+  );
 }
 
 export async function subscriptionRow(db: AppDb, subscriptionId: SubscriptionId) {

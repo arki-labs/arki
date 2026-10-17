@@ -19,9 +19,10 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
-import type { CommandErrorCode, CommandRunner } from '@arki/journal';
+import type { CommandConflict, CommandInvalid, CommandRunner } from '@arki/journal';
 import { fromDate } from '@arki/date';
-import { CommandError } from '@arki/journal';
+import { isFailure, orThrow } from '@arki/failure';
+import { CommandNotFound } from '@arki/journal';
 
 import type { PaymentId } from '../core/types.js';
 import type { AppDb, AppTx } from '../test-support.js';
@@ -83,19 +84,21 @@ function request(
 /** A refund moved along its path up to the given status. */
 async function seed(status: 'pending' | 'approved' | 'processing' | 'completed' | 'rejected'): Promise<RefundId> {
   const refundId = createRefundId();
-  await journal.run(db, commands.requestRefund, { refundId, ...request() }, meta);
+  await orThrow(journal.run(db, commands.requestRefund, { refundId, ...request() }, meta));
 
   if (status === 'rejected') {
-    await journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'no' }, meta);
+    await orThrow(
+      journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'no' }, meta),
+    );
   }
   if (status === 'approved' || status === 'processing' || status === 'completed') {
-    await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta);
+    await orThrow(journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta));
   }
   if (status === 'processing' || status === 'completed') {
-    await journal.run(db, commands.processRefund, { refundId }, meta);
+    await orThrow(journal.run(db, commands.processRefund, { refundId }, meta));
   }
   if (status === 'completed') {
-    await journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta);
+    await orThrow(journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta));
   }
 
   return refundId;
@@ -107,20 +110,23 @@ async function rowOf(refundId: RefundId) {
   return row;
 }
 
-/** The command must be rejected with this code and message, and must leave the journal and the row alone. */
+/** The code of a refusal: a rule of a command said no. */
+type RefusalCode = (CommandNotFound | CommandConflict | CommandInvalid)['code'];
+
+/** The command must return the failure with this code and message, and must leave the journal and the row alone. */
 async function expectRejected(
   attempt: () => Promise<unknown>,
-  code: CommandErrorCode,
+  code: RefusalCode,
   message: string,
   refundId?: RefundId,
 ) {
   const eventsBefore = await countEvents(db);
   const rowBefore = refundId ? await rowOf(refundId) : undefined;
 
-  const error = await rejectionOf(attempt());
+  const refused = await attempt();
 
-  expect(error).toBeInstanceOf(CommandError);
-  expect(error).toMatchObject({ code, message });
+  expect(isFailure(refused)).toBe(true);
+  expect(refused).toMatchObject({ code, message });
   expect(await countEvents(db)).toBe(eventsBefore);
   if (refundId) {
     expect(await rowOf(refundId)).toEqual(rowBefore);
@@ -132,11 +138,13 @@ let paymentCounter = 0;
 async function freshPayment(): Promise<PaymentId> {
   paymentCounter += 1;
   const id = createPaymentId();
-  await journal.run(
-    db,
-    typed.core.commands.initiatePayment,
-    { paymentId: id, userId, customerId, providerPaymentId: `pi_refunds_${paymentCounter}`, amount: usd('100') },
-    meta,
+  await orThrow(
+    journal.run(
+      db,
+      typed.core.commands.initiatePayment,
+      { paymentId: id, userId, customerId, providerPaymentId: `pi_refunds_${paymentCounter}`, amount: usd('100') },
+      meta,
+    ),
   );
 
   return id;
@@ -158,11 +166,13 @@ describe('requestRefund', () => {
   it('stores a pending refund with amounts in minor units of its currency', async () => {
     const refundId = createRefundId();
 
-    const result = await journal.run(
-      db,
-      commands.requestRefund,
-      { refundId, ...request(), customerNote: 'Changed my mind', metadata: '{}' },
-      meta,
+    const result = await orThrow(
+      journal.run(
+        db,
+        commands.requestRefund,
+        { refundId, ...request(), customerNote: 'Changed my mind', metadata: '{}' },
+        meta,
+      ),
     );
 
     expect(result.events.map(event => event.type)).toEqual(['RefundRequestedV2']);
@@ -189,7 +199,7 @@ describe('requestRefund', () => {
   });
 
   it('makes an id when the caller has none', async () => {
-    const result = await journal.run(db, commands.requestRefund, request(), meta);
+    const result = await orThrow(journal.run(db, commands.requestRefund, request(), meta));
 
     expect(result.row?.id).toMatch(/^rfnd/);
   });
@@ -199,7 +209,7 @@ describe('requestRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.requestRefund, { refundId, ...request() }, meta),
-      'CONFLICT',
+      'journal.conflict',
       `Refund ${refundId} already exists`,
       refundId,
     );
@@ -214,7 +224,7 @@ describe('requestRefund', () => {
           request({ originalAmount: usd('100'), refundAmount: usd('100.01') }),
           meta,
         ),
-      'BAD_REQUEST',
+      'journal.invalid',
       'Refund amount (100.01 USD) cannot exceed original amount (100.00 USD)',
     );
   });
@@ -222,7 +232,7 @@ describe('requestRefund', () => {
   it('rejects a refund of zero or less', async () => {
     await expectRejected(
       () => journal.run(db, commands.requestRefund, request({ refundAmount: usd('0') }), meta),
-      'BAD_REQUEST',
+      'journal.invalid',
       'Refund amount must be positive',
     );
   });
@@ -230,7 +240,7 @@ describe('requestRefund', () => {
   it('rejects a refund in another currency than the original: 25 EUR is not a part of 100 USD', async () => {
     await expectRejected(
       () => journal.run(db, commands.requestRefund, request({ refundAmount: { amount: '25', currency: 'EUR' } }), meta),
-      'BAD_REQUEST',
+      'journal.invalid',
       'Refund currency (EUR) differs from the original currency (USD)',
     );
   });
@@ -238,17 +248,19 @@ describe('requestRefund', () => {
   it('stores a JPY refund in yen, never multiplied or divided by 100', async () => {
     const refundId = createRefundId();
 
-    await journal.run(
-      db,
-      commands.requestRefund,
-      {
-        refundId,
-        ...request({
-          originalAmount: { amount: '5000', currency: 'JPY' },
-          refundAmount: { amount: '1500', currency: 'JPY' },
-        }),
-      },
-      meta,
+    await orThrow(
+      journal.run(
+        db,
+        commands.requestRefund,
+        {
+          refundId,
+          ...request({
+            originalAmount: { amount: '5000', currency: 'JPY' },
+            refundAmount: { amount: '1500', currency: 'JPY' },
+          }),
+        },
+        meta,
+      ),
     );
 
     expect(await rowOf(refundId)).toMatchObject({
@@ -261,11 +273,13 @@ describe('requestRefund', () => {
   it('stores a KWD refund to the fils: three decimals, which a two-decimal column used to cut', async () => {
     const refundId = createRefundId();
 
-    await journal.run(
-      db,
-      commands.requestRefund,
-      { refundId, ...request({ originalAmount: kwd('10.000'), refundAmount: kwd('1.234') }) },
-      meta,
+    await orThrow(
+      journal.run(
+        db,
+        commands.requestRefund,
+        { refundId, ...request({ originalAmount: kwd('10.000'), refundAmount: kwd('1.234') }) },
+        meta,
+      ),
     );
 
     expect(await rowOf(refundId)).toMatchObject({ originalAmountMinor: 10_000, refundAmountMinor: 1234 });
@@ -315,37 +329,40 @@ describe('a refund recorded before minor units (`RefundRequested`)', () => {
 describe('what a payment can refund, checked inside the command', () => {
   it('refuses a request over what earlier approved refunds left, and writes nothing', async () => {
     const earlier = createRefundId();
-    await journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta);
-    await journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta);
+    await orThrow(
+      journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta),
+    );
+    await orThrow(journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta));
 
     await expectRejected(
       () => journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('30') }) }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Refund of 30.00 USD exceeds what is left of the payment',
     );
   });
 
   it('lets a request through that fits what is left', async () => {
     const earlier = createRefundId();
-    await journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta);
-    await journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta);
+    await orThrow(
+      journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta),
+    );
+    await orThrow(journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta));
 
-    const result = await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('20') }) }, meta);
+    const result = await orThrow(
+      journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('20') }) }, meta),
+    );
 
     expect(result.events.map(event => event.type)).toEqual(['RefundRequestedV2']);
   });
 
   it('refuses a refund of a payment that does not exist', async () => {
-    const error = await rejectionOf(
-      journal.run(db, commands.requestRefund, { ...request(), paymentId: createPaymentId() }, meta),
-    );
+    const refused = await journal.run(db, commands.requestRefund, { ...request(), paymentId: createPaymentId() }, meta);
 
-    expect(error).toBeInstanceOf(CommandError);
-    expect(error).toMatchObject({ code: 'NOT_FOUND' });
+    expect(CommandNotFound.is(refused)).toBe(true);
   });
 
   it('the database allows one pending refund per payment', async () => {
-    await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta);
+    await orThrow(journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta));
 
     const error = await rejectionOf(
       journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta),
@@ -359,7 +376,7 @@ describe('approveRefund and rejectRefund', () => {
   it('approves a pending refund and records who approved it and when', async () => {
     const refundId = await seed('pending');
 
-    const result = await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta);
+    const result = await orThrow(journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta));
 
     expect(result.events.map(event => event.type)).toEqual(['RefundApproved']);
     const row = await rowOf(refundId);
@@ -370,7 +387,9 @@ describe('approveRefund and rejectRefund', () => {
   it("keeps the approver's notes on the row", async () => {
     const refundId = await seed('pending');
 
-    await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId, notes: 'seen the receipt' }, meta);
+    await orThrow(
+      journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId, notes: 'seen the receipt' }, meta),
+    );
 
     expect(await rowOf(refundId)).toMatchObject({ status: 'approved', approvalNotes: 'seen the receipt' });
   });
@@ -393,7 +412,7 @@ describe('approveRefund and rejectRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot approve refund with status approved',
       refundId,
     );
@@ -402,11 +421,13 @@ describe('approveRefund and rejectRefund', () => {
   it('rejects a pending refund and records who rejected it and why', async () => {
     const refundId = await seed('pending');
 
-    const result = await journal.run(
-      db,
-      commands.rejectRefund,
-      { refundId, rejectedBy: adminId, rejectionReason: 'Outside the refund window' },
-      meta,
+    const result = await orThrow(
+      journal.run(
+        db,
+        commands.rejectRefund,
+        { refundId, rejectedBy: adminId, rejectionReason: 'Outside the refund window' },
+        meta,
+      ),
     );
 
     expect(result.events.map(event => event.type)).toEqual(['RefundRejected']);
@@ -423,7 +444,7 @@ describe('approveRefund and rejectRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'late' }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot reject refund with status approved',
       refundId,
     );
@@ -434,7 +455,7 @@ describe('processRefund, completeRefund and failRefund', () => {
   it('starts processing an approved refund without a provider refund id (the provider has not answered yet)', async () => {
     const refundId = await seed('approved');
 
-    const result = await journal.run(db, commands.processRefund, { refundId }, meta);
+    const result = await orThrow(journal.run(db, commands.processRefund, { refundId }, meta));
 
     expect(result.events.map(event => event.type)).toEqual(['RefundProcessed']);
     const row = await rowOf(refundId);
@@ -447,7 +468,7 @@ describe('processRefund, completeRefund and failRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.processRefund, { refundId }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot process refund with status pending. Must be approved first.',
       refundId,
     );
@@ -456,11 +477,13 @@ describe('processRefund, completeRefund and failRefund', () => {
   it('completes a processing refund and stores the provider refund id that arrives with completion', async () => {
     const refundId = await seed('processing');
 
-    const result = await journal.run(
-      db,
-      commands.completeRefund,
-      { refundId, providerRefundId: 're_123', providerResponse: '{"id":"re_123"}' },
-      meta,
+    const result = await orThrow(
+      journal.run(
+        db,
+        commands.completeRefund,
+        { refundId, providerRefundId: 're_123', providerResponse: '{"id":"re_123"}' },
+        meta,
+      ),
     );
 
     expect(result.events.map(event => event.type)).toEqual(['RefundCompleted']);
@@ -478,7 +501,9 @@ describe('processRefund, completeRefund and failRefund', () => {
     const refundId = await seed('completed');
     const eventsBefore = await eventTypesOf(db, 'refund', refundId);
 
-    const result = await journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta);
+    const result = await orThrow(
+      journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta),
+    );
 
     expect(result.events).toEqual([]);
     expect(await eventTypesOf(db, 'refund', refundId)).toEqual(eventsBefore);
@@ -489,7 +514,7 @@ describe('processRefund, completeRefund and failRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_other' }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot complete refund with status completed. Must be processing first.',
       refundId,
     );
@@ -500,7 +525,7 @@ describe('processRefund, completeRefund and failRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_1' }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot complete refund with status approved. Must be processing first.',
       refundId,
     );
@@ -509,7 +534,9 @@ describe('processRefund, completeRefund and failRefund', () => {
   it('fails a processing refund and keeps the error as the JSON the service stored before the journal', async () => {
     const refundId = await seed('processing');
 
-    const result = await journal.run(db, commands.failRefund, { refundId, errorMessage: 'charge_disputed' }, meta);
+    const result = await orThrow(
+      journal.run(db, commands.failRefund, { refundId, errorMessage: 'charge_disputed' }, meta),
+    );
 
     expect(result.events.map(event => event.type)).toEqual(['RefundFailed']);
     expect(await rowOf(refundId)).toMatchObject({
@@ -524,7 +551,7 @@ describe('processRefund, completeRefund and failRefund', () => {
 
     await expectRejected(
       () => journal.run(db, commands.failRefund, { refundId, errorMessage: 'late' }, meta),
-      'CONFLICT',
+      'journal.conflict',
       'Cannot fail refund with status completed. Must be processing first.',
       refundId,
     );
@@ -543,7 +570,7 @@ describe('processRefund, completeRefund and failRefund', () => {
         failRefund: () => journal.run(db, commands.failRefund, { refundId, errorMessage: 'x' }, meta),
       };
 
-      await expectRejected(attempts[name], 'NOT_FOUND', `Refund ${refundId} not found`);
+      await expectRejected(attempts[name], 'journal.not_found', `Refund ${refundId} not found`);
     },
   );
 });
@@ -553,13 +580,15 @@ describe('writes(run): what RefundService calls', () => {
     const writes = typed.refunds.writes(run);
     const refundId = createRefundId();
 
-    const requested = await writes.requestRefund({ refundId, ...request() });
+    const requested = await orThrow(writes.requestRefund({ refundId, ...request() }));
     expect(requested).toMatchObject({ id: refundId, status: 'pending', refundAmountMinor: 2550 });
     expect(requested).not.toHaveProperty('version');
 
-    expect(await writes.approveRefund({ refundId, approvedBy: adminId })).toMatchObject({ status: 'approved' });
-    expect(await writes.processRefund({ refundId })).toMatchObject({ status: 'processing' });
-    expect(await writes.completeRefund({ refundId, providerRefundId: 're_life' })).toMatchObject({
+    expect(await orThrow(writes.approveRefund({ refundId, approvedBy: adminId }))).toMatchObject({
+      status: 'approved',
+    });
+    expect(await orThrow(writes.processRefund({ refundId }))).toMatchObject({ status: 'processing' });
+    expect(await orThrow(writes.completeRefund({ refundId, providerRefundId: 're_life' }))).toMatchObject({
       status: 'completed',
       providerRefundId: 're_life',
     });
@@ -579,10 +608,12 @@ describe('writes(run): what RefundService calls', () => {
     const failed = await seed('processing');
     const rejected = await seed('pending');
 
-    expect(await writes.rejectRefund({ refundId: rejected, rejectedBy: adminId, rejectionReason: 'no' })).toMatchObject(
-      { status: 'rejected' },
-    );
-    expect(await writes.failRefund({ refundId: failed, errorMessage: 'boom' })).toMatchObject({ status: 'failed' });
+    expect(
+      await orThrow(writes.rejectRefund({ refundId: rejected, rejectedBy: adminId, rejectionReason: 'no' })),
+    ).toMatchObject({ status: 'rejected' });
+    expect(await orThrow(writes.failRefund({ refundId: failed, errorMessage: 'boom' }))).toMatchObject({
+      status: 'failed',
+    });
     expect(await eventTypesOf(db, 'refund', rejected)).toEqual(['RefundRequestedV2', 'RefundRejected']);
     expect(await eventTypesOf(db, 'refund', failed)).toEqual([
       'RefundRequestedV2',
@@ -593,14 +624,13 @@ describe('writes(run): what RefundService calls', () => {
     expect(await journal.verify(db, entities.refund, failed)).toEqual({ ok: true });
   });
 
-  it('lets a rejected rule reach the service as a `CommandError`, so the app can map it to an API answer', async () => {
+  it('returns a refused rule to the service as a failure, so the app can map it to an API answer', async () => {
     const writes = typed.refunds.writes(run);
     const refundId = await seed('pending');
 
-    const error = await rejectionOf(writes.processRefund({ refundId }));
+    const refused = await writes.processRefund({ refundId });
 
-    expect(error).toBeInstanceOf(CommandError);
-    expect(error).toMatchObject({ code: 'CONFLICT' });
+    expect(refused).toMatchObject({ code: 'journal.conflict', status: 409 });
   });
 });
 

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 import { now, sub } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { fromStripeAmount } from '@arki/money/stripe';
 
@@ -482,6 +483,9 @@ export class WebhookHandler extends EventEmitter {
    * Move the local payment to what Stripe reports, following
    * `paymentMovesFrom`. A payment already where the event would put it, or
    * settled past it, is left alone and the event counts as done.
+   *
+   * A write the journal refuses fails the event, the way a thrown error does,
+   * so the provider's resend tries it again: `orThrow` throws the failure.
    */
   private async applyPaymentEvent(data: WebhookEventData, outcome: PaymentOutcome): Promise<void> {
     const intent = parseStripePaymentIntent(data.data);
@@ -501,15 +505,17 @@ export class WebhookHandler extends EventEmitter {
 
     switch (outcome) {
       case 'succeeded': {
-        await this.writes.completePayment({ paymentId: row.id });
+        await orThrow(this.writes.completePayment({ paymentId: row.id }));
         break;
       }
       case 'failed': {
-        await this.writes.failPayment({ paymentId: row.id, failureReason: intent.failureReason ?? 'payment_failed' });
+        await orThrow(
+          this.writes.failPayment({ paymentId: row.id, failureReason: intent.failureReason ?? 'payment_failed' }),
+        );
         break;
       }
       case 'requires_action': {
-        await this.writes.markPaymentRequiresAction({ paymentId: row.id });
+        await orThrow(this.writes.markPaymentRequiresAction({ paymentId: row.id }));
         break;
       }
     }
@@ -535,7 +541,7 @@ export class WebhookHandler extends EventEmitter {
       }
 
       const refundedAmount = fromStripeAmount(charge.amountRefunded, charge.currency).toJSON();
-      await this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount });
+      await orThrow(this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount }));
       await this.reconcileRefunds(charge.refunds);
 
       this.emit('payment:refunded', { paymentData: data.data, webhookId: data.webhookId });
@@ -586,10 +592,12 @@ export class WebhookHandler extends EventEmitter {
         continue;
       }
 
-      await this.refunds.writes.completeRefund({
-        refundId: ours.id,
-        providerRefundId: listedRefund.providerRefundId,
-      });
+      await orThrow(
+        this.refunds.writes.completeRefund({
+          refundId: ours.id,
+          providerRefundId: listedRefund.providerRefundId,
+        }),
+      );
     }
   }
 
@@ -622,12 +630,14 @@ export class WebhookHandler extends EventEmitter {
         throw new Error(`No local payment for provider payment ${dispute.providerPaymentId}`);
       }
 
-      await this.writes.recordPaymentDispute({
-        paymentId: row.id,
-        disputeId: dispute.disputeId,
-        status: dispute.status,
-        reason: dispute.reason,
-      });
+      await orThrow(
+        this.writes.recordPaymentDispute({
+          paymentId: row.id,
+          disputeId: dispute.disputeId,
+          status: dispute.status,
+          reason: dispute.reason,
+        }),
+      );
 
       this.emit('payment:dispute_created', { paymentData: data.data, webhookId: data.webhookId });
     } catch (error) {

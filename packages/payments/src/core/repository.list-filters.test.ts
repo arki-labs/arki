@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, instant, now } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import { runnerOn, seedPayment, seedSubscription } from '../service-test-support.js';
@@ -60,21 +61,23 @@ beforeAll(async () => {
   // The buyer: one active and one canceled subscription; the admin: one active on the Pro plan
   await seedSubscription(writes, 'active');
   await seedSubscription(writes, 'canceled');
-  await writes.createSubscription({
-    userId: adminId,
-    planId: proPlanId,
-    customerId: otherCustomerId,
-    providerSubscriptionId: 'psub_admin',
-    status: 'active',
-    currentPeriodStart: instant('2026-01-01T00:00:00Z'),
-    currentPeriodEnd: instant('2026-02-01T00:00:00Z'),
-    canceledAt: null,
-  });
+  await orThrow(
+    writes.createSubscription({
+      userId: adminId,
+      planId: proPlanId,
+      customerId: otherCustomerId,
+      providerSubscriptionId: 'psub_admin',
+      status: 'active',
+      currentPeriodStart: instant('2026-01-01T00:00:00Z'),
+      currentPeriodEnd: instant('2026-02-01T00:00:00Z'),
+      canceledAt: null,
+    }),
+  );
 
   const done = await seedPayment(writes, null);
-  await writes.completePayment({ paymentId: done.id });
+  await orThrow(writes.completePayment({ paymentId: done.id }));
   const failed = await seedPayment(writes, null);
-  await writes.failPayment({ paymentId: failed.id, failureReason: 'declined' });
+  await orThrow(writes.failPayment({ paymentId: failed.id, failureReason: 'declined' }));
   await seedPayment(writes, null);
 });
 
