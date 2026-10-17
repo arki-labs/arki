@@ -28,10 +28,12 @@ import {
   buildDependencyGraph,
   collectReachableArkiDeps,
 } from './dependency-graph';
+import { notYetNames, resolvePackageStatus, unknownNotYetErrors } from './admission';
 import { createEnvelope } from './json-output';
 import type {
   InventoryBlocker,
   PackageClassification,
+  PackageStatus,
   ReleaseCommandEnvelope,
   ReleaseConfig,
   ReleaseError,
@@ -87,6 +89,8 @@ export interface InventoryItem {
   readonly private: boolean;
   readonly wave: ReleaseWaveId | null;
   readonly classification: PackageClassification;
+  /** Admission status from local facts. Never `published` (needs npm). */
+  readonly status: PackageStatus;
   readonly blockers: readonly InventoryBlocker[];
 }
 
@@ -343,6 +347,7 @@ export function classifyManifests(
   opts: ClassifyManifestsOptions,
 ): ReleaseCommandEnvelope<InventoryItem, InventorySummary> {
   const waveLookup = buildWaveLookup(opts.config);
+  const notYet = notYetNames(opts.config);
   const graph = buildDependencyGraph(opts.manifests);
 
   const items: InventoryItem[] = [];
@@ -368,6 +373,11 @@ export function classifyManifests(
     }
 
     const classification = decideClassification({ manifest, wave, privateDepBlockers });
+    const status = resolvePackageStatus({
+      private: manifest.private,
+      wave,
+      inNotYet: notYet.has(manifest.name),
+    });
 
     switch (classification) {
       case 'public-candidate':
@@ -375,6 +385,8 @@ export function classifyManifests(
         // No diagnostics — the intended happy paths.
         break;
       case 'unassigned': {
+        // A `notYet` package is deliberately unassigned; ADMIT_E001 covers the rest.
+        if (status === 'not-yet') break;
         errors.push({
           code: INVENTORY_ERROR_CODES.unclassifiedPublicManifest,
           severity: 'warning',
@@ -426,6 +438,7 @@ export function classifyManifests(
 
     items.push({
       name: manifest.name,
+      status,
       version: manifest.version,
       manifestPath: manifest.manifestPath,
       private: manifest.private,
@@ -440,6 +453,7 @@ export function classifyManifests(
   // before it physically exists in the workspace. This surfaces the gap
   // without blocking the inventory.
   const discoveredNames = new Set(opts.manifests.map(m => m.name));
+  errors.push(...unknownNotYetErrors(opts.config, discoveredNames));
   for (const wave of opts.config.waves) {
     for (const pkgName of wave.packages) {
       if (!discoveredNames.has(pkgName)) {

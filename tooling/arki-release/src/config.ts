@@ -23,6 +23,7 @@ import debugFactory from 'debug';
 
 import type {
   LeakPattern,
+  NotYetEntry,
   PublicMetadataDefaults,
   ReleaseConfig,
   ReleaseWave,
@@ -43,6 +44,8 @@ export const CONFIG_ERROR_CODES = {
   invalidWavePackage: 'CFG_E004',
   /** Two waves declare the same package — package may only belong to one wave. */
   duplicatePackage: 'CFG_E005',
+  /** A `notYet` package is also listed in a wave. */
+  notYetInWave: 'CFG_E006',
 } as const;
 
 /** Thrown when validation fails. The CLI catches and converts to envelope. */
@@ -131,13 +134,67 @@ export function validateConfig(raw: unknown): ReleaseConfig {
   const publicMetadataDefaults = validateMetadataDefaults(record['publicMetadataDefaults']);
   const waves = validateWaves(record['waves']);
   const leakPatterns = validateLeakPatterns(record['leakPatterns']);
+  const notYet = validateNotYet(record['notYet'], waves);
 
   return {
     publicTreePath,
     publicMetadataDefaults,
     waves,
     ...(leakPatterns !== undefined ? { leakPatterns } : {}),
+    ...(notYet !== undefined ? { notYet } : {}),
   };
+}
+
+/**
+ * Validate the optional `notYet` list. Names must be `@arki/*`, unique,
+ * and absent from every wave. That the names exist in the workspace is
+ * checked by the inventory (ADMIT_E003), because this loader does not
+ * read the workspace.
+ */
+function validateNotYet(raw: unknown, waves: readonly ReleaseWave[]): readonly NotYetEntry[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, '`notYet` must be an array if defined.');
+  }
+  const waveOf = new Map<string, ReleaseWaveId>();
+  for (const wave of waves) {
+    for (const pkg of wave.packages) waveOf.set(pkg, wave.id);
+  }
+  const seen = new Set<string>();
+  const out: NotYetEntry[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, 'Each `notYet` entry must be an object.');
+    }
+    const e = entry as Record<string, unknown>;
+    const name = e['name'];
+    const reason = e['reason'];
+    if (typeof name !== 'string' || !name.startsWith('@arki/')) {
+      throw new ReleaseConfigError(
+        CONFIG_ERROR_CODES.invalidWavePackage,
+        `\`notYet\` lists \`${String(name)}\` which is not an \`@arki/*\` package.`,
+      );
+    }
+    if (typeof reason !== 'string' || reason.length === 0) {
+      throw new ReleaseConfigError(
+        CONFIG_ERROR_CODES.invalidShape,
+        `\`notYet\` entry \`${name}\` needs a non-empty \`reason\`.`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.duplicatePackage, `\`notYet\` lists \`${name}\` twice.`);
+    }
+    seen.add(name);
+    const wave = waveOf.get(name);
+    if (wave !== undefined) {
+      throw new ReleaseConfigError(
+        CONFIG_ERROR_CODES.notYetInWave,
+        `Package \`${name}\` is in both \`notYet\` and the \`${wave}\` wave.`,
+      );
+    }
+    out.push({ name, reason });
+  }
+  return out;
 }
 
 /**

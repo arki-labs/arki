@@ -542,6 +542,7 @@ async function resolveAuditTargets(args: ParsedCliArgs): Promise<{
       private: false,
       wave: null,
       classification: 'public-candidate',
+      status: 'candidate',
       blockers: [],
     };
     return { config, items: [item], cwd, inventoryEnvelope };

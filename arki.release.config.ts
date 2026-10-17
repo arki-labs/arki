@@ -114,6 +114,17 @@ export const config: ReleaseConfig = {
       packages: ['@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
     },
   ],
+  // Public packages deliberately outside every wave. The `admission`
+  // scorecard dimension fails a public package that is in no wave and not
+  // listed here (ADMIT_E001), or in both (ADMIT_E002).
+  notYet: [
+    { name: '@arki/auth', reason: 'awaiting security tests W2-02' },
+    { name: '@arki/failure', reason: 'admitted (A-28); joins a wave after its docs batch passes' },
+    { name: '@arki/lock', reason: 'admitted (A-28); joins a wave after its docs batch passes' },
+    { name: '@arki/mail', reason: 'Tier 1; joins a wave after its docs batch (B3) passes' },
+    { name: '@arki/schema', reason: 'admitted (A-28); joins a wave after its docs batch passes' },
+    { name: '@arki/live', reason: 'not yet (A-28)' },
+  ],
 };
 
 export default config;

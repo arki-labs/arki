@@ -341,7 +341,43 @@ export type ReleaseConfig = {
    * one-off audits that need to add or relax patterns.
    */
   readonly leakPatterns?: readonly LeakPattern[];
+  /**
+   * Public packages deliberately kept out of every wave, each with the
+   * reason. A `private: false` package must be in exactly one wave or
+   * here; the `admission` scorecard dimension enforces it.
+   */
+  readonly notYet?: readonly NotYetEntry[];
 };
+
+/** One deliberately-unadmitted public package and why. */
+export type NotYetEntry = {
+  /** Full package name, e.g. `@arki/lock`. */
+  readonly name: string;
+  /** Why it is not in a wave yet. */
+  readonly reason: string;
+};
+
+/**
+ * Where a package stands on the way to npm.
+ *
+ * - `private` — `private: true`
+ * - `not-yet` — public, listed in `notYet`
+ * - `candidate` — public, in exactly one wave (not checked against npm)
+ * - `published` — in a wave and its version is on npm (needs a network
+ *   call; local inventory never produces it)
+ * - `unadmitted` — public, in no wave and not in `notYet` (ADMIT_E001)
+ * - `conflict` — in a wave AND in `notYet` (ADMIT_E002)
+ */
+export const PACKAGE_STATUSES = [
+  'private',
+  'not-yet',
+  'candidate',
+  'published',
+  'unadmitted',
+  'conflict',
+] as const;
+
+export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
 
 /**
  * Parsed CLI arguments — produced by the cli.ts argv parser and consumed
@@ -652,17 +688,24 @@ export type FixtureMatrix = {
  *                            envelope JSON when `--json` is passed; `dot
  *                            new --dry-run --json` scaffolds a fresh app.
  *                            DEFERRED until Tasks 9 / 11.5 land.
+ *   - `admission`          — every public (`private: false`) package is
+ *                            either in exactly one wave or listed in
+ *                            `ReleaseConfig.notYet` (ADMIT_E001 / E002).
  */
-export type ScorecardDimension =
-  | 'metadata'
-  | 'privacy'
-  | 'dependencies'
-  | 'build-output'
-  | 'packlist'
-  | 'docs'
-  | 'fixtures'
-  | 'dot-gates'
-  | 'agent-native-gates';
+export const SCORECARD_DIMENSIONS = [
+  'metadata',
+  'privacy',
+  'dependencies',
+  'build-output',
+  'packlist',
+  'docs',
+  'fixtures',
+  'dot-gates',
+  'agent-native-gates',
+  'admission',
+] as const;
+
+export type ScorecardDimension = (typeof SCORECARD_DIMENSIONS)[number];
 
 /**
  * Stable severity ordering for the overall-status derivation.

@@ -38,6 +38,7 @@ import path from 'node:path';
 
 import debugFactory from 'debug';
 
+import { evaluateAdmission, isAdmissionFailure } from './admission';
 import { runDotProbe } from './dot-probe';
 import { exportPublicTree, EXPORT_ERROR_CODES } from './export-public';
 import {
@@ -67,6 +68,7 @@ import type {
   ScorecardSummary,
   WaveBuildOutput,
 } from './types';
+import { SCORECARD_DIMENSIONS } from './types';
 
 const debug = debugFactory('arki:release:scorecard');
 
@@ -164,7 +166,17 @@ export async function runScorecard(
     candidates = [requested];
   }
 
-  if (candidates.length === 0) {
+  // Public packages that are in no wave (and not in `notYet`), or in both,
+  // are never scored below; they get one failing row so the gap is loud.
+  const scoredNames = new Set(candidates.map(c => c.name));
+  const admissionFailures = inventoryEnv.items.filter(
+    item =>
+      isAdmissionFailure(item.status) &&
+      !scoredNames.has(item.name) &&
+      (opts.packageName === undefined || item.name === opts.packageName),
+  );
+
+  if (candidates.length === 0 && admissionFailures.length === 0) {
     envelopeErrors.push({
       code: SCORECARD_ERROR_CODES.noPublicCandidates,
       severity: 'warning',
@@ -283,6 +295,9 @@ export async function runScorecard(
     });
     results.push(result);
   }
+  for (const item of admissionFailures) {
+    results.push(admissionFailureRow(item));
+  }
 
   // 7. Stable-release gate.
   const allowDeferred = opts.allowDeferred === true;
@@ -308,6 +323,40 @@ export async function runScorecard(
     items: results,
     errors: envelopeErrors,
   });
+}
+
+/**
+ * Row for a public package outside the admission rules. Only `admission`
+ * ran; every other dimension is deferred because nothing else is scored
+ * for a package that is not in a wave.
+ */
+function admissionFailureRow(item: InventoryItem): ScorecardPackageResult {
+  const skipped: ScorecardDimensionResult = {
+    status: 'deferred',
+    details: 'not scored: package is not admitted',
+    evidence: [],
+  };
+  const dimensions: Record<ScorecardDimension, ScorecardDimensionResult> = {
+    metadata: skipped,
+    privacy: skipped,
+    dependencies: skipped,
+    'build-output': skipped,
+    packlist: skipped,
+    docs: skipped,
+    fixtures: skipped,
+    'dot-gates': skipped,
+    'agent-native-gates': skipped,
+    admission: evaluateAdmission(item.name, item.status),
+  };
+  return {
+    name: item.name,
+    version: item.version,
+    classification: item.classification,
+    wave: item.wave,
+    dimensions,
+    overall: 'fail',
+    blockers: computeBlockers(dimensions),
+  };
 }
 
 /**
@@ -339,6 +388,7 @@ async function evaluatePackage(input: {
     fixtures: evaluateFixtures(input.item.name, input.fixtureRuns, input.fullFixtureMatrix),
     'dot-gates': evaluateDotGates(input.dotProbe),
     'agent-native-gates': evaluateAgentNativeGates(input.dotProbe),
+    admission: evaluateAdmission(input.item.name, input.item.status),
   };
 
   const overall = rollUpStatus(Object.values(dimensions).map(d => d.status));
@@ -1167,18 +1217,7 @@ export function renderScorecardText(
 
   for (const pkg of envelope.items) {
     lines.push(`${pkg.name} — ${pkg.overall.toUpperCase()}`);
-    const dims: readonly ScorecardDimension[] = [
-      'metadata',
-      'privacy',
-      'dependencies',
-      'build-output',
-      'packlist',
-      'docs',
-      'fixtures',
-      'dot-gates',
-      'agent-native-gates',
-    ];
-    for (const dim of dims) {
+    for (const dim of SCORECARD_DIMENSIONS) {
       const result = pkg.dimensions[dim];
       const icon = statusIcon(result.status);
       const label = dim.padEnd(20, ' ');

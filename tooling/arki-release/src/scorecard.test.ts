@@ -75,7 +75,7 @@ function writeRoot(root: string): void {
   writeFile(
     root,
     'package.json',
-    `${JSON.stringify({ name: 'arki', version: '0.0.0', private: true }, null, 2)}\n`,
+    `${JSON.stringify({ name: 'arki', version: '0.0.0', private: true, packageManager: 'bun@1.4.2' }, null, 2)}\n`,
   );
 }
 
@@ -639,6 +639,48 @@ describe('runScorecard — stable release gate', () => {
         b => b.includes('dot-gates') || b.includes('agent-native-gates'),
       ),
     ).toBe(true);
+  });
+
+  // Why: a public package left out of every wave is never published, and before
+  // the admission dimension nothing reported it. It must block the gate by name.
+  it('blocks the gate when a public package is in no wave and not in notYet (ADMIT_E001)', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    writePkg(tmp, 'lock', { name: '@arki/lock', version: '0.0.0', private: false });
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(['@arki/assert']),
+      allowDeferred: true,
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
+    });
+    const lock = envelope.items.find(i => i.name === '@arki/lock');
+    expect(lock?.dimensions.admission.status).toBe('fail');
+    expect(lock?.dimensions.admission.evidence.map(e => e.code)).toEqual(['ADMIT_E001']);
+    expect(envelope.summary.stableReleaseGate).toBe('blocked');
+    expect(envelope.summary.stableReleaseBlockers.some(b => b.includes('@arki/lock'))).toBe(true);
+  });
+
+  // Why: `notYet` is the explicit, reasoned way to keep a public package out of
+  // a release. Listing it must clear the block without scoring the package.
+  it('does not block the gate for a public package listed in notYet', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    writePkg(tmp, 'lock', { name: '@arki/lock', version: '0.0.0', private: false });
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: { ...makeConfig(['@arki/assert']), notYet: [{ name: '@arki/lock', reason: 'awaiting docs batch' }] },
+      allowDeferred: true,
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
+    });
+    expect(envelope.items.map(i => i.name)).toEqual(['@arki/assert']);
+    expect(envelope.items[0]?.dimensions.admission.status).toBe('pass');
+    expect(envelope.summary.stableReleaseBlockers.some(b => b.includes('@arki/lock'))).toBe(false);
   });
 });
 
