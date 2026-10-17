@@ -1,7 +1,8 @@
 /// <reference path="../query/vite-env.d.ts" />
-import type { DefaultOptions, QueryClient } from '@tanstack/react-query';
+import type { DefaultOptions } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { createElement, Fragment } from 'react';
+import { isServer, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createElement, Fragment, useState } from 'react';
 
 import type { AnyRpcClient, OfflineMutationQueue } from '../mutations/queue.ts';
 import { OfflineDevPanel } from '../devtools/DevPanel.tsx';
@@ -38,16 +39,48 @@ export type QueueConfig = {
 export type OfflineRuntimeConfig = CacheOnlyConfig | QueueConfig;
 
 export type OfflineRuntime = {
+  /**
+   * The browser's one persisted QueryClient. Browser only: reading it on the server throws, because a
+   * module-level client there would be one cache shared by every request. On the server each render of
+   * `Provider` gets its own client; read it with `useQueryClient()`.
+   */
   queryClient: QueryClient;
   /**
    * Writes the persisted query cache to IndexedDB now and resolves when it is stored. After removing
    * a query that must not come back (a deleted item), await it before the page can reload: the
-   * automatic writes are throttled to one a second.
+   * automatic writes are throttled to one a second. Browser only: on the server it rejects.
    */
   persistNow: () => Promise<void>;
   queue?: OfflineMutationQueue;
+  /** In the browser: the persisted client. On the server: a fresh client for each request, never persisted. */
   Provider: (props: { children: ReactNode }) => ReactNode;
 };
+
+function browserOnly(member: string): Error {
+  return new Error(
+    `@arki/offline: offline.${member} exists only in the browser. On the server every request gets its own ` +
+      'QueryClient inside <offline.Provider>; read it with useQueryClient().',
+  );
+}
+
+/**
+ * One QueryClient per server render, so no request reads another request's cache. `gcTime: Infinity`
+ * is TanStack Query's server default: no garbage-collection timers, so the cache is freed with the
+ * request. The persisted cache's 24-hour `gcTime` is for the browser and would keep each request's
+ * data in memory for a day.
+ */
+function RequestQueryClientProvider(props: { defaultOptions?: DefaultOptions; children: ReactNode }): ReactNode {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          ...props.defaultOptions,
+          queries: { ...props.defaultOptions?.queries, gcTime: Number.POSITIVE_INFINITY },
+        },
+      }),
+  );
+  return createElement(QueryClientProvider, { client: queryClient, children: props.children });
+}
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -88,23 +121,26 @@ export type OfflineRuntime = {
  * });
  * ```
  *
- * Then wire the Provider in your root provider:
+ * Then wire the Provider in your root provider. Components read the client with `useQueryClient()`:
  * ```tsx
- * <offline.Provider>
- *   <ORPCReactProvider client={rpcClient} queryClient={offline.queryClient}>
- *     {children}
- *   </ORPCReactProvider>
- * </offline.Provider>
+ * <offline.Provider>{children}</offline.Provider>
  * ```
+ *
+ * In the browser, `Provider` uses one persisted QueryClient (`offline.queryClient`). On the server
+ * (SSR) this module serves every request, so `Provider` makes a fresh, unpersisted client for each
+ * request instead, and `offline.queryClient` throws there.
  */
 export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRuntime {
   const { appId, devtools = false, queryDefaults } = config;
 
-  const { queryClient, persister, persistNow, maxAge, buster } = createPersistedQueryClient({
-    storageKey: `arki-offline-query:${appId}`,
-    buster: config.buster,
-    defaultOptions: queryDefaults,
-  });
+  // Browser only: on the server one module-level client would be a cache shared by every request.
+  const persisted = isServer
+    ? undefined
+    : createPersistedQueryClient({
+        storageKey: `arki-offline-query:${appId}`,
+        buster: config.buster,
+        defaultOptions: queryDefaults,
+      });
 
   let queue: OfflineMutationQueue | undefined;
 
@@ -131,17 +167,27 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
       content = createElement(OfflineQueueProvider, { queue, children: content });
     }
 
-    // Outer: persisted query client provider
-    content = createElement(PersistedQueryClientProvider, {
-      client: queryClient,
-      persister,
-      maxAge,
-      buster,
+    // Outer: the query client provider. On the server, a fresh client for this request.
+    if (!persisted) {
+      return createElement(RequestQueryClientProvider, { defaultOptions: queryDefaults, children: content });
+    }
+
+    return createElement(PersistedQueryClientProvider, {
+      client: persisted.queryClient,
+      persister: persisted.persister,
+      maxAge: persisted.maxAge,
+      buster: persisted.buster,
       children: content,
     });
-
-    return content;
   }
 
-  return { queryClient, persistNow, queue, Provider };
+  return {
+    get queryClient() {
+      if (!persisted) throw browserOnly('queryClient');
+      return persisted.queryClient;
+    },
+    persistNow: () => (persisted ? persisted.persistNow() : Promise.reject(browserOnly('persistNow()'))),
+    queue,
+    Provider,
+  };
 }

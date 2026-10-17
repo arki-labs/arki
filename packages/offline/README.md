@@ -95,13 +95,11 @@ The replay request carries the session signed in *at replay*, not the one that q
 **Sign-out forgets the last actor.** When `actorId()` answers `null`, the remembered id is deleted. On a shared device this matters: after Alice signs out, a write queued by whoever uses the device next is bound to nobody, never to Alice, so it can never replay under her account. Feed `undefined` only while your session is still loading (for better-auth: `isPending`), never as a stand-in for signed out.
 
 ```tsx
-// src/root-provider.tsx
-<offline.Provider>
-  <ORPCReactProvider client={rpcClient} queryClient={offline.queryClient}>
-    {children}
-  </ORPCReactProvider>
-</offline.Provider>
+// src/root-provider.tsx — components read the client with useQueryClient()
+<offline.Provider>{children}</offline.Provider>
 ```
+
+**Server rendering.** In the browser, `offline.Provider` uses one persisted QueryClient for the app's lifetime (`offline.queryClient`). On the server the module that holds `offline` serves every request, so one client there would be one cache for every user. So on the server `offline.Provider` makes a fresh, unpersisted QueryClient for each request, and `offline.queryClient` and `offline.persistNow()` throw. Read the client with `useQueryClient()` inside the provider.
 
 #### The strict idempotency contract
 
