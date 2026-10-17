@@ -24,8 +24,8 @@
  * stripped during scaffolding so `package.json.tmpl` becomes
  * `package.json` on disk.
  *
- * Commands deferred to v1.1 (`dot add <plugin>`, `dot dev`,
- * `dot migrate`) are deliberately NOT surfaced here.
+ * Commands deferred to v1.1 (`dot add <plugin>`, `dot migrate`) are
+ * deliberately NOT surfaced here.
  */
 
 import path from 'node:path';

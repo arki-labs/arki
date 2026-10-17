@@ -13,13 +13,14 @@ It ships one example feature, `notes`, from the table to the page.
 
 ## Run it locally
 
-You need [Bun](https://bun.sh) 1.3+ and Docker.
+You need [Bun](https://bun.sh) 1.3+. Docker is only for Postgres.
 
 1. `bun install`
 2. `cp .env.example .env`
-3. `docker compose up -d` starts Postgres on port 5432.
-4. `bun run dev` starts the app. Migrations run on boot.
-5. Open http://localhost:3000 and write a note.
+3. `bun run dev` runs `dot dev`: it applies the migrations in `drizzle/` to an embedded PGlite database in `./.local/db`, then starts Vite. It restarts the app when `drizzle/` or `.env` change.
+4. Open http://localhost:3000 and write a note.
+
+For Postgres: `docker compose up -d`, then `bun --bun dot dev --db pg` with `DB_URL` set in `.env` (export `dev` from `src/app.ts` on `db({ relations })`). `dot dev` refuses a `DB_URL` that is not on this machine unless you pass `--allow-remote-db`.
 
 Tests need no Docker: `bun run test` boots the app on an in-memory PGlite database.
 
@@ -27,7 +28,7 @@ Tests need no Docker: `bun run test` boots the app on an in-memory PGlite databa
 
 | Script | What it does |
 | --- | --- |
-| `bun run dev` | Dev server with hot reload on port 3000. |
+| `bun run dev` | `dot dev`: migrations, then the dev server with hot reload on port 3000. `--once` only checks env, migrations and boot (for CI and agents). |
 | `bun run build` | Production build into `.output/`. |
 | `bun run start` | Serves `.output/` (run `build` first). |
 | `bun run test` | Vitest on PGlite. |

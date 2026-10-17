@@ -1,6 +1,6 @@
 // Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes targets.
-// Covers the portable entries only: `.`, `./plugin`, `./feature`, `./log`.
+// Covers the portable entries only: `.`, `./plugin`, `./feature`, `./log`, `./runtime`.
 
 import { defineFeature } from '../dist/feature.js';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../dist/index.js';
 import { log } from '../dist/log.js';
 import { plugin as pluginFromSubpath } from '../dist/plugin.js';
+import { createAppRuntime } from '../dist/runtime.js';
 
 const events = [];
 const store = plugin({
@@ -61,6 +62,13 @@ try {
   manifestCode = error.code;
 }
 
+// One start for concurrent callers: both get the same started app.
+const ticker = plugin({ name: 'ticker', provides: { ticker: () => 'tick' } });
+const appRuntime = createAppRuntime(defineApp('runtime-smoke').use(ticker));
+const [firstRun, secondRun] = await Promise.all([appRuntime.get(), appRuntime.get()]);
+const runtimeSharesOneApp = firstRun === secondRun && firstRun.state === 'started';
+await firstRun.dispose();
+
 const checks = [
   ['plugins boot in order and serve through needs', looked, 'value:a'],
   ['the app reports started', stateStarted, 'started'],
@@ -73,6 +81,7 @@ const checks = [
   ['./plugin re-exports the same plugin()', pluginFromSubpath === plugin, true],
   ['./feature loads', typeof defineFeature, 'function'],
   ['./log loads', typeof log, 'function'],
+  ['./runtime starts one app for concurrent callers', runtimeSharesOneApp, true],
 ];
 
 let failed = 0;

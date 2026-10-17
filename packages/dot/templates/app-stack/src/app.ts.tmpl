@@ -50,3 +50,11 @@ export function createApp(database: Plugin<EmptyShape, { readonly db: Migratable
 export const app = createApp(db({ relations }));
 
 export default app;
+
+/**
+ * The local app `dot dev` runs: the same plugins on an embedded PGlite
+ * database in `./.local/db` (git-ignored), so no Postgres is needed. `dot dev`
+ * picks this export over `default` and applies `drizzle/` at boot, like
+ * production does.
+ */
+export const dev = createApp(db({ driver: 'pglite', dataDir: './.local/db', relations }));

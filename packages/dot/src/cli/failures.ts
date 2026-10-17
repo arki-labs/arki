@@ -305,3 +305,94 @@ export function lifecycleFailed(error: unknown, phase: 'configure' | 'boot'): Fa
     { cause: error },
   );
 }
+
+/* `dot dev` ----------------------------------------------------------- */
+
+export type DevDbUnreachableData = {
+  /** The database URL with its password redacted, or `<not set>` / `<invalid>`. */
+  readonly target: string;
+  readonly reason: string;
+};
+
+/** `dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start. */
+export const DevDbUnreachable = defineFailure('dot.dev_db_unreachable', {
+  data: guarded(
+    'dot.dev_db_unreachable',
+    (value): value is DevDbUnreachableData => isRecord(value) && strings(value, ['target', 'reason']),
+  ),
+  message: 'Database {target} is not reachable: {reason}',
+  remediation:
+    'Start the database (`docker compose up -d <service>`), fix DB_URL in .env, or run `dot dev --db pglite` for an embedded one.',
+});
+
+export type DevRunnerFailedData = { readonly command: string; readonly causeMessage: string };
+
+/** The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started. */
+export const DevRunnerFailed = defineFailure('dot.dev_runner_failed', {
+  data: guarded(
+    'dot.dev_runner_failed',
+    (value): value is DevRunnerFailedData => isRecord(value) && strings(value, ['command', 'causeMessage']),
+  ),
+  message: 'Could not start the app runner `{command}`: {causeMessage}',
+  remediation:
+    'Install the runner (`bun add -D vite`), or pass the command that serves the app: `dot dev --run "<cmd>"`.',
+});
+
+export type DevPortInUseData = { readonly port: number };
+
+/** Something already listens on the app port, so the runner would not get it. */
+export const DevPortInUse = defineFailure('dot.dev_port_in_use', {
+  data: guarded(
+    'dot.dev_port_in_use',
+    (value): value is DevPortInUseData => isRecord(value) && typeof value['port'] === 'number',
+  ),
+  message: 'Port {port} is already in use',
+  remediation: 'Stop the process that listens on that port, or pick another one with `dot dev --port <n>`.',
+});
+
+export type DevAlreadyRunningData = { readonly pid: number; readonly statePath: string };
+
+/** Another `dot dev` is alive in this project: its pid is in the state file. */
+export const DevAlreadyRunning = defineFailure('dot.dev_already_running', {
+  data: guarded(
+    'dot.dev_already_running',
+    (value): value is DevAlreadyRunningData =>
+      isRecord(value) && typeof value['pid'] === 'number' && strings(value, ['statePath']),
+  ),
+  message: 'dot dev is already running in this project (pid {pid})',
+  remediation:
+    'Stop the other `dot dev` (press q in its terminal). If that pid is not a `dot dev`, delete the file in `.error.data.statePath`.',
+});
+
+export type DevRemoteDbRefusedData = {
+  /** The database URL with its password redacted. */
+  readonly target: string;
+  readonly host: string;
+  /** Where the URL came from: `DB_URL in .env.local`, `DATABASE_URL in process env`. */
+  readonly source: string;
+};
+
+/** The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot. */
+export const DevRemoteDbRefused = defineFailure('dot.dev_remote_db_refused', {
+  data: guarded(
+    'dot.dev_remote_db_refused',
+    (value): value is DevRemoteDbRefusedData => isRecord(value) && strings(value, ['target', 'host', 'source']),
+  ),
+  message: 'Refusing the remote database {target} ({source}): dot dev applies migrations on boot',
+  remediation:
+    'Point every DB_URL and DATABASE_URL (process env and .env files) at localhost or a docker compose service, or pass `--allow-remote-db` if you mean to migrate that database.',
+});
+
+export type DevAppStartedData = { readonly filePath: string; readonly exportName: string };
+
+/** The app export is already configured, booted or started: `dot dev` cannot own its lifecycle. */
+export const DevAppStarted = defineFailure('dot.dev_app_started', {
+  data: guarded(
+    'dot.dev_app_started',
+    (value): value is DevAppStartedData => isRecord(value) && strings(value, ['filePath', 'exportName']),
+  ),
+  message:
+    'The `{exportName}` export in {filePath} is already configured or started; dot dev needs an unstarted builder',
+  remediation:
+    'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("my-app").use(plugin);`',
+});

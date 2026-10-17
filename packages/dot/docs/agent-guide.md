@@ -261,6 +261,17 @@ binding, direction, address })` in `configure`. `rpc()` from
    rolled back the plugins that booted before it.
 4. Apply the first `remediation`. Run doctor again. Repeat.
 
+### Boot-check an app
+
+`dot dev --once --json` is the agent's boot check. It resolves the database,
+validates env, applies the committed migrations and boots the app, then exits.
+It refuses a non-local `DB_URL` unless you pass `--allow-remote-db`.
+
+- `ok: true`: `.data.items` lists the events in order: `app`, `db`,
+  `migrations` (the names the boot applied), `preflight`.
+- A failure: `.error.code` is a `dot.dev_*` code or `dot.doctor_failed`. The
+  doctor diagnostics are in `.error.data`.
+
 ### Work in a generated app
 
 Every app from `dot new` has an `AGENTS.md` at its root. It names the verify

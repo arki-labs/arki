@@ -6,6 +6,8 @@
  *   - `dot explain`    print the static app graph (manifest); never boots
  *   - `dot doctor`     boot the app and print runtime diagnostics
  *   - `dot new <name>` scaffold a DOT app
+ *   - `dot dev`        run the app in development: db, preflight, runner, watch
+ *   - `dot _serve`     (hidden) start the app until stopped: the runner of `dot dev`
  *
  * Output is text on a terminal and the `arki.cli/1` JSON envelope when piped
  * or with `--json`. Exit codes: 0 ok, 1 bug, 2 usage (unknown command,
@@ -27,9 +29,17 @@ export const program = defineCli({
     explain: () => import('./commands/explain.js'),
     doctor: () => import('./commands/doctor.js'),
     new: () => import('./commands/new.js'),
+    dev: () => import('./commands/dev.js'),
+    _serve: () => import('./commands/serve.js'),
   },
 });
 
+export { runDev } from './dev.js';
+export type { DevResult, RunDevOptions } from './dev.js';
+export { devEventSchema } from './dev-events.js';
+export type { DevEvent } from './dev-events.js';
+export { DEV_STATE_PATH, devStateSchema } from './dev-state.js';
+export type { DevState } from './dev-state.js';
 export { runDoctor } from './doctor.js';
 export type { DoctorOptions } from './doctor.js';
 export { runExplain } from './explain.js';
@@ -39,6 +49,12 @@ export {
   AppInvalidExport,
   AppLifecycleFailed,
   AppNotFound,
+  DevAlreadyRunning,
+  DevAppStarted,
+  DevDbUnreachable,
+  DevPortInUse,
+  DevRemoteDbRefused,
+  DevRunnerFailed,
   DoctorFailed,
   ObservabilityNoSdk,
   ProjectionConflict,

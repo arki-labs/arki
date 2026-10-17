@@ -48,6 +48,11 @@ export type DiscoveryOptions = {
   appPath?: string;
   /** Working directory for discovery. Defaults to `process.cwd()`. */
   cwd?: string;
+  /**
+   * `'dev'` (used by `dot dev`): a `dev` export that is an unstarted builder
+   * wins over the usual order. Default `'default'`: the usual order only.
+   */
+  prefer?: 'default' | 'dev';
 };
 
 export type DiscoveryResult = {
@@ -55,6 +60,8 @@ export type DiscoveryResult = {
   filePath: string;
   /** Discovered app (builder, configured, or booted). */
   app: DiscoveredApp;
+  /** The export the app was taken from: `default`, `app`, `dev` or another name. */
+  exportName: string;
 };
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -143,15 +150,21 @@ function looksLikeDotApp(value: unknown): boolean {
 
 /**
  * Pick the app export: `default`, else named `app`, else the single export
- * that looks like a DOT app. `names` lists every export for error messages.
+ * that looks like a DOT app. With `prefer: 'dev'`, a `dev` export that is an
+ * unstarted builder comes first. `names` lists every export for error messages.
  */
 function findAppExport(
   mod: unknown,
+  prefer: 'default' | 'dev',
 ): AppExport & { readonly names: readonly string[]; readonly matches: readonly string[] } {
   if (typeof mod !== 'object' || mod === null)
     return { found: true, name: 'default', value: mod, names: [], matches: [] };
   const record = mod as Record<string, unknown>;
   const names = Object.keys(record);
+  if (prefer === 'dev' && 'dev' in record) {
+    if (isDotAppBuilder(record.dev)) return { found: true, name: 'dev', value: record.dev, names, matches: [] };
+    debugDiscover.debug('the dev export is not an unstarted builder; using the usual export order');
+  }
   if ('default' in record) return { found: true, name: 'default', value: record.default, names, matches: [] };
   if ('app' in record) return { found: true, name: 'app', value: record.app, names, matches: [] };
   const matches = names.filter(name => looksLikeDotApp(record[name]));
@@ -200,6 +213,15 @@ function importFailed(filePath: string, exportName: string | null, error: unknow
  * path is returned: `dot.app_import_failed` or `dot.app_invalid_export`.
  */
 export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp | Failure> {
+  const loaded = await loadAppExport(filePath, 'default');
+  return isFailure(loaded) ? loaded : loaded.app;
+}
+
+/** `loadAppFromFile`, also naming the export the app came from. */
+async function loadAppExport(
+  filePath: string,
+  prefer: 'default' | 'dev',
+): Promise<{ readonly app: DiscoveredApp; readonly exportName: string } | Failure> {
   let mod: unknown;
   try {
     // Use `pathToFileURL` so dynamic import accepts absolute paths on Windows.
@@ -208,7 +230,7 @@ export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp |
     return importFailed(filePath, null, error);
   }
 
-  const exported = findAppExport(mod);
+  const exported = findAppExport(mod, prefer);
   if (!exported.found) {
     return AppInvalidExport({
       filePath,
@@ -233,7 +255,7 @@ export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp |
 
   if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
     debugDiscover.debug('loaded app from {filePath}', { filePath });
-    return candidate;
+    return { app: candidate, exportName: exported.name };
   }
 
   return AppInvalidExport({ filePath, exportName: exported.name, exports: [...exported.names], matches: [] });
@@ -250,9 +272,9 @@ export async function discoverApp(options: DiscoveryOptions = {}): Promise<Disco
     return AppNotFound({ cwd: options.cwd ?? process.cwd(), searched: [...DEFAULT_APP_PATHS] });
   }
 
-  const app = await loadAppFromFile(filePath);
-  if (isFailure(app)) return app;
-  return { filePath, app };
+  const loaded = await loadAppExport(filePath, options.prefer ?? 'default');
+  if (isFailure(loaded)) return loaded;
+  return { filePath, app: loaded.app, exportName: loaded.exportName };
 }
 
 /**

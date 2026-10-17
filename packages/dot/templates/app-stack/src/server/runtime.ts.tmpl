@@ -1,35 +1,24 @@
-import { hookSignals } from '@arki/dot';
+import { createAppRuntime } from '@arki/dot/runtime';
 
-import { app } from '~/app';
+import { app, dev } from '~/app';
 
 import type { RpcContext } from './orpc';
 
-type StartedApp = Awaited<ReturnType<typeof app.start>>;
-
-declare global {
-  // One started app per process. Kept on globalThis so a dev-server reload
-  // reuses it instead of opening a second database pool.
-  var __dotAppStart: Promise<StartedApp> | undefined;
-}
-
 /**
- * Start the DOT app once (boot runs migrations, then the journal worker
- * starts) and return it. A failed start is not cached: the next call tries
- * again, so a database that comes up late does not need a restart.
+ * The started DOT app: one per server process. Boot runs migrations, then
+ * the journal worker starts; SIGTERM / SIGINT drain it. A failed start is not
+ * cached, so a database that comes up late does not need a restart.
+ *
+ * `dot dev` sets `DOT_DEV=1` and gets `dev` (embedded PGlite); everything
+ * else runs `app` (Postgres from `DB_URL`). Both come from one `createApp`,
+ * so their services have the same shape. On a hot update the old app is
+ * disposed before the new one starts, so two apps never share the database.
  */
-export function startApp(): Promise<StartedApp> {
-  globalThis.__dotAppStart ??= app.start().then(
-    started => {
-      // SIGTERM / SIGINT drain the app: stop the worker, close the pool.
-      hookSignals(started);
-      return started;
-    },
-    (error: unknown) => {
-      globalThis.__dotAppStart = undefined;
-      throw error;
-    },
-  );
-  return globalThis.__dotAppStart;
+const runtime = createAppRuntime(process.env['DOT_DEV'] === '1' ? dev : app, { hot: import.meta.hot });
+
+/** The started app, started on first use. */
+export function startApp() {
+  return runtime.get();
 }
 
 /** The oRPC context for one request. There is no sign-in yet, so writes have no actor. */

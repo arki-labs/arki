@@ -1,6 +1,6 @@
 # @arki/dot
 
-> The app kernel for `@arki`: typed plugins, a 5-hook lifecycle (`configure`, `boot`, `start`, `stop`, `dispose`), features as a chain, and a JSON CLI (`dot new`, `dot explain`, `dot doctor`). It is not a web server, an ORM or a DI container; adapters live in other packages.
+> The app kernel for `@arki`: typed plugins, a 5-hook lifecycle (`configure`, `boot`, `start`, `stop`, `dispose`), features as a chain, and a JSON CLI (`dot new`, `dot explain`, `dot doctor`, `dot dev`). It is not a web server, an ORM or a DI container; adapters live in other packages.
 
 Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: it IS the manifest (`explain`) or the diagnostics snapshot (`doctor`).
 
@@ -10,6 +10,7 @@ Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: i
 - `@arki/dot/feature`: `defineFeature`, `DepsOf`, `routerFor`, `entrypointOnly`, `providesOf`, `servicesOf`, `resolveNeeds`, `ServicesBag`; object-form `feature()`.
 - `@arki/dot/orpc`: `needsMiddleware`, `rpc`. Optional peer `@orpc/server`.
 - `@arki/dot/log`: `log()`, the logging plugin. Mount it first.
+- `@arki/dot/runtime`: `createAppRuntime(app, { hot })`, one started app per server process; waits for the old app's dispose on a Vite hot update.
 - `@arki/dot/test-harness`: `testPlugin`, `testApp`, `bootTestApp`, `fake`.
 - `@arki/dot/cli`: `program` (built with `@arki/cli`; `program.main(argv, io)`), `runExplain`, `runDoctor`, `runNew`, the failures `AppNotFound`, `AppInvalidExport`, `AppImportFailed`, `AppLifecycleFailed`, `DoctorFailed`, `ObservabilityNoSdk`, `ProjectionNotFound`, `ProjectionImportFailed`, `ProjectionExecutionFailed`, `ProjectionConflict`, `TargetNotEmpty`, `TemplateMissing`, `WriteFailed`; types `DotNewResult`, `DotNewOperation`, `DoctorReport`. The `dot` bin: `arki.cli/1` envelope, exit 0/1/2/3.
 
@@ -22,6 +23,7 @@ Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: i
 - [Start a new app (`dot new --dry-run --json`, then `dot new --json`)](docs/agent-guide.md#start-a-new-app)
 - [Inspect the app graph (`dot explain --json`)](docs/agent-guide.md#inspect-the-app-graph)
 - [Check runtime health (`dot doctor --json`)](docs/agent-guide.md#check-runtime-health)
+- [Boot-check an app (`dot dev --once --json`)](docs/agent-guide.md#boot-check-an-app)
 - [Add a plugin](docs/agent-guide.md#add-a-plugin)
 - [Add a feature](docs/agent-guide.md#add-a-feature)
 - [Add an action](docs/agent-guide.md#add-an-action)

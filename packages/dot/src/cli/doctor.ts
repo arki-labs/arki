@@ -24,6 +24,12 @@ export type DoctorOptions = {
   readonly observability?: boolean | undefined;
   /** Return the observed plugin graph as Mermaid source instead of the diagnostics. */
   readonly graph?: boolean | undefined;
+  /**
+   * Called with the booted app before it is disposed, when boot succeeded.
+   * `dot dev` reads what the preflight boot published here (the
+   * `migrations` service of `dbMigrations`).
+   */
+  readonly onBooted?: ((app: DotApp<Record<string, unknown>>) => void) | undefined;
 };
 
 /** Fold the observability probe's issue, if any, into the top-level issues. Never mutates the input. */
@@ -81,6 +87,7 @@ export async function runDoctor(
 
   try {
     if (booted === null) return reportOf(configured.diagnostics, observability, true);
+    opts.onBooted?.(booted);
     // The booted manifest carries the wiring edges observed during boot.
     if (opts.graph === true) return renderGraph(booted.manifest);
     return reportOf(booted.diagnostics, observability, false);
