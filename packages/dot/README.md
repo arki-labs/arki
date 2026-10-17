@@ -17,7 +17,7 @@ lifecycle-aware piece of an application. Each plugin:
 - declares a **name**, **version**, and the services it **needs** as a shape
   of type witnesses;
 - **provides** services through `provides`: one factory per key — the type
-  is *inferred from the factory*, never declared separately;
+  is _inferred from the factory_, never declared separately;
 - runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
 - **publishes typed services** to a shared, type-safe registry that later
   plugins can read from;
@@ -25,31 +25,32 @@ lifecycle-aware piece of an application. Each plugin:
   dispose in reverse.
 
 The name comes from the small dots on dice, dominoes, and music notation:
-each plugin is one small mark, and the *combination* of plugins is what gives the
+each plugin is one small mark, and the _combination_ of plugins is what gives the
 app its value. Two plugins on a die make a value of two; six plugins make six. The
 plugins **are** the app — not optional add-ons to a hidden core.
 
 ```ts skip="uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
+import { db } from '@arki/db/dot'; // db plugin
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';      // env plugin
-import { db } from '@arki/db/dot';        // db plugin
-import { kv } from '@arki/kv/dot';        // kv plugin
+import { env } from '@arki/env/dot'; // env plugin
+
+import { kv } from '@arki/kv/dot'; // kv plugin
 
 const app = await defineApp('orders')
-  .use(env({ schema: { /* ... */ } }))     // 1st plugin — provides services.env
-  .use(db({ relations }))                  // 2nd plugin — provides services.db
+  .use(env({ schema: {/* ... */} })) // 1st plugin — provides services.env
+  .use(db({ relations })) // 2nd plugin — provides services.db
   .use(kv(() => ({ url: process.env.KV_URL }))) // 3rd — services.kv; env read at boot, not import
-  .boot();                                  // plugins boot in declaration order
+  .boot(); // plugins boot in declaration order
 
 await app.services.db.query(/* ... */);
-await app.dispose();                       // plugins dispose in REVERSE order
+await app.dispose(); // plugins dispose in REVERSE order
 ```
 
 Each `/dot` subpath exports a **plugin** for that package. The subpath names
 the framework the adapter targets (DOT), not the unit (which is a plugin).
 
-> **Why not "plugin"?** Plugins suggest *optional add-ons* to a core. DOT's
-> reality is the opposite: there is no hidden core — the plugins *are* the app.
+> **Why not "plugin"?** Plugins suggest _optional add-ons_ to a core. DOT's
+> reality is the opposite: there is no hidden core — the plugins _are_ the app.
 > "Plugin" names that truth, and ties the framework to the DOT name etymologically
 > (a dot, a plugin, a small mark that gains meaning by combining with others).
 
@@ -104,7 +105,7 @@ const billingPlugin = plugin({
 });
 
 const app = await defineApp('acme')
-  .use(dbPlugin)          // providers before consumers — enforced at compile time
+  .use(dbPlugin) // providers before consumers — enforced at compile time
   .use(billingPlugin)
   .start();
 
@@ -128,7 +129,7 @@ When the host can import the provider, name its handle (see
 [Plugin handles](#plugin-handles)). `service<T>()` is for the other cases: a
 library contract, a test, or a host external. It creates a phantom **type witness** — a runtime no-op that
 carries `T` at the type level. The property name you give it is your local
-alias *and* (for anonymous witnesses) the wire key:
+alias _and_ (for anonymous witnesses) the wire key:
 
 ```ts
 import { plugin, service } from '@arki/dot';
@@ -141,11 +142,12 @@ declare function buildIndex(db: Db): Promise<SearchIndex>; // your code
 export const search = plugin({
   name: 'search',
   needs: {
-    db: service<Db>(),                 // wire key 'db', local alias 'db'
-    log: service<Logger>(),            // wire key 'log'
+    db: service<Db>(), // wire key 'db', local alias 'db'
+    log: service<Logger>(), // wire key 'log'
   },
   provides: {
-    search: async ({ db, log, $app }) => { // $app/$plugin/$config: kernel context
+    search: async ({ db, log, $app }) => {
+      // $app/$plugin/$config: kernel context
       log.info(`indexing for ${$app}`);
       return buildIndex(db);
     },
@@ -162,7 +164,8 @@ export const indexer = plugin({
   name: 'indexer',
   needs: { db: service<Db>() },
   provides: { search: ({ db }) => buildIndex(db) },
-  async dispose({ search, db }) {      // own provide + still-live need
+  async dispose({ search, db }) {
+    // own provide + still-live need
     await search.flush(db);
   },
 });
@@ -178,9 +181,7 @@ defineApp('shop')
   .use(billing) // ❌ the argument is refused: "Property 'DOT: this unit needs services that nothing before it provides…' is missing"
   .use(database); //    billing's `db` need has no earlier provider
 
-defineApp('shop')
-  .use(database)
-  .use(database2);   // ❌ collision: two providers of wire key 'db'
+defineApp('shop').use(database).use(database2); // ❌ collision: two providers of wire key 'db'
 ```
 
 Reordering the first example — or `rename`-ing one provider in the second —
@@ -204,8 +205,8 @@ Each step's type offers only the later steps, and each step's input is typed
 from the earlier ones (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`).
 
 ```ts skip="the app wiring uses log(config), schedule() and a gateway from other @arki packages; the oRPC example below compiles the same chain"
-import { defineApp } from '@arki/dot';
 import type { DepsOf } from '@arki/dot/feature';
+import { defineApp } from '@arki/dot';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 
 const dailyDigestDeps = defineFeature('daily-digest')
@@ -219,7 +220,7 @@ export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) }) // public handles
   .entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures), digestSchedules(dailyDigestLogic)); // entrypoints/
 
-export const app = defineApp('avocabo')
+export const app = defineApp('shop')
   .infra(log(config), database, billing) // what the app runs on, in boot order (log first)
   .features([dailyDigest])
   .entrypoints(gateway, schedule({ clock: 'host' }));
@@ -252,7 +253,7 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
 - **Collisions are compile errors**: steps out of order; `session`,
   `headers`, `services`, `usecases` as aliases or keys; an infra key equal to a
   need alias; an entrypoint key equal to a provided key. Erased callers get
-  `FEATURE_E006`.
+  `ARKI_DOT_E027`.
 - **Tests**: `dailyDigest.override({ store: fakeStore })` rebuilds the store
   plugin in place (its sibling services keep their factories) and keeps the
   entrypoints — one provider per key.
@@ -277,13 +278,14 @@ record with `sliceOf(ctx, f)`, and a chain feature's own units with
 `@orpc/server` is an optional peer; only this subpath loads it.
 
 ```ts
-import { plugin } from '@arki/dot';
-import type { DepsOf, ServicesBag } from '@arki/dot/feature';
-import { defineFeature } from '@arki/dot/feature';
-import { needsMiddleware, rpc } from '@arki/dot/orpc';
 import { oc } from '@orpc/contract';
 import { implement, ORPCError, os } from '@orpc/server';
 import { z } from 'zod';
+
+import type { DepsOf, ServicesBag } from '@arki/dot/feature';
+import { plugin } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
+import { needsMiddleware, rpc } from '@arki/dot/orpc';
 
 // core/orpc.ts — once per app
 type Session = { readonly user: { readonly id: string } };
@@ -313,7 +315,10 @@ export const preview =
   ({ store, plans }: Pick<Deps, 'store' | 'plans'>) =>
   async (userId: string) =>
     (await store.itemsFor(userId)).slice(0, plans.capFor(userId));
-export const purge = ({ store }: Pick<Deps, 'store'>) => () => store.purge();
+export const purge =
+  ({ store }: Pick<Deps, 'store'>) =>
+  () =>
+    store.purge();
 
 // features/daily-digest/feature.ts — the chain stays in one file, the one map of the feature
 const dailyDigestDeps = defineFeature('daily-digest').needs({ plans: billing.provides.entitlements }).infra(store);
@@ -328,8 +333,7 @@ export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
     impl.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
   admin: {
-    purge: (impl: typeof rpcImplementer) =>
-      impl.admin.purge.handler(({ context }) => context.usecases.purge()),
+    purge: (impl: typeof rpcImplementer) => impl.admin.purge.handler(({ context }) => context.usecases.purge()),
   },
 };
 
@@ -342,7 +346,7 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
   holds request data only; what a handler may touch is declared once, in the
   chain, where `dot explain` sees it. `context.db` does not compile when only
   the store needs `db`. An alias equal to a request-context key does not
-  compile either; a handle missing from the bag throws `FEATURE_E005`, naming
+  compile either; a handle missing from the bag throws `ARKI_DOT_E026`, naming
   the alias.
 - **`rpc(contract, implementer, factories)`** builds the router from one factory per
   procedure. The factories object is shaped like the contract — a group
@@ -364,7 +368,7 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
   holds the route, tags, declared errors and the contract `meta` — the place
   to declare a policy (`oc.$meta<{ auth: 'admin' }>({})`), which `dot explain`
   then shows without booting. Meta that is not plain JSON fails at `rpc()`
-  (`FEATURE_E010`).
+  (`ARKI_DOT_E031`).
 - **Procedures are factories over `rpcImplementer`.** `typeof rpcImplementer` depends on the logic stage,
   never on the finished feature, so there is no type cycle; `import type` is
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
@@ -417,10 +421,10 @@ The app wires its units in three steps — the hexagon of ports and adapters:
 
 ```ts skip="mounts adapters from @arki/db, @arki/queue and @arki/http, which depend on @arki/dot"
 defineApp('shop')
-  .use(db({ relations }))            // driven: what features need
+  .use(db({ relations })) // driven: what features need
   .use(queue({ connection }))
-  .features([orders, billing])       // the domain
-  .serve(http({ port: 3000 }))       // driving: what calls the features
+  .features([orders, billing]) // the domain
+  .serve(http({ port: 3000 })) // driving: what calls the features
   .serve(queueWorker({ q, needs: {}, context }));
 ```
 
@@ -467,12 +471,12 @@ key, stamped with `provider: 'billing'`. The keys are static, so the graph is
 data before anything boots:
 
 - mounting `digest` before `billing` is a compile error, and `configure()`
-  throws `DOT_LIFECYCLE_E020` naming both positions for code that skips types.
+  throws `ARKI_DOT_E020` naming both positions for code that skips types.
   The fix line is role-aware: "Move X before Y in .features([...])." for a
   feature provider, "Mount X with .use() before Y." for any other plugin;
 - two features that need each other form a ring: TypeScript reports `TS7022`
   on both `feature()` consts (read the two files it names), and `configure()`
-  throws `DOT_LIFECYCLE_E019` printing the ring (through any plugins) for
+  throws `ARKI_DOT_E019` printing the ring (through any plugins) for
   erased graphs;
 - `dot explain` draws one labelled edge per capability, such as
   `daily-digest --[entitlements]--> billing`, without booting.
@@ -490,10 +494,12 @@ the context are part of it, so the type loops. The context carries an opaque
 (so the builder proves every provider boots first) and builds the bag:
 
 ```ts
-import { service, type NeedsShape } from '@arki/dot';
-import type { ServicesBag } from '@arki/dot/feature';
-import { feature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
 import { os } from '@orpc/server';
+
+import type { NeedsShape } from '@arki/dot';
+import type { ServicesBag } from '@arki/dot/feature';
+import { service } from '@arki/dot';
+import { feature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
 
 // Stand-ins for your own modules.
 type Db = { query(sql: string): Promise<unknown[]> };
@@ -524,7 +530,7 @@ export const ingestUrl = o
 ```
 
 `resolveNeeds` keeps only handles (driven services such as `db` stay on the
-context explicitly) and throws `FEATURE_E005` naming the alias, key and
+context explicitly) and throws `ARKI_DOT_E026` naming the alias, key and
 provider when a capability is missing from the bag.
 
 ### Plugin handles
@@ -535,7 +541,8 @@ name) and `.lazy`. The kernel checks every plugin's needs against every
 plugin's static provides at `configure()`.
 
 ```ts
-import { plugin, type Provided } from '@arki/dot';
+import type { Provided } from '@arki/dot';
+import { plugin } from '@arki/dot';
 
 // Stand-ins for your own clients; with @arki/db this is `db({ relations, url: () => env.DB_URL })`.
 type Pg = { query(sql: string): Promise<unknown[]> };
@@ -551,8 +558,8 @@ export type Db = Provided<typeof database.provides.db>; // the one alias an app 
 export const reports = plugin({
   name: 'reports',
   needs: {
-    db: database.provides.db,              // typed from the provider
-    cache: cache.provides.kv.lazy,         // a Lazy<T>, even if the provider is eager
+    db: database.provides.db, // typed from the provider
+    cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager
   },
   provides: { reports: ({ db }) => makeReports(db) },
 });
@@ -604,9 +611,9 @@ export const database = plugin({
 // Any consumer, any package, any local alias:
 export const reports = plugin({
   name: 'reports',
-  needs: { warehouse: Db },                // wire key 'arki.db', alias yours
+  needs: { warehouse: Db }, // wire key 'arki.db', alias yours
   boot: async ({ warehouse }) => {
-    await warehouse.execute('select 1');   // typed as PgDatabase
+    await warehouse.execute('select 1'); // typed as PgDatabase
   },
 });
 ```
@@ -623,27 +630,30 @@ import { defineApp, plugin, rename, token } from '@arki/dot';
 type PgDatabase = { execute(sql: string): Promise<unknown[]> };
 declare function connect(url: string): PgDatabase; // your code
 const Db = token<PgDatabase>()('arki.db');
-const database = ({ url }: { url: string }) =>
-  plugin({ name: 'database', provides: { [Db.key]: () => connect(url) } });
+const database = ({ url }: { url: string }) => plugin({ name: 'database', provides: { [Db.key]: () => connect(url) } });
 const PRIMARY_URL = 'postgres://primary/shop';
 const REPLICA_URL = 'postgres://replica/shop';
 
-const ReportsDb = Db.instance('reports');  // token for key 'arki.db#reports'
+const ReportsDb = Db.instance('reports'); // token for key 'arki.db#reports'
 
 const app = await defineApp('shop')
   .use(database({ url: PRIMARY_URL }))
-  .use(rename(
-    database({ url: REPLICA_URL }),
-    { 'arki.db': ReportsDb.key },          // republish under the derived key
-    'reports-db',                          // distinct plugin name
-  ))
-  .use(plugin({
-    name: 'analytics',
-    needs: { primary: Db, replica: ReportsDb },
-    boot: async ({ primary, replica }) => {
-      await Promise.all([primary.execute('select 1'), replica.execute('select 1')]); // two live instances, both typed
-    },
-  }))
+  .use(
+    rename(
+      database({ url: REPLICA_URL }),
+      { 'arki.db': ReportsDb.key }, // republish under the derived key
+      'reports-db', // distinct plugin name
+    ),
+  )
+  .use(
+    plugin({
+      name: 'analytics',
+      needs: { primary: Db, replica: ReportsDb },
+      boot: async ({ primary, replica }) => {
+        await Promise.all([primary.execute('select 1'), replica.execute('select 1')]); // two live instances, both typed
+      },
+    }),
+  )
   .boot();
 await app.dispose();
 ```
@@ -683,7 +693,12 @@ const store = plugin({
 const reports = defineFeature('reports')
   .needs({ db: database.provides.db })
   .infra(store)
-  .usecases({ region: ({ repos }) => () => repos.region() })
+  .usecases({
+    region:
+      ({ repos }) =>
+      () =>
+        repos.region(),
+  })
   .provides({ summary: ({ usecases }) => ({ region: usecases.region() }) })
   .entrypoints(rpc({}, {}, {}));
 
@@ -708,7 +723,7 @@ reserved: define the feature without it and call `.instance()`.
 `lazy(init, { dispose })` publishes a **handle** instead of an open
 resource. Initialization runs on first `get()` (memoized, single-flight;
 failed attempts retry). Never-touched handles never initialize — and the
-kernel auto-disposes initialized ones during teardown, *after* the
+kernel auto-disposes initialized ones during teardown, _after_ the
 publishing plugin's own `dispose` hook, even if that plugin has none:
 
 ```ts
@@ -720,9 +735,10 @@ declare function connectToElastic(): Promise<SearchClient>; // your code
 export const search = plugin({
   name: 'search',
   provides: {
-    search: () => lazy(() => connectToElastic(), {
-      dispose: client => client.close(),
-    }),
+    search: () =>
+      lazy(() => connectToElastic(), {
+        dispose: client => client.close(),
+      }),
   },
 });
 ```
@@ -736,7 +752,7 @@ export const suggestions = plugin({
   name: 'suggestions',
   needs: { search: service.lazy<SearchClient>() },
   async start({ search }) {
-    const client = await search.get();     // first access initializes
+    const client = await search.get(); // first access initializes
     await client.query('warm-up');
   },
 });
@@ -750,12 +766,12 @@ consumer — the wiring guard accepts both shapes against the same witness.
 Every service-carrying hook context includes `$app` (app name), `$plugin` (plugin
 name), `$config` (the `defineApp(name, { config })` bag), and `$signal`: one
 `AbortSignal` per hook call that aborts when the hook exceeds `hookTimeoutMs`,
-with the `DOT_LIFECYCLE_E015` error as its reason. Pass it to the hook's I/O
+with the `ARKI_DOT_E015` error as its reason. Pass it to the hook's I/O
 (`connect`, `fetch`, `sleep`) so a hung hook stops instead of running on after
 the kernel gave up on it. The `$` prefix
 is enforced as reserved: `plugin()` rejects `$`-prefixed needs aliases and
 publish keys at compile time, and the kernel re-validates at runtime
-(`DOT_LIFECYCLE_E014`) — kernel keys can never be shadowed.
+(`ARKI_DOT_E014`) — kernel keys can never be shadowed.
 
 ## A complex setup
 
@@ -816,7 +832,7 @@ const database = (url: string) =>
     needs: { metrics: service<Metrics>() },
     provides: { [Db.key]: ({ metrics }) => connectPg(url, { metrics }) },
     async dispose(ctx) {
-      await ctx[Db.key].end();       // own provide, published under the token key
+      await ctx[Db.key].end(); // own provide, published under the token key
     },
   });
 
@@ -832,9 +848,10 @@ const searchCluster = plugin({
   needs: { env: Env },
   provides: {
     // Expensive external cluster — only opens if something get()s it.
-    search: ({ env }) => lazy(() => connectElastic(env.ELASTIC_URL), {
-      dispose: client => client.close(),
-    }),
+    search: ({ env }) =>
+      lazy(() => connectElastic(env.ELASTIC_URL), {
+        dispose: client => client.close(),
+      }),
   },
 });
 
@@ -849,7 +866,7 @@ const catalog = plugin({
   needs: {
     db: Db,
     cache: Cache,
-    search: service.lazy<SearchClient>(),   // eager or lazy provider — same code
+    search: service.lazy<SearchClient>(), // eager or lazy provider — same code
   },
   provides: {
     catalog: ({ db, cache, search }) => makeCatalog({ db, cache, search }),
@@ -876,7 +893,7 @@ const outboxWorker = plugin({
   needs: { db: Db, bus: Bus },
   provides: { outbox: ({ db, bus }) => makeOutbox(db, bus) },
   start: ({ outbox }) => outbox.startPolling(),
-  stop: ({ outbox }) => outbox.drain(),      // stop processing, keep resources
+  stop: ({ outbox }) => outbox.drain(), // stop processing, keep resources
 });
 
 const http = plugin({
@@ -888,8 +905,7 @@ const http = plugin({
     reporting: service<Reporting>(),
   },
   provides: {
-    server: ({ env, catalog, checkout, reporting }) =>
-      buildServer({ port: env.PORT, catalog, checkout, reporting }),
+    server: ({ env, catalog, checkout, reporting }) => buildServer({ port: env.PORT, catalog, checkout, reporting }),
   },
   start: ({ server }) => server.listen(),
   stop: ({ server }) => server.close(),
@@ -943,7 +959,14 @@ import { log } from '@arki/dot/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 const app = await defineApp('checkout')
-  .use(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
+  .use(
+    log(() => ({
+      ...fromEnv(),
+      context: asyncContext(),
+      channels: { stdout: stdout() },
+      default: { level: 'info', channels: ['stdout'] },
+    })),
+  )
   .boot();
 ```
 
@@ -960,7 +983,7 @@ const app = await defineApp('checkout')
 lifecycle record (`configure: starting`) and closes the handle after its
 last one (`dispose: complete`). On a failed `configure`, `boot` or `start`,
 the failure is written first and logging closes last. An app has at most one
-logging plugin: two is `DOT_LIFECYCLE_E018`.
+logging plugin: two is `ARKI_DOT_E018`.
 
 Without a logging plugin, `@arki/log` keeps only the first 64 records at
 `warn` and above, and writes nothing else.
@@ -974,9 +997,10 @@ does not compile; a fake of the wrong shape fails at the `.provide()`
 call site:
 
 ```ts
+import { expect } from 'vitest';
+
 import { plugin, service, token } from '@arki/dot';
 import { testPlugin } from '@arki/dot/test-harness';
-import { expect } from 'vitest';
 
 type Pg = { query(sql: string): Promise<unknown[]> };
 type Kv = { get(key: string): Promise<string | null> };
@@ -994,8 +1018,8 @@ const fakeDb: Pg = { query: async () => [] };
 const fakeKv: Kv = { get: async () => null };
 
 const app = await testPlugin(catalog)
-  .provide(Db, fakeDb)             // token need
-  .provide('cache', fakeKv)        // anonymous need — wire key is the alias
+  .provide(Db, fakeDb) // token need
+  .provide('cache', fakeKv) // anonymous need — wire key is the alias
   .boot();
 
 expect(await app.services.catalog.list()).toEqual([]);
@@ -1030,9 +1054,7 @@ const worker = plugin({
   },
 });
 
-const app = await defineApp('shop', { hookTimeoutMs: 30_000 })
-  .use(worker)
-  .start();
+const app = await defineApp('shop', { hookTimeoutMs: 30_000 }).use(worker).start();
 
 hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
 ```
@@ -1043,7 +1065,7 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
   second signal falls through to the runtime default (immediate kill).
   Returns an unhook function.
 - **`hookTimeoutMs`** — a per-hook watchdog. Any `boot`/`start`/`stop`/
-  `dispose` hook exceeding the budget fails with `DOT_LIFECYCLE_E015`
+  `dispose` hook exceeding the budget fails with `ARKI_DOT_E015`
   naming the plugin and hook, and the kernel applies its normal rollback or
   aggregation rules. Your app cannot hang silently at boot.
 
@@ -1053,13 +1075,13 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
 contexts carry the needed services (typed, under your local aliases) and
 `$`-prefixed kernel keys (`$app`, `$plugin`, `$config`, `$signal`):
 
-| Hook        | Purpose                                                             |
-| ----------- | ------------------------------------------------------------------- |
-| `configure` | Validate static config; declare schemas, routes, services. No I/O.  |
+| Hook        | Purpose                                                                      |
+| ----------- | ---------------------------------------------------------------------------- |
+| `configure` | Validate static config; declare schemas, routes, services. No I/O.           |
 | `boot`      | Side effects only (seed, warm-up). Returns nothing. Values go in `provides`. |
-| `start`     | Begin processing (workers, subscribers, schedulers).                |
-| `stop`      | Stop processing in reverse declaration order.                       |
-| `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.    |
+| `start`     | Begin processing (workers, subscribers, schedulers).                         |
+| `stop`      | Stop processing in reverse declaration order.                                |
+| `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.             |
 
 Wiring is compile-time checked: `.use(plugin)` fails to typecheck when the
 plugin's needs aren't satisfied by earlier `.use()` calls, or when its
@@ -1089,17 +1111,71 @@ before throwing.
 
 Runtime failures carry stable codes (`DotLifecycleError.code`):
 
-| Code                 | Meaning                                              |
-| -------------------- | ---------------------------------------------------- |
-| `DOT_LIFECYCLE_E011` | Plugin registered twice.                                |
-| `DOT_LIFECYCLE_E012` | A need no plugin declares (erased or JS graphs, dynamic http bundle tokens). |
-| `DOT_LIFECYCLE_E019` | Plugins form a ring through their needs and provides.   |
-| `DOT_LIFECYCLE_E020` | A provider is mounted after its consumer (at `configure()`). |
-| `DOT_LIFECYCLE_E013` | A published wire key collides with an earlier one.   |
-| `DOT_LIFECYCLE_E014` | A service key uses the reserved `$` (kernel) prefix. |
-| `DOT_LIFECYCLE_E015` | A hook exceeded the `hookTimeoutMs` watchdog.        |
+| Code            | Meaning                                                                      |
+| --------------- | ---------------------------------------------------------------------------- |
+| `ARKI_DOT_E011` | Plugin registered twice.                                                     |
+| `ARKI_DOT_E012` | A need no plugin declares (erased or JS graphs, dynamic http bundle tokens). |
+| `ARKI_DOT_E019` | Plugins form a ring through their needs and provides.                        |
+| `ARKI_DOT_E020` | A provider is mounted after its consumer (at `configure()`).                 |
+| `ARKI_DOT_E013` | A published wire key collides with an earlier one.                           |
+| `ARKI_DOT_E014` | A service key uses the reserved `$` (kernel) prefix.                         |
+| `ARKI_DOT_E015` | A hook exceeded the `hookTimeoutMs` watchdog.                                |
 
 (Full table including hook-failure codes: [docs/lifecycle.md](./docs/lifecycle.md).)
+
+## Errors
+
+Every error the kernel throws carries a stable `code`, a one-sentence `remediation` and a `docsUrl`, the same shape as `DotPluginError`. Match on `code`, never on the message. Codes are never renumbered or reused (E009 and E010 are retired).
+
+`DotLifecycleError` (E001-E021) also carries `phase`, `plugin`, `cause` and, for stop and dispose, `failures`. `FeatureError` (E022-E031) is what `feature()`, `defineFeature()`, `rpc()` and `routerFor()` throw. `DotManifestError` (E032) extends `TypeError`.
+
+| Code            | Class               | Meaning                                                                 | Fix                                                    |
+| --------------- | ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ARKI_DOT_E001` | `DotLifecycleError` | `configure` returned a Promise.                                         | Make `configure` synchronous; do async work in `boot`. |
+| `ARKI_DOT_E002` | `DotLifecycleError` | `configure` threw.                                                      | Fix the plugin's config or its `configure` hook.       |
+| `ARKI_DOT_E003` | `DotLifecycleError` | `boot` threw. Booted plugins were rolled back.                          | Read `plugin` and `cause`; fix that `boot` hook.       |
+| `ARKI_DOT_E004` | `DotLifecycleError` | `start` threw.                                                          | Read `plugin` and `cause`; fix that `start` hook.      |
+| `ARKI_DOT_E005` | `DotLifecycleError` | One or more `stop` hooks threw.                                         | Read `failures`; each names the plugin.                |
+| `ARKI_DOT_E006` | `DotLifecycleError` | One or more `dispose` hooks threw.                                      | Read `failures`; each names the plugin.                |
+| `ARKI_DOT_E007` | `DotLifecycleError` | The app was reused after `dispose()`.                                   | Build a fresh app instance.                            |
+| `ARKI_DOT_E008` | `DotLifecycleError` | The app was reused after a failed lifecycle.                            | Build a fresh app instance.                            |
+| `ARKI_DOT_E011` | `DotLifecycleError` | A plugin was registered twice.                                          | Remove the second `.use()`, or `rename` it.            |
+| `ARKI_DOT_E012` | `DotLifecycleError` | A need no plugin provides (erased or JS graphs).                        | Mount the provider before its consumer.                |
+| `ARKI_DOT_E013` | `DotLifecycleError` | A wire key is provided twice.                                           | `rename` one provider.                                 |
+| `ARKI_DOT_E014` | `DotLifecycleError` | A key uses the reserved `$` prefix.                                     | Rename the key.                                        |
+| `ARKI_DOT_E015` | `DotLifecycleError` | A hook ran past `hookTimeoutMs`.                                        | Pass `$signal` to the hook's I/O, or raise the budget. |
+| `ARKI_DOT_E016` | `DotLifecycleError` | Two actions in one binding share an id.                                 | Give each action its own id.                           |
+| `ARKI_DOT_E017` | `DotLifecycleError` | Action `meta` is not plain JSON.                                        | Keep `meta` JSON-safe.                                 |
+| `ARKI_DOT_E018` | `DotLifecycleError` | More than one logging plugin.                                           | Keep one `log()`.                                      |
+| `ARKI_DOT_E019` | `DotLifecycleError` | Needs and provides form a ring.                                         | Move the shared piece into a third unit.               |
+| `ARKI_DOT_E020` | `DotLifecycleError` | A provider is mounted after its consumer.                               | Mount the provider first.                              |
+| `ARKI_DOT_E021` | `DotLifecycleError` | `$describeAction` named an action the plugin may not amend.             | Describe only your own actions.                        |
+| `ARKI_DOT_E022` | `FeatureError`      | Two routers use the same key.                                           | Rename one key.                                        |
+| `ARKI_DOT_E023` | `FeatureError`      | Two repos use the same key.                                             | Rename one key.                                        |
+| `ARKI_DOT_E024` | `FeatureError`      | Two slices use the same key.                                            | Rename one key.                                        |
+| `ARKI_DOT_E025` | `FeatureError`      | A feature has no slices.                                                | Add at least one slice.                                |
+| `ARKI_DOT_E026` | `FeatureError`      | A handle is missing from the services bag.                              | Mount the provider; check the gateway's needs.         |
+| `ARKI_DOT_E027` | `FeatureError`      | A feature key collides with another slot or a reserved name.            | Rename the alias or key.                               |
+| `ARKI_DOT_E028` | `FeatureError`      | `override()` named a key no infra plugin provides.                      | Override a key the feature's infra provides.           |
+| `ARKI_DOT_E029` | `FeatureError`      | `routerFor()`: an app-contract key has zero or several owners.          | Give each key exactly one feature.                     |
+| `ARKI_DOT_E030` | `FeatureError`      | `routerFor()`: a feature's contract is not mounted in the app contract. | Mount it in the app contract.                          |
+| `ARKI_DOT_E031` | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.               | Keep contract `meta` JSON-safe.                        |
+| `ARKI_DOT_E032` | `DotManifestError`  | Manifest data is not plain JSON.                                        | Pass plain JSON only.                                  |
+
+The `dot` command has its own codes (`DOT_CLI_E001` and up),.
+
+## Runtime support
+
+The portable entries (`@arki/dot`, `@arki/dot/plugin`, `@arki/dot/feature`, `@arki/dot/log`, `@arki/dot/test-harness`) run on Node, Bun, Deno, browsers and Hermes (React Native). The kernel reads `process`, `performance` and timers at call time, never at import, and falls back where the runtime has none: `hookSignals` hooks nothing without a `process`, and durations use `Date.now()` without `performance`.
+
+The adapter entries need more:
+
+| Entry                                | Needs                            | Why                               |
+| ------------------------------------ | -------------------------------- | --------------------------------- |
+| `@arki/dot/cli` and the `dot` binary | Node or Bun                      | Reads files, spawns processes.    |
+| `@arki/dot/orpc`                     | the optional `@orpc/server` peer | Wraps oRPC procedures as actions. |
+
+`bun run test:runtimes` boots a small app through the portable API on every leg, from the built `dist/`.
 
 ## CLI
 
@@ -1171,10 +1247,10 @@ that bridge databases, queues, auth providers, and HTTP routers live in their
 own packages and consume `@arki/dot` as a peer dependency:
 
 ```ts skip="adapter packages depend on @arki/dot, so dot cannot import them"
-import { env } from '@arki/env/dot';
 import { db } from '@arki/db/dot';
-import { kv } from '@arki/kv/dot';
+import { env } from '@arki/env/dot';
 import { journal } from '@arki/journal/dot';
+import { kv } from '@arki/kv/dot';
 ```
 
 This keeps the kernel free of optional dependencies and lets each adapter
@@ -1200,6 +1276,7 @@ The full docs live in [`docs/`](./docs):
 Agent-discoverable index: [`llms.txt`](./llms.txt).
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 A 20-service graph where each service depends on the two before it, built with `@arki/dot` plugins and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.
@@ -1210,22 +1287,22 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 dot: declare 20 plugins, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/dot (boot + dispose) | 199.83 µs | 14.99× |
-| awilix (register + resolve + dispose) | 65.92 µs | 4.94× |
-| hand-written wiring (no container) | 13.33 µs | fastest |
+| Library                               | Time / op | vs fastest |
+| ------------------------------------- | --------: | ---------: |
+| @arki/dot (boot + dispose)            | 199.83 µs |     14.99× |
+| awilix (register + resolve + dispose) |  65.92 µs |      4.94× |
+| hand-written wiring (no container)    |  13.33 µs |    fastest |
 
 ### Look up a service after boot
 
 The hot path: code that already has a booted app asks for one service. dot services are plain properties; awilix `resolve` and `cradle` go through a cache lookup.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/dot (app.services.s19) | 30.3 ns | fastest |
-| awilix (container.resolve('s19')) | 67.2 ns | 2.21× |
-| awilix (container.cradle.s19) | 105.4 ns | 3.47× |
-| hand-written (plain object property) | 32.0 ns | 1.05× |
+| Library                              | Time / op | vs fastest |
+| ------------------------------------ | --------: | ---------: |
+| @arki/dot (app.services.s19)         |   30.3 ns |    fastest |
+| awilix (container.resolve('s19'))    |   67.2 ns |      2.21× |
+| awilix (container.cradle.s19)        |  105.4 ns |      3.47× |
+| hand-written (plain object property) |   32.0 ns |      1.05× |
 
 Read the rows with the contracts in mind:
 

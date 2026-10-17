@@ -1128,7 +1128,7 @@ function unreachable(feature: string, witness: Ownership): string | undefined {
  * the remap at `.features()` has replaced every legitimate one, so only outsiders keep them.
  * `defineApp().features()` runs this; drivers and driven adapters read `features` from it.
  *
- * @throws {FeatureError} `FEATURE_E005` naming the unit, the alias and the owning feature.
+ * @throws {FeatureError} `ARKI_DOT_E026` naming the unit, the alias and the owning feature.
  */
 export function mountFeatures(features: readonly AnyDefinedFeature[]): {
   readonly features: readonly AnyDefinedFeature[];
@@ -1720,7 +1720,7 @@ type Unimplemented<A extends AppContract, F extends readonly Mounted[]> = {
  * entrypoint are skipped, so the app's whole feature list can be passed.
  * A nested feature's contract is mounted by its parent, not here.
  *
- * @throws {FeatureError} `FEATURE_E008` / `FEATURE_E009` for callers that skip the types.
+ * @throws {FeatureError} `ARKI_DOT_E029` / `ARKI_DOT_E030` for callers that skip the types.
  */
 export function routerFor<const A extends AppContract, const F extends readonly Mounted[]>(
   app: A &

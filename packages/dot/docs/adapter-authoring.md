@@ -48,10 +48,12 @@ adapter only makes sense inside a DOT app.
 An adapter exports a factory function that returns a `Plugin`:
 
 ```ts
-// my-pkg/src/dot.ts
-import { plugin, type EmptyShape, type Plugin } from '@arki/dot/plugin';
+import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import { plugin } from '@arki/dot/plugin';
 
 import { MyClient } from './index.js';
+
+// my-pkg/src/dot.ts
 
 export type MyPkgDotOptions = {
   readonly url: string;
@@ -91,7 +93,9 @@ export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgService
 ```ts
 import { myPkg } from '@acme/my-pkg/dot';
 
-const app = await defineApp('billing').use(myPkg({ url: '...' })).boot();
+const app = await defineApp('billing')
+  .use(myPkg({ url: '...' }))
+  .boot();
 ```
 
 Do NOT take a `name` option for multi-instance mounting — that's the app
@@ -247,7 +251,7 @@ Dependency edges are not declared — the kernel derives them at `configure()`
 from every plugin's needs and static provides, and writes them into
 `app.manifest.dependencies` (each entry carries its `key`). Manifest
 `provides` is filled at configure for adapters too. A provider mounted after
-its consumer is `DOT_LIFECYCLE_E020`.
+its consumer is `ARKI_DOT_E020`.
 
 ## Feature slices
 
@@ -259,12 +263,12 @@ own key — structurally, with no shared type between adapters.
 
 Well-known slice keys, each owned by the adapter that consumes it:
 
-| Key | Value | Consuming activator |
-| --- | --- | --- |
-| `routes` | an HTTP route bundle (bindings + derivers + rpc mounts) | `@arki/http` |
-| `queue` | a queue definition registry (jobs, queue-schedules, flows) | `@arki/queue` |
-| `schedules` | in-process schedule definitions | `@arki/schedule` |
-| `journal` | a journal bundle (projections + effects, from `journalHandlers(...)`) | `@arki/journal` |
+| Key         | Value                                                                 | Consuming activator |
+| ----------- | --------------------------------------------------------------------- | ------------------- |
+| `routes`    | an HTTP route bundle (bindings + derivers + rpc mounts)               | `@arki/http`        |
+| `queue`     | a queue definition registry (jobs, queue-schedules, flows)            | `@arki/queue`       |
+| `schedules` | in-process schedule definitions                                       | `@arki/schedule`    |
+| `journal`   | a journal bundle (projections + effects, from `journalHandlers(...)`) | `@arki/journal`     |
 
 Third-party adapters MUST package-qualify their slice keys (`'acme:bus'`)
 — the same namespacing rule as bindings.
@@ -324,8 +328,9 @@ package-scoped and easy to grep.
 Use `@arki/dot`'s test harness:
 
 ```ts
-import { bootTestApp } from '@arki/dot';
 import { describe, expect, it } from 'vitest';
+
+import { bootTestApp } from '@arki/dot';
 
 import { myPkg } from '../src/dot.js';
 
@@ -340,7 +345,7 @@ describe('myPkg adapter', () => {
     const builder = bootTestApp([
       myPkg({} as Parameters<typeof myPkg>[0]), // intentionally invalid
     ]);
-    await expect(builder).rejects.toMatchObject({ code: 'DOT_LIFECYCLE_E003' });
+    await expect(builder).rejects.toMatchObject({ code: 'ARKI_DOT_E003' });
   });
 });
 ```

@@ -1,4 +1,5 @@
 import type {
+  ActionSource,
   CtxOf,
   DotConfigureContext,
   EmptyShape,
@@ -6,7 +7,6 @@ import type {
   NeedsShape,
   NoReservedKeys,
   Plugin,
-  ActionSource,
   Service,
   ServiceRecord,
   WireNeeds,
@@ -35,7 +35,9 @@ type SchemaCheckedProvides<TServices extends object, TProvides extends ServiceRe
 
 /** One factory per published key, each checked against the context's service schema. */
 type CheckedFactories<TCtx, TServices extends object, TProvides extends ServiceRecord> = {
-  readonly [K in keyof TProvides]: (ctx: TCtx & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides>[K]>;
+  readonly [K in keyof TProvides]: (
+    ctx: TCtx & KernelCtx,
+  ) => MaybePromise<SchemaCheckedProvides<TServices, TProvides>[K]>;
 };
 
 type CommonPluginDefinition = {
@@ -129,7 +131,7 @@ function createPluginFactory<TServices extends object>(): InitPluginsFactory<TSe
         ...(def.stop === undefined ? {} : { stop: def.stop as KernelPluginDefinition['stop'] }),
         ...(def.dispose === undefined ? {} : { dispose: def.dispose as KernelPluginDefinition['dispose'] }),
       };
-      return definePlugin(kernelDef) as unknown as Plugin<ServiceRecord, ServiceRecord>;
+      return definePlugin(kernelDef);
     },
     needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys> {
       return needsFor<TServices, typeof keys>(keys);

@@ -6,12 +6,12 @@
  *
  * Found by the Drop Studio demo (catalog feature: boot = seed, no provides).
  */
-import { defineApp } from '../define-app.js';
-import { plugin, service } from '../plugin-contract.js';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { ProvidedOf } from '../feature.js';
+import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
+import { plugin, service } from '../plugin-contract.js';
 
 type Db = { readonly name: string };
 

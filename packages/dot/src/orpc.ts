@@ -68,7 +68,7 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
  * (needs, private infra, children's provides and usecases, by alias) — and
  * adds them to the context. One key per feature, read by the feature's own
  * name: no per-handle resolution, so a nested feature's remapped needs just
- * work. A missing key → `FEATURE_E005`, naming the feature. Driven services
+ * work. A missing key → `ARKI_DOT_E026`, naming the feature. Driven services
  * such as `db` reach a handler only when the feature itself needs them — the
  * feature's store does, the procedure does not.
  *
@@ -86,7 +86,8 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
         throw new FeatureError({
           code: FEATURE_ERROR_CODES.missingCapability,
           message: `[feature] "${logic.name}": its services ("${key}") are not in the request context's bag.`,
-          remediation: "Spread providesOf(units) over the features' plugins() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
+          remediation:
+            "Spread providesOf(units) over the features' plugins() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
         });
       }
       return next({
@@ -110,16 +111,23 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
 export type ProcedureFactories<C, O> = {
   readonly [K in keyof C]: C[K] extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
     ? (implementer: O) => Router<C[K], never>
-    : ProcedureFactories<C[K], O> | (C[K] extends ContractRouter<Meta> ? (implementer: O) => Router<C[K], never> : never);
+    : | ProcedureFactories<C[K], O>
+      | (C[K] extends ContractRouter<Meta> ? (implementer: O) => Router<C[K], never> : never);
 };
 
 /** The router the factories build: each factory's return under its key. */
-export type BuiltRouter<F> = { readonly [K in keyof F]: F[K] extends (implementer: never) => infer R ? R : BuiltRouter<F[K]> };
+export type BuiltRouter<F> = {
+  readonly [K in keyof F]: F[K] extends (implementer: never) => infer R ? R : BuiltRouter<F[K]>;
+};
 
 // Keys in the factories the contract does not have (a nested group reports the
 // inner key). No `${K}.${…}` path string here: that hit TS2589 in the probe.
 type ExtraKeys<C, F> = {
-  [K in keyof F]: K extends keyof C ? (F[K] extends (implementer: never) => unknown ? never : ExtraKeys<C[K], F[K]>) : K;
+  [K in keyof F]: K extends keyof C
+    ? F[K] extends (implementer: never) => unknown
+      ? never
+      : ExtraKeys<C[K], F[K]>
+    : K;
 }[keyof F];
 
 /** A compile error naming each procedure key the contract does not list. */
@@ -162,7 +170,9 @@ export function rpc<C extends ContractRouter<Meta>, O, const F extends Procedure
     actionsOf: (feature, children = []) => {
       const mounted = mountedPaths(router, new Set(children.map(child => child.router)));
       return procedures
-        .filter(procedure => !mounted.some(prefix => procedure.path === prefix || procedure.path.startsWith(`${prefix}.`)))
+        .filter(
+          procedure => !mounted.some(prefix => procedure.path === prefix || procedure.path.startsWith(`${prefix}.`)),
+        )
         .map(procedure => rpcAction(feature, procedure));
     },
     contract,
@@ -173,12 +183,17 @@ export function rpc<C extends ContractRouter<Meta>, O, const F extends Procedure
 }
 
 /** The dotted paths in the built router whose value is a declared child's router — the child declares those actions. */
-function mountedPaths(router: object, childRouters: ReadonlySet<unknown>, path: readonly string[] = []): readonly string[] {
+function mountedPaths(
+  router: object,
+  childRouters: ReadonlySet<unknown>,
+  path: readonly string[] = [],
+): readonly string[] {
   return Object.entries(router).flatMap(([key, value]: [string, unknown]) => {
     const here = [...path, key];
     if (childRouters.has(value)) return [here.join('.')];
     // A procedure carries `~orpc`; only plain groups are walked.
-    if (typeof value === 'object' && value !== null && !('~orpc' in value)) return mountedPaths(value, childRouters, here);
+    if (typeof value === 'object' && value !== null && !('~orpc' in value))
+      return mountedPaths(value, childRouters, here);
     return [];
   });
 }

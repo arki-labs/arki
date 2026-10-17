@@ -37,7 +37,7 @@ Other changes in the same release:
   `export type Db = Provided<typeof database.provides.db>`.
 - `rename(p, { db: 'reportsDb' }, 'reports-db')` rebuilds handles: use
   `reportsDb.provides.reportsDb`.
-- A provider mounted after its consumer is `DOT_LIFECYCLE_E020` at
+- A provider mounted after its consumer is `ARKI_DOT_E020` at
   `configure()`; a ring is `E019`. `E012` is now only for needs no plugin
   declares.
 - `providesOf([...])` accepts plugins as well as features.

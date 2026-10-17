@@ -20,7 +20,12 @@ import { createDb, database } from './fixtures/nested-digest/db.js';
 import { ranker } from './fixtures/nested-digest/digest/features/compile/infra/ranker.js';
 import { store } from './fixtures/nested-digest/digest/infra/store.js';
 
-type Witness = { readonly key?: string; readonly origin?: object; readonly lazy?: unknown; readonly entrypointOnly?: boolean };
+type Witness = {
+  readonly key?: string;
+  readonly origin?: object;
+  readonly lazy?: unknown;
+  readonly entrypointOnly?: boolean;
+};
 const canonical = (w: Witness): object => w.origin ?? w;
 
 /** The shape `advisoryLocks(options)` takes after the change: options only, `db` unbound. */
@@ -85,7 +90,9 @@ describe('binding: the feature need is what every infra plugin gets', () => {
     expect(app.services.digests.namespace).toBe('probe');
     expect(await app.services.digests.count()).toBe(0);
     const db = app.services.db;
-    await db.transaction(tx => app.services['digest.repos'].withTx(tx).digests.create({ id: 'd1', userId: 'u', status: 'compiled', items: [] }));
+    await db.transaction(tx =>
+      app.services['digest.repos'].withTx(tx).digests.create({ id: 'd1', userId: 'u', status: 'compiled', items: [] }),
+    );
     expect(await db.transaction(tx => app.services['digest.compile.compiler'].stored(tx))).toBe(1);
     await app.dispose();
   });
@@ -98,7 +105,10 @@ describe('binding: the feature need is what every infra plugin gets', () => {
         return createDb().transaction(fn);
       },
     };
-    const app = await defineApp('fake').infra(plugin({ name: 'fake-db', provides: { db: () => fakeDb } })).features([digest]).start();
+    const app = await defineApp('fake')
+      .infra(plugin({ name: 'fake-db', provides: { db: () => fakeDb } }))
+      .features([digest])
+      .start();
     await app.services.digests.count();
     expect(calls).toBe(1);
     await app.dispose();
@@ -162,13 +172,25 @@ describe('refusals at .infra(), before boot (the type guard refuses them too)', 
     );
     // Migration tolerance: today's `repos(database.provides.db, …)` form passes when it binds the feature's own handle.
     const boundSame = plugin({ name: 'bound-same', needs: { db: database.provides.db }, provides: { thing: () => 1 } });
-    const tolerated = defineFeature('z').needs({ db: entrypointOnly(database.provides.db) }).infra(boundSame).usecases({}).entrypoints();
+    const tolerated = defineFeature('z')
+      .needs({ db: entrypointOnly(database.provides.db) })
+      .infra(boundSame)
+      .usecases({})
+      .entrypoints();
     expect(canonical(tolerated.plugins()[0].needs['db'] as Witness)).toBe(database.provides.db);
   });
 
   it('a lazy witness gets the lazy form of the feature handle', () => {
-    const lazyUser = plugin({ name: 'lazy-user', needs: { db: service.lazy<Db>() }, provides: { later: ({ db }) => db } });
-    const lazyFeature = defineFeature('w').needs({ db: database.provides.db }).infra(lazyUser).usecases({}).entrypoints();
+    const lazyUser = plugin({
+      name: 'lazy-user',
+      needs: { db: service.lazy<Db>() },
+      provides: { later: ({ db }) => db },
+    });
+    const lazyFeature = defineFeature('w')
+      .needs({ db: database.provides.db })
+      .infra(lazyUser)
+      .usecases({})
+      .entrypoints();
     const need = lazyFeature.plugins()[0].needs['db'] as Witness;
     expect(need.lazy).toBe(true);
     expect(need.key).toBe('db');
@@ -195,11 +217,16 @@ describe('positives', () => {
   });
 
   it('entrypoint-only db: the usecases deps have repos and locks and no db; provides and entrypoints see db', () => {
-    const deps = defineFeature('h').needs({ db: entrypointOnly(database.provides.db) }).infra(store);
+    const deps = defineFeature('h')
+      .needs({ db: entrypointOnly(database.provides.db) })
+      .infra(store);
     type Deps = DepsOf<typeof deps>;
     expectTypeOf<'db' extends keyof Deps ? true : false>().toEqualTypeOf<false>();
     expectTypeOf<'repos' extends keyof Deps ? true : false>().toEqualTypeOf<true>();
-    deps.usecases({}).provides({ open: ({ db }) => db.transaction(() => Promise.resolve(1)) }).entrypoints();
+    deps
+      .usecases({})
+      .provides({ open: ({ db }) => db.transaction(() => Promise.resolve(1)) })
+      .entrypoints();
     // @ts-expect-error a usecase asking for db: the feature does not provide it to usecases
     deps.usecases({ bad: ({ db }: { db: Db }) => db });
   });

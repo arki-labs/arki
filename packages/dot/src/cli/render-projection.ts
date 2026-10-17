@@ -7,7 +7,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute } from 'node:path';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { DotAppManifest, JsonValue, ProjectionManifest } from '../manifest.js';
@@ -20,7 +20,7 @@ export type ProjectionData = {
 };
 
 type ProjectionModule = {
-  project(manifest: DotAppManifest): unknown | Promise<unknown>;
+  project(manifest: DotAppManifest): unknown;
 };
 
 export type ProjectionSource = {
@@ -54,9 +54,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isJsonValue(value: unknown): value is JsonValue {
   if (isJsonPrimitive(value)) return typeof value !== 'number' || Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (Array.isArray(value)) return value.every(item => isJsonValue(item));
   if (!isPlainObject(value)) return false;
-  return Object.values(value).every(isJsonValue);
+  return Object.values(value).every(item => isJsonValue(item));
 }
 
 function jsonDeepEqual(left: unknown, right: unknown): boolean {
@@ -134,12 +134,12 @@ function getBunResolver(): { resolveSync(specifier: string, from: string): strin
 
 function importSpecifierFor(resolved: string): string {
   if (resolved.startsWith('file:')) return resolved;
-  if (isAbsolute(resolved)) return pathToFileURL(resolved).href;
+  if (path.isAbsolute(resolved)) return pathToFileURL(resolved).href;
   return resolved;
 }
 
 function resolveProjectionSpecifier(specifier: string, appFilePath: string): string {
-  const fromDir = dirname(appFilePath);
+  const fromDir = path.dirname(appFilePath);
   const bun = getBunResolver();
   if (bun !== undefined) return bun.resolveSync(specifier, fromDir);
   return createRequire(appFilePath).resolve(specifier);
@@ -171,14 +171,17 @@ async function loadProjectionModule(
     throw new DotCliError({
       code: DotCliErrorCode.ProjectionImportFailed,
       message: `Failed to import projection module "${specifier}".`,
-      remediation:
-        'Fix the projection module export, or use --module <specifier> to debug with a replacement module.',
+      remediation: 'Fix the projection module export, or use --module <specifier> to debug with a replacement module.',
       metadata: { specifier, resolved, registeringPlugin },
       cause: error,
     });
   }
 
-  if (typeof imported !== 'object' || imported === null || typeof (imported as { project?: unknown }).project !== 'function') {
+  if (
+    typeof imported !== 'object' ||
+    imported === null ||
+    typeof (imported as { project?: unknown }).project !== 'function'
+  ) {
     throw new DotCliError({
       code: DotCliErrorCode.ProjectionImportFailed,
       message: `Projection module "${specifier}" does not export project(manifest).`,

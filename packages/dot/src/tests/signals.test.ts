@@ -32,11 +32,11 @@ function makeFakeProc(): FakeProc {
         set = new Set();
         listeners.set(event, set);
       }
-      set.add(listener as () => void);
+      set.add(listener);
       return this;
     },
     off(event, listener) {
-      listeners.get(event)?.delete(listener as () => void);
+      listeners.get(event)?.delete(listener);
       return this;
     },
     kill(pid, signal) {
@@ -94,10 +94,7 @@ describe('hookSignals', () => {
 
   it('a failing dispose still terminates', async () => {
     const proc = makeFakeProc();
-    hookSignals(
-      { name: 'app', dispose: () => Promise.reject(new Error('boom')) },
-      { proc, signals: ['SIGINT'] },
-    );
+    hookSignals({ name: 'app', dispose: () => Promise.reject(new Error('boom')) }, { proc, signals: ['SIGINT'] });
 
     proc.emit('SIGINT');
     await flush();

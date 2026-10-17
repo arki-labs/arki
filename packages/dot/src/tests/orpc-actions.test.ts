@@ -14,13 +14,15 @@ import { z } from 'zod';
 
 import { defineFeature, FEATURE_ERROR_CODES } from '../feature.js';
 import { defineApp } from '../index.js';
-import { RPC_ACTION_META_SCHEMA, rpc } from '../orpc.js';
+import { rpc, RPC_ACTION_META_SCHEMA } from '../orpc.js';
 import { digest } from './fixtures/rpc-app/digest/feature.js';
 import { billing, database } from './fixtures/rpc-app/infra.js';
 
 /** A contract with what apps actually declare: routes, errors, tags and a policy in meta. */
 const storyContract = oc.$meta<{ auth?: 'user' | 'admin' }>({}).router({
-  list: oc.route({ method: 'GET', path: '/stories', summary: 'My stories', tags: ['stories'] }).output(z.array(z.string())),
+  list: oc
+    .route({ method: 'GET', path: '/stories', summary: 'My stories', tags: ['stories'] })
+    .output(z.array(z.string())),
   remove: oc
     .meta({ auth: 'admin' })
     .route({ method: 'DELETE', path: '/stories/{id}' })

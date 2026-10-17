@@ -565,7 +565,7 @@ export function servicesOf<const T extends readonly HasProvides[]>(ctx: object, 
  * each capability handle resolves to its value under the local alias.
  * Driven services (`db`) are not in the bag and drop out of the result.
  *
- * @throws {FeatureError} `FEATURE_E005` when a handle's key is not in the bag.
+ * @throws {FeatureError} `ARKI_DOT_E026` when a handle's key is not in the bag.
  */
 export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): CtxOf<HandleEntries<N>> {
   const resolved: Record<string, unknown> = {};

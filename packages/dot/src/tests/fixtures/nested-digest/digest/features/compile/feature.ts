@@ -27,7 +27,12 @@ export const compileLogic = compileDeps.usecases({ compileFor });
 export const rpcImplementer = implement(compileRpcContract).$context<RequestContext>().use(bind(compileLogic));
 
 /** A stand-in for `schedules(compileLogic, [...])`: the slice payload is the schedule names. */
-const compileSchedules = { kind: 'schedules', key: 'schedules', actions: [], resolve: () => ['compile-digest'] } as const;
+const compileSchedules = {
+  kind: 'schedules',
+  key: 'schedules',
+  actions: [],
+  resolve: () => ['compile-digest'],
+} as const;
 
 export const compile = compileLogic
   .provides({ compiler: ({ usecases }) => ({ compile: usecases.compileFor }) })

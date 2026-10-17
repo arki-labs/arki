@@ -4,6 +4,7 @@ import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { isFailure } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
+import { nowMs } from './now.js';
 
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
@@ -131,10 +132,10 @@ export function withPluginHookSpan<R>(
       'dot.plugin.order': opts.order,
     }),
   });
-  const started = performance.now();
+  const started = nowMs();
   let status: 'ok' | 'failed' = 'ok';
   const finish = (): void => {
-    const durationMs = performance.now() - started;
+    const durationMs = nowMs() - started;
     hookDurationHistogram.record(durationMs, {
       'dot.app.name': opts.appName,
       'dot.plugin.name': opts.pluginName,
@@ -152,24 +153,24 @@ export function withPluginHookSpan<R>(
           finish();
           return v;
         },
-        (e: unknown) => {
+        (error: unknown) => {
           status = 'failed';
-          span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(e) });
-          if (e instanceof Error) span.recordException(e);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
+          if (error instanceof Error) span.recordException(error);
           finish();
-          throw e;
+          throw error;
         },
       ) as R;
     }
     span.setStatus({ code: SpanStatusCode.OK });
     finish();
     return result;
-  } catch (e) {
+  } catch (error) {
     status = 'failed';
-    span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(e) });
-    if (e instanceof Error) span.recordException(e);
+    span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
+    if (error instanceof Error) span.recordException(error);
     finish();
-    throw e;
+    throw error;
   }
 }
 
@@ -201,10 +202,10 @@ export function withPhaseSpan<R>(
       }),
     },
     (span): R => {
-      const started = performance.now();
+      const started = nowMs();
       let status: 'ok' | 'failed' = 'ok';
       const finish = (): void => {
-        const durationMs = performance.now() - started;
+        const durationMs = nowMs() - started;
         phaseDurationHistogram.record(durationMs, {
           'dot.app.name': opts.appName,
           'dot.app.phase': opts.phase,
@@ -221,24 +222,24 @@ export function withPhaseSpan<R>(
               finish();
               return v;
             },
-            (e: unknown) => {
+            (error: unknown) => {
               status = 'failed';
-              span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(e) });
-              if (e instanceof Error) span.recordException(e);
+              span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
+              if (error instanceof Error) span.recordException(error);
               finish();
-              throw e;
+              throw error;
             },
           ) as R;
         }
         span.setStatus({ code: SpanStatusCode.OK });
         finish();
         return result;
-      } catch (e) {
+      } catch (error) {
         status = 'failed';
-        span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(e) });
-        if (e instanceof Error) span.recordException(e);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
+        if (error instanceof Error) span.recordException(error);
         finish();
-        throw e;
+        throw error;
       }
     },
   );

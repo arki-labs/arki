@@ -140,7 +140,9 @@ const effects = <C extends AnyFeatureCore>(
 
 /* ---- feature.ts ---- */
 
-const digestDeps = defineFeature('digest').needs({ db: database.provides.db, plans: billing.provides.entitlements }).infra(store, mailer);
+const digestDeps = defineFeature('digest')
+  .needs({ db: database.provides.db, plans: billing.provides.entitlements })
+  .infra(store, mailer);
 const digestLogic = digestDeps.usecases({ preview, sendDue });
 
 /** entrypoints/procedures.ts: a factory over the logic stage (`import type` in a real app), resolving the handles per request. */
@@ -235,7 +237,12 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('accepts empty steps without widening the later checks', () => {
-    const empty = defineFeature('x').needs({ db: database.provides.db }).infra(store).usecases({}).provides({}).entrypoints(rpc({}, {}));
+    const empty = defineFeature('x')
+      .needs({ db: database.provides.db })
+      .infra(store)
+      .usecases({})
+      .provides({})
+      .entrypoints(rpc({}, {}));
     expect(empty.plugins().map(p => p.name)).toEqual(['x/store', 'x']);
   });
 
@@ -260,7 +267,9 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('rejects usecases that ask for what neither needs nor infra provide', () => {
-    const lean = defineFeature('x').needs({ db: database.provides.db, plans: billing.provides.entitlements }).infra(store);
+    const lean = defineFeature('x')
+      .needs({ db: database.provides.db, plans: billing.provides.entitlements })
+      .infra(store);
     const unused = () => {
       // @ts-expect-error -- `queue` is neither a need nor an infra service
       lean.usecases({ needsQueue: (deps: { queue: unknown }) => deps });
@@ -368,7 +377,13 @@ describe('compilation into kernel units', () => {
   it('puts every edge in the manifest and in `dot explain`: feature → private infra → app infra', async () => {
     const app = await boot(digest);
     const unit = (name: string) => app.manifest.plugins.find(p => p.name === name);
-    expect(unit('digest')?.dependencies).toEqual(['db', 'entitlements', 'digest.store', 'digest.stats', 'digest.mailer']);
+    expect(unit('digest')?.dependencies).toEqual([
+      'db',
+      'entitlements',
+      'digest.store',
+      'digest.stats',
+      'digest.mailer',
+    ]);
     expect(unit('digest/mailer')?.dependencies).toEqual(['digest.store']);
     expect(unit('digest/store')?.dependencies).toEqual(['db']);
     let text = '';
@@ -396,11 +411,11 @@ describe('compilation into kernel units', () => {
     const [storeUnit, mailerUnit, featureUnit] = digest.plugins();
     // @ts-expect-error -- the feature before its own infra: the tuple guard on testApp's argument refuses it too
     await expect(testApp([database, billing, featureUnit, storeUnit, mailerUnit]).start()).rejects.toMatchObject({
-      code: 'DOT_LIFECYCLE_E020',
+      code: 'ARKI_DOT_E020',
     });
     // @ts-expect-error -- the feature without its infra
     await expect(testApp([database, billing, featureUnit]).start()).rejects.toMatchObject({
-      code: 'DOT_LIFECYCLE_E012',
+      code: 'ARKI_DOT_E012',
     });
   });
 });

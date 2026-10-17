@@ -49,6 +49,8 @@ describe('testPlugin', () => {
       provides: { rows: ({ db }) => db.query('q') },
     });
 
+    // The runtime boot really does reject (kernel E012) — swallow it so the
+    // compile-time demonstration doesn't leak an unhandled rejection.
     // @ts-expect-error — `cache` is still unprovided: `.boot()`'s `this` type names it.
     // The runtime boot really does reject (kernel E012) — swallow it so the
     // compile-time demonstration doesn't leak an unhandled rejection.
@@ -76,7 +78,9 @@ describe('testPlugin', () => {
       },
     });
 
-    const plain = await testPlugin(consumer).provide('db', { query: () => ['plain'] }).boot();
+    const plain = await testPlugin(consumer)
+      .provide('db', { query: () => ['plain'] })
+      .boot();
     expect(plain.services.rows).toEqual(['plain']);
     await plain.dispose();
 

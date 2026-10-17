@@ -11,7 +11,7 @@
  * Design constraints:
  *
  *  - `configure` is SYNC. Returning a Promise is an error — the kernel
- *    throws {@link DotLifecycleError} with code `DOT_LIFECYCLE_E001`.
+ *    throws {@link DotLifecycleError} with code `ARKI_DOT_E001`.
  *  - Declaration order IS boot order. The app builder's type-level guard
  *    makes out-of-order composition a compile error; the kernel re-validates
  *    at configure time from the static `provides` handles.
@@ -95,7 +95,7 @@ export function token<T>(): <K extends string>(key: K) => Token<T, K> {
     key,
     instance<N extends string>(name: N): Token<T, `${K}#${N}`> {
       // Safe by construction: the runtime string is exactly the template type.
-      return token<T>()(`${key}#${name}` as `${K}#${N}`);
+      return token<T>()(`${key}#${name}`);
     },
   });
 }
@@ -104,9 +104,9 @@ export function token<T>(): <K extends string>(key: K) => Token<T, K> {
  * A record holding one value under a token's wire key, typed by the
  * token's literal key: `provide(Db, handle)` is `{ 'arki.db': DbHandle }`.
  */
-export function provide<T, K extends string>(tok: Token<T, K>, value: T): { [P in K]: T } {
+export function provide<T, K extends string>(tok: Token<T, K>, value: T): Record<K, T> {
   // Safe by construction: the computed key is exactly `tok.key: K`.
-  return { [tok.key]: value } as { [P in K]: T };
+  return { [tok.key]: value } as Record<K, T>;
 }
 
 /** Record of wire-keyed services. */
@@ -285,7 +285,7 @@ export type WireNeeds<S extends NeedsShape> = {
  * records: a matching key makes the property type `never`, which no
  * witness or service value satisfies, so the violation errors at the
  * exact offending property. The kernel re-validates at runtime with
- * `DOT_LIFECYCLE_E014` for paths the constraint cannot see (renames,
+ * `ARKI_DOT_E014` for paths the constraint cannot see (renames,
  * erased plugins).
  */
 export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
@@ -295,7 +295,7 @@ export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
  * context. The `$` prefix is a reserved namespace: `plugin()` rejects
  * `$`-prefixed needs aliases and publish keys at compile time (via
  * {@link NoReservedKeys}) and the kernel enforces it at runtime
- * (`DOT_LIFECYCLE_E014`), so these keys can never be shadowed.
+ * (`ARKI_DOT_E014`), so these keys can never be shadowed.
  */
 export type KernelCtx = {
   /** App name (passed to `defineApp`). */
@@ -306,7 +306,7 @@ export type KernelCtx = {
   readonly $config: Readonly<Record<string, unknown>>;
   /**
    * Aborts when this hook exceeds `defineApp(name, { hookTimeoutMs })`; the
-   * reason is the `DOT_LIFECYCLE_E015` error. Pass it to the hook's I/O
+   * reason is the `ARKI_DOT_E015` error. Pass it to the hook's I/O
    * (`fetch`, a driver's connect, `sleep`) so a hung hook stops instead of
    * running on after the kernel gave up on it. One signal per hook call.
    */
@@ -318,7 +318,7 @@ export type KernelCtx = {
    *
    * A plugin may amend an action it declared, or an action in a binding it
    * registered a projection for (an adapter completing the actions of the
-   * features it serves). Anything else throws `DOT_LIFECYCLE_E021`.
+   * features it serves). Anything else throws `ARKI_DOT_E021`.
    */
   readonly $describeAction: (actionId: string, patch: { readonly summary: string }) => void;
 };

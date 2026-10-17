@@ -104,12 +104,12 @@ The single actionable record:
 
 ```ts
 type DiagnosticIssue = {
-  code: string;          // stable machine-readable code, e.g. DOT_LIFECYCLE_E003
+  code: string; // stable machine-readable code, e.g. ARKI_DOT_E003
   severity: 'info' | 'warning' | 'error';
-  plugin?: string;       // owning plugin, when applicable
-  message: string;       // human-readable summary
-  remediation: string;   // what the developer (or agent) should do
-  docsUrl: string;       // link to the relevant doc
+  plugin?: string; // owning plugin, when applicable
+  message: string; // human-readable summary
+  remediation: string; // what the developer (or agent) should do
+  docsUrl: string; // link to the relevant doc
   metadata?: Record<string, unknown>;
 };
 ```
@@ -167,12 +167,12 @@ adapters included.
 The kernel checks every plugin's needs against every plugin's static provides
 at `configure()`:
 
-- `DOT_LIFECYCLE_E020` — a provider is mounted after its consumer. The fix
+- `ARKI_DOT_E020` — a provider is mounted after its consumer. The fix
   line is role-aware: "Move X before Y in .features([...])." for a feature
   provider, "Mount X with .use() before Y." for any other plugin.
-- `DOT_LIFECYCLE_E019` — needs and provides form a ring through any plugins.
+- `ARKI_DOT_E019` — needs and provides form a ring through any plugins.
   The message prints the ring.
-- `DOT_LIFECYCLE_E012` — a need at boot that no plugin declares (erased or JS
+- `ARKI_DOT_E012` — a need at boot that no plugin declares (erased or JS
   graphs, dynamic http bundle tokens). It is no longer the code for a plain
   ordering mistake.
 

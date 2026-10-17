@@ -20,10 +20,10 @@ DOT is allowed to sound like a human wrote it. Names earn their meaning;
 identifiers and error messages have a voice. The framework is not corporate
 and not committee-shaped.
 
-**Playful** does *not* mean cute, ironic, or whimsical for its own sake.
-It means *human*. A real developer wrote this. They cared. They had taste.
+**Playful** does _not_ mean cute, ironic, or whimsical for its own sake.
+It means _human_. A real developer wrote this. They cared. They had taste.
 
-**Precise** means every word is the *right* word. `plugin` not "module." `boot`
+**Precise** means every word is the _right_ word. `plugin` not "module." `boot`
 not "initialize." `dispose` not "cleanup." `dot doctor` not "validate." If
 a shorter, more accurate word exists, use it. If a longer word adds
 meaning, accept the length.
@@ -42,7 +42,7 @@ This means we:
 - **Refuse hedging language** in core docs ("you might want to…",
   "consider…", "feel free to…"). DOT has opinions; state them.
 
-What this principle *forbids*:
+What this principle _forbids_:
 
 - Generic, committee-shaped naming (`Plugin`, `Manager`, `Provider`,
   `Helper`, `Util`).
@@ -63,10 +63,10 @@ This means we:
   a plugin publishing them. If you want `services.logger`, a plugin publishes it.
 - Never add **hidden lifecycle hooks** that run outside the 5-hook
   sequence (`configure → boot → start → stop → dispose`).
-- Never put **app behavior in defaults**. Defaults can shape *config*; they
-  cannot shape *what the app does*.
+- Never put **app behavior in defaults**. Defaults can shape _config_; they
+  cannot shape _what the app does_.
 
-What this principle *forbids*:
+What this principle _forbids_:
 
 - A global "DOT context" that plugins read from without declaring it.
 - "Built-in" services that bypass the registration protocol.
@@ -91,7 +91,7 @@ This means we:
 - **Iterate `Map`/`Set` and rely on insertion order**, never assume host
   ordering.
 
-What this principle *forbids*:
+What this principle _forbids_:
 
 - "Eventual consistency" between plugins during boot.
 - Race-prone boot sequences disguised as `Promise.all`.
@@ -112,14 +112,14 @@ This means we:
 - Every CLI command supports `--json`. Every JSON envelope follows the same
   shape: `{ status, command, generatedAt, summary, items, errors }`.
 - Every `ReleaseError` / `DiagnosticIssue` / lifecycle failure has a
-  **stable error code** (e.g. `DOT_LIFECYCLE_E003`). Codes are part of the
+  **stable error code** (e.g. `ARKI_DOT_E003`). Codes are part of the
   public API.
 - Every error has a **`remediation` string** that tells you what to do, and
   a **`docsUrl` string** that points at the page that explains it.
 - Every public type is **importable** — no hidden shapes that an agent
   would need to reverse-engineer from runtime output.
 
-What this principle *forbids*:
+What this principle _forbids_:
 
 - `throw new Error('...')` with no code.
 - "See the docs" without a URL.
@@ -132,7 +132,7 @@ What this principle *forbids*:
 `@arki/dot` ships with `@arki/assert`, `@arki/contracts`, `@arki/log`,
 and `zod`. That is the entire dependency surface. Adapters (database,
 queue, auth, event-sourcing) live in their own packages and depend on
-`@arki/dot` as an *optional peer*.
+`@arki/dot` as an _optional peer_.
 
 This means we:
 
@@ -144,12 +144,12 @@ This means we:
   `peerDependenciesMeta.optional: true`.** The adapter only loads when both
   packages are installed.
 
-What this principle *forbids*:
+What this principle _forbids_:
 
 - "Bring-your-own-everything" config in the kernel that pretends to be
   optional but ships as part of the package.
 - Cross-adapter deps (e.g., `@arki/db` requiring `@arki/kv`). Adapters are
-  composed at the *app* layer, not chained in source.
+  composed at the _app_ layer, not chained in source.
 
 ---
 

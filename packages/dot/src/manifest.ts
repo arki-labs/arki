@@ -12,24 +12,41 @@
  * but never missing.
  */
 
-import type { DotPluginRole } from './plugin-contract.js';
 import type { DotLifecycleHook } from './lifecycle.js';
+import type { DotPluginRole } from './plugin-contract.js';
+import { dotErrorDocsUrl } from './lifecycle.js';
 
 /** JSON-serializable value — the manifest's currency. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 /** JSON-serializable object used for adapter-owned manifest metadata. */
-export type JsonObject = { [key: string]: JsonValue };
+export type JsonObject = Record<string, JsonValue>;
+
+/** Code of {@link DotManifestError}. */
+export const DOT_MANIFEST_ERROR_CODE = 'ARKI_DOT_E032';
+
+/** Manifest metadata that is not plain JSON. A `TypeError`, so existing `instanceof TypeError` checks still match. */
+export class DotManifestError extends TypeError {
+  readonly code = DOT_MANIFEST_ERROR_CODE;
+  readonly remediation =
+    'Pass plain JSON only: no functions, Dates, Maps, class instances, undefined fields, NaN or cycles.';
+  readonly docsUrl = dotErrorDocsUrl(DOT_MANIFEST_ERROR_CODE);
+
+  constructor(message: string, options?: { readonly cause?: unknown }) {
+    super(message, options);
+    this.name = 'DotManifestError';
+  }
+}
 
 function jsonRoundTrip(value: unknown): unknown {
   let serialized: string;
   try {
     serialized = JSON.stringify(value);
   } catch (error) {
-    throw new TypeError('Value must be JSON-serializable manifest data.', { cause: error });
+    throw new DotManifestError('Value must be JSON-serializable manifest data.', { cause: error });
   }
   if (serialized === undefined) {
-    throw new TypeError('Value must be a JSON-serializable object.');
+    throw new DotManifestError('Value must be a JSON-serializable object.');
   }
   return JSON.parse(serialized) as unknown;
 }
@@ -46,13 +63,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isJsonValue(value: unknown): value is JsonValue {
   if (isJsonPrimitive(value)) return typeof value !== 'number' || Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (Array.isArray(value)) return value.every(item => isJsonValue(item));
   if (!isPlainObject(value)) return false;
-  return Object.values(value).every(isJsonValue);
+  return Object.values(value).every(item => isJsonValue(item));
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return isPlainObject(value) && Object.values(value).every(isJsonValue);
+  return isPlainObject(value) && Object.values(value).every(item => isJsonValue(item));
 }
 
 function jsonDeepEqual(left: unknown, right: unknown): boolean {
@@ -82,7 +99,7 @@ function jsonDeepEqual(left: unknown, right: unknown): boolean {
 export function toJsonObject(value: unknown): JsonObject {
   const parsed = jsonRoundTrip(value);
   if (!isJsonObject(parsed) || !jsonDeepEqual(value, parsed)) {
-    throw new TypeError('Value must be a JSON-serializable object without lossy coercions.');
+    throw new DotManifestError('Value must be a JSON-serializable object without lossy coercions.');
   }
   return parsed;
 }
@@ -95,16 +112,7 @@ export function toJsonObject(value: unknown): JsonObject {
  * plugin publishes something that does not fit a reserved shape.
  */
 export type ServiceKind =
-  | 'env'
-  | 'db'
-  | 'kv'
-  | 'queue'
-  | 'auth'
-  | 'email'
-  | 'logger'
-  | 'event-store'
-  | 'message-bus'
-  | 'custom';
+  'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'event-store' | 'message-bus' | 'custom';
 
 /** Kind of dependency edge between two plugins. */
 export type DependencyEdgeKind = 'requires' | 'provides' | 'uses';

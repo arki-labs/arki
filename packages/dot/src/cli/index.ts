@@ -28,7 +28,7 @@ import type { DiscoveredApp, DiscoveryResult } from './discover.js';
 import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
-import {  DotCliError, DotCliErrorCode } from './error-codes.js';
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
 import { runNew } from './new.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
@@ -299,7 +299,7 @@ export async function runExplain(
   try {
     if (guards.isDotAppBuilder(discovered)) {
       // explain never boots — just configure.
-      configured = (discovered).configure();
+      configured = discovered.configure();
     } else {
       configured = discovered;
     }
@@ -371,9 +371,7 @@ export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOption
   // visible.
   let configured: DotAppConfigured<Record<string, unknown>>;
   try {
-    configured = guards.isDotAppBuilder(discovered)
-      ? (discovered).configure()
-      : (discovered);
+    configured = guards.isDotAppBuilder(discovered) ? discovered.configure() : discovered;
   } catch (error) {
     throw wrapLifecycleError(error, 'configure');
   }
@@ -652,4 +650,4 @@ if (isMainModule) {
   process.exit(await main({ argv: process.argv.slice(2) }));
 }
 
-export {dotCliDocsUrl, DotCliError, DotCliErrorCode} from './error-codes.js';
+export { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';

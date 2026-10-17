@@ -46,53 +46,89 @@ export const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[] = [
  */
 export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' | 'stopped' | 'disposed' | 'failed';
 
-/** Stable error codes for lifecycle failures. */
+/**
+ * Stable error codes for every failure the kernel throws, `ARKI_DOT_E001`..
+ * Codes are never renumbered and never reused (E009 and E010 are retired).
+ * E001-E021 are lifecycle failures; E022-E031 are feature-composition
+ * failures (see `FEATURE_ERROR_CODES`); E032 is non-JSON manifest data.
+ */
 export const DotLifecycleErrorCode = {
   /** A `configure` hook attempted async work (returned a Promise). */
-  ConfigureAsync: 'DOT_LIFECYCLE_E001',
+  ConfigureAsync: 'ARKI_DOT_E001',
   /** A `configure` hook threw. */
-  ConfigureFailed: 'DOT_LIFECYCLE_E002',
+  ConfigureFailed: 'ARKI_DOT_E002',
   /** A `boot` hook threw. */
-  BootFailed: 'DOT_LIFECYCLE_E003',
+  BootFailed: 'ARKI_DOT_E003',
   /** A `start` hook threw. */
-  StartFailed: 'DOT_LIFECYCLE_E004',
+  StartFailed: 'ARKI_DOT_E004',
   /** One or more `stop` hooks threw — aggregate. */
-  StopFailed: 'DOT_LIFECYCLE_E005',
+  StopFailed: 'ARKI_DOT_E005',
   /** One or more `dispose` hooks threw — aggregate. */
-  DisposeFailed: 'DOT_LIFECYCLE_E006',
+  DisposeFailed: 'ARKI_DOT_E006',
   /** Caller tried to reuse the app after dispose. */
-  ReuseAfterDispose: 'DOT_LIFECYCLE_E007',
+  ReuseAfterDispose: 'ARKI_DOT_E007',
   /** Caller tried to reuse the app after a failed lifecycle. */
-  ReuseAfterFailure: 'DOT_LIFECYCLE_E008',
+  ReuseAfterFailure: 'ARKI_DOT_E008',
   // E009 (DependencyCycle) and E010 (MissingDependency) are RETIRED with the
   // v2 wiring model — declaration order is boot order, so cycles and
   // name-based dependency declarations no longer exist. Codes are never
   // reused for new meanings.
   /** Plugin registered twice. */
-  DuplicatePlugin: 'DOT_LIFECYCLE_E011',
+  DuplicatePlugin: 'ARKI_DOT_E011',
   /** A plugin's `needs` entry has no provider among earlier-booted plugins. */
-  UnsatisfiedNeed: 'DOT_LIFECYCLE_E012',
+  UnsatisfiedNeed: 'ARKI_DOT_E012',
   /** A plugin published a wire key that an earlier plugin already provides. */
-  ServiceCollision: 'DOT_LIFECYCLE_E013',
+  ServiceCollision: 'ARKI_DOT_E013',
   /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
-  ReservedServiceKey: 'DOT_LIFECYCLE_E014',
+  ReservedServiceKey: 'ARKI_DOT_E014',
   /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
-  HookTimeout: 'DOT_LIFECYCLE_E015',
+  HookTimeout: 'ARKI_DOT_E015',
   /** Two actions in the same binding use the same id. */
-  DuplicateAction: 'DOT_LIFECYCLE_E016',
+  DuplicateAction: 'ARKI_DOT_E016',
   /** Action metadata is not JSON-round-trip safe. */
-  ActionMetaNotJson: 'DOT_LIFECYCLE_E017',
+  ActionMetaNotJson: 'ARKI_DOT_E017',
   /** More than one plugin fills the logging slot. */
-  DuplicateLogging: 'DOT_LIFECYCLE_E018',
+  DuplicateLogging: 'ARKI_DOT_E018',
   /** Static capability needs form a ring: a feature's need comes back around to itself. */
-  CapabilityRing: 'DOT_LIFECYCLE_E019',
+  CapabilityRing: 'ARKI_DOT_E019',
   /** A feature needs a capability whose (static) provider is mounted after it. */
-  ProviderMountedLater: 'DOT_LIFECYCLE_E020',
+  ProviderMountedLater: 'ARKI_DOT_E020',
   /** `$describeAction` named an action the calling plugin may not amend (unknown id, or not its own). */
-  ActionNotAmendable: 'DOT_LIFECYCLE_E021',
+  ActionNotAmendable: 'ARKI_DOT_E021',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
+
+/** Documentation page for a kernel error code: the README "Errors" table, one anchor per code. */
+export function dotErrorDocsUrl(code: string): string {
+  return `https://docs.arki.dev/dot/errors#${code.toLowerCase()}`;
+}
+
+/** Stock remediation per lifecycle code. A throw site may override it with a more specific line. */
+const LIFECYCLE_REMEDIATION: Record<DotLifecycleErrorCodeValue, string> = {
+  [DotLifecycleErrorCode.ConfigureAsync]: 'Make `configure` synchronous and move async work to `boot`.',
+  [DotLifecycleErrorCode.ConfigureFailed]: "Fix the plugin's config or its `configure` hook, then build a new app.",
+  [DotLifecycleErrorCode.BootFailed]:
+    "Read `cause` and `plugin`: fix that plugin's `boot` hook or the service it opens.",
+  [DotLifecycleErrorCode.StartFailed]: "Read `cause` and `plugin`: fix that plugin's `start` hook.",
+  [DotLifecycleErrorCode.StopFailed]: 'Read `failures`: each entry names the plugin whose `stop` hook threw.',
+  [DotLifecycleErrorCode.DisposeFailed]: 'Read `failures`: each entry names the plugin whose `dispose` hook threw.',
+  [DotLifecycleErrorCode.ReuseAfterDispose]: 'Build a fresh app instance; a disposed app cannot run again.',
+  [DotLifecycleErrorCode.ReuseAfterFailure]: 'Build a fresh app instance; a failed app cannot run again.',
+  [DotLifecycleErrorCode.DuplicatePlugin]:
+    'Remove the second `.use()` of this plugin, or `rename` it to run two copies.',
+  [DotLifecycleErrorCode.UnsatisfiedNeed]: 'Mount a plugin that provides the needed key before its consumer.',
+  [DotLifecycleErrorCode.ServiceCollision]: 'Give one of the two providers a different key with `rename`.',
+  [DotLifecycleErrorCode.ReservedServiceKey]: 'Rename the key; names starting with `$` belong to the kernel.',
+  [DotLifecycleErrorCode.HookTimeout]: "Pass the hook's `$signal` to its I/O, or raise `hookTimeoutMs`.",
+  [DotLifecycleErrorCode.DuplicateAction]: 'Give each action in a binding its own id.',
+  [DotLifecycleErrorCode.ActionMetaNotJson]: 'Keep action `meta` plain JSON: no functions, Dates, Maps or cycles.',
+  [DotLifecycleErrorCode.DuplicateLogging]: 'Keep one `log()` plugin in the app.',
+  [DotLifecycleErrorCode.CapabilityRing]: 'Move the shared piece into a third unit that both sides need.',
+  [DotLifecycleErrorCode.ProviderMountedLater]: 'Mount the provider before the unit that needs it.',
+  [DotLifecycleErrorCode.ActionNotAmendable]:
+    '`$describeAction` only accepts actions the calling plugin declared or owns.',
+};
 
 /**
  * Structured error thrown for any lifecycle failure or misuse.
@@ -106,6 +142,10 @@ export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof ty
  */
 export class DotLifecycleError extends Error {
   readonly code: DotLifecycleErrorCodeValue;
+  /** One-sentence guidance on how to fix the problem. Same shape as `DotPluginError.remediation`. */
+  readonly remediation: string;
+  /** Documentation page that explains this error. */
+  readonly docsUrl: string;
   readonly phase: DotLifecycleHook;
   readonly plugin?: string;
   override readonly cause?: unknown;
@@ -115,6 +155,8 @@ export class DotLifecycleError extends Error {
     code: DotLifecycleErrorCodeValue;
     phase: DotLifecycleHook;
     message: string;
+    /** Overrides the stock remediation for this code. */
+    remediation?: string;
     plugin?: string;
     cause?: unknown;
     failures?: readonly DotLifecyclePluginFailure[];
@@ -122,6 +164,8 @@ export class DotLifecycleError extends Error {
     super(args.message);
     this.name = 'DotLifecycleError';
     this.code = args.code;
+    this.remediation = args.remediation ?? LIFECYCLE_REMEDIATION[args.code];
+    this.docsUrl = dotErrorDocsUrl(args.code);
     this.phase = args.phase;
     this.plugin = args.plugin;
     this.cause = args.cause;

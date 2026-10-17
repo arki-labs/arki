@@ -10,15 +10,14 @@
  * is exercised through the existing in-repo `@arki/env/dot` adapter.
  */
 
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
-const join = (...segments: string[]): string => path.join(...segments);
-const resolve = (...segments: string[]): string => path.resolve(...segments);
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
+import { sha256 } from './files.js';
+import { main } from './index.js';
 import {
   DEFAULT_TEMPLATE,
   planOperations,
@@ -27,10 +26,10 @@ import {
   runNew,
   validateAppName,
 } from './new.js';
-import { sha256 } from './files.js';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
-import { main } from './index.js';
 import { readDotVersion, TEMPLATE_VERSIONS, ZOD_VERSION } from './versions.js';
+
+const join = (...segments: string[]): string => path.join(...segments);
+const resolve = (...segments: string[]): string => path.resolve(...segments);
 
 const FROZEN_NOW = () => new Date('2026-05-21T00:00:00.000Z');
 const TEMPLATE_ROOT = resolve(__dirname, '..', '..', 'templates', 'app-minimal');
@@ -513,9 +512,7 @@ describe('generated app boots', () => {
     const appSource = await readFile(join(appDir, 'src', 'app.ts'), 'utf-8');
     await writeFile(
       join(appDir, 'src', 'app.ts'),
-      appSource
-        .replaceAll("from './env.js'", "from './env.ts'")
-        .replaceAll('from "./env.js"', 'from "./env.ts"'),
+      appSource.replaceAll("from './env.js'", "from './env.ts'").replaceAll('from "./env.js"', 'from "./env.ts"'),
       'utf-8',
     );
 
@@ -731,7 +728,9 @@ describe('templates', () => {
     const ok = await main({
       argv: ['new', 'fixture', '--template', 'minimal', '--dry-run', '--json', '--cwd', workDir],
       stdout: line => out.push(line),
-      stderr: () => undefined,
+      stderr: () => {
+        /* noop */
+      },
       now: FROZEN_NOW,
     });
     expect(ok).toBe(0);
@@ -741,7 +740,9 @@ describe('templates', () => {
     const errLines: string[] = [];
     const bad = await main({
       argv: ['new', 'fixture', '--template', 'nope', '--dry-run', '--cwd', workDir],
-      stdout: () => undefined,
+      stdout: () => {
+        /* noop */
+      },
       stderr: line => errLines.push(line),
       now: FROZEN_NOW,
     });
@@ -809,9 +810,10 @@ describe('template versions', () => {
         version: string;
       };
       expect(manifest.name).toBe(`@arki/${pkg}`);
-      expect(atLeast(pinned, manifest.version), `@arki/${pkg}: template ${pinned} < workspace ${manifest.version}`).toBe(
-        true,
-      );
+      expect(
+        atLeast(pinned, manifest.version),
+        `@arki/${pkg}: template ${pinned} < workspace ${manifest.version}`,
+      ).toBe(true);
     }
   });
 

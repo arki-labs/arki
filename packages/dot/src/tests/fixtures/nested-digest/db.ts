@@ -45,7 +45,11 @@ export const database = plugin({ name: 'database', provides: { db: createDb } })
 /** A stand-in for `@arki/journal`'s `journalProjections(...)`: a need-free infra unit the adapter finds by `kind`. */
 export type ProjectionsUnit = Plugin<EmptyShape, EmptyShape> & {
   readonly kind: 'journal-projections';
-  readonly handlers: { readonly projections: readonly { readonly name: string }[]; readonly effects: readonly []; readonly taps: readonly [] };
+  readonly handlers: {
+    readonly projections: readonly { readonly name: string }[];
+    readonly effects: readonly [];
+    readonly taps: readonly [];
+  };
 };
 export const projectionsUnit = (projection: string): ProjectionsUnit => ({
   ...plugin({ name: 'projections', provides: {} }),

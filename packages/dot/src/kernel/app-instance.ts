@@ -32,6 +32,7 @@ import type { AnyPlugin, DotConfigureContext, DotLoggingHandle, Lazy, ServiceRec
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
+import { nowMs } from './now.js';
 import { withPhaseSpan, withPluginHookSpan } from './otel.js';
 
 const kernelLog = getLogger('arki:dot:kernel');
@@ -42,7 +43,6 @@ const kernelLog = getLogger('arki:dot:kernel');
  * console, once. It never replaces the lifecycle's own result or error.
  */
 function reportLoggingCloseFailure(error: unknown): void {
-  // eslint-disable-next-line no-console -- logging is closing; the console is the only channel left
   console.error('[arki:dot] closing the logging slot failed', error);
 }
 
@@ -81,9 +81,7 @@ type PluginRecord = {
 
 /** Resolve a needs-shape witness to its wire key. */
 function wireKeyOf(witness: object, alias: string): string {
-  return 'key' in witness && typeof (witness as { key: unknown }).key === 'string'
-    ? (witness as { key: string }).key
-    : alias;
+  return 'key' in witness && typeof witness.key === 'string' ? (witness as { key: string }).key : alias;
 }
 
 /** Helper for stable issue construction. */
@@ -331,7 +329,11 @@ export class DotAppImpl {
       const label = record.plugin.role === 'feature' ? 'Feature' : 'Plugin';
       for (const { key, provider } of staticNeeds(record)) {
         if (provider.order < record.order) {
-          if (!this.#wiringEdges.some(e => e.from === record.plugin.name && e.to === provider.plugin.name && e.key === key)) {
+          if (
+            !this.#wiringEdges.some(
+              e => e.from === record.plugin.name && e.to === provider.plugin.name && e.key === key,
+            )
+          ) {
             this.#wiringEdges.push({ from: record.plugin.name, to: provider.plugin.name, kind: 'requires', key });
           }
           continue;
@@ -556,7 +558,7 @@ export class DotAppImpl {
    * async variant separate (no monomorphisation cost on the hot path).
    */
   #withPhaseEmit(phase: DotLifecycleHook, fn: () => void): void {
-    const phaseStart = performance.now();
+    const phaseStart = nowMs();
     this.#emitIfObserved(() => ({
       kind: 'phase',
       phase,
@@ -571,7 +573,7 @@ export class DotAppImpl {
         phase,
         status: 'completed',
         appName: this.#appName,
-        durationMs: performance.now() - phaseStart,
+        durationMs: nowMs() - phaseStart,
         timestamp: Date.now(),
       }));
     } catch (error) {
@@ -580,7 +582,7 @@ export class DotAppImpl {
         phase,
         status: 'failed',
         appName: this.#appName,
-        durationMs: performance.now() - phaseStart,
+        durationMs: nowMs() - phaseStart,
         error,
         timestamp: Date.now(),
       }));
@@ -590,7 +592,7 @@ export class DotAppImpl {
 
   /** Async variant of {@link #withPhaseEmit}. */
   async #withPhaseEmitAsync(phase: DotLifecycleHook, fn: () => Promise<void>): Promise<void> {
-    const phaseStart = performance.now();
+    const phaseStart = nowMs();
     this.#emitIfObserved(() => ({
       kind: 'phase',
       phase,
@@ -605,7 +607,7 @@ export class DotAppImpl {
         phase,
         status: 'completed',
         appName: this.#appName,
-        durationMs: performance.now() - phaseStart,
+        durationMs: nowMs() - phaseStart,
         timestamp: Date.now(),
       }));
     } catch (error) {
@@ -614,7 +616,7 @@ export class DotAppImpl {
         phase,
         status: 'failed',
         appName: this.#appName,
-        durationMs: performance.now() - phaseStart,
+        durationMs: nowMs() - phaseStart,
         error,
         timestamp: Date.now(),
       }));
@@ -727,11 +729,11 @@ export class DotAppImpl {
     for (const plugin of this.#ordered) {
       const record = this.#records.get(plugin.name)!;
       let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
-      const declaredStarted = performance.now();
+      const declaredStarted = nowMs();
       try {
         for (const source of plugin.actions) this.#registerAction(record, this.#actionFromSource(source));
       } catch (error) {
-        const durationMs = performance.now() - declaredStarted;
+        const durationMs = nowMs() - declaredStarted;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,
           plugin: plugin.name,
@@ -784,7 +786,7 @@ export class DotAppImpl {
         },
       };
 
-      const started = performance.now();
+      const started = nowMs();
       this.#emitHook('configure', plugin.name, record.order, 'starting');
       let returned: unknown;
       try {
@@ -803,7 +805,7 @@ export class DotAppImpl {
           },
         );
       } catch (error) {
-        const durationMs = performance.now() - started;
+        const durationMs = nowMs() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,
           plugin: plugin.name,
@@ -833,7 +835,7 @@ export class DotAppImpl {
       }
 
       if (isThenable(returned)) {
-        const durationMs = performance.now() - started;
+        const durationMs = nowMs() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureAsync,
           plugin: plugin.name,
@@ -864,7 +866,7 @@ export class DotAppImpl {
         });
       }
 
-      const durationMs = performance.now() - started;
+      const durationMs = nowMs() - started;
       record.lifecycleDiagnostics.push({
         plugin: plugin.name,
         hook: 'configure',
@@ -965,7 +967,7 @@ export class DotAppImpl {
    * the `$`-prefixed kernel keys and — for post-boot hooks — the plugin's own
    * published services (local keys).
    *
-   * @throws {DotLifecycleError} `DOT_LIFECYCLE_E012` when a need has no
+   * @throws {DotLifecycleError} `ARKI_DOT_E012` when a need has no
    *   provider among earlier-booted plugins. Teardown hooks can never hit
    *   this: the service map only grows, and reverse-order teardown keeps
    *   providers alive until their consumers are done.
@@ -1020,7 +1022,7 @@ export class DotAppImpl {
   /**
    * Race one hook invocation against the app's `hookTimeoutMs` watchdog.
    * No budget configured → plain pass-through. On timeout the returned
-   * promise rejects with `DOT_LIFECYCLE_E015` naming the plugin and hook,
+   * promise rejects with `ARKI_DOT_E015` naming the plugin and hook,
    * and the call site's existing catch path applies the phase's normal
    * failure rules (boot rollback, start cascade, teardown aggregation).
    * A promise cannot be killed, so on timeout the watchdog first aborts the
@@ -1122,7 +1124,7 @@ export class DotAppImpl {
     for (const plugin of this.#ordered) {
       const record = this.#records.get(plugin.name)!;
       let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
-      const started = performance.now();
+      const started = nowMs();
 
       // Resolve needs BEFORE invoking the hook — a plugin with needs but no
       // boot hook still fails fast when its wiring is unsatisfied.
@@ -1142,7 +1144,7 @@ export class DotAppImpl {
             `strictly forward. Mutual needs between two plugins are a cycle: merge them or extract the ` +
             `shared piece into a third plugin both consume.`,
           docsAnchor: 'unsatisfied-need',
-          durationMs: performance.now() - started,
+          durationMs: nowMs() - started,
           rollback: bootedRecords,
         });
       }
@@ -1195,7 +1197,7 @@ export class DotAppImpl {
             ? `Find the hang in the boot() hook of "${plugin.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
             : `Fix the error in the provides factories or boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
           docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
-          durationMs: performance.now() - started,
+          durationMs: nowMs() - started,
           cause: error,
           rollback: bootedRecords,
         });
@@ -1219,7 +1221,7 @@ export class DotAppImpl {
               `for kernel context keys ($app, $plugin, $config).`,
             remediation: `Rename the "${wireKey}" provides key of "${plugin.name}" — "$"-prefixed keys would shadow the kernel context.`,
             docsAnchor: 'reserved-service-key',
-            durationMs: performance.now() - started,
+            durationMs: nowMs() - started,
             rollback: [...bootedRecords, record],
           });
         }
@@ -1232,7 +1234,7 @@ export class DotAppImpl {
             message: `Plugin "${plugin.name}" publishes service "${wireKey}" which plugin "${owner}" already provides.`,
             remediation: `Mount one of the two with rename(plugin, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
             docsAnchor: 'service-collision',
-            durationMs: performance.now() - started,
+            durationMs: nowMs() - started,
             rollback: [...bootedRecords, record],
           });
         }
@@ -1243,7 +1245,7 @@ export class DotAppImpl {
       }
       bootedRecords.push(record);
 
-      const durationMs = performance.now() - started;
+      const durationMs = nowMs() - started;
       record.lifecycleDiagnostics.push({
         plugin: plugin.name,
         hook: 'boot',
@@ -1321,7 +1323,7 @@ export class DotAppImpl {
       const hookAbort = new AbortController();
       const ctx = this.#buildHookCtx(record, 'start', true, hookAbort.signal);
 
-      const startedAt = performance.now();
+      const startedAt = nowMs();
       this.#emitHook('start', plugin.name, record.order, 'starting');
       try {
         await this.#withHookBudget(plugin.name, 'start', hookAbort, () =>
@@ -1341,7 +1343,7 @@ export class DotAppImpl {
           ),
         );
       } catch (error) {
-        const durationMs = performance.now() - startedAt;
+        const durationMs = nowMs() - startedAt;
         const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
         const issue = makeIssue({
           code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
@@ -1384,7 +1386,7 @@ export class DotAppImpl {
 
       record.started = true;
       startedRecords.push(record);
-      const durationMs = performance.now() - startedAt;
+      const durationMs = nowMs() - startedAt;
       record.lifecycleDiagnostics.push({
         plugin: plugin.name,
         hook: 'start',
@@ -1469,7 +1471,7 @@ export class DotAppImpl {
       record.hooks.add('stop');
       const hookAbort = new AbortController();
       const ctx = this.#buildHookCtx(record, 'stop', true, hookAbort.signal);
-      const startedAt = performance.now();
+      const startedAt = nowMs();
       this.#emitHook('stop', record.plugin.name, record.order, 'starting');
       try {
         await this.#withHookBudget(record.plugin.name, 'stop', hookAbort, () =>
@@ -1489,7 +1491,7 @@ export class DotAppImpl {
           ),
         );
         record.started = false;
-        const durationMs = performance.now() - startedAt;
+        const durationMs = nowMs() - startedAt;
         record.lifecycleDiagnostics.push({
           plugin: record.plugin.name,
           hook: 'stop',
@@ -1501,7 +1503,7 @@ export class DotAppImpl {
         this.#emitHook('stop', record.plugin.name, record.order, 'completed', { durationMs });
         pluginLogger.debug('stop: done', { 'dot.plugin.duration.ms': durationMs });
       } catch (error) {
-        const durationMs = performance.now() - startedAt;
+        const durationMs = nowMs() - startedAt;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.StopFailed,
           plugin: record.plugin.name,
@@ -1698,8 +1700,8 @@ export class DotAppImpl {
     let pluginLogger = recordLogger;
     record.hooks.add('dispose');
     const hookAbort = new AbortController();
-      const ctx = this.#buildHookCtx(record, 'dispose', true, hookAbort.signal);
-    const startedAt = performance.now();
+    const ctx = this.#buildHookCtx(record, 'dispose', true, hookAbort.signal);
+    const startedAt = nowMs();
     this.#emitHook('dispose', record.plugin.name, record.order, 'starting');
     try {
       await this.#withHookBudget(record.plugin.name, 'dispose', hookAbort, () =>
@@ -1719,7 +1721,7 @@ export class DotAppImpl {
         ),
       );
       record.booted = false;
-      const durationMs = performance.now() - startedAt;
+      const durationMs = nowMs() - startedAt;
       record.lifecycleDiagnostics.push({
         plugin: record.plugin.name,
         hook: 'dispose',
@@ -1731,7 +1733,7 @@ export class DotAppImpl {
       this.#emitHook('dispose', record.plugin.name, record.order, 'completed', { durationMs });
       pluginLogger.debug('dispose: done', { 'dot.plugin.duration.ms': durationMs });
     } catch (error) {
-      const durationMs = performance.now() - startedAt;
+      const durationMs = nowMs() - startedAt;
       const issue = makeIssue({
         code: DotLifecycleErrorCode.DisposeFailed,
         plugin: record.plugin.name,
@@ -1893,7 +1895,6 @@ function stringifyError(error: unknown): string {
 }
 
 function reverseRecords(records: readonly PluginRecord[]): readonly PluginRecord[] {
-  // eslint-disable-next-line unicorn/no-array-reverse -- lib target is ES2022, toReversed is ES2023.
   return [...records].reverse();
 }
 

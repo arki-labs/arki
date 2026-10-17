@@ -28,7 +28,7 @@
 import type { DotApp, DotAppBuilder, ListGuard, UseAllAvail, UseAllGuard } from './define-app.js';
 import type { AnyPlugin, EmptyShape, Handle, Plugin, ServiceRecord, Token } from './plugin-contract.js';
 import { defineApp } from './define-app.js';
-import { handleOf, plugin as definePlugin } from './plugin-contract.js';
+import { plugin as definePlugin, handleOf } from './plugin-contract.js';
 
 export type TestAppOptions = {
   /** App name used in the manifest. Defaults to `'test-app'`. */
@@ -190,7 +190,7 @@ export function testPlugin<TNeeds extends ServiceRecord, TProvides extends Servi
 ): TestPluginBuilder<TNeeds, TProvides> {
   // Erasure seam — same boundary as `makeBuilder` in define-app.ts: the
   // runtime impl is untyped, the type parameters do all the guarding.
-  return makeTestPluginBuilder({ plugin: plugin as AnyPlugin, fakes: {}, options }) as TestPluginBuilder<TNeeds, TProvides>;
+  return makeTestPluginBuilder({ plugin: plugin, fakes: {}, options }) as TestPluginBuilder<TNeeds, TProvides>;
 }
 
 /**
@@ -250,7 +250,10 @@ function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<Servic
  * The fake is type-checked against the handle: a wrong-shaped value fails
  * at the call site. The plugin is named `fake:<key>`.
  */
-export function fake<T, K extends string>(handle: Handle<T, K>, value: NoInfer<T>): Plugin<EmptyShape, Readonly<Record<K, T>>> {
+export function fake<T, K extends string>(
+  handle: Handle<T, K>,
+  value: NoInfer<T>,
+): Plugin<EmptyShape, Readonly<Record<K, T>>> {
   // Erasure seam: the factory record is built under `handle.key` at
   // runtime; its type is exactly `{ [handle.key]: T }`.
   const provides = { [handle.key]: () => value } as Readonly<Record<K, () => T>>;

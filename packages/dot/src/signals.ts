@@ -34,8 +34,8 @@ import { getLogger } from '@arki/log';
  */
 export type SignalTarget = {
   readonly pid: number;
-  once(event: string, listener: (...args: never[]) => void): unknown;
-  off(event: string, listener: (...args: never[]) => void): unknown;
+  once(event: string, listener: () => void): unknown;
+  off(event: string, listener: () => void): unknown;
   kill(pid: number, signal?: string): unknown;
 };
 
@@ -47,7 +47,7 @@ export type HookSignalsOptions = {
    * terminated anyway. Default: 10 000 ms.
    */
   readonly timeoutMs?: number;
-  /** Test seam — a process-like target. Default: the real `process`. */
+  /** Test seam — a process-like target. Default: the global `process`, when the runtime has one. */
   readonly proc?: SignalTarget;
 };
 
@@ -56,6 +56,18 @@ export type Disposable = {
   readonly name: string;
   dispose(): Promise<void>;
 };
+
+/** The global `process` as a {@link SignalTarget}, or `undefined` where the runtime has none. Read at call time, never at import. */
+function globalProcessTarget(): SignalTarget | undefined {
+  const proc: typeof globalThis.process | undefined = globalThis.process;
+  if (proc === undefined) return undefined;
+  return {
+    pid: proc.pid,
+    once: (event, listener) => proc.once(event, listener),
+    off: (event, listener) => proc.off(event, listener),
+    kill: (pid, signal) => proc.kill(pid, signal),
+  };
+}
 
 /**
  * Wire termination signals to `app.dispose()`. Returns an unhook function
@@ -71,7 +83,12 @@ export type Disposable = {
 export function hookSignals(app: Disposable, options: HookSignalsOptions = {}): () => void {
   const signals = options.signals ?? ['SIGTERM', 'SIGINT'];
   const timeoutMs = options.timeoutMs ?? 10_000;
-  const proc: SignalTarget = options.proc ?? (process as unknown as SignalTarget);
+  const proc = options.proc ?? globalProcessTarget();
+  // Browsers and Hermes have no process signals: nothing to hook, so the unhook does nothing.
+  if (proc === undefined)
+    return () => {
+      /* nothing was hooked */
+    };
   const logger = getLogger('arki:dot:signals').with({ 'dot.app.name': app.name });
 
   const handlers = new Map<string, () => void>();

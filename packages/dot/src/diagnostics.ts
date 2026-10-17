@@ -84,7 +84,7 @@ export type LifecycleDiagnostic = {
  * are always actionable — never just "something went wrong".
  */
 export type DiagnosticIssue = {
-  /** Stable machine-readable code, e.g. `DOT_LIFECYCLE_E003`. */
+  /** Stable machine-readable code, e.g. `ARKI_DOT_E003`. */
   code: string;
   severity: DiagnosticSeverity;
   plugin?: string;

@@ -58,6 +58,7 @@ in `src/cli/json.ts`, exported from `@arki/dot/cli`.
 
    The real run returns the same envelope. Pass `--target <dir>` to pick the
    folder and `--force` to overwrite files that exist.
+
 4. Read the generated `AGENTS.md` in the new app. It lists the verify commands
    for that app.
 
@@ -99,6 +100,7 @@ in `.errors`. Read the plan from code:
 
 ```ts
 import { spawnSync } from 'node:child_process';
+
 import type { DotNewEnvelope } from '@arki/dot/cli';
 
 const result = spawnSync('npx', ['dot', 'new', 'my-app', '--dry-run', '--json'], { encoding: 'utf8' });
@@ -182,6 +184,7 @@ if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
 
 ```ts
 import { spawnSync } from 'node:child_process';
+
 import type { DotCliEnvelope, DotDiagnosticsSnapshot } from '@arki/dot';
 
 // doctor exits 1 on a failure envelope; stdout still holds the JSON.
@@ -221,7 +224,7 @@ as Mermaid.
 ### Add an action
 
 1. Declare `actions: [...]` on the plugin, or call `ctx.registerAction({ id,
-   binding, direction, address })` in `configure`. `rpc()` from
+binding, direction, address })` in `configure`. `rpc()` from
    `@arki/dot/orpc` adds one action per procedure.
 2. `npx dot explain --json | jq '.data.actions'`: the action is listed with its
    plugin.
@@ -277,34 +280,34 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 
 ## Errors
 
-| Code | Meaning | What to do |
-| --- | --- | --- |
-| `DOT_CLI_E001` | No app file found and no `--app`. | Pass `--app <path>` or add `src/app.ts`. |
-| `DOT_CLI_E002` | The app file has no usable app export: the `default`/`app` export is not a DOT app, there is none, or several are exported and none is `default`/`app`. | `export default defineApp(...)...` or `export const app = defineApp(...)...`. |
-| `DOT_CLI_E003` | Importing the app file threw. | Fix the import error it prints. |
-| `DOT_CLI_E004` | Unknown command. | Use `explain`, `doctor` or `new`. |
-| `DOT_CLI_E005` | Bad arguments, for example an unknown `--template`. | Run `dot --help`. |
-| `DOT_CLI_E006` | `configure` or `boot` threw while the CLI prepared the app. | Run `dot doctor --json` for per-plugin issues. |
-| `DOT_CLI_E007` | `--observability`: no OpenTelemetry SDK registered (warning). | Register an SDK; see `docs/observability.md`. |
-| `DOT_CLI_E008`–`E011` | `explain --as`: projection missing, failed to import, failed to run, or claimed twice. | Check the projection module the app registers. |
-| `ARKI_DOT_E001` | `configure` returned a Promise. | Move async work to `boot`. |
-| `ARKI_DOT_E002` | `configure` threw. | Fix the plugin config. |
-| `ARKI_DOT_E003` | `boot` threw. Booted plugins were rolled back. | Read the issue's `plugin` and `remediation`. |
-| `ARKI_DOT_E004` | `start` threw. | Fix the plugin's `start`. |
-| `ARKI_DOT_E005` / `E006` | One or more `stop` / `dispose` hooks threw. | Read the aggregated causes. |
-| `ARKI_DOT_E007` / `E008` | The app was reused after `dispose` or after a failure. | Build a new app. |
-| `ARKI_DOT_E011` | A plugin was registered twice. | Remove the duplicate `.use()`. |
-| `ARKI_DOT_E012` | A need has no provider (erased or JS graphs). | Mount the provider earlier. |
-| `ARKI_DOT_E013` | A wire key is provided twice. | `rename` one provider. |
-| `ARKI_DOT_E014` | A key uses the reserved `$` prefix. | Rename the key. |
-| `ARKI_DOT_E015` | A hook ran past `hookTimeoutMs`. | Pass `$signal` to the hook's I/O; raise the budget only with a reason. |
-| `ARKI_DOT_E016` / `E017` | Duplicate action id, or action meta that is not JSON. | Rename the action; keep meta plain JSON. |
-| `ARKI_DOT_E018` | More than one logging plugin. | Keep one `log()`. |
-| `ARKI_DOT_E019` | Feature needs form a ring. | Extract the shared piece into a third unit. |
-| `ARKI_DOT_E020` | A provider is mounted after its consumer. | Move it earlier; the message names both positions. |
-| `ARKI_DOT_E026` | A handle is missing from the services bag. | Mount the provider; check the gateway's needs. |
-| `ARKI_DOT_E027` | A feature key collides with another slot or a reserved name. | Rename the alias or key. |
-| `ARKI_DOT_E031` | A procedure's contract `meta` is not plain JSON. | Keep contract meta JSON-safe. |
+| Code                     | Meaning                                                                                                                                                 | What to do                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `DOT_CLI_E001`           | No app file found and no `--app`.                                                                                                                       | Pass `--app <path>` or add `src/app.ts`.                                      |
+| `DOT_CLI_E002`           | The app file has no usable app export: the `default`/`app` export is not a DOT app, there is none, or several are exported and none is `default`/`app`. | `export default defineApp(...)...` or `export const app = defineApp(...)...`. |
+| `DOT_CLI_E003`           | Importing the app file threw.                                                                                                                           | Fix the import error it prints.                                               |
+| `DOT_CLI_E004`           | Unknown command.                                                                                                                                        | Use `explain`, `doctor` or `new`.                                             |
+| `DOT_CLI_E005`           | Bad arguments, for example an unknown `--template`.                                                                                                     | Run `dot --help`.                                                             |
+| `DOT_CLI_E006`           | `configure` or `boot` threw while the CLI prepared the app.                                                                                             | Run `dot doctor --json` for per-plugin issues.                                |
+| `DOT_CLI_E007`           | `--observability`: no OpenTelemetry SDK registered (warning).                                                                                           | Register an SDK; see `docs/observability.md`.                                 |
+| `DOT_CLI_E008`–`E011`    | `explain --as`: projection missing, failed to import, failed to run, or claimed twice.                                                                  | Check the projection module the app registers.                                |
+| `ARKI_DOT_E001`          | `configure` returned a Promise.                                                                                                                         | Move async work to `boot`.                                                    |
+| `ARKI_DOT_E002`          | `configure` threw.                                                                                                                                      | Fix the plugin config.                                                        |
+| `ARKI_DOT_E003`          | `boot` threw. Booted plugins were rolled back.                                                                                                          | Read the issue's `plugin` and `remediation`.                                  |
+| `ARKI_DOT_E004`          | `start` threw.                                                                                                                                          | Fix the plugin's `start`.                                                     |
+| `ARKI_DOT_E005` / `E006` | One or more `stop` / `dispose` hooks threw.                                                                                                             | Read the aggregated causes.                                                   |
+| `ARKI_DOT_E007` / `E008` | The app was reused after `dispose` or after a failure.                                                                                                  | Build a new app.                                                              |
+| `ARKI_DOT_E011`          | A plugin was registered twice.                                                                                                                          | Remove the duplicate `.use()`.                                                |
+| `ARKI_DOT_E012`          | A need has no provider (erased or JS graphs).                                                                                                           | Mount the provider earlier.                                                   |
+| `ARKI_DOT_E013`          | A wire key is provided twice.                                                                                                                           | `rename` one provider.                                                        |
+| `ARKI_DOT_E014`          | A key uses the reserved `$` prefix.                                                                                                                     | Rename the key.                                                               |
+| `ARKI_DOT_E015`          | A hook ran past `hookTimeoutMs`.                                                                                                                        | Pass `$signal` to the hook's I/O; raise the budget only with a reason.        |
+| `ARKI_DOT_E016` / `E017` | Duplicate action id, or action meta that is not JSON.                                                                                                   | Rename the action; keep meta plain JSON.                                      |
+| `ARKI_DOT_E018`          | More than one logging plugin.                                                                                                                           | Keep one `log()`.                                                             |
+| `ARKI_DOT_E019`          | Feature needs form a ring.                                                                                                                              | Extract the shared piece into a third unit.                                   |
+| `ARKI_DOT_E020`          | A provider is mounted after its consumer.                                                                                                               | Move it earlier; the message names both positions.                            |
+| `ARKI_DOT_E026`          | A handle is missing from the services bag.                                                                                                              | Mount the provider; check the gateway's needs.                                |
+| `ARKI_DOT_E027`          | A feature key collides with another slot or a reserved name.                                                                                            | Rename the alias or key.                                                      |
+| `ARKI_DOT_E031`          | A procedure's contract `meta` is not plain JSON.                                                                                                        | Keep contract meta JSON-safe.                                                 |
 
 Full lifecycle table: [Lifecycle](lifecycle.md). Diagnostics shapes:
 [Diagnostics](diagnostics.md).

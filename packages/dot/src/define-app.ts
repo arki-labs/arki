@@ -60,7 +60,8 @@ type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {
 };
 
 type CollisionError<TAvail, TProvides> = {
-  readonly 'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()': keyof TAvail & keyof TProvides;
+  readonly 'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()': keyof TAvail &
+    keyof TProvides;
 };
 
 /**
@@ -409,7 +410,7 @@ export function defineApp(
     /**
      * Watchdog budget (ms) for each async hook invocation (`boot`, `start`,
      * `stop`, `dispose` — `configure` is sync). A hook exceeding the budget
-     * fails with `DOT_LIFECYCLE_E015` naming the plugin and hook, and the
+     * fails with `ARKI_DOT_E015` naming the plugin and hook, and the
      * kernel applies its normal failure rules (boot rollback, teardown
      * aggregation). The hook's promise itself cannot be cancelled — the
      * watchdog makes the hang *visible*, it does not kill it. Default:
@@ -457,7 +458,7 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
   // one runtime object serves every phase.
   const impl = {
     features(features: readonly (AnyFeature | AnyDefinedFeature)[]): DotAppBuilder<ServiceRecord> {
-      // Assembly: a chain feature's raw infra handles may be held only inside its scope (FEATURE_E005 otherwise).
+      // Assembly: a chain feature's raw infra handles may be held only inside its scope (ARKI_DOT_E026 otherwise).
       mountFeatures(features.filter(f => isDefinedFeature(f)));
       const nextState: BuilderState = {
         ...state,

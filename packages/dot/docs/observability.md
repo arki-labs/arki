@@ -1,7 +1,7 @@
 # Observability
 
 DOT is OTel-first. Traces, metrics, and logs come out of the kernel
-without you wiring anything — you wire the *exporter*. Skip the OTel
+without you wiring anything — you wire the _exporter_. Skip the OTel
 SDK and you pay zero allocation per lifecycle call; the OTel API returns
 no-op implementations and the cost vanishes.
 
@@ -14,11 +14,11 @@ before, you can skim straight to the [attribute table](#attribute-conventions).
 
 Every `DotApp` emits three signals across its 5-hook lifecycle:
 
-| Signal | Carrier | When |
-| ------ | ------- | ---- |
-| **Spans** | `@opentelemetry/api` tracer named `@arki/dot` | Every `configure()` / `boot()` / `start()` / `stop()` / `dispose()` call + every plugin hook within them |
-| **Metrics** | `@opentelemetry/api` meter named `@arki/dot` | Two histograms: `dot.app.phase.duration` (per phase) and `dot.plugin.hook.duration` (per plugin per hook) |
-| **Logs** | `@arki/log` logger named `arki:dot:lifecycle` | Every phase boundary; DEBUG by default, ERROR/WARN on failure paths |
+| Signal      | Carrier                                       | When                                                                                                      |
+| ----------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Spans**   | `@opentelemetry/api` tracer named `@arki/dot` | Every `configure()` / `boot()` / `start()` / `stop()` / `dispose()` call + every plugin hook within them  |
+| **Metrics** | `@opentelemetry/api` meter named `@arki/dot`  | Two histograms: `dot.app.phase.duration` (per phase) and `dot.plugin.hook.duration` (per plugin per hook) |
+| **Logs**    | `@arki/log` logger named `arki:dot:lifecycle` | Every phase boundary; DEBUG by default, ERROR/WARN on failure paths                                       |
 
 All three are correlated. When an SDK is registered, the kernel threads
 each span's `traceId` + `spanId` onto the matching log record. One trace
@@ -45,9 +45,9 @@ You opt in by registering an SDK at app boot, exactly once, before
 
 ```ts
 // observability.ts — your app's entry point
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { NodeSDK } from '@opentelemetry/sdk-node';
 
 const sdk = new NodeSDK({
   traceExporter: new OTLPTraceExporter({ url: 'http://localhost:4318/v1/traces' }),
@@ -71,7 +71,7 @@ Two span shapes. One per public phase, one per plugin hook.
 ### Phase span — `dot.app.<phase>`
 
 Emitted by `configure()` / `boot()` / `start()` / `stop()` / `dispose()`.
-Becomes the *active* span (via `tracer.startActiveSpan`), so children
+Becomes the _active_ span (via `tracer.startActiveSpan`), so children
 created during the phase auto-parent to it.
 
 ### Plugin span — `dot.plugin.<hook>`
@@ -83,16 +83,16 @@ average?" needs all plugins' `dot.plugin.boot` spans to share a name.
 
 ### Attribute conventions
 
-| Attribute | On | Type | Meaning |
-| --------- | -- | ---- | ------- |
-| `dot.app.name` | both | string | The app name from `defineApp(name)` |
-| `dot.app.version` | phase | string | The app version (when set) |
-| `dot.app.phase` | phase | string | `configure`/`boot`/`start`/`stop`/`dispose` |
-| `dot.app.plugin.count` | phase | int | How many plugins this app composes |
-| `dot.plugin.name` | plugin | string | The plugin's `name` |
-| `dot.plugin.version` | plugin | string | The plugin's `version` |
-| `dot.hook` | plugin | string | Which hook (same set as `dot.app.phase`) |
-| `dot.plugin.order` | plugin | int | Topological order (0-based, deterministic) |
+| Attribute              | On     | Type   | Meaning                                     |
+| ---------------------- | ------ | ------ | ------------------------------------------- |
+| `dot.app.name`         | both   | string | The app name from `defineApp(name)`         |
+| `dot.app.version`      | phase  | string | The app version (when set)                  |
+| `dot.app.phase`        | phase  | string | `configure`/`boot`/`start`/`stop`/`dispose` |
+| `dot.app.plugin.count` | phase  | int    | How many plugins this app composes          |
+| `dot.plugin.name`      | plugin | string | The plugin's `name`                         |
+| `dot.plugin.version`   | plugin | string | The plugin's `version`                      |
+| `dot.hook`             | plugin | string | Which hook (same set as `dot.app.phase`)    |
+| `dot.plugin.order`     | plugin | int    | Topological order (0-based, deterministic)  |
 
 On failure, the span gets `SpanStatusCode.ERROR` and an `exception`
 event with the thrown error recorded via `span.recordException()`. No
@@ -128,7 +128,7 @@ Quiet by default. Loud when something breaks.
 
 - **DEBUG** — phase boundaries (`starting`, `done`, `complete`),
   per-plugin hook completions. Silent unless explicitly elevated.
-- **WARN** — phase completed *with* per-plugin failures (`stop`/`dispose`
+- **WARN** — phase completed _with_ per-plugin failures (`stop`/`dispose`
   continue through individual errors and report aggregates).
 - **ERROR** — a plugin's hook threw; the kernel logs the failure and the
   rollback summary before the cascading `DotLifecycleError` propagates.
@@ -187,18 +187,19 @@ the value tells you whether tracing was active.
 
 ```ts
 // 1. Register OTel SDK once, before any DOT app boots.
-import { NodeSDK } from '@opentelemetry/sdk-node';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+
+// 2. Build and boot your app. Nothing else to wire.
+import { defineApp } from '@arki/dot';
+
+import { dbPlugin, envPlugin } from './plugins';
 
 new NodeSDK({
   serviceName: 'my-app',
   contextManager: new AsyncLocalStorageContextManager(),
   // traceExporter, metricReader, logRecordProcessor — your choice
 }).start();
-
-// 2. Build and boot your app. Nothing else to wire.
-import { defineApp } from '@arki/dot';
-import { envPlugin, dbPlugin } from './plugins';
 
 await defineApp('my-app').use(envPlugin).use(dbPlugin).start();
 
@@ -270,12 +271,13 @@ synchronous event stream to registered `DotLifecycleObserver`s. The two
 signals are peers; neither layers under the other.
 
 ```ts
-import { defineApp, type DotLifecycleEvent } from '@arki/dot';
+import type { DotLifecycleEvent } from '@arki/dot';
+import { defineApp } from '@arki/dot';
 
 const events: DotLifecycleEvent[] = [];
 
 const app = await defineApp('my-app', {
-  observers: [(event) => events.push(event)],
+  observers: [event => events.push(event)],
 })
   .use(envPlugin)
   .use(dbPlugin)
@@ -293,7 +295,7 @@ since epoch), and on completion `durationMs`. Failed events also carry
 Observers may also be added post-hoc:
 
 ```ts
-const unsubscribe = app.subscribe((event) => {
+const unsubscribe = app.subscribe(event => {
   if (event.kind === 'plugin-hook' && event.status === 'failed') {
     notifyOps(event);
   }
@@ -302,7 +304,7 @@ const unsubscribe = app.subscribe((event) => {
 unsubscribe();
 ```
 
-Observers added through `subscribe()` see only events fired *after*
+Observers added through `subscribe()` see only events fired _after_
 subscription — to catch `configure`-phase events, pass them through
 `defineApp(name, { observers })` at construction.
 

@@ -74,7 +74,13 @@ const ev = (tag: string): void => {
 };
 
 const mkDb = (instance: string): Db => ({ instance, query: async sql => `${instance}:${sql}` });
-const mkKv = (ns: string): KvClient => ({ ns, store: new Map(), set(k, v) { this.store.set(k, v); } });
+const mkKv = (ns: string): KvClient => ({
+  ns,
+  store: new Map(),
+  set(k, v) {
+    this.store.set(k, v);
+  },
+});
 
 /* ------------------------------------------------------------------ */
 /* Layer 0 — infra                                                     */
@@ -626,8 +632,10 @@ describe('stress: 28-plugin commerce composition', () => {
     expect(txn).toBe('txn-100');
     expect(app.services.analytics.seen).toEqual(['order.placed']); // bus fan-out worked
     expect(await app.services.api.handle('/admin/stats')).toBe('reports:report: 1 products, 1 orders');
-    expect((await app.services.search.get()).docs).toEqual(['sku-1']);
-    expect((await app.services.mailer.get()).sent).toEqual(['noreply@stress.test -> alice@example.com']);
+    const searchState = await app.services.search.get();
+    expect(searchState.docs).toEqual(['sku-1']);
+    const mailerState = await app.services.mailer.get();
+    expect(mailerState.sent).toEqual(['noreply@stress.test -> alice@example.com']);
     expect(events.filter(e => e.startsWith('lazyinit:'))).toHaveLength(2); // still single-flight
 
     /* ---- manifest: observed wiring at scale ---- */
@@ -673,7 +681,9 @@ describe('stress: 28-plugin commerce composition', () => {
     ]);
     // Dispose hooks and kernel lazy-cleanup interleave in exact reverse
     // declaration order; blob (never initialized) is absent.
-    expect(events.filter(e => e.startsWith('dispose:') || e.startsWith('lazyclean:') || e.startsWith('lazyinit:'))).toEqual([
+    expect(
+      events.filter(e => e.startsWith('dispose:') || e.startsWith('lazyclean:') || e.startsWith('lazyinit:')),
+    ).toEqual([
       'dispose:bus',
       'lazyclean:mailer',
       'lazyclean:search',

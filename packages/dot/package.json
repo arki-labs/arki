@@ -1,18 +1,7 @@
 {
   "name": "@arki/dot",
   "version": "0.6.1",
-  "description": "TypeScript-first application composition framework for the ARKI package family \u2014 lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/dot"
-  },
-  "homepage": "https://arki.dev/dot",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
+  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "keywords": [
     "arki",
     "typescript",
@@ -25,13 +14,18 @@
     "agent-native",
     "dot"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev/dot",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/dot"
+  },
+  "license": "MIT",
   "sideEffects": false,
-  "bin": {
-    "dot": "./dist/cli/index.js"
-  },
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -70,6 +64,9 @@
       "default": "./dist/test-harness.js"
     }
   },
+  "bin": {
+    "dot": "./dist/cli/index.js"
+  },
   "files": [
     "dist/**",
     "src/**",
@@ -92,9 +89,10 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:docs": "arki-doc-examples"
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -103,14 +101,6 @@
     "@arki/log": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
-  },
-  "peerDependencies": {
-    "@orpc/server": "catalog:backend"
-  },
-  "peerDependenciesMeta": {
-    "@orpc/server": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",
@@ -126,5 +116,16 @@
     "awilix": "^13.0.5",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@orpc/server": "catalog:backend"
+  },
+  "peerDependenciesMeta": {
+    "@orpc/server": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

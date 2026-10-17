@@ -80,7 +80,7 @@ export type {
   DependencyEdgeKind,
   ServiceKind,
 } from './manifest.js';
-export { toJsonObject } from './manifest.js';
+export { DOT_MANIFEST_ERROR_CODE, DotManifestError, toJsonObject } from './manifest.js';
 
 export type {
   DotDiagnosticsSnapshot,

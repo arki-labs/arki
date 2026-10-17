@@ -20,23 +20,23 @@ becomes binding.
 
 These are the **stable contracts** as of `0.1`:
 
-| Surface                          | Stability  |
-| -------------------------------- | ---------- |
-| `defineApp(name, options?)`      | stable     |
-| `.use(plugin)` typed builder     | stable     |
-| `plugin(config)`                 | stable     |
-| `service<T>()` / `token<T>()` | stable     |
-| `rename(plugin, map, name?)`     | stable     |
-| `Plugin` shape (5 hooks)         | stable     |
-| `DotLifecycleHook` enum          | stable     |
-| `DotLifecycleState` enum         | stable     |
-| `DotLifecycleError` shape        | stable     |
-| `DotAppManifest` (5 arrays)      | stable     |
-| `DotDiagnosticsSnapshot`         | stable     |
-| `DiagnosticIssue` shape          | stable     |
-| `dot explain` CLI + JSON envelope| stable     |
-| `dot doctor` CLI + JSON envelope | stable     |
-| `testApp` / `bootTestApp`        | stable     |
+| Surface                           | Stability |
+| --------------------------------- | --------- |
+| `defineApp(name, options?)`       | stable    |
+| `.use(plugin)` typed builder      | stable    |
+| `plugin(config)`                  | stable    |
+| `service<T>()` / `token<T>()`     | stable    |
+| `rename(plugin, map, name?)`      | stable    |
+| `Plugin` shape (5 hooks)          | stable    |
+| `DotLifecycleHook` enum           | stable    |
+| `DotLifecycleState` enum          | stable    |
+| `DotLifecycleError` shape         | stable    |
+| `DotAppManifest` (5 arrays)       | stable    |
+| `DotDiagnosticsSnapshot`          | stable    |
+| `DiagnosticIssue` shape           | stable    |
+| `dot explain` CLI + JSON envelope | stable    |
+| `dot doctor` CLI + JSON envelope  | stable    |
+| `testApp` / `bootTestApp`         | stable    |
 
 These are **experimental** in `0.x` and may change without a major bump:
 
@@ -60,11 +60,11 @@ event-sourced writes (its `@arki/journal/dot` plugin connects it to a Dot app).
 
 Example timeline:
 
-| Version | Action                                                    |
-| ------- | --------------------------------------------------------- |
-| `0.3.0` | Deprecate `someApi`. Document replacement.                |
-| `0.4.0` | Deprecation still active.                                 |
-| `1.0.0` | Remove `someApi`.                                         |
+| Version | Action                                     |
+| ------- | ------------------------------------------ |
+| `0.3.0` | Deprecate `someApi`. Document replacement. |
+| `0.4.0` | Deprecation still active.                  |
+| `1.0.0` | Remove `someApi`.                          |
 
 Deprecations and removals are listed in the [upgrade guide](./upgrade-guide.md).
 

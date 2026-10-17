@@ -17,11 +17,11 @@ import { trace } from '@opentelemetry/api';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runDoctor } from '../index.js';
-import { probeObservability } from '../observability-probe.js';
 import { defineApp } from '../../define-app.js';
 import { plugin } from '../../plugin-contract.js';
 import { testApp } from '../../test-harness.js';
+import { runDoctor } from '../index.js';
+import { probeObservability } from '../observability-probe.js';
 
 describe('probeObservability — direct', () => {
   it('returns a coded warning issue when no SDK is registered', () => {
@@ -61,7 +61,12 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('without --observability, no DOT_CLI_E007 issue appears in the envelope', async () => {
-    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
+    const p = plugin({
+      name: 'p',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await testApp([p]).boot();
     try {
       let written = '';
@@ -79,12 +84,19 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and no SDK, the envelope carries a DOT_CLI_E007 warning issue', async () => {
-    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
+    const p = plugin({
+      name: 'p',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await testApp([p]).boot();
     try {
       const envelope = await runDoctor(app, {
         json: true,
-        out: () => undefined,
+        out: () => {
+          /* noop */
+        },
         observability: true,
       });
       const obsIssue = envelope.errors.find(e => e.code === 'DOT_CLI_E007');
@@ -101,12 +113,19 @@ describe('runDoctor — --observability flag', () => {
     const provider = new BasicTracerProvider();
     trace.setGlobalTracerProvider(provider);
     try {
-      const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
+      const p = plugin({
+        name: 'p',
+        boot: () => {
+          /* side effects only */
+        },
+      });
       const app = await testApp([p]).boot();
       try {
         const envelope = await runDoctor(app, {
           json: true,
-          out: () => undefined,
+          out: () => {
+            /* noop */
+          },
           observability: true,
         });
         expect(envelope.errors.some(e => e.code === 'DOT_CLI_E007')).toBe(false);
@@ -129,7 +148,9 @@ describe('runDoctor — --observability flag', () => {
 
     const envelope = await runDoctor(builder, {
       json: true,
-      out: () => undefined,
+      out: () => {
+        /* noop */
+      },
       observability: true,
     });
 

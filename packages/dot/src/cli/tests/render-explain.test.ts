@@ -100,13 +100,10 @@ describe('renderExplain', () => {
   it('JSON mode writes a parseable envelope to the sink', () => {
     const configured = syntheticApp().configure();
     let written = '';
-    const envelope = renderExplain(
-      { manifest: configured.manifest },
-      { json: true, now: FROZEN_NOW, out: line => (written += line) },
-    );
+    renderExplain({ manifest: configured.manifest }, { json: true, now: FROZEN_NOW, out: line => (written += line) });
 
     expect(written.endsWith('\n')).toBe(true);
-    const parsed = JSON.parse(written) as typeof envelope;
+    const parsed = JSON.parse(written) as ReturnType<typeof renderExplain>;
     expect(parsed.status).toBe('success');
     expect(parsed.command).toBe('explain');
     expect(parsed.data.app.name).toBe('synthetic');
@@ -132,14 +129,8 @@ describe('renderExplain', () => {
     const configured2 = syntheticApp().configure();
     let first = '';
     let second = '';
-    renderExplain(
-      { manifest: configured1.manifest },
-      { json: true, now: FROZEN_NOW, out: line => (first += line) },
-    );
-    renderExplain(
-      { manifest: configured2.manifest },
-      { json: true, now: FROZEN_NOW, out: line => (second += line) },
-    );
+    renderExplain({ manifest: configured1.manifest }, { json: true, now: FROZEN_NOW, out: line => (first += line) });
+    renderExplain({ manifest: configured2.manifest }, { json: true, now: FROZEN_NOW, out: line => (second += line) });
     expect(first).toBe(second);
   });
 

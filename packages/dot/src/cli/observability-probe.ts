@@ -22,7 +22,7 @@
 import { trace } from '@opentelemetry/api';
 
 import type { DiagnosticIssue } from '../diagnostics.js';
-import { DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { dotCliDocsUrl, DotCliErrorCode } from './error-codes.js';
 
 /** OTel API sentinel returned by `NonRecordingSpan` when no SDK is registered. */
 const ZERO_TRACE_ID = '0'.repeat(32);
@@ -42,8 +42,7 @@ export function probeObservability(): DiagnosticIssue | null {
   return {
     code: DotCliErrorCode.ObservabilityNoSdk,
     severity: 'warning',
-    message:
-      'No OpenTelemetry SDK is registered. Lifecycle traces and metrics will not be exported.',
+    message: 'No OpenTelemetry SDK is registered. Lifecycle traces and metrics will not be exported.',
     remediation:
       'Register an OTel SDK (e.g. @opentelemetry/sdk-node with AsyncLocalStorageContextManager) once at app entry, before any DotApp boots. See the docs for a minimal example.',
     docsUrl: dotCliDocsUrl(DotCliErrorCode.ObservabilityNoSdk),

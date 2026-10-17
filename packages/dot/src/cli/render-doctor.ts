@@ -59,10 +59,7 @@ function worstSeverity(snap: DotDiagnosticsSnapshot): DotCliEnvelopeStatus {
 /**
  * Compose the JSON envelope. Pure — no IO. Useful for tests and embedding.
  */
-export function buildDoctorEnvelope(
-  source: DoctorSource,
-  opts: RenderOptions,
-): DotCliEnvelope<DotDiagnosticsSnapshot> {
+export function buildDoctorEnvelope(source: DoctorSource, opts: RenderOptions): DotCliEnvelope<DotDiagnosticsSnapshot> {
   const status = worstSeverity(source.diagnostics);
 
   // Top-level `errors` is the flat list of every issue, so agents can fail
@@ -88,16 +85,21 @@ export function buildDoctorEnvelope(
 
 function statusIcon(status: DiagnosticStatus): string {
   switch (status) {
-    case 'ok':
+    case 'ok': {
       return '[OK]';
-    case 'degraded':
+    }
+    case 'degraded': {
       return '[WARN]';
-    case 'failed':
+    }
+    case 'failed': {
       return '[FAIL]';
-    case 'skipped':
+    }
+    case 'skipped': {
       return '[SKIP]';
-    case 'missing':
+    }
+    case 'missing': {
       return '[MISSING]';
+    }
   }
 }
 
@@ -105,9 +107,11 @@ function renderIssueLines(issues: readonly DiagnosticIssue[], indent: string): s
   const lines: string[] = [];
   for (const issue of issues) {
     const sev = issue.severity.toUpperCase();
-    lines.push(`${indent}- [${sev}] ${issue.code}: ${issue.message}`);
-    lines.push(`${indent}    remediation: ${issue.remediation}`);
-    lines.push(`${indent}    docs: ${issue.docsUrl}`);
+    lines.push(
+      `${indent}- [${sev}] ${issue.code}: ${issue.message}`,
+      `${indent}    remediation: ${issue.remediation}`,
+      `${indent}    docs: ${issue.docsUrl}`,
+    );
   }
   return lines;
 }
@@ -115,13 +119,13 @@ function renderIssueLines(issues: readonly DiagnosticIssue[], indent: string): s
 function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeStatus): string {
   const lines: string[] = [];
   const title = `Doctor: ${snap.app.name} (state=${snap.app.state})`;
-  lines.push(title);
-  lines.push('='.repeat(title.length));
-  lines.push(`generatedAt: ${snap.generatedAt}`);
-  lines.push('');
-
-  // Per-plugin status
-  lines.push(`Plugins (${snap.plugins.length})`);
+  lines.push(
+    title,
+    '='.repeat(title.length),
+    `generatedAt: ${snap.generatedAt}`,
+    '',
+    `Plugins (${snap.plugins.length})`,
+  );
   if (snap.plugins.length === 0) {
     lines.push('  (none)');
   } else {
@@ -164,17 +168,14 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeSt
   if (lifeWithIssues.length > 0) {
     lines.push(`Lifecycle issues (${lifeWithIssues.length})`);
     for (const l of lifeWithIssues) {
-      lines.push(`  ${l.plugin}:${l.hook} (order=${l.order}, state=${l.state})`);
-      lines.push(...renderIssueLines(l.issues, '    '));
+      lines.push(`  ${l.plugin}:${l.hook} (order=${l.order}, state=${l.state})`, ...renderIssueLines(l.issues, '    '));
     }
     lines.push('');
   }
 
   // Top-level issues (kernel-level / cross-cutting)
   if (snap.issues.length > 0) {
-    lines.push(`App-level issues (${snap.issues.length})`);
-    lines.push(...renderIssueLines(snap.issues, '  '));
-    lines.push('');
+    lines.push(`App-level issues (${snap.issues.length})`, ...renderIssueLines(snap.issues, '  '), '');
   }
 
   // Summary

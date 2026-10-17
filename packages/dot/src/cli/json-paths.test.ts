@@ -25,7 +25,10 @@ const GUIDE = readFileSync(fileURLToPath(new URL('../../docs/agent-guide.md', im
 
 /** The app the paths are checked against: one provider, one consumer, one registered service. */
 const appBuilder = () => {
-  const database = plugin({ name: 'database', provides: { db: () => ({ query: (sql: string) => Promise.resolve([sql]) }) } });
+  const database = plugin({
+    name: 'database',
+    provides: { db: () => ({ query: (sql: string) => Promise.resolve([sql]) }) },
+  });
   const reports = plugin({
     name: 'reports',
     needs: { db: database.provides.db },

@@ -144,7 +144,7 @@ describe('DOT manifest', () => {
     ]);
   });
 
-  it('surfaces duplicate action ids within a binding as DOT_LIFECYCLE_E016 issues', () => {
+  it('surfaces duplicate action ids within a binding as ARKI_DOT_E016 issues', () => {
     const duplicate = plugin({
       name: 'dup',
       actions: [
@@ -168,7 +168,7 @@ describe('DOT manifest', () => {
     });
   });
 
-  it('rejects non-JSON action metadata with DOT_LIFECYCLE_E017 diagnostics', () => {
+  it('rejects non-JSON action metadata with ARKI_DOT_E017 diagnostics', () => {
     const bad = plugin({
       name: 'bad-meta',
       actions: [

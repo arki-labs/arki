@@ -9,8 +9,6 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { defineApp, plugin, service } from '../index.js';
-
 import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from '../feature.js';
 import {
   composeRepos,
@@ -27,6 +25,7 @@ import {
   sliceOf,
   tokenOf,
 } from '../feature.js';
+import { defineApp, plugin, service } from '../index.js';
 
 type FakeDb = { readonly tag: 'db' };
 const fakeDb: FakeDb = { tag: 'db' };
@@ -70,7 +69,10 @@ describe('compile-time folds (no kernel involved)', () => {
     const clash = feature('clash', { router: { orders: {} } });
     // @ts-expect-error -- "orders" is claimed twice
     expect(() => composeRouter([orders, clash])).toThrow(
-      expect.objectContaining({ code: FEATURE_ERROR_CODES.duplicateRouterKey, message: expect.stringMatching(/router mount key "orders"/) }),
+      expect.objectContaining({
+        code: FEATURE_ERROR_CODES.duplicateRouterKey,
+        message: expect.stringMatching(/router mount key "orders"/),
+      }),
     );
   });
 
@@ -92,7 +94,10 @@ describe('compile-time folds (no kernel involved)', () => {
     const clash = feature('repo-clash', { repos: { orders: (db: FakeDb) => db } });
     // @ts-expect-error -- "orders" is claimed twice
     expect(() => composeRepos([orders, clash], { tag: 'db' })).toThrow(
-      expect.objectContaining({ code: FEATURE_ERROR_CODES.duplicateRepoKey, message: expect.stringMatching(/repo key "orders"/) }),
+      expect.objectContaining({
+        code: FEATURE_ERROR_CODES.duplicateRepoKey,
+        message: expect.stringMatching(/repo key "orders"/),
+      }),
     );
   });
 });
@@ -118,10 +123,7 @@ describe('slice keys', () => {
 describe('mounting features (.features)', () => {
   it('publishes slice payloads under the derived feature token and merges boot provides', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = await defineApp('feature-test')
-      .use(dbPlugin)
-      .features([orders, billing, authish])
-      .boot();
+    const app = await defineApp('feature-test').use(dbPlugin).features([orders, billing, authish]).boot();
 
     const manifest = app.manifest;
     const ordersUnit = manifest.plugins.find(p => p.name === 'orders');
@@ -191,7 +193,12 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
 
   const digest = feature('digest', {
     needs: { access: plans.provides.entitlements },
-    provides: { digestPlan: ({ access }) => (userId: string) => access.planOf(userId) },
+    provides: {
+      digestPlan:
+        ({ access }) =>
+        (userId: string) =>
+          access.planOf(userId),
+    },
   });
 
   it('the graph is data: handle keys equal the factory keys and carry their provider before anything boots', () => {
@@ -264,12 +271,15 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
     // @ts-expect-error — the gateway spreads every capability into its needs; scoring is mounted after it.
     const halfBuilt = defineApp('half-built').use(dbPlugin).features([plans, gateway, scoring, companion]);
-    expect(() => halfBuilt.configure()).toThrow(/DOT_LIFECYCLE_E020|"scorer"/);
+    expect(() => halfBuilt.configure()).toThrow(/ARKI_DOT_E020|"scorer"/);
   });
 
   it('a procedure resolves its capability to the very instance the app published — one DI system', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = await defineApp('bag').use(dbPlugin).features([...features, gateway]).boot();
+    const app = await defineApp('bag')
+      .use(dbPlugin)
+      .features([...features, gateway])
+      .boot();
     const resolved = resolveNeeds(app.services.bag, companionNeeds);
     // Driven services (`db`) are not capabilities: they stay on the context explicitly.
     expectTypeOf(resolved).toEqualTypeOf<{ access: ReturnType<typeof createPlanLookup> }>();
@@ -278,7 +288,7 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
     await app.dispose();
   });
 
-  it('a capability missing from the bag throws FEATURE_E005 naming alias, key, provider and the fix', () => {
+  it('a capability missing from the bag throws ARKI_DOT_E026 naming alias, key, provider and the fix', () => {
     expect(() => resolveNeeds({}, companionNeeds)).toThrow(
       expect.objectContaining({
         code: FEATURE_ERROR_CODES.missingCapability,
@@ -314,7 +324,11 @@ describe('the hexagon: .use → .features → .serve', () => {
   });
 
   it('mounts a plain plugin in .serve() unchanged', async () => {
-    const health = plugin({ name: 'health', needs: { db: service<FakeDb>() }, provides: { health: ({ db }) => db.tag } });
+    const health = plugin({
+      name: 'health',
+      needs: { db: service<FakeDb>() },
+      provides: { health: ({ db }) => db.tag },
+    });
     const app = await defineApp('serve-plain').use(dbPlugin).features([billing]).serve(health).boot();
     expect(app.services.health).toBe('db');
     await app.dispose();
@@ -329,8 +343,11 @@ describe('the hexagon: .use → .features → .serve', () => {
     afterDomain.features([billing]);
     // @ts-expect-error — a driving adapter calls into the features, so it cannot sit in .use()
     defineApp('driver-in-use').use(dbPlugin).use(collector);
-    // @ts-expect-error — a driven adapter cannot sit in .serve(): it would boot after the domain
-    defineApp('driven-in-serve').use(dbPlugin).features([billing]).serve(driven(() => plugin({ name: 'late' })));
+    defineApp('driven-in-serve')
+      .use(dbPlugin)
+      .features([billing])
+      // @ts-expect-error — a driven adapter cannot sit in .serve(): it would boot after the domain
+      .serve(driven(() => plugin({ name: 'late' })));
     // @ts-expect-error — a feature is not a plugin; it is mounted only through .features()
     defineApp('not-a-plugin').use(dbPlugin).use(authish);
     // @ts-expect-error — authish needs db, which nothing before it provides
@@ -383,8 +400,12 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
   });
 
   it('gets no slice records: those exist only once the features boot', async () => {
-    const peeking = driven(features => plugin({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }));
-    await expect(defineApp('peek').use(peeking).features([orders]).boot()).rejects.toThrow(/FEATURE_E004|slice record/);
+    const peeking = driven(features =>
+      plugin({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }),
+    );
+    await expect(defineApp('peek').use(peeking).features([orders]).boot()).rejects.toThrow(
+      /ARKI_DOT_E025|slice record/,
+    );
   });
 });
 

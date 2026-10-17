@@ -215,6 +215,11 @@ describe('staleBaselineEntries', () => {
 });
 
 describe('isAdapterSubpath', () => {
+  it('treats ./cli as an adapter because a command-line entry names a role (Node-only), not a library', () => {
+    expect(isAdapterSubpath('./cli')).toBe(true);
+    expect(isAdapterSubpath('./cli/render')).toBe(true);
+  });
+
   it('treats entries named for the dependency they adapt to as adapters, and plain names as portable', () => {
     for (const name of ['zod', 'tanstack', 'orpc', 'sentry', 'mastra', 'pg', 'http', 'react']) {
       expect(isAdapterSubpath(`./${name}`)).toBe(true);

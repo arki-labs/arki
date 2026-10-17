@@ -227,7 +227,9 @@ describe('DOT lifecycle', () => {
     let stopCalls = 0;
     const p = plugin({
       name: 'p',
-      boot: () => { /* side effects only */ },
+      boot: () => {
+        /* side effects only */
+      },
       stop: () => {
         stopCalls += 1;
       },
@@ -260,7 +262,12 @@ describe('DOT lifecycle', () => {
   });
 
   it('boot() after dispose throws DotLifecycleError with ReuseAfterDispose code', async () => {
-    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
+    const p = plugin({
+      name: 'p',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await defineApp('test').use(p).boot();
     await app.dispose();
     await expect(app.start()).rejects.toMatchObject({
@@ -310,8 +317,10 @@ describe('DOT lifecycle', () => {
     // @ts-expect-error — a's need has no provider; intentionally cyclic wiring
     const builder = defineApp('test').use(a).use(b);
     const error = await builder.boot().then(
-      () => undefined,
-      (e: unknown) => e,
+      () => {
+        /* noop */
+      },
+      (error_: unknown) => error_,
     );
     expect(error).toBeInstanceOf(DotLifecycleError);
     // Adapters declare their provides statically, so the kernel sees the ring
@@ -440,7 +449,9 @@ describe('lifecycle transition serialization', () => {
     const gate = deferred();
     const p = plugin({
       name: 'p',
-      boot: () => { /* side effects only */ },
+      boot: () => {
+        /* side effects only */
+      },
       dispose: async () => {
         entered.resolve();
         await gate.promise;
@@ -476,9 +487,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       },
     });
 
-    await expect(
-      defineApp('watchdog-boot', { hookTimeoutMs: 30 }).use(good).use(hung).boot(),
-    ).rejects.toMatchObject({
+    await expect(defineApp('watchdog-boot', { hookTimeoutMs: 30 }).use(good).use(hung).boot()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.HookTimeout,
       plugin: 'hung',
     });
@@ -493,9 +502,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       start: () => never(),
     });
 
-    await expect(
-      defineApp('watchdog-start', { hookTimeoutMs: 30 }).use(good).use(hung).start(),
-    ).rejects.toMatchObject({
+    await expect(defineApp('watchdog-start', { hookTimeoutMs: 30 }).use(good).use(hung).start()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.HookTimeout,
       plugin: 'hung-start',
     });
@@ -508,19 +515,25 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     const order: string[] = [];
     const hung = plugin({
       name: 'hung-dispose',
-      boot: () => { /* side effects only */ },
+      boot: () => {
+        /* side effects only */
+      },
       dispose: () => never(),
     });
     const tidy = plugin({
       name: 'tidy',
-      boot: () => { /* side effects only */ },
+      boot: () => {
+        /* side effects only */
+      },
       dispose: () => void order.push('tidy'),
     });
 
     const app = await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).use(tidy).use(hung).boot();
     const error = await app.dispose().then(
-      () => undefined,
-      (e: unknown) => e,
+      () => {
+        /* noop */
+      },
+      (error_: unknown) => error_,
     );
     expect(error).toBeInstanceOf(DotLifecycleError);
     expect((error as DotLifecycleError).failures).toEqual([
@@ -529,7 +542,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     expect(order).toEqual(['tidy']); // reverse order continued past the hang
   });
 
-  it('aborts the hung hook\'s $signal, so work that listens actually stops', async () => {
+  it("aborts the hung hook's $signal, so work that listens actually stops", async () => {
     // Why: a promise cannot be killed. Without the signal, a hook stuck on a
     // connect keeps running (and holding sockets) after the kernel gave up.
     let seen: AbortSignal | undefined;

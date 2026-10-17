@@ -16,8 +16,8 @@ declarations; point dependencies only downward; observe the world only in
 
 Importing any module in the declaration layer must be **observationally
 free**: no env observation, no I/O, no connections, no throws that depend on
-the world, no global mutation. Pure *computation* at import is fine (deriving
-actions, building a handler from a static router); *observation* is not.
+the world, no global mutation. Pure _computation_ at import is fine (deriving
+actions, building a handler from a static router); _observation_ is not.
 
 - **Mistakes are caught on the earliest step that can see them** (the
   ladder):
@@ -127,7 +127,7 @@ The same three steps under their final names (RFC
 order, checked like `.useAll()`:
 
 ```ts
-defineApp('avocabo')
+defineApp('shop')
   .infra(log(...), database, cache, authn, journal({ j, tables })) // what the app runs on; log first
   .features(features)                                               // defineFeature() values (feature() during the migration)
   .entrypoints(gateway, schedule({ clock: 'host' }), journalWorker()); // what calls into the features
@@ -138,9 +138,9 @@ A feature is a chain whose steps are its folders:
 ```ts
 // features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` / `rpcImplementer` as types
 const dailyDigestDeps = defineFeature('daily-digest')
-  .needs({ plans: billing.provides.entitlements })    // other units, by handle
-  .infra(store, mailer);                               // infra/ — private plugins
-export type Deps = DepsOf<typeof dailyDigestDeps>;    // what a usecase may ask for
+  .needs({ plans: billing.provides.entitlements }) // other units, by handle
+  .infra(store, mailer); // infra/ — private plugins
+export type Deps = DepsOf<typeof dailyDigestDeps>; // what a usecase may ask for
 const dailyDigestLogic = dailyDigestDeps.usecases({ preview, sendDue }); // usecases/ — one file per usecase
 export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
@@ -171,7 +171,7 @@ Rules the types enforce (each is also a coded runtime check):
   the name, and the checks fall back to wire keys for that plugin.
 - `session`, `headers`, `services` and `usecases` are reserved aliases; an
   infra key equal to a need alias, and an entrypoint key equal to a provided
-  key, are compile errors (`FEATURE_E006` at runtime).
+  key, are compile errors (`ARKI_DOT_E027` at runtime).
 - `feature.override({ store: fake })` swaps an infra service before
   compilation: one provider per key, entrypoints kept.
 - Mount keys are written once, in the app's RPC contract:
@@ -197,10 +197,10 @@ order — a unit in the wrong step does not compile:
 
 ```ts
 defineApp('shop')
-  .use(db({ relations }))           // driven adapters — what features need
-  .use(queue({ connection }))       //   (a queue CLIENT features enqueue with)
-  .features(features)               // the domain core — feature() values, one list
-  .serve(http({ port }))            // driving adapters — what calls the features
+  .use(db({ relations })) // driven adapters — what features need
+  .use(queue({ connection })) //   (a queue CLIENT features enqueue with)
+  .features(features) // the domain core — feature() values, one list
+  .serve(http({ port })) // driving adapters — what calls the features
   .serve(queueWorker({ q, needs: {}, context }));
 ```
 
@@ -237,13 +237,13 @@ schema leaves (tables.ts — import nothing above)
   a consumer reaching into another feature's services, repository, or
   internals is still a lateral import. Mount order stays the boot order: the
   provider must be listed before the consumer — a compile error, and
-  `DOT_LIFECYCLE_E020` at `configure()` for code that skips types. The kernel
+  `ARKI_DOT_E020` at `configure()` for code that skips types. The kernel
   checks every plugin's needs against every plugin's static provides, so the
   same rule holds for adapters, not only features.
 - **Capabilities never form a ring.** Two feature modules naming each
   other's handles fail as `TS7022` on both `feature()` consts (and an ESM TDZ
   `ReferenceError` at runtime); erased graphs fail `configure()` with
-  `DOT_LIFECYCLE_E019`, which prints the ring (through any plugins). Break it by moving the shared
+  `ARKI_DOT_E019`, which prints the ring (through any plugins). Break it by moving the shared
   piece into a third feature both need, or by reading through `db.query`
   instead of a handle. A feature's own router never names its own handle
   (also `TS7022`): own capabilities are called by import.
@@ -276,11 +276,11 @@ schema leaves (tables.ts — import nothing above)
 
 Three lifetimes, three homes:
 
-| Lifetime | Home | Examples |
-| --- | --- | --- |
-| compile-time | ES modules, composed folds | schema, relations, routers, repo factories, context TYPE |
-| boot-time | plugins / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles |
-| request-time | the gateway's context factory | session lookup, per-request context value |
+| Lifetime     | Home                                                                    | Examples                                                 |
+| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| compile-time | ES modules, composed folds                                              | schema, relations, routers, repo factories, context TYPE |
+| boot-time    | plugins / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles     |
+| request-time | the gateway's context factory                                           | session lookup, per-request context value                |
 
 "If it doesn't need boot, it doesn't need a plugin" — static data rides
 modules and folds, not the graph. The gateway is the one legitimate
@@ -314,10 +314,10 @@ cross-feature aggregation point (requests → contexts).
 
 - Erased bounds over heterogeneous declarations use the **contravariant
   top**: `(database: never) => unknown` for repo factories, `(services:
-  never) => ...` for erased boot fns and `provides` factories.
+never) => ...` for erased boot fns and `provides` factories.
 - **Contextually typing a record of factories needs a reverse-mapped
   parameter**, not a constraint: `provides?: { [K in keyof TProvides]:
-  (s: CtxOf<TNeeds>) => MaybePromise<TProvides[K]> }` types each factory's
+(s: CtxOf<TNeeds>) => MaybePromise<TProvides[K]> }` types each factory's
   parameter from `needs` and infers `TProvides` from the returns; a
   constraint `TProvides extends Record<string, (s) => unknown>` leaves the
   parameter untyped (`TS7031`).
@@ -339,10 +339,10 @@ cross-feature aggregation point (requests → contexts).
 
 ## 9. Enforcement (what CI/tests actually check)
 
-| Property | Mechanism |
-| --- | --- |
-| Import purity | scrubbed-env subprocess imports the app module |
-| Fold ↔ contract exactness | derivation tests: per-key `toEqualTypeOf`, `ComposedRepos` pin |
-| Duplicate membership | compile error in compose folds; coded throw at module load behind it |
-| Graph shape | `dot explain` from a bare checkout; feature-attributed actions |
-| Boot behavior | package suites + a live boot smoke (a real round-trip, a fail-closed guard, clean dispose) |
+| Property                  | Mechanism                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| Import purity             | scrubbed-env subprocess imports the app module                                             |
+| Fold ↔ contract exactness | derivation tests: per-key `toEqualTypeOf`, `ComposedRepos` pin                             |
+| Duplicate membership      | compile error in compose folds; coded throw at module load behind it                       |
+| Graph shape               | `dot explain` from a bare checkout; feature-attributed actions                             |
+| Boot behavior             | package suites + a live boot smoke (a real round-trip, a fail-closed guard, clean dispose) |

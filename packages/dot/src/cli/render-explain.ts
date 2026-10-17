@@ -66,12 +66,7 @@ function pad(s: string, width: number): string {
 function renderTextManifest(manifest: DotAppManifest): string {
   const lines: string[] = [];
   const title = `App: ${manifest.app.name}${manifest.app.version ? `@${manifest.app.version}` : ''}`;
-  lines.push(title);
-  lines.push('='.repeat(title.length));
-  lines.push('');
-
-  // Plugins
-  lines.push(`Plugins (${manifest.plugins.length})`);
+  lines.push(title, '='.repeat(title.length), '', `Plugins (${manifest.plugins.length})`);
   if (manifest.plugins.length === 0) {
     lines.push('  (none)');
   } else {
@@ -83,10 +78,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
       lines.push(`  ${pad(p.name, widthName)}  ${pad(version, 7)}  ${deps}`);
     }
   }
-  lines.push('');
-
-  // Services
-  lines.push(`Services (${manifest.services.length})`);
+  lines.push('', `Services (${manifest.services.length})`);
   if (manifest.services.length === 0) {
     lines.push('  (none)');
   } else {
@@ -97,17 +89,16 @@ function renderTextManifest(manifest: DotAppManifest): string {
       lines.push(`  ${pad(s.name, widthName)}  ${pad(s.kind, widthKind)}  ${s.plugin}`);
     }
   }
-  lines.push('');
-
-  // Actions
-  lines.push(`Actions (${manifest.actions.length})`);
+  lines.push('', `Actions (${manifest.actions.length})`);
   if (manifest.actions.length === 0) {
     lines.push('  (none)');
   } else {
     const widthId = Math.max(2, ...manifest.actions.map(action => action.id.length));
     const widthBinding = Math.max(7, ...manifest.actions.map(action => action.binding.length));
     const widthAddress = Math.max(7, ...manifest.actions.map(action => (action.address ?? '-').length));
-    lines.push(`  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PLUGIN`);
+    lines.push(
+      `  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PLUGIN`,
+    );
     for (const action of manifest.actions) {
       lines.push(
         `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.plugin}`,
@@ -115,27 +106,23 @@ function renderTextManifest(manifest: DotAppManifest): string {
       if (action.summary !== undefined) lines.push(`      ↳ ${action.summary}`);
     }
   }
-  lines.push('');
-
-  // Projections
-  lines.push(`Projections (${manifest.projections.length})`);
+  lines.push('', `Projections (${manifest.projections.length})`);
   if (manifest.projections.length === 0) {
     lines.push('  (none)');
   } else {
     const widthFormat = Math.max(6, ...manifest.projections.map(projection => projection.format.length));
     const widthBinding = Math.max(7, ...manifest.projections.map(projection => projection.binding.length));
     const widthModule = Math.max(6, ...manifest.projections.map(projection => projection.module.length));
-    lines.push(`  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PLUGIN`);
+    lines.push(
+      `  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PLUGIN`,
+    );
     for (const projection of manifest.projections) {
       lines.push(
         `  ${pad(projection.format, widthFormat)}  ${pad(projection.binding, widthBinding)}  ${pad(projection.module, widthModule)}  ${projection.plugin}`,
       );
     }
   }
-  lines.push('');
-
-  // Dependencies
-  lines.push(`Dependencies (${manifest.dependencies.length})`);
+  lines.push('', `Dependencies (${manifest.dependencies.length})`);
   if (manifest.dependencies.length === 0) {
     lines.push('  (none)');
   } else {
@@ -143,10 +130,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
       lines.push(`  ${d.from} --[${d.key ?? d.kind}]--> ${d.to}`);
     }
   }
-  lines.push('');
-
-  // Lifecycle
-  lines.push(`Lifecycle hooks (${manifest.lifecycle.length})`);
+  lines.push('', `Lifecycle hooks (${manifest.lifecycle.length})`);
   if (manifest.lifecycle.length === 0) {
     lines.push('  (none)');
   } else {

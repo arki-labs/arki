@@ -213,8 +213,10 @@ describe('lazy services in the kernel', () => {
     const app = await defineApp('lazy-cleanup-fail').use(broken).boot();
     await app.services.svc.get();
     const error = await app.dispose().then(
-      () => undefined,
-      (e: unknown) => e,
+      () => {
+        /* noop */
+      },
+      (error_: unknown) => error_,
     );
     expect(error).toBeInstanceOf(DotLifecycleError);
     expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DisposeFailed);
@@ -224,7 +226,12 @@ describe('lazy services in the kernel', () => {
   });
 
   it('service.lazy lifts an EAGER provider into a pre-initialized handle', async () => {
-    const eagerDb: Db = { id: 7, close: () => undefined };
+    const eagerDb: Db = {
+      id: 7,
+      close: () => {
+        /* noop */
+      },
+    };
     const provider = plugin({ name: 'db', provides: { db: () => eagerDb } });
     let handleSeen: Lazy<Db> | undefined;
     const consumer = plugin({

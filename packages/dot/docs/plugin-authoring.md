@@ -44,17 +44,17 @@ Returning a value from `boot` is a compile error.
 
 ## Fields
 
-| Field       | Required | Meaning                                                              |
-| ----------- | -------- | -------------------------------------------------------------------- |
-| `name`      | yes      | Unique identifier inside an app.                                     |
-| `version`   | no       | Semver string. Surfaces in `PluginManifest.version`.                    |
-| `needs`     | no       | Shape of service witnesses this plugin consumes (see below).            |
-| `configure` | no       | Sync hook. Registers metadata. No I/O.                               |
+| Field       | Required | Meaning                                                                   |
+| ----------- | -------- | ------------------------------------------------------------------------- |
+| `name`      | yes      | Unique identifier inside an app.                                          |
+| `version`   | no       | Semver string. Surfaces in `PluginManifest.version`.                      |
+| `needs`     | no       | Shape of service witnesses this plugin consumes (see below).              |
+| `configure` | no       | Sync hook. Registers metadata. No I/O.                                    |
 | `provides`  | no       | One factory per key. Gets the needs; may be async (awaited in key order). |
-| `boot`      | no       | Async hook. Side effects only; sees needs and own provides.          |
-| `start`     | no       | Async hook. Begins active work after every plugin has booted.           |
-| `stop`      | no       | Async hook. Reverse order. Halts active work.                        |
-| `dispose`   | no       | Async hook. Reverse order. Releases resources.                       |
+| `boot`      | no       | Async hook. Side effects only; sees needs and own provides.               |
+| `start`     | no       | Async hook. Begins active work after every plugin has booted.             |
+| `stop`      | no       | Async hook. Reverse order. Halts active work.                             |
+| `dispose`   | no       | Async hook. Reverse order. Releases resources.                            |
 
 ## The five hooks (one-liner each)
 
@@ -123,17 +123,17 @@ Wiring is checked **at compile time**: `.use(billing)` is a type error
 until an earlier `.use(...)` provides a compatible `apiClient`. The kernel
 also checks every plugin's needs against every plugin's static provides at
 `configure()`. A provider mounted after its consumer is
-`DOT_LIFECYCLE_E020`. A ring through any plugins is `DOT_LIFECYCLE_E019`.
-`DOT_LIFECYCLE_E012` (unsatisfied need at boot) is only for needs no plugin
-declares (erased or JS graphs, dynamic http bundle tokens). `DOT_LIFECYCLE_E013`
-(collision) and `DOT_LIFECYCLE_E014` (reserved key) cover erased/dynamic
+`ARKI_DOT_E020`. A ring through any plugins is `ARKI_DOT_E019`.
+`ARKI_DOT_E012` (unsatisfied need at boot) is only for needs no plugin
+declares (erased or JS graphs, dynamic http bundle tokens). `ARKI_DOT_E013`
+(collision) and `ARKI_DOT_E014` (reserved key) cover erased/dynamic
 composition.
 
 Hook contexts also carry `$`-prefixed kernel keys — `$app` (app name),
 `$plugin` (plugin name), `$config` (the `defineApp(name, { config })` bag). The
 `$` prefix is a reserved namespace: `plugin()` rejects `$`-prefixed needs
 aliases and publish keys at compile time, and the kernel enforces the same
-rule at runtime (`DOT_LIFECYCLE_E014`) for renames and erased plugins — so
+rule at runtime (`ARKI_DOT_E014`) for renames and erased plugins — so
 kernel keys can never be shadowed.
 
 ## Declaration order is boot order
@@ -152,15 +152,15 @@ Two plugins publishing the same wire key is a collision (compile error at
 instance of an adapter, rename its published keys at the mount site:
 
 ```ts
-import { defineApp, rename } from '@arki/dot';
 import { db } from '@arki/db/dot';
+import { defineApp, rename } from '@arki/dot';
 
 const app = await defineApp('orders')
   .use(db({ relations }))
   .use(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
   .boot();
 
-app.services.db;        // primary
+app.services.db; // primary
 app.services.reportsDb; // second instance, same type
 ```
 
@@ -192,9 +192,10 @@ import { lazy, plugin } from '@arki/dot';
 export const search = plugin({
   name: 'search',
   provides: {
-    search: () => lazy(() => connectSearchCluster(), {
-      dispose: client => client.close(),
-    }),
+    search: () =>
+      lazy(() => connectSearchCluster(), {
+        dispose: client => client.close(),
+      }),
   },
   // no dispose hook needed — the kernel auto-disposes initialized handles
 });
@@ -208,7 +209,7 @@ export const indexer = plugin({
   name: 'indexer',
   needs: { search: searchPlugin.provides.search },
   async start({ search }) {
-    const client = await search.get();   // first call initializes
+    const client = await search.get(); // first call initializes
     // ...
   },
 });
@@ -243,7 +244,7 @@ Semantics:
 
 ## Cross-package contracts: tokens
 
-`service<T>()` creates an *anonymous* witness — the property name is the
+`service<T>()` creates an _anonymous_ witness — the property name is the
 wire key. When a contract is shared across packages, use a **token**: a
 named witness whose owned key travels with it, so the local alias becomes
 a free choice:
@@ -258,8 +259,10 @@ plugin({ name: 'kv', provides: { [Kv.key]: () => client } });
 // any consumer, any alias:
 plugin({
   name: 'cache',
-  needs: { cache: Kv },       // wire key 'acme.kv', local alias `cache`
-  boot: ({ cache }) => { /* typed KvClient */ },
+  needs: { cache: Kv }, // wire key 'acme.kv', local alias `cache`
+  boot: ({ cache }) => {
+    /* typed KvClient */
+  },
 });
 
 // derived instance token:
@@ -290,7 +293,7 @@ Some text is only known after boot (which store a lock runs on). Complete an
 action's `summary` with `ctx.$describeAction(id, { summary })` in `provides`,
 `boot` or `start`, or `ctx.describeAction` in `configure`. A plugin may amend its
 own actions, or actions in a binding it registered a projection for; anything
-else throws `DOT_LIFECYCLE_E021`. `dot explain` stays static; the post-boot
+else throws `ARKI_DOT_E021`. `dot explain` stays static; the post-boot
 manifest and `dot doctor` show the new text.
 
 ## Diagnostics
@@ -352,8 +355,8 @@ defineApp('t').use(fake(database.provides.db, db)).features([billing]);
 If a module has nothing to do in `boot` — no connection to open, no
 resource whose teardown must be ordered — it does not need to be a plugin.
 Plain ES module exports already compose static values (routers, schemas,
-factories) with perfect types. DOT's job is *runtime resources with
-ordered setup and guaranteed reverse-order teardown*; keep static
+factories) with perfect types. DOT's job is _runtime resources with
+ordered setup and guaranteed reverse-order teardown_; keep static
 composition in module space.
 
 ## Testing your plugin
@@ -361,8 +364,9 @@ composition in module space.
 `@arki/dot` ships a small test harness:
 
 ```ts
-import { testApp, bootTestApp } from '@arki/dot';
 import { describe, expect, it } from 'vitest';
+
+import { bootTestApp, testApp } from '@arki/dot';
 
 import { billing } from '../src/billing-plugin.js';
 

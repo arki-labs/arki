@@ -5,7 +5,10 @@ import { store } from '../../../../infra/store.js';
 import { ranker } from '../../infra/ranker.js';
 import { top } from './usecases/top.js';
 
-const rankDeps = defineFeature('digest.compile.rank').needs({ repos: store.provides.repos, ranker: ranker.provides.ranker });
+const rankDeps = defineFeature('digest.compile.rank').needs({
+  repos: store.provides.repos,
+  ranker: ranker.provides.ranker,
+});
 export type RankDeps = DepsOf<typeof rankDeps>;
 
 const rankLogic = rankDeps.usecases({ top });

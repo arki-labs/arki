@@ -6,14 +6,7 @@ kernel surface, not an implementation detail.
 ```ts
 type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
 
-type DotLifecycleState =
-  | 'defined'
-  | 'configured'
-  | 'booted'
-  | 'started'
-  | 'stopped'
-  | 'disposed'
-  | 'failed';
+type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' | 'stopped' | 'disposed' | 'failed';
 ```
 
 ## State machine
@@ -50,7 +43,7 @@ Terminal states require a fresh `defineApp(...)` to retry.
 - **Must not** open sockets, connect to databases, start workers, perform
   async I/O.
 - Returning a Promise is a contract violation. The kernel throws
-  `DotLifecycleError` with code `DOT_LIFECYCLE_E001`.
+  `DotLifecycleError` with code `ARKI_DOT_E001`.
 
 ### `boot` — async side effects
 
@@ -90,7 +83,7 @@ DOT cleans up exactly what was opened — no more, no less.
 - Stops the lifecycle immediately. **No cleanup hooks run** because no
   resources should have been opened during `configure`.
 - App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E002`.
+- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E002`.
 
 ### `boot` failure
 
@@ -98,7 +91,7 @@ DOT cleans up exactly what was opened — no more, no less.
 - Every plugin whose `boot` already completed is disposed in
   reverse declaration order.
 - App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E003`.
+- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E003`.
 
 A plugin whose `boot` opens partial resources before throwing **must clean
 those up itself**:
@@ -125,60 +118,60 @@ The kernel only disposes plugins whose `boot` returned successfully.
 - Every started plugin's `stop` runs in reverse declaration order.
 - Then every booted plugin's `dispose` runs in reverse declaration order.
 - App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E004`.
+- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E004`.
 
 ### `stop` / `dispose` failure
 
 - The reverse-order pass **continues through individual failures**.
 - The kernel collects per-plugin failures and throws a single aggregate
-  `DotLifecycleError` (`DOT_LIFECYCLE_E005` for stop, `DOT_LIFECYCLE_E006`
+  `DotLifecycleError` (`ARKI_DOT_E005` for stop, `ARKI_DOT_E006`
   for dispose).
 - The aggregate carries `failures: readonly { plugin, phase, error }[]` so
   callers and agents can see exactly which plugins failed.
 
 ## Idempotency rules
 
-| Call                  | From state                                | Behaviour                                      |
-| --------------------- | ----------------------------------------- | ---------------------------------------------- |
-| `boot()`              | `booted`, `started`, `stopped`            | No-op. Hooks do not re-run.                    |
-| `start()`             | `defined` or `configured`                  | Boots first, then starts.                      |
-| `start()`             | `stopped`                                 | Re-runs **only** `start` hooks.                |
-| `start()`             | `started`                                 | No-op.                                         |
-| `stop()`              | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).                       |
-| `dispose()`           | `started`                                 | Runs `stop` first, then `dispose`.             |
-| `dispose()`           | `booted` or `stopped`                      | Runs only `dispose`.                           |
-| `dispose()`           | `disposed`                                | No-op.                                         |
-| `boot()` / `start()`  | `failed` or `disposed`                     | Throws `DOT_LIFECYCLE_E007` or `E008`.         |
+| Call                 | From state                                   | Behaviour                          |
+| -------------------- | -------------------------------------------- | ---------------------------------- |
+| `boot()`             | `booted`, `started`, `stopped`               | No-op. Hooks do not re-run.        |
+| `start()`            | `defined` or `configured`                    | Boots first, then starts.          |
+| `start()`            | `stopped`                                    | Re-runs **only** `start` hooks.    |
+| `start()`            | `started`                                    | No-op.                             |
+| `stop()`             | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).           |
+| `dispose()`          | `started`                                    | Runs `stop` first, then `dispose`. |
+| `dispose()`          | `booted` or `stopped`                        | Runs only `dispose`.               |
+| `dispose()`          | `disposed`                                   | No-op.                             |
+| `boot()` / `start()` | `failed` or `disposed`                       | Throws `ARKI_DOT_E007` or `E008`.  |
 
 Concurrent calls to the **same** transition share one in-flight promise
 (hooks never double-run). Calls to **different** transitions are
 serialized on a single queue: each waits for the in-flight transition to
 finish and re-checks state at the head of the queue. A `dispose()` issued
-while `start()` is mid-flight runs *after* start completes and wins —
+while `start()` is mid-flight runs _after_ start completes and wins —
 the app ends `disposed`, never resurrected.
 
 ## Error codes
 
 The kernel emits stable, machine-readable error codes:
 
-| Code                  | Meaning                                                     |
-| --------------------- | ----------------------------------------------------------- |
-| `DOT_LIFECYCLE_E001`  | `configure` returned a Promise (async configure forbidden). |
-| `DOT_LIFECYCLE_E002`  | `configure` hook threw.                                     |
-| `DOT_LIFECYCLE_E003`  | `boot` hook threw.                                          |
-| `DOT_LIFECYCLE_E004`  | `start` hook threw.                                         |
-| `DOT_LIFECYCLE_E005`  | One or more `stop` hooks threw (aggregate).                 |
-| `DOT_LIFECYCLE_E006`  | One or more `dispose` hooks threw (aggregate).              |
-| `DOT_LIFECYCLE_E007`  | Reuse after `dispose()`.                                    |
-| `DOT_LIFECYCLE_E008`  | Reuse after a failed lifecycle.                             |
-| `DOT_LIFECYCLE_E011`  | Plugin registered twice.                                       |
-| `DOT_LIFECYCLE_E012`  | A `needs` entry no plugin declares (erased or JS graphs, dynamic http bundle tokens) — at boot. |
-| `DOT_LIFECYCLE_E013`  | A published wire key collides with an earlier provider.     |
-| `DOT_LIFECYCLE_E014`  | A service key uses the reserved `$` (kernel) prefix.        |
-| `DOT_LIFECYCLE_E015`  | A hook exceeded the `hookTimeoutMs` watchdog budget.        |
-| `DOT_LIFECYCLE_E019`  | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`. |
-| `DOT_LIFECYCLE_E020`  | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
-| `DOT_LIFECYCLE_E021`  | `$describeAction` named an action the plugin may not amend (unknown id, or neither its own nor in a binding it owns). |
+| Code            | Meaning                                                                                                                                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARKI_DOT_E001` | `configure` returned a Promise (async configure forbidden).                                                                                                                                                    |
+| `ARKI_DOT_E002` | `configure` hook threw.                                                                                                                                                                                        |
+| `ARKI_DOT_E003` | `boot` hook threw.                                                                                                                                                                                             |
+| `ARKI_DOT_E004` | `start` hook threw.                                                                                                                                                                                            |
+| `ARKI_DOT_E005` | One or more `stop` hooks threw (aggregate).                                                                                                                                                                    |
+| `ARKI_DOT_E006` | One or more `dispose` hooks threw (aggregate).                                                                                                                                                                 |
+| `ARKI_DOT_E007` | Reuse after `dispose()`.                                                                                                                                                                                       |
+| `ARKI_DOT_E008` | Reuse after a failed lifecycle.                                                                                                                                                                                |
+| `ARKI_DOT_E011` | Plugin registered twice.                                                                                                                                                                                       |
+| `ARKI_DOT_E012` | A `needs` entry no plugin declares (erased or JS graphs, dynamic http bundle tokens) — at boot.                                                                                                                |
+| `ARKI_DOT_E013` | A published wire key collides with an earlier provider.                                                                                                                                                        |
+| `ARKI_DOT_E014` | A service key uses the reserved `$` (kernel) prefix.                                                                                                                                                           |
+| `ARKI_DOT_E015` | A hook exceeded the `hookTimeoutMs` watchdog budget.                                                                                                                                                           |
+| `ARKI_DOT_E019` | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`.                                                                                                               |
+| `ARKI_DOT_E020` | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
+| `ARKI_DOT_E021` | `$describeAction` named an action the plugin may not amend (unknown id, or neither its own nor in a binding it owns).                                                                                          |
 
 `TS7022` ("implicitly has type 'any' because it … is referenced directly or
 indirectly in its own initializer") on a `feature()` const is the compile-time

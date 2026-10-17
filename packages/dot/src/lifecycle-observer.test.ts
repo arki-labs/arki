@@ -109,14 +109,7 @@ describe('DotLifecycleObserver — happy path', () => {
 
     // Phase mix should be exactly { configure, boot, dispose }.
     const phaseEvents = events.filter((e): e is Extract<DotLifecycleEvent, { kind: 'phase' }> => e.kind === 'phase');
-    expect(phaseEvents.map(e => e.phase)).toEqual([
-      'configure',
-      'configure',
-      'boot',
-      'boot',
-      'dispose',
-      'dispose',
-    ]);
+    expect(phaseEvents.map(e => e.phase)).toEqual(['configure', 'configure', 'boot', 'boot', 'dispose', 'dispose']);
   });
 });
 
@@ -134,7 +127,9 @@ describe('DotLifecycleObserver — failure path', () => {
     await defineApp('boot-fail', { observers: [e => events.push(e)] })
       .use(badPlugin)
       .boot()
-      .catch(() => undefined);
+      .catch(() => {
+        /* noop */
+      });
 
     // Find the boot-phase hook-failed event.
     const hookFailed = events.find(
@@ -163,6 +158,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
     const pluginA = plugin({
       name: 'a',
       boot() {
+        /* noop */
       },
       async stop() {
         /* */
@@ -172,9 +168,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
       },
     });
 
-    const app = await defineApp('subscribe-test')
-      .use(pluginA)
-      .start();
+    const app = await defineApp('subscribe-test').use(pluginA).start();
 
     // No observer was registered at construction — so events is empty so far.
     expect(events).toEqual([]);
@@ -204,6 +198,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
     const pluginA = plugin({
       name: 'a',
       boot() {
+        /* noop */
       },
     });
 
@@ -227,6 +222,7 @@ describe('renderTimeline integration', () => {
         /* */
       },
       boot() {
+        /* noop */
       },
     });
     const pluginB = plugin({
@@ -235,6 +231,7 @@ describe('renderTimeline integration', () => {
         /* */
       },
       boot() {
+        /* noop */
       },
     });
 

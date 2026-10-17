@@ -18,7 +18,7 @@ const logger = plugin({
     logger: () => ({
       info: (s: string) => {
         // Intentional console use — fixture only.
-        // eslint-disable-next-line no-console
+
         console.log(s);
       },
     }),

@@ -6,8 +6,9 @@
 // hand-written merge without a duplicate-key check keeps a weaker promise and
 // is shown without a ratio.
 
-import type { AnyFeature, FeatureSlice } from '../src/feature.js';
 import { compare, defineSuite } from '@arki/bench';
+
+import type { AnyFeature, FeatureSlice } from '../src/feature.js';
 import { composeRepos, composeRouter, feature } from '../src/feature.js';
 
 type Db = { tag: string };

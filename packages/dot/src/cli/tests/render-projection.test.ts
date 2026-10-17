@@ -8,8 +8,7 @@
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
@@ -24,7 +23,7 @@ const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 let workDir: string;
 
 beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), 'dot-cli-projection-'));
+  workDir = await mkdtemp(path.join(tmpdir(), 'dot-cli-projection-'));
 });
 
 afterEach(async () => {
@@ -66,7 +65,7 @@ describe('--as arg parsing', () => {
 
 describe('renderProjection', () => {
   it('throws DOT_CLI_E008 when the requested format is not registered', async () => {
-    const appFilePath = join(workDir, 'app.ts');
+    const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');
 
     await expect(
@@ -78,7 +77,7 @@ describe('renderProjection', () => {
   });
 
   it('throws DOT_CLI_E011 for conflicting projection modules in the same format', async () => {
-    const appFilePath = join(workDir, 'app.ts');
+    const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');
     const manifest = manifestOf({
       projections: [
@@ -93,11 +92,11 @@ describe('renderProjection', () => {
   });
 
   it('resolves projection modules relative to the app file and wraps JSON output', async () => {
-    const appFilePath = join(workDir, 'nested', 'app.ts');
-    await mkdir(join(workDir, 'nested'), { recursive: true });
+    const appFilePath = path.join(workDir, 'nested', 'app.ts');
+    await mkdir(path.join(workDir, 'nested'), { recursive: true });
     await writeFile(appFilePath, '');
     await writeFile(
-      join(workDir, 'nested', 'projection.ts'),
+      path.join(workDir, 'nested', 'projection.ts'),
       `
 export function project(manifest) {
   return { title: manifest.app.name, actionCount: manifest.actions.length };
@@ -128,10 +127,10 @@ export function project(manifest) {
 
 describe('runExplain projection flow', () => {
   it('uses --module as a per-invocation projection override', async () => {
-    const appFilePath = join(workDir, 'app.ts');
+    const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');
     await writeFile(
-      join(workDir, 'override.ts'),
+      path.join(workDir, 'override.ts'),
       `
 export function project(manifest) {
   return 'override:' + manifest.app.name;

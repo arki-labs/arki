@@ -75,8 +75,7 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
 
   const lines: string[] = [];
   const title = `Timeline: ${snapshot.app.name} (state=${snapshot.app.state})`;
-  lines.push(title);
-  lines.push('─'.repeat(title.length));
+  lines.push(title, '─'.repeat(title.length));
 
   // Layout: 2-space indent, 10-char plugin column, 8-char duration column, then bar.
   const PLUGIN_COL = 12;
@@ -105,10 +104,10 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
     }
   }
 
-  if (!anyRendered) {
-    lines.push('(no lifecycle entries — app has not run any phase yet)');
-  } else {
+  if (anyRendered) {
     lines.push('─'.repeat(title.length));
+  } else {
+    lines.push('(no lifecycle entries — app has not run any phase yet)');
   }
 
   return lines.join('\n');

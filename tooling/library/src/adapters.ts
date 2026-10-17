@@ -15,6 +15,7 @@ export const ADAPTERS = new Set([
   'pg',
   'vite',
   'server',
+  'cli',
   'zod',
   'tanstack',
   'sentry',

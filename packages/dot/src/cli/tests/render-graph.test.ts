@@ -40,7 +40,14 @@ describe('buildMermaidGraph', () => {
     });
 
     expect(buildMermaidGraph(manifest)).toBe(
-      ['flowchart TD', '  %% numbers = boot order', '  p0["1 · db@1.2.0"]', '  p1["2 · billing"]', '  p1 -->|requires| p0', ''].join('\n'),
+      [
+        'flowchart TD',
+        '  %% numbers = boot order',
+        '  p0["1 · db@1.2.0"]',
+        '  p1["2 · billing"]',
+        '  p1 -->|requires| p0',
+        '',
+      ].join('\n'),
     );
   });
 
@@ -102,7 +109,11 @@ describe('renderGraph', () => {
   it('draws a .features()/.serve() app as the hexagon: driven → features → driving, numbered in boot order', async () => {
     const db = plugin({ name: 'db', provides: { db: () => ({ ok: true }) } });
     const orders = feature('orders', { needs: { db: service<{ ok: boolean }>() } });
-    const health = plugin({ name: 'health', needs: { db: service<{ ok: boolean }>() }, provides: { health: ({ db: handle }) => handle.ok } });
+    const health = plugin({
+      name: 'health',
+      needs: { db: service<{ ok: boolean }>() },
+      provides: { health: ({ db: handle }) => handle.ok },
+    });
 
     const app = await defineApp('hexagon').use(db).features([orders]).serve(health).boot();
     const source = buildMermaidGraph(app.manifest);

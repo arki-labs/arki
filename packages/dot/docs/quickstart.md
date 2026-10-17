@@ -21,9 +21,10 @@ the env schema.
 Create `src/app.ts`:
 
 ```ts
+import { z } from 'zod';
+
 import { defineApp } from '@arki/dot';
 import { env } from '@arki/env/dot';
-import { z } from 'zod';
 
 export const app = await defineApp('my-app')
   .use(
@@ -60,10 +61,10 @@ You will see five top-level arrays:
 ```json
 {
   "app": { "name": "my-app" },
-  "plugins": [ { "name": "env", "version": "0.1.0", "dependencies": [], "provides": ["env"] } ],
+  "plugins": [{ "name": "env", "version": "0.1.0", "dependencies": [], "provides": ["env"] }],
   "routes": [],
-  "services": [ { "name": "env", "plugin": "env", "kind": "env" } ],
-  "lifecycle": [ { "plugin": "env", "hooks": ["configure", "boot"] } ],
+  "services": [{ "name": "env", "plugin": "env", "kind": "env" }],
+  "lifecycle": [{ "plugin": "env", "hooks": ["configure", "boot"] }],
   "dependencies": []
 }
 ```

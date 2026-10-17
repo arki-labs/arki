@@ -1,9 +1,11 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-/** @type {import('typescript-eslint').Config} */
 export default [
+  // `src/cli/**` is the Node-only `dot` binary (`./cli` entry); `src/orpc.ts` is the optional `@orpc/server` adapter.
+  ...library({ adapters: ['src/cli/**', 'src/orpc.ts'] }),
   {
-    ignores: ['dist/**'],
+    // Tests are typechecked against ES2022, which has no `toSorted`.
+    files: ['src/**/*.test.ts'],
+    rules: { 'unicorn/no-array-sort': 'off' },
   },
-  ...baseConfig,
 ];
