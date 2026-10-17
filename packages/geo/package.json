@@ -88,6 +88,7 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/kv": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "node-geocoder": "catalog:",

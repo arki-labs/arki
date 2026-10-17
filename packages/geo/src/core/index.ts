@@ -3,4 +3,5 @@ export * from './conversions';
 export * from './coordinates';
 export * from './distance';
 export * from './errors';
+export * from './failures';
 export * from './types';

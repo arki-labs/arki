@@ -13,7 +13,10 @@ import type { KV } from '@arki/kv';
 import type { Entry, Options } from 'node-geocoder';
 import NodeGeocoder from 'node-geocoder';
 
+import type { FailureOf } from '@arki/failure';
+
 import { GeocodingAbortedError, GeocodingError } from '../core/errors';
+import { AddressNotFound } from '../core/failures';
 import type {
   AddressComponents,
   GeocodeResult,
@@ -125,13 +128,17 @@ export class GeocodingService {
   }
 
   /**
-   * Geocode an address to coordinates
+   * Geocode an address to coordinates.
+   *
+   * Returns `AddressNotFound` when every provider that answered found nothing
+   * (a provider with no results passes to the next one). Throws
+   * `GeocodingError` when no provider answered at all.
    */
   async geocode(
     address: string,
     preferredProvider?: GeocodingProvider,
     options: GeocodingOptions = {},
-  ): Promise<GeocodeResult> {
+  ) {
     const { signal } = options;
     throwIfAborted(signal);
 
@@ -148,6 +155,7 @@ export class GeocodingService {
     const providerOrder = this.getProviderOrder(preferredProvider);
 
     let lastError: Error | null = null;
+    let answeredWithNoResults = false;
 
     for (const providerName of providerOrder) {
       const geocoder = this.geocoders.get(providerName);
@@ -158,19 +166,10 @@ export class GeocodingService {
         const results = await geocoder.geocode(address);
         throwIfAborted(signal);
 
-        if (!results || results.length === 0) {
-          throw new GeocodingError(
-            `No results found for address: ${address}`,
-            providerName,
-          );
-        }
-
         const firstResult = results[0];
         if (!firstResult) {
-          throw new GeocodingError(
-            `No results found for address: ${address}`,
-            providerName,
-          );
+          answeredWithNoResults = true;
+          continue;
         }
 
         const result = this.transformResult(firstResult, providerName);
@@ -189,6 +188,8 @@ export class GeocodingService {
         continue;
       }
     }
+
+    if (answeredWithNoResults) return AddressNotFound({ address });
 
     throw new GeocodingError(
       `All geocoding providers failed. Last error: ${lastError?.message}`,
@@ -274,15 +275,17 @@ export class GeocodingService {
   /**
    * Batch geocode multiple addresses
    * Processes in parallel with rate limiting
+   *
+   * Each address maps to its result, its `AddressNotFound`, or the error it threw.
    */
   async batchGeocode(
     addresses: string[],
     concurrency = 5,
     options: GeocodingOptions = {},
-  ): Promise<Map<string, GeocodeResult | Error>> {
+  ): Promise<Map<string, GeocodeResult | FailureOf<GeocodingService['geocode']> | Error>> {
     const { signal } = options;
     throwIfAborted(signal);
-    const results = new Map<string, GeocodeResult | Error>();
+    const results = new Map<string, GeocodeResult | FailureOf<GeocodingService['geocode']> | Error>();
     const queue = [...addresses];
 
     const processNext = async (): Promise<void> => {

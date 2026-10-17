@@ -59,11 +59,17 @@ type Bounds = {
 ### Backend: Geocoding
 
 ```typescript
+import { AddressNotFound } from '@arki/geo';
 import { createGeocodingServiceFromEnv } from '@arki/geo/geocoding';
 
 const geocoding = createGeocodingServiceFromEnv(env, kv);
 const result = await geocoding.geocode('1600 Amphitheatre Parkway');
+if (AddressNotFound.is(result)) return result; // no provider knows this address
 ```
+
+`geocode` returns `AddressNotFound` (`geo.address_not_found`, status 404, data `{ address }`) when every provider that answered found nothing. A provider with no results passes to the next one first. A missing address is not cached. When no provider answers at all (down, refused key), `geocode` throws `GeocodingError`. Import `AddressNotFound` from `@arki/geo`. `batchGeocode` maps each address to its result, its `AddressNotFound`, or the error it threw.
+
+`reverseGeocode` still throws `GeocodingError` when no provider finds an address at the coordinates.
 
 ### Backend: Distance
 

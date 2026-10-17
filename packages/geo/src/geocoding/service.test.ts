@@ -2,6 +2,7 @@ import { http, HttpResponse, setupMswServer } from '@arki/testing/msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GeocodingAbortedError, GeocodingError } from '../core/errors';
+import { AddressNotFound } from '../core/failures';
 import type { GeocodingCache } from './service';
 import { createGeocodingService, GeocodingService } from './service';
 import type { GeocodeResult, GeocodingConfig } from './types';
@@ -107,7 +108,7 @@ describe('GeocodingService', () => {
         },
       });
       // Callers rely on a two-letter country code, regardless of provider casing.
-      expect(result.addressComponents.country?.toUpperCase()).toBe('US');
+      expect(result).toMatchObject({ addressComponents: { country: expect.stringMatching(/^us$/i) } });
     });
 
     it('maps a google response, including the place id', async () => {
@@ -161,7 +162,7 @@ describe('GeocodingService', () => {
 
       const result = await service.geocode('somewhere');
 
-      expect(result.provider).toBe('nominatim');
+      expect(result).toMatchObject({ provider: 'nominatim' });
       expect(googleCalls).not.toHaveBeenCalled();
     });
 
@@ -174,7 +175,7 @@ describe('GeocodingService', () => {
 
       const result = await service.geocode('somewhere');
 
-      expect(result.provider).toBe('google');
+      expect(result).toMatchObject({ provider: 'google' });
     });
 
     it('falls back when the primary answers with a server error', async () => {
@@ -186,7 +187,7 @@ describe('GeocodingService', () => {
 
       const result = await service.geocode('somewhere');
 
-      expect(result.provider).toBe('google');
+      expect(result).toMatchObject({ provider: 'google' });
     });
 
     it('a preferred provider goes first, then the primary, even when the primary is not in the fallback list', async () => {
@@ -206,7 +207,7 @@ describe('GeocodingService', () => {
       const result = await service.geocode('somewhere', 'google');
 
       expect(order).toEqual(['google', 'nominatim']);
-      expect(result.provider).toBe('nominatim');
+      expect(result).toMatchObject({ provider: 'nominatim' });
     });
 
     it('skips providers that are listed but not configured', async () => {
@@ -217,13 +218,13 @@ describe('GeocodingService', () => {
 
       const result = await service.geocode('somewhere');
 
-      expect(result.provider).toBe('nominatim');
+      expect(result).toMatchObject({ provider: 'nominatim' });
     });
 
     it('throws one GeocodingError carrying the last cause when every provider fails', async () => {
       server.use(
-        http.get(`${NOMINATIM}/search`, () => HttpResponse.json([])),
-        http.get(GOOGLE, () => HttpResponse.json({ status: 'ZERO_RESULTS', results: [] })),
+        http.get(`${NOMINATIM}/search`, () => new HttpResponse(null, { status: 503 })),
+        http.get(GOOGLE, () => HttpResponse.json({ status: 'REQUEST_DENIED', error_message: 'bad key', results: [] })),
       );
       const service = new GeocodingService(baseConfig({ cache: noCache }));
 
@@ -233,6 +234,33 @@ describe('GeocodingService', () => {
       expect((error as GeocodingError).message).toMatch(/All geocoding providers failed/);
       expect((error as GeocodingError).provider).toBe('nominatim');
       expect((error as GeocodingError).cause).toBeInstanceOf(Error);
+    });
+
+    // "This address does not exist" is an answer the caller must branch on, so it is
+    // returned. Only "no provider could answer" is a fault, and that stays thrown.
+    it('returns AddressNotFound, not a GeocodingError, when every provider answers with no results', async () => {
+      server.use(
+        http.get(`${NOMINATIM}/search`, () => HttpResponse.json([])),
+        http.get(GOOGLE, () => HttpResponse.json({ status: 'ZERO_RESULTS', results: [] })),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+
+      const result = await service.geocode('nowhere');
+
+      expect(AddressNotFound.is(result)).toBe(true);
+      expect(result).toMatchObject({ code: 'geo.address_not_found', status: 404, data: { address: 'nowhere' } });
+    });
+
+    it('returns AddressNotFound when one provider found nothing and the other was down', async () => {
+      server.use(
+        http.get(`${NOMINATIM}/search`, () => new HttpResponse(null, { status: 503 })),
+        http.get(GOOGLE, () => HttpResponse.json({ status: 'ZERO_RESULTS', results: [] })),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+
+      const result = await service.geocode('nowhere');
+
+      expect(AddressNotFound.is(result)).toBe(true);
     });
 
     it('reverse geocoding falls back too', async () => {
@@ -331,12 +359,13 @@ describe('GeocodingService', () => {
       expect(writes).toEqual([]);
     });
 
-    it('does not cache failures', async () => {
+    // A missing address may be added to the provider later, so a lookup asks again.
+    it('does not cache AddressNotFound', async () => {
       server.use(http.get(`${NOMINATIM}/search`, () => HttpResponse.json([])));
       const { cache, writes } = createFakeCache();
       const service = new GeocodingService(baseConfig({ fallbackProviders: [] }), cache);
 
-      await expect(service.geocode('nowhere')).rejects.toBeInstanceOf(GeocodingError);
+      expect(AddressNotFound.is(await service.geocode('nowhere'))).toBe(true);
 
       expect(writes).toEqual([]);
     });
@@ -367,20 +396,22 @@ describe('GeocodingService', () => {
       expect(peak).toBeLessThanOrEqual(3);
     });
 
-    it('records a failed address as an Error and keeps going', async () => {
+    it('records a missing address as AddressNotFound, a failed one as an Error, and keeps going', async () => {
       server.use(
-        http.get(`${NOMINATIM}/search`, ({ request }) =>
-          new URL(request.url).searchParams.get('q') === 'bad'
-            ? HttpResponse.json([])
-            : HttpResponse.json(nominatimHit('1', '2')),
-        ),
+        http.get(`${NOMINATIM}/search`, ({ request }) => {
+          const query = new URL(request.url).searchParams.get('q');
+          if (query === 'missing') return HttpResponse.json([]);
+          if (query === 'down') return new HttpResponse(null, { status: 503 });
+          return HttpResponse.json(nominatimHit('1', '2'));
+        }),
       );
       const service = new GeocodingService(baseConfig({ fallbackProviders: [], cache: noCache }));
 
-      const results = await service.batchGeocode(['good', 'bad', 'also good'], 2);
+      const results = await service.batchGeocode(['good', 'missing', 'down', 'also good'], 2);
 
       expect(results.get('good')).toMatchObject({ provider: 'nominatim' });
-      expect(results.get('bad')).toBeInstanceOf(GeocodingError);
+      expect(AddressNotFound.is(results.get('missing'))).toBe(true);
+      expect(results.get('down')).toBeInstanceOf(GeocodingError);
       expect(results.get('also good')).toMatchObject({ provider: 'nominatim' });
     });
   });
