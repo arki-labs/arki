@@ -1,0 +1,16 @@
+{
+  "extends": [
+    "//"
+  ],
+  "tags": [
+    "platform"
+  ],
+  "tasks": {
+    "test": {
+      "env": [
+        "OLLAMA_LIVE",
+        "OLLAMA_BASE_URL"
+      ]
+    }
+  }
+}

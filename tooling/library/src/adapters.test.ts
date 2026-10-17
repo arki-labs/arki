@@ -18,6 +18,10 @@ describe('isAdapterSubpath', () => {
     }
   });
 
+  it('treats ./openai as an adapter, because @arki/embeddings/openai loads its optional AI SDK peer', () => {
+    expect(isAdapterSubpath('./openai')).toBe(true);
+  });
+
   it('keeps plain subpaths portable', () => {
     expect(isAdapterSubpath('./memory')).toBe(false);
   });

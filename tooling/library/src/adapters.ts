@@ -31,6 +31,7 @@ export const ADAPTERS = new Set([
   'auth',
   'eval',
   'stdio',
+  'openai',
 ]);
 
 /** True when the export subpath (`./react`, `./comparison/server`) is an adapter entry: its first segment is in {@link ADAPTERS}. */
