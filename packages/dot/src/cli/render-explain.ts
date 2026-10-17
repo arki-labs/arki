@@ -63,6 +63,18 @@ function pad(s: string, width: number): string {
   return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }
 
+/**
+ * An rpc action's contract meta, one `key: value` per line (`policy: order.refund`, `auth: admin`).
+ * The rpc adapter puts it under `meta.meta`; `--json` carries the same object.
+ */
+function contractMetaLines(action: DotAppManifest['actions'][number]): string[] {
+  const meta = action.binding === 'rpc' ? action.meta?.['meta'] : undefined;
+  if (meta === undefined || meta === null || typeof meta !== 'object' || Array.isArray(meta)) return [];
+  return Object.entries(meta).map(
+    ([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`,
+  );
+}
+
 function renderTextManifest(manifest: DotAppManifest): string {
   const lines: string[] = [];
   const title = `App: ${manifest.app.name}${manifest.app.version ? `@${manifest.app.version}` : ''}`;
@@ -104,6 +116,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
         `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.plugin}`,
       );
       if (action.summary !== undefined) lines.push(`      ↳ ${action.summary}`);
+      for (const entry of contractMetaLines(action)) lines.push(`      ↳ ${entry}`);
     }
   }
   lines.push('', `Projections (${manifest.projections.length})`);

@@ -12,6 +12,7 @@ import { implement, ORPCError } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { renderExplain } from '../cli/render-explain.js';
 import { defineFeature, FEATURE_ERROR_CODES } from '../feature.js';
 import { defineApp } from '../index.js';
 import { rpc, RPC_ACTION_META_SCHEMA } from '../orpc.js';
@@ -94,5 +95,45 @@ describe('rpc(): manifest actions', () => {
     expect(() => rpc(odd, implement(odd), { ping: o => o.ping.handler(() => 'pong') })).toThrow(
       expect.objectContaining({ code: FEATURE_ERROR_CODES.rpcMetaNotJson }),
     );
+  });
+});
+
+describe('dot explain: the policy a procedure declares', () => {
+  // An authorization policy is declared in contract meta (`@arki/auth`'s `can` checks the same
+  // name); a reviewer reading `dot explain` must see it without booting the app or reading JSON.
+  const orderContract = oc.$meta<{ policy?: string }>({}).router({
+    refund: oc
+      .meta({ policy: 'order.refund' })
+      .route({ method: 'POST', path: '/orders/{id}/refund' })
+      .input(z.object({ id: z.string() })),
+  });
+  const orders = defineFeature('orders').entrypoints(
+    rpc(orderContract, implement(orderContract), { refund: o => o.refund.handler(() => undefined) }),
+  );
+  const manifest = defineApp('policy-explain').features([orders]).configure().manifest;
+
+  it('prints `policy: order.refund` under the action in the text output', () => {
+    const written: string[] = [];
+    renderExplain({ manifest }, { json: false, out: line => written.push(line) });
+    const text = written.join('');
+    expect(text).toMatch(
+      /orders\.refund\s+rpc\s+in\s+POST \/orders\/\{id\}\/refund\s+orders\n\s+↳ policy: order\.refund\n/,
+    );
+  });
+
+  it('carries the policy in --json as the action meta', () => {
+    let written = '';
+    renderExplain({ manifest }, { json: true, out: line => (written += line) });
+    const parsed: unknown = JSON.parse(written);
+    expect(parsed).toMatchObject({
+      data: {
+        actions: [
+          expect.objectContaining({
+            id: 'orders.refund',
+            meta: expect.objectContaining({ meta: { policy: 'order.refund' } }),
+          }),
+        ],
+      },
+    });
   });
 });

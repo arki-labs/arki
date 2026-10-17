@@ -11,6 +11,7 @@ Read this before changing code that signs users in or reads who is calling. [`ll
 5. **The engine is Better Auth 1.7.7.** It serves the routes under `/api/auth` through `auth.handler`. `auth.engine` exists for tests and the E2E handler. App code never calls it.
 6. **Boot refuses unsafe setups.** A weak secret, a missing mailer, a missing rate-limit store in production, missing workspace tables or an unknown field name all throw a coded `AuthError` when the auth is built.
 7. **Fail closed.** A failing rate-limit store answers 503. A failing `roles` resolver fails the request. Neither ever lets a request through or makes a guest.
+8. **Policies are plain functions.** `definePolicies<{ order: Order }>()({ order: { view, refund } })` from `@arki/auth`. A policy reads `{ principal, order }` and returns a boolean. `can` (oRPC) and `authorize` (`@arki/http`) load the subject and run one policy.
 
 ## Task map
 
@@ -98,6 +99,42 @@ export const adminOnly = os
   .handler(() => 'ok');
 ```
 
+### Authorize with a policy
+
+1. Write the rules in the feature's `model/policies.ts`: `export const orderPolicies = definePolicies<{ order: Order }>()({ order: { view: …, refund: … } })` (`src/policies.ts`). `view` is optional: `false` answers like a missing row (404). The action `false` answers 403.
+2. oRPC: `export const { can } = guards<RequestContext>()`, then `impl.refund.use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))`. The handler reads `context.order` and `context.principal`.
+3. Name the policy in the contract too: `oc.$meta<{ policy?: string }>({})…meta({ policy: 'order.refund' })`. A missing or different name is `ARKI_AUTH_E008` on the first call. `dot explain` shows it as `↳ policy: order.refund`.
+4. `@arki/http`: `routes().derive(withOptionalPrincipal(auth)).bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => load(params.id), (_input, { order }) => refund(order)))`.
+5. The loader returns `null` for a missing row. It may check workspace membership; the policy never queries.
+
+```ts
+import { os } from '@orpc/server';
+import { z } from 'zod';
+
+import type { AnyPrincipal } from '@arki/auth';
+import { definePolicies } from '@arki/auth';
+import { guards } from '@arki/auth/orpc';
+
+type Insight = { readonly id: string; readonly userId: string };
+type RequestContext = {
+  readonly principal: AnyPrincipal | null;
+  readonly insights: { byId(id: string): Promise<Insight | null> };
+};
+
+const insightPolicies = definePolicies<{ insight: Insight }>()({
+  insight: { view: ({ principal, insight }) => insight.userId === principal.user.id, dismiss: () => true },
+});
+const { can } = guards<RequestContext>();
+
+export const dismiss = os
+  .$context<RequestContext>()
+  .$meta<{ policy?: string }>({})
+  .meta({ policy: 'insight.dismiss' })
+  .input(z.object({ insightId: z.string() }))
+  .use(can(insightPolicies)('insight.dismiss', ({ insightId }, { insights }) => insights.byId(insightId)))
+  .handler(({ context }) => ({ dismissed: context.insight.id }));
+```
+
 ### Expose a user column
 
 1. Add the column to `columns.user` in `createAuthTables`.
@@ -175,23 +212,26 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - A failed verify mail at password sign-up is logged by the engine, not returned as `ARKI_AUTH_E006`. Asking for the mail again returns `E006`.
 - `workspaces` needs `Session.activeOrganizationId` and `Session.activeTeamId` columns (`ARKI_AUTH_E007`). `principal.workspace` is the selection, not proof of membership.
 - `expo` is `false` by default. Native apps set `expo: true`.
+- A policy never gets the input and never queries. Input rules go in the schema; membership checks go in the loader.
+- `can` needs the same policy name in the contract meta (`ARKI_AUTH_E008`). Someone else's row answers `NOT_FOUND` with no auth code, on purpose.
 - Events are observers. They never change the response. Only `beforeUserCreate` can refuse, by throwing an `AuthError`.
 
 ## Errors
 
-| Code             | Meaning                                                                                                                | What to do                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `ARKI_AUTH_E001` | Bad configuration: unknown method or field, missing provider keys, bad duration, no limiter store in production. Boot. | Fix the definition or the bindings. The message names the field. |
-| `ARKI_AUTH_E002` | Secret missing or shorter than 32 characters in production. Boot.                                                      | Set `AUTH_SECRET` to 32+ random characters.                      |
-| `ARKI_AUTH_E003` | A method sends mail and no mailer is bound. Boot.                                                                      | Add the `mail` plugin (`@arki/mail/dot`) or pass `mail`.         |
-| `ARKI_AUTH_E004` | The engine's user lacks an exposed column. 500.                                                                        | Check `user.fields` against the table and the database.          |
-| `ARKI_AUTH_E005` | A testing helper ran with `production: true`. 500.                                                                     | Never mount test helpers in production.                          |
-| `ARKI_AUTH_E006` | The mailer failed to send an auth mail. 500 with a generic message.                                                    | Check the mail transport. The user may ask again.                |
-| `ARKI_AUTH_E007` | `workspaces` is on without its tables or session columns. Boot.                                                        | Add `createWorkspaceTables` and the two session columns.         |
-| `ARKI_AUTH_E401` | No principal, or a cookie and a bearer token together. 401.                                                            | Sign in. Send one credential per request.                        |
-| `ARKI_AUTH_E403` | `role()` or `verified` refused. 403.                                                                                   | Expected for users without the role or a verified email.         |
-| `ARKI_AUTH_E429` | The rate limiter refused. 429 with `Retry-After`.                                                                      | Wait the given seconds.                                          |
-| `ARKI_AUTH_E503` | The rate-limit store failed. 503. The request is refused, never let through.                                           | Check the KV store (Redis).                                      |
+| Code             | Meaning                                                                                                                | What to do                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `ARKI_AUTH_E001` | Bad configuration: unknown method or field, missing provider keys, bad duration, no limiter store in production. Boot. | Fix the definition or the bindings. The message names the field.                          |
+| `ARKI_AUTH_E002` | Secret missing or shorter than 32 characters in production. Boot.                                                      | Set `AUTH_SECRET` to 32+ random characters.                                               |
+| `ARKI_AUTH_E003` | A method sends mail and no mailer is bound. Boot.                                                                      | Add the `mail` plugin (`@arki/mail/dot`) or pass `mail`.                                  |
+| `ARKI_AUTH_E004` | The engine's user lacks an exposed column. 500.                                                                        | Check `user.fields` against the table and the database.                                   |
+| `ARKI_AUTH_E005` | A testing helper ran with `production: true`. 500.                                                                     | Never mount test helpers in production.                                                   |
+| `ARKI_AUTH_E006` | The mailer failed to send an auth mail. 500 with a generic message.                                                    | Check the mail transport. The user may ask again.                                         |
+| `ARKI_AUTH_E007` | `workspaces` is on without its tables or session columns. Boot.                                                        | Add `createWorkspaceTables` and the two session columns.                                  |
+| `ARKI_AUTH_E008` | `can` checks a policy the procedure's contract meta does not name. 500, a bug.                                         | Add `.meta({ policy: '<group>.<action>' })` to the contract, with the same name as `can`. |
+| `ARKI_AUTH_E401` | No principal, or a cookie and a bearer token together. 401.                                                            | Sign in. Send one credential per request.                                                 |
+| `ARKI_AUTH_E403` | `role()` or `verified` refused. 403.                                                                                   | Expected for users without the role or a verified email.                                  |
+| `ARKI_AUTH_E429` | The rate limiter refused. 429 with `Retry-After`.                                                                      | Wait the given seconds.                                                                   |
+| `ARKI_AUTH_E503` | The rate-limit store failed. 503. The request is refused, never let through.                                           | Check the KV store (Redis).                                                               |
 
 ## Verify
 

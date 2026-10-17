@@ -7,6 +7,7 @@ import {
   AUTH_SECRET_MIN_LENGTH,
   AuthError,
   defineAuth,
+  definePolicies,
   isAuthError,
   PASSWORD_MIN_LENGTH,
 } from '@arki/auth';
@@ -36,6 +37,8 @@ const malformedHash = await verifyPassword({ hash: 'not-a-hash', password: 'anyt
 
 const userId = createUserId();
 
+const orderPolicies = definePolicies()({ order: { refund: ({ order }) => order.status !== 'shipped' } });
+
 const illegalScope = errorOf(() => scopeLevel({ organizationId: null, teamId: 'team_1' }));
 
 const checks = [
@@ -43,6 +46,8 @@ const checks = [
   ['an unknown method is E001', isAuthError(unknownMethod) && unknownMethod.code, AUTH_ERROR_CODES.invalidConfig],
   ['a bad app key is E001', isAuthError(badKey) && badKey.code, AUTH_ERROR_CODES.invalidConfig],
   ['E401 answers with status 401', refusal.status, 401],
+  ['definePolicies keeps the tree as written', orderPolicies.tree.order.refund({ order: { status: 'open' } }), true],
+  ['E008 answers with status 500', new AuthError(AUTH_ERROR_CODES.policyNotDeclared, 'x').status, 500],
   ['passwords have at least 8 characters', PASSWORD_MIN_LENGTH, 8],
   ['secrets have at least 32 characters', AUTH_SECRET_MIN_LENGTH, 32],
   ['a hash is <salt hex>:<key hex>', /^[0-9a-f]{32}:[0-9a-f]{128}$/.test(hash), true],

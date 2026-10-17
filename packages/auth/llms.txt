@@ -5,12 +5,12 @@
 The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is still exported while apps move. New code uses only the entries in the first group below. See [the migration guide](docs/migration.md).
 
 ## Import paths
-- `@arki/auth`: `defineAuth`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`, and the types `AuthDefinition`, `AuthMethod`, `SocialMethod`, `Principal`, `PrincipalOf`, `AuthContext`.
+- `@arki/auth`: `defineAuth`, `definePolicies`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`, and the types `AuthDefinition`, `AuthMethod`, `SocialMethod`, `Principal`, `PrincipalOf`, `AuthContext`, `Policies`, `PolicyName`.
 - `@arki/auth/pg`: `createAuth`, `createAuthTables`, `auth*Columns`, `*IdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, and the types `Auth`, `AuthBindings`, `AuthDb`, `AuthEvents`.
 - `@arki/auth/pg/workspaces`: `createWorkspaceTables` and the scoping kernel (`workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`).
 - `@arki/auth/dot`: `auth`, `AuthOf`.
-- `@arki/auth/orpc`: `guards`, `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`.
-- `@arki/auth/http`: `withPrincipal`, `withOptionalPrincipal`.
+- `@arki/auth/orpc`: `guards` (`authed`, `verified`, `role`, `can`), `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`.
+- `@arki/auth/http`: `withPrincipal`, `withOptionalPrincipal`, `authorize`.
 - `@arki/auth/ids`: id types and `create*Id` (browser-safe).
 - `@arki/auth/zod`: `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `roleIdSchema`, `permissionIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`.
 - `@arki/auth/password`: `hashPassword`, `verifyPassword`.
@@ -28,6 +28,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 ## By task
 - [Add sign-in to an app](docs/agent-guide.md#add-sign-in-to-an-app)
 - [Protect a procedure or a route](docs/agent-guide.md#protect-a-procedure-or-a-route)
+- [Authorize with a policy](docs/agent-guide.md#authorize-with-a-policy)
 - [Expose a user column](docs/agent-guide.md#expose-a-user-column)
 - [Test code that needs a signed-in user](docs/agent-guide.md#test-code-that-needs-a-signed-in-user)
 - [Move an app from the old API](docs/agent-guide.md#move-an-app-from-the-old-api)
@@ -39,6 +40,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 - `user.fields` names columns that exist on your user table. Types come from the table, never from the definition.
 - `workspaces` needs the workspace tables and the `activeOrganizationId` and `activeTeamId` session columns (`ARKI_AUTH_E007`).
 - A cookie and a bearer token on one request is `ARKI_AUTH_E401`, not the cookie's user.
+- `can(policies)('order.refund', load)` needs `.meta({ policy: 'order.refund' })` on the contract, or every call is `ARKI_AUTH_E008`.
 
 ## Optional
 - [Security review](docs/security-review.md)

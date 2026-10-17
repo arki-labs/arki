@@ -1,6 +1,7 @@
 /**
- * Stable error codes. Boot mistakes (`E001`–`E003`, `E007`) throw while the auth is built; the
- * rest are request-time failures that the transports turn into their wire shape.
+ * Stable error codes. Boot mistakes (`E001`–`E003`, `E007`) throw while the auth is built; `E008`
+ * is a procedure whose contract does not declare its policy; the rest are request-time failures
+ * that the transports turn into their wire shape.
  */
 export const AUTH_ERROR_CODES = {
   /** Unknown method, missing provider credentials, unknown `user.fields` name, bad duration. */
@@ -17,6 +18,8 @@ export const AUTH_ERROR_CODES = {
   mailFailed: 'ARKI_AUTH_E006',
   /** A feature is on without its tables (`workspaces`). */
   tableMissing: 'ARKI_AUTH_E007',
+  /** A procedure checks a policy its contract meta does not declare (`.meta({ policy })`). A bug. */
+  policyNotDeclared: 'ARKI_AUTH_E008',
   /** No principal, or a cookie and a bearer token on one request. */
   unauthenticated: 'ARKI_AUTH_E401',
   /** A `role()` or `verified` check refused the principal. */
@@ -38,6 +41,7 @@ const STATUS_BY_CODE: Readonly<Record<AuthErrorCode, number>> = {
   ARKI_AUTH_E005: 500,
   ARKI_AUTH_E006: 500,
   ARKI_AUTH_E007: 500,
+  ARKI_AUTH_E008: 500,
   ARKI_AUTH_E401: 401,
   ARKI_AUTH_E403: 403,
   ARKI_AUTH_E429: 429,
