@@ -2,11 +2,12 @@
   "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
     /**
-     * Bundler resolution, not NodeNext: `@phosphor-icons/react` (behind `@arki/icons/phosphor`, used
-     * by `./react`) ships extensionless relative imports in its ESM `.d.ts`, so under NodeNext every
-     * icon import fails. Every relative import here still carries `.js`, so the emitted `dist/` is
-     * valid Node ESM; `tsc --noEmit --module NodeNext --moduleResolution NodeNext` reports only those
-     * icon imports.
+     * Editor, lint, test and doc-example config for every file. Bundler resolution here so the
+     * React files type-check: `@phosphor-icons/react` (behind `@arki/icons/phosphor`, used by
+     * `./react` and `./react/templates`) ships `.d.ts` files with extensionless relative imports,
+     * which NodeNext cannot resolve. The build is split: `tsconfig.build.json` (NodeNext) emits
+     * the server and portable entries, `tsconfig.build.react.json` (Bundler) only the icon files.
+     * `typecheck` runs this config and the NodeNext one.
      */
     "module": "ESNext",
     "moduleResolution": "Bundler",

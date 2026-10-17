@@ -1,6 +1,21 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    /**
+     * Server and portable half: NodeNext, like `@arki/mail`, so the emitted `dist/` is checked
+     * as real Node ESM. The React half (`tsconfig.build.react.json`) references this project, so
+     * it reads these files from `dist/*.d.ts` and never emits them a second time.
+     *
+     * `composite` is what makes that reference possible, and it forces `incremental`. The build
+     * script deletes both `.tsbuildinfo` files first and runs `tsc -b --force`, so no old state
+     * exists to reuse: the TypeScript 7.0 stale-incremental bug noted in `@arki/tsconfig/base.json`
+     * cannot hide errors. `typecheck` turns `composite` and `incremental` off and never reads one.
+     */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.cache/tsbuildinfo.build.json",
     "stripInternal": true
   },
   "exclude": [
@@ -10,6 +25,9 @@
     "**/*.test.tsx",
     "**/*.spec.ts",
     "**/*.test-d.ts",
-    "**/__fixtures__/**"
+    "**/__fixtures__/**",
+    "src/react/index.ts",
+    "src/react/sign-in-form.tsx",
+    "src/react/templates/**"
   ]
 }

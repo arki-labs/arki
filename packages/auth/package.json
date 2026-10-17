@@ -123,16 +123,16 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -f .cache/tsbuildinfo.build.json .cache/tsbuildinfo.build.react.json && tsc -b --force tsconfig.build.react.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev": "tsc -b --watch tsconfig.build.react.json",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json --composite false --incremental false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

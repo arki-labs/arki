@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /**
+     * React half: only the files that render icons — `./react` (`SignInForm`) and
+     * `./react/templates`. They import `@arki/icons/phosphor`, and `@phosphor-icons/react` behind
+     * it ships `.d.ts` files with extensionless relative imports, which NodeNext cannot resolve.
+     * Bundler resolution reads them; every relative import here still ends in `.js`, so the
+     * emitted files are valid Node ESM. Everything these files import from the rest of the
+     * package comes from the referenced NodeNext project's `dist/*.d.ts`.
+     */
+    "tsBuildInfoFile": "./.cache/tsbuildinfo.build.react.json",
+    "stripInternal": true
+  },
+  "include": ["src/react/index.ts", "src/react/sign-in-form.tsx", "src/react/templates"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.test-d.ts"],
+  "references": [{ "path": "./tsconfig.build.json" }]
+}
