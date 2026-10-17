@@ -22,7 +22,8 @@
  *   the `offlineSafe` marker (`@arki/offline/orpc`), and its model (`../model/*`, or feature contracts from the app contract)
  *   — it ships to the browser.
  * - `model/` imports no `usecases/`, `infra/` or `entrypoints/`, and no
- *   database runtime — except `model/tables.ts`, which declares tables.
+ *   database runtime — except `model/tables.ts` (declares tables) and `model/relations.ts`
+ *   (declares the feature's relations part with `defineRelationsPart`).
  * - `usecases/` imports no `entrypoints/` (a usecase never knows how it is called).
  * - `usecases/` makes no RUNTIME import of infra, database, drizzle, oRPC-server
  *   or app-specific client modules (`arki-feature-layers/usecase-runtime-imports`).
@@ -64,7 +65,7 @@ const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only featu
 const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts / entrypoints/rpc.ts) only.' };
 const DB_RUNTIME = {
   regex: '^(drizzle-orm(/(?!pg-core$).*)?|pg|postgres|@arki/db(/(?!id$|temporal$).*)?)$',
-  message: 'model/ holds no database runtime (only model/tables.ts declares tables). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
+  message: 'model/ holds no database runtime (only model/tables.ts and model/relations.ts declare tables and relations). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
 };
 
 /** A relative import that walks into one of the given layer folders. */
@@ -450,12 +451,12 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
     {
       name: 'arki/feature-layers/model',
       files: [`${features}/model/**/*.ts`],
-      ignores: [...TESTS, `${features}/model/tables.ts`, `${features}/model/tables/**`],
+      ignores: [...TESTS, `${features}/model/tables.ts`, `${features}/model/tables/**`, `${features}/model/relations.ts`],
       rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME, SCHEMA_BARREL]),
     },
     {
       name: 'arki/feature-layers/model-tables',
-      files: [`${features}/model/tables.ts`, `${features}/model/tables/**/*.ts`],
+      files: [`${features}/model/tables.ts`, `${features}/model/tables/**/*.ts`, `${features}/model/relations.ts`],
       ignores: TESTS,
       rules: rule([SERVER, CONTRACT, MODEL_INWARD, SCHEMA_BARREL]),
     },
@@ -505,12 +506,12 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
     {
       name: 'arki/feature-layers/app-model',
       files: [`${appModel}/**/*.ts`],
-      ignores: [...TESTS, `${appModel}/**/tables.ts`, `${appModel}/**/tables/**`],
+      ignores: [...TESTS, `${appModel}/**/tables.ts`, `${appModel}/**/tables/**`, `${appModel}/**/relations.ts`],
       rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME]),
     },
     {
       name: 'arki/feature-layers/app-model-tables',
-      files: [`${appModel}/**/tables.ts`, `${appModel}/**/tables/**/*.ts`],
+      files: [`${appModel}/**/tables.ts`, `${appModel}/**/tables/**/*.ts`, `${appModel}/**/relations.ts`],
       ignores: TESTS,
       rules: rule([SERVER, CONTRACT, MODEL_INWARD]),
     },

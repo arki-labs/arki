@@ -41,6 +41,11 @@ test('model/tables.ts is where tables are declared, so pg-core is allowed', () =
   assert.deepEqual(ruleIds('src/features/demo/model/tables.ts', `import { pgTable } from 'drizzle-orm/pg-core';`), []);
 });
 
+test('model/relations.ts declares a relations part, so @arki/db/orm is allowed (feature and app model)', () => {
+  assert.deepEqual(ruleIds('src/features/demo/model/relations.ts', `import { defineRelationsPart } from '@arki/db/orm';`), []);
+  assert.deepEqual(ruleIds('src/model/auth/relations.ts', `import { defineRelationsPart } from '@arki/db/orm';`), []);
+});
+
 test('a usecase does not know how it is called: no entrypoints import', () => {
   assert.deepEqual(ruleIds(USECASE, `import { c } from '../entrypoints/rpc';`), [RESTRICT]);
 });
