@@ -47,11 +47,19 @@ adapter only makes sense inside a DOT app.
 
 An adapter exports a factory function that returns a `Plugin`:
 
-```ts
+```ts run
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
-import { plugin } from '@arki/dot/plugin';
+import { defineApp, plugin } from '@arki/dot/plugin';
 
-import { MyClient } from './index.js';
+// my-pkg/src/index.ts, the framework-agnostic client. A stand-in here.
+class MyClient {
+  constructor(
+    readonly url: string,
+    readonly options: { readonly timeoutMs?: number } = {},
+  ) {}
+  async connect(): Promise<void> {}
+  async close(): Promise<void> {}
+}
 
 // my-pkg/src/dot.ts
 
@@ -88,24 +96,31 @@ export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgService
 ```
 
 **Convention:** the exported factory is named after the package
-(`env`, `kv`, `db`, `queue`, ...). Users see:
+(`env`, `kv`, `db`, `queue`, ...). Users see the same call, here with the
+factory above in scope:
 
-```ts
-import { myPkg } from '@acme/my-pkg/dot';
-
+```ts continue
 const app = await defineApp('billing')
-  .use(myPkg({ url: '...' }))
+  .use(myPkg({ url: 'memory://primary' }))
   .boot();
+
+if (!(app.services.myClient instanceof MyClient)) throw new Error('myClient was not published');
+await app.dispose();
 ```
 
 Do NOT take a `name` option for multi-instance mounting — that's the app
 author's job via `rename`:
 
-```ts
-import { rename } from '@arki/dot';
+```ts continue
+import { rename } from '@arki/dot/plugin';
 
-.use(myPkg({ url: primaryUrl }))
-.use(rename(myPkg({ url: replicaUrl }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
+const twoClients = await defineApp('billing')
+  .use(myPkg({ url: 'memory://primary' }))
+  .use(rename(myPkg({ url: 'memory://replica' }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
+  .boot();
+
+if (twoClients.services.replicaClient.url !== 'memory://replica') throw new Error('rename did not retarget the key');
+await twoClients.dispose();
 ```
 
 ## Service registration in `configure`
@@ -113,11 +128,14 @@ import { rename } from '@arki/dot';
 `configure` is **sync** and runs before any I/O. Use it to declare
 metadata only:
 
-```ts
-configure(ctx) {
-  ctx.registerService('myClient', 'custom');
-  // For well-known kinds: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger'
-}
+```ts continue
+// For well-known kinds: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger'
+export const registersOnly = plugin({
+  name: 'my-pkg-registers',
+  configure(ctx) {
+    ctx.registerService('myClient', 'custom');
+  },
+});
 ```
 
 The kernel merges every plugin's registration into `app.manifest`. Agents
@@ -129,17 +147,21 @@ A plugin publishes through `provides`: one factory per key. Factories may be
 async. Open exactly one resource per factory. `boot` is for side effects only
 and returns nothing:
 
-```ts
-provides: {
-  myClient: async ({ $config }) => {
-    // Optional: read config injected by `defineApp(name, { config })`.
-    const timeoutMs = ($config['MY_PKG_TIMEOUT_MS'] as number | undefined) ?? 5000;
+```ts continue
+export const withTimeout = plugin({
+  name: 'my-pkg-timeout',
+  provides: {
+    myClient: async ({ $config }) => {
+      // Optional: read config injected by `defineApp(name, { config })`.
+      const configured = $config['MY_PKG_TIMEOUT_MS'];
+      const timeoutMs = typeof configured === 'number' ? configured : 5000;
 
-    const myClient = new MyClient(options.url, { timeoutMs });
-    await myClient.connect();
-    return myClient;
+      const myClient = new MyClient('memory://', { timeoutMs });
+      await myClient.connect();
+      return myClient;
+    },
   },
-}
+});
 ```
 
 Because the keys are static, consumers get typed handles before boot:
@@ -151,19 +173,26 @@ If a factory opens multiple resources and one of them fails, clean up the
 partial state yourself before throwing — the kernel only disposes plugins
 whose factories completed.
 
-```ts
-provides: {
-  pair: async () => {
-    const a = await openA();
-    try {
-      const b = await openB();
-      return { a, b };
-    } catch (err) {
-      await a.close();
-      throw err;
-    }
+```ts continue
+// Stand-ins for two resources the adapter opens together.
+const openA = async () => ({ close: async () => {} });
+const openB = async () => ({ close: async () => {} });
+
+export const pairPlugin = plugin({
+  name: 'my-pkg-pair',
+  provides: {
+    pair: async () => {
+      const a = await openA();
+      try {
+        const b = await openB();
+        return { a, b };
+      } catch (err) {
+        await a.close();
+        throw err;
+      }
+    },
   },
-}
+});
 ```
 
 ## Consuming other services
@@ -172,16 +201,19 @@ If your adapter needs a service from another plugin (say, a logger), declare
 it in `needs` — the hook context delivers it typed, and the app builder
 refuses composition orders that can't satisfy it:
 
-```ts
-import { plugin, service } from '@arki/dot/plugin';
+```ts continue
+import { service } from '@arki/dot/plugin';
 
-plugin({
-  name: 'my-pkg',
+// Stand-in for the logger contract another plugin provides.
+type Logger = { info(message: string): void };
+
+export const needsLogger = plugin({
+  name: 'my-pkg-logged',
   needs: { log: service<Logger>() },
   boot: ({ log }) => {
     log.info('my-pkg booting');
   },
-  provides: { myClient: () => open() },
+  provides: { myClient: () => new MyClient('memory://') },
 });
 ```
 
@@ -191,10 +223,14 @@ plugin({
 when it runs. The context carries your own published services plus your
 needs:
 
-```ts
-async dispose({ myClient }) {
-  await myClient.close();
-}
+```ts continue
+export const closesClient = plugin({
+  name: 'my-pkg-closes',
+  provides: { myClient: () => new MyClient('memory://') },
+  async dispose({ myClient }) {
+    await myClient.close();
+  },
+});
 ```
 
 `stop` runs first if the plugin has active work (workers, subscribers).
@@ -207,22 +243,25 @@ For adapters that expose app-boundary interactions, declare **actions**.
 Actions are transport-neutral: HTTP routes, queue consumers/producers, CLI
 commands, cron ticks, and future bindings all share the same kernel shape.
 
-```ts
-configure(ctx) {
-  ctx.registerService('myClient', 'custom');
-  ctx.registerAction({
-    id: 'health',
-    binding: 'http',
-    direction: 'in',
-    address: 'GET /_health/my-pkg',
-    summary: 'Adapter health check',
-    metaSchema: '@acme/my-pkg/action-meta@1',
-    meta: {
-      method: 'GET',
-      path: '/_health/my-pkg',
-    },
-  });
-}
+```ts continue
+export const declaresAction = plugin({
+  name: 'my-pkg-actions',
+  configure(ctx) {
+    ctx.registerService('myClient', 'custom');
+    ctx.registerAction({
+      id: 'health',
+      binding: 'http',
+      direction: 'in',
+      address: 'GET /_health/my-pkg',
+      summary: 'Adapter health check',
+      metaSchema: '@acme/my-pkg/action-meta@1',
+      meta: {
+        method: 'GET',
+        path: '/_health/my-pkg',
+      },
+    });
+  },
+});
 ```
 
 `binding` is an open string. Well-known bindings include `http`, `queue`,
@@ -232,14 +271,17 @@ detail in `meta`, and version that layout with `metaSchema`.
 
 Adapters can also provide projections for `dot explain --as <format>`:
 
-```ts
-configure(ctx) {
-  ctx.registerProjection({
-    format: 'openapi',
-    binding: 'http',
-    module: '@acme/my-pkg/projection',
-  });
-}
+```ts continue
+export const declaresProjection = plugin({
+  name: 'my-pkg-projection',
+  configure(ctx) {
+    ctx.registerProjection({
+      format: 'openapi',
+      binding: 'http',
+      module: '@acme/my-pkg/projection',
+    });
+  },
+});
 ```
 
 Projection modules export `project(manifest)`. They must be pure and return
@@ -301,27 +343,55 @@ Rules an adapter's `features:` option must follow:
 
 ## Diagnostics — stable codes and remediation
 
-When a hook throws, the kernel wraps the error into a `DiagnosticIssue`.
-Make every error actionable:
+Throw a `DotPluginError` when a hook cannot continue. It carries a stable
+`code`, a `remediation` line and a `docsUrl`, so a person or an agent can act
+without parsing the message:
 
-```ts
-async boot() {
-  if (!options.url) {
-    throw Object.assign(new Error(`[${name}] url is required`), {
-      code: 'MY_PKG_E001',
-      remediation: 'Pass options.url to myPkg(...) or set MY_PKG_URL.',
-      docsUrl: 'https://example.com/my-pkg/docs#configuration',
-    });
-  }
-  // ...
+```ts run expect
+import { defineApp, DotLifecycleError, DotPluginError, plugin } from '@arki/dot/plugin';
+
+export function strictPkg(options: { readonly url?: string }) {
+  return plugin({
+    name: 'strict-pkg',
+    boot() {
+      if (!options.url) {
+        throw new DotPluginError({
+          code: 'MY_PKG_E001',
+          message: '[strict-pkg] url is required',
+          remediation: 'Pass options.url to strictPkg(...) or set MY_PKG_URL.',
+          docsUrl: 'https://example.com/my-pkg/docs#configuration',
+        });
+      }
+    },
+  });
+}
+
+try {
+  await defineApp('billing').use(strictPkg({})).boot();
+} catch (err) {
+  if (!(err instanceof DotLifecycleError)) throw err;
+  const cause = err.cause;
+  if (!(cause instanceof DotPluginError)) throw err;
+  console.log(err.code, err.plugin);
+  console.log(cause.code, cause.remediation);
 }
 ```
 
-The `code`, `remediation`, and `docsUrl` propagate into
-`app.diagnostics.issues`. Agents read these directly.
+```text
+ARKI_DOT_E003 strict-pkg
+MY_PKG_E001 Pass options.url to strictPkg(...) or set MY_PKG_URL.
+```
+
+The kernel does not copy your code into its own list. It wraps the throw in a
+`DotLifecycleError` with code `ARKI_DOT_E003` (`ARKI_DOT_E004` for `start`),
+records an issue under that kernel code, and keeps your error as `cause`.
+Your `code`, `remediation` and `docsUrl` stay on `cause`, as the run above
+prints.
 
 Use the prefix `<PKG>_E<NNN>` (e.g., `MY_PKG_E001`) to keep codes
-package-scoped and easy to grep.
+package-scoped and simple to grep. The kernel's issue for the failed hook
+(`app.diagnostics.issues`, readable on a configured app) names the plugin and
+carries your message text.
 
 ## Testing your adapter
 
@@ -330,22 +400,38 @@ Use `@arki/dot`'s test harness:
 ```ts
 import { describe, expect, it } from 'vitest';
 
-import { bootTestApp } from '@arki/dot';
+import { bootTestApp, DotPluginError, plugin } from '@arki/dot';
 
-import { myPkg } from '../src/dot.js';
+// The adapter under test, as src/dot.ts would export it.
+function strictPkg(options: { readonly url?: string }) {
+  return plugin({
+    name: 'strict-pkg',
+    boot() {
+      if (!options.url) {
+        throw new DotPluginError({
+          code: 'MY_PKG_E001',
+          message: '[strict-pkg] url is required',
+          remediation: 'Pass options.url to strictPkg(...).',
+          docsUrl: 'https://example.com/my-pkg/docs#configuration',
+        });
+      }
+    },
+  });
+}
 
-describe('myPkg adapter', () => {
-  it('publishes myClient as a service', async () => {
-    const app = await bootTestApp([myPkg({ url: 'memory://' })]);
-    expect(app.services.myClient).toBeDefined();
+describe('strictPkg adapter', () => {
+  it('mounts and disposes with a url', async () => {
+    const app = await bootTestApp([strictPkg({ url: 'memory://' })]);
+    expect(app.manifest.plugins.map(p => p.name)).toEqual(['strict-pkg']);
     await app.dispose();
   });
 
-  it('emits MY_PKG_E001 when url is missing', async () => {
-    const builder = bootTestApp([
-      myPkg({} as Parameters<typeof myPkg>[0]), // intentionally invalid
-    ]);
-    await expect(builder).rejects.toMatchObject({ code: 'ARKI_DOT_E003' });
+  it('fails boot with the adapter code in cause when url is missing', async () => {
+    const booting = bootTestApp([strictPkg({})]);
+    await expect(booting).rejects.toMatchObject({
+      code: 'ARKI_DOT_E003',
+      cause: { code: 'MY_PKG_E001' },
+    });
   });
 });
 ```

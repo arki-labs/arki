@@ -88,6 +88,17 @@ contains the repos while routers are typed with that context), hand-list the
 type and pin it with a type test one module away:
 
 ```ts
+import { expectTypeOf } from 'vitest';
+
+// Stand-in for the app's fold: one repository per feature.
+type ComposedRepos<TFeatures extends Record<string, { readonly repo: object }>> = {
+  [K in keyof TFeatures]: TFeatures[K]['repo'];
+};
+const features = { orders: { repo: { find: (id: string) => ({ id }) } } };
+
+// The hand-listed type that cuts the cycle.
+type AppRepo = { orders: { find: (id: string) => { id: string } } };
+
 expectTypeOf<ComposedRepos<typeof features>>().toEqualTypeOf<AppRepo>();
 ```
 
@@ -126,25 +137,77 @@ The same three steps under their final names (RFC
 `.infra()` and `.serve()` becomes `.entrypoints()`; both take a list in boot
 order, checked like `.useAll()`:
 
-```ts
-defineApp('shop')
-  .infra(log(...), database, cache, authn, journal({ j, tables })) // what the app runs on; log first
-  .features(features)                                               // defineFeature() values (feature() during the migration)
-  .entrypoints(gateway, schedule({ clock: 'host' }), journalWorker()); // what calls into the features
+```ts run
+import { defineApp, plugin } from '@arki/dot';
+import { defineFeature, driver, sliceOf } from '@arki/dot/feature';
+import { rpc } from '@arki/dot/orpc';
+
+// Stand-ins: in a real app these come from @arki/log, @arki/db and @arki/http.
+const logger = plugin({ name: 'log', provides: { log: () => ({ info: (_message: string) => {} }) } });
+const database = plugin({ name: 'database', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
+const orders = defineFeature('orders').entrypoints(rpc({}, {}, {}));
+const features = [orders] as const;
+const gateway = driver(mounted =>
+  plugin({
+    name: 'gateway',
+    boot: ctx => {
+      for (const mountedFeature of mounted) {
+        if (sliceOf(ctx, mountedFeature) === undefined) throw new Error('gateway sees no slice');
+      }
+    },
+  }),
+);
+
+const shop = await defineApp('shop')
+  .infra(logger, database) // what the app runs on; log first
+  .features(features) // defineFeature() values (feature() during the migration)
+  .entrypoints(gateway) // what calls into the features
+  .boot();
+
+const order = shop.manifest.plugins.map(p => p.name).join(' → ');
+if (order !== 'log → database → orders → gateway') throw new Error(`unexpected boot order ${order}`);
+await shop.dispose();
 ```
 
 A feature is a chain whose steps are its folders:
 
-```ts
-// features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` / `rpcImplementer` as types
+```ts run
+import type { DepsOf } from '@arki/dot/feature';
+import { defineApp, plugin } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
+import { rpc } from '@arki/dot/orpc';
+
+// Stand-ins for the units the feature uses.
+const billing = plugin({
+  name: 'billing',
+  provides: { entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 2 : 1) }) },
+});
+const store = plugin({
+  name: 'store',
+  provides: { store: () => ({ itemsFor: async (userId: string) => [`${userId}:welcome`, `${userId}:tips`] }) },
+});
+
+// features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` as a type
 const dailyDigestDeps = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements }) // other units, by handle
-  .infra(store, mailer); // infra/ — private plugins
+  .infra(store); // infra/ — private plugins
 export type Deps = DepsOf<typeof dailyDigestDeps>; // what a usecase may ask for
-const dailyDigestLogic = dailyDigestDeps.usecases({ preview, sendDue }); // usecases/ — one file per usecase
+
+// usecases/ — one file per usecase
+const preview =
+  ({ store, plans }: Pick<Deps, 'store' | 'plans'>) =>
+  async (userId: string) =>
+    (await store.itemsFor(userId)).slice(0, plans.capFor(userId));
+
+const dailyDigestLogic = dailyDigestDeps.usecases({ preview });
 export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
-  .entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures), digestSchedules(dailyDigestLogic)); // entrypoints/
+  .entrypoints(rpc({}, {}, {})); // entrypoints/ — the contract is empty here
+
+const shop = await defineApp('shop').infra(billing).features([dailyDigest]).boot();
+const items = await shop.services.digests.previewFor('u1');
+if (items.length !== 2) throw new Error(`the plan allows two items, got ${items.length}`);
+await shop.dispose();
 ```
 
 Rules the types enforce (each is also a coded runtime check):
@@ -195,13 +258,28 @@ top-level, and owns its own infra units.
 `app.ts` wires the units in three steps, and the builder types enforce the
 order — a unit in the wrong step does not compile:
 
-```ts
-defineApp('shop')
-  .use(db({ relations })) // driven adapters — what features need
-  .use(queue({ connection })) //   (a queue CLIENT features enqueue with)
+```ts run
+import { defineApp, plugin } from '@arki/dot';
+import { driver, feature } from '@arki/dot/feature';
+
+// Stand-ins for adapters from @arki/db, @arki/queue and @arki/http.
+const db = plugin({ name: 'db', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
+const queue = plugin({ name: 'queue', provides: { queue: () => ({ enqueue: async (_job: string) => {} }) } });
+const http = driver(() => plugin({ name: 'http' }));
+const queueWorker = driver(() => plugin({ name: 'queue-worker' }));
+const features = [feature('orders', { needs: { db: db.provides.db }, provides: { orders: () => 'orders' } })] as const;
+
+const app = await defineApp('shop')
+  .use(db) // driven adapters — what features need
+  .use(queue) //   (a queue CLIENT features enqueue with)
   .features(features) // the domain core — feature() values, one list
-  .serve(http({ port })) // driving adapters — what calls the features
-  .serve(queueWorker({ q, needs: {}, context }));
+  .serve(http) // driving adapters — what calls the features
+  .serve(queueWorker)
+  .boot();
+
+const order = app.manifest.plugins.map(p => p.name).join(' → ');
+if (order !== 'db → queue → orders → http → queue-worker') throw new Error(`unexpected boot order ${order}`);
+await app.dispose();
 ```
 
 Infrastructure never depends on the domain: nothing in `.use()` can need a

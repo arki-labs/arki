@@ -1,5 +1,5 @@
 /**
- * Narrow public surface for plugin authors.
+ * The plugin author's surface: `plugin`, handles, tokens, `rename` and the contract types.
  *
  * Exposes the plugin contract and the entry points a plugin author needs to
  * author + test plugins — `plugin`, `service`, `token`, `provide`, `rename`,

@@ -59,7 +59,11 @@ function guarded<T>(code: string, guard: (value: unknown) => value is T): Standa
 
 export type AppNotFoundData = { readonly cwd: string; readonly searched: readonly string[] };
 
-/** No app file at the default paths and no `--app`. */
+/**
+ * No app file at the default paths and no `--app`.
+ * @fix Create `dot.config.ts` that exports the app, or pass `--app <path>`.
+ * @verify dot explain --json | jq -e .ok
+ */
 export const AppNotFound = defineFailure('dot.app_not_found', {
   data: guarded(
     'dot.app_not_found',
@@ -79,7 +83,11 @@ export type AppInvalidExportData = {
   readonly matches: readonly string[];
 };
 
-/** The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`. */
+/**
+ * The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`.
+ * @fix Export the app as `default` or as `app`.
+ * @verify dot explain --json | jq -e .ok
+ */
 export const AppInvalidExport = defineFailure('dot.app_invalid_export', {
   data: guarded(
     'dot.app_invalid_export',
@@ -112,7 +120,11 @@ export type AppImportFailedData = {
   readonly causeRemediation: string | null;
 };
 
-/** Importing the app file threw, or its exported factory did. */
+/**
+ * Importing the app file threw, or its exported factory did.
+ * @fix Apply `.error.data.causeRemediation` when it is set; otherwise run `bun <app file>` to reproduce.
+ * @verify dot explain --json | jq -e .ok
+ */
 export const AppImportFailed = defineFailure('dot.app_import_failed', {
   data: guarded(
     'dot.app_import_failed',
@@ -133,7 +145,11 @@ export type AppLifecycleFailedData = {
   readonly causeMessage: string;
 };
 
-/** `configure` threw while the CLI prepared the app. */
+/**
+ * `configure` threw while the CLI prepared the app.
+ * @fix Read `.error.data.underlyingCode` and look it up in the kernel error table; `ARKI_DOT_E020` means a provider is mounted after its consumer.
+ * @verify dot explain --json | jq -e .ok
+ */
 export const AppLifecycleFailed = defineFailure('dot.app_lifecycle_failed', {
   data: guarded(
     'dot.app_lifecycle_failed',
@@ -144,10 +160,14 @@ export const AppLifecycleFailed = defineFailure('dot.app_lifecycle_failed', {
   ),
   message: 'App {phase} failed: {causeMessage}',
   remediation:
-    'Look for a plugin `configure` hook that throws or returns a Promise; `dot doctor` shows per-plugin diagnostics.',
+    'Read `error.data.underlyingCode` and apply the remediation of that code (`ARKI_DOT_E020` means a provider is mounted after its consumer); `dot doctor` shows per-plugin diagnostics.',
 });
 
-/** `doctor --observability` found no OpenTelemetry SDK. Reported as a warning issue in the snapshot, not returned. */
+/**
+ * `doctor --observability` found no OpenTelemetry SDK. Reported as a warning issue in the snapshot, not returned.
+ * @fix Register an OpenTelemetry SDK once at app entry, before any app boots.
+ * @verify dot doctor --observability --json | jq '.data.issues'
+ */
 export const ObservabilityNoSdk = defineFailure('dot.observability_no_sdk', {
   message: 'No OpenTelemetry SDK is registered. Lifecycle traces and metrics will not be exported.',
   remediation:
@@ -156,7 +176,11 @@ export const ObservabilityNoSdk = defineFailure('dot.observability_no_sdk', {
 
 export type ProjectionNotFoundData = { readonly format: string; readonly registeredFormats: readonly string[] };
 
-/** No plugin registers the `--as` format. */
+/**
+ * No plugin registers the `--as` format.
+ * @fix Use a format from `.error.data.registeredFormats`, or mount the adapter that provides it.
+ * @verify dot explain --as <format> --json | jq -e .ok
+ */
 export const ProjectionNotFound = defineFailure('dot.projection_not_found', {
   data: guarded(
     'dot.projection_not_found',
@@ -176,7 +200,11 @@ export type ProjectionImportFailedData = {
   readonly causeMessage: string | null;
 };
 
-/** The projection module could not be resolved or imported, or exports no `project(manifest)`. */
+/**
+ * The projection module could not be resolved or imported, or exports no `project(manifest)`.
+ * @fix Install the module and export a named `project(manifest)` function from it.
+ * @verify dot explain --as <format> --json | jq -e .ok
+ */
 export const ProjectionImportFailed = defineFailure('dot.projection_import_failed', {
   data: guarded(
     'dot.projection_import_failed',
@@ -201,7 +229,11 @@ export type ProjectionExecutionFailedData = {
   readonly causeMessage: string;
 };
 
-/** `project(manifest)` threw or returned output that does not survive a JSON round trip. */
+/**
+ * `project(manifest)` threw or returned output that does not survive a JSON round trip.
+ * @fix Make `project(manifest)` pure and return JSON-round-trip-safe output.
+ * @verify dot explain --as <format> --json | jq -e .ok
+ */
 export const ProjectionExecutionFailed = defineFailure('dot.projection_execution_failed', {
   data: guarded(
     'dot.projection_execution_failed',
@@ -217,7 +249,11 @@ export type ProjectionConflictData = {
   readonly projections: readonly { readonly plugin: string; readonly module: string }[];
 };
 
-/** Two plugins register different modules for one projection format. */
+/**
+ * Two plugins register different modules for one projection format.
+ * @fix Remove one registration, or make both plugins register the same module.
+ * @verify dot explain --as <format> --json | jq -e .ok
+ */
 export const ProjectionConflict = defineFailure('dot.projection_conflict', {
   data: guarded(
     'dot.projection_conflict',
@@ -231,7 +267,11 @@ export const ProjectionConflict = defineFailure('dot.projection_conflict', {
   remediation: 'Remove one registration, or make both plugins register the same module specifier.',
 });
 
-/** `doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`. */
+/**
+ * `doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`.
+ * @fix Apply the `remediation` of each issue in `.error.data.plugins[].issues` and `.error.data.issues`.
+ * @verify dot doctor --json | jq -e .ok
+ */
 export const DoctorFailed = defineFailure('dot.doctor_failed', {
   data: guarded(
     'dot.doctor_failed',
@@ -248,7 +288,11 @@ export const DoctorFailed = defineFailure('dot.doctor_failed', {
 
 export type TargetNotEmptyData = { readonly target: string; readonly conflicting: readonly string[] };
 
-/** `dot new` would overwrite files in a non-empty target directory. */
+/**
+ * `dot new` would overwrite files in a non-empty target directory.
+ * @fix Choose an empty directory, or re-run with `--force` to overwrite.
+ * @verify dot new <name> --dry-run --json | jq -e .ok
+ */
 export const TargetNotEmpty = defineFailure('dot.target_not_empty', {
   data: guarded(
     'dot.target_not_empty',
@@ -261,7 +305,11 @@ export const TargetNotEmpty = defineFailure('dot.target_not_empty', {
 
 export type TemplateMissingData = { readonly templateRoot: string };
 
-/** The package's bundled template directory is empty or missing. */
+/**
+ * The package's bundled template directory is empty or missing.
+ * @fix Reinstall `@arki/dot`: it must ship its `templates/` directory.
+ * @verify dot new <name> --dry-run --json | jq -e .ok
+ */
 export const TemplateMissing = defineFailure('dot.template_missing', {
   data: guarded(
     'dot.template_missing',
@@ -278,7 +326,11 @@ export type WriteFailedData = {
   readonly failed: readonly { readonly path: string; readonly message: string }[];
 };
 
-/** `dot new` could not write some files. `written` lists the ones that landed. */
+/**
+ * `dot new` could not write some files. `written` lists the ones that landed.
+ * @fix Check the permissions of the target directory, then re-run with `--force`.
+ * @verify dot new <name> --dry-run --json | jq -e .ok
+ */
 export const WriteFailed = defineFailure('dot.write_failed', {
   data: guarded(
     'dot.write_failed',
@@ -313,7 +365,11 @@ export type DevDbUnreachableData = {
   readonly reason: string;
 };
 
-/** `dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start. */
+/**
+ * `dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start.
+ * @fix Start the database, fix `DB_URL` in `.env`, or run `dot dev --db pglite`.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevDbUnreachable = defineFailure('dot.dev_db_unreachable', {
   data: guarded(
     'dot.dev_db_unreachable',
@@ -326,7 +382,11 @@ export const DevDbUnreachable = defineFailure('dot.dev_db_unreachable', {
 
 export type DevRunnerFailedData = { readonly command: string; readonly causeMessage: string };
 
-/** The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started. */
+/**
+ * The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started.
+ * @fix Install the runner, or pass the command that serves the app with `dot dev --run "<cmd>"`.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevRunnerFailed = defineFailure('dot.dev_runner_failed', {
   data: guarded(
     'dot.dev_runner_failed',
@@ -339,7 +399,11 @@ export const DevRunnerFailed = defineFailure('dot.dev_runner_failed', {
 
 export type DevPortInUseData = { readonly port: number };
 
-/** Something already listens on the app port, so the runner would not get it. */
+/**
+ * Something already listens on the app port, so the runner would not get it.
+ * @fix Stop the process on that port, or pick another one with `dot dev --port <n>`.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevPortInUse = defineFailure('dot.dev_port_in_use', {
   data: guarded(
     'dot.dev_port_in_use',
@@ -351,7 +415,11 @@ export const DevPortInUse = defineFailure('dot.dev_port_in_use', {
 
 export type DevAlreadyRunningData = { readonly pid: number; readonly statePath: string };
 
-/** Another `dot dev` is alive in this project: its pid is in the state file. */
+/**
+ * Another `dot dev` is alive in this project: its pid is in the state file.
+ * @fix Stop the other `dot dev`; if its pid is not a `dot dev`, delete the file in `.error.data.statePath`.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevAlreadyRunning = defineFailure('dot.dev_already_running', {
   data: guarded(
     'dot.dev_already_running',
@@ -371,7 +439,11 @@ export type DevRemoteDbRefusedData = {
   readonly source: string;
 };
 
-/** The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot. */
+/**
+ * The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot.
+ * @fix Point every database URL at this machine or a compose service, or pass `--allow-remote-db` on purpose.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevRemoteDbRefused = defineFailure('dot.dev_remote_db_refused', {
   data: guarded(
     'dot.dev_remote_db_refused',
@@ -384,7 +456,11 @@ export const DevRemoteDbRefused = defineFailure('dot.dev_remote_db_refused', {
 
 export type DevAppStartedData = { readonly filePath: string; readonly exportName: string };
 
-/** The app export is already configured, booted or started: `dot dev` cannot own its lifecycle. */
+/**
+ * The app export is already configured, booted or started: `dot dev` cannot own its lifecycle.
+ * @fix Export the unstarted builder: no `configure()`, `boot()` or `start()` call on the `dev` export.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevAppStarted = defineFailure('dot.dev_app_started', {
   data: guarded(
     'dot.dev_app_started',
@@ -405,7 +481,11 @@ export type DevPreflightFailedData = {
   readonly output: readonly string[];
 };
 
-/** The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass. */
+/**
+ * The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass.
+ * @fix Read `.error.data.output`, then run `dot doctor --app <file>` to see the same boot in the foreground.
+ * @verify dot dev --once --json | jq -e .ok
+ */
 export const DevPreflightFailed = defineFailure('dot.dev_preflight_failed', {
   data: guarded(
     'dot.dev_preflight_failed',

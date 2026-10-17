@@ -43,7 +43,7 @@ That means:
 You opt in by registering an SDK at app boot, exactly once, before
 `defineApp(...)`:
 
-```ts
+```ts skip="needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
 // observability.ts — your app's entry point
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -153,7 +153,7 @@ to DEBUG severity. No code change required.
 LOG_LEVEL=debug bun run app.ts
 ```
 
-This affects every `@arki/log` logger in the process, not just the
+This affects every `@arki/log` logger in the process, not only the
 kernel. Useful in development; rarely what you want in production.
 
 ### Trace correlation
@@ -185,7 +185,7 @@ the value tells you whether tracing was active.
 
 ## Quick reference
 
-```ts
+```ts skip="needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
 // 1. Register OTel SDK once, before any DOT app boots.
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -274,9 +274,12 @@ tests, CLI tools, ad-hoc debugging — every `DotApp` also fans out a
 synchronous event stream to registered `DotLifecycleObserver`s. The two
 signals are peers; neither layers under the other.
 
-```ts
+```ts run expect
 import type { DotLifecycleEvent } from '@arki/dot';
-import { defineApp } from '@arki/dot';
+import { defineApp, plugin } from '@arki/dot';
+
+const envPlugin = plugin({ name: 'env', provides: { env: () => ({ mode: 'test' }) } });
+const dbPlugin = plugin({ name: 'db', provides: { db: () => ({ ready: true }) } });
 
 const events: DotLifecycleEvent[] = [];
 
@@ -287,9 +290,29 @@ const app = await defineApp('my-app', {
   .use(dbPlugin)
   .boot();
 
-// `events` now contains 4 events per phase (phase-starting, hook-starting
-// per plugin, hook-completed per plugin, phase-completed) plus configure/boot.
+for (const event of events) {
+  const who = event.kind === 'plugin-hook' ? ` ${event.plugin}` : '';
+  console.log(`${event.kind} ${event.phase} ${event.status}${who}`);
+}
+await app.dispose();
 ```
+
+```text
+phase configure starting
+phase configure completed
+phase boot starting
+plugin-hook boot starting env
+plugin-hook boot completed env
+plugin-hook boot starting db
+plugin-hook boot completed db
+phase boot completed
+```
+
+Every phase emits a `starting` and a `completed` (or `failed`) event. Every
+plugin that defines the hook emits the same pair for it. The two plugins above
+publish services through `provides` and define no `boot` or `configure` hook
+of their own, yet they appear under `boot`, because their factories run
+inside it.
 
 Each event carries `kind` (`'phase'` or `'plugin-hook'`), `phase`, `status`
 (`'starting'` / `'completed'` / `'failed'`), `appName`, `timestamp` (ms
@@ -298,10 +321,11 @@ since epoch), and on completion `durationMs`. Failed events also carry
 
 Observers may also be added post-hoc:
 
-```ts
+```ts continue
+const alerts: string[] = [];
 const unsubscribe = app.subscribe(event => {
   if (event.kind === 'plugin-hook' && event.status === 'failed') {
-    notifyOps(event);
+    alerts.push(`${event.plugin} failed in ${event.phase}`); // or notify ops
   }
 });
 // ...later

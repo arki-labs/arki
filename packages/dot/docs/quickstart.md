@@ -1,116 +1,212 @@
 # Quickstart
 
-Boot your first DOT app in five minutes.
+Build a two-plugin app, break it on purpose, read the error, fix it, and
+inspect it with `dot explain` and `dot doctor`. It takes about ten minutes.
 
-## Install
+Every output on this page is printed by the block above it each time the docs
+are tested (`bun run test:docs`). It is the real output, not a copy.
 
-```sh
-npm install @arki/dot @arki/env zod
-# or
-pnpm add @arki/dot @arki/env zod
-# or
-bun add @arki/dot @arki/env zod
+```text
+ database ── provides db ──▶ orders
+ (boots 1st)                  (boots 2nd)
 ```
 
-`@arki/dot` is the kernel. `@arki/env` is one of the package-owned adapters
-(it exposes `@arki/env/dot` as an optional adapter entry). `zod` validates
-the env schema.
+## 1. Install
 
-## Define your app
+```sh
+bun add @arki/dot
+```
 
-Create `src/app.ts`:
+## 2. Write the app
 
-```ts
-import { z } from 'zod';
+Create `src/app.ts`. Start with a database plugin. It provides one service,
+`db`. Here it is an array in memory, so the tutorial needs no Postgres:
 
-import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';
+```ts from="docs/examples/quickstart.ts#database"
+type Order = { readonly id: number; readonly cents: number };
 
-export const app = await defineApp('my-app')
-  .use(
-    env({
-      schema: {
-        PORT: z.coerce.number().default(3000),
-        NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+export const database = plugin({
+  name: 'database',
+  provides: {
+    // A stand-in for a real client. It is a plain array, so nobody gets paged at 3 a.m.
+    db: () => {
+      const rows: Order[] = [];
+      return {
+        insert: (row: Order) => rows.push(row),
+        count: () => rows.length,
+      };
+    },
+  },
+});
+```
+
+Then an orders plugin. It **needs** `db` and **provides** `orders`:
+
+```ts from="docs/examples/quickstart.ts#orders"
+export const orders = plugin({
+  name: 'orders',
+  needs: { db: database.provides.db }, // the handle, not a string: a typo cannot compile
+  provides: {
+    orders: ({ db }) => ({
+      place: (cents: number): Order => {
+        const order = { id: db.count() + 1, cents };
+        db.insert(order);
+        return order;
       },
     }),
-  )
-  .boot();
-
-console.log(`booted ${app.name} on port ${app.services.env.PORT}`);
+  },
+});
 ```
 
-That's the whole boot path. `defineApp(name)` returns a builder, `.use(plugin)`
-registers a plugin, and `.boot()` runs the `configure` and `boot` hooks in
-topological order.
+Mount both, provider first, and export the builder:
 
-`app.services.env` is typed from the Zod schema — `PORT` is `number`, not
-`string`. No casts, no `as any`.
-
-## Inspect the static graph
-
-Every DOT app exposes a `manifest` — a declarative description of what is
-registered:
-
-```ts
-console.log(JSON.stringify(app.manifest, null, 2));
+```ts from="docs/examples/quickstart.ts#app"
+export default defineApp('shop').use(database).use(orders);
 ```
 
-You will see five top-level arrays:
+Why export the builder and not a booted app: `dot explain` and `dot doctor`
+own the lifecycle. They decide how far the app goes, and they clean up after
+it.
 
-```json
-{
-  "app": { "name": "my-app" },
-  "plugins": [{ "name": "env", "version": "0.1.0", "dependencies": [], "provides": ["env"] }],
-  "routes": [],
-  "services": [{ "name": "env", "plugin": "env", "kind": "env" }],
-  "lifecycle": [{ "plugin": "env", "hooks": ["configure", "boot"] }],
-  "dependencies": []
-}
+## 3. Make the mistake
+
+Swap the two `.use()` calls, so `orders` comes before the plugin it needs:
+
+```js from="docs/examples/quickstart-wrong-order.mjs#wrong-order"
+export default defineApp('shop').use(orders).use(database);
 ```
 
-The CLI prints the same data:
+In TypeScript, your editor rejects the `.use(orders)` line. The last line of
+the type error says what to do:
+
+```text
+Property ''DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)'' is missing in type ...
+```
+
+The compiler is the first guard. The kernel is the second, for code the
+compiler never sees: plain JavaScript, or TypeScript that Bun runs without a
+type check. The example file is JavaScript, so it loads. Run `dot doctor` on
+it:
 
 ```sh
-npx dot explain --json
+dot doctor --app src/app.js --json | jq -r '.error.code, .error.data.underlyingCode, .error.data.causeMessage'
 ```
 
-## Check runtime health
+This page runs the same command line in-process with `program.main`:
 
-```ts
-console.log(JSON.stringify(app.diagnostics, null, 2));
+```ts run expect
+import { program } from '@arki/dot/cli';
+
+let out = '';
+await program.main(['doctor', '--app', 'docs/examples/quickstart-wrong-order.mjs', '--json'], {
+  stdout: text => {
+    out += text;
+  },
+});
+const { error } = JSON.parse(out);
+console.log(error.code);
+console.log(error.data.underlyingCode);
+console.log(error.data.causeMessage);
 ```
 
-Or from the CLI:
+```text
+dot.app_lifecycle_failed
+ARKI_DOT_E020
+Plugin "orders" needs "db", which "database" provides — but "database" is mounted after it (position 2; "orders" is 1).
+Mount "database" with .use() before "orders".
+```
+
+Read it from the inside out:
+
+- `dot.app_lifecycle_failed` is the command's failure: the app failed while
+  the CLI prepared it. The process exits with code `3`.
+- `ARKI_DOT_E020` is the kernel's code: a provider is mounted after its
+  consumer. Codes never change meaning, so match on them, not on the text.
+- The message names both plugins and both positions.
+
+The kernel caught it at `configure`, before any `boot` hook ran. Nothing was
+opened, so there is nothing to clean up.
+
+## 4. Fix it
+
+Put `database` first again, as in step 2. The type error goes away, and the
+kernel has nothing to say.
+
+## 5. Read the graph: `dot explain`
 
 ```sh
-npx dot doctor --json | jq '.data.diagnostics.issues'
+dot explain --app src/app.ts --json | jq -c '.data.plugins[], .data.dependencies[]'
 ```
 
-`app.diagnostics` is a `DotDiagnosticsSnapshot`: same five-array shape as the
-manifest, plus runtime status for each plugin/route/service and an `issues`
-array. Empty `issues` means the app is healthy.
+Side effects: `dot explain` imports the app file, so its top-level code runs.
+Then it calls `configure` on each plugin. It never boots: no `provides`
+factory runs, no connection opens. A plugin that keeps the rules does no I/O
+in `configure`, so this is safe to run against production config.
 
-## Stop and dispose
+```ts run expect
+import { program } from '@arki/dot/cli';
 
-When you are done:
-
-```ts
-await app.stop();
-await app.dispose();
+let out = '';
+await program.main(['explain', '--app', 'docs/examples/quickstart.ts', '--json'], {
+  stdout: text => {
+    out += text;
+  },
+});
+const { data } = JSON.parse(out);
+for (const entry of [...data.plugins, ...data.dependencies]) console.log(JSON.stringify(entry));
 ```
 
-`stop` halts active work (workers, listeners) in reverse-topological order.
-`dispose` releases resources (connections, file handles) in the same order.
-Both are idempotent — calling them twice is safe.
+```text
+{"name":"database","dependencies":[],"provides":["db"]}
+{"name":"orders","dependencies":["db"],"provides":["orders"]}
+{"from":"orders","to":"database","kind":"requires","key":"db"}
+```
+
+`.data` is the manifest itself. There is no `.data.manifest`.
+
+## 6. Check it boots: `dot doctor`
+
+```sh
+dot doctor --app src/app.ts --json | jq -c '.data.status, (.data.plugins[] | {plugin, status}), .data.issues'
+```
+
+Side effects: `dot doctor` boots the app for real. Every `provides` factory
+and every `boot` hook runs, so connections open and a migrations plugin
+applies its migrations. Then it disposes the app. It never calls `start`, so
+workers and servers stay off. Point it at a database you are allowed to
+change.
+
+```ts run expect
+import { program } from '@arki/dot/cli';
+
+let out = '';
+await program.main(['doctor', '--app', 'docs/examples/quickstart.ts', '--json'], {
+  stdout: text => {
+    out += text;
+  },
+});
+const { data } = JSON.parse(out);
+console.log(JSON.stringify(data.status));
+for (const { plugin, status } of data.plugins) console.log(JSON.stringify({ plugin, status }));
+console.log(JSON.stringify(data.issues));
+```
+
+```text
+"success"
+{"plugin":"database","status":"ok"}
+{"plugin":"orders","status":"ok"}
+[]
+```
+
+An empty `issues` array means the app is healthy. `.data` is the diagnostics
+snapshot itself. There is no `.data.diagnostics`.
 
 ## Next steps
 
-- [Plugin authoring](./plugin-authoring.md) — write your own `DotPlugin`.
-- [Lifecycle](./lifecycle.md) — what each hook can (and cannot) do.
-- [Diagnostics](./diagnostics.md) — the full `dot explain` / `dot doctor`
-  contract.
-- [Adapter authoring](./adapter-authoring.md) — expose your own package.
-
-The full working code for this tutorial lives at
-[`env/docs/examples/quickstart.ts`](../../env/docs/examples/quickstart.ts).
+- [Dependency injection](./di.md): handles, tokens, `rename`, lazy services
+  and features.
+- [Plugin authoring](./plugin-authoring.md): write a plugin with all five
+  hooks.
+- [The `dot` command](./cli.md): `dot new` scaffolds a full app, `dot dev`
+  runs it.
+- [Deploy an app](./recipes/deploy.md): ship it in a container.

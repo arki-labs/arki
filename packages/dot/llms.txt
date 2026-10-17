@@ -5,17 +5,21 @@
 Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: it IS the manifest (`explain`) or the diagnostics snapshot (`doctor`).
 
 ## Import paths
-- `@arki/dot`: `defineApp`, `plugin`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `testApp`, `testPlugin`, `fake`; types `Provided`, `NeedsShape`, `DotAppManifest`, `DotDiagnosticsSnapshot`.
-- `@arki/dot/plugin`: the adapter-author surface: `plugin`, `handleOf`, `lazy`, `token`, `rename`, `defineApp`, contract types.
-- `@arki/dot/feature`: `defineFeature`, `DepsOf`, `routerFor`, `entrypointOnly`, `providesOf`, `servicesOf`, `resolveNeeds`, `ServicesBag`; object-form `feature()`.
-- `@arki/dot/orpc`: `needsMiddleware`, `rpc`. Optional peer `@orpc/server`.
-- `@arki/dot/log`: `log()`, the logging plugin. Mount it first.
-- `@arki/dot/runtime`: `createAppRuntime(app, { hot })`, one started app per server process; waits for the old app's dispose on a Vite hot update.
-- `@arki/dot/test-harness`: `testPlugin`, `testApp`, `bootTestApp`, `fake`.
-- `@arki/dot/cli`: `program` (built with `@arki/cli`; `program.main(argv, io)`), `runExplain`, `runDoctor`, `runNew`, the failures `AppNotFound`, `AppInvalidExport`, `AppImportFailed`, `AppLifecycleFailed`, `DoctorFailed`, `ObservabilityNoSdk`, `ProjectionNotFound`, `ProjectionImportFailed`, `ProjectionExecutionFailed`, `ProjectionConflict`, `TargetNotEmpty`, `TemplateMissing`, `WriteFailed`; types `DotNewResult`, `DotNewOperation`, `DoctorReport`. The `dot` bin: `arki.cli/1` envelope, exit 0/1/2/3.
+<!-- llms:start -->
+- `@arki/dot`: Compose an app from typed plugins that boot in declaration order and dispose in reverse. `DOT_LIFECYCLE_HOOKS`, `DOT_MANIFEST_ERROR_CODE`, `DotLifecycleError`, `DotLifecycleErrorCode`, `DotManifestError`, `DotPluginError`, `bootTestApp`, `defineApp`, `fake`, `hookSignals`, `initPlugins`, `isLazy`; and 82 more.
+- `@arki/dot/plugin`: The plugin author's surface: `plugin`, handles, tokens, `rename` and the contract types. `DOT_LIFECYCLE_HOOKS`, `DotLifecycleError`, `DotLifecycleErrorCode`, `DotPluginError`, `bootTestApp`, `defineApp`, `handleOf`, `initPlugins`, `isLazy`, `lazy`, `lazyOf`, `plugin`; and 73 more.
+- `@arki/dot/feature`: Domain modules for Dot apps: `defineFeature`, its routers and the services bag. `FEATURE_ERROR_CODES`, `FeatureError`, `allFeatures`, `bindDriver`, `composeRepos`, `composeRouter`, `defineFeature`, `driven`, `driver`, `entrypointOnly`, `entrypointsOf`, `feature`; and 87 more.
+- `@arki/dot/orpc`: oRPC procedures for `defineFeature` features, contract first. `RPC_ACTION_META_SCHEMA`, `errorCaptureMiddleware`, `needsMiddleware`, `rpc`; types `BoundContext`, `BuiltRouter`, `ContractKeysGuard`, `ErrorCaptureInfo`, `ProcedureFactories`, `RequestContextShape`.
+- `@arki/dot/cli`: The `dot` command line, built on `@arki/cli`: `program`, the run functions and the `dot.*` failures. `AppImportFailed`, `AppInvalidExport`, `AppLifecycleFailed`, `AppNotFound`, `DEV_STATE_PATH`, `DevAlreadyRunning`, `DevAppStarted`, `DevDbUnreachable`, `DevPortInUse`, `DevPreflightFailed`, `DevRemoteDbRefused`, `DevRunnerFailed`; and 30 more.
+- `@arki/dot/log`: `log()`: the plugin that fills Dot's logging slot with an `@arki/log` configuration. `DOT_LOG_ERROR_CODES`, `log`; types `LogServices`.
+- `@arki/dot/runtime`: `createAppRuntime`: the one started Dot app of a server process, safe under Vite hot updates. `createAppRuntime`.
+- `@arki/dot/test-harness`: Test builders that boot plugins against fakes: `testPlugin`, `testApp` and `bootTestApp`. `bootTestApp`, `fake`, `testApp`, `testPlugin`; types `TestAppOptions`, `TestAppServices`, `TestPluginBuilder`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.
+- [AGENTS.md](AGENTS.md): the laws for changing this package.
+- [Quickstart](docs/quickstart.md): build an app, break it, read the `ARKI_DOT_E020` error, fix it.
 - [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): the long overview, with compiled examples.
 
@@ -30,6 +34,10 @@ Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: i
 - [Debug a boot failure](docs/agent-guide.md#debug-a-boot-failure)
 - [Look up an error code](docs/agent-guide.md#errors)
 - [Write a plugin](docs/plugin-authoring.md)
+- [Wire needs and provides, tokens, `rename`, features](docs/di.md)
+- [Test a plugin against fakes](docs/testing.md)
+- [Deploy an app (ends in `curl /api/health`)](docs/recipes/deploy.md)
+- [Upgrade Dot (ends in `dot doctor --json`)](docs/recipes/upgrade.md)
 - [Expose a package as a `./dot` adapter](docs/adapter-authoring.md)
 
 ## Rules that bite
@@ -45,4 +53,6 @@ Wrong wiring is a compile error at `.use()`. Read `.data` from the CLI's JSON: i
 - [Lifecycle](docs/lifecycle.md): state machine, failure order, every error code.
 - [Diagnostics](docs/diagnostics.md): manifest and diagnostics contracts.
 - [Observability](docs/observability.md): OpenTelemetry, observers, `app.timeline()`.
-- [Quickstart](docs/quickstart.md), [Principles](docs/principles.md), [Release policy](docs/release-policy.md)
+- [The `dot` command](docs/cli.md): every command and its side effects.
+- [Logging, shutdown and timeouts](docs/operations.md), [A complex setup](docs/complex-setup.md)
+- [Principles](docs/principles.md), [Release policy](docs/release-policy.md), [Upgrade guide](docs/upgrade-guide.md)

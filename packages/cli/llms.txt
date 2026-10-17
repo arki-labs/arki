@@ -5,14 +5,16 @@
 `main(argv, io)` never exits the process; `run(program)` is the only process boundary.
 
 ## Import paths
-
-- `@arki/cli`: `defineCommand`, `group`, `defineCli`, `run`, `ExitCode`, the failures `UnknownCommand`, `InvalidInput`, `PreviewUnsupported`, `InputRequired`, `ConfirmationRequired`, `Cancelled`, and the types `Command`, `AnyCommand`, `RunContext`, `InputOf`, `OutputOf`, `ServicesOf`, `CommandTree`, `Group`, `Cli`, `Program`, `Io`, `Ui`, `Envelope`.
+<!-- llms:start -->
+- `@arki/cli`: Typed command-line programs from one `defineCommand`: flags from the input schema, a JSON envelope when piped, stable exit codes. `Cancelled`, `ConfirmationRequired`, `ExitCode`, `InputRequired`, `InvalidInput`, `PreviewUnsupported`, `UnknownCommand`, `defineCli`, `defineCommand`, `group`, `run`; types `AnyCommand`; and 28 more.
+<!-- llms:end -->
 
 ## Start here
 
 - [Agent guide](docs/agent-guide.md): read first.
+- [AGENTS.md](AGENTS.md): the laws for changing this package.
 - [Verify](docs/agent-guide.md#verify): the commands to run after a change.
-- [README](README.md): the long overview.
+- [README](README.md): the long overview; `Failure behaviour` lists every `cli.*` code and exit code.
 
 ## By task
 

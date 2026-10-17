@@ -1,6 +1,7 @@
 /**
- * `@arki/dot/orpc` — oRPC for `defineFeature` features, contract first
- * (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, Part B).
+ * `@arki/dot/orpc` — oRPC procedures for `defineFeature` features, contract first.
+ *
+ * Design: RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, Part B.
  *
  *   // app: core/orpc.ts
  *   export const bind = needsMiddleware<RequestContext>();

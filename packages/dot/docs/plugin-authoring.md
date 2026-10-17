@@ -11,6 +11,24 @@ contract.
 ```ts
 import { plugin, service } from '@arki/dot';
 
+// Stand-ins for the pieces a real app brings.
+type Logger = { info(message: string): void };
+type Db = { query(sql: string): Promise<unknown[]> };
+class BillingService {
+  constructor(
+    readonly db: Db,
+    readonly log: Logger,
+  ) {}
+  async tick(): Promise<void> {
+    this.log.info('tick');
+    await this.db.query('select 1');
+  }
+}
+const database = plugin({
+  name: 'database',
+  provides: { db: (): Db => ({ query: async () => [] }) },
+});
+
 export const billing = plugin({
   name: 'billing',
   version: '1.0.0',
@@ -18,6 +36,7 @@ export const billing = plugin({
 
   configure(ctx) {
     // Synchronous registration. No I/O.
+    ctx.registerService('billing', 'custom');
   },
   provides: {
     // One factory per key. Publish services here.
@@ -25,15 +44,19 @@ export const billing = plugin({
   },
   async boot({ billing }) {
     // Side effects only (seed, warm-up). Returns nothing.
+    await billing.tick();
   },
   async start({ billing }) {
     // Begin active work.
+    await billing.tick();
   },
   async stop({ billing }) {
     // Halt active work.
+    await billing.tick();
   },
   async dispose({ billing, db }) {
     // Release resources. Needs are still alive here (reverse-order teardown).
+    await db.query(`close ${billing.constructor.name}`);
   },
 });
 ```
@@ -75,12 +98,15 @@ A plugin **provides** services through `provides`: one factory per key.
 Factories get the plugin's needs (local aliases) plus `$app`, `$plugin` and
 `$config`. They may be async. They run in key order and are awaited:
 
-```ts
-import { plugin } from '@arki/dot';
+```ts run
+import { defineApp, plugin } from '@arki/dot';
 
 type Client = { ping(): Promise<void>; close(): Promise<void> };
 
-export const apiClient = plugin({
+// Stand-in for a real connection.
+const openClient = async (): Promise<Client> => ({ ping: async () => {}, close: async () => {} });
+
+export const apiClientPlugin = plugin({
   name: 'api-client',
   provides: {
     apiClient: (): Promise<Client> => openClient(),
@@ -95,16 +121,17 @@ A plugin **consumes** services by declaring a `needs` shape. Name the
 provider's handle when you can import it. The hook context delivers the
 values fully typed — destructuring is the injection:
 
-```ts
-import { plugin } from '@arki/dot';
+```ts continue
+// Stand-in for the service this plugin publishes.
+const makeBilling = (client: Client) => ({ charge: () => client.ping() });
 
 export const billing = plugin({
   name: 'billing',
   needs: { apiClient: apiClientPlugin.provides.apiClient },
+  provides: { billing: ({ apiClient }) => makeBilling(apiClient) },
   async boot({ apiClient }) {
     await apiClient.ping();
   },
-  provides: { billing: ({ apiClient }) => makeBilling(apiClient) },
 });
 ```
 
@@ -129,6 +156,17 @@ declares (erased or JS graphs, dynamic http bundle tokens). `ARKI_DOT_E013`
 (collision) and `ARKI_DOT_E014` (reserved key) cover erased/dynamic
 composition.
 
+Mounted in order, the wiring boots and the manifest records the need:
+
+```ts continue
+const shop = await defineApp('shop').use(apiClientPlugin).use(billing).boot();
+
+const billingEntry = shop.manifest.plugins.find(p => p.name === 'billing');
+if (billingEntry?.dependencies.join() !== 'apiClient') throw new Error('billing should need apiClient');
+await shop.services.billing.charge();
+await shop.dispose();
+```
+
 Hook contexts also carry `$`-prefixed kernel keys — `$app` (app name),
 `$plugin` (plugin name), `$config` (the `defineApp(name, { config })` bag). The
 `$` prefix is a reserved namespace: `plugin()` rejects `$`-prefixed needs
@@ -151,25 +189,35 @@ Two plugins publishing the same wire key is a collision (compile error at
 `.use()`, coded runtime error on erased paths). To mount a second
 instance of an adapter, rename its published keys at the mount site:
 
-```ts
-import { db } from '@arki/db/dot';
-import { defineApp, rename } from '@arki/dot';
+```ts continue
+import { rename } from '@arki/dot';
 
-const app = await defineApp('orders')
-  .use(db({ relations }))
-  .use(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
+// Stand-in for an adapter factory such as `db()` from `@arki/db/dot`.
+const db = (label: string) => plugin({ name: 'db', provides: { db: () => ({ label }) } });
+
+const orders = await defineApp('orders')
+  .use(db('primary'))
+  .use(rename(db('reports'), { db: 'reportsDb' }, 'reports-db'))
   .boot();
 
-app.services.db; // primary
-app.services.reportsDb; // second instance, same type
+if (orders.services.db.label !== 'primary') throw new Error('primary instance lost');
+if (orders.services.reportsDb.label !== 'reports') throw new Error('second instance missing'); // same type
+await orders.dispose();
 ```
 
 `rename` rebuilds the handles. Consumers of the second instance use
 `reportsDb.provides.reportsDb`:
 
-```ts
-const reportsDb = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
-// needs: { db: reportsDb.provides.reportsDb }
+```ts continue
+const reportsDb = rename(db('reports'), { db: 'reportsDb' }, 'reports-db');
+
+export const reportReader = plugin({
+  name: 'report-reader',
+  needs: { db: reportsDb.provides.reportsDb },
+  boot: ({ db }) => {
+    if (db.label !== 'reports') throw new Error('wired to the wrong database');
+  },
+});
 ```
 
 A handle taken before the rename keeps the old key and fails the builder guard.
@@ -186,10 +234,18 @@ When opening a resource is expensive and not every process needs it, wrap
 the initialization in `lazy()` — `boot` stays cheap and the resource opens
 on first use:
 
-```ts
-import { lazy, plugin } from '@arki/dot';
+```ts continue
+import { lazy } from '@arki/dot';
 
-export const search = plugin({
+type SearchClient = { query(text: string): Promise<string[]>; close(): Promise<void> };
+
+// Stand-in for an expensive connection.
+const connectSearchCluster = async (): Promise<SearchClient> => ({
+  query: async text => [text],
+  close: async () => {},
+});
+
+export const searchPlugin = plugin({
   name: 'search',
   provides: {
     search: () =>
@@ -204,29 +260,52 @@ export const search = plugin({
 Laziness is visible in the type: the service is a `Lazy<SearchClient>`,
 and consumers acquire it explicitly:
 
-```ts
+```ts continue
 export const indexer = plugin({
   name: 'indexer',
   needs: { search: searchPlugin.provides.search },
   async start({ search }) {
     const client = await search.get(); // first call initializes
-    // ...
+    await client.query('warm up');
   },
 });
 ```
 
 A handle to a lazy provider binds the consumer to a lazy provider. To stay
-agnostic about the provider's strategy, use `.lazy` on the handle — it
-accepts an **eager or lazy** provider and always delivers a `Lazy<T>`
-(eager values arrive pre-initialized):
+agnostic about the provider's strategy, ask for `service.lazy<T>()`. It
+accepts an **eager or lazy** provider and always delivers a `Lazy<T>` (eager
+values arrive pre-initialized):
 
-```ts
-needs: { search: searchPlugin.provides.search.lazy },
-// works against provides: { search: () => client }                (lifted, warm)
-// and           provides: { search: () => lazy(() => connect()) } (passed through)
+```ts continue
+import { service } from '@arki/dot';
+
+export const agnosticIndexer = plugin({
+  name: 'agnostic-indexer',
+  needs: { search: service.lazy<SearchClient>() },
+  async start({ search }) {
+    await (await search.get()).query('warm up');
+  },
+});
+
+// Works against a lazy provider (passed through) ...
+const lazyApp = await defineApp('lazy').use(searchPlugin).use(agnosticIndexer).start();
+
+// ... and against an eager one, whose value is lifted and arrives warm.
+const eagerSearch = plugin({
+  name: 'eager-search',
+  provides: { search: async (): Promise<SearchClient> => connectSearchCluster() },
+});
+const eagerApp = await defineApp('eager').use(eagerSearch).use(agnosticIndexer).start();
+
+await lazyApp.dispose();
+await eagerApp.dispose();
 ```
 
-Without the provider in reach, `service.lazy<T>()` does the same job.
+When the provider is in reach and publishes a plain value, its handle has the
+same lift as `.lazy`: `needs: { search: eagerSearch.provides.search.lazy }`.
+A handle of a provider that already publishes a `Lazy<T>` has the type
+`Lazy<T>`, so `.lazy` on it would wrap a lazy in a lazy. Use `service.lazy<T>()`
+there.
 
 Semantics:
 
@@ -249,41 +328,56 @@ wire key. When a contract is shared across packages, use a **token**: a
 named witness whose owned key travels with it, so the local alias becomes
 a free choice:
 
-```ts
+```ts continue
+import { token } from '@arki/dot';
+
+type KvClient = { get(key: string): Promise<string | undefined> };
+const client: KvClient = { get: async key => key };
+
 // @acme/kv owns the contract:
 export const Kv = token<KvClient>()('acme.kv');
 
 // provider (in @acme/kv):
-plugin({ name: 'kv', provides: { [Kv.key]: () => client } });
+export const kvPlugin = plugin({ name: 'kv', provides: { [Kv.key]: () => client } });
 
 // any consumer, any alias:
-plugin({
+export const cachePlugin = plugin({
   name: 'cache',
   needs: { cache: Kv }, // wire key 'acme.kv', local alias `cache`
-  boot: ({ cache }) => {
-    /* typed KvClient */
+  boot: async ({ cache }) => {
+    await cache.get('warm'); // typed KvClient
   },
 });
 
 // derived instance token:
 const SessionsKv = Kv.instance('sessions'); // key 'acme.kv#sessions'
+if (SessionsKv.key !== 'acme.kv#sessions') throw new Error(`unexpected key ${SessionsKv.key}`);
+
+const cacheApp = await defineApp('cache-demo').use(kvPlugin).use(cachePlugin).boot();
+await cacheApp.dispose();
 ```
 
 ## Manifest contribution
 
 During `configure`, a plugin registers what it exposes:
 
-```ts
-configure(ctx) {
-  ctx.registerService('billing', 'custom');
-  ctx.registerAction({
-    id: 'create-invoice',
-    binding: 'http',
-    direction: 'in',
-    address: 'POST /invoices',
-  });
-  ctx.declareProvides('billing');
-}
+```ts continue
+export const invoicing = plugin({
+  name: 'invoicing',
+  configure(ctx) {
+    ctx.registerService('billing', 'custom');
+    ctx.registerAction({
+      id: 'create-invoice',
+      binding: 'http',
+      direction: 'in',
+      address: 'POST /invoices',
+    });
+    ctx.declareProvides('billing');
+  },
+});
+
+const invoicingApp = defineApp('invoices').use(invoicing).configure();
+if (invoicingApp.manifest.actions.map(a => a.id).join() !== 'create-invoice') throw new Error('action missing');
 ```
 
 The merged result lands in `app.manifest`. Agents and CI tools read this
@@ -303,36 +397,61 @@ automatically records lifecycle state. To emit a custom issue, throw a
 structured error from a hook — the kernel wraps it into a
 `DiagnosticIssue` with the plugin name attached.
 
-```ts
-async boot({ $config }) {
-  const key = $config['BILLING_KEY'];
-  if (!key) {
-    throw Object.assign(new Error('BILLING_KEY not set'), {
-      code: 'BILLING_E001',
-      remediation: 'Set BILLING_KEY in your env or pass it to the billing plugin.',
-      docsUrl: 'https://example.com/dot/docs/billing#config',
-    });
-  }
+```ts run expect
+import { defineApp, DotLifecycleError, DotPluginError, plugin } from '@arki/dot';
+
+const strictBilling = plugin({
+  name: 'strict-billing',
+  async boot({ $config }) {
+    const key = $config['BILLING_KEY'];
+    if (!key) {
+      throw new DotPluginError({
+        code: 'BILLING_E001',
+        message: 'BILLING_KEY not set',
+        remediation: 'Set BILLING_KEY in your env or pass it to the billing plugin.',
+        docsUrl: 'https://example.com/dot/docs/billing#config',
+      });
+    }
+  },
+});
+
+const configured = defineApp('demo').use(strictBilling).configure();
+try {
+  await configured.boot();
+} catch (err) {
+  if (!(err instanceof DotLifecycleError) || !(err.cause instanceof DotPluginError)) throw err;
+  console.log(err.code, err.cause.code);
+  console.log(configured.diagnostics.issues.map(issue => `${issue.code} ${issue.plugin}`).join());
 }
 ```
 
-The properties `code`, `remediation`, and `docsUrl` propagate to the
-`DiagnosticIssue` in `app.diagnostics.issues`. See
-[Diagnostics](./diagnostics.md) for the full shape and stable code
-conventions.
+```text
+ARKI_DOT_E003 BILLING_E001
+ARKI_DOT_E003 strict-billing
+```
+
+The kernel records one issue under its own code (`ARKI_DOT_E003`, with the
+plugin name and your message) and rethrows a `DotLifecycleError` whose
+`cause` is your `DotPluginError`. Your `code`, `remediation` and `docsUrl`
+live on `cause`. See [Diagnostics](./diagnostics.md) for the full shape and
+stable code conventions.
 
 ## Type-safe services
 
 Provides are inferred from the `provides` factories and accumulate through the
 builder:
 
-```ts
+```ts run
+import { defineApp, plugin } from '@arki/dot';
+
 const a = plugin({ name: 'a', provides: { a: () => 1 } });
 const b = plugin({ name: 'b', provides: { b: () => 'x' } });
 
 const app = await defineApp('demo').use(a).use(b).boot();
-app.services.a; // number
-app.services.b; // string
+const first: number = app.services.a;
+const second: string = app.services.b;
+if (first !== 1 || second !== 'x') throw new Error('services lost their values');
+await app.dispose();
 ```
 
 The builder type narrows on every `.use(...)` call. No casts needed —
@@ -344,10 +463,22 @@ anywhere, including inside hooks.
 `fake:<key>`. It provides `value` under the handle's wire key, type-checked
 against the handle:
 
-```ts
+```ts run
+import { defineApp, plugin } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
 
-defineApp('t').use(fake(database.provides.db, db)).features([billing]);
+type Db = { query(sql: string): Promise<string> };
+const database = plugin({ name: 'database', provides: { db: (): Db => ({ query: async () => 'real' }) } });
+const reports = plugin({
+  name: 'reports',
+  needs: { db: database.provides.db },
+  provides: { report: ({ db }) => db.query('select 1') },
+});
+
+const fakeDb: Db = { query: async () => 'fake' };
+const app = await defineApp('t').use(fake(database.provides.db, fakeDb)).use(reports).boot();
+if (app.services.report !== 'fake') throw new Error('the fake did not replace the database');
+await app.dispose();
 ```
 
 ## When NOT to write a plugin
@@ -366,9 +497,19 @@ composition in module space.
 ```ts
 import { describe, expect, it } from 'vitest';
 
-import { bootTestApp, testApp } from '@arki/dot';
+import { bootTestApp, plugin, testApp } from '@arki/dot';
 
-import { billing } from '../src/billing-plugin.js';
+// The plugins under test, as ../src/billing-plugin.ts would export them.
+type Client = { ping(): Promise<void> };
+const apiClient = plugin({
+  name: 'api-client',
+  provides: { apiClient: (): Client => ({ ping: async () => {} }) },
+});
+const billing = plugin({
+  name: 'billing',
+  needs: { apiClient: apiClient.provides.apiClient },
+  provides: { billing: ({ apiClient }) => ({ charge: () => apiClient.ping() }) },
+});
 
 describe('billing plugin', () => {
   it('publishes a billing service', async () => {

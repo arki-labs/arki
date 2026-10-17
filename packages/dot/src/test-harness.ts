@@ -1,5 +1,5 @@
 /**
- * Test harness for unit-testing DOT plugins.
+ * Test builders that boot plugins against fakes: `testPlugin`, `testApp` and `bootTestApp`.
  *
  * Provides `testApp` — a convenience wrapper that lets plugin authors verify
  * lifecycle behaviour, registration, and service publishing without dragging

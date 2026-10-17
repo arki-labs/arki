@@ -309,7 +309,8 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 (`cli.*`) and `3` on a returned failure (`dot.*`). Every failure envelope has
 `.error.code`, `.error.message`, `.error.remediation` and `.error.docsUrl`;
 `jq '.error.remediation'` is the fix. Kernel errors (`ARKI_DOT_E*`) appear as
-issue codes inside the diagnostics.
+issue codes inside the diagnostics, or as `.error.data.underlyingCode` when
+`configure` failed (`dot.app_lifecycle_failed`).
 
 | Code                                                                        | Meaning                                                                                                                                                 | What to do                                                                              |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -318,7 +319,7 @@ issue codes inside the diagnostics.
 | `dot.app_not_found` (exit 3)                                                | No app file found and no `--app`.                                                                                                                       | Pass `--app <path>`, or create `dot.config.ts`.                                         |
 | `dot.app_invalid_export` (exit 3)                                           | The app file has no usable app export: the `default`/`app` export is not a DOT app, there is none, or several are exported and none is `default`/`app`. | `export default defineApp(...)` or `export const app = defineApp(...)`.                 |
 | `dot.app_import_failed` (exit 3)                                            | Importing the app file, or calling its factory export, threw.                                                                                           | Apply `.error.data.causeRemediation` when set; otherwise run `bun <path>` to reproduce. |
-| `dot.app_lifecycle_failed` (exit 3)                                         | `configure` threw while the CLI prepared the app.                                                                                                       | Run `dot doctor --json` for per-plugin issues.                                          |
+| `dot.app_lifecycle_failed` (exit 3)                                         | `configure` threw while the CLI prepared the app. `.error.data.underlyingCode` is the kernel code.                                                      | Fix that code; `ARKI_DOT_E020` means a provider is mounted after its consumer.          |
 | `dot.doctor_failed` (exit 3)                                                | `doctor` found an error issue, or boot threw. `.error.data` is the report.                                                                              | Apply each issue's `remediation` in `.error.data.plugins[].issues`.                     |
 | `dot.observability_no_sdk`                                                  | `doctor --observability`: no OpenTelemetry SDK registered. A warning issue in `.data.issues`, not a failure.                                            | Register an SDK once at app entry; see `docs/observability.md`.                         |
 | `dot.projection_*` (exit 3)                                                 | `explain --as`: `projection_not_found`, `projection_import_failed`, `projection_execution_failed`, `projection_conflict`.                               | Check the projection module the adapter registers; `--module` tries a replacement.      |
@@ -379,4 +380,8 @@ checks that every `jq` path in this guide exists in the real CLI output.
 - [Plugin authoring](plugin-authoring.md): write a plugin.
 - [Adapter authoring](adapter-authoring.md): expose a package as a `./dot` plugin.
 - [Observability](observability.md): OpenTelemetry, observers, `app.timeline()`.
-- [Quickstart](quickstart.md): boot a first app.
+- [Quickstart](quickstart.md): build an app, break it, read the error.
+- [Dependency injection](di.md): needs, provides, tokens, `rename`, features.
+- [The `dot` command](cli.md): every command and its side effects.
+- [Testing plugins](testing.md) and [Logging, shutdown and timeouts](operations.md).
+- Recipes: [Deploy an app](recipes/deploy.md), [Upgrade Dot](recipes/upgrade.md).

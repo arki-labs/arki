@@ -53,47 +53,123 @@ export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' 
  * failures (see `FEATURE_ERROR_CODES`); E032 is non-JSON manifest data.
  */
 export const DotLifecycleErrorCode = {
-  /** A `configure` hook attempted async work (returned a Promise). */
+  /**
+   * A `configure` hook attempted async work (returned a Promise).
+   * @fix Make `configure` synchronous and move async work to `boot`.
+   * @verify dot explain --json | jq -e .ok
+   */
   ConfigureAsync: 'ARKI_DOT_E001',
-  /** A `configure` hook threw. */
+  /**
+   * A `configure` hook threw.
+   * @fix Fix the plugin's config or its `configure` hook, then build a new app.
+   * @verify dot explain --json | jq -e .ok
+   */
   ConfigureFailed: 'ARKI_DOT_E002',
-  /** A `boot` hook threw. */
+  /**
+   * A `boot` hook threw.
+   * @fix Read `cause` and `plugin`, then fix that plugin's `boot` hook or the service it opens.
+   * @verify dot doctor --json | jq -e .ok
+   */
   BootFailed: 'ARKI_DOT_E003',
-  /** A `start` hook threw. */
+  /**
+   * A `start` hook threw.
+   * @fix Read `cause` and `plugin`, then fix that plugin's `start` hook.
+   * @verify bun run test
+   */
   StartFailed: 'ARKI_DOT_E004',
-  /** One or more `stop` hooks threw — aggregate. */
+  /**
+   * One or more `stop` hooks threw — aggregate.
+   * @fix Read `failures`: each entry names the plugin whose `stop` hook threw.
+   * @verify bun run test
+   */
   StopFailed: 'ARKI_DOT_E005',
-  /** One or more `dispose` hooks threw — aggregate. */
+  /**
+   * One or more `dispose` hooks threw — aggregate.
+   * @fix Read `failures`: each entry names the plugin whose `dispose` hook threw.
+   * @verify dot doctor --json | jq -e .ok
+   */
   DisposeFailed: 'ARKI_DOT_E006',
-  /** Caller tried to reuse the app after dispose. */
+  /**
+   * Caller tried to reuse the app after dispose.
+   * @fix Build a fresh app instance; a disposed app cannot run again.
+   * @verify bun run test
+   */
   ReuseAfterDispose: 'ARKI_DOT_E007',
-  /** Caller tried to reuse the app after a failed lifecycle. */
+  /**
+   * Caller tried to reuse the app after a failed lifecycle.
+   * @fix Build a fresh app instance; a failed app cannot run again.
+   * @verify bun run test
+   */
   ReuseAfterFailure: 'ARKI_DOT_E008',
   // E009 (DependencyCycle) and E010 (MissingDependency) are RETIRED with the
   // v2 wiring model — declaration order is boot order, so cycles and
   // name-based dependency declarations no longer exist. Codes are never
   // reused for new meanings.
-  /** Plugin registered twice. */
+  /**
+   * Plugin registered twice.
+   * @fix Remove the second `.use()` of this plugin, or `rename` it to run two copies.
+   * @verify dot explain --json | jq -e .ok
+   */
   DuplicatePlugin: 'ARKI_DOT_E011',
-  /** A plugin's `needs` entry has no provider among earlier-booted plugins. */
+  /**
+   * A plugin's `needs` entry has no provider among earlier-booted plugins.
+   * @fix Mount a plugin that provides the needed key before its consumer.
+   * @verify dot doctor --json | jq -e .ok
+   */
   UnsatisfiedNeed: 'ARKI_DOT_E012',
-  /** A plugin published a wire key that an earlier plugin already provides. */
+  /**
+   * A plugin published a wire key that an earlier plugin already provides.
+   * @fix Give one of the two providers a different key with `rename`.
+   * @verify dot doctor --json | jq -e .ok
+   */
   ServiceCollision: 'ARKI_DOT_E013',
-  /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
+  /**
+   * A needs alias, publish key, or rename target uses the reserved `$` prefix.
+   * @fix Rename the key; names starting with `$` belong to the kernel.
+   * @verify dot explain --json | jq -e .ok
+   */
   ReservedServiceKey: 'ARKI_DOT_E014',
-  /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
+  /**
+   * A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog.
+   * @fix Pass the hook's `$signal` to its I/O, or raise `hookTimeoutMs` with a reason.
+   * @verify dot doctor --json | jq -e .ok
+   */
   HookTimeout: 'ARKI_DOT_E015',
-  /** Two actions in the same binding use the same id. */
+  /**
+   * Two actions in the same binding use the same id.
+   * @fix Give each action in a binding its own id.
+   * @verify dot explain --json | jq -e .ok
+   */
   DuplicateAction: 'ARKI_DOT_E016',
-  /** Action metadata is not JSON-round-trip safe. */
+  /**
+   * Action metadata is not JSON-round-trip safe.
+   * @fix Keep action `meta` plain JSON: no functions, Dates, Maps or cycles.
+   * @verify dot explain --json | jq -e .ok
+   */
   ActionMetaNotJson: 'ARKI_DOT_E017',
-  /** More than one plugin fills the logging slot. */
+  /**
+   * More than one plugin fills the logging slot.
+   * @fix Keep one `log()` plugin in the app.
+   * @verify dot explain --json | jq -e .ok
+   */
   DuplicateLogging: 'ARKI_DOT_E018',
-  /** Static capability needs form a ring: a feature's need comes back around to itself. */
+  /**
+   * Static capability needs form a ring: a feature's need comes back around to itself.
+   * @fix Move the shared piece into a third unit that both sides need.
+   * @verify dot explain --json | jq -e .ok
+   */
   CapabilityRing: 'ARKI_DOT_E019',
-  /** A feature needs a capability whose (static) provider is mounted after it. */
+  /**
+   * A feature needs a capability whose (static) provider is mounted after it.
+   * @fix Mount the provider before the unit that needs it; the message names both positions.
+   * @verify dot explain --json | jq -e .ok
+   */
   ProviderMountedLater: 'ARKI_DOT_E020',
-  /** `$describeAction` named an action the calling plugin may not amend (unknown id, or not its own). */
+  /**
+   * `$describeAction` named an action the calling plugin may not amend (unknown id, or not its own).
+   * @fix Describe only actions the calling plugin declared or owns.
+   * @verify dot explain --json | jq -e .ok
+   */
   ActionNotAmendable: 'ARKI_DOT_E021',
 } as const;
 

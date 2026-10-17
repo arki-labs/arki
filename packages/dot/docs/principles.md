@@ -37,10 +37,10 @@ This means we:
   No "An error occurred." No `e.message` fallbacks.
 - Allow a **light hand in JSDoc** — examples can be vivid, comparisons can
   be concrete, asides are allowed if they teach. We trust the reader.
-- **Refuse buzzwords** ("seamless," "best-in-class," "enterprise-grade,"
-  "next-generation"). They mean nothing.
-- **Refuse hedging language** in core docs ("you might want to…",
-  "consider…", "feel free to…"). DOT has opinions; state them.
+- **Refuse buzzwords** (`seamless`, `best-in-class`, `enterprise-grade`,
+  `next-generation`). They mean nothing.
+- **Refuse hedging language** in core docs (`you might want to…`,
+  `consider…`, `feel free to…`). DOT has opinions; state them.
 
 What this principle _forbids_:
 

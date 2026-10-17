@@ -1,3 +1,6 @@
+/**
+ * Typed command-line programs from one `defineCommand`: flags from the input schema, a JSON envelope when piped, stable exit codes.
+ */
 export type { Cli, Io, Program } from './cli.js';
 export { defineCli } from './cli.js';
 export type {

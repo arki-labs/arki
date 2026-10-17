@@ -25,6 +25,8 @@
     "llms.txt",
     "README.md",
     "LICENSE",
+    "CHANGELOG.md",
+    "AGENTS.md",
     "package.json"
   ],
   "scripts": {

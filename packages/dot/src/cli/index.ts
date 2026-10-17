@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * `dot` CLI entry point, built on `@arki/cli`.
+ * The `dot` command line, built on `@arki/cli`: `program`, the run functions and the `dot.*` failures.
  *
  *   - `dot explain`    print the static app graph (manifest); never boots
  *   - `dot doctor`     boot the app and print runtime diagnostics

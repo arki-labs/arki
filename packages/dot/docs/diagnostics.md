@@ -14,6 +14,8 @@ The manifest is the declarative description of an app. It is finalised once
 `configure()` completes and never changes afterwards.
 
 ```ts
+import type { DotAppManifest as ExportedManifest } from '@arki/dot';
+
 type DotAppManifest = {
   manifestVersion: 2;
   app: { name: string; version?: string };
@@ -24,6 +26,18 @@ type DotAppManifest = {
   dependencies: DependencyEdge[];
   projections: ProjectionManifest[];
 };
+
+// Shapes are written out to read. This line stops compiling if one drifts from the exported type.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const manifestMatches: Same<DotAppManifest, ExportedManifest> = true;
+
+// The sub-shapes are in the next block.
+type PluginManifest = ExportedManifest['plugins'][number];
+type ActionManifest = ExportedManifest['actions'][number];
+type ServiceManifest = ExportedManifest['services'][number];
+type LifecycleManifest = ExportedManifest['lifecycle'][number];
+type DependencyEdge = ExportedManifest['dependencies'][number];
+type ProjectionManifest = ExportedManifest['projections'][number];
 ```
 
 **Six-array contract.** The six top-level arrays (`plugins`, `actions`,
@@ -33,9 +47,12 @@ present**, even when empty. Consumers must never see an omitted array.
 ### Sub-shapes
 
 ```ts
+import type { DotAppManifest, DotLifecycleHook, JsonObject } from '@arki/dot';
+
 type PluginManifest = {
   name: string;
   version?: string;
+  role?: 'feature' | 'driving'; // the hexagon role the app builder gave the plugin
   dependencies: readonly string[];
   provides: readonly string[];
 };
@@ -54,7 +71,7 @@ type ActionManifest = {
 type ServiceManifest = {
   name: string;
   plugin: string;
-  kind: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'custom';
+  kind: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'event-store' | 'message-bus' | 'custom';
 };
 
 type LifecycleManifest = {
@@ -75,6 +92,15 @@ type ProjectionManifest = {
   module: string;
   plugin: string;
 };
+
+// Each shape must equal the entry type of the exported manifest.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const pluginMatches: Same<PluginManifest, DotAppManifest['plugins'][number]> = true;
+export const actionMatches: Same<ActionManifest, DotAppManifest['actions'][number]> = true;
+export const serviceMatches: Same<ServiceManifest, DotAppManifest['services'][number]> = true;
+export const lifecycleMatches: Same<LifecycleManifest, DotAppManifest['lifecycle'][number]> = true;
+export const edgeMatches: Same<DependencyEdge, DotAppManifest['dependencies'][number]> = true;
+export const projectionMatches: Same<ProjectionManifest, DotAppManifest['projections'][number]> = true;
 ```
 
 ## `DotDiagnosticsSnapshot`
@@ -83,16 +109,21 @@ A diagnostics snapshot is a point-in-time record. Reading
 `app.diagnostics` re-computes it from the kernel's live state.
 
 ```ts
+import type { DotLifecycleState, DotDiagnosticsSnapshot as ExportedSnapshot } from '@arki/dot';
+
 type DotDiagnosticsSnapshot = {
   snapshotVersion: 2;
   generatedAt: string; // ISO-8601
   app: { name: string; state: DotLifecycleState };
-  plugins: PluginDiagnostic[];
-  actions: ActionDiagnostic[];
-  services: ServiceDiagnostic[];
-  lifecycle: LifecycleDiagnostic[];
-  issues: DiagnosticIssue[];
+  plugins: ExportedSnapshot['plugins'];
+  actions: ExportedSnapshot['actions'];
+  services: ExportedSnapshot['services'];
+  lifecycle: ExportedSnapshot['lifecycle'];
+  issues: ExportedSnapshot['issues'];
 };
+
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const snapshotMatches: Same<DotDiagnosticsSnapshot, ExportedSnapshot> = true;
 ```
 
 **Five-array contract.** Same rule as the manifest — `plugins`, `actions`,
@@ -103,6 +134,8 @@ type DotDiagnosticsSnapshot = {
 The single actionable record:
 
 ```ts
+import type { DiagnosticIssue as ExportedIssue } from '@arki/dot';
+
 type DiagnosticIssue = {
   code: string; // stable machine-readable code, e.g. ARKI_DOT_E003
   severity: 'info' | 'warning' | 'error';
@@ -112,6 +145,9 @@ type DiagnosticIssue = {
   docsUrl: string; // link to the relevant doc
   metadata?: Record<string, unknown>;
 };
+
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const issueMatches: Same<DiagnosticIssue, ExportedIssue> = true;
 ```
 
 Every issue is required to carry `code`, `message`, `remediation`, and
@@ -120,24 +156,33 @@ actionable.
 
 ## Programmatic access
 
-```ts
-import { defineApp } from '@arki/dot';
+```ts run expect
+import { defineApp, plugin } from '@arki/dot';
 
-const app = await defineApp('my-app').use(/* ... */).boot();
+const database = plugin({ name: 'database', provides: { db: () => ({ ready: true }) } });
+const billing = plugin({ name: 'billing', needs: { db: database.provides.db } });
+
+const app = await defineApp('my-app').use(database).use(billing).boot();
 
 // Static graph
-console.log(app.manifest.plugins.map(p => p.name));
-console.log(app.manifest.dependencies);
+console.log(app.manifest.plugins.map(p => p.name).join());
+console.log(JSON.stringify(app.manifest.dependencies));
 
 // Runtime snapshot
 const snapshot = app.diagnostics;
-if (snapshot.issues.length > 0) {
-  for (const issue of snapshot.issues) {
-    console.error(`[${issue.severity}] ${issue.code}: ${issue.message}`);
-    console.error(`  remediation: ${issue.remediation}`);
-    console.error(`  docs: ${issue.docsUrl}`);
-  }
+console.log(snapshot.app.state, snapshot.issues.length);
+for (const issue of snapshot.issues) {
+  console.error(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+  console.error(`  remediation: ${issue.remediation}`);
+  console.error(`  docs: ${issue.docsUrl}`);
 }
+await app.dispose();
+```
+
+```text
+database,billing
+[{"from":"billing","to":"database","kind":"requires","key":"db"}]
+booted 0
 ```
 
 `app.diagnostics` is re-computed on every access, so reading it inside a
@@ -179,9 +224,14 @@ at `configure()`:
 Output envelope (`arki.cli/1`, from `@arki/cli`; JSON when piped or with `--json`):
 
 ```ts
-type Envelope<T> =
-  | { ok: true; command: string[]; data: T; error: null; meta: EnvelopeMeta }
-  | { ok: false; command: string[]; data: null; error: EnvelopeError; meta: EnvelopeMeta };
+import type { Envelope } from '@arki/cli';
+import type { DotAppManifest } from '@arki/dot';
+
+// What `dot explain --json` prints, read the way an agent reads it.
+export function pluginNames(envelope: Envelope<DotAppManifest>): readonly string[] {
+  if (!envelope.ok) throw new Error(`${envelope.error.code}: ${envelope.error.remediation ?? envelope.error.message}`);
+  return envelope.data?.plugins.map(p => p.name) ?? [];
+}
 ```
 
 `.data` is the `DotAppManifest` itself. When `configure` throws, the envelope

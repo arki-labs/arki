@@ -67,7 +67,11 @@ function isInputIssue(value: unknown): value is InputIssue {
   );
 }
 
-/** The command name is not one at this level. `suggestions` holds the close names and aliases. */
+/**
+ * The command name is not one at this level. `suggestions` holds the close names and aliases.
+ * @fix Use a name from `.error.data.suggestions`, or run `--help` to list the commands.
+ * @verify <bin> --help
+ */
 export const UnknownCommand = defineFailure('cli.unknown_command', {
   message: 'Unknown command "{received}"',
   remediation: 'Run with --help to list the commands.',
@@ -78,7 +82,11 @@ export const UnknownCommand = defineFailure('cli.unknown_command', {
   ),
 });
 
-/** The command line does not fit the command's input. `issues` names each key and flag. */
+/**
+ * The command line does not fit the command's input. `issues` names each key and flag.
+ * @fix Fix the flags named in `.error.issues`; `--help` lists them.
+ * @verify <bin> <command> --json | jq -e .ok
+ */
 export const InvalidInput = defineFailure('cli.invalid_input', {
   message: data => data.issues.map(issue => issue.message).join('; '),
   remediation: 'Fix the flags named in the issues; run with --help to see them.',
@@ -89,7 +97,11 @@ export const InvalidInput = defineFailure('cli.invalid_input', {
   ),
 });
 
-/** `--dry-run` on a command without `preview`. */
+/**
+ * `--dry-run` on a command without `preview`.
+ * @fix Run the command without `--dry-run`, or give the command a `preview`.
+ * @verify <bin> <command> --json | jq -e .ok
+ */
 export const PreviewUnsupported = defineFailure('cli.preview_unsupported', {
   message: 'This command has no dry run',
   remediation: 'Run it without --dry-run.',
@@ -99,7 +111,11 @@ export const PreviewUnsupported = defineFailure('cli.preview_unsupported', {
   ),
 });
 
-/** A required value is missing and there is no terminal to ask for it. */
+/**
+ * A required value is missing and there is no terminal to ask for it.
+ * @fix Pass the flag named in `.error.data.flag`.
+ * @verify <bin> <command> --json | jq -e .ok
+ */
 export const InputRequired = defineFailure('cli.input_required', {
   message: 'Missing {field}',
   remediation: 'Pass the flag named in the failure data.',
@@ -110,7 +126,11 @@ export const InputRequired = defineFailure('cli.input_required', {
   ),
 });
 
-/** The command asks for confirmation and there is no terminal to ask on. */
+/**
+ * The command asks for confirmation and there is no terminal to ask on.
+ * @fix Pass `--yes` to confirm without a terminal.
+ * @verify <bin> <command> --json | jq -e .ok
+ */
 export const ConfirmationRequired = defineFailure('cli.confirmation_required', {
   message: 'This command needs confirmation',
   remediation: 'Pass --yes to confirm without a terminal.',
@@ -120,7 +140,11 @@ export const ConfirmationRequired = defineFailure('cli.confirmation_required', {
   ),
 });
 
-/** The run was interrupted by SIGINT or SIGTERM. */
+/**
+ * The run was interrupted by SIGINT or SIGTERM.
+ * @fix Check what the interrupted run changed, then run the command again.
+ * @verify <bin> <command> --json | jq -e .ok
+ */
 export const Cancelled = defineFailure('cli.cancelled', {
   message: 'Cancelled',
   remediation: 'Run the command again; check what it changed first, the outcome is unknown.',

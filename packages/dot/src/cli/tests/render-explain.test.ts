@@ -75,6 +75,9 @@ describe('runExplain', () => {
       code: 'dot.app_lifecycle_failed',
       data: { phase: 'configure', causeMessage: expect.stringContaining('configure-boom') },
     });
+    // Why: the cause may be any kernel code (ARKI_DOT_E020 is plugin order, not a
+    // throwing hook), so the remediation must send the reader to that code's own fix.
+    expect(result).toMatchObject({ remediation: expect.stringContaining('error.data.underlyingCode') });
   });
 
   it('snapshot stability: same app -> same JSON (no random ordering)', async () => {

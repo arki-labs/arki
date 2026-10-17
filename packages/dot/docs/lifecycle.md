@@ -4,9 +4,16 @@ The DOT lifecycle is a pinned 5-hook contract. It is part of the public
 kernel surface, not an implementation detail.
 
 ```ts
+import type { DotLifecycleHook as ExportedHook, DotLifecycleState as ExportedState } from '@arki/dot';
+
 type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
 
 type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' | 'stopped' | 'disposed' | 'failed';
+
+// The two unions above must equal the exported ones, so this block stops compiling if the kernel adds a state.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const hooksMatch: Same<DotLifecycleHook, ExportedHook> = true;
+export const statesMatch: Same<DotLifecycleState, ExportedState> = true;
 ```
 
 ## State machine
@@ -93,22 +100,44 @@ DOT cleans up exactly what was opened — no more, no less.
 - App transitions to `failed`.
 - Kernel throws `DotLifecycleError` with code `ARKI_DOT_E003`.
 
-A plugin whose `boot` opens partial resources before throwing **must clean
-those up itself**:
+A plugin whose `provides` factory or `boot` opens partial resources before
+throwing **must clean those up itself**:
 
-```ts
-provides: {
-  pair: async () => {
-    const a = await openA();
-    try {
-      const b = await openB();
-      return { a, b };
-    } catch (err) {
-      await a.close(); // clean up our own partial state
-      throw err;
-    }
+```ts run
+import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+
+let aClosed = false;
+const openA = async () => ({
+  close: async () => {
+    aClosed = true;
   },
+});
+const openB = async (): Promise<{ close(): Promise<void> }> => {
+  throw new Error('b is down');
+};
+
+const pairPlugin = plugin({
+  name: 'pair',
+  provides: {
+    pair: async () => {
+      const a = await openA();
+      try {
+        const b = await openB();
+        return { a, b };
+      } catch (err) {
+        await a.close(); // clean up our own partial state
+        throw err;
+      }
+    },
+  },
+});
+
+try {
+  await defineApp('pair-demo').use(pairPlugin).boot();
+} catch (err) {
+  if (!(err instanceof DotLifecycleError) || err.code !== 'ARKI_DOT_E003') throw err;
 }
+if (!aClosed) throw new Error('the factory left resource a open');
 ```
 
 The kernel only disposes plugins whose `boot` returned successfully.
@@ -169,6 +198,9 @@ The kernel emits stable, machine-readable error codes:
 | `ARKI_DOT_E013` | A published wire key collides with an earlier provider.                                                                                                                                                        |
 | `ARKI_DOT_E014` | A service key uses the reserved `$` (kernel) prefix.                                                                                                                                                           |
 | `ARKI_DOT_E015` | A hook exceeded the `hookTimeoutMs` watchdog budget.                                                                                                                                                           |
+| `ARKI_DOT_E016` | Two actions in the same binding use the same id.                                                                                                                                                               |
+| `ARKI_DOT_E017` | Action `meta` is not plain JSON (a function, Date, Map or cycle).                                                                                                                                              |
+| `ARKI_DOT_E018` | More than one plugin fills the logging slot.                                                                                                                                                                   |
 | `ARKI_DOT_E019` | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`.                                                                                                               |
 | `ARKI_DOT_E020` | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
 | `ARKI_DOT_E021` | `$describeAction` named an action the plugin may not amend (unknown id, or neither its own nor in a binding it owns).                                                                                          |
@@ -190,36 +222,74 @@ remediation guidance.
 
 ### Catching a boot failure
 
-```ts
-import { defineApp, DotLifecycleError } from '@arki/dot';
+```ts run expect
+import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+
+const flaky = plugin({
+  name: 'flaky',
+  boot() {
+    throw new Error('no network');
+  },
+});
 
 try {
-  const app = await defineApp('my-app').use(somePlugin).boot();
-  // ...
+  await defineApp('my-app').use(flaky).boot();
 } catch (err) {
-  if (err instanceof DotLifecycleError) {
-    console.error(`${err.code} in ${err.plugin}: ${err.message}`);
-    if (err.failures) {
-      for (const f of err.failures) {
-        console.error(`  ${f.plugin}/${f.phase}: ${String(f.error)}`);
-      }
-    }
-  }
-  throw err;
+  if (!(err instanceof DotLifecycleError)) throw err;
+  console.log(`${err.code} in ${err.plugin}: ${err.message}`);
 }
+```
+
+```text
+ARKI_DOT_E003 in flaky: boot hook threw for plugin "flaky": no network
+```
+
+`stop` and `dispose` failures arrive as one aggregate. Read `failures` to see
+which plugin failed in which phase:
+
+```ts run expect
+import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+
+const stuck = plugin({
+  name: 'stuck',
+  provides: { socket: () => 1 },
+  dispose() {
+    throw new Error('socket stuck');
+  },
+});
+
+const app = await defineApp('my-app').use(stuck).boot();
+try {
+  await app.dispose();
+} catch (err) {
+  if (!(err instanceof DotLifecycleError)) throw err;
+  console.log(err.code, err.message);
+  for (const f of err.failures ?? []) {
+    console.log(`${f.plugin}/${f.phase}: ${String(f.error)}`);
+  }
+}
+```
+
+```text
+ARKI_DOT_E006 1 plugin(s) failed during dispose
+stuck/dispose: Error: socket stuck
 ```
 
 ### Idempotent shutdown
 
 ```ts
-async function shutdown(app: Awaited<ReturnType<typeof boot>>) {
+import { defineApp } from '@arki/dot';
+
+const app = await defineApp('svc').boot();
+
+async function shutdown() {
   // Both calls are safe to repeat; the kernel tracks state.
   await app.stop();
   await app.dispose();
 }
 
-process.on('SIGTERM', () => shutdown(app));
-process.on('SIGINT', () => shutdown(app));
+process.on('SIGTERM', () => void shutdown());
+process.on('SIGINT', () => void shutdown());
 ```
 
 The kernel coalesces concurrent calls to the same transition onto a single

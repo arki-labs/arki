@@ -1,5 +1,5 @@
 /**
- * `log()`: the plugin that fills Dot's logging slot (`@arki/log` redesign RFC §9).
+ * `log()`: the plugin that fills Dot's logging slot with an `@arki/log` configuration.
  *
  * ```ts
  * import { defineApp } from '@arki/dot';
@@ -25,7 +25,11 @@ import { configure } from '@arki/log';
 import { DotPluginError, plugin } from './plugin-contract.js';
 
 export const DOT_LOG_ERROR_CODES = {
-  /** `boot` ran before the kernel activated the logging slot. */
+  /**
+   * `boot` ran before the kernel activated the logging slot.
+   * @fix Mount `log()` with `.use()` in a Dot app and let the kernel run its hooks; never call them yourself.
+   * @verify dot doctor --json | jq -e .ok
+   */
   notActivated: 'DOT_LOG_E001',
 } as const;
 

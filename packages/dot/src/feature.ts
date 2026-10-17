@@ -1,5 +1,5 @@
 /**
- * `@arki/dot/feature` — domain modules for DOT apps.
+ * `@arki/dot/feature` — Domain modules for Dot apps: `defineFeature`, its routers and the services bag.
  *
  * A feature is a named, inert declaration of what one domain module
  * contributes to an app:

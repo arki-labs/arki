@@ -1,5 +1,5 @@
 /**
- * @arki/dot — TypeScript-first application composition framework
+ * @arki/dot — Compose an app from typed plugins that boot in declaration order and dispose in reverse.
  *
  * Public surface:
  *   - `defineApp(name)` — the entry point for composing applications.
