@@ -1,11 +1,12 @@
 // Cross-runtime smoke test, run by `arki-runtimes` on every engine. The package ships TypeScript source for
 // bundlers, and `@arki/rss` does too, so `test:runtimes` first bundles `src/index.ts` (with its dependencies)
-// to `.cache/runtimes-dist/index.js`. Each engine then builds a feed, parses it back, and searches an index
-// after a JSON round trip, so a runtime gap fails loudly.
+// to `.cache/runtimes-dist/index.js`. Each engine then builds a feed, parses it back, searches an index
+// after a JSON round trip, and sorts content with contentQueries, so a runtime gap fails loudly.
 
 import {
   buildChangelogFeed,
   buildPostFeed,
+  contentQueries,
   createPostSearchIndex,
   loadPostSearchIndex,
   searchPosts,
@@ -63,6 +64,21 @@ const [hit] = searchPosts(index, 'widgets');
 check('search after JSON round trip', hit?.id, '/posts/widgets');
 check('search stores the overview', hit?.readingTime, '1 min read');
 check('search keeps the body out', hit?.content, undefined);
+
+const queries = contentQueries({
+  allPosts: [
+    { slug: 'old', publishedAt: new Date(0) },
+    { slug: 'new', publishedAt },
+  ],
+  allLegals: [
+    { slug: 'terms', title: 'Terms' },
+    { slug: 'cookies', title: 'Cookies' },
+  ],
+});
+check('queries sort posts newest first', queries.posts[0]?.slug, 'new');
+check('queries sort legals by title', queries.legals[0]?.slug, 'cookies');
+check('queries find by slug', queries.legalBySlug('terms')?.title, 'Terms');
+check('queries skip missing collections', 'faqs' in queries, false);
 
 const failed = checks.filter(c => !c.ok);
 for (const c of failed) console.error(`✗ ${c.name}: expected ${String(c.expected)}, got ${String(c.actual)}`);
