@@ -72,6 +72,7 @@ import type { LiveCursor, LiveEvent, LiveReceipt, TableTag } from './types.js';
 import { cursorCipher } from './cursor.js';
 import { debugHub } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
+import { pullIterator } from './iterator.js';
 import { tagKey } from './manifest.js';
 import { replayRing } from './replay.js';
 import { liveCursorSchema, MAX_KEYS_PER_FRAME, txIdSchema } from './schema.js';
@@ -799,22 +800,20 @@ export function createLiveHub(options: {
     }
   }
 
-  async function* feed(subscriber: Subscriber, sealer: CursorCipher): AsyncGenerator<LiveFeed, void, undefined> {
-    try {
-      for (;;) {
-        const item = take(subscriber);
-        if (item) {
-          yield await reveal(item, sealer);
-          continue;
+  function feed(subscriber: Subscriber, sealer: CursorCipher): AsyncIterableIterator<LiveFeed, void, undefined> {
+    return pullIterator(
+      async () => {
+        for (;;) {
+          const item = take(subscriber);
+          if (item) return { done: false, value: await reveal(item, sealer) };
+          if (subscriber.done) return { done: true, value: undefined };
+          await new Promise<void>(resolve => {
+            subscriber.wake = resolve;
+          });
         }
-        if (subscriber.done) return;
-        await new Promise<void>(resolve => {
-          subscriber.wake = resolve;
-        });
-      }
-    } finally {
-      close(subscriber);
-    }
+      },
+      () => close(subscriber),
+    );
   }
 
   return {

@@ -46,6 +46,7 @@ import type { LiveFeed, LiveGrant, LiveHub, LiveView } from './hub.js';
 import type { LiveEvent, LiveManifest, LiveScopes, TableTag } from './types.js';
 import { debugHttp } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
+import { pullIterator } from './iterator.js';
 import { tagKey } from './manifest.js';
 import { liveCursorSchema, liveEventSchema, MAX_GRANT_KEYS, scopeKeySchema, tableTagSchema } from './schema.js';
 import { checkScopes, normalizeKey } from './scopes.js';
@@ -130,8 +131,11 @@ type Recheck = {
   revoked: boolean;
 };
 
-/** Hub frames to wire frames for one client. `end` detaches it (idempotent). */
-async function* framesFor(
+/**
+ * Hub frames to wire frames for one client. `end` detaches it (idempotent).
+ * Ending early (a last frame, an error, or `return()`) also returns the hub's feed.
+ */
+function framesFor(
   feed: AsyncIterable<LiveFeed>,
   view: View,
   stream: {
@@ -140,50 +144,73 @@ async function* framesFor(
     readonly end: () => void;
     readonly recheck: Recheck;
   },
-): AsyncGenerator<LiveEvent, void, undefined> {
+): AsyncIterableIterator<LiveEvent, void, undefined> {
   const { expired, closed, end, recheck } = stream;
-  try {
-    for await (const item of feed) {
+  const source = feed[Symbol.asyncIterator]();
+  /** The hub's feed is over on its own (done or failed): nothing to return. */
+  let drained = false;
+  /** The frame just given was the stream's last. */
+  let last = false;
+  return pullIterator(
+    async () => {
+      if (last) return { done: true, value: undefined };
+      const step = await source.next().catch((error: unknown) => {
+        drained = true;
+        throw error;
+      });
+      if (step.done === true) {
+        drained = true;
+        last = true;
+        // The hub ended the feed without a frame: the max age passed, the grant changed, the endpoint closed, or the request is gone.
+        return expired() || recheck.revoked || closed()
+          ? { done: false, value: { kind: 'bye' } }
+          : { done: true, value: undefined };
+      }
+      const item = step.value;
       switch (item.kind) {
         case 'begin': {
           // A re-check started while the stream opened decides before the first frame.
           if (recheck.pending !== undefined) await recheck.pending;
           if (recheck.revoked) {
-            yield { kind: 'bye' };
-            return;
+            last = true;
+            return { done: false, value: { kind: 'bye' } };
           }
-          yield {
-            kind: 'hello',
-            v: 1,
-            mode: item.mode,
-            cursor: item.cursor,
-            manifest: view.manifest,
-            ...(view.scopes === undefined ? {} : { scopes: view.scopes }),
+          return {
+            done: false,
+            value: {
+              kind: 'hello',
+              v: 1,
+              mode: item.mode,
+              cursor: item.cursor,
+              manifest: view.manifest,
+              ...(view.scopes === undefined ? {} : { scopes: view.scopes }),
+            },
           };
-          break;
         }
         case 'change': {
           // A re-check under way decides first: on a new grant the client resumes from the cursor before this frame.
           if (recheck.pending !== undefined) await recheck.pending;
           if (recheck.revoked) {
-            yield { kind: 'bye' };
-            return;
+            last = true;
+            return { done: false, value: { kind: 'bye' } };
           }
           // Already through the grant: the hub sends only what this view shows.
-          yield item;
-          break;
+          return { done: false, value: item };
         }
         default: {
-          yield item;
-          return;
+          last = true;
+          return { done: false, value: item };
         }
       }
-    }
-    // The hub ended the feed without a frame: the max age passed, the grant changed, the endpoint closed, or the request is gone.
-    if (expired() || recheck.revoked || closed()) yield { kind: 'bye' };
-  } finally {
-    end();
-  }
+    },
+    async () => {
+      try {
+        if (!drained) await source.return?.();
+      } finally {
+        end();
+      }
+    },
+  );
 }
 
 /**

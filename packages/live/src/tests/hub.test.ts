@@ -245,3 +245,21 @@ describe('stop (step 10)', () => {
     expect(hub.connections()).toBe(0);
   });
 });
+
+describe('a consumer that stops reading', () => {
+  it('return() closes the stream: the hub forgets it, and nothing more comes', async () => {
+    // Why: a tab that goes away must free its hub slot at once; a leak keeps a subscriber and its queue per dead tab.
+    const source = fakeSource();
+    const hub = createLiveHub({ source });
+    await hub.start();
+    source.emit({ kind: 'ready' });
+    const feed = await hub.open({ signal: new AbortController().signal });
+    const stream = feed[Symbol.asyncIterator]();
+    expect(await nextOf(stream)).toMatchObject({ kind: 'begin' });
+    expect(hub.connections()).toBe(1);
+    await stream.return?.();
+    expect(hub.connections()).toBe(0);
+    expect(await nextOf(stream)).toBeUndefined();
+    await hub.stop();
+  });
+});

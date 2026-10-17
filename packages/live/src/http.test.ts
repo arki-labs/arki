@@ -334,6 +334,16 @@ describe('closing', () => {
     expect(hub.connections()).toBe(0);
   });
 
+  it('a client that cancels the body detaches from the hub', async () => {
+    // Why: cancelling the body returns the stream's iterator; that must reach the hub, or every dead tab holds a slot.
+    const { stream, hub } = await rig();
+    const client = await stream();
+    expect(await client.next()).toMatchObject({ kind: 'hello' });
+    expect(hub.connections()).toBe(1);
+    await client.cancel();
+    await vi.waitFor(() => expect(hub.connections()).toBe(0));
+  });
+
   it('a listener gap reaches the stream as gap, then the stream ends', async () => {
     const { stream, source } = await rig();
     const client = await stream();

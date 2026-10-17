@@ -32,6 +32,7 @@ import { backoff } from '@arki/resilience';
 import type { LiveCursor, LiveEvent } from './types.js';
 import { debugClient } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
+import { pullIterator } from './iterator.js';
 import { parseLiveEvent } from './parse.js';
 
 /** Where the stream is: first connect, open, between connects, refused (401/403), or stopped. */
@@ -76,11 +77,11 @@ type SseMessage = { readonly event: string; readonly data: string };
  * Comments (`:keepalive`) and unknown fields are skipped. A read that waits
  * `IDLE_MS` calls `idle`; `drop` aborting cancels the read and throws its reason.
  */
-async function* sseMessages(
+function sseMessages(
   body: ReadableStream<Uint8Array>,
   drop: AbortSignal,
   idle: () => void,
-): AsyncGenerator<SseMessage, void, undefined> {
+): AsyncIterableIterator<SseMessage, void, undefined> {
   const reader = body.getReader();
   const cancel = (): void => {
     reader.cancel().catch(noop);
@@ -90,8 +91,14 @@ async function* sseMessages(
   let buffer = '';
   let event = '';
   let data: string[] = [];
-  try {
+  /** Messages read but not handed out yet: one chunk may hold several. */
+  const ready: SseMessage[] = [];
+  let ended = false;
+  async function pull(): Promise<IteratorResult<SseMessage, void>> {
     for (;;) {
+      const message = ready.shift();
+      if (message) return { done: false, value: message };
+      if (ended) return { done: true, value: undefined };
       const timer = setTimeout(idle, IDLE_MS);
       let chunk: ReadableStreamReadResult<Uint8Array>;
       try {
@@ -113,7 +120,7 @@ async function* sseMessages(
         if (char === '\r' && buffer[index + 1] === '\n') index += 1;
         start = index + 1;
         if (line === '') {
-          if (data.length > 0) yield { event: event === '' ? 'message' : event, data: data.join('\n') };
+          if (data.length > 0) ready.push({ event: event === '' ? 'message' : event, data: data.join('\n') });
           event = '';
           data = [];
         } else {
@@ -127,16 +134,17 @@ async function* sseMessages(
         }
       }
       buffer = buffer.slice(start);
-      if (chunk.done) return;
+      if (chunk.done) ended = true;
     }
-  } finally {
+  }
+  return pullIterator(pull, async () => {
     drop.removeEventListener('abort', cancel);
     try {
       await reader.cancel();
     } catch {
       // Already closed or errored: nothing left to release.
     }
-  }
+  });
 }
 
 /** `retry-after` in milliseconds (seconds or an HTTP date), capped; `undefined` when absent or unreadable. */

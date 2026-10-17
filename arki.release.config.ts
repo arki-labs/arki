@@ -85,8 +85,9 @@ export const config: ReleaseConfig = {
       // `@arki/queue`, `@arki/auth`, `@arki/mail` rejoin this wave when
       // they ship dist+docs / drop `private: true`. `@arki/journal` joined
       // 2026-10-13 (Drizzle entity journal; depends on `@arki/log`, optional
-      // `@arki/dot` peer).
-      packages: ['@arki/db', '@arki/kv', '@arki/http', '@arki/journal'],
+      // `@arki/dot` peer). `@arki/live` joined 2026-10-17 (A-31: live queries;
+      // peers `@arki/db`, `@arki/http`, `@arki/dot`).
+      packages: ['@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live'],
     },
     {
       id: 'frontend',
@@ -120,13 +121,13 @@ export const config: ReleaseConfig = {
   // Package tiers, mirroring docs/arki/core-packages.md. Tier 1 is the stack,
   // Tier 2 the standalone libraries; they decide which readiness items bind a
   // package, and a Tier 2 package with no @arki deps is a leaf library
-  // (runtimes + bench-fresh). `@arki/live` is not tiered yet (notYet).
+  // (runtimes + bench-fresh). `@arki/live` joined the stack 2026-10-17 (A-31).
   tiers: {
     stack: [
       '@arki/dot', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
       '@arki/log', '@arki/mail', '@arki/auth', '@arki/payments', '@arki/ui', '@arki/design-systems',
       '@arki/theme', '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
-      '@arki/ai', '@arki/chat-ui',
+      '@arki/ai', '@arki/chat-ui', '@arki/live',
     ],
     libraries: [
       '@arki/math', '@arki/money', '@arki/date', '@arki/string', '@arki/clock', '@arki/resilience',
@@ -148,7 +149,6 @@ export const config: ReleaseConfig = {
     { name: '@arki/auth', reason: 'awaiting security tests W2-02' },
     { name: '@arki/lock', reason: 'admitted (A-28); joins a wave after its docs batch passes' },
     { name: '@arki/mail', reason: 'Tier 1; joins a wave after its docs batch (B3) passes' },
-    { name: '@arki/live', reason: 'not yet (A-28)' },
   ],
 };
 

@@ -138,6 +138,24 @@ describe('reconnecting', () => {
     expect(statuses).toEqual(['connecting', 'live', 'reconnecting']);
   });
 
+  it('bye releases the old body before the next connection, even when the server keeps it open', async () => {
+    // Why: leaving the frame loop early must cancel the body; otherwise each reconnect leaks an open HTTP stream.
+    const cancelled = vi.fn();
+    const encoder = new TextEncoder();
+    const open = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame(hello()) + frame({ kind: 'bye' })));
+      },
+      cancel: cancelled,
+    });
+    const { fetch, urls } = scriptedFetch([() => sse(open)]);
+    const { live } = client(fetch);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toHaveLength(2);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    live.stop();
+  });
+
   it('gap and a dropped connection back off, then reconnect with the cursor', async () => {
     const { fetch, urls } = scriptedFetch([
       () => sse(body([frame(hello()), frame({ kind: 'gap' })])),
