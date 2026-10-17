@@ -69,7 +69,11 @@ const checks = [
     '{"code":"journal.not_found","message":"Order not found","data":{"detail":"Order not found"},"status":404}',
   ],
   ['the door binds without a database call', typeof journal.bind({}, { actorId: 'system' }), 'function'],
-  ['tables', Object.keys(journalTables()).join(','), 'events,jobs,receipts,cursors'],
+  [
+    'tables',
+    Object.keys(journalTables()).join(','),
+    'events,jobs,jobAttempts,jobArchive,jobOperations,receipts,cursors',
+  ],
 ];
 
 let failed = 0;
