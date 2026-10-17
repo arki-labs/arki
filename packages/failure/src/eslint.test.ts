@@ -2,7 +2,7 @@ import { RuleTester } from '@typescript-eslint/rule-tester';
 import { TSESLint } from '@typescript-eslint/utils';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import plugin, { mustUse } from './eslint.js';
+import plugin, { mustUse, noBlindAccept } from './eslint.js';
 
 RuleTester.afterAll = afterAll;
 RuleTester.describe = describe;
@@ -102,6 +102,98 @@ ruleTester.run('must-use', mustUse, {
   ],
 });
 
+/**
+ * A command that runs a child which can refuse with two kinds, the way `@arki/journal` hands them back.
+ * `OutOfStock.is` and `Busy.is` narrow to one code each; `isFailure` narrows to every failure in the value.
+ */
+const acceptDeclarations = `
+type Brand = { readonly '~failure': true };
+type OutOfStock = { readonly code: 'stock.out' } & Brand;
+type Busy = { readonly code: 'stock.busy' } & Brand;
+type AnyFailure = { readonly code: string } & Brand;
+type Reserved = { readonly reserved: number };
+declare const OutOfStock: { is(value: unknown): value is OutOfStock };
+declare const Busy: { is(value: unknown): value is Busy };
+declare function isFailure<Value>(value: Value): value is Extract<Value, Brand>;
+declare function isRefusal(value: unknown): value is AnyFailure;
+declare function reserve(): Promise<Reserved | OutOfStock | Busy>;
+declare function reserveAny(): Promise<Reserved | AnyFailure>;
+declare function reserveOne(): Promise<Reserved | OutOfStock>;
+declare function accept(failure: AnyFailure): void;
+declare function handled(failure: AnyFailure): void;
+declare const ctx: { accept(failure: AnyFailure): void };
+declare const dialog: { accept(text?: string): void };
+`;
+
+ruleTester.run('no-blind-accept', noBlindAccept, {
+  valid: [
+    // Why: the intended use. The handler checked this one kind, so only this refusal may let the command commit.
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (OutOfStock.is(r)) { accept(r); return 0; } return r; }`,
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (OutOfStock.is(r)) ctx.accept(r); return r; }`,
+    // Each kind is checked by name, so a code the child adds later is still not accepted.
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (OutOfStock.is(r) || Busy.is(r)) accept(r); return r; }`,
+    // Checked kinds plus an extra condition are still those kinds.
+    `${acceptDeclarations} async function f(retry: boolean) { const r = await reserve(); if ((OutOfStock.is(r) || Busy.is(r)) && retry) accept(r); return r; }`,
+    // The kinds are checked in a nested condition: the nearest condition about r decides, not the outer isFailure.
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) { if (OutOfStock.is(r) || Busy.is(r)) accept(r); } return r; }`,
+    // A wide failure narrowed by a definition's .is is one known kind.
+    `${acceptDeclarations} async function f() { const r = await reserveAny(); if (OutOfStock.is(r)) accept(r); return r; }`,
+    // Another API's accept takes no failure, so it is not this rule's business.
+    `${acceptDeclarations} dialog.accept('yes'); dialog.accept();`,
+    // With custom names, plain accept is someone else's function.
+    {
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) accept(r); return r; }`,
+      options: [{ names: ['handled'] }],
+    },
+    // Known limit: with one failure code in the value, isFailure narrows to the same type as OutOfStock.is,
+    // so the type cannot show the check was blind. The rule lets it pass.
+    `${acceptDeclarations} async function f() { const r = await reserveOne(); if (isFailure(r)) accept(r); return r; }`,
+  ],
+  invalid: [
+    {
+      // The headline bug: isFailure accepts every refusal, so a refusal the handler never thought about commits too.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept', data: { name: 'accept' } }],
+    },
+    {
+      // Same through the context, the way a journal handler writes it.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) { ctx.accept(r); } return r; }`,
+      errors: [{ messageId: 'noBlindAccept', data: { name: 'accept' } }],
+    },
+    {
+      // A failure with a wide code (string) can be any refusal at all.
+      code: `${acceptDeclarations} async function f() { const r = await reserveAny(); if (isFailure(r)) accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept' }],
+    },
+    {
+      // No check at all: r may not even be a failure.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept' }],
+    },
+    {
+      // Unchecked with one failure kind: r may still be the success.
+      code: `${acceptDeclarations} async function f() { const r = await reserveOne(); accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept' }],
+    },
+    {
+      // One checked kind next to a blind check is still blind.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (OutOfStock.is(r) || isFailure(r)) accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept' }],
+    },
+    {
+      // A hand-written guard that is not generic but names no single kind is as blind as isFailure.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isRefusal(r)) accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept' }],
+    },
+    {
+      // With custom names, the rule checks those calls instead, and names them in the message.
+      code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) handled(r); return r; }`,
+      options: [{ names: ['handled'] }],
+      errors: [{ messageId: 'noBlindAccept', data: { name: 'handled' } }],
+    },
+  ],
+});
+
 describe('configs.recommended', () => {
   const linter = new TSESLint.Linter({ configType: 'flat' });
   const recommended = [plugin.configs.recommended];
@@ -110,8 +202,11 @@ describe('configs.recommended', () => {
     expect(linter.verify('export default [];', recommended, 'eslint.config.js')).toEqual([]);
   });
 
-  it('registers the rule as failure/must-use, the id the message tells people to disable', () => {
-    expect(plugin.configs.recommended.rules).toEqual({ 'failure/must-use': 'error' });
+  it('registers the rules as failure/*, the id the must-use message tells people to disable', () => {
+    expect(plugin.configs.recommended.rules).toEqual({
+      'failure/must-use': 'error',
+      'failure/no-blind-accept': 'error',
+    });
     expect(mustUse.meta.messages.mustUse).toContain('eslint-disable-next-line failure/must-use -- <reason>');
   });
 

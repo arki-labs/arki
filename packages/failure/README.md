@@ -24,7 +24,7 @@ post.title; // ✓ narrowed to Post
 - **Errors in the type, inferred.** A function's return type lists every failure it can produce, including the ones it passes on with `if (isFailure(x)) return x`. Nobody writes the union down.
 - **Written once.** Code, status, data schema, message template and remediation live in `defineFailure`. Failure values, `match` and `recover` handlers, oRPC error maps and `revive` all take their types from it.
 - **Any schema.** The data schema is any [Standard Schema](https://standardschema.dev): Zod 4, Valibot, ArkType. The core depends only on `@arki/schema`.
-- **Caught when ignored.** The `must-use` lint rule reports a call whose failure is thrown away.
+- **Caught when ignored.** The `must-use` lint rule reports a call whose failure is thrown away. `no-blind-accept` reports `accept(r)` of a failure not checked by kind.
 - **Bugs still throw.** A failure is something the caller should handle ("not found", "email taken", "card declined"). A bug is not; keep throwing those.
 - **Every runtime.** Node, Bun, Deno, browsers and React Native (Hermes), checked by `test:runtimes`.
 
@@ -226,6 +226,17 @@ await remove(id); // ✓ dropped on purpose, with the reason in the comment
 
 The disable comment is the only deliberate discard. A kept value (`const result = await remove(id)`) is left to the compiler and the unused-variable rules.
 
+`no-blind-accept` guards a helper that lets one checked refusal through, such as `accept` on an `@arki/journal` command context. Accepting any failure accepts every refusal, including codes the callee adds later, so check the kind first:
+
+```ts
+if (isFailure(r)) accept(r); // ✗ failure/no-blind-accept: any failure, not one you checked
+accept(r); // ✗ not checked at all
+if (OutOfStock.is(r)) accept(r); // ✓ one kind
+if (OutOfStock.is(r) || Busy.is(r)) accept(r); // ✓ each kind checked by name
+```
+
+"Checked by kind" comes from types. Every part of the value's type at the call must be a failure with a literal `code`. One code is enough. With two or more codes, the type cannot tell `isFailure(r)` from `A.is(r) || B.is(r)`, so the rule reads the nearest condition that mentions the value: each `||` branch must be a non-generic guard whose type predicate names one code (`Def.is` does; the generic `isFailure` never does). Limits: with one failure code in the value, `if (isFailure(r)) accept(r)` passes, since its type is the same as after `Def.is`; and two or more codes checked by an early return or a `switch` are reported, so check them in an `if` around the call. The checked calls default to `accept` (as `accept(x)` or `ctx.accept(x)`); set `names` to check others: `'failure/no-blind-accept': ['error', { names: ['accept', 'handled'] }]`. A call whose argument cannot be a failure (such as `dialog.accept('yes')`) is left alone.
+
 ```js
 // eslint.config.js
 import tseslint from 'typescript-eslint';
@@ -233,7 +244,7 @@ import tseslint from 'typescript-eslint';
 import failure from '@arki/failure/eslint';
 
 export default [
-  // The rule is type-aware: TypeScript files need the typescript-eslint parser with projectService.
+  // The rules are type-aware: TypeScript files need the typescript-eslint parser with projectService.
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
     languageOptions: { parser: tseslint.parser, parserOptions: { projectService: true } },
@@ -300,6 +311,7 @@ Mistakes in how the package is used are thrown as `FailureError` with a stable `
 ## Pitfalls
 
 - **A discarded call drops its failure.** Turn on the `must-use` rule.
+- **`accept` after `isFailure` accepts every refusal.** Check the kind with `Def.is` first; the `no-blind-accept` rule reports it.
 - **`unknown`, `any` and `object` swallow failures.** A function whose return type widens to one of them loses its failures from the type. Parse with a schema instead of casting to `unknown`, and assert `FailureOf<typeof fn>` in a test when it matters.
 - **Truthiness does not narrow.** A failure is an object, so `if (post)` and `post ?? fallback` do not remove it. Use `isFailure`.
 - **A data schema must accept its own output.** `revive` validates the JSON of the live value, so a schema such as `z.string().transform(Number)` makes `revive` throw `ARKI_FAILURE_E006` on its own failures.
