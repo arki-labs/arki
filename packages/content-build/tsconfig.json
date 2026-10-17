@@ -1,0 +1,9 @@
+{
+  "extends": "@arki/tsconfig/internal-package.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "dom", "dom.iterable"],
+    "rootDir": "."
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}

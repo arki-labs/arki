@@ -10,99 +10,29 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./config": {
-      "types": "./dist/src/config.d.ts",
-      "default": "./dist/src/config.js"
-    },
-    "./node": {
-      "types": "./dist/src/node.d.ts",
-      "default": "./dist/src/node.js"
-    },
-    "./presets": {
-      "types": "./dist/src/presets.d.ts",
-      "default": "./dist/src/presets.js"
-    },
-    "./react": {
-      "types": "./dist/src/react.d.ts",
-      "import": "./src/react.ts",
-      "default": "./src/react.ts"
-    },
-    "./vite": {
-      "types": "./dist/src/vite.d.ts",
-      "default": "./dist/src/vite.js"
-    },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "arki-content": "./dist/src/cli.js"
-  },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:runtimes": "bun build src/index.ts --target=node --outfile=.cache/runtimes-dist/index.js && arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/contracts": "workspace:*",
-    "@arki/date": "workspace:*",
-    "@arki/icons": "workspace:*",
-    "@arki/intl": "workspace:*",
-    "@arki/log": "workspace:*",
-    "@arki/math": "workspace:*",
-    "@arki/react-hooks": "workspace:*",
     "@arki/rss": "workspace:*",
-    "@arki/ui": "workspace:*",
-    "@code-hike/mdx": "catalog:",
-    "@content-collections/core": "catalog:next",
-    "@content-collections/mdx": "catalog:next",
-    "@mdx-js/loader": "catalog:content",
-    "@mdx-js/react": "catalog:content",
-    "mdx-bundler": "catalog:content",
-    "minisearch": "catalog:",
-    "nuqs": "catalog:",
-    "react-tweet": "catalog:",
-    "reading-time": "catalog:content",
-    "rehype-autolink-headings": "catalog:content",
-    "rehype-pretty-code": "catalog:content",
-    "rehype-react": "catalog:content",
-    "rehype-slug": "catalog:content",
-    "remark-gfm": "catalog:content",
-    "remark-mdx": "^3.1.1",
-    "remark-parse": "catalog:content",
-    "remark-rehype": "catalog:content",
-    "schema-dts": "catalog:",
-    "sharp": "catalog:image-processing",
-    "unified": "catalog:",
-    "unist-util-visit": "^5.1.0",
-    "use-intl": "catalog:",
-    "vfile": "^6.0.3"
+    "minisearch": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/hast": "^3.0.4",
-    "@types/mdast": "^4.0.4",
-    "@types/unist": "^3.0.3",
-    "react": "catalog:react",
-    "vite": "catalog:build-tools",
     "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "react": "^18 || ^19",
-    "vite": "^7 || ^8"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "vite": {
-      "optional": true
-    }
   }
 }

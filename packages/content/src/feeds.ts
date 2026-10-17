@@ -1,8 +1,6 @@
 import type { Feed, FeedItem } from '@arki/rss';
 import { generateRss } from '@arki/rss/generate';
 
-import type { Changelog, Post } from './models';
-
 export type FeedSiteOptions = {
   appTitle: string;
   appDomain: string;
@@ -11,19 +9,25 @@ export type FeedSiteOptions = {
   now?: Date;
 };
 
+/** What a post feed reads from each post. A content-build `Post` has these fields. */
+export type FeedPost = {
+  title: string;
+  description: string;
+  slug: string;
+  publishedAt: Date;
+  author: { name: string };
+};
+
+/** What a changelog feed reads from each entry. A content-build `Changelog` has these fields. */
+export type FeedChangelogEntry = Omit<FeedPost, 'author'>;
+
 type FeedSection = {
   path: 'posts' | 'changelog';
   description: string;
   generator: string;
 };
 
-type FeedEntry = {
-  author: string;
-  title: string;
-  description: string;
-  slug: string;
-  publishedAt: Date;
-};
+type FeedEntry = FeedChangelogEntry & { author: string };
 
 function itemFor(entry: FeedEntry, url: string): FeedItem {
   return {
@@ -40,7 +44,7 @@ function itemFor(entry: FeedEntry, url: string): FeedItem {
 }
 
 function buildFeed(
-  entries: FeedEntry[],
+  entries: readonly FeedEntry[],
   { appTitle, appDomain, appLink, now = new Date() }: FeedSiteOptions,
   section: FeedSection,
 ): string {
@@ -66,7 +70,7 @@ function buildFeed(
 }
 
 /** RSS 2.0 feed of blog posts, in the order given. */
-export function buildPostFeed(items: Post[], options: FeedSiteOptions): string {
+export function buildPostFeed(items: readonly FeedPost[], options: FeedSiteOptions): string {
   return buildFeed(
     items.map(post => ({ ...post, author: post.author.name })),
     options,
@@ -75,7 +79,7 @@ export function buildPostFeed(items: Post[], options: FeedSiteOptions): string {
 }
 
 /** RSS 2.0 feed of changelog entries, in the order given. */
-export function buildChangelogFeed(items: Changelog[], options: FeedSiteOptions): string {
+export function buildChangelogFeed(items: readonly FeedChangelogEntry[], options: FeedSiteOptions): string {
   return buildFeed(
     items.map(entry => ({ ...entry, author: `${options.appTitle} Team` })),
     options,

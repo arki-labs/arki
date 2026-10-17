@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { parseFeed } from '@arki/rss';
 
-import type { Changelog, Post } from './index';
+import type { FeedChangelogEntry, FeedPost } from './index';
 import { buildChangelogFeed, buildPostFeed } from './index';
 
 const site = {
@@ -12,34 +12,12 @@ const site = {
   now: new Date('2026-10-14T12:00:00Z'),
 };
 
-function post(slug: string, title: string, publishedAt: string, author = 'Ada'): Post {
-  return {
-    title,
-    description: `About ${title}`,
-    publishedAt: new Date(publishedAt),
-    author: { name: author },
-    tags: [],
-    content: { mdx: '', raw: '' },
-    readingTime: '1 min read',
-    lastModification: publishedAt,
-    image: { url: '', blurDataURL: '' },
-    url: `/posts/${slug}`,
-    slug,
-    _meta: { directory: slug, fileName: 'index.mdx', filePath: `${slug}/index.mdx`, extension: 'mdx', path: slug },
-  };
+function post(slug: string, title: string, publishedAt: string, author = 'Ada'): FeedPost {
+  return { title, description: `About ${title}`, publishedAt: new Date(publishedAt), author: { name: author }, slug };
 }
 
-function entry(slug: string, title: string, publishedAt: string): Changelog {
-  return {
-    title,
-    description: `Changes in ${title}`,
-    publishedAt: new Date(publishedAt),
-    content: { mdx: '', raw: '' },
-    image: { url: '', blurDataURL: '' },
-    url: `/changelog/${slug}`,
-    slug,
-    _meta: { directory: slug, fileName: 'index.mdx', filePath: `${slug}/index.mdx`, extension: 'mdx', path: slug },
-  };
+function entry(slug: string, title: string, publishedAt: string): FeedChangelogEntry {
+  return { title, description: `Changes in ${title}`, publishedAt: new Date(publishedAt), slug };
 }
 
 describe('buildPostFeed', () => {

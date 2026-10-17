@@ -24,7 +24,7 @@
 @plugin "@tailwindcss/typography";
 
 /* Tailwind sources */
-@source "../../../../../packages/content/src";
+@source "../../../../../packages/content-react/src";
 @source "../../../../../packages/ui/src";
 @source "../../../../../packages/ui/components/src";
 @source "../../../../../packages/theme/src";

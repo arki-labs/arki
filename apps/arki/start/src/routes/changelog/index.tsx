@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { Link } from '@tanstack/react-router';
 
-import { ChangelogTimeline } from '@arki/content/react';
+import { ChangelogTimeline } from '@arki/content-react';
 import { Shell } from '@fleet/sitekit/components/shell';
 import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 

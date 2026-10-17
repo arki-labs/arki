@@ -1,1 +1,1 @@
-export { marketing as default } from '@arki/content/presets';
+export { marketing as default } from '@arki/content-build/presets';

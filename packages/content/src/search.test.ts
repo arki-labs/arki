@@ -1,22 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Post } from './index';
+import type { SearchablePost } from './index';
 import { createPostSearchIndex, loadPostSearchIndex, searchPosts } from './index';
 
-function post(slug: string, fields: Partial<Pick<Post, 'title' | 'description' | 'tags'>> & { body: string }): Post {
+function post(
+  slug: string,
+  fields: Partial<Pick<SearchablePost, 'title' | 'description' | 'tags'>> & { body: string },
+): SearchablePost {
   return {
     title: fields.title ?? slug,
     description: fields.description ?? '',
     publishedAt: new Date('2026-01-01T00:00:00Z'),
-    author: { name: 'Ada' },
     tags: fields.tags ?? [],
-    content: { mdx: '', raw: fields.body },
+    content: { raw: fields.body },
     readingTime: '1 min read',
-    lastModification: '2026-01-01T00:00:00.000Z',
     image: { url: '', blurDataURL: '' },
     url: `/posts/${slug}`,
-    slug,
-    _meta: { directory: slug, fileName: 'index.mdx', filePath: `${slug}/index.mdx`, extension: 'mdx', path: slug },
   };
 }
 

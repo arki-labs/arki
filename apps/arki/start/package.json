@@ -22,6 +22,8 @@
     "@arki/auth": "workspace:*",
     "@arki/backend": "workspace:*",
     "@arki/content": "workspace:*",
+    "@arki/content-build": "workspace:*",
+    "@arki/content-react": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/dev-certs": "workspace:*",

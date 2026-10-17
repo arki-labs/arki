@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { Link } from '@tanstack/react-router';
 
-import { PostsTimeline } from '@arki/content/react';
+import { PostsTimeline } from '@arki/content-react';
 import { Shell } from '@fleet/sitekit/components/shell';
 
 import config from '~/config';

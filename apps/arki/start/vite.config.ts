@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
-import { contentPlugin } from '@arki/content/vite';
+import { contentPlugin } from '@arki/content-build/vite';
 import { devServer, printLocalhostUrl } from '@arki/dev-certs';
 import { nitro } from 'nitro/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';

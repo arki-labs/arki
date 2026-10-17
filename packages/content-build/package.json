@@ -1,0 +1,73 @@
+{
+  "name": "@arki/content-build",
+  "version": "0.1.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    "./config": {
+      "types": "./dist/src/config.d.ts",
+      "default": "./dist/src/config.js"
+    },
+    "./presets": {
+      "types": "./dist/src/presets.d.ts",
+      "default": "./dist/src/presets.js"
+    },
+    "./vite": {
+      "types": "./dist/src/vite.d.ts",
+      "default": "./dist/src/vite.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "arki-content": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/contracts": "workspace:*",
+    "@arki/log": "workspace:*",
+    "@code-hike/mdx": "catalog:",
+    "@content-collections/core": "catalog:next",
+    "@content-collections/mdx": "catalog:next",
+    "reading-time": "catalog:content",
+    "rehype-autolink-headings": "catalog:content",
+    "rehype-pretty-code": "catalog:content",
+    "rehype-slug": "catalog:content",
+    "remark-gfm": "catalog:content",
+    "remark-mdx": "^3.1.1",
+    "remark-parse": "catalog:content",
+    "sharp": "catalog:image-processing",
+    "unified": "catalog:",
+    "unist-util-visit": "^5.1.0",
+    "vfile": "^6.0.3"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/hast": "^3.0.4",
+    "@types/mdast": "^4.0.4",
+    "@types/unist": "^3.0.3",
+    "remark-rehype": "catalog:content",
+    "vite": "catalog:build-tools",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "vite": "^7 || ^8"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  }
+}

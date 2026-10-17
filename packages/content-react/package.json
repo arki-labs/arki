@@ -1,0 +1,50 @@
+{
+  "name": "@arki/content-react",
+  "version": "0.1.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/content": "workspace:*",
+    "@arki/date": "workspace:*",
+    "@arki/icons": "workspace:*",
+    "@arki/intl": "workspace:*",
+    "@arki/math": "workspace:*",
+    "@arki/react-hooks": "workspace:*",
+    "@arki/ui": "workspace:*",
+    "@content-collections/mdx": "catalog:next",
+    "nuqs": "catalog:",
+    "react-tweet": "catalog:",
+    "rehype-react": "catalog:content",
+    "remark-parse": "catalog:content",
+    "remark-rehype": "catalog:content",
+    "unified": "catalog:",
+    "use-intl": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "react": "catalog:react"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  }
+}
