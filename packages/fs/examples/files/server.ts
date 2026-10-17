@@ -8,6 +8,7 @@ import { implement, ORPCError } from '@orpc/server';
 import type { IdOf } from '@arki/contracts';
 import type { Locker, ScheduleDef } from '@arki/schedule';
 import { defineId } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 import { defineSchedule } from '@arki/schedule';
 
 import type { FilesDb, FileStorage } from '../../src/pg/index.js';
@@ -63,8 +64,9 @@ export function buildRouter(storage: FileStorage<typeof files>) {
 
 // on read: store the FileId, never the URL
 export async function avatarUrl(storage: FileStorage<typeof files>, viewer: UserId, avatar: `fil_${string}`) {
-  const { url, expiresAt } = await storage.url(viewer, avatar, { disposition: 'inline' });
-  return { url, expiresAt };
+  const link = await storage.url(viewer, avatar, { disposition: 'inline' });
+  if (isFailure(link)) return link; // FileUnavailable or FileWrongState: show the placeholder
+  return { url: link.url, expiresAt: link.expiresAt };
 }
 
 // the sweep: loop while `more`, inside a time budget

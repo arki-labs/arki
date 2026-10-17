@@ -9,6 +9,7 @@ import {
   fileId,
   FileStorageError,
   isFileStorageError,
+  UploadPending,
   uploadRequest,
   uploadTicket,
 } from '../.cache/files-dist/index.js';
@@ -33,7 +34,13 @@ check(
   !uploadRequest.safeParse({ mime: 'text/plain; charset=utf-8', size: 1 }).success,
 );
 
-const error = new FileStorageError(FILE_ERROR_CODES.objectMissing, 'not uploaded yet');
-check('errors carry a stable code', isFileStorageError(error) && error.code === 'ARKI_FS_E004' && error.retryable);
+const error = new FileStorageError(FILE_ERROR_CODES.storage, 'store down');
+check('errors carry a stable code', isFileStorageError(error) && error.code === 'ARKI_FS_E007' && error.retryable);
+
+const pending = UploadPending({ fileId: id });
+check(
+  'failures are values with a dotted code',
+  UploadPending.is(pending) && pending.code === 'fs.upload_pending' && pending.status === 409,
+);
 
 console.log('smoke checks passed');

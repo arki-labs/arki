@@ -1,20 +1,14 @@
 /**
- * Every failure the files table raises on purpose is a {@link FileStorageError}
- * with a stable `code`. Match on the code, never on the message.
+ * Every fault the files table throws on purpose is a {@link FileStorageError}
+ * with a stable `code`. Match on the code, never on the message. Expected
+ * outcomes (a missing file, an unfinished upload) are returned instead: see
+ * `failures.ts`.
  */
 
-/** Stable error codes of `@arki/fs/files` and `@arki/fs/pg`. */
+/** Stable error codes of `@arki/fs/files` and `@arki/fs/pg`. E002–E005 are retired: those outcomes are returned failures now. */
 export const FILE_ERROR_CODES = {
   /** Bad input or config: TTL over the cap, size over the limit, mime not allowed. */
   invalid: 'ARKI_FS_E001',
-  /** Missing, not yours, or another bucket binding. One code on purpose, so callers cannot probe for existence. */
-  unavailable: 'ARKI_FS_E002',
-  /** Not pending, not ready, or the confirm window passed. */
-  wrongState: 'ARKI_FS_E003',
-  /** Confirm came before the PUT finished. The row stays pending; a retry is fine. */
-  objectMissing: 'ARKI_FS_E004',
-  /** The stored size, type or hash differs from the row. */
-  mismatch: 'ARKI_FS_E005',
   /** The adapter cannot sign uploads (the local adapter). */
   unsupported: 'ARKI_FS_E006',
   /** The object store failed. */
@@ -25,12 +19,12 @@ export const FILE_ERROR_CODES = {
 export type FileErrorCode = (typeof FILE_ERROR_CODES)[keyof typeof FILE_ERROR_CODES];
 
 /** Codes where the same call may succeed later without any change. */
-const RETRYABLE: ReadonlySet<FileErrorCode> = new Set([FILE_ERROR_CODES.objectMissing, FILE_ERROR_CODES.storage]);
+const RETRYABLE: ReadonlySet<FileErrorCode> = new Set([FILE_ERROR_CODES.storage]);
 
 /** A coded failure of the files table or one of its adapters. */
 export class FileStorageError extends Error {
   readonly code: FileErrorCode;
-  /** True when retrying the same call later can succeed (the PUT is still running, the store hiccuped). */
+  /** True when retrying the same call later can succeed (the store hiccuped). */
   readonly retryable: boolean;
 
   constructor(code: FileErrorCode, message: string, options?: { cause?: unknown }) {

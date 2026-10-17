@@ -20,6 +20,9 @@ Six steps. The full, typechecked wiring is in `examples/files/server.ts` and `ex
 ## Traps
 
 - **Store the `FileId`, never a URL.** URLs expire (300 s by default). Call `storage.url` when you render.
+- **Expected outcomes are returned, not thrown.** `confirmUpload` returns `UploadPending` while the PUT is still
+  running, and every call returns `FileUnavailable` for a file that is missing or not yours. Check
+  `isFailure(result)` and return the failure on; `filesRouter` already sends them as declared oRPC errors.
 - **Never mark a file ready from client success.** Only `confirmUpload` does, after it has read the object.
 - **Never use `exists()` or an ETag as proof.** `exists()` answers `false` on any error; ETags differ by store.
 - **Never call storage I/O inside a database transaction.** A rolled-back insert would leave a live URL with

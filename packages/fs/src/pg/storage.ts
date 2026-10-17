@@ -6,9 +6,14 @@
  * Two rules decide the design. The server derives every key from the row, and
  * nothing is `ready` until the server has looked at the stored object.
  * Storage I/O never runs inside a database transaction.
+ *
+ * Expected outcomes are returned as failures (`FileUnavailable`, `UploadPending`,
+ * `FileWrongState`, `UploadMismatch`); bad input, config and store faults throw.
  */
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
+
+import type { FailureOf } from '@arki/failure';
 
 import type { FileId, SignedFileUrl, UploadRequest, UploadTicket } from '../files/schemas.js';
 import type { SignedUploadAdapter, StorageAdapter } from '../storage/types.js';
@@ -16,6 +21,7 @@ import type { CleanupOptions, CleanupResult } from './cleanup.js';
 import type { FilesContext, FilesDb } from './context.js';
 import type { FileRow, FilesTable, OwnerOf } from './table.js';
 import { FILE_ERROR_CODES, FileStorageError } from '../files/errors.js';
+import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
 import { fileId, uploadRequest } from '../files/schemas.js';
 import { cleanupOrphans } from './cleanup.js';
 import { fail, filesLog } from './context.js';
@@ -51,20 +57,28 @@ export type FileStorageOptions<T extends FilesTable> = {
   policy?: FilePolicy<T>;
 };
 
+type Unavailable = FailureOf<typeof FileUnavailable>;
+type WrongState = FailureOf<typeof FileWrongState>;
+
 export type FileStorage<T extends FilesTable> = {
-  /** Writes a pending row, then signs a create-only PUT for it. */
-  createUpload(actor: OwnerOf<T>, request: UploadRequest): Promise<UploadTicket>;
+  /** Writes a pending row, then signs a create-only PUT for it. `FileUnavailable` when the policy refuses. */
+  createUpload(actor: OwnerOf<T>, request: UploadRequest): Promise<UploadTicket | Unavailable>;
   /** Checks the stored object against the row and marks it ready. Idempotent. */
-  confirmUpload(actor: OwnerOf<T>, id: FileId): Promise<FileRow<T>>;
-  get(actor: OwnerOf<T>, id: FileId): Promise<FileRow<T>>;
+  confirmUpload(
+    actor: OwnerOf<T>,
+    id: FileId,
+  ): Promise<
+    FileRow<T> | Unavailable | WrongState | FailureOf<typeof UploadPending> | FailureOf<typeof UploadMismatch>
+  >;
+  get(actor: OwnerOf<T>, id: FileId): Promise<FileRow<T> | Unavailable>;
   /** A GET URL for a ready file. Store the `FileId`, never this URL. */
   url(
     actor: OwnerOf<T>,
     id: FileId,
     options?: { expiresIn?: number; disposition?: 'inline' | 'attachment'; filename?: string },
-  ): Promise<SignedFileUrl>;
+  ): Promise<SignedFileUrl | Unavailable | WrongState>;
   /** Marks the file deleting; deletes now when it is safe, else leaves it to the sweep. */
-  remove(actor: OwnerOf<T>, id: FileId): Promise<{ physical: 'done' | 'scheduled' }>;
+  remove(actor: OwnerOf<T>, id: FileId): Promise<{ physical: 'done' | 'scheduled' } | Unavailable>;
   cleanupOrphans(options?: CleanupOptions): Promise<CleanupResult>;
 };
 
@@ -133,6 +147,12 @@ async function storeCall<R>(what: string, call: () => Promise<R>): Promise<R> {
   }
 }
 
+/** The file is in the wrong state for this call; the log says which state. */
+function wrongState(fileId: FileId, why: string) {
+  filesLog.debug('{fileId}: wrong state ({why})', { fileId, why });
+  return FileWrongState({ fileId });
+}
+
 function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -182,32 +202,33 @@ export function fileStorage<T extends FilesTable>(
     return row;
   };
 
-  /** One code for missing, other binding and denied, so callers cannot probe for existence. The log says which. */
+  /** One failure for missing, other binding and denied, so callers cannot probe for existence. The log says which. */
   const load = async (
     actor: OwnerOf<T>,
     id: FileId,
     allowed: (file: FileRow<T>, actor: OwnerOf<T>) => boolean | Promise<boolean>,
-  ): Promise<FileRow<T>> => {
-    const row = await read(parseId(id));
+  ) => {
+    const fileId = parseId(id);
+    const row = await read(fileId);
     if (!row) {
-      filesLog.debug('{fileId}: unavailable (no row in this bucket)', { fileId: id });
-      return fail(FILE_ERROR_CODES.unavailable, 'file unavailable');
+      filesLog.debug('{fileId}: unavailable (no row in this bucket)', { fileId });
+      return FileUnavailable({ fileId });
     }
     if (!(await allowed(row, actor))) {
-      filesLog.debug('{fileId}: unavailable (policy denied)', { fileId: id });
-      return fail(FILE_ERROR_CODES.unavailable, 'file unavailable');
+      filesLog.debug('{fileId}: unavailable (policy denied)', { fileId });
+      return FileUnavailable({ fileId });
     }
     return row;
   };
 
   /** Ends a pending row whose object is wrong; the sweep deletes it once a late PUT can no longer land. */
-  const reject = async (row: FileRow<T>, reason: string): Promise<never> => {
+  const reject = async (row: FileRow<T>, reason: string) => {
     await db
       .update(files)
       .set({ status: 'deleting', cleanupAt: sql`greatest(now(), ${files.expiresAt} + ${grace})` })
       .where(and(eq(files.id, row.id), eq(files.status, 'pending')));
     filesLog.debug('{fileId}: pending → deleting ({reason})', { fileId: row.id, reason });
-    return fail(FILE_ERROR_CODES.mismatch, `stored object does not match the upload: ${reason}`);
+    return UploadMismatch({ fileId: row.id, reason });
   };
 
   return {
@@ -223,7 +244,8 @@ export function fileStorage<T extends FilesTable>(
       if (!mimeAllowed(mime, config.limits.allowedMime))
         fail(FILE_ERROR_CODES.invalid, `type "${mime}" is not allowed`);
       if (!(await canCreate(actor, parsedRequest.data))) {
-        fail(FILE_ERROR_CODES.unavailable, 'upload not allowed');
+        filesLog.debug('upload refused by the policy');
+        return FileUnavailable({});
       }
 
       const id = fileId.create();
@@ -267,11 +289,13 @@ export function fileStorage<T extends FilesTable>(
 
     async confirmUpload(actor, id) {
       const row = await load(actor, id, canRead);
+      if (FileUnavailable.is(row)) return row;
       if (row.status === 'ready') return row;
-      if (row.status === 'deleting') return fail(FILE_ERROR_CODES.wrongState, 'file is being deleted');
+      if (row.status === 'deleting') return wrongState(row.id, 'being deleted');
 
+      // No object yet: the PUT has not landed. The row stays pending, so a later confirm can win.
       const meta = await storeCall('HEAD', () => adapter.getMetadata(row.key));
-      if (!meta) return fail(FILE_ERROR_CODES.objectMissing, 'the upload has not finished; retry later');
+      if (!meta) return UploadPending({ fileId: row.id });
       if (meta.size !== row.size) return reject(row, `size ${String(meta.size)} ≠ ${String(row.size)}`);
       if (meta.contentType.toLowerCase() !== row.mime.toLowerCase()) {
         return reject(row, `type "${meta.contentType}" ≠ "${row.mime}"`);
@@ -280,7 +304,7 @@ export function fileStorage<T extends FilesTable>(
       let sha256: string | null = null;
       if (config.verify === 'hash') {
         const bytes = await storeCall('GET', () => adapter.get(row.key));
-        if (!bytes) return fail(FILE_ERROR_CODES.objectMissing, 'the upload has not finished; retry later');
+        if (!bytes) return UploadPending({ fileId: row.id });
         if (bytes.byteLength !== row.size) return reject(row, `downloaded ${String(bytes.byteLength)} bytes`);
         sha256 = toHex(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes)));
       }
@@ -298,7 +322,7 @@ export function fileStorage<T extends FilesTable>(
       // Lost the race: a concurrent confirm won (fine), or the sweep or a remove did.
       const now = await read(row.id);
       if (now?.status === 'ready') return now;
-      return fail(FILE_ERROR_CODES.wrongState, 'the confirm window passed or the file is being deleted');
+      return wrongState(row.id, now ? `${now.status}, confirm window passed` : 'swept');
     },
 
     async get(actor, id) {
@@ -318,7 +342,8 @@ export function fileStorage<T extends FilesTable>(
       }
 
       const row = await load(actor, id, canRead);
-      if (row.status !== 'ready') return fail(FILE_ERROR_CODES.wrongState, 'file is not ready');
+      if (FileUnavailable.is(row)) return row;
+      if (row.status !== 'ready') return wrongState(row.id, `${row.status}, not ready`);
       // Taken before signing, so the reported deadline is never later than the real one.
       const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
       const url = await storeCall('sign GET', () =>
@@ -329,6 +354,7 @@ export function fileStorage<T extends FilesTable>(
 
     async remove(actor, id) {
       const row = await load(actor, id, canRemove);
+      if (FileUnavailable.is(row)) return row;
       // A pending object may still receive a PUT until expires_at + grace; delete only after that.
       const [marked] = await db
         .update(files)

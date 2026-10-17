@@ -6,41 +6,48 @@
  *
  * Output types reach the browser through the contract; nothing is restated.
  * Outputs never carry the bucket, key or owner.
+ *
+ * Each procedure lists the failures its storage call can return (`errorMap`),
+ * so clients get them typed and can `reviveRpcError` them. Thrown faults
+ * (`FileStorageError`) become plain `ORPCError`s with the `ARKI_FS_E00x` code in `data`.
  */
 import type { Context, ImplementerInternal } from '@orpc/server';
 import { oc } from '@orpc/contract';
 import { ORPCError } from '@orpc/server';
 import { z } from 'zod';
 
+import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+
 import type { FileErrorCode } from './files/errors.js';
 import type { FilesTable, FileStorage, OwnerOf } from './pg/index.js';
 import { FILE_ERROR_CODES, isFileStorageError } from './files/errors.js';
+import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from './files/failures.js';
 import { fileId, fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
 import { toFileRecord } from './pg/record.js';
 
 const byFileId = z.strictObject({ fileId: fileId.schema });
 
 export const filesContract = {
-  createUpload: oc.input(uploadRequest).output(uploadTicket),
-  confirmUpload: oc.input(byFileId).output(fileRecord),
+  createUpload: oc.errors(errorMap(FileUnavailable)).input(uploadRequest).output(uploadTicket),
+  confirmUpload: oc
+    .errors(errorMap(FileUnavailable, FileWrongState, UploadPending, UploadMismatch))
+    .input(byFileId)
+    .output(fileRecord),
   url: oc
+    .errors(errorMap(FileUnavailable, FileWrongState))
     .input(z.strictObject({ fileId: fileId.schema, expiresIn: z.number().int().min(1).optional() }))
     .output(signedFileUrl),
-  remove: oc.input(byFileId).output(z.void()),
+  remove: oc.errors(errorMap(FileUnavailable)).input(byFileId).output(z.void()),
 };
 export type FilesContract = typeof filesContract;
 
 const ORPC_CODES = {
   [FILE_ERROR_CODES.invalid]: 'BAD_REQUEST',
-  [FILE_ERROR_CODES.unavailable]: 'NOT_FOUND',
-  [FILE_ERROR_CODES.wrongState]: 'CONFLICT',
-  [FILE_ERROR_CODES.objectMissing]: 'CONFLICT',
-  [FILE_ERROR_CODES.mismatch]: 'CONFLICT',
   [FILE_ERROR_CODES.unsupported]: 'INTERNAL_SERVER_ERROR',
   [FILE_ERROR_CODES.storage]: 'INTERNAL_SERVER_ERROR',
 } as const satisfies Record<FileErrorCode, string>;
 
-/** Runs one storage call; a `FileStorageError` becomes the matching `ORPCError`, with the `ARKI_FS_E00x` code in `data`. */
+/** Runs one storage call; a thrown `FileStorageError` becomes the matching `ORPCError`, with the `ARKI_FS_E00x` code in `data`. */
 async function answer<R>(call: () => Promise<R>): Promise<R> {
   try {
     return await call();
@@ -72,18 +79,25 @@ export function filesRouter<TInitialContext extends Context, TCurrentContext ext
   bind: { storage: (context: TCurrentContext) => FileStorage<T>; actor: (context: TCurrentContext) => OwnerOf<T> },
 ) {
   return {
-    createUpload: implementer.createUpload.handler(({ input, context }) =>
-      answer(() => bind.storage(context).createUpload(bind.actor(context), input)),
+    createUpload: implementer.createUpload.handler(({ input, context, errors }) =>
+      answer(() => orThrowRpc(bind.storage(context).createUpload(bind.actor(context), input), errors)),
     ),
-    confirmUpload: implementer.confirmUpload.handler(({ input, context }) =>
-      answer(async () => toFileRecord(await bind.storage(context).confirmUpload(bind.actor(context), input.fileId))),
+    confirmUpload: implementer.confirmUpload.handler(({ input, context, errors }) =>
+      answer(async () =>
+        toFileRecord(orThrowRpc(await bind.storage(context).confirmUpload(bind.actor(context), input.fileId), errors)),
+      ),
     ),
-    url: implementer.url.handler(({ input, context }) =>
-      answer(() => bind.storage(context).url(bind.actor(context), input.fileId, { expiresIn: input.expiresIn })),
+    url: implementer.url.handler(({ input, context, errors }) =>
+      answer(() =>
+        orThrowRpc(
+          bind.storage(context).url(bind.actor(context), input.fileId, { expiresIn: input.expiresIn }),
+          errors,
+        ),
+      ),
     ),
-    remove: implementer.remove.handler(({ input, context }) =>
+    remove: implementer.remove.handler(({ input, context, errors }) =>
       answer(async () => {
-        await bind.storage(context).remove(bind.actor(context), input.fileId);
+        orThrowRpc(await bind.storage(context).remove(bind.actor(context), input.fileId), errors);
       }),
     ),
   };

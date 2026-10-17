@@ -172,6 +172,7 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",

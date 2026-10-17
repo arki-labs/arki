@@ -12,12 +12,22 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { isFailure, orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
 import type { FileId } from '../files/index.js';
 import type { FileRow, FilesDb, FileStorage, OwnerOf } from './index.js';
 import type { FileStorageOptions } from './storage.js';
-import { FILE_ERROR_CODES, fileId, fileRecord, isFileStorageError } from '../files/index.js';
+import {
+  FILE_ERROR_CODES,
+  fileId,
+  fileRecord,
+  FileUnavailable,
+  FileWrongState,
+  isFileStorageError,
+  UploadMismatch,
+  UploadPending,
+} from '../files/index.js';
 import { createLocalStorageAdapter } from '../storage/local-adapter';
 import { memoryUploadAdapter } from '../testing.js';
 import { filesTable, fileStorage, toFileRecord } from './index.js';
@@ -64,7 +74,7 @@ function setup(options: Options = {}) {
 }
 
 async function upload(env: ReturnType<typeof setup>, actor: UserId = alice, body = hello, mime = 'text/plain') {
-  const ticket = await env.storage.createUpload(actor, { mime, size: body.byteLength });
+  const ticket = orThrow(await env.storage.createUpload(actor, { mime, size: body.byteLength }));
   const response = await env.adapter.browserPut(ticket.url, body, ticket.headers);
   expect(response.status).toBe(200);
   return ticket;
@@ -88,11 +98,16 @@ async function expire(id: FileId) {
     .where(eq(files.id, id));
 }
 
-/** The ARKI_FS code a call failed with; 'resolved' when it did not fail. */
+/**
+ * The code a call failed with: a returned failure's dotted code, or a thrown
+ * fault's ARKI_FS code. 'resolved' when it did not fail. A failure that was
+ * thrown instead of returned comes back as the failure itself, so it never
+ * matches a code.
+ */
 async function codeOf(promise: Promise<unknown>) {
   try {
-    await promise;
-    return 'resolved';
+    const value = await promise;
+    return isFailure(value) ? value.code : 'resolved';
   } catch (error) {
     return isFileStorageError(error) ? error.code : error;
   }
@@ -147,7 +162,7 @@ describe('fileStorage types', () => {
 describe('createUpload', () => {
   it('writes a pending row first and returns a create-only ticket for a server-derived key', async () => {
     const env = setup();
-    const ticket = await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 });
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
 
     expect(fileId.is(ticket.fileId)).toBe(true);
     expect(ticket.method).toBe('PUT');
@@ -185,9 +200,9 @@ describe('createUpload', () => {
     expect(await codeOf(storage.createUpload(alice, { mime: 'text/plain', size: 1 }))).toBe(FILE_ERROR_CODES.invalid);
   });
 
-  it('answers ARKI_FS_E002 when the policy refuses creation', async () => {
+  it('returns FileUnavailable when the policy refuses creation', async () => {
     const { storage } = setup({ policy: { canCreate: actor => actor !== bob } });
-    expect(await codeOf(storage.createUpload(bob, { mime: 'text/plain', size: 1 }))).toBe(FILE_ERROR_CODES.unavailable);
+    expect(await codeOf(storage.createUpload(bob, { mime: 'text/plain', size: 1 }))).toBe(FileUnavailable.code);
   });
 
   // G1: the row commits before the URL exists, so a signer failure leaves a row the sweep removes.
@@ -224,12 +239,12 @@ describe('confirmUpload', () => {
     using log = fakeLog();
     const ticket = await upload(env);
 
-    const ready = await env.storage.confirmUpload(alice, ticket.fileId);
+    const ready = orThrow(await env.storage.confirmUpload(alice, ticket.fileId));
     expect(ready).toMatchObject({ status: 'ready', size: 5, mime: 'text/plain', sha256: null, cleanupAt: null });
     expect(ready.confirmedAt).not.toBeNull();
     expect(fileRecord.parse(toFileRecord(ready))).toEqual(toFileRecord(ready));
 
-    const { url, expiresAt } = await env.storage.url(alice, ticket.fileId);
+    const { url, expiresAt } = orThrow(await env.storage.url(alice, ticket.fileId));
     expect(new URL(url).pathname).toBe(`/files/${ticket.fileId}`);
     expect(Date.parse(expiresAt)).toBeGreaterThan(Date.now());
 
@@ -253,10 +268,10 @@ describe('confirmUpload', () => {
     expect(second).toEqual(first);
   });
 
-  it('answers ARKI_FS_E004 before the PUT finished and keeps the row pending', async () => {
+  it('returns UploadPending before the PUT finished and keeps the row pending', async () => {
     const env = setup();
-    const ticket = await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 });
-    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.objectMissing);
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
+    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(UploadPending.code);
     expect(await row(ticket.fileId)).toHaveProperty('status', 'pending');
     await env.adapter.browserPut(ticket.url, hello, ticket.headers);
     expect(await env.storage.confirmUpload(alice, ticket.fileId)).toHaveProperty('status', 'ready');
@@ -264,48 +279,78 @@ describe('confirmUpload', () => {
 
   // G2: ready only when the stored object matches the row. A store that ignored the signed
   // length or type (or a write by another path) must not produce a ready row.
-  it('marks the row deleting on a size mismatch (ARKI_FS_E005)', async () => {
+  it('marks the row deleting on a size mismatch (UploadMismatch)', async () => {
     const env = setup();
-    const ticket = await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 });
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
     await env.adapter.put(`files/${ticket.fileId}`, Buffer.from('hello world'), { contentType: 'text/plain' });
-    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.mismatch);
+    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(UploadMismatch.code);
     expect(await row(ticket.fileId)).toHaveProperty('status', 'deleting');
   });
 
-  it('marks the row deleting on a type mismatch (ARKI_FS_E005)', async () => {
+  it('marks the row deleting on a type mismatch (UploadMismatch)', async () => {
     const env = setup();
-    const ticket = await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 });
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
     await env.adapter.put(`files/${ticket.fileId}`, Buffer.from(hello), { contentType: 'image/png' });
-    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.mismatch);
+    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(UploadMismatch.code);
     expect(await row(ticket.fileId)).toHaveProperty('status', 'deleting');
   });
 
   it("stores the SHA-256 hex with verify: 'hash'", async () => {
     const env = setup({ verify: 'hash' });
     const ticket = await upload(env);
-    const ready = await env.storage.confirmUpload(alice, ticket.fileId);
+    const ready = orThrow(await env.storage.confirmUpload(alice, ticket.fileId));
     expect(ready.sha256).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
   });
 
-  it('answers ARKI_FS_E003 once the confirm window passed, even with the object present', async () => {
+  it('returns FileWrongState once the confirm window passed, even with the object present', async () => {
     const env = setup();
     const ticket = await upload(env);
     await expire(ticket.fileId);
-    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.wrongState);
+    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FileWrongState.code);
     expect(await row(ticket.fileId)).toHaveProperty('status', 'pending');
   });
 
   // G6: once the sweep claimed a row, a confirm cannot make it ready.
-  it('loses to a sweep that claimed the row first (ARKI_FS_E003)', async () => {
+  it('loses to a sweep that claimed the row first (FileWrongState)', async () => {
     const env = setup();
     const ticket = await upload(env);
     await db.update(files).set({ status: 'deleting' }).where(eq(files.id, ticket.fileId));
-    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.wrongState);
+    expect(await codeOf(env.storage.confirmUpload(alice, ticket.fileId))).toBe(FileWrongState.code);
+  });
+});
+
+describe('expected outcomes', () => {
+  // A missing file or an unfinished upload is an answer the caller branches on (show a
+  // placeholder, confirm again later), not a fault. So it is returned, never thrown.
+  it('returns failures as values, with the file id in the data', async () => {
+    const env = setup();
+    const missing = fileId.create();
+    const unavailable = await env.storage.get(alice, missing);
+    expect(FileUnavailable.is(unavailable)).toBe(true);
+    expect(unavailable).toMatchObject({ code: 'fs.file_unavailable', status: 404, data: { fileId: missing } });
+
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
+    expect(await env.storage.confirmUpload(alice, ticket.fileId)).toMatchObject({
+      code: 'fs.upload_pending',
+      status: 409,
+      data: { fileId: ticket.fileId },
+    });
+  });
+
+  it('says why an upload mismatched, so the client can show it', async () => {
+    const env = setup();
+    const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
+    await env.adapter.put(`files/${ticket.fileId}`, Buffer.from('hello world'), { contentType: 'text/plain' });
+    expect(await env.storage.confirmUpload(alice, ticket.fileId)).toMatchObject({
+      code: 'fs.upload_mismatch',
+      status: 422,
+      data: { fileId: ticket.fileId, reason: 'size 11 ≠ 5' },
+    });
   });
 });
 
 describe('access', () => {
-  it('denies another owner with the same code as a missing file (ARKI_FS_E002)', async () => {
+  it('denies another owner with the same failure as a missing file (FileUnavailable)', async () => {
     const env = setup();
     const ticket = await upload(env);
     await env.storage.confirmUpload(alice, ticket.fileId);
@@ -316,7 +361,9 @@ describe('access', () => {
       env.storage.remove(bob, ticket.fileId),
       env.storage.get(alice, fileId.create()),
     ]) {
-      expect(await codeOf(call)).toBe(FILE_ERROR_CODES.unavailable);
+      // Denied and missing look the same, down to the data: nothing tells a prober the file exists.
+      const result = await call;
+      expect(FileUnavailable.is(result) && Object.keys(result.data)).toEqual(['fileId']);
     }
     expect(await row(ticket.fileId)).toHaveProperty('status', 'ready');
   });
@@ -336,7 +383,7 @@ describe('access', () => {
       bucket: 'avatars',
       limits: { maxSize: 10, allowedMime: ['*/*'] },
     });
-    expect(await codeOf(other.confirmUpload(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.unavailable);
+    expect(await codeOf(other.confirmUpload(alice, ticket.fileId))).toBe(FileUnavailable.code);
     await expire(ticket.fileId);
     await other.cleanupOrphans({ batch: 1000 });
     expect(await row(ticket.fileId)).toBeDefined();
@@ -344,10 +391,10 @@ describe('access', () => {
 });
 
 describe('url', () => {
-  it('answers ARKI_FS_E003 for a pending file', async () => {
+  it('returns FileWrongState for a pending file', async () => {
     const env = setup();
     const ticket = await upload(env);
-    expect(await codeOf(env.storage.url(alice, ticket.fileId))).toBe(FILE_ERROR_CODES.wrongState);
+    expect(await codeOf(env.storage.url(alice, ticket.fileId))).toBe(FileWrongState.code);
   });
 
   it('rejects a TTL over the cap instead of clamping it (ARKI_FS_E001)', async () => {
@@ -356,7 +403,7 @@ describe('url', () => {
     await env.storage.confirmUpload(alice, ticket.fileId);
     expect(await codeOf(env.storage.url(alice, ticket.fileId, { expiresIn: 601 }))).toBe(FILE_ERROR_CODES.invalid);
     expect(await codeOf(env.storage.url(alice, ticket.fileId, { filename: 'a"b' }))).toBe(FILE_ERROR_CODES.invalid);
-    const { url } = await env.storage.url(alice, ticket.fileId, { expiresIn: 600 });
+    const { url } = orThrow(await env.storage.url(alice, ticket.fileId, { expiresIn: 600 }));
     expect(new URL(url).searchParams.get('X-Memory-Expires')).toBe('600');
   });
 });
@@ -407,7 +454,7 @@ describe('cleanupOrphans', () => {
     await env.storage.cleanupOrphans({ batch: 1000 });
     const tickets = [];
     for (let index = 0; index < 3; index += 1)
-      tickets.push(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 }));
+      tickets.push(orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 })));
     for (const ticket of tickets) await expire(ticket.fileId);
 
     expect(await env.storage.cleanupOrphans({ batch: 2 })).toEqual({ removed: 2, failed: 0, more: true });
@@ -418,7 +465,7 @@ describe('cleanupOrphans', () => {
     const env = setup();
     const ready = await upload(env);
     await env.storage.confirmUpload(alice, ready.fileId);
-    const fresh = await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 });
+    const fresh = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 }));
     await env.storage.cleanupOrphans({ batch: 1000 });
     expect(await row(ready.fileId)).toHaveProperty('status', 'ready');
     expect(await row(fresh.fileId)).toHaveProperty('status', 'pending');
@@ -428,8 +475,8 @@ describe('cleanupOrphans', () => {
   it('backs off a failing delete so later rows still go', async () => {
     const env = setup();
     await env.storage.cleanupOrphans({ batch: 1000 });
-    const stuck = await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 });
-    const later = await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 });
+    const stuck = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 }));
+    const later = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 }));
     await expire(stuck.fileId);
     await expire(later.fileId);
     await db

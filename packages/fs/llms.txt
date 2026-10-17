@@ -3,7 +3,7 @@
 > File storage for arki apps: S3/R2/local adapters, and the files table — a Postgres upload recipe where the row exists before any byte and nothing is ready until the server saw the object.
 
 ## Entries
-- @arki/fs/files — fileId (`fil_`), uploadRequest, uploadTicket, fileRecord, signedFileUrl, FILE_ERROR_CODES, FileStorageError, uploadFile(client, blob, { onProgress, signal }). Portable (Node, Bun, Deno, browser, Hermes).
+- @arki/fs/files — fileId (`fil_`), uploadRequest, uploadTicket, fileRecord, signedFileUrl, FileUnavailable, UploadPending, FileWrongState, UploadMismatch, FILE_ERROR_CODES, FileStorageError, uploadFile(client, blob, { onProgress, signal }). Portable (Node, Bun, Deno, browser, Hermes).
 - @arki/fs/pg — filesTable({ owner, name?, schema? }), fileStorage(db, adapter, options), toFileRecord(row), types FileRow<T>, OwnerOf<T>, FilePolicy<T>. Server. Peers: @arki/db, drizzle-orm.
 - @arki/fs/orpc — filesContract (createUpload, confirmUpload, url, remove), filesRouter(implementer.files, { storage, actor }). Peers: @orpc/contract, @orpc/server.
 - @arki/fs/testing — memoryUploadAdapter(); browserPut(url, body, headers) plays the browser PUT.
@@ -12,16 +12,19 @@
 ## The five calls (each takes the acting owner id first)
 1. createUpload(actor, { mime, size }) → { fileId, url, method: 'PUT', headers, expiresAt }. Row is written first (pending).
 2. Browser PUTs the body to url with headers unchanged (Content-Type, If-None-Match: *; both signed, plus Content-Length).
-3. confirmUpload(actor, fileId) → row. HEADs the object; size and type must match; idempotent.
-4. url(actor, fileId, { expiresIn?, disposition?, filename? }) → { url, expiresAt }. Ready files only. Store the FileId, never the URL.
-5. remove(actor, fileId) → { physical: 'done' | 'scheduled' }. cleanupOrphans({ batch }) → { removed, failed, more } from a locked schedule.
+3. confirmUpload(actor, fileId) → row | UploadPending | FileWrongState | UploadMismatch. HEADs the object; size and type must match; idempotent.
+4. url(actor, fileId, { expiresIn?, disposition?, filename? }) → { url, expiresAt } | FileWrongState. Ready files only. Store the FileId, never the URL.
+5. remove(actor, fileId) → { physical: 'done' | 'scheduled' }. Every call can also return FileUnavailable. cleanupOrphans({ batch }) → { removed, failed, more } from a locked schedule.
 
 ## Guarantees
 G1 no URL before its pending row commits. G2 ready only after size+type matched the stored object. G3 keys are server-derived. G4 PUT grants are create-only. G5 every URL expires. G6 confirm and sweep never both win. G7 every expired pending row and every deleting row is eventually removed (backoff up to 1 day).
 Not promised: no 2PC, no instant revocation of issued GET URLs, a PUT later than expires_at + grace after a removal can orphan an object, MIME is declared not sniffed.
 
-## Error codes (FileStorageError.code)
-ARKI_FS_E001 invalid · E002 unavailable (missing/not yours/other bucket) · E003 wrongState · E004 objectMissing (retry) · E005 mismatch · E006 unsupported (local adapter) · E007 storage (retry).
+## Failures (returned, never thrown; from @arki/failure)
+FileUnavailable fs.file_unavailable 404 (missing/not yours/other bucket/policy refused: one failure, no existence leak) · UploadPending fs.upload_pending 409 (PUT not landed; confirm again later) · FileWrongState fs.file_wrong_state 409 · UploadMismatch fs.upload_mismatch 422 (row now deleting). Check with isFailure(result). filesContract lists them per procedure (errorMap).
+
+## Error codes (FileStorageError.code, thrown faults)
+ARKI_FS_E001 invalid · E006 unsupported (local adapter) · E007 storage (retry). E002–E005 are retired.
 
 ## Rules
 Pass the root Drizzle db, never a transaction. Never call storage I/O inside a DB transaction. Never mark a file ready from client success. Never use exists() or an ETag as proof. Local adapter is refused; use MinIO or a dev R2 bucket.

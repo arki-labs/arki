@@ -49,7 +49,7 @@ describe('uploadRequest', () => {
 describe('FileStorageError', () => {
   it('marks only "retry later" codes retryable', () => {
     const retryable = Object.values(FILE_ERROR_CODES).filter(code => new FileStorageError(code, 'x').retryable);
-    expect(retryable).toEqual([FILE_ERROR_CODES.objectMissing, FILE_ERROR_CODES.storage]);
+    expect(retryable).toEqual([FILE_ERROR_CODES.storage]);
   });
 
   it('is recognised by isFileStorageError, plain errors are not', () => {

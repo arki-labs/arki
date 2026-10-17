@@ -14,10 +14,11 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { defineId } from '@arki/contracts';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FileId } from '../files/index.js';
 import type { FilesDb, FileStorage } from './index.js';
-import { FILE_ERROR_CODES, isFileStorageError } from '../files/index.js';
+import { FileWrongState, isFileStorageError } from '../files/index.js';
 import { memoryUploadAdapter } from '../testing.js';
 import { filesTable, fileStorage } from './index.js';
 
@@ -57,7 +58,7 @@ afterAll(async () => {
 });
 
 async function uploaded(): Promise<FileId> {
-  const ticket = await storageA.createUpload(alice, { mime: 'text/plain', size: hello.byteLength });
+  const ticket = orThrow(await storageA.createUpload(alice, { mime: 'text/plain', size: hello.byteLength }));
   expect(await adapter.browserPut(ticket.url, hello, ticket.headers)).toHaveProperty('status', 200);
   return ticket.fileId;
 }
@@ -129,7 +130,7 @@ describe('sweep', () => {
 describe('confirm races', () => {
   // A sweep claim that commits while confirm waits on the row lock: confirm re-checks
   // `cleanup_at > now()` on the new row version under READ COMMITTED and loses.
-  it('a confirm blocked behind a sweep claim loses with ARKI_FS_E003', async () => {
+  it('a confirm blocked behind a sweep claim loses with FileWrongState', async () => {
     const id = await uploaded();
     const holder = await poolB.connect();
     try {
@@ -140,7 +141,7 @@ describe('confirm races', () => {
         [id],
       );
       const confirm = storageA.confirmUpload(alice, id).then(
-        () => 'won',
+        value => (isFailure(value) ? value.code : 'won'),
         (error: unknown) => (isFileStorageError(error) ? error.code : error),
       );
       // Wait until confirm's UPDATE is queued on the row lock.
@@ -150,7 +151,7 @@ describe('confirm races', () => {
         await new Promise(resolve => setTimeout(resolve, 20));
       }
       await holder.query('commit');
-      expect(await confirm).toBe(FILE_ERROR_CODES.wrongState);
+      expect(await confirm).toBe(FileWrongState.code);
       expect(await statusOf(id)).toBe('deleting');
     } finally {
       holder.release();
@@ -170,7 +171,7 @@ describe('confirm races', () => {
 
     const confirms = ids.map(id =>
       storageA.confirmUpload(alice, id).then(
-        () => 'won',
+        value => (isFailure(value) ? value.code : 'won'),
         (error: unknown) => (isFileStorageError(error) ? error.code : error),
       ),
     );
@@ -190,7 +191,7 @@ describe('confirm races', () => {
         expect(status).toBe('ready');
         expect(await adapter.exists(`files/${id}`)).toBe(true);
       } else {
-        expect(outcomes[index]).toBe(FILE_ERROR_CODES.wrongState);
+        expect(outcomes[index]).toBe(FileWrongState.code);
         expect(status).toBeUndefined();
         expect(await adapter.exists(`files/${id}`)).toBe(false);
       }

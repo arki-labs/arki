@@ -8,13 +8,13 @@ any byte is written.
 
 `@arki/fs` is a workspace package (`"private": true`). Add it with `bun add @arki/fs` in the app.
 
-| Entry                                                       | What                                              | Runs on                                        | Peers you install                |
-| ----------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------- | -------------------------------- |
-| `@arki/fs/files`                                            | file ids, wire schemas, error codes, `uploadFile` | Node, Bun, Deno, browsers, Hermes              | none                             |
-| `@arki/fs/pg`                                               | `filesTable`, `fileStorage`, the sweep            | server                                         | `@arki/db`, `drizzle-orm`        |
-| `@arki/fs/orpc`                                             | `filesContract`, `filesRouter`                    | server; the contract gives clients their types | `@orpc/contract`, `@orpc/server` |
-| `@arki/fs/testing`                                          | `memoryUploadAdapter`                             | Node, Bun                                      | none                             |
-| `@arki/fs/storage`, `/storage/*`, `/s3`, `/local/*`, `/env` | storage adapters and local helpers                | Node, Bun                                      | none                             |
+| Entry                                                       | What                                                        | Runs on                                        | Peers you install                |
+| ----------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------- | -------------------------------- |
+| `@arki/fs/files`                                            | file ids, wire schemas, failures, error codes, `uploadFile` | Node, Bun, Deno, browsers, Hermes              | none                             |
+| `@arki/fs/pg`                                               | `filesTable`, `fileStorage`, the sweep                      | server                                         | `@arki/db`, `drizzle-orm`        |
+| `@arki/fs/orpc`                                             | `filesContract`, `filesRouter`                              | server; the contract gives clients their types | `@orpc/contract`, `@orpc/server` |
+| `@arki/fs/testing`                                          | `memoryUploadAdapter`                                       | Node, Bun                                      | none                             |
+| `@arki/fs/storage`, `/storage/*`, `/s3`, `/local/*`, `/env` | storage adapters and local helpers                          | Node, Bun                                      | none                             |
 
 ## Storage adapters
 
@@ -110,8 +110,9 @@ Read it back. Store the `FileId`, never a URL:
 ```ts
 // on read: store the FileId, never the URL
 export async function avatarUrl(storage: FileStorage<typeof files>, viewer: UserId, avatar: `fil_${string}`) {
-  const { url, expiresAt } = await storage.url(viewer, avatar, { disposition: 'inline' });
-  return { url, expiresAt };
+  const link = await storage.url(viewer, avatar, { disposition: 'inline' });
+  if (isFailure(link)) return link; // FileUnavailable or FileWrongState: show the placeholder
+  return { url: link.url, expiresAt: link.expiresAt };
 }
 ```
 
@@ -257,20 +258,37 @@ The local adapter cannot sign uploads, so `fileStorage` refuses it (a compile er
 `@arki/fs/testing`; its `browserPut(url, body, headers)` plays the browser's PUT and enforces the
 signed headers.
 
-## Errors
+## Failures and errors
 
-Every failure raised on purpose is a `FileStorageError` with a stable `code` and `retryable`. Match on
-the code, never the message. `filesRouter` maps them to oRPC codes and puts the code in `data.code`.
+Outcomes a correct caller must handle are **returned** as failures from `@arki/failure`, never thrown.
+Each storage call returns its value or one of these. Check with `isFailure(result)` or
+`FileUnavailable.is(result)`, and return the failure on. They are exported from `@arki/fs/files`, so a
+browser can `reviveRpcError(error, [FileUnavailable, ...])` them.
 
-| Code           | Name            | oRPC                    | Meaning                                                                      |
-| -------------- | --------------- | ----------------------- | ---------------------------------------------------------------------------- |
-| `ARKI_FS_E001` | `invalid`       | `BAD_REQUEST`           | bad input or config: TTL over the cap, size over the limit, mime not allowed |
-| `ARKI_FS_E002` | `unavailable`   | `NOT_FOUND`             | missing, not yours, or another bucket binding (one code: no existence leak)  |
-| `ARKI_FS_E003` | `wrongState`    | `CONFLICT`              | not pending, not ready, or the confirm window passed                         |
-| `ARKI_FS_E004` | `objectMissing` | `CONFLICT`              | confirm before the PUT finished; the row stays pending, retry is fine        |
-| `ARKI_FS_E005` | `mismatch`      | `CONFLICT`              | stored size, type or hash differs from the row                               |
-| `ARKI_FS_E006` | `unsupported`   | `INTERNAL_SERVER_ERROR` | the adapter cannot sign uploads (local)                                      |
-| `ARKI_FS_E007` | `storage`       | `INTERNAL_SERVER_ERROR` | the object store failed                                                      |
+| Failure           | Code                  | Status | Returned by            | Meaning                                                                               |
+| ----------------- | --------------------- | ------ | ---------------------- | ------------------------------------------------------------------------------------- |
+| `FileUnavailable` | `fs.file_unavailable` | 404    | every call             | missing, not yours, another bucket binding, or the policy refused (no existence leak) |
+| `UploadPending`   | `fs.upload_pending`   | 409    | `confirmUpload`        | the PUT has not landed yet; the row stays pending, so confirming again later is fine  |
+| `FileWrongState`  | `fs.file_wrong_state` | 409    | `confirmUpload`, `url` | not ready (for `url`), being deleted, or the confirm window passed                    |
+| `UploadMismatch`  | `fs.upload_mismatch`  | 422    | `confirmUpload`        | stored size, type or hash differs from the request; the row is now deleting           |
+
+`FileUnavailable` is one failure on purpose: a missing file and a denied one look the same, so a caller
+cannot probe which files exist. The `arki:fs` debug log says which it was. Its `fileId` is absent only
+when the policy refused a new upload.
+
+`filesContract` lists these per procedure (`errorMap`), so a client gets them as declared, typed
+`ORPCError`s with the failure's code, status and data.
+
+Faults stay **thrown** as a `FileStorageError` with a stable `code` and `retryable`. Match on the
+code, never the message. `filesRouter` maps them to oRPC codes and puts the code in `data.code`.
+
+| Code           | Name          | oRPC                    | Meaning                                                                      |
+| -------------- | ------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `ARKI_FS_E001` | `invalid`     | `BAD_REQUEST`           | bad input or config: TTL over the cap, size over the limit, mime not allowed |
+| `ARKI_FS_E006` | `unsupported` | `INTERNAL_SERVER_ERROR` | the adapter cannot sign uploads (local)                                      |
+| `ARKI_FS_E007` | `storage`     | `INTERNAL_SERVER_ERROR` | the object store failed; `retryable`                                         |
+
+E002 to E005 are retired: those outcomes are the failures above.
 
 ## Logging
 

@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Locker } from '@arki/schedule';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { orThrow } from '@arki/failure';
 
 import type { FilesDb, FileStorage } from './pg/index.js';
 import { cleanupSchedule, drain, files, userId } from '../examples/files/server.js';
@@ -38,7 +39,7 @@ afterAll(async () => {
 
 async function staleTickets(count: number) {
   for (let index = 0; index < count; index += 1) {
-    const ticket = await storage.createUpload(userId.create(), { mime: 'text/plain', size: 1 });
+    const ticket = orThrow(await storage.createUpload(userId.create(), { mime: 'text/plain', size: 1 }));
     await db
       .update(files)
       .set({ cleanupAt: sql`now() - interval '1 second'` })
@@ -58,7 +59,7 @@ describe('examples/files/server.ts', () => {
     await staleTickets(2);
     const locks: Locker = {
       mutex: () => ({
-        tryRun: async fn => ({ ran: true, value: await fn({ signal: new AbortController().signal, fence: 1n }) }),
+        tryRun: fn => Promise.resolve(fn({ signal: new AbortController().signal, fence: 1n })),
       }),
     };
     const schedule = cleanupSchedule(storage, locks);

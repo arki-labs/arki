@@ -13,10 +13,11 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vit
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { reviveRpcError } from '@arki/failure/orpc';
 
 import type { FileRecord, SignedFileUrl } from './files/index.js';
 import type { FileStorage } from './pg/index.js';
-import { uploadFile } from './files/index.js';
+import { FileUnavailable, uploadFile, UploadPending } from './files/index.js';
 import { filesContract, filesRouter } from './orpc.js';
 import { filesTable, fileStorage } from './pg/index.js';
 import { memoryUploadAdapter } from './testing.js';
@@ -105,19 +106,31 @@ describe('filesRouter', () => {
     expect(Object.keys(ticket).toSorted()).toEqual(['expiresAt', 'fileId', 'headers', 'method', 'url']);
   });
 
-  it('maps ARKI_FS codes to oRPC codes: E002 → NOT_FOUND, E001 → BAD_REQUEST, E004 → CONFLICT', async () => {
+  // A returned failure is part of the contract: the client gets it declared and typed, and
+  // can revive it to branch on. Thrown faults stay plain oRPC codes with the ARKI_FS code in data.
+  it('sends returned failures as declared errors, and thrown faults as oRPC codes (E001 → BAD_REQUEST)', async () => {
     const ticket = await clientFor(alice).files.createUpload({ mime: 'text/plain', size: 2 });
 
     const asBob = await clientFor(bob)
       .files.confirmUpload({ fileId: ticket.fileId })
       .catch((error: unknown) => error);
     expect(asBob).toBeInstanceOf(ORPCError);
-    expect(asBob).toMatchObject({ code: 'NOT_FOUND', data: { code: 'ARKI_FS_E002' } });
+    expect(asBob).toMatchObject({
+      code: 'fs.file_unavailable',
+      status: 404,
+      defined: true,
+      data: { fileId: ticket.fileId },
+    });
+    expect(FileUnavailable.is(reviveRpcError(asBob, [FileUnavailable]))).toBe(true);
 
     const early = await clientFor(alice)
       .files.confirmUpload({ fileId: ticket.fileId })
       .catch((error: unknown) => error);
-    expect(early).toMatchObject({ code: 'CONFLICT', data: { code: 'ARKI_FS_E004', retryable: true } });
+    expect(early).toMatchObject({ code: 'fs.upload_pending', status: 409, defined: true });
+    expect(reviveRpcError(early, [FileUnavailable, UploadPending])).toMatchObject({
+      code: 'fs.upload_pending',
+      data: { fileId: ticket.fileId },
+    });
 
     const tooBig = await clientFor(alice)
       .files.createUpload({ mime: 'text/plain', size: 101 })
