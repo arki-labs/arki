@@ -58,13 +58,13 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
 import type { EmptyShape, Handle, Plugin } from '@arki/dot/plugin';
-import { plugin, service, DotPluginError } from '@arki/dot/plugin';
+import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
+import type { MigratableDb, MigrateDbOptions } from './migrate.js';
 import type { PgliteInitOptions } from './runtime-local.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
-import type { MigratableDb, MigrateDbOptions } from './migrate.js';
-import { migrateDb } from './migrate.js';
+import { migrateDb, pendingMigrations } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 /**
@@ -227,13 +227,23 @@ export function db<TRelations extends AnyRelations>(
 
 /**
  * DOT plugin: migrate during `boot`, after the `db` plugin and before any
- * plugin that reads tables. Needs the `db` service; provides nothing.
+ * plugin that reads tables. Needs the `db` service.
+ *
+ * Provides `migrations`: `{ pending }`, the names this boot found pending and
+ * then applied, in order (empty when the database was up to date). `dot dev`
+ * reads it from its preflight boot to print what it applied.
  */
 export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(options: MigrateDbOptions) {
   return plugin({
     name: 'db-migrations',
     version: '0.1.0',
     needs: { db: service<MigratableDb<TRelations>>() },
+    provides: {
+      // Factories run before `boot`, so this reads the database before any migration is applied.
+      migrations: async ({ db }): Promise<{ readonly pending: readonly string[] }> => ({
+        pending: await pendingMigrations(db, options),
+      }),
+    },
     async boot({ db }) {
       await migrateDb(db, options);
     },
@@ -340,7 +350,10 @@ export function repos<const F extends RepoFactories>(factories: F & SameDatabase
     // kernel orders this plugin after the database that publishes it.
     needs: { db: service<DatabaseOf<F>>() },
     provides: {
-      repos: ({ db }): Repos<F> => ({ ...bindAll(factories, db), withTx: (tx: DatabaseOf<F>) => bindAll(factories, tx) }),
+      repos: ({ db }): Repos<F> => ({
+        ...bindAll(factories, db),
+        withTx: (tx: DatabaseOf<F>) => bindAll(factories, tx),
+      }),
     },
   });
 }
@@ -458,4 +471,3 @@ export function reader<R extends object, const M extends readonly MethodKeys<R>[
   // Erasure seam: built name by name above; each value is the repository's own method, bound.
   return out as Pick<R, M[number]>;
 }
-

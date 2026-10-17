@@ -45,6 +45,15 @@ import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 const { db, pglite } = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
 ```
 
+A data directory has one owner. PGlite has no lock of its own, and two handles on one directory corrupt it, so `initDbRuntimeLocal` writes `<dataDir>/.arki-owner` (the pid) before it opens PGlite:
+
+- A second open while the first handle lives, in another process or in this one, throws `DbRuntimeLocalError` with code `ARKI_DB_LOCAL_E001` and the owner's `pid`.
+- A lock left by a process that is gone is taken over. There is no age-based takeover.
+- `pglite.close()` gives the lock back. So does a PGlite that fails to start.
+- `memory://` and `idb://` take no lock, and `node:fs` loads only for file paths.
+
+`dbMigrations({ migrationsFolder })` applies pending migrations at boot. It also provides `migrations: { pending }`, the names it found pending and applied, read before applying (`pendingMigrations(db, options)` from `@arki/db/migrate` gives the same list on demand). `dot dev` prints it.
+
 ### Projections (event sourcing read models)
 
 ```ts

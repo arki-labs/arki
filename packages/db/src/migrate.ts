@@ -26,8 +26,12 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { MigrationMeta } from 'drizzle-orm/migrator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { sql } from 'drizzle-orm';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
+import { getMigrationsToRun } from 'drizzle-orm/migrator.utils';
 import { migrate } from 'drizzle-orm/pg-core';
+
+import { z } from '@arki/contracts';
 
 import { debugInit } from './debug.js';
 
@@ -36,7 +40,7 @@ export type MigratableDb<TRelations extends AnyRelations = AnyRelations> =
   NodePgDatabase<TRelations> | PgliteDatabase<TRelations>;
 
 /** One migration as drizzle's migrator consumes it. Re-exported so apps can type a generated module. */
-export type { MigrationMeta };
+export type { MigrationMeta } from 'drizzle-orm/migrator';
 
 type MigrationSource =
   | {
@@ -62,6 +66,42 @@ export function readMigrations(migrationsFolder: string): MigrationMeta[] {
   return readMigrationFiles({ migrationsFolder });
 }
 
+function sourceOf(options: MigrateDbOptions): MigrationMeta[] {
+  return options.migrations === undefined ? readMigrations(options.migrationsFolder) : [...options.migrations];
+}
+
+/** A row of drizzle's bookkeeping table. `created_at` is a bigint: a string on node-postgres. */
+const appliedRowSchema = z.object({
+  id: z.coerce.number(),
+  hash: z.string(),
+  created_at: z.coerce.string(),
+  name: z
+    .string()
+    .nullish()
+    .transform(name => name ?? null),
+});
+
+/**
+ * The names of the migrations `migrateDb` would apply now, in order. Read
+ * only: it never creates the bookkeeping table. Uses drizzle's own rule
+ * (`getMigrationsToRun`), so the list matches what `migrateDb` runs.
+ */
+export async function pendingMigrations<TRelations extends AnyRelations>(
+  db: MigratableDb<TRelations>,
+  options: MigrateDbOptions,
+): Promise<string[]> {
+  const local = sourceOf(options);
+  const table = `"${options.migrationsSchema ?? 'drizzle'}"."${options.migrationsTable ?? '__drizzle_migrations'}"`;
+  const exists = await db.execute(sql`select to_regclass(${table}) is not null as "exists"`);
+  const found = z.array(z.object({ exists: z.boolean() })).parse(exists.rows);
+  if (found[0]?.exists !== true) return local.map(migration => migration.name);
+  const applied = await db.execute(
+    sql`select * from ${sql.identifier(options.migrationsSchema ?? 'drizzle')}.${sql.identifier(options.migrationsTable ?? '__drizzle_migrations')}`,
+  );
+  const dbMigrations = z.array(appliedRowSchema).parse(applied.rows);
+  return getMigrationsToRun({ localMigrations: local, dbMigrations }).map(migration => migration.name);
+}
+
 /**
  * Run pending migrations. Both drivers share drizzle's Postgres migrate step
  * (`drizzle-orm/pg-core`'s `migrate`), which the per-driver `migrate()`
@@ -71,8 +111,7 @@ export async function migrateDb<TRelations extends AnyRelations>(
   db: MigratableDb<TRelations>,
   options: MigrateDbOptions,
 ): Promise<void> {
-  const migrations =
-    options.migrations === undefined ? readMigrations(options.migrationsFolder) : [...options.migrations];
+  const migrations = sourceOf(options);
   debugInit.debug('[migrate] applying {migrationsLength} migration(s)', { migrationsLength: migrations.length });
   await migrate(migrations, db, {
     // Drizzle's config type requires the folder even though this step only
