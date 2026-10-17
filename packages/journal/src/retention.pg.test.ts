@@ -10,6 +10,7 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { fakeLog } from '@arki/log/testing';
 
@@ -18,9 +19,10 @@ import { jobId } from './id.js';
 import { createJobOps } from './outbox.js';
 import { journalTables } from './pg.js';
 import { resolveRetention } from './retention.js';
-import { j } from './test-support.js';
+import { initJournal } from './journal.js';
 
 const tables = journalTables();
+const testMeta = z.object({ actorId: z.string().min(1) });
 let container: StartedPostgreSqlContainer;
 let poolA: pg.Pool;
 let poolB: pg.Pool;
@@ -252,7 +254,7 @@ describe('the sweep verbs on two connections', () => {
 
 describe('the worker sweeper', () => {
   it('the sweeper stops with the worker', async () => {
-    const journal = j.compose({ retention: { sweep: { every: 0.02 } } });
+    const journal = initJournal({ tables, meta: testMeta, retention: { sweep: { every: 0.02 } } }).compose({});
     const archived = async (id: string) =>
       (await dbA.select({ id: tables.jobArchive.id }).from(tables.jobArchive).where(eq(tables.jobArchive.id, id)))
         .length;
@@ -272,7 +274,7 @@ describe('the worker sweeper', () => {
   });
 
   it('retention.sweep false runs no tick', async () => {
-    const journal = j.compose({ retention: { sweep: false } });
+    const journal = initJournal({ tables, meta: testMeta, retention: { sweep: false } }).compose({});
     const worker = journal.worker(dbA, { pollMs: 60_000 });
     await worker.start();
     const id = await deadJob();

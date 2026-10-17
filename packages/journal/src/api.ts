@@ -9,7 +9,7 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import type { EntityBuilder } from './entity.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
-import type { JobRetention, ResolvedRetention } from './retention.js';
+import type { ResolvedRetention } from './retention.js';
 import type {
   AcceptFailure,
   AnyEntity,
@@ -440,7 +440,7 @@ export type Journal<
    */
   strandedJobs(db: DbHandle, opts?: { readonly jobs?: Pick<JobRunner, 'names'> }): Promise<readonly StrandedJobs[]>;
   /**
-   * The resolved archive policy: the `retention` option with its defaults filled in. The one source the
+   * The resolved archive policy: the `retention` option of `initJournal` with its defaults filled in. The one source the
    * worker, the verbs and the sweeper read.
    */
   readonly retention: ResolvedRetention;
@@ -617,8 +617,6 @@ export type JournalDefinitions<
     const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
   >(
     config: {
-      /** How long finished jobs are kept, where they go, how often the sweeper runs. Defaults: completed 7 days, dead 90 days. */
-      readonly retention?: JobRetention;
       readonly projections?: readonly Projection<SchemaOutput<Meta>, Tx>[];
       readonly effects?: E;
       readonly taps?: T;

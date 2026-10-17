@@ -399,6 +399,11 @@ export type EffectSchedule<Meta = unknown> = {
   readonly retention?: EffectRetention;
   /** A method signature, so an effect of one meta type is still an `Effect<unknown>`; see `BivariantFn`. */
   runAt?(event: Recorded<string, unknown, Meta>): Date;
+  /**
+   * Jobs are made only for the events where this returns true. Default: every event of the effect's types.
+   * A method signature, like `runAt`.
+   */
+  when?(event: Recorded<string, unknown, Meta>): boolean;
 };
 
 export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {

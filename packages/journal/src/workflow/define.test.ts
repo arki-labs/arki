@@ -251,6 +251,27 @@ describe('definition rules, each throws BAD_DEFINITION naming the workflow', () 
   });
 });
 
+describe('one signal name, one payload schema', () => {
+  it('two waits for one signal with different schemas are refused, so the payload type of a signal is never ambiguous', () => {
+    const message = refusal(() =>
+      base('shared')
+        .waitFor('first', { signal: 'provider.settled', schema: z.object({ id: z.string() }) })
+        .waitFor('second', { signal: 'provider.settled', schema: z.object({ id: z.string() }) }),
+    );
+    expect(message).toContain('shared');
+    expect(message).toContain('provider.settled');
+  });
+
+  it('two waits for one signal may share the same schema object, as a loop does', () => {
+    const settled = z.object({ id: z.string() });
+    const def = base('loop')
+      .waitFor('first', { signal: 'provider.settled', schema: settled })
+      .waitFor('second', { signal: 'provider.settled', schema: settled })
+      .finish();
+    expect(def.nodes.map(node => node.name)).toEqual(['first', 'second']);
+  });
+});
+
 describe('node options are kept for the runner', () => {
   it('stores waitFor and child defaults', () => {
     const child = base('c')

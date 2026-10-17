@@ -361,7 +361,12 @@ export function createWriter<
 
         const jobs = recorded.flatMap(event =>
           effects
-            .filter(effect => effect.types.has(event.type) && effect.entities.some(e => e.kind === entity.kind))
+            .filter(
+              effect =>
+                effect.types.has(event.type) &&
+                effect.entities.some(e => e.kind === entity.kind) &&
+                effect.schedule.when?.(event) !== false,
+            )
             .map(effect => ({
               id: jobId(),
               eventSeq: event.seq,

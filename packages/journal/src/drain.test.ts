@@ -229,6 +229,29 @@ describe('drain', () => {
     );
   });
 
+  it('when: an event it refuses makes no job row, so a worker never claims a job that has nothing to do', async () => {
+    // Why: a job per event is the default. An effect that acts on only some events (a timer with no wake time)
+    // must not leave a row for the rest, or it has to delete them afterwards.
+    const big = j.effect('big-orders', order, {
+      OrderPaid: () => {
+        // The effect does nothing: only its schedule is under test.
+      },
+    }).withSchedule({
+      when: e => typeof e.data === 'object' && e.data !== null && 'amount' in e.data && Number(e.data.amount) >= 100,
+    });
+    const filtered = j.compose({ effects: [big] });
+    const id = orderId(++next);
+    await db.transaction(tx =>
+      filtered.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    );
+    const jobsOf = () => db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'big-orders'));
+    await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    expect(await jobsOf()).toEqual([]);
+    await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 500 })] }));
+    expect(await jobsOf()).toHaveLength(1);
+    await db.delete(tables.jobs).where(eq(tables.jobs.effect, 'big-orders'));
+  });
+
   it('jobs lists pending or dead rows; retry brings a dead job back and wakes; discard removes only a dead job', async () => {
     // Why: the founder operating a failed payment effect needs to see it, run it again after the
     // fix, or drop it on purpose, without SQL and without touching a job that is still alive.

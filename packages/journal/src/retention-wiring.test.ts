@@ -2,8 +2,10 @@ import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import type { ArchiveSink } from './retention.js';
+import type { ArchiveSink, JobRetention } from './retention.js';
+import { initJournal } from './journal.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -18,10 +20,10 @@ const quiet = j
   .effect('quiet', order, { OrderPaid: () => {} })
   .withSchedule({ retention: { completed: false, dead: false } });
 const loud = j.effect('loud', order, { OrderPaid: () => {} });
-const journal = j.compose({
-  effects: [quiet, loud],
-  retention: { archive: { completed: '7d', dead: '90d' } },
-});
+// The retention is the app's, given once to `initJournal`.
+const withRetention = (retention: JobRetention) =>
+  initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }), retention });
+const journal = withRetention({ archive: { completed: '7d', dead: '90d' } }).compose({ effects: [quiet, loud] });
 
 const sink: ArchiveSink = { name: 'test-sink', write: () => Promise.resolve() };
 
@@ -123,11 +125,11 @@ describe('the boot check', () => {
     expect(() => j.compose({ effects: [exported] })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION', message: expect.stringContaining('ledger-mail') }),
     );
-    expect(() => j.compose({ effects: [exported], retention: { archive: { sink } } })).not.toThrow();
+    expect(() => withRetention({ archive: { sink } }).compose({ effects: [exported] })).not.toThrow();
   });
 
   it("'untilExported' in the journal policy without a sink is BAD_DEFINITION", () => {
-    expect(() => j.compose({ retention: { archive: { dead: 'untilExported' } } })).toThrow(
+    expect(() => withRetention({ archive: { dead: 'untilExported' } }).compose({})).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );
   });

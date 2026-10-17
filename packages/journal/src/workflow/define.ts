@@ -93,8 +93,19 @@ export type WorkflowLimits = {
   readonly children: number;
 };
 
-/** The finished definition. `types.output` is a phantom: it carries the output type and holds no value. */
-export type WorkflowDef<Input extends StandardSchemaV1 = StandardSchemaV1, Output = unknown> = {
+/** The signals a workflow waits for: each signal name with the schema of its payload. */
+export type AnySignals = Readonly<Record<string, StandardSchemaV1>>;
+export type NoSignals = Readonly<Record<never, never>>;
+
+/**
+ * The finished definition. `types` is a phantom: it carries the output type and the signals, and holds no value.
+ * `Signals` defaults to any signal map, so a bare `WorkflowDef` accepts every definition.
+ */
+export type WorkflowDef<
+  Input extends StandardSchemaV1 = StandardSchemaV1,
+  Output = unknown,
+  Signals extends AnySignals = AnySignals,
+> = {
   readonly name: string;
   readonly version: number;
   readonly shape: WorkflowShape;
@@ -117,7 +128,7 @@ export type WorkflowDef<Input extends StandardSchemaV1 = StandardSchemaV1, Outpu
   readonly nodes: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
-  readonly types?: { readonly output: Output };
+  readonly types?: { readonly output: Output; readonly signals: Signals };
 };
 
 export type WorkflowOptions<
@@ -152,6 +163,10 @@ type Fresh<Results extends AnyResults, Name extends string> = Name extends keyof
 type Resolved<Returned> = Exclude<Awaited<Returned>, Failure>;
 type Host = { readonly db: unknown; readonly run: unknown };
 type OutputOf<Def extends WorkflowDef> = NonNullable<Def['types']>['output'];
+/** `Signals` plus one signal. A name used twice keeps the later schema; `define` refuses two different schemas for one name. */
+type AddSignal<Signals extends AnySignals, Name extends string, Payload extends StandardSchemaV1> = {
+  readonly [K in keyof Signals | Name]: K extends Name ? Payload : K extends keyof Signals ? Signals[K] : never;
+};
 
 type StepOptions<Context, Result, Earlier extends string> = {
   /** Parses the stored result. Needed for an operator to supply a result by hand. */
@@ -172,6 +187,7 @@ export type WorkflowBuilder<
   Last,
   Where extends Host,
   Extra extends object = Record<never, never>,
+  Signals extends AnySignals = NoSignals,
 > = {
   step<Name extends string, Returned, When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined>(
     name: Fresh<Results, Name>,
@@ -187,13 +203,20 @@ export type WorkflowBuilder<
     Declared,
     StepResult<Returned, When>,
     Where,
-    Extra
+    Extra,
+    Signals
   >;
 
-  waitFor<Name extends string, Payload extends StandardSchemaV1, OnTimeout extends 'fail' | 'continue' = 'fail'>(
+  waitFor<
+    Name extends string,
+    Signal extends string,
+    Payload extends StandardSchemaV1,
+    OnTimeout extends 'fail' | 'continue' = 'fail',
+  >(
     name: Fresh<Results, Name>,
     options: {
-      readonly signal: string;
+      /** The signal's name. One name has one payload schema: two waits for it must share the same schema object. */
+      readonly signal: Signal;
       readonly schema: Payload;
       readonly timeout?: RetentionAge;
       readonly onTimeout?: OnTimeout;
@@ -205,13 +228,14 @@ export type WorkflowBuilder<
     Declared,
     OnTimeout extends 'continue' ? SchemaOutput<Payload> | null : SchemaOutput<Payload>,
     Where,
-    Extra
+    Extra,
+    AddSignal<Signals, Signal, Payload>
   >;
 
   sleep<Name extends string>(
     name: Fresh<Results, Name>,
     until: RetentionAge | ((ctx: Ctx<Input, Results, N, Where>) => Date),
-  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Extra>;
+  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Extra, Signals>;
 
   child<Name extends string, Def extends WorkflowDef>(
     name: Fresh<Results, Name>,
@@ -220,7 +244,7 @@ export type WorkflowBuilder<
       readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
       readonly onCancel?: 'cancel' | 'detach';
     },
-  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Extra>;
+  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Extra, Signals>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -238,7 +262,8 @@ export type WorkflowBuilder<
     Declared,
     Wait extends 'any' ? OutputOf<Def> : OutputOf<Def>[],
     Where,
-    Extra
+    Extra,
+    Signals
   >;
 
   /**
@@ -248,7 +273,7 @@ export type WorkflowBuilder<
   finish<Returned = Last>(
     run?: (ctx: FinishContext<Input, Results>) => Returned,
     ...check: FinishCheck<Declared, Returned>
-  ): WorkflowDef<Input, FinishOutput<Declared, Returned>> & Extra;
+  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals> & Extra;
 };
 
 type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
@@ -338,14 +363,14 @@ function refuseUndo(workflowName: string, kind: string, name: string, options: o
   }
 }
 
-function finishDef<Input extends StandardSchemaV1, Output, Extra extends object>(
+function finishDef<Input extends StandardSchemaV1, Output, Signals extends AnySignals, Extra extends object>(
   state: BuilderState<Input, Extra>,
   finish: WorkflowDef['finish'],
-): WorkflowDef<Input, Output> & Extra {
+): WorkflowDef<Input, Output, Signals> & Extra {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
-  const plain: WorkflowDef<Input, Output> = {
+  const plain: WorkflowDef<Input, Output, Signals> = {
     ...state.header,
     shape: Object.freeze({ nodes: Object.freeze(shape.nodes.map(entry => Object.freeze(entry))) }),
     shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => [entry.name, entry.kind, entry.undo]))),
@@ -369,7 +394,8 @@ function makeBuilder<
   Last,
   Where extends Host,
   Extra extends object,
->(state: BuilderState<Input, Extra>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Extra> {
+  Signals extends AnySignals,
+>(state: BuilderState<Input, Extra>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Extra, Signals> {
   return {
     step: (name, run, options) =>
       makeBuilder(
@@ -378,6 +404,15 @@ function makeBuilder<
     waitFor: (name, options) => {
       refuseUndo(state.name, 'waitFor', name, options);
       if (options.signal === '') refuse(state.name, `waitFor '${name}' needs a signal name`);
+      const sharing = state.nodes.find(
+        node => node.kind === 'waitFor' && node.signal === options.signal && node.schema !== options.schema,
+      );
+      if (sharing !== undefined) {
+        refuse(
+          state.name,
+          `waitFor '${name}' and '${sharing.name}' both wait for signal '${options.signal}' with different schemas; one signal name has one payload schema, so share the schema object`,
+        );
+      }
       return makeBuilder(
         withNode(state, {
           kind: 'waitFor',

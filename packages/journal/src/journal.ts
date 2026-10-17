@@ -70,18 +70,23 @@ const emptyMeta: StandardSchemaV1<Record<string, never>, Record<string, never>> 
 type EmptyMeta = typeof emptyMeta;
 
 function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
-  function init(options: { readonly tables: JournalTables }): JournalDefinitions<EmptyMeta, Tx, AppDb>;
+  function init(options: {
+    readonly tables: JournalTables;
+    readonly retention?: JobRetention;
+  }): JournalDefinitions<EmptyMeta, Tx, AppDb>;
   function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
     readonly tables: JournalTables;
+    readonly retention?: JobRetention;
     readonly meta: Meta;
   }): JournalDefinitions<Meta, Tx, AppDb>;
   function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
     readonly tables: JournalTables;
+    readonly retention?: JobRetention;
     readonly meta?: Meta;
   }): JournalDefinitions<Meta, Tx, AppDb> | JournalDefinitions<EmptyMeta, Tx, AppDb> {
     return options.meta === undefined
-      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta, options.tables)
-      : createInit<Meta, Tx, AppDb>(options.meta, options.tables);
+      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta, options.tables, options.retention)
+      : createInit<Meta, Tx, AppDb>(options.meta, options.tables, options.retention);
   }
   return init;
 }
@@ -93,6 +98,9 @@ function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
  * repositories typed against it fit. `initJournal.db<AppDb>()` names the
  * app's root database type: effects get it as `ctx.db`, and `drain` and
  * `worker` then need it. Both are type-only steps and chain in either order.
+ * `retention` says how long finished jobs are kept, where they go and how often the sweeper runs. It is the one
+ * place for it: archive at ack, the job operations, the sweeper, Foreman and workflow timers all read it.
+ * Defaults: completed 7 days, dead 90 days.
  */
 export const initJournal = Object.assign(initFor<DbHandle, RootDb>(), {
   tx: <Tx extends TransactionSource<Tx>>() => ({
@@ -115,7 +123,11 @@ function createInit<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(metaSchema: Meta, tables: JournalTables): JournalDefinitions<Meta, Tx, AppDb> {
+>(
+  metaSchema: Meta,
+  tables: JournalTables,
+  retention: JobRetention | undefined,
+): JournalDefinitions<Meta, Tx, AppDb> {
   type MetaOut = SchemaOutput<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
@@ -153,7 +165,7 @@ function createInit<
   const projection: JournalDefinitions<Meta, Tx, AppDb>['projection'] = (name, entity, on, opts) =>
     defineProjection(name, entity, on, opts);
   const effect = effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>();
-  const workflows = createWorkflows<Meta, Tx, AppDb>({ event: defineEvent, entity, command, projection, effect }, tables);
+  const workflows = createWorkflows<Meta, Tx, AppDb>({ event: defineEvent, entity, command, projection, effect }, tables, retention);
   return {
     event: defineEvent,
     entity,
@@ -178,12 +190,12 @@ function createInit<
           : workflows.register(registered, config.workflowMeta);
       // `'worker'`: the handlers keep their needs, and each worker or drain gives the services.
       const services = config.services === 'worker' ? undefined : (config.services ?? {});
-      const effects = [...(config.effects ?? []), ...(runner === undefined ? [] : [runner.effect])].map(declared =>
+      const effects = [...(config.effects ?? []), ...(runner === undefined ? [] : runner.effects)].map(declared =>
         services === undefined ? declared : bindEffect(declared, services),
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
-      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, config.retention);
+      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention);
     },
   };
 }

@@ -2,6 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
+import type { SchemaInput } from '@arki/schema';
 
 import type { WorkflowDef } from './define.js';
 import { need } from '../handlers.js';
@@ -125,6 +126,25 @@ describe('the workflow builder, as types', () => {
         expectTypeOf(results.later).toEqualTypeOf<{ ok: boolean } | null>();
         return 1;
       });
+  });
+
+  it('waitFor adds its signal and payload schema to the definition, so a sender cannot name another signal', () => {
+    const accepted = z.object({ id: z.string() });
+    const _def = base()
+      .waitFor('settled', { signal: 'a', schema: accepted })
+      .waitFor('later', { signal: 'b', schema: z.object({ ok: z.boolean() }) })
+      .finish();
+    type Signals = NonNullable<typeof _def.types>['signals'];
+    expectTypeOf<keyof Signals>().toEqualTypeOf<'a' | 'b'>();
+    expectTypeOf<Signals['a']>().toEqualTypeOf<typeof accepted>();
+    expectTypeOf<SchemaInput<Signals['b']>>().toEqualTypeOf<{ ok: boolean }>();
+  });
+
+  it('a workflow with no waitFor declares no signal', () => {
+    const _def = base()
+      .step('a', () => 1)
+      .finish();
+    expectTypeOf<keyof NonNullable<typeof _def.types>['signals']>().toEqualTypeOf<never>();
   });
 
   it('sleep leaves null in results', () => {
