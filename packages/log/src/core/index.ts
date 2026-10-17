@@ -7,6 +7,7 @@ export { json, logfmt, pretty } from './formatters.js';
 export { Level, type LevelInput, type LevelName } from './levels.js';
 export {
   type ChannelName,
+  type ConfigureOptions,
   type Configured,
   createLogging,
   type LogEvent,

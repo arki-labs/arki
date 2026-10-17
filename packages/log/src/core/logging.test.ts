@@ -20,6 +20,11 @@ function codeOf(fn: () => unknown): string | undefined {
   return undefined;
 }
 
+/** A setup that sends everything at `info` and up to `sink`. */
+function outConfig(sink: Sink) {
+  return { channels: { out: sink }, default: { level: 'info', channels: ['out'] } } as const;
+}
+
 describe('late binding', () => {
   it('a logger created before configure() obeys the level and channels set later, then the reconfigured ones', async () => {
     const logging = createLogging();
@@ -203,6 +208,55 @@ describe('configure()', () => {
     await expect(
       old.reconfigure({ channels: { out: first.sink }, default: { level: 'info', channels: ['out'] } }),
     ).rejects.toMatchObject({ code: LOG_ERROR_CODES.staleHandle });
+  });
+
+  describe('owner', () => {
+    // Nitro's dev worker imports the app entry again after an edit, in the same
+    // process, and runs no import.meta.hot dispose hooks. The entry's re-run must
+    // take over its own setup; any other second configure() is still a bug.
+
+    it('lets the same owner configure again: the new setup takes over and the old sinks close', async () => {
+      const logging = createLogging();
+      let closed = false;
+      const first = capture({ close: () => void (closed = true) });
+      const second = capture();
+      logging.configure(outConfig(first.sink), { owner: 'file:///app/src/server.ts' });
+      logging.configure(outConfig(second.sink), { owner: 'file:///app/src/server.ts' });
+      logging.getLogger('app').info('after reload');
+      expect(first.records).toHaveLength(0);
+      expect(second.records).toHaveLength(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(closed).toBe(true);
+    });
+
+    it('still throws ARKI_LOG_E001 when another owner, or no owner, configures again', () => {
+      const owned = createLogging();
+      owned.configure(outConfig(capture().sink), { owner: 'file:///app/src/server.ts' });
+      expect(codeOf(() => owned.configure(outConfig(capture().sink), { owner: 'file:///lib/setup.ts' }))).toBe(
+        LOG_ERROR_CODES.alreadyConfigured,
+      );
+      expect(codeOf(() => owned.configure(outConfig(capture().sink)))).toBe(LOG_ERROR_CODES.alreadyConfigured);
+
+      const unowned = createLogging();
+      unowned.configure(outConfig(capture().sink));
+      expect(codeOf(() => unowned.configure(outConfig(capture().sink), { owner: 'file:///app/src/server.ts' }))).toBe(
+        LOG_ERROR_CODES.alreadyConfigured,
+      );
+    });
+
+    it("makes the previous run's handle stale, so its late close() leaves the new setup alone", async () => {
+      const logging = createLogging();
+      const second = capture();
+      const old = logging.configure(outConfig(capture().sink), { owner: 'file:///app/src/server.ts' });
+      logging.configure(outConfig(second.sink), { owner: 'file:///app/src/server.ts' });
+      await old.close();
+      logging.getLogger('app').info('still logging');
+      expect(second.records).toHaveLength(1);
+      await expect(old.reconfigure(outConfig(capture().sink))).rejects.toMatchObject({
+        code: LOG_ERROR_CODES.staleHandle,
+      });
+    });
   });
 
   it('keeps createLogging() instances independent', () => {

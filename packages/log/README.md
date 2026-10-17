@@ -34,15 +34,18 @@ A real app uses the default instance and a Node sink:
 import { configure, getLogger, redact } from '@arki/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
-export const logging = configure({
-  ...fromEnv(), // LOG_LEVEL=debug, DEBUG=arki:kv:*
-  context: asyncContext(),
-  resource: { 'service.name': 'checkout', 'service.version': '1.4.0' },
-  channels: { stdout: stdout() },
-  default: { level: 'info', channels: ['stdout'] },
-  categories: { arki: { level: 'warn' } },
-  processors: [redact(['password', 'headers.authorization'])],
-});
+export const logging = configure(
+  {
+    ...fromEnv(), // LOG_LEVEL=debug, DEBUG=arki:kv:*
+    context: asyncContext(),
+    resource: { 'service.name': 'checkout', 'service.version': '1.4.0' },
+    channels: { stdout: stdout() },
+    default: { level: 'info', channels: ['stdout'] },
+    categories: { arki: { level: 'warn' } },
+    processors: [redact(['password', 'headers.authorization'])],
+  },
+  { owner: import.meta.url }, // a dev server that runs this module again replaces the setup
+);
 
 getLogger('arki:kv').debug('connecting to {host}', { host: 'db.example.com' });
 ```
@@ -97,7 +100,7 @@ Fix the setup. Do not catch a `LogError` and carry on: the next call fails the s
 ## Limits
 
 - Before `configure()`, only `warn` and above are kept, and only the first 64 records. The 65th early `warn` is lost.
-- `configure()` runs once per instance. A second call throws `ARKI_LOG_E001`.
+- `configure()` runs once per instance. A second call throws `ARKI_LOG_E001`, unless both calls pass the same `owner`.
 - A failure value logged as a field prints at most 64 links of its cause chain, then `[MaxDepth]`. A cycle prints `[Circular]`.
 - Async code keeps `withContext` fields only when `asyncContext()` from `@arki/log/node` is in `configure()`.
 - `fatal` writes a record. It never ends the process.
@@ -176,7 +179,7 @@ await logging.reconfigure({ channels: { memory: sink }, default: { level: 'debug
 await logging.close({ timeoutMs: 5000 }); // flush, close every sink, unconfigured again
 ```
 
-A second `configure()` throws `ARKI_LOG_E001`; use `reconfigure`. `createLogging()` returns a private instance. Declare `interface Register { logging: typeof logging }` in `declare module '@arki/log'` to type-check channel names in `to()`.
+A second `configure()` throws `ARKI_LOG_E001`; use `reconfigure`. The exception is `configure(config, { owner })` called again with the same `owner`: a dev server (Vite, Nitro) that runs the entry module again after an edit, in the same process, without running its `import.meta.hot` dispose hooks. Pass `{ owner: import.meta.url }` at the entry, and the re-run replaces the setup and makes the old handle stale. `createLogging()` returns a private instance. Declare `interface Register { logging: typeof logging }` in `declare module '@arki/log'` to type-check channel names in `to()`.
 
 ## Environment
 

@@ -53,7 +53,7 @@ test('logs a warning', () => {
 ## Rules that bite
 
 - Before `configure()`, only `warn` and above are kept, and only the first 64 records.
-- A second `configure()` throws `ARKI_LOG_E001`. Use `reconfigure()` on the handle.
+- A second `configure()` throws `ARKI_LOG_E001`. Use `reconfigure()` on the handle. App entries pass `{ owner: import.meta.url }`, so a dev server's re-run of the entry replaces the setup instead of throwing.
 - `withContext` fields cross `await` only with `asyncContext()` from `@arki/log/node`.
 - A failure value logged as a field prints its cause chain, at most 64 links.
 - `fatal` never ends the process.

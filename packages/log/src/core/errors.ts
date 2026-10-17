@@ -7,7 +7,7 @@ export const LOG_ERROR_CODES = {
   /**
    * `configure()` ran a second time on the same logging instance.
    *
-   * @fix Call `configure()` once at the app entry. Use `reconfigure()` on its handle to change the setup.
+   * @fix Call `configure()` once at the app entry, with `{ owner: import.meta.url }` so a dev re-run of the entry is allowed. Use `reconfigure()` on its handle to change the setup.
    * @verify bun run test -- src/core/logging.test.ts
    */
   alreadyConfigured: 'ARKI_LOG_E001',
@@ -61,7 +61,7 @@ export function alreadyConfiguredError(): LogError {
     code: LOG_ERROR_CODES.alreadyConfigured,
     message: 'Logging is already configured.',
     remediation:
-      'Call configure() once, at the app entry. To change the setup later, call reconfigure() on the handle it returned; for an isolated setup, use createLogging().',
+      'Call configure() once, at the app entry. If a dev server runs the entry again, pass { owner: import.meta.url } to configure(). To change the setup later, call reconfigure() on the handle it returned; for an isolated setup, use createLogging().',
   });
 }
 

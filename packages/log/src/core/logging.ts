@@ -87,10 +87,21 @@ export type Configured<C extends string> = {
   reconfigure<const D extends string>(config: LogConfig<D>): Promise<void>;
 };
 
+/** Options for `configure()`. */
+export type ConfigureOptions = {
+  /**
+   * Who configures, usually the entry's `import.meta.url`. When the same owner
+   * calls `configure()` again (a dev server re-running the entry), the new setup
+   * replaces the old one and the old handle goes stale. Any other second call
+   * still throws `ARKI_LOG_E001`.
+   */
+  readonly owner?: string;
+};
+
 /** A logging instance: the default one behind the global functions, or a private one from `createLogging()`. */
 export type Logging = {
   getLogger(category?: string): Logger;
-  configure<const C extends string>(config: LogConfig<C>): Configured<C>;
+  configure<const C extends string>(config: LogConfig<C>, options?: ConfigureOptions): Configured<C>;
   withContext<R>(fields: Fields, fn: () => R): R;
   shareContext(fields: Fields): void;
 };
@@ -154,6 +165,8 @@ class LoggingImpl implements InternalLogging {
   context: ContextStore = syncContext();
 
   private state: State | undefined;
+  /** The `owner` the live setup was configured with, if any. */
+  private owner: string | undefined;
   private fake: Capture | undefined;
   private ring: LogRecord[] = [];
   private readonly ringRoute: Route;
@@ -197,10 +210,13 @@ class LoggingImpl implements InternalLogging {
     return logger;
   }
 
-  configure<const C extends string>(config: LogConfig<C>): Configured<C> {
+  configure<const C extends string>(config: LogConfig<C>, options?: ConfigureOptions): Configured<C> {
     if (this.fake !== undefined) throw fakeActiveError();
-    if (this.state !== undefined) throw alreadyConfiguredError();
-    this.install(config);
+    const owner = options?.owner;
+    if (this.state !== undefined && (owner === undefined || owner !== this.owner)) throw alreadyConfiguredError();
+    // A re-run by the same owner replaces its live setup; the old sinks drain in the background.
+    void drainAndClose(this.install(config));
+    this.owner = owner;
     // A handle acts only on the configuration it created. In dev, Vite can
     // close an old module's handle after the reloaded module has configured
     // again; that late close must not shut the new setup down.
@@ -381,6 +397,7 @@ class LoggingImpl implements InternalLogging {
     const state = this.state;
     if (state === undefined) return;
     this.state = undefined;
+    this.owner = undefined;
     this.processors = NO_PROCESSORS;
     this.resource = EMPTY_FIELDS;
     this.traceSource = undefined;

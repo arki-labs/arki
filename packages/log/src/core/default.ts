@@ -1,4 +1,4 @@
-import type { Configured, InternalLogging, Logger } from './logging.js';
+import type { Configured, ConfigureOptions, InternalLogging, Logger } from './logging.js';
 import type { Fields, LogConfig } from './types.js';
 import { createInternalLogging, isInternalLogging } from './logging.js';
 
@@ -24,9 +24,12 @@ export function getLogger(category?: string): Logger {
   return defaultLogging().getLogger(category);
 }
 
-/** Configures the default instance, once, at the app entry. A second call throws `ARKI_LOG_E001`. */
-export function configure<const C extends string>(config: LogConfig<C>): Configured<C> {
-  return defaultLogging().configure(config);
+/**
+ * Configures the default instance, once, at the app entry. A second call throws `ARKI_LOG_E001`,
+ * unless it comes from the same `owner` (a dev server re-running the entry).
+ */
+export function configure<const C extends string>(config: LogConfig<C>, options?: ConfigureOptions): Configured<C> {
+  return defaultLogging().configure(config, options);
 }
 
 /** Runs `fn` with fields every record inside carries. Async code needs `asyncContext()` installed. */
