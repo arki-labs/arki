@@ -7,3 +7,4 @@ export {
   createSelectSchema,
   createUpdateSchema,
 } from 'drizzle-orm/zod';
+export { mergeRelations } from './merge-relations.js';

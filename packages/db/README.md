@@ -164,6 +164,28 @@ The layering rule that keeps the module graph a DAG: `tables.ts` imports
 nothing from `core/`; `core/schema.ts` imports only leaves; feature code
 imports its own leaves plus the app's plugin factory.
 
+### Relations split by feature: `mergeRelations`
+
+`defineRelationsPart` returns config only for the tables its callback names, and
+`{ ...a, ...b }` replaces a whole table entry, so two parts that add relations to
+the same table silently lose keys. `mergeRelations` merges per table instead. The
+same `(table, relation key)` in two parts throws `DB_COMPOSITION_E004`. The result
+type is the per-table merge, so `drizzle({ relations })` and
+`db.query.X.findMany({ with })` infer as with one big `defineRelations`.
+
+```ts
+import { defineRelationsPart, mergeRelations } from '@arki/db/orm';
+
+// features/sources/relations.ts: each feature declares only what it owns.
+export const sourcesRelations = defineRelationsPart(schema, (r) => ({
+  ContentSource: { user: r.one.User({ from: r.ContentSource.userId, to: r.User.id }) },
+}));
+
+// core/relations.ts: the base part registers every table with `{}`.
+export const relations = mergeRelations(defineRelationsPart(schema), sourcesRelations, contentRelations);
+export type Relations = typeof relations;
+```
+
 ### Cross-feature transactions: `createUnitOfWork`
 
 Feature services built at boot capture the singleton `db` — calling them
@@ -543,7 +565,7 @@ return byNewest.page(rows, limit); // { items, nextCursor } — null on the last
 - `@arki/db/transaction` — `runTransaction`, `retryableSqlState`, `DbTransactionError`: serializable retry on `40001` / `40P01`. Portable.
 - `@arki/db/orpc` — `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`: the oRPC middleware. Portable; needs the optional peer `@orpc/server`.
 - `@arki/db/eslint` — the `db/no-effects-in-transaction` rule. Tooling only; needs `eslint`, `@typescript-eslint/utils` and `typescript`.
-- `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers.
+- `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.
 - `@arki/db/bun` — Bun-SQL driver entry (also routed via the `bun` condition on `./init`).

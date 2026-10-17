@@ -4,6 +4,7 @@ export const DB_COMPOSITION_ERROR_CODES = {
   duplicateSchemaKey: 'DB_COMPOSITION_E001',
   projectionNameMissing: 'DB_COMPOSITION_E002',
   projectionEventsMissing: 'DB_COMPOSITION_E003',
+  duplicateRelationKey: 'DB_COMPOSITION_E004',
 } as const;
 
 export class DbCompositionError extends Error {
