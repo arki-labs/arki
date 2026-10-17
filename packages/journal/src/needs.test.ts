@@ -83,11 +83,11 @@ describe('an effect with needs', () => {
     );
   });
 
-  it.each(['jobId', 'signal', 'db', 'run'])(
+  it.each(['jobId', 'signal', 'db', 'run', 'accept'])(
     'refuses a need named "%s" when the effect is defined, so a service can never hide a built-in part of the handler context',
     name => {
       expect(() => j.effect('needs-reserved', order, { [name]: need<Mailer>() }, {})).toThrow(
-        `journal: effect "needs-reserved" has a need named "${name}", but the handler context already has "jobId", "signal", "db" and "run"; give the need another name`,
+        `journal: effect "needs-reserved" has a need named "${name}", but the handler context already has "jobId", "signal", "db", "run" and "accept"; give the need another name`,
       );
     },
   );

@@ -501,6 +501,9 @@ describe('write', () => {
       signal: new AbortController().signal,
       db,
       run: () => Promise.reject(new Error('no handler runs, so no command does')),
+      accept: () => {
+        throw new Error('no handler runs, so nothing is accepted');
+      },
     };
     await expect(silent.run(event, ctx)).rejects.toThrow('no handler for "toString"');
     await expect(noop.run(db, event)).resolves.toBeUndefined();

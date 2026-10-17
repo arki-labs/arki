@@ -12,6 +12,7 @@ import type { JobOps } from './outbox.js';
 import type { JournalTables } from './pg.js';
 import type { JobRetention, ResolvedRetention } from './retention.js';
 import type {
+  AcceptFailure,
   AnyEntity,
   AnyEventDef,
   CommandHookContext,
@@ -183,6 +184,13 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     input: NoInfer<SchemaInput<S>>,
     opts?: CallOptions,
   ) => Promise<Awaited<R>>;
+  /**
+   * Marks a refusal that `write` or `run` returned as handled, so the handler may still return a
+   * success: `if (OutOfStock.is(r)) { accept(r); ... }`. Without it, a success after a refusal
+   * throws `IGNORED_FAILURE`. Only this command's own check is lifted: a refused child's
+   * savepoint stays rolled back. Safe to destructure. See `AcceptFailure`.
+   */
+  readonly accept: AcceptFailure;
 };
 /**
  * The type of `context.run`. Use it in app code that passes `run` on, so the

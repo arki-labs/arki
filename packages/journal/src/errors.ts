@@ -15,6 +15,7 @@ export type JournalErrorCode =
   | 'ID_MISMATCH'
   | 'VALUE_MISMATCH'
   | 'IGNORED_FAILURE'
+  | 'INVALID_ACCEPT'
   | 'BAD_DEFINITION'
   | 'JOB_NOT_DEAD'
   | 'JOB_NOT_PENDING'
@@ -70,7 +71,11 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   },
   IGNORED_FAILURE: {
     what: 'a write or a child command returned a failure, and the command still returned a success',
-    next: 'Return that failure from the handler, or another one: `if (isFailure(result)) return result;`. A command that met a failure must end with one, so none of its writes commit',
+    next: 'Return that failure from the handler, or another one: `if (isFailure(result)) return result;`. A command that met a failure must end with one, so none of its writes commit. To handle the refusal on purpose and still succeed, check it and call `accept(result)` first',
+  },
+  INVALID_ACCEPT: {
+    what: '`accept` cannot mark this value as a handled refusal',
+    next: 'Call `accept(result)` with the very failure a `write` or `run` of this handler returned, once for each return, before the handler returns',
   },
   BAD_DEFINITION: {
     what: 'a declaration is wrong',
@@ -107,6 +112,8 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   declaration runs (a bad name, a bad key column, a duplicate reducer or handler name).
  * - A misuse at run time is a plain `Error` whose message starts with `journal:` (two
  *   operations at once on one transaction, `drain` inside a transaction).
+ * - A misused `accept` (a value the handler never received, accepted twice, called late,
+ *   or not a failure) is a `JournalError` with code `INVALID_ACCEPT`.
  * - Command input, event data or `meta` that fails its schema is a `SchemaError` from
  *   `@arki/schema`, with the schema's `issues`. A schema that cannot run (async where
  *   the journal parses sync, or a `validate` that throws) is a `SchemaRunError`.

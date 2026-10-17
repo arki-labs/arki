@@ -35,6 +35,7 @@ export {
 export type { CommandErrorCode, JournalErrorCode } from './errors.js';
 export type { GuaranteedCreateKeys, EntityBuilder, OnReducerRow, OnOnlyEntityBuilder } from './entity.js';
 export type {
+  AcceptFailure,
   AnyEntity,
   AnyEventDef,
   CreateReducer,

@@ -19,6 +19,7 @@ import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
 import { JournalError } from './errors.js';
 import { commandId, correlationId } from './id.js';
+import { trackRefusals } from './refusals.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 import { assertRoundTrips, sameValue } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
@@ -154,23 +155,25 @@ export function createCommandRunner<
           void operation.then(done, done);
           return operation;
         };
-        // The first failure a write's `events` or a child command returned. From then on the
-        // command is doomed: it must end with a failure, or an ignored refusal would commit the rest.
-        let ignored: { readonly from: string; readonly code: string } | undefined;
-        const watch =
-          (from: string) =>
-          <T>(value: T): T => {
-            if (ignored === undefined && isReturnedFailure(value)) ignored = { from, code: value.code };
-            return value;
-          };
-        /** The handler's result, unless it is a success after a failure it was handed: then the run throws and rolls back. */
-        const unlessIgnored = (value: Awaited<R>): Awaited<R> => {
+        // Every failure a write's `events` or a child command returned. While one is not accepted,
+        // the command is doomed: it must end with a failure, or an ignored refusal would commit the rest.
+        const refusals = trackRefusals('command', command.name, 'write or run');
+        const { watch } = refusals;
+        /** The handler's result, unless it is a success after a failure it did not accept: then the run throws and rolls back. */
+        const handle = async (): Promise<Awaited<R>> => {
+          let value: Awaited<R>;
+          try {
+            value = await command.handler(parsed, context);
+          } finally {
+            refusals.finish();
+          }
+          const ignored = refusals.unhandled();
           if (ignored === undefined || isReturnedFailure(value)) return value;
           throw new JournalError(
             'IGNORED_FAILURE',
             'command',
             command.name,
-            `${ignored.from} returned the failure "${ignored.code}", but the handler returned a success`,
+            `${ignored.from} returned the failure "${ignored.failure.code}", but the handler returned a success`,
           );
         };
         const context: CommandContext<MetaOut, Tx> = {
@@ -196,6 +199,7 @@ export function createCommandRunner<
                 childOpts?.idempotencyKey,
               ).then(watch(`the child command "${child.name}"`)),
             ),
+          accept: refusals.accept,
         };
         let result: Awaited<R>;
         try {
@@ -216,7 +220,7 @@ export function createCommandRunner<
                 const refused = await command.authorize(parsed, { tx, meta });
                 if (isReturnedFailure(refused)) return refused;
               }
-              if (key === undefined) return unlessIgnored(await command.handler(parsed, context));
+              if (key === undefined) return await handle();
               const held = await claimReceipt(tx, key, command.name, parsed, own);
               if (held !== undefined) {
                 debugCommand.debug('{commandName}: replayed from receipt {key}', { commandName: command.name, key });
@@ -224,7 +228,7 @@ export function createCommandRunner<
                 // `storeReceipt` checked against the live value. This is the one cast in the library.
                 return held.replay as Awaited<R>;
               }
-              const value = unlessIgnored(await command.handler(parsed, context));
+              const value = await handle();
               // A refusal is not stored: the rollback takes the claimed key back, so a repeat runs again.
               if (isReturnedFailure(value)) return value;
               await storeReceipt(tx, key, command.name, value);

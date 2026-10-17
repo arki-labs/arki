@@ -487,3 +487,516 @@ describe("an effect that ignores its command's failure", () => {
     expect((await relays.jobs(effectDb, { effect: 'relay-passes' })).jobs, 'the other job is done').toEqual([]);
   });
 });
+
+/** The error a synchronous call throws, so a test can read its code. */
+function thrownBy(call: () => void): unknown {
+  try {
+    call();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}
+
+/** One order line for `placeWithBackorder`: 3 wanted, 1 in stock. `acceptIt: false` forgets the `accept` call. */
+const lineFor = (acceptIt: boolean) => ({
+  orderId: orderId(++next),
+  reservationId: orderId(++next),
+  backorderId: orderId(++next),
+  sku: `sku_${next}`,
+  qty: 3,
+  inStock: 1,
+  acceptIt,
+});
+
+/** Input for the three-level test: none in stock, so the grandchild refuses. */
+const levels = (passUp: boolean) => ({
+  topOrderId: orderId(++next),
+  childOrderId: orderId(++next),
+  reservationId: orderId(++next),
+  sku: 'x',
+  qty: 2,
+  inStock: 0,
+  passUp,
+});
+
+/** Made by an unrelated helper: never returned by a write or run of the command. */
+const helperRefusal = () => CommandNotFound({ detail: 'No order' });
+
+describe('a refusal the command accepts', () => {
+  // Why: a handler may meet a refusal and still have a good answer: a backorder when stock is
+  // out, "already paid" for a payment that is done. `accept(result)` says so on purpose. It lifts
+  // only this command's check: a refused child's savepoint stays rolled back, and every refusal
+  // that is not accepted still dooms the command.
+  const OutOfStock = defineFailure('stock.out', {
+    status: 409,
+    data: z.object({ sku: z.string(), short: z.int() }),
+  });
+  const line = z.object({ reservationId: orderIdSchema, sku: z.string(), qty: z.int(), inStock: z.int() });
+
+  /** Writes the reservation (a placed and paid order, so an effect job too), then refuses when stock is short. */
+  const reserveStock = j.command('reserveStock', line, async (input, { write }) => {
+    if (input.qty <= 0) return CommandInvalid({ detail: 'Reserve at least one' });
+    await write(order, input.reservationId, () => [
+      OrderPlaced({ customerId: input.sku, total: input.qty }),
+      OrderPaid({ amount: input.qty }),
+    ]);
+    if (input.qty > input.inStock) return keep(OutOfStock({ sku: input.sku, short: input.qty - input.inStock }));
+    return { reservationId: input.reservationId };
+  });
+
+  /** Places the backorder; a second one for the same id is a conflict. */
+  const placeBackorder = j.command(
+    'placeBackorder',
+    z.object({ backorderId: orderIdSchema, sku: z.string(), qty: z.int() }),
+    async (input, { write }) => {
+      const placed = await write(order, input.backorderId, row =>
+        row
+          ? CommandConflict({ detail: 'Already backordered' })
+          : [OrderPlaced({ customerId: `backorder-${input.sku}`, total: input.qty })],
+      );
+      if (isFailure(placed)) return placed;
+      return 'backordered' as const;
+    },
+  );
+
+  const orderLine = line.extend({ orderId: orderIdSchema, backorderId: orderIdSchema, acceptIt: z.boolean() });
+  let backorderRuns = 0;
+  /** The backorder example of the docs. `acceptIt: false` forgets the `accept` call. */
+  const placeWithBackorder = j.command('placeWithBackorder', orderLine, async (input, { write, run, accept }) => {
+    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'buyer', total: input.qty })]);
+    const stock = await run(
+      reserveStock,
+      { reservationId: input.reservationId, sku: input.sku, qty: input.qty, inStock: input.inStock },
+      { idempotencyKey: `res_${input.reservationId}` },
+    );
+    if (OutOfStock.is(stock)) {
+      if (input.acceptIt) accept(stock);
+      backorderRuns += 1;
+      const backorder = await run(placeBackorder, {
+        backorderId: input.backorderId,
+        sku: stock.data.sku,
+        qty: stock.data.short,
+      });
+      if (isFailure(backorder)) return backorder;
+      return { status: 'backordered' as const };
+    }
+    if (isFailure(stock)) return stock;
+    return { status: 'reserved' as const, reservationId: stock.reservationId };
+  });
+
+  it("backorders after an accepted child refusal: the parent and the backorder commit, the child's work does not", async () => {
+    const input = lineFor(true);
+
+    const result = await journal.run(db, placeWithBackorder, input, meta);
+
+    expect(result).toEqual({ status: 'backordered' });
+    expect(await rowsOf(input.orderId), "the parent's own write commits").toHaveLength(1);
+    expect(await rowsOf(input.backorderId), 'the fallback commits').toMatchObject([{ total: 2 }]);
+    expect(await rowsOf(input.reservationId), "the refused child's savepoint stays rolled back").toEqual([]);
+    expect(await eventsOf(input.reservationId)).toEqual([]);
+    expect(await jobsOf(input.reservationId), 'no job for the payment that never happened').toEqual([]);
+    expect(await receiptOf(`res_${input.reservationId}`), 'a refused child stores no receipt').toEqual([]);
+  });
+
+  it('without accept, the same success is still IGNORED_FAILURE, the error names the fix, and nothing commits', async () => {
+    const input = lineFor(false);
+
+    const error = await misuseOf(journal.run(db, placeWithBackorder, input, meta));
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.message).toContain('the child command "reserveStock" returned the failure "stock.out"');
+    expect(error.message, 'the error teaches the way out').toContain('accept(result)');
+    expect(await rowsOf(input.orderId)).toEqual([]);
+    expect(await rowsOf(input.backorderId), 'the fallback is undone with the rest').toEqual([]);
+  });
+
+  it("accepts a write's own refusal: the other writes commit and the refused row is unchanged", async () => {
+    const id = orderId(++next);
+    const acc = accountId(++next);
+    await journal.run(db, placeOrder, { orderId: id }, meta);
+    await journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta);
+    const ensurePaid = j.command('ensurePaid', ids, async (input, { write, accept }) => {
+      await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+      const paid = await write(order, input.orderId, row => {
+        if (!row) return CommandNotFound({ detail: 'Order not found' });
+        if (row.status === 'paid') return CommandConflict({ detail: 'Already paid' });
+        return [OrderPaid({ amount: 1 })];
+      });
+      if (CommandConflict.is(paid)) {
+        accept(paid);
+        return { status: 'already_paid' as const };
+      }
+      if (isFailure(paid)) return paid;
+      return { status: 'paid' as const };
+    });
+
+    const result = await journal.run(db, ensurePaid, { orderId: id, accountId: acc }, meta);
+
+    expect(result).toEqual({ status: 'already_paid' });
+    expect(await profileOf(acc), 'the write before the refusal commits').toHaveLength(1);
+    expect(await typesOf(id), 'the refused write added nothing').toEqual(['OrderPlaced', 'OrderPaid']);
+    expect(await rowsOf(id)).toMatchObject([{ status: 'paid', version: 2 }]);
+  });
+
+  /** A command that refuses two writes to missing orders, and accepts what `pick` chooses. */
+  const twoRefusals = (name: string, pick: (first: Failure, second: Failure, accept: (f: Failure) => void) => void) =>
+    j.command(name, z.object({ a: orderIdSchema, b: orderIdSchema }), async (input, { write, accept }) => {
+      const first = await write(order, input.a, row =>
+        row ? [OrderNoted({ note: 'a' })] : CommandNotFound({ detail: 'a' }),
+      );
+      const second = await write(order, input.b, row =>
+        row ? [OrderNoted({ note: 'b' })] : CommandNotFound({ detail: 'b' }),
+      );
+      if (isFailure(first) && isFailure(second)) pick(first, second, accept);
+      return 'went on';
+    });
+
+  it('accepting one of two refusals still throws IGNORED_FAILURE, naming the other', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    const acceptsFirst = twoRefusals('acceptsFirst', (first, _second, accept) => accept(first));
+
+    const error = await misuseOf(journal.run(db, acceptsFirst, { a, b }, meta));
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.message, 'the refusal still pending is named').toContain(`the write to order ${b} returned`);
+  });
+
+  it('identity decides, not the code: two refusals with the same code need two accepts', async () => {
+    const acceptsSecond = twoRefusals('acceptsSecond', (_first, second, accept) => accept(second));
+    const acceptsBoth = twoRefusals('acceptsBoth', (first, second, accept) => {
+      accept(first);
+      accept(second);
+    });
+
+    const error = await misuseOf(journal.run(db, acceptsSecond, { a: orderId(++next), b: orderId(++next) }, meta));
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.message, 'the first one, never accepted, is still pending').toContain(
+      'returned the failure "journal.not_found"',
+    );
+    expect(await journal.run(db, acceptsBoth, { a: orderId(++next), b: orderId(++next) }, meta)).toBe('went on');
+  });
+
+  it('the same object returned twice is two refusals: one accept is not enough', async () => {
+    const soldOut = OutOfStock({ sku: 'shared', short: 1 });
+    const twice = j.command(
+      'sameRefusalTwice',
+      z.object({ a: orderIdSchema, b: orderIdSchema, accepts: z.int() }),
+      async (input, { write, accept }) => {
+        const first = await write(order, input.a, () => soldOut);
+        await write(order, input.b, () => soldOut);
+        if (isFailure(first)) for (let n = 0; n < input.accepts; n += 1) accept(first);
+        return 'went on';
+      },
+    );
+
+    const error = await misuseOf(journal.run(db, twice, { a: orderId(++next), b: orderId(++next), accepts: 1 }, meta));
+
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(await journal.run(db, twice, { a: orderId(++next), b: orderId(++next), accepts: 2 }, meta)).toBe('went on');
+  });
+
+  /** A command that refuses one write, then calls `misuse` with what it received and its `accept`. */
+  const misusing = (name: string, misuse: (received: Failure, accept: (f: Failure) => void) => void) =>
+    j.command(name, z.object({ id: orderIdSchema }), async (input, { write, accept }) => {
+      const received = await write(order, input.id, () => CommandNotFound({ detail: 'No order' }));
+      if (isFailure(received)) misuse(received, accept);
+      return received;
+    });
+  const invalidAccept = async (name: string, misuse: (received: Failure, accept: (f: Failure) => void) => void) => {
+    const error = await misuseOf(journal.run(db, misusing(name, misuse), { id: orderId(++next) }, meta));
+    expect(error.code).toBe('INVALID_ACCEPT');
+    expect(error.kind).toBe('command');
+    expect(error.entityId).toBe(name);
+    return error.message;
+  };
+
+  it('only a refusal this command received can be accepted: hand-built, helper-made, cloned and non-failure values throw', async () => {
+    const notReceived =
+      'accept() was given the failure "journal.not_found", but no write or run of this command returned it';
+    expect(
+      await invalidAccept('acceptsHandBuilt', (_r, accept) => accept(CommandNotFound({ detail: 'No order' }))),
+    ).toContain(notReceived);
+    expect(await invalidAccept('acceptsHelperMade', (_r, accept) => accept(helperRefusal()))).toContain(notReceived);
+    // A spread copy loses the failure brand, so it is not even a failure; the type allows it, the run does not.
+    expect(await invalidAccept('acceptsClone', (received, accept) => accept({ ...received }))).toContain(
+      'accept() expects an @arki/failure value',
+    );
+    expect(
+      await invalidAccept('acceptsNonFailure', (_r, accept) =>
+        Reflect.apply(accept, undefined, [{ code: 'journal.not_found' }]),
+      ),
+    ).toContain('accept() expects an @arki/failure value');
+  });
+
+  it('accepting the same return twice throws "already accepted": a repeat is a copy-paste bug', async () => {
+    const message = await invalidAccept('acceptsTwice', (received, accept) => {
+      accept(received);
+      accept(received);
+    });
+
+    expect(message).toContain('the failure "journal.not_found" was already accepted');
+  });
+
+  it('accept never forces a commit: returning the accepted failure, or another one, still rolls back', async () => {
+    const acc = accountId(++next);
+    const id = orderId(++next);
+    const returns = j.command(
+      'acceptsThenRefuses',
+      ids.extend({ other: z.boolean() }),
+      async (input, { write, accept }) => {
+        await write(profile, input.accountId, () => [ProfileOpened({ nick: 'x' })]);
+        const missing = await write(order, input.orderId, () => keep(CommandNotFound({ detail: 'No order' })));
+        if (!isFailure(missing)) return 'paid';
+        accept(missing);
+        return input.other ? keep(CommandInvalid({ detail: 'Changed my mind' })) : missing;
+      },
+    );
+
+    const same = await journal.run(db, returns, { orderId: id, accountId: acc, other: false }, meta);
+    expect(same, 'the run returns the accepted failure itself').toBe(made.at(-1));
+    expect(await profileOf(acc)).toEqual([]);
+
+    const other = await journal.run(db, returns, { orderId: id, accountId: acc, other: true }, meta);
+    expect(other).toBe(made.at(-1));
+    expect(CommandInvalid.is(other)).toBe(true);
+    expect(await profileOf(acc)).toEqual([]);
+  });
+
+  it('a failed recovery commits nothing: an ignored fallback refusal dooms the command, and a throw rolls it back', async () => {
+    const input = lineFor(true);
+    // The backorder exists already, so the fallback refuses.
+    await journal.run(db, placeOrder, { orderId: input.backorderId }, meta);
+    const ignoresFallback = j.command('ignoresFallback', orderLine, async (args, { write, run, accept }) => {
+      await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]);
+      const stock = await run(reserveStock, {
+        reservationId: args.reservationId,
+        sku: args.sku,
+        qty: args.qty,
+        inStock: args.inStock,
+      });
+      if (!OutOfStock.is(stock)) return stock;
+      accept(stock);
+      await run(placeBackorder, { backorderId: args.backorderId, sku: args.sku, qty: 1 });
+      return 'backordered';
+    });
+    const throwsInFallback = j.command('throwsInFallback', orderLine, async (args, { write, run, accept }) => {
+      await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]);
+      const stock = await run(reserveStock, {
+        reservationId: args.reservationId,
+        sku: args.sku,
+        qty: args.qty,
+        inStock: args.inStock,
+      });
+      if (!OutOfStock.is(stock)) return stock;
+      accept(stock);
+      throw new Error('the backorder service is down');
+    });
+
+    const error = await misuseOf(journal.run(db, ignoresFallback, input, meta));
+    expect(error.code).toBe('IGNORED_FAILURE');
+    expect(error.message).toContain('the child command "placeBackorder" returned the failure "journal.conflict"');
+    expect(await rowsOf(input.orderId)).toEqual([]);
+
+    await expect(journal.run(db, throwsInFallback, input, meta)).rejects.toThrow('the backorder service is down');
+    expect(await rowsOf(input.orderId), 'accept never hides a throw').toEqual([]);
+  });
+
+  it('three levels: acceptance changes only the scope that received the value', async () => {
+    const childLine = line.extend({ childOrderId: orderIdSchema, passUp: z.boolean() });
+    /** Writes its own row, then runs `reserveStock`; it either accepts the refusal or passes it up. */
+    const reserveOrPass = j.command('reserveOrPass', childLine, async (input, { write, run, accept }) => {
+      await write(order, input.childOrderId, () => [OrderPlaced({ customerId: 'child', total: 1 })]);
+      const stock = await run(reserveStock, input);
+      if (OutOfStock.is(stock) && !input.passUp) {
+        accept(stock);
+        return 'short';
+      }
+      return stock;
+    });
+    const top = j.command(
+      'topOfThree',
+      childLine.extend({ topOrderId: orderIdSchema }),
+      async (input, { write, run, accept }) => {
+        await write(order, input.topOrderId, () => [OrderPlaced({ customerId: 'top', total: 1 })]);
+        const child = await run(reserveOrPass, input);
+        if (OutOfStock.is(child)) {
+          accept(child);
+          return 'passed up and accepted';
+        }
+        if (isFailure(child)) return child;
+        return child === 'short' ? 'accepted below' : 'reserved';
+      },
+    );
+
+    const below = levels(false);
+    expect(await journal.run(db, top, below, meta)).toBe('accepted below');
+    expect(await rowsOf(below.topOrderId)).toHaveLength(1);
+    expect(await rowsOf(below.childOrderId), 'the child accepted, so it commits').toHaveLength(1);
+    expect(await rowsOf(below.reservationId), "the grandchild's savepoint stays rolled back").toEqual([]);
+
+    const up = levels(true);
+    expect(await journal.run(db, top, up, meta)).toBe('passed up and accepted');
+    expect(await rowsOf(up.topOrderId), 'the parent received the same instance, so it may accept it').toHaveLength(1);
+    expect(await rowsOf(up.childOrderId), 'the child returned a failure, so it rolled back').toEqual([]);
+    expect(await rowsOf(up.reservationId)).toEqual([]);
+  });
+
+  it('a child cannot accept a refusal only its parent received: trackers do not leak between levels', async () => {
+    const theirs: Failure[] = [];
+    const meddles = j.command('meddlingChild', z.object({}), (_input, { accept }) => {
+      const failure = theirs.at(-1);
+      if (failure !== undefined) accept(failure);
+      return 'meddled';
+    });
+    const parentOfMeddler = j.command(
+      'parentOfMeddler',
+      z.object({ id: orderIdSchema }),
+      async (input, { write, run }) => {
+        const missing = await write(order, input.id, () => CommandNotFound({ detail: 'No order' }));
+        if (isFailure(missing)) theirs.push(missing);
+        await run(meddles, {});
+        return missing;
+      },
+    );
+
+    const error = await misuseOf(journal.run(db, parentOfMeddler, { id: orderId(++next) }, meta));
+
+    expect(error.code).toBe('INVALID_ACCEPT');
+    expect(error.entityId, 'the child is the one that misused accept').toBe('meddlingChild');
+  });
+
+  it("a child's authorize refusal comes back through run, so the parent may accept it", async () => {
+    const guarded = j.command('guardedChild', z.object({}), () => 'ran', {
+      authorize: () => CommandForbidden({ detail: 'No' }),
+    });
+    const tolerant = j.command(
+      'toleratesForbidden',
+      z.object({ id: orderIdSchema }),
+      async (input, { write, run, accept }) => {
+        await write(order, input.id, () => [OrderPlaced({ customerId: 'tolerant', total: 1 })]);
+        const child = await run(guarded, {});
+        if (CommandForbidden.is(child)) {
+          accept(child);
+          return 'skipped';
+        }
+        return child;
+      },
+    );
+    const id = orderId(++next);
+
+    expect(await journal.run(db, tolerant, { id }, meta)).toBe('skipped');
+    expect(await rowsOf(id)).toHaveLength(1);
+  });
+
+  it('a captured accept called after the handler finished throws: a settled command cannot change', async () => {
+    const captured: { accept?: (f: Failure) => void; failure?: Failure } = {};
+    const leaks = misusing('leaksAccept', (received, accept) => {
+      captured.accept = accept;
+      captured.failure = received;
+    });
+
+    expect(CommandNotFound.is(await journal.run(db, leaks, { id: orderId(++next) }, meta))).toBe(true);
+    const late = captured.accept;
+    const failure = captured.failure;
+    if (late === undefined || failure === undefined) throw new Error('the handler did not run');
+    const error = thrownBy(() => late(failure));
+
+    expect(isJournalError(error, 'INVALID_ACCEPT')).toBe(true);
+    expect(String(error)).toContain('accept() was called after the handler finished');
+  });
+
+  it('an idempotency key stores the accepted success as the receipt, and a repeat replays it', async () => {
+    const input = lineFor(true);
+    const key = `k_backorder_${next}`;
+    const before = backorderRuns;
+
+    expect(await journal.run(db, placeWithBackorder, input, meta, { idempotencyKey: key })).toEqual({
+      status: 'backordered',
+    });
+    expect(await receiptOf(key)).toMatchObject([{ result: { value: { status: 'backordered' } } }]);
+
+    expect(await journal.run(db, placeWithBackorder, input, meta, { idempotencyKey: key })).toEqual({
+      status: 'backordered',
+    });
+    expect(backorderRuns - before, 'the repeat replays the receipt; the handler ran once').toBe(1);
+  });
+});
+
+describe('a refusal the effect accepts', () => {
+  // Why: one rule for effects. A refusal the effect accepts ends the job done; one it does not
+  // accept still ends it dead after one try. Misuse is a bug: it throws, and the worker treats
+  // it like any thrown error, while commands that already committed stay committed.
+  let effectDb: PgliteDatabase;
+  let effectClient: PGlite;
+  const refuse = j.command('refuseForEffect', z.object({}), () => CommandConflict({ detail: 'Already closed' }));
+  const captured: { accept?: (f: Failure) => void; failure?: Failure } = {};
+  const accepts = j.effect('relay-accepts', order, {
+    OrderNoted: async (_event, { run, accept }) => {
+      const closed = await run(refuse, {}, meta);
+      if (CommandConflict.is(closed)) {
+        accept(closed);
+        captured.accept = accept;
+        captured.failure = closed;
+        return;
+      }
+      return closed;
+    },
+  });
+  const forgets = j.effect('relay-forgets', order, {
+    OrderNoted: async (_event, { run }) => {
+      await run(refuse, {}, meta);
+    },
+  });
+  const misuses = j.effect('relay-misuses', order, {
+    OrderNoted: async (event, { run, accept }) => {
+      await run(placeOrder, { orderId: `${event.entityId}_side` }, meta);
+      accept(CommandConflict({ detail: 'never returned' }));
+    },
+  });
+  const relays = j.compose({ tables, effects: [accepts, forgets, misuses] });
+
+  beforeAll(async () => {
+    ({ db: effectDb, client: effectClient } = await openDb());
+  });
+
+  afterAll(async () => {
+    await effectClient.close();
+  });
+
+  it('an accepted refusal ends the job done; an unaccepted one dies after one try; misuse throws and is retried', async () => {
+    const id = orderId(++next);
+    await relays.run(effectDb, placeOrder, { orderId: id }, meta);
+    await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] });
+
+    await relays.drain(effectDb);
+
+    const { jobs: accepted } = await relays.jobs(effectDb, { effect: 'relay-accepts' });
+    expect(accepted, 'the accepting job is done').toEqual([]);
+    const { jobs: dead } = await relays.jobs(effectDb, { status: 'dead' });
+    expect(dead.map(job => job.effect)).toEqual(['relay-forgets']);
+    expect(dead[0]?.attempts).toBe(1);
+    const { jobs: retrying } = await relays.jobs(effectDb, { effect: 'relay-misuses' });
+    expect(retrying, 'a thrown error goes to the retry policy, not straight to dead').toMatchObject([
+      { attempts: 1, state: 'delayed' },
+    ]);
+    expect(retrying[0]?.lastError).toContain('INVALID_ACCEPT');
+    expect(
+      await effectDb
+        .select()
+        .from(orders)
+        .where(eq(orders.id, `${id}_side`)),
+      'the command it ran stays committed',
+    ).toHaveLength(1);
+
+    const late = captured.accept;
+    const failure = captured.failure;
+    if (late === undefined || failure === undefined) throw new Error('the accepting effect did not run');
+    const error = thrownBy(() => late(failure));
+    expect(isJournalError(error, 'INVALID_ACCEPT'), 'a late call cannot change a settled job').toBe(true);
+    expect(error).toMatchObject({ kind: 'effect', entityId: 'relay-accepts' });
+    expect(String(error)).toContain('accept() was called after the handler finished');
+  });
+});

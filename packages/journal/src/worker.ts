@@ -16,6 +16,7 @@ import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
 import type { EffectRetention, ResolvedRetention } from './retention.js';
 import type {
+  AcceptFailure,
   DbHandle,
   Effect,
   EffectHookContext,
@@ -65,6 +66,19 @@ const scheduledJob = (job: JobRow): ScheduledJob => {
   return { id: job.id, name: job.jobName, args: job.args, attempt: job.attempts };
 };
 
+/**
+ * The command part of one effect attempt's context, made fresh for each attempt.
+ * `run` is the journal's `run`, bound to the root database the drain was given and to the
+ * event the job is for. `accept` marks a refusal that `run` returned as handled.
+ * `settle` waits for the handler, ends the attempt (a later `accept` throws), and resolves
+ * with the outcome the job records.
+ */
+export type EffectAttempt<Run> = {
+  readonly run: Run;
+  readonly accept: AcceptFailure;
+  readonly settle: (handler: Promise<unknown>) => Promise<unknown>;
+};
+
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
 export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
@@ -73,8 +87,12 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
   /** As composed: an effect may still have needs. Each drain binds them from its `services`. */
   readonly effects: readonly Effect<SchemaOutput<Meta>, AppDb, Run, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
-  /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
-  readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
+  /** Makes the command part of one attempt's context, for the effect named `effect`. See `EffectAttempt`. */
+  readonly attemptOn: (
+    db: AppDb & RootDb,
+    cause: { readonly seq: number; readonly correlationId: string | null },
+    effect: string,
+  ) => EffectAttempt<Run>;
   /** The journal's resolved archive policy. Default: completed jobs kept 7 days. */
   readonly retention?: ResolvedRetention;
 };
@@ -198,9 +216,10 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       eventRow.entityId,
     );
     // Inside the lease: a hook that throws fails the job like a handler failure.
-    return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
-      effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) }),
-    );
+    return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () => {
+      const { run, accept, settle } = deps.attemptOn(db, event, effect.name);
+      return settle(effect.run(event, { jobId: job.id, signal, db, run, accept }));
+    });
   };
 
   /** The per-job retention override: a queue job's comes from its runner, an effect's from its schedule. */

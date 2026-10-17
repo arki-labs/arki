@@ -7,7 +7,6 @@
 import { getTableColumns, getTableName, is, lt } from 'drizzle-orm';
 import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
 
-import type { Failure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
@@ -31,6 +30,7 @@ import type {
   Tap,
   TransactionSource,
 } from './types.js';
+import type { EffectAttempt } from './worker.js';
 import { createCommandRunner } from './command.js';
 import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
@@ -40,6 +40,7 @@ import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor 
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
 import { createJobOps } from './outbox.js';
+import { trackRefusals } from './refusals.js';
 import { assertRetention, effectOverrides, resolveRetention } from './retention.js';
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
@@ -227,46 +228,46 @@ function createJournal<
     hooks: commandHooks,
     tables,
   });
-  type RunEffect = Effect<MetaOut, AppDb, RootCommandRunner<Meta, Tx>, Needs>;
-  /**
-   * An effect whose `ctx.run` returned a failure must not report success: the job would count
-   * as done though a command said no. Each command already rolled back on its own, so there is
-   * nothing left to undo. A success after an ignored refusal ends the job with that refusal
-   * instead: dead after one try, like a returned failure. It is not thrown, because a thrown
-   * error is retried, and a retry would run again the commands that did commit.
-   */
-  const failWhenIgnored = (effect: RunEffect): RunEffect => ({
-    ...effect,
-    run: async (event, ctx) => {
-      const seen: { ignored?: { readonly failure: Failure; readonly command: string } } = {};
-      const run: RootCommandRunner<Meta, Tx> = (command, input, meta, call) =>
-        ctx.run(command, input, meta, call).then(result => {
-          if (seen.ignored === undefined && isReturnedFailure(result))
-            seen.ignored = { failure: result, command: command.name };
-          return result;
-        });
-      const outcome = await effect.run(event, { ...ctx, run });
-      if (seen.ignored === undefined || isFailure<unknown>(outcome)) return outcome;
-      debugDrain.debug(
-        '{effect}: command {command} returned {code}, and the effect returned a success; the job fails',
-        {
-          effect: effect.name,
-          command: seen.ignored.command,
-          code: seen.ignored.failure.code,
-        },
-      );
-      return seen.ignored.failure;
-    },
-  });
   // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
   type WorkerDb = AppDb & TransactionSource<Tx>;
+  /**
+   * An effect whose `ctx.run` returned a failure it did not accept must not report success:
+   * the job would count as done though a command said no. Each command already rolled back on
+   * its own, so there is nothing left to undo. A success after an unaccepted refusal ends the
+   * job with that refusal instead: dead after one try by default, like a returned failure. It
+   * is not thrown, because a thrown error is retried, and a retry would run again the commands
+   * that did commit.
+   */
+  const attemptOn = (
+    db: WorkerDb,
+    cause: { readonly seq: number; readonly correlationId: string | null },
+    effect: string,
+  ): EffectAttempt<RootCommandRunner<Meta, Tx>> => {
+    const refusals = trackRefusals('effect', effect, 'run');
+    return {
+      run: (command, input, meta, call) =>
+        run(db, command, input, meta, call, cause).then(refusals.watch(`the command "${command.name}"`)),
+      accept: refusals.accept,
+      settle: async handler => {
+        const outcome = await handler.finally(refusals.finish);
+        const ignored = refusals.unhandled();
+        if (ignored === undefined || isFailure<unknown>(outcome)) return outcome;
+        debugDrain.debug('{effect}: {from} returned {code}, and the effect returned a success; the job fails', {
+          effect,
+          from: ignored.from,
+          code: ignored.failure.code,
+        });
+        return ignored.failure;
+      },
+    };
+  };
   const drain = createDrain<Meta, WorkerDb, RootCommandRunner<Meta, Tx>>({
     tables,
     hooks: effectHooks,
-    effects: effects.map(effect => failWhenIgnored(effect)),
+    effects,
     retention,
     history,
-    runOn: (db, cause) => (command, input, meta, call) => run(db, command, input, meta, call, cause),
+    attemptOn,
   });
   const catching = createCatchUp<Meta, Tx>({ tables, projections: asyncProjections, history });
   const dispatch = createTapDispatch<Meta, WorkerDb>({ tables, taps, history });

@@ -61,7 +61,7 @@ export function defineProjection<E extends AnyEntity<Meta>, Meta, Tx extends DbH
 }
 
 /** Every effect handler gets these. A need must not take one of their names. */
-const builtInContext = new Set(['jobId', 'signal', 'db', 'run']);
+const builtInContext = new Set(['jobId', 'signal', 'db', 'run', 'accept']);
 
 /** Declare one thing an effect needs: `j.effect('order-mail', order, { mailer: need<Mailer>() }, { ... })`. */
 export const need = <T>(): Need<T> => ({});
@@ -79,7 +79,7 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
         'BAD_DEFINITION',
         'effect',
         name,
-        `journal: effect "${name}" has a need named "${key}", but the handler context already has "jobId", "signal", "db" and "run"; give the need another name`,
+        `journal: effect "${name}" has a need named "${key}", but the handler context already has "jobId", "signal", "db", "run" and "accept"; give the need another name`,
       );
   }
   const handlers: Partial<

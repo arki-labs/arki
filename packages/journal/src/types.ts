@@ -1,6 +1,7 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { AnyPgColumn, PgAsyncDatabase, PgQueryResultHKT, PgTableWithColumns } from 'drizzle-orm/pg-core';
 
+import type { Failure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
@@ -306,15 +307,28 @@ export type Projection<Meta = unknown, Tx = DbHandle> = {
 export type ProjectionOptions = { readonly lane?: 'inline' | 'async' };
 
 /**
+ * `ctx.accept` of a command or an effect: marks one refusal that this handler's `write` or
+ * `run` returned as handled, so the handler may still return a success. Check the value
+ * first, then accept it: `if (OutOfStock.is(r)) { accept(r); ... }`. One call clears one
+ * return of that very value. It commits nothing by itself: a returned failure still rolls back.
+ * A value the handler never received, a second call for one return, a call after the
+ * handler finished, or a value that is not a failure throws `INVALID_ACCEPT`.
+ */
+export type AcceptFailure = (failure: Failure) => void;
+
+/**
  * `db` is the root database that was given to `drain` or `worker`: the same object.
  * `run` is `journal.run` on that database. A journal types it as `RootCommandRunner`
  * (in `api.ts`). This file cannot name a command, so the type comes in as `Run`.
+ * `accept` marks a refusal a `run` of this attempt returned as handled, so the job can
+ * still succeed; see `AcceptFailure`.
  */
 export type EffectContext<AppDb = RootDb, Run = unknown> = {
   readonly jobId: string;
   readonly signal: AbortSignal;
   readonly db: AppDb;
   readonly run: Run;
+  readonly accept: AcceptFailure;
 };
 
 declare const needType: unique symbol;
