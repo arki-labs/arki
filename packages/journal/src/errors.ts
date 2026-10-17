@@ -21,7 +21,8 @@ export type JournalErrorCode =
   | 'JOB_NOT_PENDING'
   | 'JOB_RUNNING'
   | 'JOB_EXISTS'
-  | 'BAD_ARGUMENT';
+  | 'BAD_ARGUMENT'
+  | 'LEASE_LOST';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -100,6 +101,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   BAD_ARGUMENT: {
     what: 'an argument is out of range',
     next: 'Fix the argument named in the detail, then call again',
+  },
+  LEASE_LOST: {
+    what: 'this worker no longer holds the job: its lease ran out and another worker took it, or the job was finished or removed',
+    next: 'Nothing was written. Stop the handler. The new owner runs the job, so a side effect outside the database needs an idempotency key',
   },
 };
 

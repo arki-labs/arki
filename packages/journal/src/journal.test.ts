@@ -498,6 +498,7 @@ describe('write', () => {
     };
     const ctx = {
       jobId: 'job_x',
+      attempt: 1,
       signal: new AbortController().signal,
       db,
       run: () => Promise.reject(new Error('no handler runs, so no command does')),

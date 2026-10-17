@@ -92,6 +92,8 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
     db: AppDb & RootDb,
     cause: { readonly seq: number; readonly correlationId: string | null },
     effect: string,
+    /** The attempt row this worker holds open: its command transactions check it. */
+    attempt: { readonly jobId: string; readonly attempt: number },
   ) => EffectAttempt<Run>;
   /** The journal's resolved archive policy. Default: completed jobs kept 7 days. */
   readonly retention?: ResolvedRetention;
@@ -217,8 +219,8 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     );
     // Inside the lease: a hook that throws fails the job like a handler failure.
     return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () => {
-      const { run, accept, settle } = deps.attemptOn(db, event, effect.name);
-      return settle(effect.run(event, { jobId: job.id, signal, db, run, accept }));
+      const { run, accept, settle } = deps.attemptOn(db, event, effect.name, { jobId: job.id, attempt: job.attempts });
+      return settle(effect.run(event, { jobId: job.id, attempt: job.attempts, signal, db, run, accept }));
     });
   };
 

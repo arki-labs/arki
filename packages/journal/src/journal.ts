@@ -4,7 +4,7 @@
  * dependencies and wires the public methods.
  * May import every other file. No implementation file may import this one.
  */
-import { getTableColumns, getTableName, is, lt } from 'drizzle-orm';
+import { and, eq, getTableColumns, getTableName, is, isNull, lt } from 'drizzle-orm';
 import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
@@ -31,6 +31,7 @@ import type {
   TransactionSource,
 } from './types.js';
 import type { EffectAttempt } from './worker.js';
+import type { Fence } from './command.js';
 import { createCommandRunner } from './command.js';
 import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
@@ -242,11 +243,24 @@ function createJournal<
     db: WorkerDb,
     cause: { readonly seq: number; readonly correlationId: string | null },
     effect: string,
+    held: { readonly jobId: string; readonly attempt: number },
   ): EffectAttempt<RootCommandRunner<Meta, Tx>> => {
     const refusals = trackRefusals('effect', effect, 'run');
+    const attempts = tables.jobAttempts;
+    // `FOR SHARE` on the open attempt row: a claim that supersedes it needs the row for update, so it waits for
+    // this command to commit, and a command that starts after the claim finds no open row and commits nothing.
+    const fence: Fence = async tx => {
+      const open = await tx
+        .select({ id: attempts.id })
+        .from(attempts)
+        .where(and(eq(attempts.jobId, held.jobId), eq(attempts.attempt, held.attempt), isNull(attempts.finishedAt)))
+        .for('share');
+      if (open.length === 0)
+        throw new JournalError('LEASE_LOST', 'job', held.jobId, `attempt ${held.attempt} of "${effect}" is no longer open`);
+    };
     return {
       run: (command, input, meta, call) =>
-        run(db, command, input, meta, call, cause).then(refusals.watch(`the command "${command.name}"`)),
+        run(db, command, input, meta, call, cause, fence).then(refusals.watch(`the command "${command.name}"`)),
       accept: refusals.accept,
       settle: async handler => {
         const outcome = await handler.finally(refusals.finish);

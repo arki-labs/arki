@@ -43,6 +43,12 @@ export type CommandDeps<
   readonly tables: Pick<JournalTables, 'receipts'>;
 };
 
+/**
+ * Runs first inside a command's transaction and throws to refuse it. An effect's `ctx.run` passes the check that
+ * its attempt is still the job's open attempt. Child commands run inside the same transaction, so only the top one is fenced.
+ */
+export type Fence = (tx: DbHandle) => Promise<void>;
+
 export function createCommandRunner<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -126,6 +132,7 @@ export function createCommandRunner<
     onJobs: (count: number) => void,
     parent: Omit<Trace, 'commandId'>,
     key: string | undefined,
+    fence?: Fence,
   ): Promise<Awaited<R>> =>
     oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R>> => {
       hooks.freeze();
@@ -142,6 +149,8 @@ export function createCommandRunner<
       // and is what the run returns: a rule that says no never leaves half a change behind.
       const refusal = rollbackOnFailure<Awaited<R>>();
       const transaction = source.transaction(async (tx): Promise<Awaited<R>> => {
+        // First statement of the transaction: a stale owner commits nothing, and a claim waits for this commit.
+        await fence?.(tx);
         // Every operation the handler starts through this context. The transaction
         // must not close while one is still running: its work would land outside.
         const started: Promise<unknown>[] = [];
@@ -265,6 +274,7 @@ export function createCommandRunner<
     meta: SchemaInput<Meta>,
     opts?: RunOptions,
     cause?: { readonly seq: number; readonly correlationId: string | null },
+    fence?: Fence,
   ): Promise<Awaited<R>> => {
     let queued = 0;
     return runCommand(
@@ -285,6 +295,7 @@ export function createCommandRunner<
         correlationId: opts?.correlationId ?? cause?.correlationId ?? correlationId(),
       },
       opts?.idempotencyKey,
+      fence,
     ).then(result => {
       // The root database has committed by now. Inside a caller's transaction
       // only the caller knows when the commit happens, so the caller wakes.

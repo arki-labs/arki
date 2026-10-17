@@ -325,6 +325,8 @@ export type AcceptFailure = (failure: Failure) => void;
  */
 export type EffectContext<AppDb = RootDb, Run = unknown> = {
   readonly jobId: string;
+  /** 1 on the first try of this job, 2 on the next, and so on. The number of the attempt row this worker holds open. */
+  readonly attempt: number;
   readonly signal: AbortSignal;
   readonly db: AppDb;
   readonly run: Run;
