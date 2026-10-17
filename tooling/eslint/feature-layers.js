@@ -19,7 +19,7 @@
  * - The app's own `model/` is a leaf like a feature's: every layer may import
  *   it; it imports no `usecases/`, `infra/` or `entrypoints/` and no database runtime.
  * - A contract file imports only `@orpc/contract`, zod / `@arki/contracts`,
- *   the `offlineSafe` marker (`@arki/offline/orpc`), and its model (`../model/*`, or feature contracts from the app contract)
+ *   the `offlineSafe` marker (`@arki/offline/orpc`), failure error maps (`@arki/failure/orpc`), and its model (`../model/*`, or feature contracts from the app contract)
  *   — it ships to the browser.
  * - `model/` imports no `usecases/`, `infra/` or `entrypoints/`, and no
  *   database runtime — except `model/tables.ts` (declares tables) and `model/relations.ts`
@@ -88,14 +88,15 @@ const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoi
 
 /**
  * Only the contract's own vocabulary: oRPC contract, zod, the `offlineSafe`
- * marker (policy is declared on the contract), its model, and (in the app
+ * marker (policy is declared on the contract), `errorMap` from
+ * `@arki/failure/orpc` (browser-safe: it imports only `@orpc/client`), its model, and (in the app
  * contract) the feature contracts.
  */
 const CONTRACT_ONLY = {
   regex:
-    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
+    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc|@arki/failure/orpc)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
   message:
-    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
+    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), @arki/failure/orpc (errorMap), ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
 };
 
 /**

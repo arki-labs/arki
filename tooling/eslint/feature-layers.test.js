@@ -29,6 +29,11 @@ test('contracts ship to the browser, so importing outside their vocabulary fails
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { z } from 'zod'; import { m } from '../model/m';`), []);
 });
 
+test("a contract lists its failures with @arki/failure/orpc's errorMap (browser-safe), and nothing else from the package", () => {
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { errorMap } from '@arki/failure/orpc';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { orThrow } from '@arki/failure';`), [RESTRICT]);
+});
+
 test('model is the inside layer: it never imports usecases', () => {
   assert.deepEqual(ruleIds('src/features/demo/model/x.ts', `import { y } from '../usecases/y';`), [RESTRICT]);
 });
