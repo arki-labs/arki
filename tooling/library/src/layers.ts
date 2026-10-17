@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * `arki-layers`: the blocking layer and dependency gate for `packages/*` and
- * `tooling/*` (RFC `arki-structure` P2, P3, §4). Run once from the repo root.
+ * `arki-layers`: the blocking layer and dependency gate for `packages/*`,
+ * `tooling/*` and `fleet/*` (RFC `arki-structure` P2, P3, §4). Run once from the repo root.
  * `turbo boundaries` stays an advisory report: it counts optional peers as
  * undeclared and cannot see export entries.
  *
@@ -31,6 +31,9 @@
  *                        devDependency (L004 reports that edge).
  *   L003 portable-peer   a portable entry reaches an optional peer (breaks when the peer is absent).
  *   L004 dev-edge        a workspace package in devDependencies whose tag the rules deny.
+ *   L005 fleet           an `@arki/*` package lists `@fleet/*` in any dependency bucket, or
+ *                        imports it. The direction is apps -> fleet -> Arki, never back. No
+ *                        adapter or devDependency exemption, and no baseline entry waives it.
  *
  *   arki-layers [--json] [--package @arki/name] [--root <dir>]
  *
@@ -51,7 +54,7 @@ import { isAdapterSubpath } from './adapters';
 import { leaves, readManifest } from './manifest';
 import { complain, say } from './report';
 
-export type Rule = 'L001' | 'L002' | 'L003' | 'L004';
+export type Rule = 'L001' | 'L002' | 'L003' | 'L004' | 'L005';
 
 export type Finding = {
   readonly package: string;
@@ -117,7 +120,8 @@ const MAX_FILE_BYTES = 1_000_000;
 
 function loadWorkspaces(root: string): Map<string, Workspace> {
   const found = new Map<string, Workspace>();
-  for (const group of ['packages', 'tooling']) {
+  // `fleet/` may not exist yet; a missing group is skipped like any other.
+  for (const group of ['packages', 'tooling', 'fleet']) {
     const base = path.join(root, group);
     if (!existsSync(base)) continue;
     for (const entry of readdirSync(base, { withFileTypes: true })) {
@@ -323,6 +327,7 @@ const baselineSchema = z.object({
   entries: z.array(
     z.object({
       package: z.string(),
+      // L005 (Arki -> fleet) is left out on purpose: no baseline entry may waive it.
       rule: z.enum(['L001', 'L002', 'L003', 'L004']),
       specifier: z.string(),
       file: z.string().optional(),
@@ -333,7 +338,7 @@ const baselineSchema = z.object({
 
 export type BaselineEntry = z.infer<typeof baselineSchema>['entries'][number];
 
-function readBaseline(file: string): BaselineEntry[] {
+export function readBaseline(file: string): BaselineEntry[] {
   if (!existsSync(file)) return [];
   return baselineSchema.parse(JSON.parse(readFileSync(file, 'utf8'))).entries;
 }
@@ -371,6 +376,9 @@ export function staleBaselineEntries(
   );
 }
 
+/** A package that `@arki/*` packages may never depend on (`fleet/<name>` = `@fleet/<name>`). */
+const isFleetPackage = (name: string): boolean => name.startsWith('@fleet/');
+
 export type CheckOptions = { readonly root: string; readonly only?: string | undefined };
 
 export function checkLayers({ root, only }: CheckOptions): Finding[] {
@@ -379,9 +387,35 @@ export function checkLayers({ root, only }: CheckOptions): Finding[] {
   const findings: Finding[] = [];
 
   for (const [name, workspace] of workspaces) {
-    if ((only && name !== only) || SKIP_WALK.has(name)) continue;
+    if (only && name !== only) continue;
     const { manifest } = workspace;
     const rel = (file: string): string => path.relative(root, file);
+    const isArki = name.startsWith('@arki/');
+
+    // L005: an Arki package never depends on a fleet package, in any bucket.
+    if (isArki) {
+      const buckets = {
+        dependencies: manifest.dependencies,
+        devDependencies: manifest.devDependencies,
+        peerDependencies: manifest.peerDependencies,
+        optionalDependencies: manifest.optionalDependencies,
+      };
+      for (const [bucket, deps] of Object.entries(buckets)) {
+        for (const dep of Object.keys(deps).filter(isFleetPackage)) {
+          findings.push({
+            package: name,
+            rule: 'L005',
+            file: rel(path.join(workspace.dir, 'package.json')),
+            line: 1,
+            specifier: dep,
+            reach: 'none',
+            message: `${bucket} lists ${dep}; an @arki/* package may never depend on @fleet/*`,
+          });
+        }
+      }
+    }
+
+    if (SKIP_WALK.has(name)) continue;
     const optionalPeers = new Set([...manifest.optionalPeers].filter(peer => peer in manifest.peerDependencies));
     const declared = new Set([
       ...Object.keys(manifest.dependencies),
@@ -459,6 +493,11 @@ export function checkLayers({ root, only }: CheckOptions): Finding[] {
               ? `${dep} is only a devDependency but ${reachable ? 'an export entry reaches this file' : 'this file ships'}`
               : `${dep} is not declared in package.json`,
           });
+        }
+
+        // L005 for imports: apart from L002, so its adapter-peer and dev-only exemptions never apply.
+        if (isArki && isFleetPackage(dep)) {
+          findings.push({ ...where, rule: 'L005', message: `an @arki/* package may never import ${dep} (@fleet/*)` });
         }
 
         // A lazy import() of an optional peer is how a portable entry stays usable without it (RFC P3).

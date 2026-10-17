@@ -5,7 +5,9 @@
  *
  * Hard errors (exit 1): an export without `types`, an export that points
  * nowhere under `dist/` or `src/`, a package with no Boundaries tag, a folder
- * name that differs from the package name (`folder = name`, RFC B17).
+ * name that differs from the package name (`folder = name`, RFC B17), a scope
+ * that differs from the parent folder (`scope = folder`: `packages/x` is
+ * `@arki/x`, `fleet/x` is `@fleet/x`), a fleet package without `"private": true`.
  * Warnings (printed, exit 0): a `"./*"` wildcard export, `sideEffects` is not
  * `false` or an exact file list.
  *
@@ -21,7 +23,7 @@
  * export entry other than `./zod` exposes Zod types), TYPES_W001 (the entry's
  * types file is not built, so that check is skipped).
  *
- * `--all` checks every package under `packages/` and `tooling/`. Known errors
+ * `--all` checks every package under `packages/`, `tooling/` and `fleet/`. Known errors
  * are listed with a reason in `tooling/library/library-check-baseline.json`; only
  * errors outside it fail the run, and a baseline entry that no longer matches
  * an error fails it too (so the file cannot rot).
@@ -76,9 +78,18 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
   }
 
   const folder = path.basename(path.resolve(dir));
-  const expected = manifest.name.replace(/^@arki\//, '');
+  const expected = manifest.name.replace(/^@[^/]+\//, '');
   if (folder !== expected) {
     errors.push(`folder "${folder}" should be "${expected}" (folder = name)`);
+  }
+  // Fleet packages are shared across our apps, not Arki: never released, so always private.
+  const isFleet = path.basename(path.dirname(path.resolve(dir))) === 'fleet';
+  const scope = isFleet ? '@fleet/' : '@arki/';
+  if (!manifest.name.startsWith(scope)) {
+    errors.push(`name "${manifest.name}" should start with "${scope}" (scope = folder)`);
+  }
+  if (isFleet && !manifest.private) {
+    errors.push('a fleet package must be "private": true (fleet packages are never released)');
   }
 
   const wildcards = Object.keys(manifest.exports).filter(key => key.includes('*'));
@@ -151,16 +162,16 @@ function findRepoRoot(from: string): string {
   return current;
 }
 
-/** Every `packages/*` and `tooling/*` folder that has a manifest. */
+/** Every `packages/*`, `tooling/*` and `fleet/*` folder that has a manifest. A missing group is skipped. */
 function workspaceDirs(root: string): { dir: string; kind: Kind }[] {
-  return (['packages', 'tooling'] as const).flatMap(group => {
+  return (['packages', 'tooling', 'fleet'] as const).flatMap(group => {
     const base = path.join(root, group);
     if (!existsSync(base)) return [];
     return readdirSync(base, { withFileTypes: true })
       .filter(entry => entry.isDirectory() && existsSync(path.join(base, entry.name, 'package.json')))
       .map(entry => ({
         dir: path.join(base, entry.name),
-        kind: group === 'packages' ? ('library' as const) : ('tooling' as const),
+        kind: group === 'tooling' ? ('tooling' as const) : ('library' as const),
       }))
       .toSorted((a, b) => a.dir.localeCompare(b.dir));
   });

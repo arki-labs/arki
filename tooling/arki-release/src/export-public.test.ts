@@ -507,6 +507,28 @@ describe('exportPublicTree', () => {
     expect(envelope.errors.map(error => error.code)).toContain('EXPORT_E007');
   });
 
+  it('refuses the whole export when an @arki/* package depends on @fleet/*, because npm could never resolve it', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      type: 'module',
+      main: 'dist/index.js',
+      types: 'dist/index.d.ts',
+      files: ['dist'],
+      optionalDependencies: { '@fleet/shared': 'workspace:*' },
+    });
+    writeFixtureFile(tmp, 'packages/assert/dist/index.js', 'export const ok = true;\n');
+
+    const envelope = await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+
+    expect(envelope.status).toBe('failure');
+    expect(envelope.summary.exported).toBe(0);
+    expect(envelope.errors.map(error => error.code)).toContain('INV_E006');
+    // Aborted before anything was written: not even the root scaffolding exists.
+    expect(() => statSync(path.join(tmp, baseConfig.publicTreePath))).toThrow();
+  });
+
   it('refuses to export to a path outside the workspace root', async () => {
     writeRoot(tmp);
     const elsewhere = mkdtempSync(path.join(tmpdir(), 'arki-elsewhere-'));

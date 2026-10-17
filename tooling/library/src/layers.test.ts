@@ -4,15 +4,19 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { isAdapterSubpath } from './adapters';
-import { checkLayers, packageNameOf, parseImports, staleBaselineEntries } from './layers';
+import { checkLayers, packageNameOf, parseImports, readBaseline, staleBaselineEntries } from './layers';
 
 type Fixture = {
   readonly tag: string;
+  /** Top-level folder; `packages` when omitted. */
+  readonly group?: 'packages' | 'fleet';
+  /** Package name; `@arki/<folder>` when omitted. */
+  readonly name?: string;
   readonly manifest?: object;
   readonly files: Record<string, string>;
 };
 
-/** A tiny repo: root turbo.json with the real tag rules, plus the given workspaces under packages/. */
+/** A tiny repo: root turbo.json with the real tag rules, plus the given workspaces under packages/ (or fleet/). */
 function repo(workspaces: Record<string, Fixture>): string {
   const root = mkdtempSync(path.join(tmpdir(), 'arki-layers-'));
   writeFileSync(
@@ -23,17 +27,22 @@ function repo(workspaces: Record<string, Fixture>): string {
           foundation: { dependencies: { allow: ['foundation', 'tooling'] } },
           platform: { dependencies: { allow: ['foundation', 'platform', 'tooling'] } },
           web: { dependencies: { allow: ['foundation', 'platform', 'web', 'tooling'], deny: ['@arki/db'] } },
+          fleet: { dependencies: { allow: ['foundation', 'platform', 'web', 'fleet', 'tooling'] } },
         },
       },
     }),
   );
   for (const [folder, fixture] of Object.entries(workspaces)) {
-    const dir = path.join(root, 'packages', folder);
+    const dir = path.join(root, fixture.group ?? 'packages', folder);
     mkdirSync(path.join(dir, 'src'), { recursive: true });
     writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify({ tags: [fixture.tag] }));
     writeFileSync(
       path.join(dir, 'package.json'),
-      JSON.stringify({ name: `@arki/${folder}`, exports: { '.': './src/index.ts' }, ...fixture.manifest }),
+      JSON.stringify({
+        name: fixture.name ?? `@arki/${folder}`,
+        exports: { '.': './src/index.ts' },
+        ...fixture.manifest,
+      }),
     );
     for (const [file, text] of Object.entries(fixture.files)) {
       mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
@@ -227,5 +236,84 @@ describe('isAdapterSubpath', () => {
     expect(isAdapterSubpath('./sentry/client')).toBe(true);
     expect(isAdapterSubpath('./serialize')).toBe(false);
     expect(isAdapterSubpath('./client')).toBe(false);
+  });
+});
+
+// The direction is apps -> fleet -> Arki. An Arki package that reaches into fleet/ could never be released.
+describe('checkLayers L005 (Arki -> fleet)', () => {
+  const fleetShared: Fixture = {
+    tag: 'fleet',
+    group: 'fleet',
+    name: '@fleet/shared',
+    manifest: { private: true },
+    files: { 'src/index.ts': 'export const shared = 1;' },
+  };
+
+  it('flags @fleet/* in optionalDependencies, because a manifest dep alone breaks the Arki release', () => {
+    const root = repo({
+      demo: {
+        tag: 'foundation',
+        manifest: { optionalDependencies: { '@fleet/shared': 'workspace:*' } },
+        files: { 'src/index.ts': 'export const x = 1;' },
+      },
+    });
+    expect(checkLayers({ root }).map(f => [f.rule, f.specifier, f.file])).toEqual([
+      ['L005', '@fleet/shared', path.join('packages', 'demo', 'package.json')],
+    ]);
+  });
+
+  it.each(['dependencies', 'devDependencies', 'peerDependencies'])('flags @fleet/* in %s too', bucket => {
+    const root = repo({
+      demo: {
+        tag: 'foundation',
+        manifest: { [bucket]: { '@fleet/shared': 'workspace:*' } },
+        files: { 'src/index.ts': 'export const x = 1;' },
+      },
+    });
+    expect(checkLayers({ root }).map(f => f.rule)).toEqual(['L005']);
+  });
+
+  it('flags an import of @fleet/* even from an adapter file that declares it as an optional peer', () => {
+    const root = repo({
+      demo: {
+        tag: 'web',
+        manifest: {
+          exports: { '.': './src/index.ts', './react': './src/react.ts' },
+          peerDependencies: { '@fleet/shared': 'workspace:*' },
+          peerDependenciesMeta: { '@fleet/shared': { optional: true } },
+        },
+        files: {
+          'src/index.ts': 'export const x = 1;',
+          'src/react.ts': "import { shared } from '@fleet/shared';\nexport { shared };",
+        },
+      },
+      shared: fleetShared,
+    });
+    const findings = checkLayers({ root });
+    expect(findings.map(f => [f.rule, f.file.split(path.sep).at(-1)])).toEqual([
+      ['L005', 'package.json'],
+      ['L005', 'react.ts'],
+    ]);
+  });
+
+  it('lets a fleet package import Arki, because fleet sits above Arki', () => {
+    const root = repo({
+      core: { tag: 'foundation', files: { 'src/index.ts': 'export const core = 1;' } },
+      shared: {
+        ...fleetShared,
+        manifest: { private: true, dependencies: { '@arki/core': 'workspace:*' } },
+        files: { 'src/index.ts': "export { core } from '@arki/core';" },
+      },
+    });
+    expect(checkLayers({ root })).toEqual([]);
+  });
+
+  it('never lets a baseline entry waive L005, so the Arki -> fleet ban cannot rot into a known finding', () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'arki-layers-baseline-')), 'baseline.json');
+    const entry = { package: '@arki/demo', specifier: '@fleet/shared', reason: 'try to waive it' };
+    writeFileSync(file, JSON.stringify({ entries: [{ ...entry, rule: 'L005' }] }));
+    expect(() => readBaseline(file)).toThrow();
+    writeFileSync(file, JSON.stringify({ entries: [{ ...entry, rule: 'L004' }] }));
+    expect(readBaseline(file)).toEqual([{ ...entry, rule: 'L004' }]);
   });
 });

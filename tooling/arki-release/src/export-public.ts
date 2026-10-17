@@ -59,7 +59,7 @@ import type {
 } from './types';
 import { loadCatalogs } from './catalogs';
 import { buildCopyPlan, executeCopyPlan, removeDirectory } from './files';
-import { runInventory } from './inventory';
+import { INVENTORY_ERROR_CODES, runInventory } from './inventory';
 import { createEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, scanDirectory } from './leaks';
 import { materializeManifest } from './manifest';
@@ -182,6 +182,28 @@ export async function exportPublicTree(
   });
 
   debug('inventory: %d items, %d candidates', inventoryEnv.items.length, candidates.length);
+
+  // An `@arki/*` package that depends on `@fleet/*` would publish a dependency
+  // npm cannot resolve: refuse the whole export before anything is written.
+  const fleetErrors = inventoryEnv.errors.filter(error => error.code === INVENTORY_ERROR_CODES.fleetDependency);
+  if (fleetErrors.length > 0) {
+    errors.push(...fleetErrors);
+    const summary: ExportSummary = {
+      message: `Export refused: ${fleetErrors.length.toString()} @arki/* manifest dependenc${fleetErrors.length === 1 ? 'y' : 'ies'} on @fleet/* (INV_E006).`,
+      totalCandidates: candidates.length,
+      exported: 0,
+      skipped: 0,
+      failed: 0,
+      outputPath,
+    };
+    return createEnvelope<ExportItem, ExportSummary>({
+      command: 'export-public',
+      status: 'failure',
+      summary,
+      items: [],
+      errors,
+    });
+  }
 
   // 4. Catalogs + workspace/version maps.
   const rootManifest = await loadRootManifest(sourceRoot);

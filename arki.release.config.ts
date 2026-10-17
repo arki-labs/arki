@@ -71,9 +71,7 @@ export const config: ReleaseConfig = {
     {
       id: 'dot-kernel',
       label: 'Wave 2 — DOT Kernel',
-      // @arki/feature is the authoring layer over the kernel: zero runtime
-      // deps, optional @arki/dot peer — it ships with the kernel wave.
-      packages: ['@arki/dot', '@arki/feature'],
+      packages: ['@arki/dot'],
     },
     {
       id: 'infrastructure-adapters',

@@ -52,6 +52,8 @@ export const INVENTORY_ERROR_CODES = {
   unclassifiedPublicManifest: 'INV_E004',
   /** Wave references a workspace package that does not exist (warning). */
   waveReferencesMissingPackage: 'INV_E005',
+  /** An `@arki/*` manifest lists a `@fleet/*` package in any dependency bucket (error). */
+  fleetDependency: 'INV_E006',
 } as const;
 
 /** A parsed manifest (a thin wrapper around the on-disk JSON shape). */
@@ -118,6 +120,7 @@ export async function discoverManifests(cwd: string): Promise<{
   readonly manifests: readonly ParsedManifest[];
   readonly diagnostics: readonly ReleaseError[];
 }> {
+  // Only `packages/`: `fleet/*` (`@fleet/*`) is shared across our apps and never released.
   const packagesRoot = path.join(cwd, 'packages');
   const manifests: ParsedManifest[] = [];
   const diagnostics: ReleaseError[] = [];
@@ -150,6 +153,7 @@ export async function discoverManifests(cwd: string): Promise<{
       });
       continue;
     }
+    diagnostics.push(...fleetDependencyErrors(rel, parsed.name, json));
     manifests.push(parsed);
   }
 
@@ -185,6 +189,28 @@ async function walkForManifests(root: string): Promise<readonly string[]> {
     }
   }
   return out;
+}
+
+const DEPENDENCY_BUCKETS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;
+
+/**
+ * INV_E006 for every `@fleet/*` entry of a raw manifest. It reads the raw JSON
+ * on purpose: the dependency graph keeps only `@arki/*` edges, so it would drop
+ * a `@fleet/*` dependency silently. No bucket and no optional peer is exempt.
+ */
+function fleetDependencyErrors(manifestPath: string, name: string, raw: unknown): ReleaseError[] {
+  const m = raw as Record<string, unknown>;
+  return DEPENDENCY_BUCKETS.flatMap(bucket =>
+    Object.keys(narrowDepBucket(m[bucket]) ?? {})
+      .filter(dep => dep.startsWith('@fleet/'))
+      .map((dep): ReleaseError => ({
+        code: INVENTORY_ERROR_CODES.fleetDependency,
+        severity: 'error',
+        message: `${name} lists ${dep} in \`${bucket}\`; an @arki/* package may never depend on @fleet/*.`,
+        target: manifestPath,
+        remediation: `Move the shared code into an @arki/* package, or move ${name} to fleet/.`,
+      })),
+  );
 }
 
 /** Parse a raw manifest JSON value, or return `null` to signal "skip". */
@@ -436,11 +462,10 @@ export function classifyManifests(
     byWave[key] = (byWave[key] ?? 0) + 1;
   }
 
-  const hasBlocker = items.some(
-    i =>
-      i.classification === 'blocked-by-private-flag' ||
-      i.classification === 'blocked-by-private-dependency',
-  );
+  const hasBlocker =
+    items.some(
+      i => i.classification === 'blocked-by-private-flag' || i.classification === 'blocked-by-private-dependency',
+    ) || errors.some(error => error.code === INVENTORY_ERROR_CODES.fleetDependency);
 
   const summary: InventorySummary = {
     message: hasBlocker

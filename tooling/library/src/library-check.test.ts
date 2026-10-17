@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { checkAll, checkLibrary, updateBaseline } from './library-check';
 import { leaves, readManifest } from './manifest';
 
-function packageDir(folder: string, manifest: object, turbo: object | null): string {
-  const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), folder);
+/** `group` is the parent folder (`fleet` for a fleet package); a random temp dir when omitted. */
+function packageDir(folder: string, manifest: object, turbo: object | null, group = ''): string {
+  const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), group, folder);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
   if (turbo) writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify(turbo));
@@ -83,6 +84,42 @@ describe('checkLibrary', () => {
   });
 });
 
+// `packages/x` is `@arki/x`, `fleet/x` is `@fleet/x`; fleet packages are shared by our apps and never released.
+describe('checkLibrary in fleet/', () => {
+  const fleetGood = { ...good, name: '@fleet/demo' };
+  const fleetTag = { tags: ['fleet'] };
+
+  it('passes a private @fleet/* package', () => {
+    expect(checkLibrary(packageDir('demo', fleetGood, fleetTag, 'fleet'))).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('fails a fleet package that is not private, because release tooling must never publish it', () => {
+    const manifest = { ...fleetGood, private: false };
+    expect(checkLibrary(packageDir('demo', manifest, fleetTag, 'fleet')).errors).toContain(
+      'a fleet package must be "private": true (fleet packages are never released)',
+    );
+  });
+
+  it('fails a fleet package without a private flag, because absent means public', () => {
+    const { private: _ignored, ...manifest } = fleetGood;
+    expect(checkLibrary(packageDir('demo', manifest, fleetTag, 'fleet')).errors).toContain(
+      'a fleet package must be "private": true (fleet packages are never released)',
+    );
+  });
+
+  it('fails fleet/x named @arki/x, because the scope must match the folder', () => {
+    expect(checkLibrary(packageDir('demo', good, fleetTag, 'fleet')).errors).toEqual([
+      'name "@arki/demo" should start with "@fleet/" (scope = folder)',
+    ]);
+  });
+
+  it('fails packages/x named @fleet/x, because packages/ holds only Arki libraries', () => {
+    expect(checkLibrary(packageDir('demo', fleetGood, fleetTag, 'packages')).errors).toEqual([
+      'name "@fleet/demo" should start with "@arki/" (scope = folder)',
+    ]);
+  });
+});
+
 describe('checkAll', () => {
   function repo(): string {
     const root = mkdtempSync(path.join(tmpdir(), 'arki-library-check-all-'));
@@ -103,6 +140,18 @@ describe('checkAll', () => {
     }
     return root;
   }
+
+  it('walks fleet/ too, so a public fleet package fails the run', () => {
+    const root = repo();
+    const dir = path.join(root, 'fleet', 'shared');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...good, name: '@fleet/shared', private: false }));
+    writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify({ tags: ['fleet'] }));
+    expect(checkAll(root, []).errors).toContainEqual({
+      package: '@fleet/shared',
+      error: 'a fleet package must be "private": true (fleet packages are never released)',
+    });
+  });
 
   it('walks packages and tooling and reports each error with its package', () => {
     const result = checkAll(repo(), []);

@@ -185,6 +185,58 @@ describe('runInventory', () => {
   });
 });
 
+// `fleet/<name>` = `@fleet/<name>`: shared across our apps, never released. Arki may not depend on it.
+describe('runInventory and fleet/', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'arki-release-inv-fleet-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('never inventories a fleet/ package, even one misnamed @arki/*, so release tooling cannot see it', async () => {
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    writeManifest(tmp, 'fleet/shared', { name: '@fleet/shared', version: '1.0.0', private: true });
+    writeManifest(tmp, 'fleet/misnamed', { name: '@arki/misnamed', version: '1.0.0' });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.items.map(item => item.name)).toEqual(['@arki/assert']);
+    expect(env.errors.filter(error => String(error.target).startsWith('fleet'))).toEqual([]);
+  });
+
+  it.each(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])(
+    'fails with INV_E006 when an @arki/* manifest lists @fleet/* in %s',
+    async bucket => {
+      writeManifest(tmp, 'packages/log', {
+        name: '@arki/log',
+        version: '1.0.0',
+        private: true,
+        [bucket]: { '@fleet/shared': 'workspace:*' },
+        // An optional peer is still a dependency on fleet: no exemption.
+        peerDependenciesMeta: { '@fleet/shared': { optional: true } },
+      });
+      const env = await runInventory({ cwd: tmp, config: baseConfig });
+      expect(env.status).toBe('failure');
+      expect(env.errors.filter(error => error.code === 'INV_E006')).toEqual([
+        expect.objectContaining({ severity: 'error', target: path.join('packages', 'log', 'package.json') }),
+      ]);
+    },
+  );
+
+  it('does not emit INV_E006 for @arki/* dependencies', async () => {
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    writeManifest(tmp, 'packages/log', {
+      name: '@arki/log',
+      version: '1.0.0',
+      dependencies: { '@arki/assert': 'workspace:*' },
+    });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.errors.map(error => error.code)).not.toContain('INV_E006');
+  });
+});
+
 describe('classifyManifests (pure)', () => {
   it('aggregates byClassification and byWave counts correctly', () => {
     const env = classifyManifests({
