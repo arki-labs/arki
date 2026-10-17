@@ -1,33 +1,23 @@
 import handler from '@tanstack/react-start/server-entry';
 
-import type { Configured, LogConfig } from '@arki/log';
 import { configure } from '@arki/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 import { paraglideMiddleware } from './paraglide/server.js';
 
-declare global {
-  // The configure() handle lives as long as the logging setup it controls: for
-  // the whole process. See the note below.
-  var arkiEntryLogging: Configured<string> | undefined;
-}
-
 // Switch logging on once, before the app serves anything (@arki/log RFC §8).
-// Dev: Nitro's dev worker imports this module again, in the same process, after
-// an edit, and never runs import.meta.hot dispose hooks. Logging stays
-// configured across that re-run, so a second configure() would throw
-// ARKI_LOG_E001. The re-run swaps the setup in place with reconfigure() instead.
-const loggingConfig = {
-  ...fromEnv(),
-  context: asyncContext(),
-  channels: { stdout: stdout() },
-  default: { level: 'info', channels: ['stdout'] },
-} satisfies LogConfig<'stdout'>;
-if (globalThis.arkiEntryLogging) {
-  void globalThis.arkiEntryLogging.reconfigure(loggingConfig);
-} else {
-  globalThis.arkiEntryLogging = configure(loggingConfig);
-}
+// `owner`: Nitro's dev worker imports this module again after an edit and runs
+// no import.meta.hot dispose hooks. The re-run then replaces the setup instead
+// of throwing ARKI_LOG_E001.
+configure(
+  {
+    ...fromEnv(),
+    context: asyncContext(),
+    channels: { stdout: stdout() },
+    default: { level: 'info', channels: ['stdout'] },
+  },
+  { owner: import.meta.url },
+);
 
 /**
  * Server fetch handler.
