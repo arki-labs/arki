@@ -1265,10 +1265,13 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
   builder) over `default`. The stack template exports `dev` on an embedded
   PGlite database in `./.local/db`. A started app is refused
   (`dot.dev_app_started`).
-- **Order.** It resolves the database, then runs a preflight in its own process.
-  The preflight is `dot doctor`'s boot: it validates env and applies the
-  committed `drizzle/` migrations through `dbMigrations`. It prints the
-  migrations that boot applied, then disposes the app. Only then does it start
+- **Order.** It resolves the database, then runs a preflight in a fresh process
+  (`dot _preflight`, with the runner's env). The preflight is `dot doctor`'s
+  boot: it validates env and applies the committed `drizzle/` migrations
+  through `dbMigrations`. It prints the migrations that boot applied, then
+  disposes the app. Every restart runs a new preflight process, so it checks
+  the code and env as they are now. A preflight that crashes, hangs or prints
+  no report fails (`dot.dev_preflight_failed`). Only then does it start
   the runner. A failed preflight prints the doctor text and starts nothing.
 - **Database.** `--db auto` (the default) means Postgres when `DB_URL` /
   `DATABASE_URL` is set (process env or `.env`, `.env.local`, `.env.development`,
@@ -1299,7 +1302,7 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
   `--once`, `--run`.
 - **Failure codes:** `dot.dev_db_unreachable`, `dot.dev_runner_failed`,
   `dot.dev_port_in_use`, `dot.dev_already_running`,
-  `dot.dev_remote_db_refused`, `dot.dev_app_started`. With `--output ndjson`,
+  `dot.dev_remote_db_refused`, `dot.dev_app_started`, `dot.dev_preflight_failed`. With `--output ndjson`,
   the events (`app`, `db`, `migrations`, `preflight`, `runner`, `console`,
   `restart`, `exit`) print one per line when the session ends.
 

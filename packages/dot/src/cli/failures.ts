@@ -117,8 +117,7 @@ export const AppImportFailed = defineFailure('dot.app_import_failed', {
   data: guarded(
     'dot.app_import_failed',
     (value): value is AppImportFailedData =>
-      isRecord(value) &&
-      strings(value, ['filePath', 'causeMessage'], ['exportName', 'causeCode', 'causeRemediation']),
+      isRecord(value) && strings(value, ['filePath', 'causeMessage'], ['exportName', 'causeCode', 'causeRemediation']),
   ),
   message: data =>
     data.exportName === null
@@ -395,4 +394,28 @@ export const DevAppStarted = defineFailure('dot.dev_app_started', {
     'The `{exportName}` export in {filePath} is already configured or started; dot dev needs an unstarted builder',
   remediation:
     'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("my-app").use(plugin);`',
+});
+
+export type DevPreflightFailedData = {
+  /** What went wrong with the preflight process: it crashed, hung, or did not report. */
+  readonly reason: string;
+  /** Its exit code; null when it was killed or is still running. */
+  readonly exitCode: number | null;
+  /** Its last output lines. */
+  readonly output: readonly string[];
+};
+
+/** The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass. */
+export const DevPreflightFailed = defineFailure('dot.dev_preflight_failed', {
+  data: guarded(
+    'dot.dev_preflight_failed',
+    (value): value is DevPreflightFailedData =>
+      isRecord(value) &&
+      strings(value, ['reason']) &&
+      (value['exitCode'] === null || typeof value['exitCode'] === 'number') &&
+      isStringArray(value['output']),
+  ),
+  message: 'The preflight did not report a result: {reason}',
+  remediation:
+    'Read `.error.data.output`; run `dot doctor --app <file>` in the project to see the same boot in the foreground.',
 });

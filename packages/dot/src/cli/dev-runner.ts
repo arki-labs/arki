@@ -21,15 +21,17 @@ const debugRunner = getLogger('arki:dot:cli:dev');
 
 export type RunnerKind = 'run' | 'vite' | 'serve';
 
-/** What to spawn. `shell` runs `file` as one shell command line (`--run`). */
-export type RunnerSpec = {
-  readonly kind: RunnerKind;
+/** A child process to spawn. `shell` runs `file` as one shell command line (`--run`). */
+export type ProcessSpec = {
   /** The command line, for people. */
   readonly command: string;
   readonly file: string;
   readonly args: readonly string[];
   readonly shell: boolean;
 };
+
+/** What to spawn as the runner. */
+export type RunnerSpec = ProcessSpec & { readonly kind: RunnerKind };
 
 const VITE_CONFIGS = ['vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs'] as const;
 const VITE_BINARIES = process.platform === 'win32' ? ['vite.exe', 'vite.cmd', 'vite'] : ['vite'];
@@ -113,7 +115,7 @@ export type RunnerExit = { readonly code: number | null; readonly signal: NodeJS
 
 export type RunnerHandle = {
   readonly pid: number;
-  readonly spec: RunnerSpec;
+  readonly spec: ProcessSpec;
   /** Settles when the child itself exits. */
   readonly exited: Promise<RunnerExit>;
   /** True once `stop` was called: an exit after it is ours, not a crash. */
@@ -158,7 +160,7 @@ function readLines(child: ChildProcess, onLine: (line: string) => void): void {
 }
 
 /** Spawn the runner. Resolves once the child runs, or with `dot.dev_runner_failed` when it cannot start. */
-export function startRunner(spec: RunnerSpec, options: StartRunnerOptions): Promise<RunnerHandle | Failure> {
+export function startRunner(spec: ProcessSpec, options: StartRunnerOptions): Promise<RunnerHandle | Failure> {
   const child = spawn(spec.file, [...spec.args], {
     cwd: options.cwd,
     env: options.env,
@@ -190,7 +192,7 @@ export function startRunner(spec: RunnerSpec, options: StartRunnerOptions): Prom
   });
 }
 
-function createHandle(spec: RunnerSpec, child: ChildProcess, pid: number, exited: Promise<RunnerExit>): RunnerHandle {
+function createHandle(spec: ProcessSpec, child: ChildProcess, pid: number, exited: Promise<RunnerExit>): RunnerHandle {
   let stopping = false;
   let done = false;
   exited.then(

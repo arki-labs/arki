@@ -2,13 +2,14 @@
  * `dot dev`: the supervisor. It never serves the app and holds no database
  * connection while the runner runs. One session:
  *
- *   1. discover the app (`dev` export first), emit `app`
- *   2. claim `.local/dot/dev.json` (another live `dot dev` → refused)
- *   3. the db step (`dev-db.ts`): which database, is it local, is it up
- *   4. the preflight: `runDoctor` in this process, which boots the app
- *      (env validation, committed migrations) and disposes it. It runs with
- *      `process.env` replaced by the prepared env, restored afterwards: the
- *      supervisor's own env is the only one the app's plugins read.
+ *   1. claim `.local/dot/dev.json` (another live `dot dev` → refused)
+ *   2. the db step (`dev-db.ts`): which database, is it local, is it up
+ *   3. the preflight: `dot _preflight` in a fresh process with the runner's
+ *      env (`preflight-child.ts`). It imports the app (`dev` export first),
+ *      boots it like `dot doctor` (env validation, committed migrations),
+ *      disposes it and reports one JSON line: the counts (`app`), the applied
+ *      migrations and the doctor verdict. The supervisor never imports the
+ *      app, so every restart checks the code and env as they are now.
  *   5. the runner (`dev-runner.ts`), a warm-up `GET /` for Vite and `--run`
  *   6. watch files and keys until `q` or the CLI's abort signal
  *
@@ -23,26 +24,33 @@ import { z } from 'zod';
 
 import type { Mode, Ui } from '@arki/cli';
 import type { Failure } from '@arki/failure';
-import { isFailure } from '@arki/failure';
+import { isFailure, revive } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import { parse } from '@arki/schema';
 
 import type { DbChoice, Exec, Lookup } from './dev-db.js';
 import type { DevEvent } from './dev-events.js';
 import type { Probe } from './dev-net.js';
 import type { RunnerHandle, RunnerKind, RunnerSpec } from './dev-runner.js';
 import type { ProjectWatcher, RestartRequest, RestartScheduler } from './dev-watch.js';
-import type { DiscoveredApp } from './discover.js';
 import type { DoctorReport } from './failures.js';
-import { mergedEnv, prepareDb, selectDriver, withoutDbUrls } from './dev-db.js';
+import { prepareDb } from './dev-db.js';
 import { openLoopbackHost, pollUntil, probeTcp } from './dev-net.js';
 import { chooseRunner, createOutputBuffer, startRunner } from './dev-runner.js';
 import { claimDevState, readDevState, releaseDevState } from './dev-state.js';
 import { classifyChange, createRestartScheduler, watchProject } from './dev-watch.js';
-import { discoverApp, guards } from './discover.js';
-import { runDoctor } from './doctor.js';
-import { DevAppStarted, DevPortInUse, DoctorFailed, lifecycleFailed } from './failures.js';
+import {
+  AppImportFailed,
+  AppInvalidExport,
+  AppLifecycleFailed,
+  AppNotFound,
+  DevAppStarted,
+  DevPortInUse,
+  DevPreflightFailed,
+  DoctorFailed,
+} from './failures.js';
+import { preflightMessageSchema } from './preflight-child.js';
 import { renderDoctorText } from './render-doctor.js';
-import { isGraphData } from './render-graph.js';
 
 const debugDev = getLogger('arki:dot:cli:dev');
 
@@ -81,6 +89,8 @@ export type RunDevOptions = {
   readonly openUrl?: ((url: string) => void) | undefined;
   /** How long the runner gets between SIGTERM and SIGKILL. Default 10 s. */
   readonly stopGraceMs?: number | undefined;
+  /** How long one preflight process may run before it is killed and the preflight fails. Default 120 s. */
+  readonly preflightTimeoutMs?: number | undefined;
 };
 
 /** What `dot dev` succeeds with: every event, so `--output ndjson` prints one per line. */
@@ -124,25 +134,6 @@ export function openInBrowser(url: string): void {
   }
 }
 
-/** Run `fn` with `process.env` replaced by `env`; the old env comes back afterwards. */
-async function withProcessEnv<T>(env: Readonly<Record<string, string>>, fn: () => Promise<T>): Promise<T> {
-  const saved = { ...process.env };
-  const replace = (next: Readonly<Record<string, string | undefined>>): void => {
-    for (const key of Object.keys(process.env)) {
-      if (!(key in next)) Reflect.deleteProperty(process.env, key);
-    }
-    for (const [key, value] of Object.entries(next)) {
-      if (value !== undefined) process.env[key] = value;
-    }
-  };
-  replace(env);
-  try {
-    return await fn();
-  } finally {
-    replace(saved);
-  }
-}
-
 type PreflightEvent = Extract<DevEvent, { readonly kind: 'preflight' }>;
 
 /** Every issue code of a report, once each, in order. */
@@ -158,21 +149,11 @@ function issueCodes(report: DoctorReport): string[] {
 }
 
 type MigrationsEvent = Extract<DevEvent, { readonly kind: 'migrations' }>;
-
-/**
- * The `migrations` service of `@arki/db`'s `dbMigrations`: the names its boot
- * found pending, read before it applied them. Matched by shape, so the kernel
- * never imports `@arki/db`; an app without it (or with another service of
- * that name) reports nothing.
- */
-const migrationsServiceSchema = z.object({ pending: z.array(z.string()) });
-
-function migrationsEventOf(services: Readonly<Record<string, unknown>>): MigrationsEvent | null {
-  const parsed = migrationsServiceSchema.safeParse(services['migrations']);
-  return parsed.success ? { kind: 'migrations', pending: parsed.data.pending } : null;
-}
+type AppEvent = Extract<DevEvent, { readonly kind: 'app' }>;
 
 type Preflight = {
+  /** The checked app (absolute file) and its counts; null when discovery or configure failed. */
+  readonly app: (Omit<AppEvent, 'kind'> & { readonly file: string }) | null;
   /** What the preflight boot applied, when the app runs `dbMigrations`. */
   readonly migrations: MigrationsEvent | null;
   readonly event: PreflightEvent;
@@ -180,24 +161,161 @@ type Preflight = {
   readonly failure: Failure | null;
 };
 
-async function preflight(builder: DiscoveredApp, env: Readonly<Record<string, string>>): Promise<Preflight> {
-  let migrations: MigrationsEvent | null = null;
-  const result = await withProcessEnv(env, () =>
-    runDoctor(builder, {
-      onBooted: app => {
-        migrations = migrationsEventOf(app.services);
-      },
-    }),
-  );
-  if (isFailure(result)) {
-    const report = DoctorFailed.is(result) ? result.data : null;
-    const codes = report === null ? [result.code] : issueCodes(report);
-    return { migrations, event: { kind: 'preflight', status: 'failure', codes }, report, failure: result };
+/** The failures `dot _preflight` can report, for `revive`. */
+const PREFLIGHT_FAILURES = [
+  AppNotFound,
+  AppInvalidExport,
+  AppImportFailed,
+  AppLifecycleFailed,
+  DevAppStarted,
+  DoctorFailed,
+] as const;
+
+const envelopeSchema = z.looseObject({ ok: z.literal(true), data: preflightMessageSchema });
+
+/** The report line: the last output line that is a valid `_preflight` envelope. */
+function findReport(lines: readonly string[]): z.infer<typeof preflightMessageSchema> | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim() ?? '';
+    if (!line.startsWith('{')) continue;
+    try {
+      const parsed = envelopeSchema.safeParse(JSON.parse(line));
+      if (parsed.success) return parsed.data.data;
+    } catch {
+      // Not JSON: app output.
+    }
   }
-  if (isGraphData(result))
-    return { migrations, event: { kind: 'preflight', status: 'ok', codes: [] }, report: null, failure: null };
-  const status = result.status === 'success' ? 'ok' : result.status;
-  return { migrations, event: { kind: 'preflight', status, codes: issueCodes(result) }, report: result, failure: null };
+  return null;
+}
+
+function preflightFailed(reason: string, exitCode: number | null, lines: readonly string[]): Preflight {
+  const failure = DevPreflightFailed({ reason, exitCode, output: lines.slice(-20) });
+  return {
+    app: null,
+    migrations: null,
+    event: { kind: 'preflight', status: 'failure', codes: [failure.code] },
+    report: null,
+    failure,
+  };
+}
+
+/** Turn the child's report into the supervisor's view. A report that does not check out is a failed preflight. */
+function fromMessage(message: z.infer<typeof preflightMessageSchema>, lines: readonly string[]): Preflight {
+  const report = message.report === null ? null : parse(DoctorFailed.dataSchema, message.report);
+  let failure: Failure | null = null;
+  if (message.failure !== null) {
+    let revived: Failure | undefined;
+    try {
+      revived = revive(message.failure, PREFLIGHT_FAILURES);
+    } catch {
+      revived = undefined;
+    }
+    if (revived === undefined) return preflightFailed(`unexpected failure ${message.failure.code}`, null, lines);
+    failure = revived;
+  }
+  const migrations: MigrationsEvent | null =
+    message.migrations === null ? null : { kind: 'migrations', pending: message.migrations };
+  if (failure !== null) {
+    const codes = report === null ? [failure.code] : issueCodes(report);
+    return { app: message.app, migrations, event: { kind: 'preflight', status: 'failure', codes }, report, failure };
+  }
+  const status = report === null || report.status === 'success' ? 'ok' : report.status;
+  return {
+    app: message.app,
+    migrations,
+    event: { kind: 'preflight', status, codes: report === null ? [] : issueCodes(report) },
+    report,
+    failure: null,
+  };
+}
+
+/**
+ * One preflight in a fresh process: `dot _preflight` with the runner's env.
+ * A crash, a hang past `timeoutMs` or output without a valid report is a
+ * failed preflight (`dot.dev_preflight_failed`), never a pass. An abort of
+ * `signal` (the session's stop) kills it.
+ */
+async function preflightProcess(options: {
+  readonly cwd: string;
+  readonly app: string | undefined;
+  readonly cliEntry: readonly [string, ...string[]];
+  readonly env: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  readonly signal: AbortSignal;
+  readonly onLine: (line: string) => void;
+}): Promise<Preflight> {
+  const [file, ...entryArgs] = options.cliEntry;
+  const args = [
+    ...entryArgs,
+    '_preflight',
+    '--cwd',
+    options.cwd,
+    ...(options.app === undefined ? [] : ['--app', options.app]),
+    '--output',
+    'json',
+  ];
+  const lines: string[] = [];
+  const handle = await startRunner(
+    { command: 'dot _preflight', file, args, shell: false },
+    {
+      cwd: options.cwd,
+      env: options.env,
+      onLine: line => {
+        lines.push(line);
+      },
+    },
+  );
+  if (isFailure(handle)) return preflightFailed(handle.message, null, lines);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => {
+      resolve('timeout');
+    }, options.timeoutMs);
+  });
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<'aborted'>(resolve => {
+    onAbort = () => {
+      resolve('aborted');
+    };
+    if (options.signal.aborted) onAbort();
+    else options.signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const outcome = await Promise.race([handle.exited, timedOut, aborted]);
+    if (outcome === 'timeout' || outcome === 'aborted') {
+      await handle.stop(0);
+      return preflightFailed(
+        outcome === 'timeout' ? `no report within ${String(options.timeoutMs)} ms` : 'dot dev stopped',
+        null,
+        lines,
+      );
+    }
+    const message = findReport(lines);
+    // Everything but the report line is the app's own output.
+    for (const line of lines) if (!line.trim().startsWith('{"ok"')) options.onLine(line);
+    if (message === null) {
+      return preflightFailed(
+        outcome.code === 0 ? 'it printed no valid report' : 'it exited without a report',
+        outcome.code,
+        lines,
+      );
+    }
+    // `dot _preflight` always exits 0 once it has reported: any other code is a crash after the report.
+    if (outcome.code !== 0) {
+      return preflightFailed(`it exited with code ${String(outcome.code)} after its report`, outcome.code, lines);
+    }
+    try {
+      return fromMessage(message, lines);
+    } catch {
+      return preflightFailed('its report did not check out', outcome.code, lines);
+    }
+  } finally {
+    clearTimeout(timer);
+    if (onAbort !== undefined) options.signal.removeEventListener('abort', onAbort);
+    // Also reaps anything the child left in its process group, and drops the exit hook.
+    await handle.stop(0);
+  }
 }
 
 function describeEvent(event: DevEvent): string {
@@ -282,44 +400,12 @@ export async function runDev(options: RunDevOptions): Promise<DevResult | Failur
     ui.info(`dot dev ▸ ${describeEvent(event)}`);
   };
 
-  // The app module is imported once, here, and cached for the session. Import it with the env
-  // the preflight will get, so code that reads a URL at import time never sees one pglite drops.
-  const importEnv = await mergedEnv(cwd, options.env ?? process.env);
-  const discovered = await withProcessEnv(
-    selectDriver(options.db, importEnv) === 'pglite' ? withoutDbUrls(importEnv) : importEnv,
-    () => discoverApp({ appPath: options.app, cwd, prefer: 'dev' }),
-  );
-  if (isFailure(discovered)) return discovered;
-  const builder = discovered.app;
-  if (!guards.isDotAppBuilder(builder)) {
-    return DevAppStarted({ filePath: discovered.filePath, exportName: discovered.exportName });
-  }
-  // Configured once: the counts come from it, and the first preflight boots this same app.
-  // A second `configure()` would find the logging slot (the log() plugin) still active.
-  let configured;
-  try {
-    configured = builder.configure();
-  } catch (error) {
-    return lifecycleFailed(error, 'configure');
-  }
-  const { manifest } = configured;
-  emit({
-    kind: 'app',
-    file: displayPath(cwd, discovered.filePath),
-    exportName: discovered.exportName,
-    plugins: manifest.plugins.length,
-    features: manifest.plugins.filter(entry => entry.role === 'feature').length,
-  });
-
   const claimed = await claimDevState(cwd);
   if (isFailure(claimed)) return claimed;
   try {
     return await supervise({
       ...options,
       cwd,
-      builder,
-      firstApp: configured,
-      appFile: discovered.filePath,
       stateFile: claimed.file,
       events,
       emit,
@@ -331,10 +417,6 @@ export async function runDev(options: RunDevOptions): Promise<DevResult | Failur
 
 type SessionOptions = RunDevOptions & {
   readonly cwd: string;
-  readonly builder: DiscoveredApp;
-  /** The app `runDev` configured for its counts: the first preflight boots it, later ones configure the builder. */
-  readonly firstApp: DiscoveredApp;
-  readonly appFile: string;
   readonly stateFile: string;
   readonly events: DevEvent[];
   readonly emit: (event: DevEvent) => void;
@@ -364,7 +446,9 @@ async function superviseUntilQuit(
   const probe = session.probe ?? probeTcp;
   const graceMs = session.stopGraceMs ?? 10_000;
   let lastReport: DoctorReport | null = null;
-  let firstApp: DiscoveredApp | null = session.firstApp;
+  const cliEntry = session.cliEntry ?? defaultCliEntry();
+  /** The app file the first preflight found: later preflights and the runner use it. An object: set inside `prepare`. */
+  const found: { appFile: string | null } = { appFile: null };
 
   /** The env the preflight and the runner get: the prepared env plus the `dot dev` keys. */
   const childEnv = (base: Readonly<Record<string, string>>): Record<string, string> => ({
@@ -391,12 +475,23 @@ async function superviseUntilQuit(
       },
     });
     if (isFailure(db)) return db;
+    const checked = await preflightProcess({
+      cwd,
+      app: found.appFile ?? session.app,
+      cliEntry,
+      env: childEnv(db.env),
+      timeoutMs: session.preflightTimeoutMs ?? 120_000,
+      signal,
+      onLine: line => {
+        ui.info(`[preflight] ${line}`);
+      },
+    });
+    // The counts come from the child, so the first `app` event follows the preflight; the order of events is kept.
+    if (found.appFile === null && checked.app !== null) {
+      found.appFile = checked.app.file;
+      emit({ kind: 'app', ...checked.app, file: displayPath(cwd, checked.app.file) });
+    }
     emit(db.event);
-    // The first preflight boots the app `runDev` configured; its dispose closes the logging slot,
-    // so every later preflight configures the builder afresh.
-    const app = firstApp ?? session.builder;
-    firstApp = null;
-    const checked = await preflight(app, childEnv(db.env));
     lastReport = checked.report;
     if (checked.migrations !== null) emit(checked.migrations);
     emit(checked.event);
@@ -410,13 +505,15 @@ async function superviseUntilQuit(
 
   const first = await prepare();
   if (isFailure(first) || session.once || signal.aborted) return isFailure(first) ? first : { items: session.events };
+  if (found.appFile === null) return DevPreflightFailed({ reason: 'it named no app file', exitCode: null, output: [] });
+  const projectAppFile = found.appFile;
 
   const spec = await chooseRunner({
     cwd,
     run: session.run,
     port: session.port,
-    appFile: session.appFile,
-    cliEntry: session.cliEntry ?? defaultCliEntry(),
+    appFile: projectAppFile,
+    cliEntry,
   });
   if (isFailure(spec)) return spec;
 
@@ -514,7 +611,7 @@ async function superviseUntilQuit(
     });
     scheduler = restarts;
 
-    const appRelative = path.relative(cwd, session.appFile).split(path.sep).join('/');
+    const appRelative = path.relative(cwd, projectAppFile).split(path.sep).join('/');
     watcher = watchProject({
       cwd,
       appFile: appRelative,

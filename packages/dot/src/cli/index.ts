@@ -8,6 +8,7 @@
  *   - `dot new <name>` scaffold a DOT app
  *   - `dot dev`        run the app in development: db, preflight, runner, watch
  *   - `dot _serve`     (hidden) start the app until stopped: the runner of `dot dev`
+ *   - `dot _preflight` (hidden) one preflight boot in a fresh process, reported as JSON to `dot dev`
  *
  * Output is text on a terminal and the `arki.cli/1` JSON envelope when piped
  * or with `--json`. Exit codes: 0 ok, 1 bug, 2 usage (unknown command,
@@ -31,6 +32,7 @@ export const program = defineCli({
     new: () => import('./commands/new.js'),
     dev: () => import('./commands/dev.js'),
     _serve: () => import('./commands/serve.js'),
+    _preflight: () => import('./commands/preflight.js'),
   },
 });
 
@@ -53,6 +55,7 @@ export {
   DevAppStarted,
   DevDbUnreachable,
   DevPortInUse,
+  DevPreflightFailed,
   DevRemoteDbRefused,
   DevRunnerFailed,
   DoctorFailed,

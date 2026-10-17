@@ -70,6 +70,8 @@ async function session(overrides: Partial<RunDevOptions>) {
     signal: controller.signal,
     onEvent: event => events.push(event),
     env: { PATH: process.env['PATH'] ?? '' },
+    // The preflight and `_serve` run the CLI from source, so under Bun.
+    cliEntry: ['bun', CLI],
     stopGraceMs: 2000,
     ...overrides,
   });
@@ -95,8 +97,11 @@ const slot = plugin({
 export const dev = defineApp('slot-app').use(slot);`,
     );
     await mkdir(path.join(workDir, 'drizzle'));
-    const { result, events, controller } = await session({ app, run: 'sleep 30' });
+    const { result, events, lines, controller } = await session({ app, run: 'sleep 30' });
     await waitFor(() => runnerPids(events).length === 1, 15_000);
+    // FSEvents needs a moment after the watcher starts before it delivers changes.
+    await waitFor(() => lines.some(line => line.includes('dot dev ▸ watching')), 15_000);
+    await new Promise(resolve => setTimeout(resolve, 500));
     await writeFile(path.join(workDir, 'drizzle', '0001.sql'), 'select 1;');
     await waitFor(() => runnerPids(events).length === 2, 15_000);
     controller.abort();

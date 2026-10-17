@@ -87,7 +87,6 @@ describe('startRunner', () => {
     const lines: string[] = [];
     const handle = await startRunner(
       {
-        kind: 'run',
         command: 'stubborn',
         file: process.execPath,
         args: [
@@ -113,7 +112,6 @@ describe('startRunner', () => {
     const pidFile = path.join(workDir, 'grandchild.pid');
     const handle = await startRunner(
       {
-        kind: 'run',
         command: 'sleeper',
         file: `sleep 30 & echo $! > ${pidFile}; wait`,
         args: [],
