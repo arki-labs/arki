@@ -1,5 +1,5 @@
 export { createIdbPersister } from './idb-persister.ts';
-export type { CreateIdbPersisterOptions } from './idb-persister.ts';
+export type { CreateIdbPersisterOptions, IdbPersister } from './idb-persister.ts';
 
 export { createPersistedQueryClient } from './createPersistedQueryClient.ts';
 export type {

@@ -1,7 +1,9 @@
 import type { DefaultOptions } from '@tanstack/react-query';
-import type { Persister } from '@tanstack/query-persist-client-core';
 import { QueryClient } from '@tanstack/react-query';
 
+import { persistQueryClientSave } from '@tanstack/query-persist-client-core';
+
+import type { IdbPersister } from './idb-persister.ts';
 import { createIdbPersister } from './idb-persister.ts';
 
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
@@ -34,7 +36,13 @@ export interface CreatePersistedQueryClientOptions {
 
 export interface PersistedQueryClient {
   queryClient: QueryClient;
-  persister: Persister;
+  persister: IdbPersister;
+  /**
+   * Writes the whole cache to IndexedDB now and resolves when it is stored. Await it after removing
+   * a query that must never come back (a deleted item) and before the page can reload; the
+   * provider's own writes are throttled to one a second.
+   */
+  persistNow: () => Promise<void>;
   /** Resolved buster string — forward to `PersistedQueryClientProvider`. */
   buster: string;
   /** Resolved max age in ms — forward to `PersistedQueryClientProvider`. */
@@ -86,5 +94,12 @@ export function createPersistedQueryClient(
 
   const persister = createIdbPersister({ storageKey });
 
-  return { queryClient, persister, buster, maxAge };
+  const persistNow = () =>
+    persistQueryClientSave({
+      queryClient,
+      persister: { ...persister, persistClient: persister.persistClientNow },
+      buster,
+    });
+
+  return { queryClient, persister, persistNow, buster, maxAge };
 }

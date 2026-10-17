@@ -12,6 +12,16 @@ export interface CreateIdbPersisterOptions {
   storageKey?: string;
 }
 
+/** A persister that can also write the cache at once, for callers that must know the write is done. */
+export type IdbPersister = Persister & {
+  /**
+   * Writes `client` now and resolves when it is stored. `persistClient` is throttled to one write a
+   * second and does not say when it finishes; a page that reloads right after a delete would restore
+   * the older snapshot.
+   */
+  persistClientNow: (client: PersistedClient) => Promise<void>;
+};
+
 /**
  * Creates an async storage persister backed by IndexedDB via idb-keyval.
  *
@@ -20,10 +30,10 @@ export interface CreateIdbPersisterOptions {
  * (Temporal types registered), so dates and Temporal values restore typed.
  * A cache written as plain JSON restores as empty and is refetched.
  */
-export function createIdbPersister(options: CreateIdbPersisterOptions = {}): Persister {
+export function createIdbPersister(options: CreateIdbPersisterOptions = {}): IdbPersister {
   const key = options.storageKey ?? 'arki-offline-query';
 
-  return createAsyncStoragePersister({
+  const throttled = createAsyncStoragePersister({
     storage: {
       getItem: (storageKey) => get<string>(storageKey).then((v) => v ?? null),
       setItem: (storageKey, value) => set(storageKey, value),
@@ -34,4 +44,9 @@ export function createIdbPersister(options: CreateIdbPersisterOptions = {}): Per
     serialize: (client) => offlineSerializer.stringify(client),
     deserialize: (text) => offlineSerializer.parse<PersistedClient>(text),
   });
+
+  return {
+    ...throttled,
+    persistClientNow: client => set(key, offlineSerializer.stringify(client)),
+  };
 }

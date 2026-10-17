@@ -39,6 +39,12 @@ export type OfflineRuntimeConfig = CacheOnlyConfig | QueueConfig;
 
 export type OfflineRuntime = {
   queryClient: QueryClient;
+  /**
+   * Writes the persisted query cache to IndexedDB now and resolves when it is stored. After removing
+   * a query that must not come back (a deleted item), await it before the page can reload: the
+   * automatic writes are throttled to one a second.
+   */
+  persistNow: () => Promise<void>;
   queue?: OfflineMutationQueue;
   Provider: (props: { children: ReactNode }) => ReactNode;
 };
@@ -92,11 +98,11 @@ export type OfflineRuntime = {
  * ```
  */
 export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRuntime {
-  const { appId, buster, devtools = false, queryDefaults } = config;
+  const { appId, devtools = false, queryDefaults } = config;
 
-  const { queryClient, persister, maxAge } = createPersistedQueryClient({
+  const { queryClient, persister, persistNow, maxAge, buster } = createPersistedQueryClient({
     storageKey: `arki-offline-query:${appId}`,
-    buster,
+    buster: config.buster,
     defaultOptions: queryDefaults,
   });
 
@@ -137,5 +143,5 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
     return content;
   }
 
-  return { queryClient, queue, Provider };
+  return { queryClient, persistNow, queue, Provider };
 }
