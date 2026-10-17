@@ -23,7 +23,7 @@ import { jobs, outboxJobs, outboxPlugin, outboxProducers } from '../dot.ts';
 import { initQueue } from '../init.ts';
 
 const tables = journalTables();
-const j = initJournal({ meta: z.object({}) });
+const j = initJournal({ tables, meta: z.object({}) });
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -98,7 +98,7 @@ const reminders = defineFeature('reminders')
 describe('outboxPlugin + outboxJobs', () => {
   it('a feature schedules in its transaction and the journal worker runs its jobs slice', async () => {
     const app = await defineApp('outbox-worker')
-      .infra(database, scheduling, journal({ j, tables }))
+      .infra(database, scheduling, journal({ j }))
       .features([signup])
       .entrypoints(
         journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: ({ db: root }) => ({ tag: typeof root }) }) }),
@@ -120,7 +120,7 @@ describe('outboxPlugin + outboxJobs', () => {
 
   it('the worker claims the consumer side of the manifest; the feature only produces', () => {
     const app = defineApp('outbox-explain')
-      .infra(database, scheduling, journal({ j, tables }))
+      .infra(database, scheduling, journal({ j }))
       .features([signup])
       .entrypoints(journalWorker({ jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'x' }) }) }))
       .configure();
@@ -131,7 +131,7 @@ describe('outboxPlugin + outboxJobs', () => {
 
   it("an instance's row carries its instance and runs that instance's job, with its rebound need", async () => {
     const app = await defineApp('outbox-regions')
-      .infra(database, scheduling, regionUs, regionEu, journal({ j, tables }))
+      .infra(database, scheduling, regionUs, regionEu, journal({ j }))
       .features([reminders.instance('eu', { region: regionEu.provides.regionEu }), reminders.instance('us')])
       .entrypoints(journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'regions' }) }) }))
       .boot();
@@ -154,7 +154,7 @@ describe('outboxPlugin + outboxJobs', () => {
   it('an outboxJobs need the app does not provide is a compile error and fails boot', async () => {
     type Mailer = { readonly send: (to: string) => void };
     const source = outboxJobs({ needs: { mailer: service<Mailer>() }, context: ({ mailer }) => ({ tag: typeof mailer }) });
-    const configured = defineApp('outbox-missing').infra(database, scheduling, journal({ j, tables })).features([signup]);
+    const configured = defineApp('outbox-missing').infra(database, scheduling, journal({ j })).features([signup]);
     // @ts-expect-error -- the app provides no `mailer`
     await expect(configured.entrypoints(journalWorker({ jobs: source })).boot()).rejects.toThrow(/mailer/);
   });

@@ -24,7 +24,7 @@ let poolB: pg.Pool;
 let poolListen: pg.Pool;
 let dbA: NodePgDatabase;
 let dbB: NodePgDatabase;
-const journal = j.compose({ tables });
+const journal = j.compose({});
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -244,7 +244,6 @@ describe('queue rows on Postgres', () => {
 
   it('an old worker (a drain built without jobs) claims none of the queue rows', async () => {
     const effects = j.compose({
-      tables,
       effects: [],
     });
     const id = await schedule();

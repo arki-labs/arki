@@ -10,7 +10,8 @@ import { z } from 'zod';
 import { CommandNotFound, initJournal, isJournalError, JournalError, need } from '../dist/index.js';
 import { journalTables } from '../dist/pg.js';
 
-const j = initJournal({ meta: z.object({ actorId: z.string() }) });
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
 const OrderPlaced = j.event('OrderPlaced', z.object({ total: z.int().positive() }));
 const OrderPaid = j.event('OrderPaid', z.object({ amount: z.int().positive() }));
 const orders = pgTable('orders', {
@@ -38,7 +39,6 @@ const push = j.effect(
   },
 );
 const journal = j.compose({
-  tables: journalTables(),
   effects: [mail, push],
   services: { push: id => pushed.push(id) },
 });
@@ -72,7 +72,7 @@ const checks = [
   [
     'tables',
     Object.keys(journalTables()).join(','),
-    'events,jobs,jobAttempts,jobArchive,jobOperations,receipts,cursors',
+    'events,jobs,jobAttempts,jobArchive,jobOperations,receipts,cursors,workflowRuns,workflowSteps,workflowSignals',
   ],
 ];
 

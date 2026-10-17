@@ -22,7 +22,11 @@ export type JournalErrorCode =
   | 'JOB_RUNNING'
   | 'JOB_EXISTS'
   | 'BAD_ARGUMENT'
-  | 'LEASE_LOST';
+  | 'LEASE_LOST'
+  | 'STEP_TIMEOUT'
+  | 'WORKFLOW_LIMIT'
+  | 'WORKFLOW_UNKNOWN'
+  | 'WORKFLOW_SHAPE_CHANGED';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -105,6 +109,22 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   LEASE_LOST: {
     what: 'this worker no longer holds the job: its lease ran out and another worker took it, or the job was finished or removed',
     next: 'Nothing was written. Stop the handler. The new owner runs the job, so a side effect outside the database needs an idempotency key',
+  },
+  STEP_TIMEOUT: {
+    what: 'a workflow step ran longer than its timeout',
+    next: 'The step failed and follows its retry. Raise the step `timeout`, or make the body stop when `ctx.signal` aborts',
+  },
+  WORKFLOW_LIMIT: {
+    what: 'a workflow value is larger than `limits.payload`',
+    next: 'Keep the input or the step result small: store the data elsewhere and return a reference, or raise `limits.payload`',
+  },
+  WORKFLOW_UNKNOWN: {
+    what: 'no registered workflow has this name and version',
+    next: 'Pass the workflow to `compose({ workflows })` in every process that starts or runs it, and keep the old version registered until its runs finish',
+  },
+  WORKFLOW_SHAPE_CHANGED: {
+    what: 'the registered workflow has other nodes than the run was started with',
+    next: 'A run keeps the shape it started with. Bump the workflow `version` for a changed shape, and keep the old version registered until its runs finish',
   },
 };
 

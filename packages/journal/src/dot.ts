@@ -2,7 +2,7 @@
  * `@arki/dot` adapter, in two parts:
  *
  * - `journal(...)` is the driven part, for `.use()`. It publishes `services.journal`, so
- *   features can write through it. With `{ j, tables }` it composes the journal from the
+ *   features can write through it. With `{ j }` it composes the journal from the
  *   features' `journalHandlers` declarations. It reads them from the feature values, so it
  *   boots before the features.
  * - `journalWorker(...)` is the driving part, for `.serve()`. It runs the effects, taps and
@@ -32,7 +32,6 @@ import { driven, driver, entrypointsOf, instanceOf, ownUnits, sliceOf } from '@a
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { Journal, JournalDefinitions } from './api.js';
-import type { JournalTables } from './pg.js';
 import type {
   DbHandle,
   Effect,
@@ -79,7 +78,7 @@ export type JournalSlicePayload = { readonly services: Services };
 
 /**
  * The feature slice a `journalHandlers(...)` declaration produces.
- * `handlers` is read before the features boot, by `journal({ j, tables })`.
+ * `handlers` is read before the features boot, by `journal({ j })`.
  * `resolve` runs at the feature's boot. `TServices` is what the feature's effects and
  * taps need: the feature must declare it in `needs`.
  */
@@ -123,7 +122,7 @@ function effectAction(
 /**
  * Declare a feature's projections, effects and taps
  * (`feature('orders', { use: [journalHandlers({ projections, effects })] })`).
- * `journal({ j, tables })` reads them from the feature value and composes the journal.
+ * `journal({ j })` reads them from the feature value and composes the journal.
  *
  * An effect with needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`) gets
  * them from the booted services of this feature, by name, when `journalWorker()` runs it.
@@ -291,7 +290,6 @@ export type JournalFeatureOptions<
   AppDb extends RootDb,
 > = {
   readonly j: Pick<JournalDefinitions<Meta, Tx, AppDb>, 'compose'>;
-  readonly tables: JournalTables;
 };
 
 /**
@@ -459,7 +457,7 @@ function journalPlugin<
  * It runs nothing in the background: serve `journalWorker()` for that.
  *
  * - `journal({ journal })`: the journal the app composed itself.
- * - `journal({ j, tables })`: the journal composed from the `journalHandlers` slices of
+ * - `journal({ j })`: the journal composed from the `journalHandlers` slices of
  *   the features the app mounts. Effects and taps get their services from `journalWorker()`.
  */
 export function journal<
@@ -483,11 +481,11 @@ export function journal<
     const composed = options.journal;
     return journalPlugin(() => composed);
   }
-  const { j, tables } = options;
+  const { j } = options;
   return driven(features =>
     journalPlugin(() =>
       // `'worker'`: the effects' services exist only once the features boot, after this journal.
-      j.compose({ tables, ...readDeclarations(features).declarations, services: 'worker' }),
+      j.compose({ ...readDeclarations(features).declarations, services: 'worker' }),
     ),
   );
 }

@@ -50,7 +50,7 @@ let next = 100;
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.compose({ tables });
+  journal = j.compose({});
 });
 
 afterAll(async () => {

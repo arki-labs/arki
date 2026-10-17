@@ -21,7 +21,7 @@ import { logTransport } from './log-transport.js';
 import { defineTemplate } from './template.js';
 
 const tables = journalTables();
-const journal = initJournal().compose({ tables });
+const journal = initJournal({ tables }).compose({});
 let db: PgliteDatabase;
 let client: PGlite;
 beforeAll(async () => {

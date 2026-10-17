@@ -26,7 +26,7 @@ afterAll(async () => {
   await client.close();
 });
 
-const journal = j.compose({ tables });
+const journal = j.compose({});
 type Session = { readonly user: { readonly id: string } } | null;
 type Ctx = {
   readonly headers: Headers;

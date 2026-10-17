@@ -21,7 +21,7 @@ const mail = j.effect('order-mail', order, {
   },
 });
 
-const journal = j.compose({ tables, effects: [mail] });
+const journal = j.compose({ effects: [mail] });
 const op = { actor: 'drain-test' } as const;
 
 beforeAll(async () => {
@@ -130,7 +130,7 @@ describe('drain', () => {
         seen.push(signal.aborted ? `${e.entityId}:aborted` : e.entityId);
       },
     });
-    const slowJournal = j.compose({ tables, effects: [slow] });
+    const slowJournal = j.compose({ effects: [slow] });
     const place = (id: OrderId) =>
       db.transaction(tx =>
         slowJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
@@ -200,7 +200,7 @@ describe('drain', () => {
         },
       })
       .withSchedule({ runAt: e => new Date(e.recordedAt.getTime() + 1000) });
-    const scheduled = j.compose({ tables, effects: [lazy, urgent, later, at] });
+    const scheduled = j.compose({ effects: [lazy, urgent, later, at] });
     const id = orderId(++next);
     await db.transaction(tx =>
       scheduled.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
@@ -270,7 +270,6 @@ describe('drain', () => {
     // Dropping them would lose the side effect for good.
     const job = await placeAndPay();
     const narrowed = j.compose({
-      tables,
       effects: [
         j.effect('order-mail', order, {
           OrderCancelled: () => {
@@ -313,7 +312,7 @@ describe('drain', () => {
   });
 
   it('a journal without effects drains nothing', async () => {
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     expect(await bare.drain(db)).toBe(0);
   });
 });
@@ -345,7 +344,7 @@ describe('effect context', () => {
       },
     });
     // Its own journal: a job names its effect, so the tests above never see this one.
-    const auditJournal = j.compose({ tables, effects: [audit] });
+    const auditJournal = j.compose({ effects: [audit] });
     const id = orderId(++next);
     await db.transaction(tx =>
       auditJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
@@ -399,11 +398,10 @@ describe('effect context: run', () => {
       waiting.get(e.entityId)?.();
     },
   });
-  const chain = j.compose({ tables, effects: [payOnPlace, receipt] });
+  const chain = j.compose({ effects: [payOnPlace, receipt] });
 
   it('runs a command on the root database and commits it under the meta the effect passed, so a reaction needs no closure over the journal', async () => {
     const auto = j.compose({
-      tables,
       effects: [
         j.effect('run-pay-on-place', order, {
           OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, system),
@@ -466,7 +464,6 @@ describe('effect context: run', () => {
 
   it('fails the job when the command throws: it stays to retry with the error stored, and nothing the command wrote is committed', async () => {
     const failing = j.compose({
-      tables,
       effects: [
         j.effect('run-pay-fails', order, {
           OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId, fail: true }, system),
@@ -486,7 +483,6 @@ describe('effect context: run', () => {
 
   it('keeps the command committed when the effect throws after it and retries the job, so the handler must be safe to run twice', async () => {
     const halfDone = j.compose({
-      tables,
       effects: [
         j.effect('run-pay-then-fail', order, {
           OrderPlaced: async (e, { run }) => {
@@ -520,7 +516,6 @@ describe('claiming, stopping and stranded jobs', () => {
     // worker takes them: the side effect would happen twice.
     const othersClaimed: boolean[] = [];
     const probe = j.compose({
-      tables,
       effects: [
         j.effect('lease-probe', order, {
           OrderPlaced: async (_e, { jobId }) => {
@@ -540,7 +535,6 @@ describe('claiming, stopping and stranded jobs', () => {
     const controller = new AbortController();
     const seen: boolean[] = [];
     const probe = j.compose({
-      tables,
       effects: [
         j.effect('abort-probe', order, {
           OrderPlaced: (_e, { signal }) => {
@@ -567,7 +561,6 @@ describe('claiming, stopping and stranded jobs', () => {
       markStarted = resolve;
     });
     const slow = j.compose({
-      tables,
       effects: [
         j.effect('slow-effect', order, {
           OrderPlaced: (_e, { signal }) =>
@@ -591,7 +584,6 @@ describe('claiming, stopping and stranded jobs', () => {
     // The jobs stay unclaimed on purpose (an older worker may still have the
     // effect during a rolling deploy), so a count is the only way to see them.
     const oldName = j.compose({
-      tables,
       effects: [j.effect('old-effect-name', order, { OrderPlaced: () => Promise.resolve() })],
     });
     await placeOn(oldName);

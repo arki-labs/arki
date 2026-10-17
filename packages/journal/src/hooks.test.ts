@@ -35,7 +35,7 @@ describe('command hooks', () => {
   it('see the run, wrap it in registration order with the first outermost, and cannot change the result', async () => {
     // Why: this is the one extension point. A telemetry or log plugin must be able to trust
     // the order and the context without the app threading anything.
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     const trail: string[] = [];
     journal.hooks.command.around(async (ctx, next) => {
       trail.push(`outer:${ctx.name}:${ctx.commandId.slice(0, 4)}:${ctx.correlationId}`);
@@ -56,7 +56,7 @@ describe('command hooks', () => {
   });
 
   it('run inside the transaction: a hook that throws after next rolls the write back, and the caller gets that error', async () => {
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     journal.hooks.command.around(async (_ctx, next) => {
       await next();
       throw new Error('audit refused');
@@ -67,7 +67,7 @@ describe('command hooks', () => {
   });
 
   it('a hook that throws before next stops the command; nothing runs', async () => {
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     journal.hooks.command.around(() => Promise.reject(new Error('not allowed')));
     const id = orderId(++next);
     await expect(journal.run(db, placeOrder, { orderId: id }, meta)).rejects.toThrow('not allowed');
@@ -77,7 +77,7 @@ describe('command hooks', () => {
   it('cannot swallow a failure, call next twice, or skip next', async () => {
     // Why: a hook that catches the handler error and returns would tell the caller the command
     // succeeded while the transaction rolled back.
-    const swallowing = j.compose({ tables });
+    const swallowing = j.compose({});
     swallowing.hooks.command.around(async (_ctx, next) => {
       await next().catch(() => {
         /* swallowed on purpose */
@@ -86,7 +86,7 @@ describe('command hooks', () => {
     const unpaid = orderId(++next);
     await expect(swallowing.run(db, payOrder, { orderId: unpaid }, meta)).rejects.toMatchObject({ code: 'NO_ROW' });
 
-    const twice = j.compose({ tables });
+    const twice = j.compose({});
     twice.hooks.command.around(async (_ctx, next) => {
       await next();
       await next();
@@ -95,7 +95,7 @@ describe('command hooks', () => {
     await expect(twice.run(db, placeOrder, { orderId: id }, meta)).rejects.toThrow('called next twice');
     expect(await rowOf(id), 'the error after next rolled the write back').toBeNull();
 
-    const skipping = j.compose({ tables });
+    const skipping = j.compose({});
     skipping.hooks.command.around(() => Promise.resolve());
     const skipped = orderId(++next);
     await expect(skipping.run(db, placeOrder, { orderId: skipped }, meta)).rejects.toThrow('without calling next');
@@ -103,7 +103,7 @@ describe('command hooks', () => {
   });
 
   it('a child run is wrapped too, with its own command id and the same chain', async () => {
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     const seen: [string, string][] = [];
     journal.hooks.command.around(async (ctx, next) => {
       seen.push([ctx.name, ctx.correlationId]);
@@ -122,7 +122,7 @@ describe('command hooks', () => {
   });
 
   it('registration is frozen once the journal has run a command', async () => {
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     await journal.run(db, placeOrder, { orderId: orderId(++next) }, meta);
     expect(() => journal.hooks.command.around(async (_ctx, next) => next())).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
@@ -138,7 +138,7 @@ describe('effect hooks', () => {
         ran.push(e.entityId);
       },
     });
-    const journal = j.compose({ tables, effects: [mail] });
+    const journal = j.compose({ effects: [mail] });
     const seen: { name: string; jobId: string; attempt: number; type: string }[] = [];
     let refuse = true;
     journal.hooks.effect.around(async (ctx, next) => {

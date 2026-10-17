@@ -39,7 +39,7 @@ export const profiles = pgTable('profiles', {
 
 export const tables = journalTables();
 
-export const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
+export const j = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 
 export const OrderPlaced = j.event(
   'OrderPlaced',

@@ -293,7 +293,7 @@ export function journalTables(schema?: PgSchema) {
       phase: varchar('phase', { length: 4 }).notNull().$type<'do' | 'undo'>(),
       status: varchar('status', { length: 16 })
         .notNull()
-        .$type<'scheduled' | 'running' | 'done' | 'skipped' | 'failed'>(),
+        .$type<'scheduled' | 'done' | 'skipped' | 'failed'>(),
       attempt: integer('attempt').notNull().default(0),
       /** The step's idempotency key. Null on a step that was skipped before it was ever scheduled. */
       key: varchar('key', { length: 512 }),

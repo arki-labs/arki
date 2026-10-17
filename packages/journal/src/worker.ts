@@ -43,7 +43,8 @@ import { assertRootDb } from './storage.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
 /** The retry of an effect whose schedule sets none: 7 retries (8 tries), doubling from 1 s to at most 5 minutes. */
-const defaultEffectRetry = backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7);
+/** The retry of an effect that sets none: 7 retries doubling from 1 s to at most 5 minutes. A workflow step uses it too. */
+export const defaultEffectRetry = backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7);
 const DEFAULT_POLL_MS = 1000;
 
 /** A returned failure is stored as its JSON, so `lastError` keeps its code, message, status and data. */

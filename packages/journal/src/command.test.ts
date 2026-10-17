@@ -202,7 +202,7 @@ expectTypeOf<HandlerArgs<typeof placeOrder>[1]['tx']>().toEqualTypeOf<DbHandle>(
 expectTypeOf<HandlerArgs<typeof placeOrder>[1]['meta']>().toEqualTypeOf<{ actorId: string }>();
 
 const foreignEvents = () => [ProfileOpened({ nick: 'a' })];
-const otherJ = initJournal({ meta: z.object({ tenant: z.string() }) });
+const otherJ = initJournal({ tables, meta: z.object({ tenant: z.string() }) });
 const foreignCommand = otherJ.command('foreign', z.object({}), () => 1);
 function typeChecks(): void {
   void journal.run(db, dated, { at: '2026-01-01' }, meta);
@@ -229,7 +229,7 @@ void typeChecks;
 // --- Runtime ----------------------------------------------------------------
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.compose({ tables, projections: [customerStats], effects: [mail] });
+  journal = j.compose({ projections: [customerStats], effects: [mail] });
 });
 
 afterAll(async () => {
@@ -281,6 +281,7 @@ describe('journal.run', () => {
     // the decoding of each stored event parse the already-transformed value.
     let parses = 0;
     const loud = initJournal({
+      tables,
       meta: z.object({
         actorId: z.string().transform(v => {
           if (v !== v.toUpperCase()) parses += 1;
@@ -294,7 +295,7 @@ describe('journal.run', () => {
       return meta;
     });
     const id = orderId(++next);
-    const seen = await loud.compose({ tables }).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
+    const seen = await loud.compose({}).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
     expect(parses).toBe(1);
     expect(seen).toEqual({ actorId: 'USR_X' });
     const stored = await eventsOf(id);
@@ -631,7 +632,7 @@ describe('idempotency receipts', () => {
   });
 
   it('a command that returns nothing replays as nothing; hooks see the replay; a key cannot be reused inside its own run', async () => {
-    const hooked = j.compose({ tables });
+    const hooked = j.compose({});
     const seen: (string | null)[] = [];
     hooked.hooks.command.around(async (ctx, next) => {
       seen.push(ctx.idempotencyKey);

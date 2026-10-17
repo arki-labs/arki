@@ -32,7 +32,7 @@ export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootD
 };
 
 /** The context as the runner builds it: nothing is known about the input or the results. */
-type ErasedContext = StepContext<unknown, Readonly<Record<string, unknown>>, Needs, unknown, unknown>;
+export type ErasedContext = StepContext<unknown, Readonly<Record<string, unknown>>, Needs, unknown, unknown>;
 /** A stored body. Bivariant so a body typed for one workflow fits the erased slot without a cast. */
 type Body<Out, Extra extends unknown[] = []> = BivariantFn<[...Extra, ctx: ErasedContext], Out>;
 
@@ -141,7 +141,7 @@ export type WorkflowOptions<
 };
 
 type AnyResults = Readonly<Record<string, unknown>>;
-type NoResults = Readonly<Record<never, never>>;
+export type NoResults = Readonly<Record<never, never>>;
 /** `Results` plus one key. Written as a mapped type so the shape prints and compares flat. */
 type Add<Results extends AnyResults, Name extends string, Value> = {
   readonly [K in keyof Results | Name]: K extends Name ? Value : K extends keyof Results ? Results[K] : never;
@@ -171,6 +171,7 @@ export type WorkflowBuilder<
   Declared extends StandardSchemaV1 | undefined,
   Last,
   Where extends Host,
+  Extra extends object = Record<never, never>,
 > = {
   step<Name extends string, Returned, When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined>(
     name: Fresh<Results, Name>,
@@ -185,7 +186,8 @@ export type WorkflowBuilder<
     N,
     Declared,
     StepResult<Returned, When>,
-    Where
+    Where,
+    Extra
   >;
 
   waitFor<Name extends string, Payload extends StandardSchemaV1, OnTimeout extends 'fail' | 'continue' = 'fail'>(
@@ -202,13 +204,14 @@ export type WorkflowBuilder<
     N,
     Declared,
     OnTimeout extends 'continue' ? SchemaOutput<Payload> | null : SchemaOutput<Payload>,
-    Where
+    Where,
+    Extra
   >;
 
   sleep<Name extends string>(
     name: Fresh<Results, Name>,
     until: RetentionAge | ((ctx: Ctx<Input, Results, N, Where>) => Date),
-  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where>;
+  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Extra>;
 
   child<Name extends string, Def extends WorkflowDef>(
     name: Fresh<Results, Name>,
@@ -217,7 +220,7 @@ export type WorkflowBuilder<
       readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
       readonly onCancel?: 'cancel' | 'detach';
     },
-  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where>;
+  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Extra>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -234,7 +237,8 @@ export type WorkflowBuilder<
     N,
     Declared,
     Wait extends 'any' ? OutputOf<Def> : OutputOf<Def>[],
-    Where
+    Where,
+    Extra
   >;
 
   /**
@@ -244,7 +248,7 @@ export type WorkflowBuilder<
   finish<Returned = Last>(
     run?: (ctx: FinishContext<Input, Results>) => Returned,
     ...check: FinishCheck<Declared, Returned>
-  ): WorkflowDef<Input, FinishOutput<Declared, Returned>>;
+  ): WorkflowDef<Input, FinishOutput<Declared, Returned>> & Extra;
 };
 
 type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
@@ -272,7 +276,11 @@ type FinishContext<Input extends StandardSchemaV1, Results extends AnyResults> =
 
 const DEFAULT_LIMITS: WorkflowLimits = { payload: 65_536, transitions: 1000, children: 1000 };
 
-type BuilderState<Input extends StandardSchemaV1> = {
+/** Adds what a journal puts on a finished definition, such as `start`. It sees the definition without it. */
+type Attach<Input extends StandardSchemaV1, Extra extends object> = (def: WorkflowDef<Input>) => Extra;
+
+type BuilderState<Input extends StandardSchemaV1, Extra extends object> = {
+  readonly attach: Attach<Input, Extra>;
   readonly name: string;
   readonly header: Omit<WorkflowDef<Input>, 'shape' | 'shapeHash' | 'nodes' | 'finish' | 'types'>;
   readonly nodes: readonly WorkflowNode[];
@@ -303,7 +311,10 @@ function refuse(workflowName: string, detail: string): never {
 }
 
 /** Adds a node after checking the rules that need no types. */
-function withNode<Input extends StandardSchemaV1>(state: BuilderState<Input>, node: WorkflowNode): BuilderState<Input> {
+function withNode<Input extends StandardSchemaV1, Extra extends object>(
+  state: BuilderState<Input, Extra>,
+  node: WorkflowNode,
+): BuilderState<Input, Extra> {
   if (node.name === '') refuse(state.name, 'a node name must not be empty');
   if (node.name === 'next') refuse(state.name, "a node cannot be called 'next', because `next: 'next'` means carry on");
   if (state.nodes.some(existing => existing.name === node.name)) {
@@ -327,20 +338,23 @@ function refuseUndo(workflowName: string, kind: string, name: string, options: o
   }
 }
 
-function finishDef<Input extends StandardSchemaV1, Output>(
-  state: BuilderState<Input>,
+function finishDef<Input extends StandardSchemaV1, Output, Extra extends object>(
+  state: BuilderState<Input, Extra>,
   finish: WorkflowDef['finish'],
-): WorkflowDef<Input, Output> {
+): WorkflowDef<Input, Output> & Extra {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
-  return Object.freeze({
+  const plain: WorkflowDef<Input, Output> = {
     ...state.header,
     shape: Object.freeze({ nodes: Object.freeze(shape.nodes.map(entry => Object.freeze(entry))) }),
     shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => [entry.name, entry.kind, entry.undo]))),
     nodes: Object.freeze(nodes),
     finish,
-  });
+  };
+  const def = { ...plain, ...state.attach(plain) };
+  Object.freeze(def);
+  return def;
 }
 
 /**
@@ -354,7 +368,8 @@ function makeBuilder<
   Declared extends StandardSchemaV1 | undefined,
   Last,
   Where extends Host,
->(state: BuilderState<Input>): WorkflowBuilder<Input, Results, N, Declared, Last, Where> {
+  Extra extends object,
+>(state: BuilderState<Input, Extra>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Extra> {
   return {
     step: (name, run, options) =>
       makeBuilder(
@@ -428,6 +443,24 @@ export function workflow<
   name: string,
   options: WorkflowOptions<Input, N, Declared>,
 ): WorkflowBuilder<Input, NoResults, N, Declared, never, Where> {
+  return workflowWith(name, options, () => ({}));
+}
+
+/**
+ * `workflow` with a journal's additions: `attach` runs when `finish` builds the definition and
+ * returns what to merge into it (`start`, from `j.workflow`). The builder types carry that as `Extra`.
+ */
+export function workflowWith<
+  Input extends StandardSchemaV1,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Extra extends object,
+>(
+  name: string,
+  options: WorkflowOptions<Input, N, Declared>,
+  attach: Attach<Input, Extra>,
+): WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Extra> {
   if (name === '') refuse(name, 'a workflow needs a name');
   if (!isPositiveInt(options.version)) refuse(name, `version must be a positive whole number, got ${options.version}`);
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
@@ -439,6 +472,7 @@ export function workflow<
     refuse(name, `concurrency.limit must be a positive whole number, got ${concurrency.limit}`);
   }
   return makeBuilder({
+    attach,
     name,
     nodes: [],
     header: {

@@ -24,7 +24,7 @@ import { jobsByName } from './registry.ts';
 import { outboxRunner } from './runner.ts';
 
 const tables = journalTables();
-const journal = initJournal({ meta: z.object({}) }).compose({ tables });
+const journal = initJournal({ tables, meta: z.object({}) }).compose({});
 const schedule = outbox({ tables });
 
 type Ctx = { readonly tag: string };

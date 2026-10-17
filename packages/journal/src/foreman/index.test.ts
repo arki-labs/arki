@@ -30,7 +30,7 @@ const sendWelcomeMail = j.effect('sendWelcomeMail', order, {
     sent += 1;
   },
 });
-const journal = j.compose({ tables, effects: [sendWelcomeMail] });
+const journal = j.compose({ effects: [sendWelcomeMail] });
 const hidden = () => journalJobsModule({ journal, db });
 const redacted = () => journalJobsModule({ journal, db, payload: 'redacted' });
 

@@ -21,7 +21,7 @@ let db: PgliteDatabase;
 let client: PGlite;
 let next = 1000;
 
-const journal = j.compose({ tables });
+const journal = j.compose({});
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -184,6 +184,6 @@ describe('BAD_DEFINITION', () => {
   it('a duplicate effect name carries the code', () => {
     const first = j.effect('same-name', order, {});
     const second = j.effect('same-name', order, {});
-    expectBadDefinition(() => j.compose({ tables, effects: [first, second] }), 'duplicate effect name "same-name"');
+    expectBadDefinition(() => j.compose({ effects: [first, second] }), 'duplicate effect name "same-name"');
   });
 });

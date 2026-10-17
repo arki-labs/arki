@@ -59,7 +59,7 @@ const centsV1: StandardSchemaV1<{ cents: number }> = {
   },
 };
 
-const j = initJournal({ meta: actorMeta });
+const j = initJournal({ tables, meta: actorMeta });
 const meta = { actorId: 'usr_standard' };
 
 const Opened = j.event('StdOpened', z.object({ customerId: z.string().min(1) }));
@@ -107,7 +107,7 @@ let next = 12_000;
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.compose({ tables });
+  journal = j.compose({});
 });
 
 afterAll(async () => {
@@ -210,10 +210,10 @@ describe('Standard Schema event and meta schemas', () => {
   it('records `{}` as the meta of a journal declared without a meta schema', async () => {
     // Why: the default meta schema is the journal's own; it must accept the documented
     // `meta: {}` and store nothing the app did not declare.
-    const bare = initJournal();
+    const bare = initJournal({ tables });
     const BareOpened = bare.event('StdOpened', z.object({ customerId: z.string().min(1) }));
     const bareAccount = bare.entity('std_account', orders).create(BareOpened, opened);
-    const bareJournal = bare.compose({ tables });
+    const bareJournal = bare.compose({});
     const id = orderId(++next);
     await db.transaction(tx =>
       bareJournal.write(tx, bareAccount, id, { meta: {}, events: () => [BareOpened({ customerId: 'cus_std' })] }),

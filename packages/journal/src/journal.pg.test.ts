@@ -33,14 +33,14 @@ let poolB: pg.Pool;
 let dbA: NodePgDatabase;
 let dbB: NodePgDatabase;
 let next = 100;
-const journal = j.compose({ tables });
+const journal = j.compose({});
 
 /** The test swaps this to script the effect handler per scenario. */
 let onPaid: (jobId: string) => Promise<void> | void = () => {
   /* the default handler does nothing */
 };
 const mail = j.effect('order-mail', order, { OrderPaid: (_e, ctx) => onPaid(ctx.jobId) });
-const withJobs = j.compose({ tables, effects: [mail] });
+const withJobs = j.compose({ effects: [mail] });
 
 const placeAndPay = async () => {
   const id = orderId(++next);
@@ -375,7 +375,7 @@ describe('listenOnPool on real Postgres', () => {
         seen.push(e.entityId);
       },
     });
-    const tapped = j.compose({ tables, taps: [live] });
+    const tapped = j.compose({ taps: [live] });
     const listenPool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 2 });
     const until = async (check: () => boolean) => {
       const end = Date.now() + 5000;

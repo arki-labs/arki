@@ -29,7 +29,7 @@ const notify = j.effect('order-notify', order, {
     /* never drained here: the tests only need the job to be queued */
   },
 });
-const journal = j.compose({ tables, effects: [notify] });
+const journal = j.compose({ effects: [notify] });
 
 const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
 
@@ -139,6 +139,7 @@ describe('journal.bind', () => {
   it('gives each command its own parsed meta, so a default in the meta schema is not frozen at bind time', async () => {
     let requests = 0;
     const jd = initJournal({
+      tables,
       meta: z.object({ actorId: z.string(), requestId: z.string().default(() => `req_${++requests}`) }),
     });
     const Noted = jd.event('OrderNoted', z.object({ note: z.string() }));
@@ -151,7 +152,7 @@ describe('journal.bind', () => {
       write(tracedOrder, input.id, row => (row ? [Noted({ note: 'again' })] : [Placed({ customerId: 'c', total: 1 })])),
     );
     const id = orderId(next++);
-    const run = jd.compose({ tables }).bind(db, { actorId: 'usr_door' });
+    const run = jd.compose({}).bind(db, { actorId: 'usr_door' });
 
     const first = await run(touch, { id });
     const second = await run(touch, { id });
@@ -177,7 +178,7 @@ describe('journal.bind', () => {
       // @ts-expect-error -- the input is checked against the command's schema
       await run(noteOrder, { id: 7 });
 
-      const other = initJournal({ meta: z.object({ tenantId: z.string() }) });
+      const other = initJournal({ tables, meta: z.object({ tenantId: z.string() }) });
       const otherCommand = other.command('otherCommand', z.object({}), (_input, { meta: otherMeta }) => otherMeta);
       // @ts-expect-error -- a command of a journal with another meta shape would read a `tenantId` this door never gives
       await run(otherCommand, {});

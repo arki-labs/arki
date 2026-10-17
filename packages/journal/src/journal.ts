@@ -52,6 +52,7 @@ import {
   createTapDispatch,
   createWorkers,
 } from './worker.js';
+import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
 
 /**
@@ -69,22 +70,24 @@ const emptyMeta: StandardSchemaV1<Record<string, never>, Record<string, never>> 
 type EmptyMeta = typeof emptyMeta;
 
 function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
-  function init(): JournalDefinitions<EmptyMeta, Tx, AppDb>;
+  function init(options: { readonly tables: JournalTables }): JournalDefinitions<EmptyMeta, Tx, AppDb>;
   function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
+    readonly tables: JournalTables;
     readonly meta: Meta;
   }): JournalDefinitions<Meta, Tx, AppDb>;
-  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options?: {
+  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
+    readonly tables: JournalTables;
     readonly meta?: Meta;
   }): JournalDefinitions<Meta, Tx, AppDb> | JournalDefinitions<EmptyMeta, Tx, AppDb> {
-    return options?.meta === undefined
-      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta)
-      : createInit<Meta, Tx, AppDb>(options.meta);
+    return options.meta === undefined
+      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta, options.tables)
+      : createInit<Meta, Tx, AppDb>(options.meta, options.tables);
   }
   return init;
 }
 
 /**
- * `initJournal({ meta })` types `write`'s `tx`, `events`' `{ tx }` and
+ * `initJournal({ tables, meta })` types `write`'s `tx`, `events`' `{ tx }` and
  * projection handlers with the structural `DbHandle`. `initJournal.tx<AppTx>()
  * .create({ meta })` uses the app's own Drizzle transaction type instead, so
  * repositories typed against it fit. `initJournal.db<AppDb>()` names the
@@ -112,7 +115,7 @@ function createInit<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(metaSchema: Meta): JournalDefinitions<Meta, Tx, AppDb> {
+>(metaSchema: Meta, tables: JournalTables): JournalDefinitions<Meta, Tx, AppDb> {
   type MetaOut = SchemaOutput<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
@@ -137,30 +140,50 @@ function createInit<
     }
     return defineEntity<K, Tbl, MetaOut, 'id'>(kind, table, 'id');
   }
+  const command: JournalDefinitions<Meta, Tx, AppDb>['command'] = (name, input, handler, options) => {
+    const authorize = options?.authorize;
+    if (authorize === undefined) return { name, input, handler };
+    // Keeps only a failure, so the command's type holds the failures `authorize` can return.
+    const refuse = async (...args: Parameters<typeof authorize>) => {
+      const refused = await authorize(...args);
+      return isReturnedFailure(refused) ? refused : undefined;
+    };
+    return { name, input, handler, authorize: refuse };
+  };
+  const projection: JournalDefinitions<Meta, Tx, AppDb>['projection'] = (name, entity, on, opts) =>
+    defineProjection(name, entity, on, opts);
+  const effect = effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>();
+  const workflows = createWorkflows<Meta, Tx, AppDb>({ event: defineEvent, entity, command, projection, effect }, tables);
   return {
     event: defineEvent,
     entity,
-    command: (name, input, handler, options) => {
-      const authorize = options?.authorize;
-      if (authorize === undefined) return { name, input, handler };
-      // Keeps only a failure, so the command's type holds the failures `authorize` can return.
-      const refuse = async (...args: Parameters<typeof authorize>) => {
-        const refused = await authorize(...args);
-        return isReturnedFailure(refused) ? refused : undefined;
-      };
-      return { name, input, handler, authorize: refuse };
-    },
-    projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
-    effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
+    command,
+    projection,
+    effect,
     tap: tapFor<MetaOut, AppDb>(),
+    workflow: workflows.workflow,
     compose: config => {
+      const registered = config.workflows === undefined || config.workflows.length === 0 ? undefined : config.workflows;
+      if (registered !== undefined && config.workflowMeta === undefined) {
+        throw new JournalError(
+          'BAD_DEFINITION',
+          'workflow',
+          registered[0]?.name ?? '',
+          "journal: compose({ workflows }) needs workflowMeta, the meta recorded on the workflow runner's checkpoints, such as { actorId: 'system:workflow' }",
+        );
+      }
+      const runner =
+        registered === undefined || config.workflowMeta === undefined
+          ? undefined
+          : workflows.register(registered, config.workflowMeta);
       // `'worker'`: the handlers keep their needs, and each worker or drain gives the services.
       const services = config.services === 'worker' ? undefined : (config.services ?? {});
-      const effects = (config.effects ?? []).map(effect =>
-        services === undefined ? effect : bindEffect(effect, services),
+      const effects = [...(config.effects ?? []), ...(runner === undefined ? [] : [runner.effect])].map(declared =>
+        services === undefined ? declared : bindEffect(declared, services),
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
-      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects, taps, config.retention);
+      const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
+      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, config.retention);
     },
   };
 }

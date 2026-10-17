@@ -20,10 +20,9 @@ export const journalMetaSchema = z.object({
 
 export type JournalMeta = z.output<typeof journalMetaSchema>;
 
-export const j = initJournal({ meta: journalMetaSchema });
+export const j = initJournal({ tables: allJournalTables, meta: journalMetaSchema });
 
 export const appJournal = j.compose({
-  tables: allJournalTables,
   projections: [],
   effects: [],
 });

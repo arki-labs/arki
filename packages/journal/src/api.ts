@@ -9,7 +9,6 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import type { EntityBuilder } from './entity.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
-import type { JournalTables } from './pg.js';
 import type { JobRetention, ResolvedRetention } from './retention.js';
 import type {
   AcceptFailure,
@@ -32,6 +31,7 @@ import type {
   JournalWorker,
   KeyName,
   Needs,
+  NoNeeds,
   PendingOf,
   Projection,
   ProjectionHandlers,
@@ -49,6 +49,8 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
+import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions } from './workflow/define.js';
+import type { WorkflowStarter } from './workflow/runner.js';
 
 /**
  * Looks at the locked row, checks the rules, and returns the events to append.
@@ -573,7 +575,7 @@ export type JournalDefinitions<
     on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>>,
   ): Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
   /**
-   * Build the runtime journal from the tables and the handlers. `services` holds one
+   * Build the runtime journal from the tables given to `initJournal` and the handlers. `services` holds one
    * value for every need of every listed effect, by name. A need without a value throws here, unless `services` is `'worker'`.
    * `const`: the list is read as a tuple, so an effect with needs keeps them next to one without.
    */
@@ -589,17 +591,41 @@ export type JournalDefinitions<
     needs: N,
     on: NoInfer<TapHandlers<E, SchemaOutput<Meta>, AppDb, N>>,
   ): Tap<SchemaOutput<Meta>, AppDb, N>;
+  /**
+   * A durable workflow: `.step(...)` nodes, then `.finish()`. The finished definition has `start`, a command:
+   * `context.run(refund.start, { input, id? })` returns `{ runId }` (a repeat with the same `id` and input returns the
+   * same run; another input is a `CommandConflict`). Pass the definition to `compose({ workflows })` so a worker runs it.
+   */
+  workflow<
+    Input extends StandardSchemaV1,
+    N extends Needs = NoNeeds,
+    Declared extends StandardSchemaV1 | undefined = undefined,
+  >(
+    name: string,
+    options: WorkflowOptions<Input, N, Declared>,
+  ): WorkflowBuilder<
+    Input,
+    NoResults,
+    N,
+    Declared,
+    never,
+    { readonly db: AppDb; readonly run: RootCommandRunner<Meta, Tx> },
+    WorkflowStarter<Meta, Tx, Input>
+  >;
   compose<
     const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
     const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
   >(
     config: {
-      readonly tables: JournalTables;
       /** How long finished jobs are kept, where they go, how often the sweeper runs. Defaults: completed 7 days, dead 90 days. */
       readonly retention?: JobRetention;
       readonly projections?: readonly Projection<SchemaOutput<Meta>, Tx>[];
       readonly effects?: E;
       readonly taps?: T;
+      /** Workflows to run. Adds the `workflow.step` effect and the `workflow-steps` projection; their needs come from `services`. */
+      readonly workflows?: readonly WorkflowDef[];
+      /** The meta recorded on the checkpoints the workflow runner commits, such as `{ actorId: 'system:workflow' }`. Required with `workflows`. */
+      readonly workflowMeta?: SchemaInput<Meta>;
     } & ServicesOption<ServicesFor<E> & ServicesFor<T>>,
   ): Journal<Meta, Tx, AppDb>;
 };

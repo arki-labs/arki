@@ -29,7 +29,7 @@ beforeEach(async () => {
 });
 
 /** A journal with no effects: the queue lane must still drain (the journal-less app path). */
-const bare = j.compose({ tables });
+const bare = j.compose({});
 
 type Insert = typeof tables.jobs.$inferInsert;
 
@@ -95,7 +95,6 @@ describe('drain with a job runner', () => {
   it('a drain without a runner claims no queue row, so an old worker beside new rows is safe', async () => {
     const id = await queueRow('demo', {});
     const withEffects = j.compose({
-      tables,
       effects: [j.effect('noop', order, { OrderPlaced: () => Promise.resolve() })],
     });
     expect(await withEffects.drain(db)).toBe(0);
@@ -186,7 +185,6 @@ describe('drain with a job runner', () => {
   it('runs effect rows and queue rows from one table in priority order; NORMAL queue rows tie with effects', async () => {
     const ran: string[] = [];
     const lanes = j.compose({
-      tables,
       effects: [j.effect('placed', order, { OrderPlaced: () => void ran.push('effect') })],
     });
     await queueRow('demo', 'background', { priority: -5 });

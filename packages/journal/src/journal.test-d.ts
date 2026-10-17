@@ -14,10 +14,10 @@ import type {
   JobState,
 } from './index.js';
 import { CommandInvalid } from './index.js';
-import { j, meta, order, tables } from './test-support.js';
+import { j, meta, order } from './test-support.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it.
-const journal = j.compose({ tables });
+const journal = j.compose({});
 const db = null as unknown as Parameters<typeof journal.jobs>[0];
 const op: JobOperationInput = { actor: 'a' };
 
@@ -27,10 +27,10 @@ describe('the job surface, as types', () => {
     expectTypeOf<{ archive: { completed: { age: '30d'; max: 100 } } }>().toExtend<JobRetention>();
     expectTypeOf<{ archive: { completed: 3600 } }>().toExtend<JobRetention>();
     expectTypeOf<{ archive: { completed: '30x' } }>().not.toExtend<JobRetention>();
-    j.compose({ tables, retention: { archive: { completed: '30d' } } });
-    j.compose({ tables, retention: { archive: { dead: { age: '90d', max: 1000 } } } });
+    j.compose({ retention: { archive: { completed: '30d' } } });
+    j.compose({ retention: { archive: { dead: { age: '90d', max: 1000 } } } });
     // @ts-expect-error '30x' is not an age
-    j.compose({ tables, retention: { archive: { completed: '30x' } } });
+    j.compose({ retention: { archive: { completed: '30x' } } });
   });
 
   it('op is required on every verb that changes jobs', () => {

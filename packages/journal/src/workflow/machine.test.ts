@@ -10,7 +10,7 @@ import { workflowMachine } from './machine.js';
 
 const machine = workflowMachine(j, tables);
 const { run, events } = machine;
-const journal = j.compose({ tables, projections: [machine.steps] });
+const journal = j.compose({ projections: [machine.steps] });
 const shape = {
   nodes: [
     { name: 'hold', kind: 'step', undo: true },

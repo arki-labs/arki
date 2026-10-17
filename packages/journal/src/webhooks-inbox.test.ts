@@ -26,7 +26,7 @@ afterAll(async () => {
   await client.close();
 });
 
-const journal = j.compose({ tables });
+const journal = j.compose({});
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]), total: z.int().positive() }),

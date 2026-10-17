@@ -26,7 +26,7 @@ import { mailOutbox } from './index.js';
 import { mailQueueAssertions } from './testing.js';
 
 const tables = journalTables();
-const journal = initJournal().compose({ tables });
+const journal = initJournal({ tables }).compose({});
 
 let db: PgliteDatabase;
 let client: PGlite;

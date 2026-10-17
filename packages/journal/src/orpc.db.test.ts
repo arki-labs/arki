@@ -39,7 +39,7 @@ const tables = journalTables();
 type Db = PgliteDatabase;
 type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-const j = initJournal.tx<Transaction>().create({ meta: z.object({ actorId: z.string().min(1) }) });
+const j = initJournal.tx<Transaction>().create({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 const Opened = j.event('Opened', z.object({ balance: z.int().nonnegative() }));
 const Deposited = j.event('Deposited', z.object({ amount: z.int().positive() }));
 const account = j
@@ -48,7 +48,7 @@ const account = j
   .on(Deposited, (row, e) => ({ balance: row.balance + e.data.amount }));
 /** Runs after commit, from a job row: proves a rolled-back attempt leaves no job. */
 const notify = j.effect('notify-deposit', account, { Deposited: () => Promise.resolve() });
-const journal = j.compose({ tables, effects: [notify] });
+const journal = j.compose({ effects: [notify] });
 
 const accountIdSchema = z.templateLiteral(['acc_', z.string()]);
 let runs = 0;

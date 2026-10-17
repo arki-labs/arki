@@ -30,7 +30,7 @@ afterAll(async () => {
   await client.close();
 });
 
-const journal = j.compose({ tables });
+const journal = j.compose({});
 type AppJournal = typeof journal;
 type Session = { readonly user: { readonly id: string } } | null;
 

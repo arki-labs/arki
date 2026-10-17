@@ -33,7 +33,7 @@ const waitFor = async (check: () => boolean, ms = 3000) => {
 
 describe('the wake channel', () => {
   it('names the channel after the tables, and every commit that recorded events notifies it with the seq range', async () => {
-    const journal = j.compose({ tables });
+    const journal = j.compose({});
     expect(journal.wakeChannel).toBe('journal_wake');
     const heard: string[] = [];
     const unlisten = await client.listen(journal.wakeChannel, payload => {
@@ -65,7 +65,7 @@ describe('the wake channel', () => {
         ran.push(e.entityId);
       },
     });
-    const journal = j.compose({ tables, effects: [mail] });
+    const journal = j.compose({ effects: [mail] });
     const worker = journal.worker(db, { pollMs: 60_000, listen: listenOn(journal.wakeChannel) });
     await worker.start();
     try {
@@ -96,7 +96,7 @@ describe('taps', () => {
         throw new Error('hub down');
       },
     });
-    const journal = j.compose({ tables, taps: [live] });
+    const journal = j.compose({ taps: [live] });
     expect(journal.catalog.taps).toEqual(['live-orders']);
     expect(() => journal.worker(db)).toThrow('has taps');
     expect(() => journal.worker(db, { taps: false })).not.toThrow();
@@ -136,10 +136,10 @@ describe('taps', () => {
         },
       },
     );
-    expect(() => j.compose({ tables, taps: [live], services: {} as { hub: string[] } })).toThrow(
+    expect(() => j.compose({ taps: [live], services: {} as { hub: string[] } })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );
-    const journal = j.compose({ tables, taps: [live], services: { hub } });
+    const journal = j.compose({ taps: [live], services: { hub } });
     const worker = journal.worker(db, { pollMs: 60_000, listen: listenOn(journal.wakeChannel) });
     await worker.start();
     try {
@@ -166,7 +166,7 @@ describe('taps', () => {
         },
       },
     );
-    const journal = j.compose({ tables, taps: [live], services: 'worker' });
+    const journal = j.compose({ taps: [live], services: 'worker' });
     const listen = listenOn(journal.wakeChannel);
     expect(() => journal.worker(db, { pollMs: 60_000, listen })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),

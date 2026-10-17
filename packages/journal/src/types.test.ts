@@ -177,7 +177,7 @@ const keyedProjection = j.projection('keyed-ids', profile, {
 });
 void keyedProjection;
 async function keyedIds(db: DbHandle) {
-  const journal = j.compose({ tables });
+  const journal = j.compose({});
   await journal.write(db, profile, 'acc_1', { meta, events: () => [] });
   await journal.replay(db, profile, 'acc_1');
   // @ts-expect-error -- the id must be an AccountId, not any string
@@ -188,7 +188,7 @@ void keyedIds;
 // --- Change 2: events gets the transaction; the app names its transaction type
 
 type AppTx = Parameters<Parameters<PgliteDatabase['transaction']>[0]>[0];
-const jt = initJournal.tx<AppTx>().create({ meta: z.object({ actorId: z.string() }) });
+const jt = initJournal.tx<AppTx>().create({ tables, meta: z.object({ actorId: z.string() }) });
 const txOrder = jt
   .entity('tx-order', orders)
   .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
@@ -199,7 +199,7 @@ const txProjection = jt.projection('tx-typed', txOrder, {
   },
 });
 async function typedTx(db: PgliteDatabase, tx: AppTx) {
-  const journal = jt.compose({ tables, projections: [txProjection] });
+  const journal = jt.compose({ projections: [txProjection] });
   await journal.write(tx, txOrder, 'ord_1', {
     meta: { actorId: 'a' },
     events: (row, ctx) => {
@@ -213,7 +213,7 @@ async function typedTx(db: PgliteDatabase, tx: AppTx) {
   // @ts-expect-error -- the root database is not the app's transaction type
   await journal.write(db, txOrder, 'ord_1', { meta: { actorId: 'a' }, events: () => [] });
   // A plain `initJournal` keeps the structural `DbHandle`, so a one-argument `events` still fits.
-  const plain = j.compose({ tables });
+  const plain = j.compose({});
   await plain.write(db, typed, 'ord_1', { meta, events: () => [] });
 }
 void typedTx;
@@ -290,7 +290,7 @@ expectTypeOf(onFirst).not.toHaveProperty('create');
 const jd = initJournal
   .tx<AppTx>()
   .db<PgliteDatabase>()
-  .create({ meta: z.object({ actorId: z.string() }) });
+  .create({ tables, meta: z.object({ actorId: z.string() }) });
 const dbOrder = jd
   .entity('db-order', orders)
   .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
@@ -306,7 +306,7 @@ const dbEffect = jd.effect('db-typed', dbOrder, {
 const jdSwapped = initJournal
   .db<PgliteDatabase>()
   .tx<AppTx>()
-  .create({ meta: z.object({ actorId: z.string() }) });
+  .create({ tables, meta: z.object({ actorId: z.string() }) });
 expectTypeOf(jdSwapped).toEqualTypeOf<typeof jd>();
 // Without `.db<…>()` an effect sees the library's `RootDb`.
 const plainEffect = jt.effect('plain-db', txOrder, {
@@ -315,7 +315,7 @@ const plainEffect = jt.effect('plain-db', txOrder, {
   },
 });
 async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
-  const journal = jd.compose({ tables, effects: [dbEffect] });
+  const journal = jd.compose({ effects: [dbEffect] });
   await journal.drain(db);
   journal.worker(db);
   // @ts-expect-error -- a transaction is not the root database
@@ -327,12 +327,12 @@ async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
   // @ts-expect-error -- the structural `RootDb` is not the app's database type
   journal.worker(structural);
   // A journal without `.db<…>()` takes any root database that opens its transaction type.
-  const plain = jt.compose({ tables, effects: [plainEffect] });
+  const plain = jt.compose({ effects: [plainEffect] });
   await plain.drain(db);
   // @ts-expect-error -- the structural `RootDb` opens `DbHandle` transactions: a command run by an effect needs an `AppTx`
   await plain.drain(structural);
   // Without `.tx<…>()` too, every root database fits.
-  await j.compose({ tables }).drain(structural);
+  await j.compose({}).drain(structural);
 }
 void typedDb;
 
@@ -344,7 +344,7 @@ const dbPay = jd.command('pay', z.object({ id: z.string() }), (input, { tx }) =>
 });
 // Written for the structural transaction: any journal with this meta can run it.
 const plainPay = j.command('pay', z.object({ id: z.string() }), input => input.id.length);
-const tenants = initJournal({ meta: z.object({ tenantId: z.string() }) });
+const tenants = initJournal({ tables, meta: z.object({ tenantId: z.string() }) });
 const tenantPay = tenants.command('pay', z.object({ id: z.string() }), input => input.id.length);
 
 const dbRuns = jd.effect('db-runs', dbOrder, {
@@ -370,8 +370,8 @@ const plainRuns = j.effect('plain-runs', typed, {
   },
 });
 // The same journal that types `run` composes these effects.
-void jd.compose({ tables, effects: [dbRuns] });
-void j.compose({ tables, effects: [plainRuns] });
+void jd.compose({ effects: [dbRuns] });
+void j.compose({ effects: [plainRuns] });
 
 // --- An effect's needs reach its handlers, and `compose` asks for a service for each one
 
@@ -402,17 +402,17 @@ const needsClock = jd.effect(
 );
 function needsFit(mailer: Mailer, clock: Clock) {
   // One `services` object covers every effect in the list. Effects without needs sit next to them.
-  void jd.compose({ tables, effects: [dbRuns, needsMail, needsClock], services: { mailer, clock } });
+  void jd.compose({ effects: [dbRuns, needsMail, needsClock], services: { mailer, clock } });
   // @ts-expect-error -- `needsClock` needs `clock`: every need of every listed effect must be given
-  void jd.compose({ tables, effects: [needsMail, needsClock], services: { mailer } });
+  void jd.compose({ effects: [needsMail, needsClock], services: { mailer } });
   // @ts-expect-error -- an effect in the list has a need, so `services` is required
-  void jd.compose({ tables, effects: [needsMail] });
+  void jd.compose({ effects: [needsMail] });
   // @ts-expect-error -- an effect without needs next to it must not hide the need
-  void jd.compose({ tables, effects: [dbRuns, needsMail] });
+  void jd.compose({ effects: [dbRuns, needsMail] });
   // @ts-expect-error -- a service must have the type its need names
-  void jd.compose({ tables, effects: [needsMail], services: { mailer: clock } });
+  void jd.compose({ effects: [needsMail], services: { mailer: clock } });
   // @ts-expect-error -- an effect is typed for its own journal: this one reads `ctx.db` as a `PgliteDatabase` with `AppTx` commands
-  void tenants.compose({ tables, effects: [needsMail], services: { mailer } });
+  void tenants.compose({ effects: [needsMail], services: { mailer } });
 }
 void needsFit;
 type Both = ServicesFor<[typeof needsMail, typeof dbRuns, typeof needsClock]>;
@@ -426,7 +426,7 @@ async function dbFits() {
   const asDb: DbHandle = db;
   const asRoot: RootDb = db;
   void asRoot;
-  const journal = j.compose({ tables });
+  const journal = j.compose({});
   await asDb.transaction(tx => {
     const inner: DbHandle = tx;
     void inner;

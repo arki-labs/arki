@@ -19,7 +19,7 @@ import { openJournalDb } from '@arki/journal/testing';
 
 const tables = journalTables();
 const jobs = tables.jobs;
-const journal = initJournal({ meta: z.object({}) }).compose({ tables });
+const journal = initJournal({ tables, meta: z.object({}) }).compose({});
 const STRANDED = 10_000;
 
 /** One PGlite per environment, created on first use. `stranded` adds rows no worker claims. */

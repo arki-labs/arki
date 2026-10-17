@@ -29,8 +29,8 @@ const picky = j
   .effect('picky-retry', order, handlers)
   .withSchedule({ retry: backoff.constant(1000).while(error => !(error instanceof BadInput)) });
 
-const slowJournal = j.compose({ tables, effects: [slow] });
-const pickyJournal = j.compose({ tables, effects: [picky] });
+const slowJournal = j.compose({ effects: [slow] });
+const pickyJournal = j.compose({ effects: [picky] });
 
 const CardDeclined = defineFailure('card.declined', {
   status: 402,
@@ -54,8 +54,8 @@ const patient = j.effect('charge-timeout-retry', order, charging).withSchedule({
     .upTo(3)
     .while(reason => isFailure(reason) && reason.code === 'db.timeout'),
 });
-const chargeJournal = j.compose({ tables, effects: [charge] });
-const patientJournal = j.compose({ tables, effects: [patient] });
+const chargeJournal = j.compose({ effects: [charge] });
+const patientJournal = j.compose({ effects: [patient] });
 
 beforeAll(async () => {
   ({ db, client } = await openDb());

@@ -120,7 +120,7 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
 
     const app = track(
       await defineApp('chain-journal')
-        .infra(dbPlugin(), journal({ j, tables }))
+        .infra(dbPlugin(), journal({ j }))
         .features([orders, billing])
         .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot(),
@@ -153,7 +153,7 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
       .usecases({})
       .entrypoints();
     const app = track(
-      await defineApp('nested-journal').infra(dbPlugin(), journal({ j, tables })).features([orders]).boot(),
+      await defineApp('nested-journal').infra(dbPlugin(), journal({ j })).features([orders]).boot(),
     );
     await app.start();
     // Without `ownUnits`, the parent's `plugins()` would list the child's unit too and `audit` would be a duplicate owner.
@@ -171,7 +171,7 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     const legacy = feature('legacy', { use: [journalHandlers({ projections: [countPlaced('twice-count', 'b')] })] });
 
     await expect(
-      defineApp('twice').infra(dbPlugin(), journal({ j, tables })).features([chain, legacy]).boot(),
+      defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot(),
     ).rejects.toThrow('duplicate projection name "twice-count" (features "chain" and "legacy")');
   });
 
@@ -189,7 +189,7 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     const entry = journalEffects(bare, erased);
     await expect(
       defineApp('bypassed')
-        .infra(dbPlugin(), journal({ j, tables }))
+        .infra(dbPlugin(), journal({ j }))
         .features([bare.entrypoints(entry)])
         .boot(),
     ).rejects.toThrow(/mailer/);
@@ -200,7 +200,7 @@ describe('dot explain: event → effect edges', () => {
   it('draws each effect from the events it handles, read from the manifest alone', () => {
     const orders = ordersFeature([]);
     const configured = defineApp('explain')
-      .infra(dbPlugin(), journal({ j, tables }))
+      .infra(dbPlugin(), journal({ j }))
       .features([orders])
       .entrypoints(journalWorker())
       .configure();
@@ -253,7 +253,7 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
       await defineApp('jobs-worker')
         .infra(
           dbPlugin(),
-          journal({ j, tables }),
+          journal({ j }),
           mailerPlugin(sent, () => done()),
         )
         .features([ordersFeature([])])
@@ -270,7 +270,7 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
   it('a source need the app does not provide fails boot, before any job', async () => {
     const seen = { features: [] as string[] };
     const configured = defineApp('jobs-missing')
-      .infra(dbPlugin(), journal({ j, tables }))
+      .infra(dbPlugin(), journal({ j }))
       .features([ordersFeature([])]);
     await expect(
       // @ts-expect-error -- the app provides no `mailer`, which the jobs source needs
@@ -283,7 +283,7 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
     const configured = defineApp('jobs-explain')
       .infra(
         dbPlugin(),
-        journal({ j, tables }),
+        journal({ j }),
         mailerPlugin([], () => undefined),
       )
       .features([ordersFeature([])])
@@ -315,7 +315,7 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     const { reports, us, eu } = reportsFeature(sent);
     const app = track(
       await defineApp('instance-effects')
-        .infra(dbPlugin(), journal({ j, tables }), us, eu)
+        .infra(dbPlugin(), journal({ j }), us, eu)
         .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
         .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot(),
@@ -331,7 +331,7 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
   it('names the action of an instance effect after the instance', () => {
     const { reports, us, eu } = reportsFeature([]);
     const configured = defineApp('instance-actions')
-      .infra(dbPlugin(), journal({ j, tables }), us, eu)
+      .infra(dbPlugin(), journal({ j }), us, eu)
       .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
       .configure();
     const ids = configured.manifest.actions.filter(action => action.binding === 'journal').map(action => action.id);
@@ -343,10 +343,10 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     const rival = defineFeature('rival').needs({ mailer: us.provides.mailer }).usecases({});
     const clash = rival.entrypoints(journalEffects(rival, { effects: [mail('send-on-request')] }));
     await expect(
-      defineApp('plain-duplicate').infra(dbPlugin(), journal({ j, tables }), us).features([reports, clash]).boot(),
+      defineApp('plain-duplicate').infra(dbPlugin(), journal({ j }), us).features([reports, clash]).boot(),
     ).rejects.toThrow('duplicate effect name "send-on-request" (features "reports" and "rival")');
     const instances = defineApp('instances-ok')
-      .infra(dbPlugin(), journal({ j, tables }), us, eu)
+      .infra(dbPlugin(), journal({ j }), us, eu)
       .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')]);
     await expect(instances.boot().then(app => track(app))).resolves.toBeDefined();
   });
@@ -355,7 +355,7 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     const { reports, us } = reportsFeature([]);
     const app = track(
       await defineApp('plain-names')
-        .infra(dbPlugin(), journal({ j, tables }), us)
+        .infra(dbPlugin(), journal({ j }), us)
         .features([reports])
         .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot(),

@@ -21,7 +21,7 @@ import { openJournalDb } from '../testing.js';
 import { WEBHOOK_ERROR_CODES, webhookSender, webhookTables } from './webhooks.js';
 
 const hooks = webhookTables();
-const journal = j.compose({ tables });
+const journal = j.compose({});
 const encryptionKey = Buffer.alloc(32, 7).toString('base64');
 const encoder = new TextEncoder();
 

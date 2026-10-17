@@ -252,7 +252,7 @@ describe('the sweep verbs on two connections', () => {
 
 describe('the worker sweeper', () => {
   it('the sweeper stops with the worker', async () => {
-    const journal = j.compose({ tables, retention: { sweep: { every: 0.02 } } });
+    const journal = j.compose({ retention: { sweep: { every: 0.02 } } });
     const archived = async (id: string) =>
       (await dbA.select({ id: tables.jobArchive.id }).from(tables.jobArchive).where(eq(tables.jobArchive.id, id)))
         .length;
@@ -272,7 +272,7 @@ describe('the worker sweeper', () => {
   });
 
   it('retention.sweep false runs no tick', async () => {
-    const journal = j.compose({ tables, retention: { sweep: false } });
+    const journal = j.compose({ retention: { sweep: false } });
     const worker = journal.worker(dbA, { pollMs: 60_000 });
     await worker.start();
     const id = await deadJob();

@@ -133,8 +133,8 @@ const placedCount = async (customerId: string) => {
 const typed = initJournal
   .tx<AppTx>()
   .db<PgliteDatabase>()
-  .create({ meta: z.object({ actorId: z.string().min(1) }) });
-const typedJournal = typed.compose({ tables });
+  .create({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+const typedJournal = typed.compose({});
 
 describe('journal(...) in direct mode', () => {
   it('publishes a journal built with the typed chain as `services.journal`, so a typed app can mount it', async () => {
@@ -152,8 +152,8 @@ describe('journal(...) in direct mode', () => {
     expect(app.manifest.plugins.find(p => p.name === 'journal')).toMatchObject({ dependencies: ['db'] });
   });
 
-  it('accepts a journal from the untyped `initJournal({ meta })`, so small apps need no type steps', async () => {
-    const untyped = j.compose({ tables });
+  it('accepts a journal from the untyped `initJournal({ tables, meta })`, so small apps need no type steps', async () => {
+    const untyped = j.compose({});
     const app = track(
       await defineApp('untyped')
         .use(dbPlugin())
@@ -168,15 +168,15 @@ describe('journal(...) in direct mode', () => {
   it('refuses a transaction or another database type as `db` at compile time, because the worker must see committed data', () => {
     const withTx = defineApp('tx').use(plugin({ name: 'db', provides: { db: () => neverBooted<AppTx>() } }));
     // @ts-expect-error -- a transaction has `rollback`, so it is not a root database: effects would run before the outer commit.
-    withTx.use(journal({ journal: j.compose({ tables }) }));
+    withTx.use(journal({ journal: j.compose({}) }));
     // @ts-expect-error -- the same holds when the journal names the app's database type.
     withTx.use(journal({ journal: typedJournal }));
 
     type ReportsDb = PgliteDatabase & { readonly reports: true };
     const reports = initJournal
       .db<ReportsDb>()
-      .create({ meta: z.object({ actorId: z.string() }) })
-      .compose({ tables });
+      .create({ tables, meta: z.object({ actorId: z.string() }) })
+      .compose({});
     const withPlainDb = defineApp('plain').use(dbPlugin());
     // @ts-expect-error -- this journal's effects read `ctx.db` as a `ReportsDb`; the app publishes another database type.
     withPlainDb.use(journal({ journal: reports }));
@@ -186,7 +186,7 @@ describe('journal(...) in direct mode', () => {
 
   it('runs effects only through a served `journalWorker()`, between start and stop, so none runs during shutdown', async () => {
     const mail = recorder('dot-direct-mail');
-    const composed = j.compose({ tables, effects: [mail.effect] });
+    const composed = j.compose({ effects: [mail.effect] });
     const app = track(
       await defineApp('direct-worker')
         .use(dbPlugin())
@@ -210,7 +210,7 @@ describe('journal(...) in direct mode', () => {
 
   it('runs no effect in an app that serves no worker, so a web-only process leaves the jobs to the worker process', async () => {
     const mail = recorder('dot-no-worker-mail');
-    const composed = j.compose({ tables, effects: [mail.effect] });
+    const composed = j.compose({ effects: [mail.effect] });
     const app = track(
       await defineApp('web-only')
         .use(dbPlugin())
@@ -227,8 +227,8 @@ describe('journal(...) in direct mode', () => {
   });
 
   it('mounts a second journal through `rename`, so one app can run two journals without a key collision', async () => {
-    const main = j.compose({ tables });
-    const reports = j.compose({ tables });
+    const main = j.compose({});
+    const reports = j.compose({});
     const app = track(
       await defineApp('two-journals')
         .use(dbPlugin())
@@ -243,7 +243,7 @@ describe('journal(...) in direct mode', () => {
   });
 });
 
-describe('journal({ j, tables }) with features', () => {
+describe('journal({ j }) with features', () => {
   it('builds the journal from the mounted features alone: one command fires each inline projection and, through the worker, each effect', async () => {
     const ordersMail = recorder('dot-orders-mail');
     const billingMail = recorder('dot-billing-mail');
@@ -264,7 +264,7 @@ describe('journal({ j, tables }) with features', () => {
     const app = track(
       await defineApp('feature-mode')
         .use(dbPlugin())
-        .use(journal({ j, tables }))
+        .use(journal({ j }))
         .features([orders, billing, plain])
         .serve(journalWorker({ pollMs: POLL_MS }))
         .boot(),
@@ -305,7 +305,7 @@ describe('journal({ j, tables }) with features', () => {
     });
 
     track(
-      await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j, tables })).features([writer, counting]).boot(),
+      await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot(),
     );
 
     expect(await placedCount('boot:at-boot')).toBe(1);
@@ -336,7 +336,7 @@ describe('journal({ j, tables }) with features', () => {
     const app = track(
       await defineApp('cross-feature')
         .use(dbPlugin())
-        .use(journal({ j, tables }))
+        .use(journal({ j }))
         .features([ordering, billing])
         .serve(journalWorker({ pollMs: POLL_MS }))
         .boot(),
@@ -414,7 +414,7 @@ describe('journal({ j, tables }) with features', () => {
         .use(dbPlugin())
         .use(orders.emitter)
         .use(billing.emitter)
-        .use(journal({ j, tables }))
+        .use(journal({ j }))
         .features([orders.feature, billing.feature])
         .serve(journalWorker({ pollMs: POLL_MS }))
         .boot(),
@@ -463,7 +463,7 @@ describe('journal({ j, tables }) with features', () => {
     const second = feature('second', { use: [journalHandlers({ effects: [recorder('dot-twice').effect] })] });
 
     await expect(
-      defineApp('twice').use(dbPlugin()).use(journal({ j, tables })).features([first, second]).boot(),
+      defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
     ).rejects.toThrow('duplicate effect name "dot-twice" (features "first" and "second")');
   });
 
@@ -476,7 +476,7 @@ describe('journal({ j, tables }) with features', () => {
     });
 
     await expect(
-      defineApp('twice').use(dbPlugin()).use(journal({ j, tables })).features([first, second]).boot(),
+      defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
     ).rejects.toThrow('duplicate projection name "dot-count-twice" (features "first" and "second")');
   });
 
@@ -485,7 +485,7 @@ describe('journal({ j, tables }) with features', () => {
       use: [journalHandlers({ effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] })],
     });
 
-    await expect(defineApp('once').use(dbPlugin()).use(journal({ j, tables })).features([only]).boot()).rejects.toThrow(
+    await expect(defineApp('once').use(dbPlugin()).use(journal({ j })).features([only]).boot()).rejects.toThrow(
       'duplicate effect name "dot-same-feature" (feature "only", twice)',
     );
   });
@@ -494,7 +494,7 @@ describe('journal({ j, tables }) with features', () => {
     const broken = feature('broken', { use: [{ key: 'journal', actions: [], resolve: () => ({}) }] });
 
     await expect(
-      defineApp('broken').use(dbPlugin()).use(journal({ j, tables })).features([broken]).boot(),
+      defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot(),
     ).rejects.toThrow(/feature "broken"/);
   });
 });

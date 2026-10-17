@@ -104,7 +104,7 @@ const racer = j.effect('racer', order, {
     }
   },
 });
-const journal = j.compose({ tables, effects: [racer] });
+const journal = j.compose({ effects: [racer] });
 
 async function payOrder() {
   const id: `ord_${number}` = `ord_${++next}`;

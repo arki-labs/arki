@@ -67,7 +67,7 @@ const noteLog = j.projection('note-log', order, {
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.compose({ tables, projections: [customerStats, flaky, noteLog], effects: [mail] });
+  journal = j.compose({ projections: [customerStats, flaky, noteLog], effects: [mail] });
 });
 
 afterAll(async () => {
@@ -310,7 +310,7 @@ describe('write', () => {
       .entity('touchy', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed' }))
       .on(Touched, () => ({ status: undefined, note: 'touched' }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = orderId(++next);
     await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Opened({})] }));
     const result = await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Touched({})] }));
@@ -358,7 +358,7 @@ describe('write', () => {
     const shaky = j
       .entity('shaky', orders)
       .create(Bumped, e => ({ customerId: 'c', total: e.data.n, status: 'placed' }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = orderId(++next);
     await expect(
       db.transaction(tx => bare.write(tx, shaky, id, { meta, events: () => [Bumped({ n: 1 })] })),
@@ -367,10 +367,10 @@ describe('write', () => {
   });
 
   it('meta that does not survive a JSON round trip is UNSTABLE_SCHEMA too', async () => {
-    const dated = initJournal({ meta: z.object({ at: z.date() }) });
+    const dated = initJournal({ tables, meta: z.object({ at: z.date() }) });
     const Ping = dated.event('Ping', z.object({}));
     const pinged = dated.entity('pinged', orders).create(Ping, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = dated.compose({ tables });
+    const bare = dated.compose({});
     await expect(
       db.transaction(tx =>
         bare.write(tx, pinged, orderId(++next), { meta: { at: new Date() }, events: () => [Ping({})] }),
@@ -383,7 +383,7 @@ describe('write', () => {
     // would call that equal. Only primitives, arrays and plain objects survive JSON.
     const Loose = j.event('Loose', z.object({ bag: z.unknown() }));
     const loose = j.entity('loose', orders).create(Loose, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     class Box {
       readonly value = 1;
     }
@@ -399,7 +399,7 @@ describe('write', () => {
   it('data JSON cannot serialize (a bigint) is UNSTABLE_SCHEMA with the serializer error as cause, not a raw TypeError', async () => {
     const Big = j.event('Big', z.object({ n: z.bigint() }));
     const big = j.entity('big', orders).create(Big, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = orderId(++next);
     const failure: unknown = await db
       .transaction(tx => bare.write(tx, big, id, { meta, events: () => [Big({ n: 1n })] }))
@@ -422,7 +422,7 @@ describe('write', () => {
       Counted: (tx, e) =>
         tx.insert(customerOrderCounts).values({ customerId: `keys_${id}`, placed: Object.keys(e.data).length }),
     });
-    const bare = j.compose({ tables, projections: [keyCount] });
+    const bare = j.compose({ projections: [keyCount] });
     const data = { n: 1, bonus: 10 };
     const handBuilt: PendingOf<typeof Counted> = { type: 'Counted', data };
     const written = await db.transaction(tx => bare.write(tx, counted, id, { meta, events: () => [handBuilt] }));
@@ -443,7 +443,7 @@ describe('write', () => {
     const blank = j
       .entity('blank', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed', note: undefined }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = orderId(++next);
     const written = await db.transaction(tx => bare.write(tx, blank, id, { meta, events: () => [Opened({})] }));
     expect(written.row?.note).toBe('none');
@@ -462,7 +462,7 @@ describe('write', () => {
       .entity('leaky', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed' }))
       .on(Copied, row => ({ customerId: row.note ?? 'absent' }));
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = orderId(++next);
     await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Opened({})] }));
     const written = await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Copied({})] }));
@@ -685,7 +685,7 @@ describe('replay, verify, repair', () => {
       .entity('leaky', orders)
       .create(leakyPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
       .on(leaky, (_row, e) => ({ note: e.data.note }));
-    const leakyJournal = j.compose({ tables });
+    const leakyJournal = j.compose({});
     const id = orderId(++next);
     await db.transaction(tx =>
       leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leakyPlaced({ customerId: 'c', total: 1 })] }),
@@ -856,7 +856,7 @@ describe('duplicate handler names', () => {
         /* handler body is irrelevant */
       },
     });
-    expect(() => j.compose({ tables, effects: [first, second] })).toThrow(/effect.*"mail"/);
+    expect(() => j.compose({ effects: [first, second] })).toThrow(/effect.*"mail"/);
   });
 
   it('two projections with the same name are rejected, naming the duplicate', () => {
@@ -870,7 +870,7 @@ describe('duplicate handler names', () => {
         /* handler body is irrelevant */
       },
     });
-    expect(() => j.compose({ tables, projections: [first, second] })).toThrow(/projection.*"stats"/);
+    expect(() => j.compose({ projections: [first, second] })).toThrow(/projection.*"stats"/);
   });
 });
 
@@ -887,7 +887,7 @@ describe('verify on JSON columns', () => {
     await db.execute(
       sql`create table docs (id varchar(256) primary key, payload jsonb not null, version integer not null default 0)`,
     );
-    const bare = j.compose({ tables });
+    const bare = j.compose({});
     const id = `doc_${++next}`;
     await db.transaction(tx => bare.write(tx, doc, id, { meta, events: () => [Opened({})] }));
     expect(await bare.verify(db, doc, id)).toEqual({ ok: true });

@@ -56,7 +56,7 @@ const paid = j.projection(
   },
   { lane: 'async' },
 );
-const journal = j.compose({ tables, projections: [counts, paid] });
+const journal = j.compose({ projections: [counts, paid] });
 
 const place = (id: OrderId, customerId: string) =>
   db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId, total: 1 })] }));

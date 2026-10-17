@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { z } from 'zod';
 
 import type { OrderId } from './test-support.js';
-import { j, meta, openDb, order, orderId, OrderNoted, OrderPlaced, tables } from './test-support.js';
+import { j, meta, openDb, order, orderId, OrderNoted, OrderPlaced } from './test-support.js';
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -32,7 +32,7 @@ const notify = j.effect('order-notify', order, {
   },
 });
 
-const journal = j.compose({ tables, effects: [notify] });
+const journal = j.compose({ effects: [notify] });
 
 const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
 

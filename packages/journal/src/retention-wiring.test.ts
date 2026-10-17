@@ -19,7 +19,6 @@ const quiet = j
   .withSchedule({ retention: { completed: false, dead: false } });
 const loud = j.effect('loud', order, { OrderPaid: () => {} });
 const journal = j.compose({
-  tables,
   effects: [quiet, loud],
   retention: { archive: { completed: '7d', dead: '90d' } },
 });
@@ -98,7 +97,7 @@ describe('per-effect retention wins over the journal', () => {
     const patient = j
       .effect('patient', order, { OrderPaid: () => {} })
       .withSchedule({ retention: { retryableFor: '90d' } });
-    const own = j.compose({ tables, effects: [patient] });
+    const own = j.compose({ effects: [patient] });
     const id = orderId(++next);
     await db.transaction(tx =>
       own.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
@@ -121,14 +120,14 @@ describe('the boot check', () => {
     const exported = j
       .effect('ledger-mail', order, { OrderPaid: () => {} })
       .withSchedule({ retention: { completed: 'untilExported' } });
-    expect(() => j.compose({ tables, effects: [exported] })).toThrow(
+    expect(() => j.compose({ effects: [exported] })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION', message: expect.stringContaining('ledger-mail') }),
     );
-    expect(() => j.compose({ tables, effects: [exported], retention: { archive: { sink } } })).not.toThrow();
+    expect(() => j.compose({ effects: [exported], retention: { archive: { sink } } })).not.toThrow();
   });
 
   it("'untilExported' in the journal policy without a sink is BAD_DEFINITION", () => {
-    expect(() => j.compose({ tables, retention: { archive: { dead: 'untilExported' } } })).toThrow(
+    expect(() => j.compose({ retention: { archive: { dead: 'untilExported' } } })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );
   });
@@ -138,7 +137,7 @@ describe('the boot check', () => {
       .effect('typo', order, { OrderPaid: () => {} })
       // @ts-expect-error '30x' is not an age; the check also runs for callers the type cannot stop
       .withSchedule({ retention: { completed: '30x' } });
-    expect(() => j.compose({ tables, effects: [typo] })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
+    expect(() => j.compose({ effects: [typo] })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
   });
 
   it('journal.retention is the resolved policy', () => {

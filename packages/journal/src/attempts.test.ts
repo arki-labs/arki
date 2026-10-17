@@ -27,7 +27,7 @@ beforeEach(async () => {
   await db.delete(tables.jobArchive);
 });
 
-const bare = j.compose({ tables });
+const bare = j.compose({});
 
 const queueRow = async (name: string): Promise<string> => {
   const id = jobId();

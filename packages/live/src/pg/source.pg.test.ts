@@ -46,7 +46,7 @@ const POSTS = tableTag(posts);
 const COUNTS = tableTag(postCounts);
 const tables = journalTables();
 
-const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
+const j = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 const PostCreated = j.event('PostCreated', z.object({ title: z.string().min(1) }));
 const post = j.entity('post', posts).create(PostCreated, e => ({ title: e.data.title }));
 const createPost = j.command(
@@ -62,7 +62,7 @@ const countPosts = j.effect('count-posts', post, {
     );
   },
 });
-const journal = j.compose({ tables, effects: [countPosts] });
+const journal = j.compose({ effects: [countPosts] });
 
 type Db = NodePgDatabase;
 

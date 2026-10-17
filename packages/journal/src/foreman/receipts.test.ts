@@ -19,10 +19,10 @@ const T0 = '2026-10-14T12:00:00.000Z';
 
 /** A journal receipt store on an in-memory Postgres, the way a DOT app builds it. */
 async function journalStore() {
-  const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
   const tables = journalTables();
+  const j = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
   const receiptTables = foremanReceiptTables();
-  const journal = j.compose({ tables });
+  const journal = j.compose({});
   const { db } = await openJournalDb({ ...tables, ...receiptTables });
   return journalReceiptStore({ j, journal, db, tables: receiptTables, meta: { actorId: 'foreman' } });
 }

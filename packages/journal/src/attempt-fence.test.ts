@@ -47,7 +47,7 @@ const counting = j.effect('count-attempts', order, {
     if (ctx.attempt < 3) throw new Error('not yet');
   },
 });
-const countingJournal = j.compose({ tables, effects: [counting] });
+const countingJournal = j.compose({ effects: [counting] });
 
 const outcomes: string[] = [];
 const fenced = j.effect('fenced-writer', order, {
@@ -66,12 +66,12 @@ const fenced = j.effect('fenced-writer', order, {
     }
   },
 });
-const fencedJournal = j.compose({ tables, effects: [fenced] });
+const fencedJournal = j.compose({ effects: [fenced] });
 
 const healthy = j.effect('healthy-writer', order, {
   OrderPaid: (event, ctx) => ctx.run(noteOrder, { orderId: event.entityId, note: 'from the owner' }, meta),
 });
-const healthyJournal = j.compose({ tables, effects: [healthy] });
+const healthyJournal = j.compose({ effects: [healthy] });
 
 const noteOf = async (id: string) => {
   const rows = await db

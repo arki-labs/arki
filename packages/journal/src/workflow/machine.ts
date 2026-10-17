@@ -5,10 +5,12 @@
  * from the step rows, so no event names them.
  */
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
+import type { DbHandle, TransactionSource } from '../types.js';
 import type { WorkflowShape } from './shape.js';
 
 const at = z.iso.datetime();
@@ -26,8 +28,11 @@ const shapeSchema: z.ZodType<WorkflowShape> = z.object({
 /** When the run row is pruned; null keeps it. Resolved by the runner from `retention.workflows`. */
 const keepUntil = z.iso.datetime().nullable();
 
-export function workflowMachine<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
-  j: Pick<JournalDefinitions<Meta>, 'event' | 'entity' | 'projection'>,
+export function workflowMachine<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx> = DbHandle,
+>(
+  j: Pick<JournalDefinitions<Meta, Tx>, 'event' | 'entity' | 'projection'>,
   tables: Pick<JournalTables, 'workflowRuns' | 'workflowSteps'>,
 ) {
   const { workflowRuns, workflowSteps } = tables;
@@ -47,6 +52,7 @@ export function workflowMachine<Meta extends StandardSchemaV1<unknown, Record<st
       at,
     }),
   );
+  /** `at` is when the node is due: now for a first try, later for a retry that waits out its backoff. */
   const NodeScheduled = j.event(
     'NodeScheduled',
     z.object({
@@ -257,3 +263,24 @@ export function workflowMachine<Meta extends StandardSchemaV1<unknown, Record<st
     },
   };
 }
+
+/** What a step row stores, plus `running`, which is never stored: it is derived from the step's job. */
+export type StepStatus = JournalTables['workflowSteps']['$inferSelect']['status'] | 'running';
+
+/**
+ * The status of a step as a SQL expression, for a query on `workflow_steps`. A `scheduled` step is `running` while
+ * its current job (`job_id`) is alive and holds a lease, the same test `outbox.ts` uses for a running job. Any other
+ * stored status is returned as it is. Nothing writes `running` to the step row, so a crashed worker's step is
+ * `scheduled` again as soon as its lease runs out.
+ */
+export const stepStatusSql = (tables: Pick<JournalTables, 'workflowSteps' | 'jobs'>) => {
+  const { workflowSteps, jobs } = tables;
+  return sql<StepStatus>`
+    CASE
+        WHEN ${workflowSteps.status} = 'scheduled' AND EXISTS (
+          SELECT 1 FROM ${jobs}
+          WHERE ${jobs.id} = ${workflowSteps.jobId} AND ${jobs.deadAt} IS NULL AND ${jobs.leaseUntil} > now()
+        ) THEN 'running'
+        ELSE ${workflowSteps.status} END
+  `;
+};

@@ -17,10 +17,10 @@ import { pgSchema, varchar } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { z } from 'zod';
 
-import type { UserId } from './core/user-id.js';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
+import type { UserId } from './core/user-id.js';
 import { createCoreJournal } from './core/journal.js';
 import { createCustomerId, createPlanId } from './core/primitives.js';
 import { createCoreTables } from './core/tables.js';
@@ -47,25 +47,28 @@ export const customerId = createCustomerId();
 export const metaSchema = z.object({ actorId: z.string().min(1) });
 export const meta = { actorId: 'usr_test' };
 
-const plainDefinitions = initJournal({ meta: metaSchema });
+const plainDefinitions = initJournal({ tables: journalTablesInSchema, meta: metaSchema });
 
 export const plain = {
   j: plainDefinitions,
   core: createCoreJournal(plainDefinitions, core),
   refunds: createRefundsJournal(plainDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
-  journal: plainDefinitions.compose({ tables: journalTablesInSchema }),
+  journal: plainDefinitions.compose({}),
 };
 
 export type AppDb = PgliteDatabase;
 export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
 
-const typedDefinitions = initJournal.tx<AppTx>().db<AppDb>().create({ meta: metaSchema });
+const typedDefinitions = initJournal
+  .tx<AppTx>()
+  .db<AppDb>()
+  .create({ tables: journalTablesInSchema, meta: metaSchema });
 
 export const typed = {
   j: typedDefinitions,
   core: createCoreJournal(typedDefinitions, core),
   refunds: createRefundsJournal(typedDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
-  journal: typedDefinitions.compose({ tables: journalTablesInSchema }),
+  journal: typedDefinitions.compose({}),
 };
 
 /** `extra`: more tables or enums of the same schema, pushed in the same call (a second push would drop these). */

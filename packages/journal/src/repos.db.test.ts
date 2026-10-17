@@ -5,7 +5,7 @@
  *
  * The one setup rule this pins: create the journal with
  * `initJournal.tx<Transaction>()`, so `tx` has the app's own Drizzle
- * transaction type. With plain `initJournal({ meta })`, `tx` is the journal's
+ * transaction type. With plain `initJournal({ tables, meta })`, `tx` is the journal's
  * structural `DbHandle`, which the repository factories do not accept.
  */
 import type { PGlite } from '@electric-sql/pglite';
@@ -47,14 +47,14 @@ class AccountRepository {
 }
 
 // The fix that makes the two fit: the journal's `tx` is the app's `Transaction`.
-const j = initJournal.tx<Transaction>().create({ meta: z.object({ actorId: z.string().min(1) }) });
+const j = initJournal.tx<Transaction>().create({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 const Opened = j.event('Opened', z.object({ balance: z.int().nonnegative() }));
 const Deposited = j.event('Deposited', z.object({ amount: z.int().positive() }));
 const account = j
   .entity('account', accounts)
   .create(Opened, e => ({ balance: e.data.balance }))
   .on(Deposited, (row, e) => ({ balance: row.balance + e.data.amount }));
-const journal = j.compose({ tables });
+const journal = j.compose({});
 
 let handle: Db;
 let client: PGlite;
@@ -118,7 +118,7 @@ describe('repos() in a journal command', () => {
   });
 
   it('without initJournal.tx<Transaction>(), tx is the structural DbHandle and does not fit', () => {
-    const plain = initJournal({ meta: z.object({ actorId: z.string() }) });
+    const plain = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
     // Defined, never run: the check is the compiler's.
     plain.command('peek', z.object({}), (_input, { tx }) => {
       expectTypeOf(tx).not.toExtend<Database>();

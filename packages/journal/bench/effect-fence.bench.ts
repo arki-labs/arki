@@ -21,7 +21,7 @@ const notes = pgTable('bench_notes', {
 });
 
 const tables = journalTables();
-const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
+const j = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 const NoteOpened = j.event('NoteOpened', z.object({ note: z.string() }));
 const NoteSent = j.event('NoteSent', z.object({}));
 const noteEntity = j
@@ -37,14 +37,14 @@ type Db = Awaited<ReturnType<typeof openJournalDb>>['db'];
 const fenced = j.effect('fenced', noteEntity, {
   NoteSent: (event, ctx) => ctx.run(touch, { id: event.entityId }, meta),
 });
-const fencedJournal = j.compose({ tables, effects: [fenced] });
+const fencedJournal = j.compose({ effects: [fenced] });
 // Reads `unfencedJournal` only when the effect runs, after `compose` has returned it.
 const unfenced = j.effect('unfenced', noteEntity, {
   NoteSent: async (event, ctx) => {
     await unfencedJournal.run(ctx.db, touch, { id: event.entityId }, meta);
   },
 });
-const unfencedJournal = j.compose({ tables, effects: [unfenced] });
+const unfencedJournal = j.compose({ effects: [unfenced] });
 
 let pending: Promise<Db> | undefined;
 const environment = (): Promise<Db> => (pending ??= openJournalDb({ ...tables, notes }).then(opened => opened.db));

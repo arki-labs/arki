@@ -100,7 +100,7 @@ const receiptOf = (key: string) => db.select().from(tables.receipts).where(eq(ta
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.compose({ tables, effects: [mail] });
+  journal = j.compose({ effects: [mail] });
 });
 
 afterAll(async () => {
@@ -465,7 +465,7 @@ describe("an effect that ignores its command's failure", () => {
       await run(placeOrder, { orderId: `${event.entityId}_copy` }, meta);
     },
   });
-  const relays = j.compose({ tables, effects: [ignores, passes] });
+  const relays = j.compose({ effects: [ignores, passes] });
 
   beforeAll(async () => {
     ({ db: effectDb, client: effectClient } = await openDb());
@@ -969,7 +969,7 @@ describe('a refusal the effect accepts', () => {
       accept(CommandConflict({ detail: 'never returned' }));
     },
   });
-  const relays = j.compose({ tables, effects: [accepts, forgets, misuses] });
+  const relays = j.compose({ effects: [accepts, forgets, misuses] });
 
   beforeAll(async () => {
     ({ db: effectDb, client: effectClient } = await openDb());
