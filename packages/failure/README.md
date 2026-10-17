@@ -93,7 +93,7 @@ A function with no success value returns `undefined` or a failure. Callers check
 ```ts
 async function remove(id: PostId): Promise<undefined | Failure<'post.not_found', { id: PostId }>> {
   if (!(await repo.delete(id))) return PostNotFound({ id });
-  return undefined;
+  return;
 }
 
 const removed = await remove(id);
