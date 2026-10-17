@@ -65,18 +65,20 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 
 ## Usage
 
+App-shaped blocks import their tables, `db` and repositories from [the docs fixture](docs/examples/fixture.ts): a small schema (users, posts, stories, accounts, orders, invoices) on an in-memory PGlite database from `@arki/db/runtime-local`, seeded with a few rows. In your app those names come from your own `tables.ts`, `relations.ts` and `db.ts`.
+
 ### Initialize a database from environment
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 import { createDb } from '@arki/db/init';
 import { defineRelations } from '@arki/db/orm';
 
-import { schema } from './schema';
+import { schema } from './fixture.ts';
 
 export const db = createDb({
-  relations: defineRelations(schema, builder => ({
-    user: { posts: builder.many('post') },
-    post: { author: builder.one('user') },
+  relations: defineRelations(schema, r => ({
+    users: { posts: r.many.posts() },
+    posts: { author: r.one.users({ from: r.posts.userId, to: r.users.id }) },
   })),
 });
 ```
@@ -85,8 +87,10 @@ export const db = createDb({
 
 ### Embedded local development (PGlite)
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+
+import { relations } from './fixture.ts';
 
 const { db, pglite } = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
 ```
@@ -102,8 +106,11 @@ A data directory has one owner. PGlite has no lock of its own, and two handles o
 
 ### Projections (event sourcing read models)
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 import { initDb } from '@arki/db/builder';
+import { env } from '@arki/db/env';
+
+import { schema } from './fixture.ts';
 
 const d = initDb.schema(schema).create({ connectionString: env.DB_URL, isDev: true });
 
@@ -117,12 +124,14 @@ const userProjection = d.projection
 
 ### Branded IDs
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run
 import { createIdFactory, createPrefixedId } from '@arki/db/id';
 
 const userId = createPrefixedId('usr_'); // 'usr_…'
 const idFactory = createIdFactory('post_');
-const postId = idFactory.next();
+const postId = idFactory.create();
+
+if (!userId.startsWith('usr_') || !postId.startsWith('post_')) throw new Error('prefix missing');
 ```
 
 ### Ids declared once: `idColumns(defineId(...))`
@@ -132,7 +141,7 @@ client can import it — and turn the same declaration into columns here. The
 prefix is the one place the id kind is written; the type, the zod schema, the
 generator and the columns all come from it.
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 // features/story/model/ids.ts (browser-safe)
 import { defineId, type IdOf } from '@arki/contracts';
 export const storyId = defineId('sty_');
@@ -140,6 +149,7 @@ export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
 
 // features/story/model/tables.ts (server)
 import { idColumns } from '@arki/db/id';
+import { pgTable } from 'drizzle-orm/pg-core';
 const story = idColumns(storyId);
 export const stories = pgTable('stories', {
   id: story.primaryColumn(), // varchar(256) PK, typed StoryId, defaults to storyId.create()
@@ -159,11 +169,12 @@ code — it re-exports Drizzle; the browser imports the declaration from the
 
 `@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 import { now } from '@arki/date/clock';
 import { instant, plainDate } from '@arki/db/temporal';
+import { pgTable } from 'drizzle-orm/pg-core';
 
-export const bookings = schema.table('bookings', {
+export const bookings = pgTable('bookings', {
   day: plainDate('day').notNull(), // date ↔ PlainDate
   confirmedAt: instant('confirmed_at'), // timestamp with time zone ↔ Instant
   createdAt: instant('created_at', { withTimezone: false }) // an existing `timestamp` column, read as UTC
@@ -191,8 +202,10 @@ core/relations.ts           — defineRelations(schema, …) — one app-level f
 core/db.ts                  — type only: Db = ReturnType<typeof buildDb>['db']
 ```
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run
 import { composeSchema } from '@arki/db';
+
+import { billingTables, orderItems, orders, orderStatusEnum } from './fixture.ts';
 
 // Each feature exports a named record from its tables.ts leaf:
 export const ordersTables = { orders, orderItems, orderStatusEnum };
@@ -202,14 +215,19 @@ export const ordersTables = { orders, orderItems, orderStatusEnum };
 // (the parameter type collapses to a named error object) AND a runtime
 // `DB_COMPOSITION_E001`, so drizzle sees a plain, collision-free object.
 export const schema = composeSchema(ordersTables, billingTables);
+
+if (schema.orders !== orders || schema.invoices !== billingTables.invoices) throw new Error('a table is missing');
 ```
 
 Point `drizzle-kit` at the leaves — no aggregation entrypoint needed, and
 enums are scanned per file (no aliased re-export tricks):
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 // drizzle.config.ts
+import { defineConfig } from 'drizzle-kit';
+
 export default defineConfig({
+  dialect: 'postgresql',
   schema: ['./src/features/**/tables.ts'],
   // …
 });
@@ -228,16 +246,21 @@ same `(table, relation key)` in two parts throws `DB_COMPOSITION_E004`. The resu
 type is the per-table merge, so `drizzle({ relations })` and
 `db.query.X.findMany({ with })` infer as with one big `defineRelations`.
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts
 import { defineRelationsPart, mergeRelations } from '@arki/db/orm';
 
-// features/sources/relations.ts: each feature declares only what it owns.
-export const sourcesRelations = defineRelationsPart(schema, (r) => ({
-  ContentSource: { user: r.one.User({ from: r.ContentSource.userId, to: r.User.id }) },
+import { schema } from './fixture.ts';
+
+// features/posts/relations.ts: each feature declares only what it owns.
+export const postsRelations = defineRelationsPart(schema, r => ({
+  posts: { author: r.one.users({ from: r.posts.userId, to: r.users.id }) },
+}));
+export const storiesRelations = defineRelationsPart(schema, r => ({
+  stories: { author: r.one.users({ from: r.stories.userId, to: r.users.id }) },
 }));
 
 // core/relations.ts: the base part registers every table with `{}`.
-export const relations = mergeRelations(defineRelationsPart(schema), sourcesRelations, contentRelations);
+export const relations = mergeRelations(defineRelationsPart(schema), postsRelations, storiesRelations);
 export type Relations = typeof relations;
 ```
 
@@ -247,8 +270,10 @@ Feature services built at boot capture the singleton `db` — calling them
 inside a transaction would silently escape it. Cross-feature writes go
 through a typed unit of work instead:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run
 import { createUnitOfWork } from '@arki/db';
+
+import { createBillingTx, createOrdersTx, db } from './fixture.ts';
 
 // Feature tx factories are STATIC exports: (tx: Database) => scoped repos.
 const uow = createUnitOfWork(db, {
@@ -260,6 +285,8 @@ await uow(async tx => {
   await tx.orders.create('ord_1');
   await tx.billing.charge(500); // one transaction, both features, inferred types
 });
+
+if ((await db.query.invoices.findMany()).length !== 1) throw new Error('the charge did not commit');
 ```
 
 ## Transactional procedures: `transactionalProcedure`
@@ -270,14 +297,20 @@ transaction. Per call it opens the transaction, binds the repositories to it
 the transaction with `40001` or `40P01`, it runs the handler again in a fresh
 transaction. The handler cannot forget the transaction: it never sees the pool.
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run
+import { call, implement } from '@orpc/server';
 import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+
+import { balance, contract, db, moveMoney, repositories } from './fixture.ts';
 
 const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 });
 
 export const transfer = implement(contract, transactionalProcedureConfig)
   .transfer.use(transact) // always the last `.use()`
   .handler(({ context: { repos }, input }) => moveMoney(repos, input));
+
+await call(transfer, { from: 'acc_alice', to: 'acc_bob', cents: 500 });
+if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
 ```
 
 Two rules, both checked on the first call of each procedure (`ARKI_DB_TX_E004`):
@@ -299,13 +332,19 @@ In a Dot feature, see [Transactional procedures in a feature](#transactional-pro
 
 Jobs, scripts and journal effects use the same loop without oRPC:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run
 import { runTransaction } from '@arki/db/transaction';
 
-const moved = await runTransaction(db, async (tx, attempt) => moveMoney(tx, input), {
+import { balance, db, moveMoney, repositories } from './fixture.ts';
+
+const input = { from: 'acc_alice', to: 'acc_bob', cents: 500 };
+const signal = AbortSignal.timeout(10_000);
+
+await runTransaction(db, async (tx, attempt) => moveMoney(repositories.withTx(tx), input), {
   retries: 3, // extra attempts: at most 4 runs
   signal, // stops before the next attempt and during the wait
 });
+if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
 ```
 
 `@arki/db/transaction` and `@arki/db/orpc` are portable: no driver, and they
@@ -350,7 +389,7 @@ When the connection drops around `COMMIT`, nobody knows whether the commit
 happened. That error is **not** retried: a retry could apply the work twice.
 The client gets a 500. Recovery is an idempotency key and a journal receipt:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a fragment of a journal-backed oRPC procedure; @arki/journal is not a dependency of this package"
 .handler(({ context, input }) =>
   journal.run(context.tx, deposit, { id: input.id, amount: input.amount }, meta, {
     // Scope the key: tenant, actor, operation, version, then the client's key (validated, ≤ 256 chars in all).
@@ -394,7 +433,7 @@ All of these live in `@arki/db/dot` and return plain plugins. In a
 
 ### `repos(factories)` — repositories built once
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
 // features/highlights/infra/repository.ts
 export const repository = repos({
   highlights: (db: Database) => new HighlightRepository(db), // Database = Db | Transaction
@@ -431,7 +470,7 @@ export const core = defineFeature('highlights')
 
 ### Transactions: `repos.withTx(tx)`
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
 await db.transaction(async tx => {
   const r = repos.withTx(tx); // the same repositories, bound to tx
   await r.highlights.add(itemId);
@@ -448,7 +487,7 @@ forgetting to pass `tx` by hand today.
 
 ### `transactions()` — a usecase may open a transaction, never run SQL
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
 // features/digest/feature.ts
 const digestDeps = defineFeature('digest')
   .needs({ db: entrypointOnly(database.provides.db) })
@@ -480,7 +519,7 @@ A middleware cannot rebind them. The pattern that works: mount the repository
 plugin under another name, and let a transaction-aware usecase take the scope
 per call.
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
 // feature.ts
 const accountsDeps = defineFeature('accounts')
   .needs({ db: database.provides.db })
@@ -522,7 +561,7 @@ Repositories are the read side; events are written with `write`. Create the
 journal with the app's transaction type, so the `tx` a command receives is
 one the repositories accept:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a fragment of a journal-backed oRPC procedure; @arki/journal is not a dependency of this package"
 const j = initJournal.tx<Transaction>().create({ meta });
 const deposit = j.command('deposit', input, async (data, { write, tx }) => {
   const limit = await repos.withTx(tx).limits.forAccount(data.accountId); // reads see this command's writes
@@ -537,7 +576,7 @@ With plain `initJournal({ meta })`, `tx` is the journal's structural
 
 Hand other features a few bound methods, not the whole repository:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
 .provides({ storyReader: ({ repos }) => reader(repos.stories, ['get', 'listByUser']) })
 // another feature: .needs({ stories: story.provides.storyReader }) → context.stories.get(id)
 ```
@@ -557,7 +596,7 @@ that type-check:
 2. **A full fixture whose unused methods throw.** A class repository has
    private fields, so an object literal cannot pose as it; a subclass can:
 
-   ```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+   ```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
    const unused = async (): Promise<never> => { throw new Error('not used by this test'); };
    class FakeHighlights extends HighlightRepository {
      override add = unused;
@@ -587,16 +626,35 @@ The order and the cursor are declared once in `@arki/contracts`
 (`keyset({ createdAt: 'desc', id: 'desc' })`); `@arki/db/pagination` turns them
 into the query:
 
-```ts skip="fragment: uses the app's own tables, features and contracts, which this page does not define"
+```ts run expect
+import { keyset } from '@arki/contracts';
+import { and, eq } from '@arki/db/orm';
+import { keysetQuery } from '@arki/db/pagination';
+
+import { db, stories } from './fixture.ts';
+
+const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });
 const byNewest = keysetQuery(storyOrder, stories); // columns named like the keys
 
-const rows = await db
-  .select()
-  .from(stories)
-  .where(and(eq(stories.userId, userId), byNewest.after(cursor)))
-  .orderBy(...byNewest.orderBy)
-  .limit(byNewest.take(limit)); // limit + 1
-return byNewest.page(rows, limit); // { items, nextCursor } — null on the last page
+async function listStories(userId: string, cursor: string | undefined, limit: number) {
+  const rows = await db
+    .select()
+    .from(stories)
+    .where(and(eq(stories.userId, userId), byNewest.after(cursor)))
+    .orderBy(...byNewest.orderBy)
+    .limit(byNewest.take(limit)); // limit + 1
+  return byNewest.page(rows, limit); // { items, nextCursor } — null on the last page
+}
+
+const first = await listStories('usr_1', undefined, 2);
+const last = await listStories('usr_1', first.nextCursor ?? undefined, 2);
+console.log(first.items.map(story => story.title).join(', '));
+console.log(last.items.map(story => story.title).join(', '), last.nextCursor);
+```
+
+```text
+third, second
+first null
 ```
 
 - End the order on a unique key (`id`): rows with the same timestamp have no

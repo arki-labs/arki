@@ -8,7 +8,7 @@ export default defineConfig({
       DB_URL: 'postgres://test:test@localhost:5432/test',
     },
     environment: 'node',
-    include: ['src/**/*.{test,spec}.ts'],
+    include: ['src/**/*.{test,spec}.ts', 'docs/examples/*.test.ts'],
     // Most files boot an in-memory PGlite (a WASM Postgres, ~1 s alone) and one
     // starts a Postgres container. Run side by side on a busy machine, the
     // first boot alone can pass the 5 s default.

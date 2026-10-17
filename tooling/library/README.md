@@ -97,8 +97,22 @@ Words go after the language, space separated. `ts`, `tsx`, `typescript`, `js`, `
 - A `continue` after a skipped block is skipped too, with the same reason.
 - Fences may be indented (blocks in list items); the indent is stripped. Tilde fences and CRLF files work. A fence inside a longer outer fence is text.
 - Banned in blocks: `any`, `as unknown as`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`. A negative claim ("this must not compile") goes in the package's `*.test-d.ts`.
-- A block may import the package by name (`@arki/<name>`, `@arki/<name>/sub`), its `dependencies`, `peerDependencies`, `devDependencies`, and `node:` builtins. No relative imports. The root `node_modules` would resolve more; a consumer would not.
-- Database examples use PGlite inside the block, or `skip="needs Postgres"`.
+- A block may import the package by name (`@arki/<name>`, `@arki/<name>/sub`), its `dependencies`, `peerDependencies`, `devDependencies`, `node:` builtins, and the docs fixture `./fixture.ts`. No other relative imports. The root `node_modules` would resolve more; a consumer would not.
+- `skip="…"` is for what cannot run here: a real Postgres server, the network, a browser, an app's lint config. "Uses the app's tables" is not a reason: that is what the docs fixture is for.
+
+### The docs fixture: app-shaped examples that run
+
+Many blocks show how an app uses the package: its tables, its database, its contracts. The page does not define them, so the block cannot compile alone. The docs fixture provides them, once per package, in plain sight.
+
+- The package writes `docs/examples/fixture.ts`: named exports only, for example an in-memory PGlite `db` from `@arki/db/runtime-local` and the `users` table. Its imports follow the block rules.
+- A block imports what it uses on its first line: `import { db, users } from './fixture.ts';`. A `continue` step uses what the first step imported. `run` and `run expect` work as usual: each run is a fresh process, so it gets a fresh fixture.
+- Add `docs/examples/tsconfig.json` (extends `../../tsconfig.json`, `noEmit`, `allowImportingTsExtensions`, `include: ["./*.ts"]`), so eslint's project service lints the fixture like any other file.
+- A fixture that opens PGlite closes it on `beforeExit` (see `packages/db/docs/examples/fixture.ts`): Bun exits with 99 when a PGlite instance is left open.
+- The page links the fixture file (relative to the page: `[docs fixture](docs/examples/fixture.ts)` from `README.md`, `examples/fixture.ts` from `docs/agent-guide.md`). Say in one sentence what it holds.
+
+Why an import and not a hidden prelude: readers copy blocks. A prelude the harness prepends makes a block that works only inside the harness. The import names the file, the link opens it, and a reader replaces `./fixture.ts` with their own module.
+
+How it works: `.cache/doc-examples/fixture.ts` re-exports `../../docs/examples/fixture.ts`, so TypeScript and Bun resolve `./fixture.ts` like any relative file. The fixture is compiled in the same program, so a type error in it is reported at `docs/examples/fixture.ts:<line>`. It also obeys the block bans (DOCX_E006). Every `run` block that imports it tests it; a fixture with logic of its own also gets a vitest test.
 
 How it works: blocks are written to `.cache/doc-examples/<file>-<line>.ts` (first line `// from README.md:12`), with a tsconfig that extends the package's own. One `ts.Program` checks them all. The package resolves itself through `node_modules/@arki/<name>` and its `exports`, so types come from `dist/*.d.ts`. `run` blocks then run serially with `bun`, from the package directory, with only `PATH` and `HOME`, 30 s each. Nothing is written outside `.cache/doc-examples/`.
 
@@ -220,6 +234,8 @@ arki-runtimes --write-readme [--only node,bun] [--require-all]
 | DOCX_E006 | forbidden construct                            | Use the inferred type; move negative claims to a `*.test-d.ts`.                                    |
 | DOCX_E007 | undeclared or relative import                  | Declare the package in `package.json`, or import the package by name.                              |
 | DOCX_E008 | no build output                                | Run `bun run build` first (turbo's `test:docs` does).                                              |
+| DOCX_E013 | imports `./fixture.ts`, no fixture file        | Write `docs/examples/fixture.ts`, or import the names from the package.                            |
+| DOCX_E014 | imports `./fixture.ts`, page does not link it  | Link `docs/examples/fixture.ts` from the page and say what it holds.                               |
 
 Reading a DOCX_E001 line:
 

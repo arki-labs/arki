@@ -5,6 +5,8 @@ The old API had one big options object (`defineAuthBackend`) that each app fille
 - `defineAuth` (from `@arki/auth`): plain data about the app's auth. The backend, the start app and the sign-in form share it.
 - `createAuth` (from `@arki/auth/pg`) or the Dot plugin `auth` (from `@arki/auth/dot`): the runtime bindings. Database, tables, secrets, mail, limiter store.
 
+The code blocks that import from `./fixture.ts` use [the docs fixture](examples/fixture.ts). It holds a Notes app's auth tables, definition and env, so the blocks compile. Replace it with your own modules.
+
 Existing databases keep working. Only code changes. `src/pg/upgrade.test.ts` proves an old user, an old password hash and an old session work with the new factory.
 
 The old exports stay until every app has moved. Then they are deleted in one step. There are no compatibility shims after that.
@@ -62,8 +64,10 @@ Open the app's auth tables file (often `backend/src/features/auth/model/tables.t
 
 Create `shared/auth.ts` (or the app's shared folder) with `defineAuth`:
 
-```ts skip="before and after fragment of a migration"
+```ts
 import { defineAuth } from '@arki/auth';
+
+import { APP_KEY, APP_NAME } from './fixture.ts';
 
 export const authDefinition = defineAuth({
   app: { name: APP_NAME, key: APP_KEY },
@@ -86,9 +90,13 @@ Choices to make per app, from the old config:
 
 Replace the old auth module (`backend/src/core/auth.ts`, `backend/src/infra/auth/*`, or `core/auth/config.ts`) with the Dot plugin:
 
-```ts skip="before and after fragment of a migration"
+```ts
+import type { PrincipalOf } from '@arki/auth';
+import type { AuthOf } from '@arki/auth/dot';
 import { auth } from '@arki/auth/dot';
 import { tanstackStart } from '@arki/auth/tanstack-start';
+
+import { authDefinition, authTables, env, kv } from './fixture.ts';
 
 export const authn = auth(authDefinition, {
   tables: authTables,
@@ -113,7 +121,7 @@ export type Principal = PrincipalOf<Auth>;
 - `onAPIError` and other engine options have no binding. Use `on` (events) for observers and `beforeUserCreate` for a waitlist. Anything else goes through `plugins`, and needs a review.
 - `databaseHooks.session.create.before` that adds a column (such as `appContext`) becomes `on.sessionCreating`. Return only the columns, not the whole row. The `session` table must declare the column through `createAuthTables(schema, { columns: { session: { appContext } } })`.
 
-  ```ts skip="before and after"
+  ```ts skip="the Before half is the old better-auth config, removed in the migration"
   // Before
   databaseHooks: { session: { create: { before: data => Promise.resolve({ data: { ...data, appContext: appKey } }) } } },
   // After

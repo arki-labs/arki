@@ -80,9 +80,13 @@ A route is split in two:
   plugin's typed needs are already injected. Handlers close over real
   services; no service locator exists.
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+App-shaped blocks import their schemas, contracts, services and plugins from [the docs fixture](docs/examples/fixture.ts): a small orders app (`Order`, `listOrders`, `db`, `auth`, a `defineFeature` core, and so on).
+
+```ts
 import { optional, route, routes } from '@arki/http';
 import { z } from 'zod';
+
+import { CreateOrder, Order } from './fixture.ts';
 
 export const listOrders = route.get('/orders', {
   id: 'orders.list',
@@ -114,8 +118,9 @@ arrives with it and encodes what leaves with it. When the forms differ, pair
 two schemas with `codec`. `decode` reads the wire, `encode` writes it, and the
 pair must reverse each other's types or the call does not compile:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
-import { codec } from '@arki/http';
+```ts
+import { codec, route } from '@arki/http';
+import { z } from 'zod';
 
 const isoDate = codec(
   z.iso.datetime().transform(text => new Date(text)), // wire -> value
@@ -139,7 +144,12 @@ and `query` are records with one field per key: a schema, a `codec()`, or
 `optional(...)` around either. `responses` lists the other statuses a handler
 may answer with.
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts run
+import { buildEngine, optional, reply, route, routes } from '@arki/http';
+import { z } from 'zod';
+
+import { Conflict, Order, OrderId, db } from './fixture.ts';
+
 export const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
   params: { id: OrderId }, // keys must match the :placeholders
@@ -149,10 +159,19 @@ export const getOrder = route.get('/orders/:id', {
   responses: { 409: Conflict },
 });
 
-routes().bind(getOrder, async ({ params, headers }) => {
+const orderRoutes = routes().bind(getOrder, async ({ params, headers }) => {
   const order = await db.orders.find(headers['x-tenant'], params.id); // params.id is an OrderId
   return order ?? reply(409, { reason: 'moved' }, { headers: { 'retry-after': '1' } });
 });
+```
+
+Call it with a request. An unknown order answers the `409` the contract lists:
+
+```ts continue
+const moved = await buildEngine([orderRoutes]).fetch(
+  new Request('http://local/orders/o99', { headers: { 'x-tenant': 't1' } }),
+);
+if (moved.status !== 409 || moved.headers.get('retry-after') !== '1') throw new Error(`got ${moved.status}`);
 ```
 
 - Each field schema gets one string, or `undefined` when the key is missing.
@@ -177,7 +196,10 @@ routes().bind(getOrder, async ({ params, headers }) => {
   input the handler gets. Return issues to answer `400`; give each a path such
   as `['query', 'to']` and the message reads `query.to: …`:
 
-  ```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+  ```ts
+  import { route } from '@arki/http';
+  import { z } from 'zod';
+
   route.get('/range', {
     id: 'range',
     query: { from: z.coerce.number(), to: z.coerce.number() },
@@ -203,7 +225,13 @@ return. The handler returns a failure like any value; the engine answers
 with the failure's status and the same envelope (`code`, `message`,
 `remediation`, `data`). The output schema never runs on a failure.
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
+import { defineFailure } from '@arki/failure';
+import { route, routes } from '@arki/http';
+import { z } from 'zod';
+
+import { Order, usecases } from './fixture.ts';
+
 export const OrderNotFound = defineFailure('order.not_found', {
   status: 404,
   data: z.object({ id: z.string() }),
@@ -225,10 +253,12 @@ its schema must be JSON-safe: a `Date` field fails `revive` on the client.
 A feature declares its HTTP surface with `endpoints(build)`. The builder
 runs once at boot with the feature's typed needs:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
 import { feature } from '@arki/dot/feature';
 import { service } from '@arki/dot/plugin';
 import { endpoints, routes } from '@arki/http';
+
+import { type Db, createOrder, listOrders } from './fixture.ts';
 
 export const orders = feature('orders', {
   needs: { db: service<Db>() },
@@ -250,12 +280,13 @@ core, so the routes file needs no annotation and no runtime import of the
 feature. `contracts` are the feature's manifest actions (a chain feature has no
 `actions` list of its own):
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
 // features/orders/entrypoints/routes.ts
 import { routes } from '@arki/http';
 import { endpoints } from '@arki/http/dot';
 
-import type { core } from '../feature';
+
+import { core, listOrders } from './fixture.ts';
 
 export const orderRoutes = (c: typeof core) =>
   endpoints(c, ({ usecases }) => routes().bind(listOrders, ({ query }) => usecases.list(query)), {
@@ -273,7 +304,7 @@ routes, fewer places for them to hide.)
 features. It serves the routes of every mounted feature, in mount order —
 the app lists its features once:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts skip="starts a server on port 3000 and hooks process signals"
 import { defineApp, hookSignals } from '@arki/dot';
 import { http } from '@arki/http/dot';
 
@@ -295,7 +326,14 @@ Route bundles published as plain token services (not by a feature) go in
 to typecheck when no earlier unit provides it. Bundles come first in the
 route table, then feature routes:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
+import { defineApp } from '@arki/dot';
+import { token } from '@arki/dot/plugin';
+import type { RouteBundle } from '@arki/http';
+import { http } from '@arki/http/dot';
+
+import { adminPlugin, orders } from './fixture.ts';
+
 export const AdminRoutes = token<RouteBundle>()('admin.routes');
 
 defineApp('shop-api')
@@ -323,8 +361,10 @@ Derivers run in declaration order; each adds a key later handlers (and
 later derivers) see typed. A deriver that throws `HttpError` is the whole
 "guard" story:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
-import { derive, HttpError, HTTP_ERROR_CODES } from '@arki/http';
+```ts run
+import { buildEngine, derive, HttpError, HTTP_ERROR_CODES, routes } from '@arki/http';
+
+import { auth, dbForTenant, listOrders } from './fixture.ts';
 
 // inside a `provides` factory — `auth` is an injected singleton
 const withPrincipal = derive('principal', async req => {
@@ -333,10 +373,17 @@ const withPrincipal = derive('principal', async req => {
   return p;
 });
 
-routes()
+const orderRoutes = routes()
   .derive(withPrincipal)
   .derive('db', (_req, ctx) => dbForTenant(ctx.principal.tenantId))
   .bind(listOrders, async (_input, ctx) => ctx.db.orders.list());
+```
+
+A request with no credentials never reaches the handler:
+
+```ts continue
+const denied = await buildEngine([orderRoutes]).fetch(new Request('http://local/orders'));
+if (denied.status !== 401) throw new Error(`got ${denied.status}`);
 ```
 
 Request scope is function application over the compile-time-wired
@@ -352,7 +399,11 @@ request/response — CORS, request logging — pass fetch-shaped middleware
 to `http()` (first = outermost). A middleware that throws `HttpError`
 short-circuits into the coded envelope:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
+import { http } from '@arki/http/dot';
+
+import { OrdersRoutes, cors, logger, origins, requestLog } from './fixture.ts';
+
 http({ port: 3000, bundles: [OrdersRoutes], middleware: [requestLog(logger), cors(origins)] })
 ```
 
@@ -364,7 +415,7 @@ users compose the same way with `composeMiddleware(engine.fetch, [...])`.
 
 `idempotent(...)` from `@arki/http/idempotency` is an `HttpMiddleware`. It runs each listed request once per `Idempotency-Key` and answers a repeat with the stored response. It is portable (Web Crypto only). The store is a `ResponseCache`: `@arki/journal/http` (Postgres) or `@arki/kv/redis/idempotency` (Redis).
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts skip="needs a Postgres journal (the @arki/journal package), which this package does not depend on"
 import { idempotent } from '@arki/http/idempotency';
 import { responseCache } from '@arki/journal/http';
 
@@ -393,7 +444,7 @@ http({
 
 `@arki/http/webhooks` checks that a webhook comes from the sender who holds the secret. It is portable (Web Crypto only), and `subtle.verify` compares in constant time.
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts skip="needs a Postgres journal (the @arki/journal package), which this package does not depend on"
 import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
 
 const partnerEvents = routes()
@@ -420,7 +471,12 @@ binding is an async generator. Every yield is encoded with the event
 schema and framed as a `data:` message; client disconnect aborts
 `ctx.signal` and runs the generator's `finally`:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
+import { route, routes } from '@arki/http';
+import { z } from 'zod';
+
+import { Queued, Shipped, tracker } from './fixture.ts';
+
 const progress = route.sse('/orders/:id/progress', {
   id: 'orders.progress',
   event: z.discriminatedUnion('type', [Queued, Shipped]),
@@ -443,19 +499,27 @@ fetch-native end to end.
 An oRPC router, a tRPC fetch adapter, or any fetch-shaped handler mounts
 as one manifest route — the migration on-ramp for existing backends:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
+import { routes } from '@arki/http';
+
+import { rpcHandler } from './fixture.ts';
+
 routes().mount('/rpc', rpcHandler, { id: 'rpc', transport: 'orpc' });
 ```
 
 ## OpenAPI
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts run
 import { toOpenApi } from '@arki/http';
+
+import { createOrder, listOrders, progress } from './fixture.ts';
 
 const document = toOpenApi([listOrders, createOrder, progress], {
   title: 'shop-api',
   version: '1.0.0',
 });
+
+if (!JSON.stringify(document).includes('"/orders/{id}/progress"')) throw new Error('missing the progress path');
 ```
 
 Deterministic — same contracts, byte-identical output. Each `params`,
@@ -480,8 +544,10 @@ without booting anything.
 `createClient` builds a fetch client from the same contracts the server binds.
 Pass one contract for one call, or an object of contracts for one call per key:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
 import { createClient } from '@arki/http/client';
+
+import { authorization, getOrder, listOrders } from './fixture.ts';
 
 const orders = createClient({ listOrders, getOrder }, { baseUrl: 'https://api.example.com' });
 
@@ -512,10 +578,12 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
 
 ### Retries, timeouts, and calling URLs you do not control
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
+```ts
 import { backoff, createRetryPolicy } from '@arki/resilience';
 import { createClient } from '@arki/http/client';
 import { publicFetch } from '@arki/http/public-fetch';
+
+import { partnerRoutes, partnerUrl } from './fixture.ts';
 
 const partner = createClient(partnerRoutes, {
   baseUrl: partnerUrl, // set by a user: it must not reach your private network
@@ -556,8 +624,10 @@ const partner = createClient(partnerRoutes, {
 
 The core is framework-agnostic:
 
-```ts skip="fragment: uses the app's own contracts, services and plugins, which this page does not define"
-import { buildEngine, listen, routes } from '@arki/http';
+```ts
+import { buildEngine, listen } from '@arki/http';
+
+import { bundle } from './fixture.ts';
 
 const engine = buildEngine([bundle]);
 const handle = await listen(engine.fetch, { port: 3000 });

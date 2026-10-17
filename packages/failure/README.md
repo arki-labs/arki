@@ -43,6 +43,8 @@ console.log(result.status, result.message);
 409 email ada@example.com is taken
 ```
 
+App-shaped blocks import their names from [the docs fixture](docs/examples/fixture.ts): an in-memory post repository, the example failures, and small stand-ins for an export step, a feed and an RPC client.
+
 `signUp` returns `{ email } | Failure<'user.email_taken', { email: string }>`. Nobody wrote that type. The compiler infers it, and `result.email` is a type error until `isFailure` has run.
 
 ## When not to use this
@@ -109,7 +111,11 @@ A **failure value** is a frozen object, `{ code, message, data, status, remediat
 
 When a failure carries an upstream service's HTTP status in its data, name that field `upstreamStatus`, so it is never confused with the failure's own `status`.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts
+import { z } from 'zod';
+
+import { defineFailure } from '@arki/failure';
+
 export const NotionTokenRejected = defineFailure('export.notion_token_rejected', { status: 422 });
 export const NotionUnavailable = defineFailure('export.notion_unavailable', {
   status: 503,
@@ -139,21 +145,35 @@ export async function titleOf(id: string) {
 
 A function with no success value returns `undefined` or a failure. Callers check with `isFailure`.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { isFailure, type Failure } from '@arki/failure';
+
+import { PostId, PostNotFound, repo } from './fixture.ts';
+
 async function remove(id: PostId): Promise<undefined | Failure<'post.not_found', { id: PostId }>> {
   if (!(await repo.delete(id))) return PostNotFound({ id });
   return;
 }
 
-const removed = await remove(id);
-if (isFailure(removed)) return removed;
+async function removeOrStop(id: PostId) {
+  const removed = await remove(id);
+  if (isFailure(removed)) return removed;
+  return 'removed';
+}
+
+const got = [await removeOrStop('p1'), await removeOrStop('p1')];
+if (got[0] !== 'removed' || typeof got[1] === 'string') throw new Error('expected removed, then a failure');
 ```
 
 ### Partial success
 
 When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away. `Stoppable<Value, Failures>` is that shape: `Value & { readonly stoppedBy?: Failures }`. Build it with `stoppable(value, stoppedBy?)`, and the return type is inferred, so you write no annotation.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { isFailure, stoppable } from '@arki/failure';
+
+import { items, save, send, type Item } from './fixture.ts';
+
 async function exportAll(items: Item[]) {
   const delivered: Item[] = [];
   for (const item of items) {
@@ -164,9 +184,17 @@ async function exportAll(items: Item[]) {
   return stoppable({ delivered });
 } // Promise<Stoppable<{ delivered: Item[] }, FailureOf<typeof send>>>
 
-const result = await exportAll(items);
-save(result.delivered); // keep what was already sent
-if (result.stoppedBy) return result.stoppedBy; // typed, with no `'stoppedBy' in result` check
+async function exportAndKeep(items: Item[]) {
+  const result = await exportAll(items);
+  save(result.delivered); // keep what was already sent
+  if (result.stoppedBy) return result.stoppedBy; // typed, with no `'stoppedBy' in result` check
+  return result;
+}
+
+const stopped = await exportAndKeep(items);
+if (!isFailure(stopped)) throw new Error('expected the token failure');
+const all = await exportAll(items.slice(0, 2));
+if ('stoppedBy' in all || all.delivered.length !== 2) throw new Error('a finished result has no stoppedBy key');
 ```
 
 `stoppable` returns a shallow copy of `value`. It adds the `stoppedBy` key only when you pass a failure, so a finished result has no `stoppedBy` key at all.
@@ -212,7 +240,11 @@ Put it in the `default` of a `switch` over a union. When the union gains a membe
 
 Run code that throws (`JSON.parse`, `fetch`, a driver, an SDK) and turn a throw, or a rejected promise, into the value `onThrow` returns. The mapper is required, so no failure is ever typed `unknown`. It may rethrow what it does not recognise, which keeps unknown errors as bugs. Returning a plain value works like Laravel's `rescue()`.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { attempt } from '@arki/failure';
+
+import { fetchPage, InvalidJson, text, url } from './fixture.ts';
+
 const body = attempt(
   () => JSON.parse(text) as unknown,
   cause => InvalidJson({ reason: String(cause) }),
@@ -221,32 +253,48 @@ const page = await attempt(
   () => fetchPage(url),
   () => null,
 );
+if (page !== 'page body' || typeof body !== 'object') throw new Error('expected the parsed body and the page');
 ```
 
 ### `revive(value, definitions)`
 
 A failure that went through JSON (a queue, a journal row, a worker message) is a plain object again. `revive` returns the live failure for one of the definitions you expect, matched by code, and checks its data with that definition's schema. It returns `undefined` for anything else. Data that does not match throws `ARKI_FAILURE_E006`, and an asynchronous schema throws `ARKI_FAILURE_E007`; each keeps the `@arki/schema` error as its `cause`. A validator that throws is a bug, not bad data: its `SchemaRunError` (`ARKI_SCHEMA_E002`) passes through unwrapped.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { revive } from '@arki/failure';
+
+import { EmailTaken, message, PostNotFound } from './fixture.ts';
+
 const failure = revive(JSON.parse(message), [PostNotFound, EmailTaken]);
+if (failure?.code !== 'user.email_taken') throw new Error('expected the email failure back');
 ```
 
 ### `findCause(value, definitionOrErrorClass)`
 
 Walks the `cause` chain, starting with the value itself, like Go's `errors.As`. It returns the first link that is a failure of the definition, or an instance of the error class.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { findCause } from '@arki/failure';
+
+import { ConnectionError, DbTimeout, error, syncFailure } from './fixture.ts';
+
 const timeout = findCause(syncFailure, DbTimeout); // typed, or undefined
 const socket = findCause(error, ConnectionError);
+if (timeout === undefined || socket === undefined) throw new Error('expected both causes');
 ```
 
 ### `partition(values)` and `collect(values)`
 
 `partition` splits values into successes and failures. `collect` returns every success, typed per position like `Promise.all`, or the first failure.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { collect, partition } from '@arki/failure';
+
+import { a, b, find, findAuthor, ids } from './fixture.ts';
+
 const [posts, missing] = partition(await Promise.all(ids.map(id => find(id))));
 const pair = collect([await find(a), await findAuthor(b)]); // [Post, Author] | the first failure
+if (posts.length !== 1 || missing.length !== 1 || !Array.isArray(pair)) throw new Error('unexpected split');
 ```
 
 ## Types
@@ -262,7 +310,9 @@ const pair = collect([await find(a), await findAuthor(b)]); // [Post, Author] | 
 
 A failure is a return value, so the compiler checks it only when the value is used. A call whose result is thrown away drops its failure silently:
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts
+import { id, a, b, remove } from './fixture.ts';
+
 await remove(id); // ✗ failure/must-use: this call can return a failure ("post.not_found") and its result is thrown away
 void (await remove(id)); // ✗ `void` hides the failure too
 await Promise.all([remove(a), remove(b)]); // ✗ each item's failure is dropped (same for Promise.allSettled)
@@ -275,7 +325,11 @@ The disable comment is the only deliberate discard. A kept value (`const result 
 
 `no-blind-accept` guards a helper that lets one checked refusal through, such as `accept` on an `@arki/journal` command context. Accepting any failure accepts every refusal, including codes the callee adds later, so check the kind first:
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts
+import { isFailure } from '@arki/failure';
+
+import { accept, Busy, OutOfStock, r } from './fixture.ts';
+
 if (isFailure(r)) accept(r); // ✗ failure/no-blind-accept: any failure, not one you checked
 accept(r); // ✗ not checked at all
 if (OutOfStock.is(r)) accept(r); // ✓ one kind
@@ -306,14 +360,25 @@ Peers for this entry: `eslint`, `@typescript-eslint/utils`, `typescript`.
 
 The contract lists failures by definition, and the procedure hands the usecase's result to `orThrowRpc` with the handler's `errors`. Code, status and data come from one `defineFailure`, and a failure the contract does not list is a compile error, so the contract and the usecase cannot drift.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts
+import { oc } from '@orpc/contract';
+import { implement } from '@orpc/server';
+import { z } from 'zod';
+
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
+import { PostId, PostNotFound, PostSchema, type AppContext } from './fixture.ts';
+
 // entrypoints/rpc.ts
-byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
+export const rpc = {
+  byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
+};
 
 // entrypoints/procedures.ts
-byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(context.usecases.find(input.id), errors)),
+const impl = implement(rpc).$context<AppContext>();
+export const procedures = {
+  byId: impl.byId.handler(({ context, input, errors }) => orThrowRpc(context.usecases.find(input.id), errors)),
+};
 ```
 
 - `errorMap(...definitions)` builds the contract's error map. Two definitions with one code throw `ARKI_FAILURE_E005`.
@@ -323,12 +388,19 @@ byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(conte
 - Forgetting `orThrowRpc` is a compile error: `Post | Failure` is not the procedure's output.
 - `reviveRpcError(error, definitions)` is the client side: a caught `ORPCError` whose code is one of the definitions becomes the live failure, its data checked like `revive`. Anything else returns `undefined`, so rethrow it. Then `match` on the failure as the backend does.
 
-```ts skip="fragment: repo, PostId and the other app names are not defined here"
+```ts run
+import { isFailure } from '@arki/failure';
+import { reviveRpcError } from '@arki/failure/orpc';
+
+import { client, PostNotFound } from './fixture.ts';
+
+const id = 'missing';
 const post = await client.posts.byId({ id }).catch((error: unknown) => {
   const failure = reviveRpcError(error, [PostNotFound]);
   if (failure === undefined) throw error;
   return failure;
 }); // Post | Failure<'post.not_found', …>
+if (!isFailure(post)) throw new Error('expected the failure');
 ```
 
 `@orpc/client` is an optional peer dependency, needed only for this entry. The entry imports nothing from `@orpc/server`, so contract files and client code that use it can ship to browsers.

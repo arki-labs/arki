@@ -145,6 +145,8 @@
     "README.md",
     "llms.txt",
     "docs/**",
+    "!docs/examples/*.test.ts",
+    "!docs/examples/tsconfig.json",
     "LICENSE",
     "package.json"
   ],

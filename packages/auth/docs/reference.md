@@ -2,6 +2,8 @@
 
 The long form of the [README](../README.md). Each section is a task or a contract. The recipes in the README come first; read this when you need the exact option.
 
+The code blocks that import from `./fixture.ts` use [the docs fixture](examples/fixture.ts). It holds a Notes app's auth tables, definitions, env and an in-memory auth, so the blocks compile. Replace it with your own modules.
+
 ## The declaration
 
 | Option                  | Default     | Meaning                                                                                                                                                                                           |
@@ -41,7 +43,7 @@ Link lifetimes are fixed: magic link 5 minutes, password reset 15 minutes, email
 
 ## The principal and sessions
 
-```ts skip="a type listing, not a program"
+```ts skip="a type sketch: the field types are elided, so it does not compile"
 type Principal<User> = {
   readonly user: User; // core columns + `user.fields`, typed from your table
   readonly session: { id; createdAt; expiresAt; ipAddress; userAgent };
@@ -156,14 +158,18 @@ Workspaces: `principal.workspace` is only the selection. The loader checks membe
 
 A native app signs in with the platform SDK (Sign in with Apple, Google Sign-In) and gets an id token. The backend trades it for a session:
 
-```ts skip="a route fragment, needs an app"
-if (!auth.supportsIdToken('apple')) {
-  return Response.json({ error: 'Apple sign-in is not configured.' }, { status: 501 });
+```ts
+import { auth } from './fixture.ts';
+
+export async function signInWithApple(request: Request, idToken: string, nonce: string): Promise<Response> {
+  if (!auth.supportsIdToken('apple')) {
+    return Response.json({ error: 'Apple sign-in is not configured.' }, { status: 501 });
+  }
+  const session = await auth.signInWithIdToken({ provider: 'apple', idToken, nonce, headers: request.headers });
+  if (session === null) return Response.json({ error: 'Sign-in failed.' }, { status: 401 });
+  // The app keeps session.token and sends `Authorization: Bearer <token>`.
+  return Response.json({ token: session.token, userId: session.principal.user.id });
 }
-const session = await auth.signInWithIdToken({ provider: 'apple', idToken, nonce, headers: request.headers });
-if (session === null) return Response.json({ error: 'Sign-in failed.' }, { status: 401 });
-// The app keeps session.token and sends `Authorization: Bearer <token>`.
-return Response.json({ token: session.token, userId: session.principal.user.id });
 ```
 
 - `provider` is typed: only the definition's enabled methods whose id tokens the engine verifies (`google`, `apple`, `facebook`, `microsoft`; GitHub has none). A disabled one does not compile.
@@ -196,9 +202,13 @@ Most events come from a wrapper around the engine's handler. It reads the route,
 
 `sessionCreating` and `sessionCreated` run for every session the engine makes: every sign-in path, sign-up with auto sign-in, and `actingAs` in tests. Use them for a column every session must carry, or for work at first sign-in.
 
-```ts skip="a fragment of the bindings"
+```ts
+import { createAuth } from '@arki/auth/pg';
+
+import { appKeyOf, authDefinition, bindings, db, ensureProfile } from './fixture.ts';
+
 createAuth(authDefinition, {
-  // ...
+  ...bindings, // db, tables and runtime
   on: {
     // `appContext` is an extra session column: createAuthTables(schema, { columns: { session: { appContext } } }).
     sessionCreating: ({ request }) => ({ appContext: appKeyOf(request) }),
@@ -240,10 +250,12 @@ export const brandOfHost: AuthMailBrandPicker = ({ request }) => {
 - Custom `templates` get the picked `appName` too.
 - `appUrl` is the brand's own site. Only a custom template that declares `input: authLinkInput` (from `@arki/auth/pg`) receives it, as `data.appUrl`. The default `@arki/mail` templates take no site and ignore it. It must be an absolute http(s) URL, or the mail fails with E006.
 
-```ts skip="a fragment of the bindings"
+```ts
 import { authLinkInput } from '@arki/auth/pg';
 import { defineTemplate } from '@arki/mail';
 import { magicLink } from '@arki/mail/templates/auth';
+
+import { page } from './fixture.ts';
 
 const brandedMagicLink = defineTemplate({
   name: magicLink.name,

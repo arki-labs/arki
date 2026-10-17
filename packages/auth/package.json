@@ -117,6 +117,8 @@
     "!src/**/*.test-d.ts",
     "!src/**/__fixtures__/**",
     "docs/**",
+    "!docs/examples/*.test.ts",
+    "!docs/examples/tsconfig.json",
     "!docs/USER_VS_ACCOUNT.md",
     "llms.txt",
     "README.md",

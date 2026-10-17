@@ -392,3 +392,76 @@ describe('report summary', () => {
     });
   });
 });
+
+const FIXTURE_SOURCE = ['export const answer: number = 42;', 'export const double = (value: number): number => value * 2;', ''].join('\n');
+const FIXTURE_LINK = 'Blocks import the [docs fixture](docs/examples/fixture.ts).';
+
+/** A fixture package whose README is `readme` and whose docs fixture is `source`. */
+function withDocsFixture(readme: string, source = FIXTURE_SOURCE): string {
+  const dir = fixture(readme);
+  mkdirSync(path.join(dir, 'docs', 'examples'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs', 'examples', 'fixture.ts'), source);
+  return dir;
+}
+
+describe('the docs fixture (./fixture.ts)', () => {
+  it('runs an app-shaped block against the fixture, checked by its output', () => {
+    // Why: blocks that need an app's tables or services must run for real, not hide behind skip=.
+    const block = fence('ts run expect', "import { answer, double } from './fixture.ts';", LOG, 'console.log(String(double(answer)));');
+    const report = checkExamples(withDocsFixture([FIXTURE_LINK, block, fence('text', '84')].join('\n\n')), { run: true, only: ['README.md'] });
+    expect(report.failures).toEqual([]);
+    expect(report.ran).toBe(1);
+  });
+
+  it('carries the fixture through a continue chain', () => {
+    // Why: tutorials import the fixture once, in the first step, and later steps use it.
+    const readme = [
+      FIXTURE_LINK,
+      fence('ts run expect', "import { answer } from './fixture.ts';", LOG, 'const total = answer + 1;'),
+      fence('text', '43'),
+      fence('ts continue', 'console.log(String(total));'),
+    ].join('\n\n');
+    expect(checkExamples(withDocsFixture(readme), { run: true }).failures).toEqual([]);
+  });
+
+  it('fails a page that imports the fixture without linking it', () => {
+    // Why: an import of a file the reader cannot find is a hidden prelude; the page must point to it.
+    const block = fence('ts', "import { answer } from './fixture.ts';", 'const n: number = answer;');
+    const failures = checkExamples(withDocsFixture(block), { run: false }).failures;
+    expect(failures.map(({ rule, file, line }) => `${rule} ${file}:${String(line)}`)).toEqual(['DOCX_E014 README.md:1']);
+  });
+
+  it('accepts a reference-style link, and resolves links relative to the page', () => {
+    // Why: docs/agent-guide.md links the same file as `examples/fixture.ts`; both forms are a real link.
+    const readme = [fence('ts', "import { answer } from './fixture.ts';", 'const n: number = answer;'), '[fixture]: ./docs/examples/fixture.ts'].join('\n\n');
+    const dir = withDocsFixture(readme);
+    writeFileSync(
+      path.join(dir, 'docs', 'agent-guide.md'),
+      ['See [the fixture](examples/fixture.ts#L1).', fence('ts', "import { double } from './fixture.ts';", 'const n: number = double(1);')].join('\n\n'),
+    );
+    expect(checkExamples(dir, { run: false }).failures).toEqual([]);
+  });
+
+  it('fails an import of the fixture when the package has none', () => {
+    // Why: TS2307 alone would not say where the fixture belongs; DOCX_E013 names docs/examples/fixture.ts.
+    const readme = [FIXTURE_LINK, fence('ts', "import { answer } from './fixture.ts';")].join('\n\n');
+    expect(checkExamples(fixture(readme), { run: false }).failures.map(item => item.rule)).toContain('DOCX_E013');
+  });
+
+  it('holds the fixture to the block bans and reports its type errors at its own lines', () => {
+    // Why: readers copy the fixture too, and a broken fixture must not look like a broken block.
+    const source = ['export const answer: number = 42;', 'export const loose = (value: any) => value;', 'export const wrong: string = 1;', ''].join('\n');
+    const readme = [FIXTURE_LINK, fence('ts', "import { answer } from './fixture.ts';")].join('\n\n');
+    const failures = checkExamples(withDocsFixture(readme, source), { run: false }).failures;
+    expect(failures.map(({ rule, file, line }) => `${rule} ${file}:${String(line)}`)).toEqual([
+      'DOCX_E006 docs/examples/fixture.ts:2',
+      'DOCX_E001 docs/examples/fixture.ts:3',
+    ]);
+  });
+
+  it('still rejects every other relative import', () => {
+    // Why: only the named fixture is allowed; `./schema` would be a file no reader has.
+    const readme = [FIXTURE_LINK, fence('ts', "import { schema } from './schema.ts';")].join('\n\n');
+    expect(checkExamples(withDocsFixture(readme), { run: false }).failures.map(item => item.rule)).toContain('DOCX_E007');
+  });
+});

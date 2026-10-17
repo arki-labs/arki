@@ -17,8 +17,15 @@
  *
  * Banned in blocks: `any`, `as unknown as`, `@ts-ignore`, `@ts-expect-error`,
  * `@ts-nocheck`. A block may import only the package itself, its declared
- * dependencies and `node:` builtins. Generated files go to `.cache/doc-examples/`
- * and nowhere else.
+ * dependencies, `node:` builtins and `./fixture.ts`. Generated files go to
+ * `.cache/doc-examples/` and nowhere else.
+ *
+ * The docs fixture: an app-shaped block (a table, a database, a contract the
+ * page does not define) writes `import { db, users } from './fixture.ts'`.
+ * That resolves to the package's `docs/examples/fixture.ts`, written once and
+ * typechecked with the blocks. Nothing is prepended: the import is in the
+ * block, and the page must link the fixture file, so a reader who copies the
+ * block sees exactly what it assumes and where to read it.
  *
  *   arki-doc-examples [--no-run] [--write] [--json] [--file <path>]...
  *
@@ -58,8 +65,15 @@ export const DOCX_RULES = {
   DOCX_E010: 'printed output differs from the ```text block',
   DOCX_E011: 'block differs from its from= source region (bun run test:docs -- --write refreshes it)',
   DOCX_E012: 'from= names a file or region that does not exist, or a path outside the package',
+  DOCX_E013: 'imports ./fixture.ts, but the package has no docs/examples/fixture.ts',
+  DOCX_E014: 'imports ./fixture.ts, but this page does not link docs/examples/fixture.ts',
 } as const;
 export type DocxRule = keyof typeof DOCX_RULES;
+
+/** The package's docs fixture, relative to the package. */
+export const FIXTURE_FILE = 'docs/examples/fixture.ts';
+/** How a block imports the fixture: the generated modules sit next to a re-export of it. */
+export const FIXTURE_IMPORT = './fixture.ts';
 
 /** Fence languages that are examples. Everything else (`sh`, `json`, `md`, `text`, ...) is ignored. */
 export const EXAMPLE_LANGS = ['ts', 'tsx', 'typescript', 'js', 'jsx', 'javascript'] as const;
@@ -325,7 +339,7 @@ function lineAt(code: string, position: number): number {
 const SUPPRESSION = /@ts-(?:ignore|expect-error|nocheck)\b/g;
 
 /** `any` and `as unknown as` found in the syntax tree; suppression comments found in the text. */
-function forbidden(module: ExampleModule): { name: string; codeLine: number }[] {
+function forbidden(module: Pick<ExampleModule, 'code' | 'lang'>): { name: string; codeLine: number }[] {
   const kind = module.lang === 'tsx' || module.lang === 'jsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile('example.tsx', module.code, ts.ScriptTarget.Latest, true, kind);
   const found: { name: string; codeLine: number }[] = [];
@@ -354,8 +368,19 @@ function packageOf(specifier: string): string {
   return (specifier.startsWith('@') ? parts.slice(0, 2) : parts.slice(0, 1)).join('/');
 }
 
-/** Imports outside the package, its declared dependencies and `node:` builtins. */
-function undeclaredImports(manifest: Manifest, module: ExampleModule): { detail: string; codeLine: number }[] {
+/** Does this code import the docs fixture? */
+function importsFixture(code: string): boolean {
+  return ts.preProcessFile(code, true, true).importedFiles.some(({ fileName }) => fileName === FIXTURE_IMPORT);
+}
+
+type ImportProblem = { rule: DocxRule; detail: string; codeLine: number };
+
+/** Imports outside the package, its declared dependencies, `node:` builtins and the docs fixture. */
+function undeclaredImports(
+  manifest: Manifest,
+  module: ExampleModule,
+  hasFixture: boolean,
+): ImportProblem[] {
   const declared = new Set([
     manifest.name,
     ...Object.keys(manifest.dependencies),
@@ -363,14 +388,15 @@ function undeclaredImports(manifest: Manifest, module: ExampleModule): { detail:
     ...Object.keys(manifest.devDependencies),
     ...Object.keys(manifest.optionalDependencies),
   ]);
-  return ts.preProcessFile(module.code, true, true).importedFiles.flatMap(({ fileName, pos }) => {
+  return ts.preProcessFile(module.code, true, true).importedFiles.flatMap(({ fileName, pos }): ImportProblem[] => {
     const codeLine = lineAt(module.code, pos);
     if (fileName.startsWith('node:')) return [];
+    if (fileName === FIXTURE_IMPORT) return hasFixture ? [] : [{ rule: 'DOCX_E013', detail: '', codeLine }];
     if (fileName.startsWith('.') || fileName.startsWith('/')) {
-      return [{ detail: `: "${fileName}" is relative; import the package by name`, codeLine }];
+      return [{ rule: 'DOCX_E007', detail: `: "${fileName}" is relative; import the package by name`, codeLine }];
     }
     if (declared.has(packageOf(fileName))) return [];
-    return [{ detail: `: "${fileName}" is not in package.json`, codeLine }];
+    return [{ rule: 'DOCX_E007', detail: `: "${fileName}" is not in package.json`, codeLine }];
   });
 }
 
@@ -406,6 +432,8 @@ function exampleTsconfig(dir: string): object {
       composite: false,
       incremental: false,
       sourceMap: false,
+      // The fixture shim re-exports `../../docs/examples/fixture.ts` by its real name; nothing is emitted.
+      allowImportingTsExtensions: true,
       allowJs: true,
       checkJs: true,
       jsx: 'react-jsx',
@@ -423,17 +451,25 @@ function exampleTsconfig(dir: string): object {
  */
 export function compileExamples(dir: string, manifest: Manifest, modules: readonly ExampleModule[]): ExampleFailure[] {
   const failures: ExampleFailure[] = [];
+  const fixturePath = path.join(dir, FIXTURE_FILE);
+  const hasFixture = existsSync(fixturePath);
   for (const module of modules) {
     for (const { name, codeLine } of forbidden(module)) {
       const at = sourceOf(module, codeLine);
       failures.push(failure('DOCX_E006', at.file, at.line, `: ${name}`));
     }
-    for (const { detail, codeLine } of undeclaredImports(manifest, module)) {
+    for (const { rule, detail, codeLine } of undeclaredImports(manifest, module, hasFixture)) {
       const at = sourceOf(module, codeLine);
-      failures.push(failure('DOCX_E007', at.file, at.line, detail));
+      failures.push(failure(rule, at.file, at.line, detail));
     }
   }
   if (modules.length === 0) return failures;
+  // Readers copy the fixture too, so it obeys the same bans as a block.
+  if (hasFixture && modules.some(module => importsFixture(module.code))) {
+    for (const { name, codeLine } of forbidden({ code: readFileSync(fixturePath, 'utf8'), lang: 'ts' })) {
+      failures.push(failure('DOCX_E006', FIXTURE_FILE, codeLine + 1, `: ${name}`));
+    }
+  }
 
   const missing = missingBuildOutput(dir, manifest);
   if (missing !== undefined) {
@@ -449,6 +485,11 @@ export function compileExamples(dir: string, manifest: Manifest, modules: readon
     const head = module.examples[0];
     writeFileSync(file, `// from ${head?.file ?? ''}:${String(head?.line ?? 0)}\n${module.code}\nexport {};\n`);
     byFile.set(path.resolve(file), module);
+  }
+  if (hasFixture) {
+    // A re-export, not a copy: diagnostics and stack traces name the real file.
+    const shim = `// the docs fixture; blocks import it as '${FIXTURE_IMPORT}'\nexport * from '../../${FIXTURE_FILE}';\n`;
+    writeFileSync(path.join(out, 'fixture.ts'), shim);
   }
   const configFile = path.join(out, 'tsconfig.json');
   writeFileSync(configFile, `${JSON.stringify(exampleTsconfig(dir), null, 2)}\n`);
@@ -620,6 +661,29 @@ function checkFromBlocks(
   return { failures, markdown: lines.join(eol) };
 }
 
+/** Link targets of a Markdown file: inline `](target)` and reference `[label]: target`, anchors dropped. */
+function linkTargets(markdown: string): string[] {
+  const inline = [...markdown.matchAll(/\]\(\s*<?([^)\s>]+)/g)].map(match => match[1] ?? '');
+  const reference = [...markdown.matchAll(/^ {0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s|$)/gm)].map(match => match[1] ?? '');
+  return [...inline, ...reference].map(target => target.split('#')[0] ?? '');
+}
+
+/**
+ * A page whose compiled blocks import `./fixture.ts` must link `docs/examples/fixture.ts`
+ * (relative to the page). Without the link the import names a file the reader cannot find,
+ * which is the hidden prelude this design exists to avoid.
+ */
+function checkFixtureLink(file: string, examples: readonly Example[], markdown: string): ExampleFailure[] {
+  const first = examples.find(
+    example => example.skip === undefined && example.from === undefined && importsFixture(example.code),
+  );
+  if (first === undefined) return [];
+  const linked = linkTargets(markdown).some(
+    target => path.posix.normalize(path.posix.join(path.posix.dirname(file), target)) === FIXTURE_FILE,
+  );
+  return linked ? [] : [failure('DOCX_E014', file, first.line)];
+}
+
 /**
  * Extract, compile and (unless `run` is false) run every example of the package in `dir`.
  * `only` limits the check to those files (package-relative, as `docFiles` names them).
@@ -639,6 +703,7 @@ export function checkExamples(
     const extracted = extractExamples(file, markdown);
     examples.push(...extracted.examples);
     failures.push(...extracted.failures);
+    failures.push(...checkFixtureLink(file, extracted.examples, markdown));
     const mirrored = checkFromBlocks(root, extracted.examples, markdown, options.write === true);
     failures.push(...mirrored.failures);
     if (mirrored.markdown !== undefined) writeFileSync(full, mirrored.markdown);

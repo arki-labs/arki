@@ -124,6 +124,7 @@ declare const env: {
   readonly NODE_ENV: string;
   readonly GOOGLE_CLIENT_ID: string;
   readonly GOOGLE_CLIENT_SECRET: string;
+  readonly RESEND_API_KEY: string;
 };
 declare const kv: KV;
 
@@ -144,9 +145,15 @@ export type Auth = AuthOf<typeof authn>;
 export type Principal = PrincipalOf<Auth>;
 ```
 
-The app adds the plugin after its database and mail plugins:
+The app adds the plugin after its database and mail plugins. `database` here comes from [the docs fixture](docs/examples/fixture.ts), which holds an in-memory database for the examples; use your own database plugin.
 
-```ts skip="needs Postgres and a mail provider"
+```ts continue
+import { defineApp } from '@arki/dot';
+import { mail } from '@arki/mail/dot';
+import { resend } from '@arki/mail/http/resend';
+
+import { database } from './fixture.ts';
+
 export const app = defineApp('notes')
   .use(database)
   .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Notes <hi@notes.app>' })))
