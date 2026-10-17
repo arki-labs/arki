@@ -3,19 +3,37 @@ name: ARKI Release Gates
 on:
   pull_request:
     branches: [main, master]
+    paths:
+      - 'packages/**'
+      - 'tooling/**'
+      - 'arki.release.config.ts'
+      - '.changeset/**'
+      - '.github/workflows/arki-release-gates.yml'
   push:
     branches: [main, master]
+    paths:
+      - 'packages/**'
+      - 'tooling/**'
+      - 'arki.release.config.ts'
+      - '.changeset/**'
+      - '.github/workflows/arki-release-gates.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: arki-release-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # Only PR runs are replaced by a newer push; master/tag runs always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: 'true'
   # Quiet the changesets/turbo telemetry noise in CI logs.
   TURBO_TELEMETRY_DISABLED: '1'
   DO_NOT_TRACK: '1'
+  # Must match "packageManager" in the root package.json.
+  BUN_VERSION: '1.4.2'
 
 jobs:
   scorecard:
@@ -31,7 +49,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Setup Node 26
         uses: actions/setup-node@v4
@@ -86,6 +104,20 @@ jobs:
         run: bun run release:arki fixture --json > scorecard-fixture.json
         continue-on-error: true
 
+      - name: List affected public packages
+        run: |
+          bun -e '
+            const sh = (cmd) => new TextDecoder().decode(Bun.spawnSync(cmd).stdout);
+            const changed = sh(["git", "diff", "--name-only", "origin/master...HEAD"]).split("\n").filter(Boolean);
+            const inventory = JSON.parse(sh(["bun", "run", "release:arki", "inventory", "--json"]));
+            const names = inventory.items
+              .filter((pkg) => pkg.status === "candidate")
+              .filter((pkg) => changed.some((file) => file.startsWith(pkg.manifestPath.replace(/package\.json$/, ""))))
+              .map((pkg) => pkg.name);
+            await Bun.write("affected.json", JSON.stringify(names));
+            console.log("Affected public packages:", names.length === 0 ? "(none)" : names.join(", "));
+          '
+
       - name: Scorecard (machine output)
         id: scorecard
         run: |
@@ -122,6 +154,28 @@ jobs:
             scorecard.json
           retention-days: 30
 
+      - name: Fail on scorecard tool error (exit code 2)
+        if: steps.scorecard.outputs.scorecard_exit == '2'
+        run: |
+          echo "::error::Scorecard crashed or got bad flags (exit code 2)."
+          exit 1
+
+      - name: Fail PR on admission or docs-impact for affected packages
+        if: github.event_name == 'pull_request'
+        run: |
+          bun -e '
+            const scorecard = JSON.parse(await Bun.file("scorecard.json").text());
+            const affected = new Set(JSON.parse(await Bun.file("affected.json").text()));
+            const failures = scorecard.items
+              .filter((pkg) => affected.has(pkg.name))
+              .flatMap((pkg) => ["admission", "docs-impact"]
+                .filter((dimension) => pkg.dimensions[dimension].status === "fail")
+                .map((dimension) => pkg.name + ": " + dimension + " - " + pkg.dimensions[dimension].details));
+            for (const failure of failures) console.log("::error::" + failure);
+            if (failures.length > 0) process.exit(1);
+            console.log("admission and docs-impact pass for all affected packages.");
+          '
+
       - name: Fail on blocked gate (release branches / tags only)
         # PRs surface the gate as a check but don't block — the merge can
         # land with deferred items. Tags + master pushes require the gate
@@ -146,3 +200,184 @@ jobs:
           if [ "$GATE" != "open" ]; then
             echo "::warning::Stable release gate is currently blocked. Merging is permitted (PR mode); fix the blockers before tagging a release."
           fi
+
+  library:
+    name: Library check + layers
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Library check
+        run: bun run library-check
+
+      - name: Layers
+        run: bun run layers
+
+  docs:
+    name: Docs examples (affected)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test docs for affected packages
+        run: bun run turbo run test:docs --filter='...[origin/master]'
+
+  runtimes:
+    name: Runtimes (affected)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test runtimes for affected packages
+        run: bun run turbo run test:runtimes --filter='...[origin/master]'
+
+  smoke:
+    name: Candidate smoke (affected)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: List affected public packages
+        id: affected
+        run: |
+          bun -e '
+            const sh = (cmd) => new TextDecoder().decode(Bun.spawnSync(cmd).stdout);
+            const changed = sh(["git", "diff", "--name-only", "origin/master...HEAD"]).split("\n").filter(Boolean);
+            const inventory = JSON.parse(sh(["bun", "run", "release:arki", "inventory", "--json"]));
+            const names = inventory.items
+              .filter((pkg) => pkg.status === "candidate")
+              .filter((pkg) => changed.some((file) => file.startsWith(pkg.manifestPath.replace(/package\.json$/, ""))))
+              .map((pkg) => pkg.name);
+            console.log("Affected public packages:", names.length === 0 ? "(none)" : names.join(", "));
+            if (names.length === 0) console.log("Skipping smoke: no public package changed.");
+            require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "count=" + names.length + "\n");
+          '
+
+      - name: Freeze affected candidate
+        id: candidate
+        if: steps.affected.outputs.count != '0'
+        run: |
+          bun run release:arki candidate --affected origin/master --json > candidate-out.json
+          dir=$(jq -r '.summary.directory' candidate-out.json)
+          echo "directory=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke the candidate
+        if: steps.affected.outputs.count != '0'
+        run: bun run release:arki smoke --candidate "${{ steps.candidate.outputs.directory }}" --json
+
+      - name: Upload candidate.json
+        if: always() && steps.candidate.outputs.directory != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: arki-release-candidate
+          path: ${{ steps.candidate.outputs.directory }}/candidate.json
+          retention-days: 30
+
+  exclusions:
+    name: Intentional exclusions
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [scorecard, library, docs, runtimes, smoke]
+    if: always()
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Print every intentional exclusion
+        run: |
+          baseline=tooling/arki-release/readiness-baseline.json
+          echo "Readiness baseline: $(jq 'length' "$baseline") packages, $(jq '[.[] | length] | add' "$baseline") known-failing checks excluded."
+          bun run release:arki inventory --json > inventory.json
+          echo "Packages in notYet: $(jq '[.items[] | select(.status == "not-yet")] | length' inventory.json)"
+          jq -r '.items[] | select(.status == "not-yet") | "  notYet: " + .name' inventory.json
+          echo "Unadmitted public packages: $(jq '[.items[] | select(.status == "unadmitted")] | length' inventory.json)"
+          jq -r '.items[] | select(.status == "unadmitted") | "  unadmitted: " + .name' inventory.json
+          if [ -d demos ]; then
+            echo "Demo checks: demos/ is present in this clone."
+          else
+            echo "Demo checks skipped: demos/ is not in this clone."
+          fi
+          echo "Job results: scorecard=${{ needs.scorecard.result }} library=${{ needs.library.result }} docs=${{ needs.docs.result }} runtimes=${{ needs.runtimes.result }} smoke=${{ needs.smoke.result }}"
