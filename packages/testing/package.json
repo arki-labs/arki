@@ -50,6 +50,11 @@
       "import": "./src/e2e/index.ts",
       "node": "./src/e2e/index.ts"
     },
+    "./services/http-fixtures": {
+      "types": "./dist/src/services/http-fixtures.d.ts",
+      "import": "./src/services/http-fixtures.ts",
+      "node": "./src/services/http-fixtures.ts"
+    },
     "./services/mailpit": {
       "types": "./dist/src/services/mailpit.d.ts",
       "import": "./src/services/mailpit.ts",

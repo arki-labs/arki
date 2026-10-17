@@ -2,6 +2,8 @@
  * `@arki/testing/services/redis` — one Redis container per worker. A built production server
  * demands a KV store at boot, so every worker gets its own.
  */
+import { connect } from 'node:net';
+
 import { GenericContainer, Wait } from 'testcontainers';
 
 import { service } from '../stack/index.js';
@@ -28,3 +30,19 @@ export const redis = (options: { readonly image?: string } = {}) =>
       };
     },
   });
+
+/** Empties every key of the Redis at `url` (`FLUSHALL`), so one test's keys never reach the next. */
+export async function flushRedis(url: string): Promise<void> {
+  const { hostname, port } = new URL(url);
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host: hostname, port: Number(port) });
+    socket.setTimeout(10_000, () => socket.destroy(new Error('REDIS_FLUSH_TIMEOUT: Redis did not answer FLUSHALL.')));
+    socket.once('error', reject);
+    socket.once('connect', () => socket.write('FLUSHALL\r\n'));
+    socket.once('data', answer => {
+      socket.end();
+      if (answer.toString().startsWith('+OK')) resolve();
+      else reject(new Error(`REDIS_FLUSH_REFUSED: ${answer.toString().trim()}`));
+    });
+  });
+}

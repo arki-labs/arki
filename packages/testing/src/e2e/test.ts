@@ -11,13 +11,10 @@ import { writeFile } from 'node:fs/promises';
 import type {
   BrowserContext,
   Page,
-  PlaywrightTestArgs,
-  PlaywrightTestOptions,
-  PlaywrightWorkerArgs,
-  PlaywrightWorkerOptions,
   TestInfo,
 } from '@playwright/test';
 import { test as base } from '@playwright/test';
+import type { TestType } from '@playwright/test';
 
 import { getLogger } from '@arki/log';
 
@@ -25,6 +22,8 @@ import type { MailpitWorker, Mailbox, MailSummary, ReceivedMail } from '../servi
 import type { Json, ServiceSpec, Stack, WorkerValues } from '../stack/index.js';
 import type { RunningServer, ServerOptions } from './server.js';
 import { mailbox } from '../services/mailpit.js';
+import { truncateAll } from '../services/postgres.js';
+import { flushRedis } from '../services/redis.js';
 import { expect } from '../ai/playwright.js';
 import { readManifest } from '../stack/index.js';
 import { freePort, startServer } from './server.js';
@@ -71,7 +70,19 @@ type WorkerFixtures<M extends E2EServices, TServices> = {
   mailbox: Mailbox;
 };
 
+/**
+ * What a test shares with the ones before it on the same worker.
+ * `shared` (default): the worker's database, mail and keys as the last test left them.
+ * `fresh`: every table emptied, mail and keys flushed before the test starts. Use it for a test
+ * that runs work over everything in the database (a global cron), whose outcome would otherwise
+ * depend on the tests that ran before it. Set it with `test.use({ isolation: 'fresh' })`.
+ */
+export type Isolation = 'shared' | 'fresh';
+
 type TestFixtures<TUser, TFactories> = {
+  isolation: Isolation;
+  /** Runs first (it is automatic): puts the worker in the state `isolation` asks for. */
+  freshWorker: undefined;
   serverLog: undefined;
   actingAs(user?: { readonly email?: string }): Promise<Actor<TUser>>;
   cron: { run(name: string): Promise<CronRun> };
@@ -88,13 +99,6 @@ export type E2EOptions<M extends E2EServices, TServices, TUser, TFactories> = {
   /** The env name of the cron secret. Default `CRON_SECRET`. */
   readonly cronSecretEnv?: string;
 };
-
-type StoryArgs<M extends E2EServices, TServices, TUser, TFactories> = PlaywrightTestArgs &
-  PlaywrightTestOptions &
-  PlaywrightWorkerArgs &
-  PlaywrightWorkerOptions &
-  TestFixtures<TUser, TFactories> &
-  WorkerFixtures<M, TServices>;
 
 export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
   options: E2EOptions<M, TServices, TUser, TFactories>,
@@ -132,6 +136,27 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
       { scope: 'worker' },
     ],
     seed: [async ({ graph }, use) => use(graph), { scope: 'worker' }],
+    isolation: ['shared', { option: true }],
+    freshWorker: [
+      async ({ isolation, server, mailbox: box }, use, testInfo) => {
+        if (isolation === 'fresh') {
+          const started = performance.now();
+          const database = urlOf(server.values, 'postgres');
+          const keys = urlOf(server.values, 'redis');
+          await Promise.all([
+            database === undefined ? undefined : truncateAll(database),
+            keys === undefined ? undefined : flushRedis(keys),
+            box.clear(),
+          ]);
+          const ms = Math.round(performance.now() - started);
+          log.debug('Fresh isolation of worker {worker} took {ms} ms', { worker: testInfo.parallelIndex, ms });
+          testInfo.annotations.push({ type: 'fresh-isolation', description: `${ms} ms` });
+        }
+        // eslint-disable-next-line unicorn/no-useless-undefined -- Playwright types a void fixture's `use` as taking one argument
+        await use(undefined);
+      },
+      { auto: true },
+    ],
     mailbox: [async ({ server }, use) => use(mailbox(server.values.mailpit.httpUrl)), { scope: 'worker' }],
     // A failed test carries what its server printed, which is where a 500 explains itself.
     serverLog: [
@@ -147,13 +172,17 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
       { auto: true },
     ],
     baseURL: async ({ server }, use) => use(server.url),
-    factories: async ({ seed }, use) => use(options.factories(seed)),
-    cron: async ({ server, request }, use) => {
+    factories: async ({ seed, freshWorker }, use) => {
+      void freshWorker;
+      await use(options.factories(seed));
+    },
+    cron: async ({ server, request, freshWorker }, use) => {
+      void freshWorker;
       const secret = server.env[cronSecretEnv];
       if (secret === undefined) throw new Error(`CRON_SECRET_MISSING: the stack env must set ${cronSecretEnv}.`);
       await use({
         async run(name) {
-          const response = await request.post(`/api/cron/${name}`, { headers: { authorization: `Bearer ${secret}` } });
+          const response = await request.post(`/api/cron/${name}`, { headers: { authorization: `Bearer ${secret}` }, timeout: 0 });
           const text = await response.text();
           const body: unknown = text === '' ? null : JSON.parse(text);
           if (!response.ok()) throw new Error(`CRON_FAILED: ${name} answered ${response.status()}: ${text}`);
@@ -161,12 +190,20 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
         },
       });
     },
-    actingAs: async ({ seed, context, mailbox: box, server }, use) => {
+    actingAs: async ({ seed, context, browser, mailbox: box, server, freshWorker }, use) => {
+      void freshWorker;
+      // The test's own browser context serves the first actor. A second actor needs a context of
+      // their own, or their session cookie would replace the first one's.
+      const extra: BrowserContext[] = [];
+      let actors = 0;
       await use(async user => {
         const email = (user?.email ?? `actor-${Math.random().toString(36).slice(2, 8)}@e2e.test`).toLowerCase();
         const signed = await options.auth(seed).testing.signIn({ email });
-        await addSessionCookie(context, signed.headers, server.url);
-        const page = await context.newPage();
+        const own = actors === 0 ? context : await browser.newContext({ baseURL: server.url });
+        if (actors > 0) extra.push(own);
+        actors += 1;
+        await addSessionCookie(own, signed.headers, server.url);
+        const page = await own.newPage();
         return {
           email,
           user: signed.user,
@@ -178,22 +215,21 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
           },
         };
       });
+      for (const closing of extra) await closing.close();
     },
   });
 
-  /** A test that proves one user story. The title starts with the id, so the report and the PRD agree. */
-  function story(
-    id: string,
-    title: string,
-    body: (
-      args: StoryArgs<M, TServices, TUser, TFactories>,
-      testInfo: TestInfo,
-    ) => Promise<void> | void,
-  ) {
-    return test(`${id}: ${title}`, { annotation: { type: 'story', description: id }, tag: ['@story'] }, body);
-  }
+  const story = storyFor(test);
 
   return { test, expect, story };
+}
+
+/** The `url` a service published for this worker, when the stack has that service. */
+function urlOf(values: object, service: string): string | undefined {
+  const published: unknown = Reflect.get(values, service);
+  if (typeof published !== 'object' || published === null) return undefined;
+  const url: unknown = Reflect.get(published, 'url');
+  return typeof url === 'string' ? url : undefined;
 }
 
 /** `name=value` from a `cookie` header, installed on the browser context for the server's host. */
@@ -210,3 +246,34 @@ async function addSessionCookie(context: BrowserContext, headers: Headers, serve
 
 
 export {type WorkerValues} from '../stack/index.js';
+/** What a story body receives from a test built by `e2eTest`, plus whatever the app added with `extend`. */
+export type StoryBody<TArgs extends object, WArgs extends object> = (
+  args: TArgs & WArgs,
+  testInfo: TestInfo,
+) => Promise<void> | void;
+
+/**
+ * `story(id, title, body)` for any Playwright test, including one an app extended with its own
+ * fixtures. The title starts with the id, so the report and the PRD agree.
+ */
+export function storyFor<TArgs extends object, WArgs extends object>(test: TestType<TArgs, WArgs>) {
+  function story(id: string, title: string, body: StoryBody<TArgs, WArgs>): void;
+  /** `tag` adds to `@story`, so a project can pick this story out by tag. */
+  function story(id: string, title: string, details: { readonly tag: string }, body: StoryBody<TArgs, WArgs>): void;
+  function story(
+    id: string,
+    title: string,
+    detailsOrBody: { readonly tag: string } | StoryBody<TArgs, WArgs>,
+    maybeBody?: StoryBody<TArgs, WArgs>,
+  ): void {
+    const [extraTag, body] =
+      typeof detailsOrBody === 'function' ? [undefined, detailsOrBody] : [detailsOrBody.tag, maybeBody];
+    if (body === undefined) throw new Error(`STORY_BODY_MISSING: story ${id} has no body.`);
+    test(
+      `${id}: ${title}`,
+      { annotation: { type: 'story', description: id }, tag: extraTag === undefined ? ['@story'] : ['@story', extraTag] },
+      body,
+    );
+  }
+  return story;
+}

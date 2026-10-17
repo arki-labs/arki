@@ -31,6 +31,31 @@ export const systemTransport: PublicFetchTransport = {
   },
 };
 
+/** The env variable that lists hosts the guard lets through even at a private address (tests only). */
+export const FETCH_ALLOW_HOSTS_ENV = 'FETCH_ALLOW_HOSTS';
+
+/**
+ * Hosts (`host:port`, comma separated, from `FETCH_ALLOW_HOSTS`) that skip the private-address
+ * checks. It exists so an end-to-end test can fetch from a feed server on the same machine. It
+ * throws in production, so a misset variable can never open the guard; call it at boot to fail early.
+ * Only the exact `host:port` listed is allowed; every other private address is still refused.
+ */
+export function fetchAllowedHosts(
+  env: Readonly<Record<string, string | undefined>> = typeof process === 'undefined' ? {} : process.env,
+): ReadonlySet<string> {
+  const listed = (env[FETCH_ALLOW_HOSTS_ENV] ?? '')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(host => host !== '');
+  if (listed.length > 0 && env['NODE_ENV'] === 'production')
+    throw new Error(`${FETCH_ALLOW_HOSTS_ENV} is for tests only; refusing to run in production.`);
+  return new Set(listed);
+}
+
+function isAllowedHost(url: URL) {
+  return fetchAllowedHosts().has(url.host.toLowerCase());
+}
+
 export function isPublicAddress(address: string) {
   try {
     return ipaddr.process(address).range() === 'unicast';
@@ -55,7 +80,7 @@ export function validatePublicURL(value: string, options: { allowCredentials?: b
   if (!['http:', 'https:'].includes(url.protocol) || (hasCredentials && !options.allowCredentials))
     throw new UnsafeUrlError('Only public HTTP feeds are supported.');
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (ipaddr.isValid(host) && !isPublicAddress(host))
+  if (ipaddr.isValid(host) && !isPublicAddress(host) && !isAllowedHost(url))
     throw new UnsafeUrlError('Private network addresses are not allowed.');
   return url;
 }
@@ -102,7 +127,7 @@ async function fetchPinned(request: PinnedRequest) {
       ? transport.lookup(host)
       : Promise.race([transport.lookup(host), untilAborted(signal)]));
     const [address] = addresses;
-    if (address === undefined || addresses.some(a => !isPublicAddress(a.address)))
+    if (address === undefined || (!addresses.every(a => isPublicAddress(a.address)) && !isAllowedHost(url)))
       throw new UnsafeUrlError('Private network addresses are not allowed.');
     // Resolve once and pin the connection; a second DNS answer must never select a private address.
     const agent = new Agent({

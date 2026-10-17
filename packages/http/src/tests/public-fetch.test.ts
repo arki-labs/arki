@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { HTTP_ERROR_CODES } from '../error.js';
-import { publicFetch, safeFetchBytes, UnsafeUrlError, validatePublicURL } from '../public-fetch.js';
+import { fetchAllowedHosts, publicFetch, safeFetchBytes, UnsafeUrlError, validatePublicURL } from '../public-fetch.js';
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), fetch: vi.fn(), destroy: vi.fn(), agent: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
@@ -306,5 +306,34 @@ describe('UnsafeUrlError: a refusal, not a network failure', () => {
     const error = await rejection(safeFetchBytes('https://hooks.example/x', { transport }));
     expect(error).toBeInstanceOf(TypeError);
     expect(error).not.toBeInstanceOf(UnsafeUrlError);
+  });
+});
+
+describe('the test-only host allowance', () => {
+  // WHY: an end-to-end test fetches a feed from a server on this machine; nothing else private may open.
+  afterEach(() => {
+    delete process.env['FETCH_ALLOW_HOSTS'];
+  });
+  const loopbackTransport = () => ({
+    lookup: vi.fn().mockResolvedValue([{ address: '127.0.0.1', family: 4 }]),
+    fetch: vi.fn().mockResolvedValue(new Response('feed', { status: 200 })),
+  });
+
+  it('fetches a listed host:port at a loopback address', async () => {
+    process.env['FETCH_ALLOW_HOSTS'] = '127.0.0.1:4567';
+    const transport = loopbackTransport();
+    const result = await safeFetchBytes('http://127.0.0.1:4567/feed', { transport });
+    expect(new TextDecoder().decode(result.bytes)).toBe('feed');
+  });
+
+  it('still refuses a loopback host or port that is not listed', async () => {
+    process.env['FETCH_ALLOW_HOSTS'] = '127.0.0.1:4567';
+    await expect(safeFetchBytes('http://127.0.0.1:9999/feed', { transport: loopbackTransport() })).rejects.toThrow('Private network');
+    await expect(safeFetchBytes('http://localhost:4567/feed', { transport: loopbackTransport() })).rejects.toThrow('Private network');
+  });
+
+  it('refuses to run in production with the allowance set', () => {
+    expect(() => fetchAllowedHosts({ FETCH_ALLOW_HOSTS: '127.0.0.1:4567', NODE_ENV: 'production' })).toThrow('tests only');
+    expect(fetchAllowedHosts({ NODE_ENV: 'production' }).size).toBe(0);
   });
 });
