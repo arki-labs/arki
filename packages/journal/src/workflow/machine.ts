@@ -93,6 +93,21 @@ export function workflowMachine<
     'Parked',
     z.object({ node: nodePath, waitingFor: z.string().nullable(), wakeAt: at.nullable(), at }),
   );
+  /**
+   * A child or map node reached its work: the child runs it will start, in order, each with its stored input, and the
+   * run parks until they end. `base` is the node path with the visit of a loop appended (`fan`, `fan:2`); every child's
+   * `parentPath` is it. Children that wait for a free slot (`concurrency`) are started later, from this list.
+   */
+  const ChildrenPlanned = j.event(
+    'ChildrenPlanned',
+    z.object({
+      path: nodePath,
+      base: z.string().min(1),
+      def: z.object({ name: z.string().min(1), version: z.int().positive() }),
+      children: z.array(z.object({ id: z.string().min(1), input: z.unknown() })).min(1),
+      at,
+    }),
+  );
   const SignalReceived = j.event(
     'SignalReceived',
     z.object({ name: z.string().min(1), deliveryId: z.string().min(1), at }),
@@ -153,6 +168,13 @@ export function workflowMachine<
       waitingFor: e.data.waitingFor,
       wakeAt: e.data.wakeAt === null ? null : new Date(e.data.wakeAt),
     }))
+    // The run waits for its children: the wake is `NodeCompleted` when they have all (or the first) ended well.
+    .on(ChildrenPlanned, (_row, e) => ({
+      state: 'parked',
+      node: e.data.path,
+      waitingFor: null,
+      wakeAt: null,
+    }))
     // The signal row is written by the signal command; the wake that follows is NodeCompleted.
     .on(SignalReceived, () => ({}))
     .on(TimerFired, row => ({
@@ -167,7 +189,14 @@ export function workflowMachine<
       cancelledAt: row.cancelledAt ?? new Date(e.data.at),
       cancelReason: row.cancelReason ?? e.data.reason,
     }))
-    .on(CompensationStarted, () => ({ state: 'compensating', wakeAt: null, waitingFor: null }))
+    // A completed child run is reopened by its parent to undo its work: it is unfinished again until it ends cancelled.
+    .on(CompensationStarted, () => ({
+      state: 'compensating',
+      wakeAt: null,
+      waitingFor: null,
+      finishedAt: null,
+      keepUntil: null,
+    }))
     .on(RunCompleted, (_row, e) => ({ state: 'completed', output: e.data.output, ...finished(e.data) }))
     .on(RunFailed, (_row, e) => ({ state: 'failed', ...finished(e.data) }))
     .on(RunCancelled, (_row, e) => ({ state: 'cancelled', ...finished(e.data) }));
@@ -252,6 +281,7 @@ export function workflowMachine<
       NodeSkipped,
       NodeFailed,
       Parked,
+      ChildrenPlanned,
       SignalReceived,
       TimerFired,
       DeadlineReached,

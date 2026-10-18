@@ -180,6 +180,41 @@ describe('the workflow builder, as types', () => {
     base().child('ledger', ledger, { input: () => ({ refundId: 1 }) });
   });
 
+  it('a child undo gets the child output as result', () => {
+    const ledger = workflow('ledger', { version: 1, input: z.object({ refundId: z.string() }) })
+      .step('post', () => ({ entryId: 'e1' }))
+      .finish(({ results }) => ({ entryId: results.post.entryId }));
+    base().child('ledger', ledger, {
+      input: () => ({ refundId: 'x' }),
+      undo: ({ result }) => {
+        expectTypeOf(result).toEqualTypeOf<{ entryId: string }>();
+      },
+    });
+    base().child('ledger', ledger, {
+      input: () => ({ refundId: 'x' }),
+      // @ts-expect-error the child output has no refundId
+      undo: ({ result }) => result.refundId,
+    });
+  });
+
+  it('a map input must return the item workflow input, and gets the item and its index', () => {
+    const item = workflow('item', { version: 1, input: z.object({ id: z.string() }) })
+      .step('work', ({ input }) => ({ done: input.id }))
+      .finish();
+    workflow('batch', { version: 1, input: z.object({ ids: z.array(z.string()) }) }).map('all', item, {
+      items: ({ input }) => input.ids,
+      input: (_ctx, id, index) => {
+        expectTypeOf(index).toEqualTypeOf<number>();
+        return { id };
+      },
+    });
+    workflow('batch', { version: 1, input: z.object({ ids: z.array(z.string()) }) }).map('all', item, {
+      items: ({ input }) => input.ids,
+      // @ts-expect-error the item workflow needs a string id
+      input: () => ({ id: 1 }),
+    });
+  });
+
   it('a map result is an array of the item result, or one item result with wait any', () => {
     const item = workflow('item', { version: 1, input: z.object({ id: z.string() }) })
       .step('work', ({ input }) => ({ done: input.id }))
@@ -187,12 +222,12 @@ describe('the workflow builder, as types', () => {
     workflow('batch', { version: 1, input: z.object({ ids: z.array(z.string()) }) })
       .map('all', item, {
         items: ({ input }) => input.ids,
-        input: id => {
+        input: (_ctx, id) => {
           expectTypeOf(id).toEqualTypeOf<string>();
           return { id };
         },
       })
-      .map('first', item, { items: ({ input }) => input.ids, input: id => ({ id }), wait: 'any' })
+      .map('first', item, { items: ({ input }) => input.ids, input: (_ctx, id) => ({ id }), wait: 'any' })
       .step('after', ({ results }) => {
         expectTypeOf(results.all).toEqualTypeOf<{ done: string }[]>();
         expectTypeOf(results.first).toEqualTypeOf<{ done: string }>();

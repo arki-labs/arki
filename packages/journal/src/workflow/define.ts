@@ -71,10 +71,14 @@ export type WorkflowNode =
   | {
       readonly kind: 'child';
       readonly name: string;
-      readonly undo: false;
+      /** True when the node has an `undo` of its own, which then replaces compensating the child run. */
+      readonly undo: boolean;
       readonly def: WorkflowDef | Body<WorkflowDef>;
       readonly input: Body<unknown>;
       readonly onCancel: 'cancel' | 'detach';
+      readonly options: {
+        readonly undo?: BivariantFn<[ctx: ErasedContext & { readonly result: unknown }], unknown>;
+      };
     }
   | {
       readonly kind: 'map';
@@ -82,7 +86,7 @@ export type WorkflowNode =
       readonly undo: false;
       readonly def: WorkflowDef;
       readonly items: Body<readonly unknown[]>;
-      readonly input: BivariantFn<[item: unknown, ctx: ErasedContext], unknown>;
+      readonly input: BivariantFn<[ctx: ErasedContext, item: unknown, index: number], unknown>;
       readonly wait: 'all' | 'any';
       readonly concurrency?: number;
     };
@@ -242,7 +246,10 @@ export type WorkflowBuilder<
     def: Def | ((ctx: Ctx<Input, Results, N, Where>) => Def),
     options: {
       readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
+      /** What a cancel of this run does to the child: cancel it (default) or leave it running. */
       readonly onCancel?: 'cancel' | 'detach';
+      /** Undoes the node when the run compensates. Without it, the child run itself is compensated. */
+      readonly undo?: (ctx: Ctx<Input, Results, N, Where> & { readonly result: OutputOf<Def> }) => unknown;
     },
   ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals>;
 
@@ -251,7 +258,7 @@ export type WorkflowBuilder<
     def: Def,
     options: {
       readonly items: (ctx: Ctx<Input, Results, N, Where>) => readonly Item[];
-      readonly input: (item: Item, ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
+      readonly input: (ctx: Ctx<Input, Results, N, Where>, item: Item, index: number) => SchemaInput<Def['input']>;
       readonly wait?: Wait;
       readonly concurrency?: number;
     },
@@ -374,7 +381,7 @@ function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
 
 function refuseUndo(workflowName: string, kind: string, name: string, options: object | undefined) {
   if (options !== undefined && 'undo' in options) {
-    refuse(workflowName, `${kind} '${name}' cannot have an undo; only a step can be undone`);
+    refuse(workflowName, `${kind} '${name}' cannot have an undo; only a step or a child can be undone`);
   }
 }
 
@@ -445,15 +452,15 @@ function makeBuilder<
       return makeBuilder(withNode(state, { kind: 'sleep', name, undo: false, until }));
     },
     child: (name, def, options) => {
-      refuseUndo(state.name, 'child', name, options);
       return makeBuilder(
         withNode(state, {
           kind: 'child',
           name,
-          undo: false,
+          undo: options.undo !== undefined,
           def,
           input: options.input,
           onCancel: options.onCancel ?? 'cancel',
+          options: { undo: options.undo },
         }),
       );
     },
@@ -482,7 +489,7 @@ function makeBuilder<
 /**
  * Starts a workflow definition. The version and input schema are required; nodes follow.
  * Throws `BAD_DEFINITION`, naming the workflow, for a duplicate node name, a `next` that is not
- * an earlier node, an `undo` on anything but a step, and a workflow with no node.
+ * an earlier node, an `undo` on anything but a step or a child, and a workflow with no node.
  */
 export function workflow<
   Input extends StandardSchemaV1,

@@ -47,7 +47,7 @@ describe('the shape manifest', () => {
       .finish();
     const def = base('parent')
       .child('one', item, { input: () => ({ paymentId: 'a' }) })
-      .map('many', item, { items: () => ['a', 'b'], input: id => ({ paymentId: id }) })
+      .map('many', item, { items: () => ['a', 'b'], input: (_ctx, id) => ({ paymentId: id }) })
       .finish();
     expect(def.shape.nodes.map(node => [node.name, node.kind])).toEqual([
       ['one', 'child'],
@@ -218,10 +218,6 @@ describe('definition rules, each throws BAD_DEFINITION naming the workflow', () 
     expect(refusal(() => base().sleep('s', '1h', { undo }))).toContain('cannot have an undo');
     // @ts-expect-error waitFor has no undo option
     expect(refusal(() => base('loose').waitFor('w', { signal: 's', schema: z.string(), undo }))).toContain('loose');
-    // @ts-expect-error child has no undo option
-    expect(refusal(() => base().child('c', child, { input: () => ({ paymentId: 'x' }), undo }))).toContain(
-      'only a step can be undone',
-    );
     expect(
       // @ts-expect-error map has no undo option
       refusal(() => base().map('m', child, { items: () => [], input: () => ({ paymentId: 'x' }), undo })),

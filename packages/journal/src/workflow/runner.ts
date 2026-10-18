@@ -17,9 +17,9 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { defineFailure, isFailure } from '@arki/failure';
 import { parseAsync, SchemaError } from '@arki/schema';
 
-import type { Command, JournalDefinitions, RootCommandRunner } from '../api.js';
+import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
 import type { JournalTables } from '../pg.js';
-import type { JobRetention } from '../retention.js';
+import type { JobRetention, RetentionAge } from '../retention.js';
 import type { EffectContext, Needed, Needs, RecordedOf, RootDb, TransactionSource } from '../types.js';
 import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
 import { debugWorkflow } from '../debug.js';
@@ -40,6 +40,14 @@ export const TIMER_EFFECT = 'workflow.timer';
 const WORKFLOW_ACTOR = 'system:workflow';
 /** The command that moves a run on after a node attempt. Internal: only the step effect runs it. */
 const CHECKPOINT_COMMAND = 'workflow.checkpoint';
+/** The command a parent's checkpoint runs to start one child run. Internal. */
+const START_CHILD_COMMAND = 'workflow.startChild';
+const startChildSchema = z.object({
+  def: z.object({ name: z.string().min(1), version: z.int().positive() }),
+  id: z.string().min(1),
+  input: z.unknown(),
+  parent: z.object({ id: z.string().min(1), path: z.string().min(1) }),
+});
 
 /** What a step's last attempt returns to the worker when the step is dead: the job dies at once and an operator can revive it. */
 const StepDead = defineFailure('journal.workflow.step_dead', {
@@ -128,6 +136,14 @@ const routeSchema = z.discriminatedUnion('go', [
   z.object({ go: z.literal('finish'), output: z.unknown(), keepUntil: isoTime.nullable() }),
 ]);
 type Route = z.infer<typeof routeSchema>;
+/** The child runs of one visit of a child or map node. */
+const childrenPlanSchema = z.object({
+  /** The node path, with the visit of a loop appended (`fan`, `fan:2`): the `parentPath` of every child. */
+  base: z.string().min(1),
+  def: z.object({ name: z.string().min(1), version: z.int().positive() }),
+  children: z.array(z.object({ id: z.string().min(1), input: z.unknown() })).min(1),
+});
+type ChildrenPlan = z.infer<typeof childrenPlanSchema>;
 const nodeCheckpointSchema = z.object({
   runId: z.string().min(1),
   path: z.string().min(1),
@@ -145,6 +161,8 @@ const nodeCheckpointSchema = z.object({
     z.object({ kind: z.literal('undone'), result: z.unknown() }),
     /** A `waitFor` or `sleep` node has nothing to run: the run parks until the signal or `wakeAt`. */
     z.object({ kind: z.literal('park'), waitingFor: z.string().min(1).nullable(), wakeAt: isoTime.nullable() }),
+    /** A `child` or `map` node worked out its child runs (ids and checked inputs): the run parks and starts them. */
+    z.object({ kind: z.literal('children'), plan: childrenPlanSchema }),
   ]),
 });
 /** A timer job fired: the wake time of a park, or the deadline of the run. */
@@ -185,6 +203,7 @@ type Verdict =
   | { readonly kind: 'skipped'; readonly reason: string; readonly route: Route }
   | { readonly kind: 'completed'; readonly result: unknown; readonly route: Route }
   | { readonly kind: 'undone'; readonly result: unknown }
+  | { readonly kind: 'children'; readonly plan: ChildrenPlan }
   | { readonly kind: 'failed'; readonly reason: unknown; readonly retryable: boolean };
 
 const failed = (reason: unknown, retryable = true): Verdict => ({ kind: 'failed', reason, retryable });
@@ -253,7 +272,7 @@ const settledNodeSchema = z.object({
   result: z.unknown().optional(),
 });
 const failedNodeSchema = z.object({ error: z.string().min(1) });
-/** A completed `do` step that an undo may still have to answer: its path, which visit of the node it was, and its result. */
+/** A completed `do` node (step, child or map) that an undo may still have to answer: its path, which visit of the node it was, and its result. */
 type Done = { readonly path: string; readonly visit: number; readonly result: unknown };
 
 /**
@@ -270,11 +289,14 @@ function remainingUndos(
   const visits = new Map<string, number>();
   const done: Done[] = [];
   let undone = undoneNow;
-  const isStep = (path: string) => def.nodes.some(node => node.name === path && node.kind === 'step');
+  const isUndoable = (path: string) =>
+    def.nodes.some(
+      node => node.name === path && (node.kind === 'step' || node.kind === 'child' || node.kind === 'map'),
+    );
   const see = (path: string, completed: boolean, result: unknown) => {
     const visit = (visits.get(path) ?? 0) + 1;
     visits.set(path, visit);
-    if (completed && isStep(path)) done.push({ path, visit, result });
+    if (completed && isUndoable(path)) done.push({ path, visit, result });
   };
   for (const event of settled) {
     const data = settledNodeSchema.parse(event.data);
@@ -285,6 +307,22 @@ function remainingUndos(
   return done.slice(0, Math.max(done.length - undone, 0)).reverse();
 }
 
+/** A run may have at most this many ancestors: a start any deeper is refused with `WORKFLOW_LIMIT`. */
+const MAX_CHILD_DEPTH = 8;
+/** `workflow_runs.id` is a `varchar(256)`. */
+const MAX_RUN_ID_LENGTH = 256;
+/** The id stem of a node visit's children: the node path, and `:2`, `:3` when a `next` loop comes back to it. */
+const childBase = (path: string, visit: number) => (visit === 1 ? path : `${path}:${visit}`);
+/** The child or map node a `parentPath` (a `childBase`) belongs to. */
+function nodeOfBase(def: WorkflowDef, base: string): WorkflowNode | undefined {
+  const exact = def.nodes.find(node => node.name === base);
+  if (exact !== undefined) return exact;
+  const looped = /^(.*):\d+$/.exec(base);
+  return looped?.[1] === undefined ? undefined : def.nodes.find(node => node.name === looped[1]);
+}
+/** A cancel of the parent leaves a detached child running, and compensation does not wait for it. */
+const isDetached = (node: WorkflowNode | undefined) => node?.kind === 'child' && node.onCancel === 'detach';
+
 const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 const keepUntilFor = (age: WorkflowDef['retention']['completed']): string | null =>
   age === undefined || age === 'forever' ? null : inMs(parseAge(age));
@@ -294,6 +332,40 @@ type Definitions<
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 > = Pick<JournalDefinitions<Meta, Tx, AppDb>, 'event' | 'entity' | 'projection' | 'command' | 'effect'>;
+
+/** The body of one node attempt, bounded by the step's timeout. A timeout aborts `signal` and fails the attempt. */
+async function runBody(
+  node: { readonly name: string; readonly timeout: RetentionAge | undefined },
+  invoke: (ctx: ErasedContext) => unknown,
+  build: (signal: AbortSignal) => ErasedContext,
+  signal: AbortSignal,
+  runId: string,
+) {
+  const timeoutMs = node.timeout === undefined ? undefined : parseAge(node.timeout);
+  if (timeoutMs === undefined) return invoke(build(signal));
+  const timeout = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new JournalError(
+        'STEP_TIMEOUT',
+        'workflow',
+        runId,
+        `step '${node.name}' ran longer than ${timeoutMs} ms`,
+      );
+      timeout.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => invoke(build(AbortSignal.any([signal, timeout.signal])))),
+      expired,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * The workflow runner of one `initJournal()`: `workflow` builds definitions with `start`; `register`, called by
@@ -310,12 +382,9 @@ export function createWorkflows<
   const { run, events } = machine;
   const { workflowRuns, workflowSteps, workflowSignals } = tables;
 
-  /**
-   * The step key of a node's next visit: `<run>:<path>:do`, and `…:do:2`, `…:do:3` when a `next` loop comes back to
-   * it. A retry of the same visit keeps the key, so a provider that dedupes on it dedupes the retry; a new visit gets a new one.
-   */
-  const keyOfNextVisit = async (tx: Tx, runId: string, path: string) => {
-    const [seen] = await tx
+  /** Which visit of a node the run is on: 1 the first time, 2 when a `next` loop comes back to it, and so on. */
+  const visitOf = async (db: Pick<Tx, 'select'>, runId: string, path: string) => {
+    const [seen] = await db
       .select({ n: count() })
       .from(tables.events)
       .where(
@@ -327,7 +396,14 @@ export function createWorkflows<
           sql`${tables.events.data} ->> 'phase' = 'do'`,
         ),
       );
-    const visit = (seen?.n ?? 0) + 1;
+    return (seen?.n ?? 0) + 1;
+  };
+  /**
+   * The step key of a node's next visit: `<run>:<path>:do`, and `…:do:2`, `…:do:3` when a `next` loop comes back to
+   * it. A retry of the same visit keeps the key, so a provider that dedupes on it dedupes the retry; a new visit gets a new one.
+   */
+  const keyOfNextVisit = async (tx: Tx, runId: string, path: string) => {
+    const visit = await visitOf(tx, runId, path);
     return visit === 1 ? `${runId}:${path}:do` : `${runId}:${path}:do:${visit}`;
   };
 
@@ -457,6 +533,26 @@ export function createWorkflows<
       : failedNodeSchema.parse(last.data).error;
   };
 
+  /** The child runs of a run: which are unfinished, which completed, and which node visit each belongs to. */
+  const kidsOf = (tx: Tx, runId: string) =>
+    tx
+      .select({
+        id: workflowRuns.id,
+        state: workflowRuns.state,
+        parentPath: workflowRuns.parentPath,
+        finishedAt: workflowRuns.finishedAt,
+      })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.parentId, runId));
+  /** A step whose attempt is in flight, or whose undo is: the run is not between two nodes, so a child ending must not move it. */
+  const hasScheduledStep = async (tx: Tx, runId: string) => {
+    const [open] = await tx
+      .select({ n: count() })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.runId, runId), eq(workflowSteps.status, 'scheduled')));
+    return (open?.n ?? 0) > 0;
+  };
+
   type CompensateOptions = {
     /** The text of `RunFailed`; null looks it up from the events (after an undo settles). */
     readonly cause: string | null;
@@ -473,6 +569,10 @@ export function createWorkflows<
    * none is left. A step without an `undo` is recorded as skipped (the `residual` of the run) and the next is tried.
    * Nodes that are not steps (waitFor, sleep) have nothing to undo and leave no row. The undo of a loop's second visit
    * gets its own key: `<run>:<path>:undo:2`.
+   *
+   * A child or map node is undone by its `undo` (a child node only), else through its child runs: a completed child is
+   * reopened and undoes itself (`driveChildren` does that), and the node's undo is settled once none is left completed.
+   * While a child that the run must wait for is unfinished (cancelled with the run, or being reopened), nothing moves.
    */
   const compensate = async (tx: Tx, def: WorkflowDef, row: Row, at: string, options: CompensateOptions) => {
     const settled = await tx
@@ -482,16 +582,41 @@ export function createWorkflows<
       .orderBy(asc(tables.events.seq));
     const out: (
       | ReturnType<typeof events.NodeScheduled>
+      | ReturnType<typeof events.NodeCompleted>
       | ReturnType<typeof events.NodeSkipped>
       | ReturnType<typeof events.RunCancelled>
       | ReturnType<typeof events.RunFailed>
     )[] = [];
+    const kids = await kidsOf(tx, row.id);
+    const waitedFor = (kid: (typeof kids)[number]) =>
+      kid.finishedAt === null && !isDetached(nodeOfBase(def, kid.parentPath ?? ''));
+    if (kids.some(kid => waitedFor(kid))) return out;
     for (const item of remainingUndos(def, settled, options.doneNow, options.undoneNow)) {
       const node = def.nodes.find(candidate => candidate.name === item.path);
-      if (node?.kind === 'step' && node.options.undo !== undefined) {
+      const hasUndo =
+        (node?.kind === 'step' && node.options.undo !== undefined) || (node?.kind === 'child' && node.undo);
+      if (hasUndo) {
         const key = `${row.id}:${item.path}:undo${item.visit === 1 ? '' : `:${item.visit}`}`;
         out.push(events.NodeScheduled({ path: item.path, phase: 'undo', attempt: 1, key, jobId: null, at }));
         return out;
+      }
+      if (node?.kind === 'child' || node?.kind === 'map') {
+        if (isDetached(node)) {
+          out.push(
+            events.NodeSkipped({
+              path: item.path,
+              phase: 'undo',
+              reason: 'the child was detached, so it is left running',
+              actorId: null,
+              at,
+            }),
+          );
+          continue;
+        }
+        const base = childBase(item.path, item.visit);
+        if (kids.some(kid => kid.parentPath === base && kid.state === 'completed')) return out;
+        out.push(events.NodeCompleted({ path: item.path, phase: 'undo', result: null, resolvedBy: null, at }));
+        continue;
       }
       out.push(
         events.NodeSkipped({ path: item.path, phase: 'undo', reason: 'the step declares no undo', actorId: null, at }),
@@ -746,12 +871,283 @@ export function createWorkflows<
     );
   };
 
+  type RunCtx = Pick<CommandContext<MetaOut, Tx>, 'write' | 'run' | 'accept' | 'tx'>;
+  type Written = { readonly row: Row | null; readonly events: readonly RunEvent[] };
+  const ENDS = new Set(['RunCompleted', 'RunFailed', 'RunCancelled']);
+  const plannedSchema = childrenPlanSchema.extend({ path: z.string().min(1) });
+  type Planned = z.infer<typeof plannedSchema>;
+
+  /** The newest plan of a run's children, or the one of this `base`. */
+  const plannedOf = async (tx: Tx, runId: string, base?: string): Promise<Planned | undefined> => {
+    const [latest] = await tx
+      .select({ data: tables.events.data })
+      .from(tables.events)
+      .where(
+        and(
+          eq(tables.events.kind, 'workflow.run'),
+          eq(tables.events.entityId, runId),
+          eq(tables.events.type, 'ChildrenPlanned'),
+          base === undefined ? undefined : sql`${tables.events.data} ->> 'base' = ${base}`,
+        ),
+      )
+      .orderBy(desc(tables.events.seq))
+      .limit(1);
+    return latest === undefined ? undefined : plannedSchema.parse(latest.data);
+  };
+
+  /** A node whose work cannot go on and cannot be retried: `NodeFailed`, then `onDeadStep` decides (wait for an operator, or compensate). */
+  const deadNode = async (tx: Tx, def: WorkflowDef, row: Row, path: string, error: string, at: string) => {
+    const [step] = await tx
+      .select({ attempt: workflowSteps.attempt })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, path), eq(workflowSteps.phase, 'do')));
+    const failedNode = events.NodeFailed({ path, phase: 'do', attempt: Math.max(step?.attempt ?? 1, 1), error, at });
+    if (def.onDeadStep === 'wait') return [failedNode];
+    return beginCompensation(tx, def, row, at, [failedNode], { closed: true, cause: error });
+  };
+
+  /** The children node `index` is over: the outputs of `ids`, checked with the child workflow's output schema, are its result. */
+  const completeChildren = async (
+    tx: Tx,
+    def: WorkflowDef,
+    index: number,
+    parent: Row,
+    plan: Planned,
+    ids: readonly string[],
+    list: boolean,
+    at: string,
+  ) => {
+    const stored = await tx
+      .select({ id: workflowRuns.id, output: workflowRuns.output })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.parentId, parent.id), inArray(workflowRuns.id, [...ids])));
+    const outputOf = new Map(stored.map(kid => [kid.id, kid.output]));
+    const childDef = started.get(`${plan.def.name}@${plan.def.version}`);
+    try {
+      const checked: unknown[] = [];
+      for (const id of ids) {
+        const raw = outputOf.get(id);
+        checked.push(childDef?.output === undefined ? raw : await parseAsync(childDef.output, raw));
+      }
+      const kept = storable(list ? checked : checked[0], def.limits.payload, `the result of '${plan.path}'`, parent.id);
+      if (kept instanceof JournalError) return deadNode(tx, def, parent, plan.path, reasonText(kept), at);
+      return completeWait(tx, def, index, parent, kept.value, at);
+    } catch (error) {
+      return deadNode(tx, def, parent, plan.path, reasonText(error), at);
+    }
+  };
+
+  /** What a write to a run asks of the other runs, done after it: children to start, and children to stop. */
+  type Moves = {
+    starts: { readonly plan: Planned; readonly children: Planned['children'] } | undefined;
+    readonly stops: string[];
+  };
+
+  /** A child run of the node this parent waits on has ended (or the parent looks again): the parent's node may be over. */
+  const onChildEnded = async (tx: Tx, parent: Row, base: string, at: string, moves: Moves) => {
+    const def = definitionOf(parent);
+    if (parent.state === 'compensating') {
+      const plan = await plannedOf(tx, parent.id, base);
+      const node = def.nodes.find(candidate => candidate.name === plan?.path);
+      // A detached child is not waited for; a run that is between two nodes in flight moves on its own checkpoint.
+      if (plan === undefined || isDetached(node) || (await hasScheduledStep(tx, parent.id))) return [];
+      return compensate(tx, def, parent, at, { cause: null });
+    }
+    if (parent.state !== 'parked') return [];
+    const plan = await plannedOf(tx, parent.id);
+    if (plan === undefined || plan.base !== base || parent.node !== plan.path) return [];
+    const index = def.nodes.findIndex(candidate => candidate.name === plan.path);
+    const node = def.nodes[index];
+    if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
+      throw new JournalError('BAD_DEFINITION', 'workflow', parent.id, `"${def.name}" has no child node '${plan.path}'`);
+    }
+    // A node that is dead already waits for an operator: a later child end changes nothing.
+    const [step] = await tx
+      .select({ status: workflowSteps.status })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.runId, parent.id), eq(workflowSteps.path, plan.path), eq(workflowSteps.phase, 'do')));
+    if (step?.status === 'failed') return [];
+    if (pastDeadline(parent)) return deadlineEvents(tx, def, parent, at);
+
+    const allKids = await kidsOf(tx, parent.id);
+    const kids = allKids.filter(kid => kid.parentPath === plan.base);
+    const known = new Set(kids.map(kid => kid.id));
+    const unfinished = kids.filter(kid => kid.finishedAt === null);
+    const ended = kids.filter(kid => kid.finishedAt !== null);
+    const pending = plan.children.filter(child => !known.has(child.id));
+    const free =
+      node.kind === 'map' && node.concurrency !== undefined ? node.concurrency - unfinished.length : pending.length;
+    const startNext = () => {
+      if (pending.length > 0 && free > 0) moves.starts = { plan, children: pending.slice(0, free) };
+      return [];
+    };
+    const describe = (kid: (typeof kids)[number]) => `child run ${kid.id} ${kid.state}`;
+
+    if (node.kind === 'map' && node.wait === 'any') {
+      const winner = ended
+        .filter(kid => kid.state === 'completed')
+        .sort((a, b) => (a.finishedAt?.getTime() ?? 0) - (b.finishedAt?.getTime() ?? 0) || a.id.localeCompare(b.id))[0];
+      if (winner === undefined) {
+        if (unfinished.length === 0 && pending.length === 0) {
+          return deadNode(tx, def, parent, plan.path, `no child of map '${plan.path}' completed`, at);
+        }
+        return startNext();
+      }
+      // The first to complete wins. The others are cancelled, and the node completes once each has cleaned up.
+      moves.stops.push(
+        ...unfinished.filter(kid => kid.state === 'running' || kid.state === 'parked').map(kid => kid.id),
+      );
+      if (unfinished.length > 0) return [];
+      return completeChildren(tx, def, index, parent, plan, [winner.id], false, at);
+    }
+
+    const bad = ended.find(kid => kid.state !== 'completed');
+    if (bad !== undefined) return deadNode(tx, def, parent, plan.path, describe(bad), at);
+    if (ended.length === plan.children.length) {
+      return completeChildren(
+        tx,
+        def,
+        index,
+        parent,
+        plan,
+        plan.children.map(child => child.id),
+        node.kind === 'map',
+        at,
+      );
+    }
+    return startNext();
+  };
+
+  /** Moves a child run into compensation: a live one is cancelled, a completed one is reopened to undo its own work. */
+  const compensateChild = async (ctx: RunCtx, childId: string, reason: string, reopen: boolean) => {
+    const before = { parked: false };
+    const written = await ctx.write(run, childId, async (row, inside) => {
+      if (row === null) return [];
+      const eligible = reopen ? row.state === 'completed' : row.state === 'running' || row.state === 'parked';
+      if (!eligible) return [];
+      before.parked = row.state === 'parked';
+      const at = nowIso();
+      return beginCompensation(
+        inside.tx,
+        definitionOf(row),
+        row,
+        at,
+        [events.CancelRequested({ reason, actorId: null, at })],
+        { closed: false, cause: null, cancelling: true },
+      );
+    });
+    if (isFailure(written)) throw new Error(`journal: a child run could not be stopped: ${JSON.stringify(written)}`);
+    await settle(ctx, childId, written, before.parked);
+  };
+
+  /**
+   * What a compensating run asks of its child runs. Live children it waits for are cancelled. When none is live and no
+   * step is in flight, the newest node to undo may be a child node: its completed children are reopened to undo
+   * themselves. Both read the database, so a repeat finds the work done and does nothing.
+   */
+  const driveChildren = async (ctx: RunCtx, row: Row) => {
+    const kids = await kidsOf(ctx.tx, row.id);
+    if (kids.length === 0) return;
+    const def = definitionOf(row);
+    const waitedFor = kids.filter(kid => kid.finishedAt === null && !isDetached(nodeOfBase(def, kid.parentPath ?? '')));
+    const live = waitedFor.filter(kid => kid.state === 'running' || kid.state === 'parked');
+    for (const kid of live) await compensateChild(ctx, kid.id, `its parent run ${row.id} is stopping`, false);
+    if (waitedFor.length > 0 || (await hasScheduledStep(ctx.tx, row.id))) return;
+    const settled = await ctx.tx
+      .select({ type: tables.events.type, data: tables.events.data })
+      .from(tables.events)
+      .where(settledOf(row.id))
+      .orderBy(asc(tables.events.seq));
+    const [top] = remainingUndos(def, settled);
+    const node = def.nodes.find(candidate => candidate.name === top?.path);
+    if (top === undefined || (node?.kind !== 'child' && node?.kind !== 'map') || isDetached(node)) return;
+    if (node.kind === 'child' && node.undo) return;
+    const base = childBase(top.path, top.visit);
+    for (const kid of kids.filter(candidate => candidate.parentPath === base && candidate.state === 'completed')) {
+      await compensateChild(ctx, kid.id, `its parent run ${row.id} is undoing it`, true);
+    }
+  };
+
+  /** After a write to a run: its jobs and timers, the children a compensating run must move, and the parent an ended run wakes. */
+  async function settle(ctx: RunCtx, runId: string, written: Written, wasParked: boolean) {
+    await queueJobs(ctx.tx, runId, written.events);
+    const ended = endedBy(written.events);
+    await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
+    const { row } = written;
+    if (row === null || written.events.length === 0) return;
+    if (row.state === 'compensating') await driveChildren(ctx, row);
+    if (row.parentId !== null && row.parentPath !== null && written.events.some(event => ENDS.has(event.type))) {
+      await wakeParent(ctx, row.parentId, row.parentPath);
+    }
+  }
+
+  /** The parent of an ended child looks at its node again, in the same transaction as the child's end. */
+  async function wakeParent(ctx: RunCtx, parentId: string, base: string) {
+    const before = { parked: false };
+    const moves: Moves = { starts: undefined, stops: [] };
+    const written = await ctx.write(run, parentId, async (parent, inside) => {
+      if (parent === null || parent.finishedAt !== null) return [];
+      before.parked = parent.state === 'parked';
+      return onChildEnded(inside.tx, parent, base, nowIso(), moves);
+    });
+    if (isFailure(written))
+      throw new Error(`journal: a parent run refused its child's end: ${JSON.stringify(written)}`);
+    await settle(ctx, parentId, written, before.parked);
+    for (const id of moves.stops) {
+      await compensateChild(ctx, id, `the join of its parent run ${parentId} was won by another child`, false);
+    }
+    if (moves.starts !== undefined) await startChildren(ctx, parentId, moves.starts.plan, moves.starts.children);
+  }
+
+  /** The node cannot go on after a child failed to start: it is dead, and `onDeadStep` decides. */
+  const failChildrenNode = async (ctx: RunCtx, parentId: string, path: string, error: string) => {
+    const before = { parked: false };
+    const written = await ctx.write(run, parentId, async (parent, inside) => {
+      if (parent === null || parent.finishedAt !== null || parent.state !== 'parked' || parent.node !== path) return [];
+      before.parked = true;
+      return deadNode(inside.tx, definitionOf(parent), parent, path, error, nowIso());
+    });
+    if (isFailure(written)) throw new Error(`journal: a parent run refused its dead node: ${JSON.stringify(written)}`);
+    await settle(ctx, parentId, written, before.parked);
+  };
+
+  /**
+   * Starts the planned children, by the same command `start` uses, in the transaction of the parent's own write.
+   * A child that already exists (its id was started before) is attached, not started again; the parent then looks at
+   * its node once, because that child may have ended already.
+   */
+  async function startChildren(ctx: RunCtx, parentId: string, plan: Planned, children: Planned['children']) {
+    let attached = false;
+    for (const child of children) {
+      const startedRun = await ctx.run(startChild, {
+        def: plan.def,
+        id: child.id,
+        input: child.input,
+        parent: { id: parentId, path: plan.base },
+      });
+      if (isFailure(startedRun)) {
+        ctx.accept(startedRun);
+        await failChildrenNode(
+          ctx,
+          parentId,
+          plan.path,
+          `child run ${child.id} could not start: ${JSON.stringify(startedRun)}`,
+        );
+        return;
+      }
+      if (!startedRun.created) attached = true;
+    }
+    if (attached) await wakeParent(ctx, parentId, plan.base);
+  }
+
   const checkpoint = j.command(
     CHECKPOINT_COMMAND,
     checkpointSchema,
-    async (input, { write, tx }): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' }> => {
+    async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' }> => {
+      const { write } = context;
       const before = { parked: false };
       const settled = { value: false };
+      const planned: { value: { readonly plan: Planned; readonly room: number } | undefined } = { value: undefined };
       const written = await write(run, input.runId, async (row, inside) => {
         if (row === null || row.finishedAt !== null) return [];
         before.parked = row.state === 'parked';
@@ -843,6 +1239,26 @@ export function createWorkflows<
             settled.value = true;
             return beginCompensation(inside.tx, def, row, at, [failedNode], { closed: true, cause: outcome.error });
           }
+          case 'children': {
+            if (row.state === 'parked') return [];
+            const node = def.nodes.find(candidate => candidate.name === path);
+            if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
+              throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no child node '${path}'`);
+            }
+            const dropped = events.NodeSkipped({ path, phase: 'do', reason: COMPENSATING, actorId: null, at });
+            // The run began compensating while the children were being worked out: no child is started.
+            if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
+            if (pastDeadline(row)) {
+              return beginCompensation(inside.tx, def, row, at, [events.DeadlineReached({ at }), dropped], {
+                closed: true,
+                cause: 'the run deadline passed before it finished',
+              });
+            }
+            const room =
+              node.kind === 'map' && node.concurrency !== undefined ? node.concurrency : outcome.plan.children.length;
+            planned.value = { plan: { path, ...outcome.plan }, room };
+            return [events.ChildrenPlanned({ path, ...outcome.plan, at })];
+          }
           case 'park': {
             // The park of this attempt is already in: the step row stays `scheduled` while a run is parked.
             if (row.state === 'parked') return [];
@@ -871,80 +1287,111 @@ export function createWorkflows<
       });
       if (isFailure(written))
         throw new Error(`journal: the workflow checkpoint was refused: ${JSON.stringify(written)}`);
-      await queueJobs(tx, input.runId, written.events);
-      const ended = endedBy(written.events);
-      await cancelTimers(tx, input.runId, { park: before.parked && ended.park, deadline: ended.deadline });
+      await settle(context, input.runId, written, before.parked);
+      if (planned.value !== undefined) {
+        const { plan, room } = planned.value;
+        await startChildren(context, input.runId, plan, plan.children.slice(0, room));
+      }
       if (written.events.length === 0) return { status: 'already' };
       return { status: settled.value ? 'settled' : 'checkpointed' };
     },
   );
 
-  const startCommandFor = <Input extends StandardSchemaV1>(def: WorkflowDef<Input>) => {
+  /**
+   * Starts a run of `def` with an input that is already checked. The id is the key: the same start again is the same
+   * run (`created` is false); another workflow or another input under that id is a refusal. A child run is started by
+   * its parent's checkpoint, with `parent` set.
+   */
+  const startRun = async (
+    def: WorkflowDef,
+    { write, tx }: Pick<CommandContext<MetaOut, Tx>, 'write' | 'tx'>,
+    args: { readonly input: unknown; readonly id?: string | undefined },
+    parent?: { readonly id: string; readonly path: string },
+  ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict> => {
+    if (!started.has(`${def.name}@${def.version}`)) {
+      throw new JournalError(
+        'WORKFLOW_UNKNOWN',
+        'workflow',
+        def.name,
+        `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
+      );
+    }
     const first = def.nodes[0];
-    return j.command(
-      `${def.name}.start`,
-      startSchema(def.input),
-      async (args, { write, tx }): Promise<StartOutcome> => {
-        if (!started.has(`${def.name}@${def.version}`)) {
-          throw new JournalError(
-            'WORKFLOW_UNKNOWN',
-            'workflow',
-            def.name,
-            `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
-          );
-        }
-        if (first === undefined)
-          throw new JournalError('BAD_DEFINITION', 'workflow', def.name, 'a workflow needs a node');
-        const stored = storable(args.input, def.limits.payload, 'the input', def.name);
-        if (stored instanceof JournalError) return CommandConflict({ detail: stored.message });
-        const runId = args.id ?? workflowRunId();
-        const now = new Date();
-        const at = now.toISOString();
-        const written = await write(machine.run, runId, row => {
-          if (row !== null) return [];
-          return [
-            machine.events.RunStarted({
-              name: def.name,
-              workflowVersion: def.version,
-              shape: def.shape,
-              shapeHash: def.shapeHash,
-              input: stored.value,
-              deadlineAt: def.deadline === undefined ? null : inMs(parseAge(def.deadline)),
-              parentId: null,
-              parentPath: null,
-              concurrencyKey: null,
-              at,
-            }),
-            machine.events.NodeScheduled({
-              path: first.name,
-              phase: 'do',
-              attempt: 1,
-              key: `${runId}:${first.name}:do`,
-              jobId: null,
-              at,
-            }),
-          ];
-        });
-        if (isFailure(written)) return written;
-        const { row } = written;
-        // The id is taken. The same start again is the same run; another workflow or another input is not.
-        if (written.events.length === 0) {
-          if (
-            row === null ||
-            row.name !== def.name ||
-            row.workflowVersion !== def.version ||
-            !sameValue(row.input, stored.value)
-          ) {
-            return CommandConflict({ detail: `run id "${runId}" already belongs to another run` });
-          }
-          return { runId };
-        }
-        await queueJobs(tx, runId, written.events);
-        debugWorkflow.debug('{name} v{version}: run {runId} started', { name: def.name, version: def.version, runId });
-        return { runId };
-      },
-    );
+    if (first === undefined) throw new JournalError('BAD_DEFINITION', 'workflow', def.name, 'a workflow needs a node');
+    const stored = storable(args.input, def.limits.payload, 'the input', def.name);
+    if (stored instanceof JournalError) return CommandConflict({ detail: stored.message });
+    const runId = args.id ?? workflowRunId();
+    const now = new Date();
+    const at = now.toISOString();
+    const written = await write(machine.run, runId, row => {
+      if (row !== null) return [];
+      return [
+        machine.events.RunStarted({
+          name: def.name,
+          workflowVersion: def.version,
+          shape: def.shape,
+          shapeHash: def.shapeHash,
+          input: stored.value,
+          deadlineAt: def.deadline === undefined ? null : inMs(parseAge(def.deadline)),
+          parentId: parent?.id ?? null,
+          parentPath: parent?.path ?? null,
+          concurrencyKey: null,
+          at,
+        }),
+        machine.events.NodeScheduled({
+          path: first.name,
+          phase: 'do',
+          attempt: 1,
+          key: `${runId}:${first.name}:do`,
+          jobId: null,
+          at,
+        }),
+      ];
+    });
+    if (isFailure(written)) return written;
+    const { row } = written;
+    // The id is taken. The same start again is the same run; another workflow or another input is not.
+    if (written.events.length === 0) {
+      if (
+        row === null ||
+        row.name !== def.name ||
+        row.workflowVersion !== def.version ||
+        !sameValue(row.input, stored.value) ||
+        row.parentId !== (parent?.id ?? null) ||
+        row.parentPath !== (parent?.path ?? null)
+      ) {
+        return CommandConflict({ detail: `run id "${runId}" already belongs to another run` });
+      }
+      return { runId, created: false };
+    }
+    await queueJobs(tx, runId, written.events);
+    debugWorkflow.debug('{name} v{version}: run {runId} started', { name: def.name, version: def.version, runId });
+    return { runId, created: true };
   };
+
+  const startCommandFor = <Input extends StandardSchemaV1>(def: WorkflowDef<Input>) =>
+    j.command(`${def.name}.start`, startSchema(def.input), async (args, context): Promise<StartOutcome> => {
+      const outcome = await startRun(def, context, args);
+      return isFailure(outcome) ? outcome : { runId: outcome.runId };
+    });
+
+  /** The command a parent's checkpoint runs for each child: `start` with the parent recorded. Internal. */
+  const startChild = j.command(
+    START_CHILD_COMMAND,
+    startChildSchema,
+    async (args, context): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict> => {
+      const def = started.get(`${args.def.name}@${args.def.version}`);
+      if (def === undefined) {
+        throw new JournalError(
+          'WORKFLOW_UNKNOWN',
+          'workflow',
+          args.def.name,
+          `no registered workflow "${args.def.name}" v${args.def.version}`,
+        );
+      }
+      return startRun(def, context, { input: args.input, id: args.id }, args.parent);
+    },
+  );
 
   /** `def.signal(name)`: the command that delivers one of the definition's signals. */
   const signalCommandFor = <Signals extends AnySignals>(def: WorkflowDef<StandardSchemaV1, unknown, Signals>) =>
@@ -958,7 +1405,8 @@ export function createWorkflows<
       return j.command(
         `${def.name}.signal.${name}`,
         signalSchemaFor<Signals[Name]>(),
-        async (args, { write, tx }): Promise<SignalOutcome> => {
+        async (args, context): Promise<SignalOutcome> => {
+          const { write } = context;
           if (!started.has(`${def.name}@${def.version}`)) {
             throw new JournalError(
               'WORKFLOW_UNKNOWN',
@@ -1029,9 +1477,7 @@ export function createWorkflows<
             return [received, ...(await wakeOnSignal(inside.tx, def, index, row, stored.value, at))];
           });
           if (isFailure(written)) return written;
-          await queueJobs(tx, args.runId, written.events);
-          const ended = endedBy(written.events);
-          await cancelTimers(tx, args.runId, { park: before.parked && ended.park, deadline: ended.deadline });
+          await settle(context, args.runId, written, before.parked);
           return result;
         },
       );
@@ -1039,7 +1485,8 @@ export function createWorkflows<
 
   /** `def.cancel`: stops a run, undoes what it completed, newest first, and ends it `cancelled`. */
   const cancelCommandFor = (def: WorkflowDef) =>
-    j.command(`${def.name}.cancel`, cancelSchema, async (args, { write, tx, meta }): Promise<CancelOutcome> => {
+    j.command(`${def.name}.cancel`, cancelSchema, async (args, context): Promise<CancelOutcome> => {
+      const { write, meta } = context;
       if (!started.has(`${def.name}@${def.version}`)) {
         throw new JournalError(
           'WORKFLOW_UNKNOWN',
@@ -1073,9 +1520,7 @@ export function createWorkflows<
         );
       });
       if (isFailure(written)) return written;
-      await queueJobs(tx, args.runId, written.events);
-      const ended = endedBy(written.events);
-      await cancelTimers(tx, args.runId, { park: before.parked && ended.park, deadline: ended.deadline });
+      await settle(context, args.runId, written, before.parked);
       debugWorkflow.debug('{name}: run {runId} cancel requested', { name: def.name, runId: args.runId });
       return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
     });
@@ -1089,6 +1534,21 @@ export function createWorkflows<
     }));
 
   type StepEffectContext = EffectContext<AppDb, RootCommandRunner<Meta, Tx>> & Needed<Needs>;
+
+  /** How many ancestors a run has: its parent, that one's parent, and so on, counted up to the depth limit. */
+  async function ancestorsOf(db: StepEffectContext['db'], row: { readonly parentId: string | null }): Promise<number> {
+    let depth = 0;
+    let parentId = row.parentId;
+    while (parentId !== null && depth <= MAX_CHILD_DEPTH) {
+      const [parent] = await db
+        .select({ parentId: workflowRuns.parentId })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, parentId));
+      depth++;
+      parentId = parent?.parentId ?? null;
+    }
+    return depth;
+  }
 
   /**
    * Registers the definitions: the step effect that runs their nodes, and the projection that keeps `workflow_steps`.
@@ -1106,17 +1566,23 @@ export function createWorkflows<
           `workflow "${def.name}" v${def.version} is registered twice`,
         );
       }
-      const unsupported = def.nodes.find(node => node.kind === 'child' || node.kind === 'map');
-      if (unsupported !== undefined) {
-        throw new JournalError(
-          'BAD_DEFINITION',
-          'workflow',
-          def.name,
-          `node '${unsupported.name}' is a ${unsupported.kind}; the runner runs step, waitFor and sleep nodes only so far`,
-        );
-      }
       registry.set(id, def);
       started.set(id, def);
+    }
+    // A child workflow named in the definition itself must be registered too: its runs are started by the parent's checkpoint.
+    for (const def of defs) {
+      for (const node of def.nodes) {
+        const child = node.kind === 'map' ? node.def : node.kind === 'child' ? node.def : undefined;
+        if (child === undefined || typeof child === 'function') continue;
+        if (!started.has(`${child.name}@${child.version}`)) {
+          throw new JournalError(
+            'BAD_DEFINITION',
+            'workflow',
+            def.name,
+            `${node.kind} '${node.name}' runs workflow "${child.name}" v${child.version}, which is not registered; pass it to compose({ workflows })`,
+          );
+        }
+      }
     }
     const needs: Needs = Object.fromEntries(defs.flatMap(def => Object.entries(def.needs)));
 
@@ -1140,40 +1606,6 @@ export function createWorkflows<
 
     type NodeScheduledEvent = RecordedOf<typeof machine.events.NodeScheduled, MetaOut, string>;
     type StepNode = Extract<WorkflowNode, { readonly kind: 'step' }>;
-
-    /** The body of one node attempt, bounded by the step's timeout. A timeout aborts `signal` and fails the attempt. */
-    async function runBody(
-      node: StepNode,
-      invoke: (ctx: ErasedContext) => unknown,
-      build: (signal: AbortSignal) => ErasedContext,
-      signal: AbortSignal,
-      runId: string,
-    ) {
-      const timeoutMs = node.options.timeout === undefined ? undefined : parseAge(node.options.timeout);
-      if (timeoutMs === undefined) return invoke(build(signal));
-      const timeout = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const expired = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          const error = new JournalError(
-            'STEP_TIMEOUT',
-            'workflow',
-            runId,
-            `step '${node.name}' ran longer than ${timeoutMs} ms`,
-          );
-          timeout.abort(error);
-          reject(error);
-        }, timeoutMs);
-      });
-      try {
-        return await Promise.race([
-          Promise.resolve().then(() => invoke(build(AbortSignal.any([signal, timeout.signal])))),
-          expired,
-        ]);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
 
     /** Where the run goes after `index`, once its result is `result`. A `next` that is not an earlier node is a bad definition. */
     async function routeFrom(
@@ -1245,7 +1677,7 @@ export function createWorkflows<
 
       let result: unknown;
       try {
-        result = await runBody(node, node.run, make, ctx.signal, row.id);
+        result = await runBody({ name: node.name, timeout: node.options.timeout }, node.run, make, ctx.signal, row.id);
       } catch (error) {
         return failed(error);
       }
@@ -1267,10 +1699,10 @@ export function createWorkflows<
       }
     }
 
-    /** Runs one attempt of the undo of a step. Its context is the step's, plus `result`: what the step stored. */
+    /** Runs one attempt of the undo of a step or a child node. Its context is the node's, plus `result`: what the node stored. */
     async function attemptUndo(
       def: WorkflowDef,
-      node: StepNode,
+      node: StepNode | Extract<WorkflowNode, { readonly kind: 'child' }>,
       row: Row,
       event: NodeScheduledEvent,
       ctx: StepEffectContext,
@@ -1278,7 +1710,7 @@ export function createWorkflows<
     ): Promise<Verdict> {
       const { undo } = node.options;
       if (undo === undefined) {
-        throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `step '${node.name}' has no undo to run`);
+        throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `node '${node.name}' has no undo to run`);
       }
       const build = (signal: AbortSignal): ErasedContext => ({
         ...ctx,
@@ -1291,7 +1723,13 @@ export function createWorkflows<
         signal,
       });
       try {
-        const result = await runBody(node, step => undo({ ...step, result: done.result }), build, ctx.signal, row.id);
+        const result = await runBody(
+          { name: node.name, timeout: node.kind === 'step' ? node.options.timeout : undefined },
+          step => undo({ ...step, result: done.result }),
+          build,
+          ctx.signal,
+          row.id,
+        );
         if (isFailure(result)) return failed(result);
         const kept = storable(result, def.limits.payload, `the undo result of step '${node.name}'`, row.id);
         if (kept instanceof JournalError) return failed(kept);
@@ -1336,6 +1774,110 @@ export function createWorkflows<
       }
     }
 
+    type FanNode = Extract<WorkflowNode, { readonly kind: 'child' | 'map' }>;
+
+    /**
+     * The work of a child or map node: which workflow, and the id and checked input of each child run. Nothing is
+     * started here: the checkpoint starts the children in the same transaction that parks this run, so a crash leaves
+     * no child behind. A throw from `def`, `items` or `input` is a failure of the node, like a throw from a step body.
+     */
+    async function attemptChildren(
+      def: WorkflowDef,
+      index: number,
+      node: FanNode,
+      row: Row,
+      event: NodeScheduledEvent,
+      ctx: StepEffectContext,
+    ): Promise<Verdict> {
+      const { data } = event;
+      const context: ErasedContext = {
+        ...ctx,
+        runId: row.id,
+        path: data.path,
+        attempt: data.attempt,
+        input: row.input,
+        results: row.results,
+        key: data.key,
+        signal: ctx.signal,
+      };
+      let childDef: WorkflowDef;
+      let inputs: { readonly index: number | null; readonly input: unknown }[];
+      try {
+        childDef = typeof node.def === 'function' ? node.def(context) : node.def;
+        if (node.kind === 'child') {
+          inputs = [{ index: null, input: node.input(context) }];
+        } else {
+          const items = node.items(context);
+          if (items.length > def.limits.children) {
+            return failed(
+              new JournalError(
+                'WORKFLOW_LIMIT',
+                'workflow',
+                row.id,
+                `map '${node.name}' has ${items.length} items; limits.children is ${def.limits.children}`,
+              ),
+              false,
+            );
+          }
+          inputs = items.map((item, at) => ({ index: at, input: node.input(context, item, at) }));
+        }
+      } catch (error) {
+        return failed(error);
+      }
+      try {
+        if (!started.has(`${childDef.name}@${childDef.version}`)) {
+          throw new JournalError(
+            'WORKFLOW_UNKNOWN',
+            'workflow',
+            row.id,
+            `${node.kind} '${node.name}' runs workflow "${childDef.name}" v${childDef.version}, which is not registered`,
+          );
+        }
+        if (inputs.length === 0) {
+          // An empty map is already done: nothing to wait for. With `wait: 'any'` no child can ever win.
+          if (node.kind === 'map' && node.wait === 'any') {
+            throw new JournalError(
+              'BAD_DEFINITION',
+              'workflow',
+              row.id,
+              `map '${node.name}' has no items, so no child can win`,
+            );
+          }
+          return { kind: 'completed', result: [], route: await routeAt(def, index + 1, row, node.name, []) };
+        }
+        if ((await ancestorsOf(ctx.db, row)) >= MAX_CHILD_DEPTH) {
+          throw new JournalError(
+            'WORKFLOW_LIMIT',
+            'workflow',
+            row.id,
+            `${node.kind} '${node.name}' would nest runs deeper than ${MAX_CHILD_DEPTH} levels`,
+          );
+        }
+        const base = childBase(node.name, await visitOf(ctx.db, row.id, node.name));
+        const stem = `${row.id}/${base}`;
+        const children: { id: string; input: unknown }[] = [];
+        for (const { index: at, input } of inputs) {
+          const id = at === null ? stem : `${stem}[${at}]`;
+          if (id.length > MAX_RUN_ID_LENGTH) {
+            throw new JournalError(
+              'WORKFLOW_LIMIT',
+              'workflow',
+              row.id,
+              `the child run id "${id}" is longer than ${MAX_RUN_ID_LENGTH} characters`,
+            );
+          }
+          const parsed = await parseAsync(childDef.input, input);
+          const kept = storable(parsed, childDef.limits.payload, `the input of child run ${id}`, row.id);
+          if (kept instanceof JournalError) throw kept;
+          children.push({ id, input: kept.value });
+        }
+        return { kind: 'children', plan: { base, def: { name: childDef.name, version: childDef.version }, children } };
+      } catch (error) {
+        // A limit, a schema or a definition that is wrong will be wrong again: no retry.
+        return failed(error, !(error instanceof JournalError || error instanceof SchemaError));
+      }
+    }
+
     async function runNode(event: NodeScheduledEvent, ctx: StepEffectContext): Promise<unknown> {
       const { data } = event;
       const runId = event.entityId;
@@ -1370,7 +1912,7 @@ export function createWorkflows<
       }
       const index = def.nodes.findIndex(candidate => candidate.name === data.path);
       const node = def.nodes[index];
-      if (node === undefined || node.kind === 'child' || node.kind === 'map') {
+      if (node === undefined) {
         throw new JournalError(
           'BAD_DEFINITION',
           'workflow',
@@ -1381,7 +1923,7 @@ export function createWorkflows<
 
       let verdict: Verdict;
       if (data.phase === 'undo') {
-        if (node.kind !== 'step') {
+        if (node.kind !== 'step' && !(node.kind === 'child' && node.undo)) {
           throw new JournalError('BAD_DEFINITION', 'workflow', runId, `"${row.name}" has no undo for '${data.path}'`);
         }
         const settled = await ctx.db
@@ -1396,10 +1938,10 @@ export function createWorkflows<
         }
         verdict = await attemptUndo(def, node, row, event, ctx, done);
       } else {
-        verdict =
-          node.kind === 'step'
-            ? await attemptNode(def, index, node, row, event, ctx)
-            : attemptWait(node, row, event, ctx);
+        if (node.kind === 'step') verdict = await attemptNode(def, index, node, row, event, ctx);
+        else if (node.kind === 'child' || node.kind === 'map') {
+          verdict = await attemptChildren(def, index, node, row, event, ctx);
+        } else verdict = attemptWait(node, row, event, ctx);
       }
 
       const at = { runId, path: data.path, phase: data.phase, attempt: data.attempt };
