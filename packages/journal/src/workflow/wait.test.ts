@@ -331,6 +331,9 @@ describe('timeout', () => {
       'Parked',
       'TimerFired',
       'NodeFailed',
+      'CompensationStarted',
+      // `open` declares no undo: it is recorded as skipped, then the run ends failed.
+      'NodeSkipped',
       'RunFailed',
     ]);
   });

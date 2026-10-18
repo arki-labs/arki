@@ -5,7 +5,7 @@ import type { SchemaInput, SchemaOutput } from '@arki/schema';
 
 import type { CommandConflict } from '../errors.js';
 import type { NoSignals } from './define.js';
-import type { SignalOutcome } from './runner.js';
+import type { CancelOutcome, SignalOutcome } from './runner.js';
 import { j } from '../test-support.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it. The callbacks never execute.
@@ -76,5 +76,35 @@ describe('def.start, as types', () => {
     expectTypeOf(refund.types).toEqualTypeOf<
       { readonly output: { holdId: string }; readonly signals: NoSignals } | undefined
     >();
+  });
+});
+
+describe('def.cancel, as types', () => {
+  it('takes the run id, a reason and an optional Foreman execution id', () => {
+    expectTypeOf<SchemaInput<typeof refund.cancel.input>>().toEqualTypeOf<{
+      readonly runId: string;
+      readonly reason: string;
+      readonly executionId?: string | undefined;
+    }>();
+  });
+
+  it('returns the state the run is in, or a refusal', () => {
+    expectTypeOf<Awaited<ReturnType<typeof refund.cancel.handler>>>().toEqualTypeOf<CancelOutcome>();
+  });
+
+  it('gives an undo the result of its own step, not of another', () => {
+    j.workflow('undone', { version: 1, input: z.object({}) })
+      .step('charge', () => ({ chargeId: 'c1' }), {
+        undo: ({ result }) => {
+          expectTypeOf(result).toEqualTypeOf<{ chargeId: string }>();
+        },
+      })
+      .step('reserve', () => ({ slot: 7 }), {
+        undo: ({ result, results }) => {
+          expectTypeOf(result).toEqualTypeOf<{ slot: number }>();
+          expectTypeOf(results.charge).toEqualTypeOf<{ chargeId: string }>();
+        },
+      })
+      .finish();
   });
 });

@@ -74,7 +74,7 @@ const bounded = j
 
 const journal = j.compose({ workflows: [timed, bounded], workflowMeta });
 
-type Side = 'signal' | 'timer';
+type Side = 'signal' | 'timer' | 'cancel';
 type Hold = { readonly arrived: ReturnType<typeof gate>; readonly release: ReturnType<typeof gate> };
 const holds = new Map<Side, Hold>();
 const hold = (side: Side): Hold => {
@@ -84,11 +84,13 @@ const hold = (side: Side): Hold => {
 };
 const timerInput = z.object({ fired: z.unknown() });
 journal.hooks.command.around(async (ctx, next) => {
-  const side: Side | undefined = ctx.name.startsWith('test.race.')
-    ? 'signal'
-    : ctx.name === 'workflow.checkpoint' && timerInput.safeParse(ctx.input).success
-      ? 'timer'
-      : undefined;
+  const side: Side | undefined = ctx.name.endsWith('.cancel')
+    ? 'cancel'
+    : ctx.name.startsWith('test.race.')
+      ? 'signal'
+      : ctx.name === 'workflow.checkpoint' && timerInput.safeParse(ctx.input).success
+        ? 'timer'
+        : undefined;
   const held = side === undefined ? undefined : holds.get(side);
   if (held !== undefined) {
     holds.delete(side ?? 'signal');
@@ -218,4 +220,44 @@ describe('signal, timeout and deadline race on one parked run', () => {
       expect(outcome.types.filter(type => type === 'DeadlineReached')).toHaveLength(1);
     }
   }, 60_000);
+});
+
+describe('cancel races a signal and a timeout on one parked run', () => {
+  it('signal, timeout and cancel on one parked run resolve exactly once', async () => {
+    for (let round = 0; round < 8; round++) {
+      const id = await parkedAndDue(timed);
+      const timer = hold('timer');
+      const late = hold('signal');
+      const stop = hold('cancel');
+      const fired = journal.drain(dbA);
+      const sent = signal(timed, id);
+      const cancelled = journal.run(dbA, timed.cancel, { runId: id, reason: 'race' }, caller);
+      await Promise.all([timer.arrived.opened, late.arrived.opened, stop.arrived.opened]);
+      timer.release.open();
+      late.release.open();
+      stop.release.open();
+      const [, sentResult, cancelResult] = await Promise.all([fired, sent, cancelled]);
+      expectOk(sentResult);
+      await journal.drain(dbA);
+      const events = await dbA
+        .select({ type: tables.events.type, data: tables.events.data })
+        .from(tables.events)
+        .where(eq(tables.events.entityId, id))
+        .orderBy(asc(tables.events.seq));
+      const settledNode = events.filter(
+        event =>
+          ['NodeCompleted', 'NodeFailed', 'NodeSkipped'].includes(event.type) &&
+          z.object({ path: z.literal('settled') }).safeParse(event.data).success,
+      );
+      const ended = events.filter(event => ['RunCompleted', 'RunFailed', 'RunCancelled'].includes(event.type));
+      const label = `round ${round}: ${events.map(event => event.type).join(',')}`;
+      // The wait ends once, whoever got the row, and the run ends once.
+      expect(settledNode, label).toHaveLength(1);
+      expect(ended, label).toHaveLength(1);
+      expect(events.filter(event => event.type === 'CompensationStarted').length, label).toBeLessThanOrEqual(1);
+      // A cancel that lost to the end of the wait is a returned conflict, never a second end.
+      if (events.some(event => event.type === 'CancelRequested')) expect(isFailure(cancelResult), label).toBe(false);
+      else expect(isFailure(cancelResult), label).toBe(true);
+    }
+  }, 90_000);
 });

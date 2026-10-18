@@ -72,6 +72,8 @@ export type WorkflowStarter<
   readonly signal: <Name extends keyof Signals & string>(
     name: Name,
   ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome>, SchemaOutput<Meta>, Tx>;
+  /** The command that cancels a run: it stops, undoes its completed steps newest first, and ends `cancelled`. */
+  readonly cancel: Command<CancelSchema, Promise<CancelOutcome>, SchemaOutput<Meta>, Tx>;
 };
 /** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
@@ -108,6 +110,17 @@ function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<
   };
 }
 
+/** The arguments of `def.cancel`. `executionId` is the Foreman execution that asked, kept on the job operation of a step job the cancel stops. */
+export type CancelArgs = { readonly runId: string; readonly reason: string; readonly executionId?: string | undefined };
+export type CancelSchema = StandardSchemaV1<CancelArgs>;
+const cancelSchema: CancelSchema = z.object({
+  runId: z.string().min(1),
+  reason: z.string().min(1),
+  executionId: z.string().min(1).optional(),
+});
+/** `compensating`: the run is undoing its steps now (or waits for a step in flight). `cancelled`: there was nothing to undo, so it ended at once. */
+export type CancelOutcome = { readonly state: 'compensating' | 'cancelled' } | CommandNotFound | CommandConflict;
+
 const isoTime = z.iso.datetime();
 /** Where a run goes after a node: to another node, or to its end with the output already worked out. */
 const routeSchema = z.discriminatedUnion('go', [
@@ -118,6 +131,7 @@ type Route = z.infer<typeof routeSchema>;
 const nodeCheckpointSchema = z.object({
   runId: z.string().min(1),
   path: z.string().min(1),
+  phase: z.enum(['do', 'undo']),
   /** The attempt of the node this checkpoint answers. A checkpoint for any other attempt is stale. */
   attempt: z.int().positive(),
   outcome: z.discriminatedUnion('kind', [
@@ -125,8 +139,10 @@ const nodeCheckpointSchema = z.object({
     z.object({ kind: z.literal('skipped'), reason: z.string().min(1), route: routeSchema }),
     /** The attempt failed and the step retries: the same key, the next attempt, due at `at`. */
     z.object({ kind: z.literal('retry'), error: z.string().min(1), key: z.string().min(1), at: isoTime }),
-    /** The attempt failed and the step is out of retries: it waits for an operator. */
+    /** The attempt failed and the step is out of retries: it waits for an operator, or the run compensates (`onDeadStep`). */
     z.object({ kind: z.literal('dead'), error: z.string().min(1) }),
+    /** An undo ran. */
+    z.object({ kind: z.literal('undone'), result: z.unknown() }),
     /** A `waitFor` or `sleep` node has nothing to run: the run parks until the signal or `wakeAt`. */
     z.object({ kind: z.literal('park'), waitingFor: z.string().min(1).nullable(), wakeAt: isoTime.nullable() }),
   ]),
@@ -168,6 +184,7 @@ type Verdict =
   | { readonly kind: 'park'; readonly waitingFor: string | null; readonly wakeAt: string | null }
   | { readonly kind: 'skipped'; readonly reason: string; readonly route: Route }
   | { readonly kind: 'completed'; readonly result: unknown; readonly route: Route }
+  | { readonly kind: 'undone'; readonly result: unknown }
   | { readonly kind: 'failed'; readonly reason: unknown; readonly retryable: boolean };
 
 const failed = (reason: unknown, retryable = true): Verdict => ({ kind: 'failed', reason, retryable });
@@ -219,10 +236,54 @@ function storable(
 }
 
 const nowIso = () => new Date().toISOString();
+/** What a write ended: a park ends when its node completes or the run starts compensating; the deadline when the run is over or compensating. */
 const endedBy = (written: readonly { readonly type: string }[]) => ({
-  park: written.some(event => event.type === 'NodeCompleted' || event.type === 'RunFailed'),
-  deadline: written.some(event => event.type === 'RunCompleted' || event.type === 'RunFailed'),
+  park: written.some(event => event.type === 'NodeCompleted' || event.type === 'CompensationStarted'),
+  deadline: written.some(event =>
+    ['RunCompleted', 'RunFailed', 'RunCancelled', 'CompensationStarted'].includes(event.type),
+  ),
 });
+
+/** Why the node a run was on is dropped when the run begins to compensate. */
+const COMPENSATING = 'the run began compensating';
+/** `path` and `phase` (and the result of a completed node) in the data of a settled node event. */
+const settledNodeSchema = z.object({
+  path: z.string().min(1),
+  phase: z.enum(['do', 'undo']),
+  result: z.unknown().optional(),
+});
+const failedNodeSchema = z.object({ error: z.string().min(1) });
+/** A completed `do` step that an undo may still have to answer: its path, which visit of the node it was, and its result. */
+type Done = { readonly path: string; readonly visit: number; readonly result: unknown };
+
+/**
+ * The completed steps still to undo, newest first. Undo goes in reverse order of completion, one undo per completed
+ * visit. Each settled undo (done or skipped) takes the newest one away, so the list is the same after a crash.
+ * `doneNow` and `undoneNow` are what the write in progress adds: its events are not in the table yet.
+ */
+function remainingUndos(
+  def: WorkflowDef,
+  settled: readonly { readonly type: string; readonly data: unknown }[],
+  doneNow?: { readonly path: string; readonly result: unknown },
+  undoneNow = 0,
+): Done[] {
+  const visits = new Map<string, number>();
+  const done: Done[] = [];
+  let undone = undoneNow;
+  const isStep = (path: string) => def.nodes.some(node => node.name === path && node.kind === 'step');
+  const see = (path: string, completed: boolean, result: unknown) => {
+    const visit = (visits.get(path) ?? 0) + 1;
+    visits.set(path, visit);
+    if (completed && isStep(path)) done.push({ path, visit, result });
+  };
+  for (const event of settled) {
+    const data = settledNodeSchema.parse(event.data);
+    if (data.phase === 'undo') undone++;
+    else see(data.path, event.type === 'NodeCompleted', data.result);
+  }
+  if (doneNow !== undefined) see(doneNow.path, true, doneNow.result);
+  return done.slice(0, Math.max(done.length - undone, 0)).reverse();
+}
 
 const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 const keepUntilFor = (age: WorkflowDef['retention']['completed']): string | null =>
@@ -365,10 +426,166 @@ export function createWorkflows<
   const pastDeadline = (row: Row) => row.deadlineAt !== null && row.deadlineAt.getTime() <= Date.now();
   const runFailed = (def: WorkflowDef, error: string, at: string) =>
     events.RunFailed({ error, at, keepUntil: keepUntilFor(def.retention.failed) });
-  const deadlineEvents = (def: WorkflowDef, at: string) => [
-    events.DeadlineReached({ at }),
-    runFailed(def, 'the run deadline passed before it finished', at),
-  ];
+
+  /** The completed events of a run and its undo events, oldest first: what `remainingUndos` reads. */
+  const settledOf = (runId: string) =>
+    and(
+      eq(tables.events.kind, 'workflow.run'),
+      eq(tables.events.entityId, runId),
+      inArray(tables.events.type, ['NodeCompleted', 'NodeSkipped']),
+    );
+  /** The text of the failure that made a run compensate: the deadline, or the last `do` node that failed. */
+  const causeOf = async (tx: Tx, runId: string) => {
+    const [last] = await tx
+      .select({ type: tables.events.type, data: tables.events.data })
+      .from(tables.events)
+      .where(
+        and(
+          eq(tables.events.kind, 'workflow.run'),
+          eq(tables.events.entityId, runId),
+          or(
+            eq(tables.events.type, 'DeadlineReached'),
+            and(eq(tables.events.type, 'NodeFailed'), sql`${tables.events.data} ->> 'phase' = 'do'`),
+          ),
+        ),
+      )
+      .orderBy(desc(tables.events.seq))
+      .limit(1);
+    if (last === undefined) return 'the run failed';
+    return last.type === 'DeadlineReached'
+      ? 'the run deadline passed before it finished'
+      : failedNodeSchema.parse(last.data).error;
+  };
+
+  type CompensateOptions = {
+    /** The text of `RunFailed`; null looks it up from the events (after an undo settles). */
+    readonly cause: string | null;
+    /** A `CancelRequested` is in the write in progress. */
+    readonly cancelling?: boolean;
+    /** A `do` step the write in progress completes: it is the newest to undo. */
+    readonly doneNow?: { readonly path: string; readonly result: unknown };
+    /** An undo the write in progress settles. */
+    readonly undoneNow?: number;
+  };
+
+  /**
+   * One step of compensation: the undo of the newest completed `do` step not yet undone, or the end of the run when
+   * none is left. A step without an `undo` is recorded as skipped (the `residual` of the run) and the next is tried.
+   * Nodes that are not steps (waitFor, sleep) have nothing to undo and leave no row. The undo of a loop's second visit
+   * gets its own key: `<run>:<path>:undo:2`.
+   */
+  const compensate = async (tx: Tx, def: WorkflowDef, row: Row, at: string, options: CompensateOptions) => {
+    const settled = await tx
+      .select({ type: tables.events.type, data: tables.events.data })
+      .from(tables.events)
+      .where(settledOf(row.id))
+      .orderBy(asc(tables.events.seq));
+    const out: (
+      | ReturnType<typeof events.NodeScheduled>
+      | ReturnType<typeof events.NodeSkipped>
+      | ReturnType<typeof events.RunCancelled>
+      | ReturnType<typeof events.RunFailed>
+    )[] = [];
+    for (const item of remainingUndos(def, settled, options.doneNow, options.undoneNow)) {
+      const node = def.nodes.find(candidate => candidate.name === item.path);
+      if (node?.kind === 'step' && node.options.undo !== undefined) {
+        const key = `${row.id}:${item.path}:undo${item.visit === 1 ? '' : `:${item.visit}`}`;
+        out.push(events.NodeScheduled({ path: item.path, phase: 'undo', attempt: 1, key, jobId: null, at }));
+        return out;
+      }
+      out.push(
+        events.NodeSkipped({ path: item.path, phase: 'undo', reason: 'the step declares no undo', actorId: null, at }),
+      );
+    }
+    if (row.cancelledAt !== null || options.cancelling === true) {
+      out.push(events.RunCancelled({ at, keepUntil: keepUntilFor(def.retention.failed) }));
+    } else {
+      out.push(runFailed(def, options.cause ?? (await causeOf(tx, row.id)), at));
+    }
+    return out;
+  };
+
+  /**
+   * The node a run is on, when compensation starts and the events so far do not close it. A parked wait is dropped. A
+   * step job nobody holds is cancelled so it never runs. A step job a worker holds may already have done its work (a
+   * charge): it stays, and its checkpoint settles it later. Returns the events that drop the node, and whether it is
+   * still in flight.
+   */
+  const dropCurrentNode = async (tx: Tx, row: Row, at: string, executionId: string | undefined) => {
+    const none = { events: [], inFlight: false };
+    if (row.node === null) return none;
+    const [step] = await tx
+      .select({ status: workflowSteps.status, jobId: workflowSteps.jobId, attempt: workflowSteps.attempt })
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, row.node), eq(workflowSteps.phase, 'do')));
+    if (step === undefined || step.status !== 'scheduled') return none;
+    const dropped = {
+      events: [events.NodeSkipped({ path: row.node, phase: 'do', reason: COMPENSATING, actorId: null, at })],
+      inFlight: false,
+    };
+    // A parked wait has no work in flight: the job that parked it is only finishing.
+    if (row.state === 'parked') return dropped;
+    if (step.jobId === null) return { events: [], inFlight: true };
+    // Only a job that never started may be skipped. A retry (an earlier attempt of this step, or a crashed try of this
+    // job) may have acted on a provider before it failed, so it runs once more and settles like a step in flight.
+    const [tried] = await tx
+      .select({ n: count() })
+      .from(tables.jobAttempts)
+      .where(eq(tables.jobAttempts.jobId, step.jobId));
+    if (step.attempt > 1 || (tried?.n ?? 0) > 0) return { events: [], inFlight: true };
+    try {
+      await jobOps.cancel(tx, step.jobId, {
+        actor: WORKFLOW_ACTOR,
+        reason: COMPENSATING,
+        ...(executionId === undefined ? {} : { executionId }),
+      });
+    } catch (error) {
+      if (isJournalError(error, 'JOB_RUNNING')) return { events: [], inFlight: true };
+      throw error;
+    }
+    return dropped;
+  };
+
+  /**
+   * The run starts compensating: `head` (the event that caused it) is followed by `CompensationStarted`, the drop of
+   * the node it is on (unless `head` already closes that node), and the first undo. While a step is in flight, no undo
+   * is scheduled: that step's checkpoint schedules it.
+   */
+  const beginCompensation = async (
+    tx: Tx,
+    def: WorkflowDef,
+    row: Row,
+    at: string,
+    head: readonly (
+      | ReturnType<typeof events.NodeFailed>
+      | ReturnType<typeof events.NodeSkipped>
+      | ReturnType<typeof events.DeadlineReached>
+      | ReturnType<typeof events.CancelRequested>
+      | ReturnType<typeof events.TimerFired>
+      | ReturnType<typeof events.SignalReceived>
+    )[],
+    options: {
+      readonly closed: boolean;
+      readonly cause: string | null;
+      readonly cancelling?: boolean;
+      readonly executionId?: string | undefined;
+    },
+  ) => {
+    const dropped = options.closed
+      ? { events: [], inFlight: false }
+      : await dropCurrentNode(tx, row, at, options.executionId);
+    const next = dropped.inFlight
+      ? []
+      : await compensate(tx, def, row, at, { cause: options.cause, cancelling: options.cancelling === true });
+    return [...head, events.CompensationStarted({ at }), ...dropped.events, ...next];
+  };
+
+  /** The run deadline passed: the run compensates, then fails. `closed`: the events so far already close the current node. */
+  const deadlineEvents = (tx: Tx, def: WorkflowDef, row: Row, at: string) =>
+    beginCompensation(tx, def, row, at, [events.DeadlineReached({ at })], {
+      closed: false,
+      cause: 'the run deadline passed before it finished',
+    });
 
   /** Where a run goes: the next node's schedule, or its completion. */
   const eventsAfter = async (tx: Tx, runId: string, route: Route, at: string) =>
@@ -385,16 +602,14 @@ export function createWorkflows<
         ]
       : [events.RunCompleted({ output: route.output, at, keepUntil: route.keepUntil })];
 
-  /** A wait that cannot go on: the node is marked failed, and the run fails with the same text. */
+  /** A wait that cannot go on: the node is marked failed and the run compensates, then fails with the same text. */
   const failWait = async (tx: Tx, def: WorkflowDef, row: Row, path: string, error: string, at: string) => {
     const [step] = await tx
       .select({ attempt: workflowSteps.attempt })
       .from(workflowSteps)
       .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, path), eq(workflowSteps.phase, 'do')));
-    return [
-      events.NodeFailed({ path, phase: 'do', attempt: Math.max(step?.attempt ?? 1, 1), error, at }),
-      runFailed(def, error, at),
-    ];
+    const failedNode = events.NodeFailed({ path, phase: 'do', attempt: Math.max(step?.attempt ?? 1, 1), error, at });
+    return beginCompensation(tx, def, row, at, [failedNode], { closed: true, cause: error });
   };
 
   /** The wait node `index` is over with `result`: it completes and the run goes on. */
@@ -447,7 +662,7 @@ export function createWorkflows<
   /** A timer fired. It acts only if the run is still parked on the very park the timer was made for. */
   const onTimer = async (tx: Tx, row: Row, fired: z.infer<typeof timerCheckpointSchema>['fired'], at: string) => {
     const def = definitionOf(row);
-    if (fired.kind === 'deadline') return deadlineEvents(def, at);
+    if (fired.kind === 'deadline') return row.state === 'compensating' ? [] : deadlineEvents(tx, def, row, at);
     // A timer of a park the run already left finds the run elsewhere and does nothing. A run in a loop can park on
     // the same node again: only the timer of its latest park may end that wait.
     if (row.state !== 'parked' || row.node !== fired.node) return [];
@@ -458,7 +673,7 @@ export function createWorkflows<
       .orderBy(desc(tables.events.seq))
       .limit(1);
     if (latestPark?.seq !== fired.parkSeq) return [];
-    if (pastDeadline(row)) return deadlineEvents(def, at);
+    if (pastDeadline(row)) return deadlineEvents(tx, def, row, at);
     const index = def.nodes.findIndex(candidate => candidate.name === fired.node);
     const node = def.nodes[index];
     if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
@@ -534,8 +749,9 @@ export function createWorkflows<
   const checkpoint = j.command(
     CHECKPOINT_COMMAND,
     checkpointSchema,
-    async (input, { write, tx }): Promise<{ readonly status: 'checkpointed' | 'already' }> => {
+    async (input, { write, tx }): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' }> => {
       const before = { parked: false };
+      const settled = { value: false };
       const written = await write(run, input.runId, async (row, inside) => {
         if (row === null || row.finishedAt !== null) return [];
         before.parked = row.state === 'parked';
@@ -548,7 +764,7 @@ export function createWorkflows<
             and(
               eq(workflowSteps.runId, input.runId),
               eq(workflowSteps.path, input.path),
-              eq(workflowSteps.phase, 'do'),
+              eq(workflowSteps.phase, input.phase),
             ),
           );
         // Another checkpoint already moved this node on, or a later attempt replaced the one this answers.
@@ -559,26 +775,59 @@ export function createWorkflows<
         ) {
           return [];
         }
-        const { outcome } = input;
+        const { outcome, path, phase } = input;
+        const def = definitionOf(row);
+        const compensating = row.state === 'compensating';
+        /** A `do` attempt that ends badly while the run compensates is not retried: the step is settled and the undos go on. */
+        const failedWhileCompensating = async (error: string) => {
+          settled.value = true;
+          return [
+            events.NodeFailed({ path, phase, attempt: input.attempt, error, at }),
+            ...(await compensate(inside.tx, def, row, at, { cause: null })),
+          ];
+        };
         switch (outcome.kind) {
           case 'completed': {
+            if (compensating) {
+              // A step in flight when the run began compensating: it did its work, so it is undone like the rest.
+              return [
+                events.NodeCompleted({ path, phase, result: outcome.result, resolvedBy: null, at }),
+                ...(await compensate(inside.tx, def, row, at, {
+                  cause: null,
+                  doneNow: { path, result: outcome.result },
+                })),
+              ];
+            }
             return [
-              events.NodeCompleted({ path: input.path, phase: 'do', result: outcome.result, resolvedBy: null, at }),
+              events.NodeCompleted({ path, phase, result: outcome.result, resolvedBy: null, at }),
               ...(await eventsAfter(inside.tx, input.runId, outcome.route, at)),
             ];
           }
           case 'skipped': {
+            if (compensating) {
+              return [
+                events.NodeSkipped({ path, phase, reason: outcome.reason, actorId: null, at }),
+                ...(await compensate(inside.tx, def, row, at, { cause: null })),
+              ];
+            }
             return [
-              events.NodeSkipped({ path: input.path, phase: 'do', reason: outcome.reason, actorId: null, at }),
+              events.NodeSkipped({ path, phase, reason: outcome.reason, actorId: null, at }),
               ...(await eventsAfter(inside.tx, input.runId, outcome.route, at)),
             ];
           }
-          case 'retry': {
+          case 'undone': {
             return [
-              events.NodeFailed({ path: input.path, phase: 'do', attempt: input.attempt, error: outcome.error, at }),
+              events.NodeCompleted({ path, phase, result: outcome.result, resolvedBy: null, at }),
+              ...(await compensate(inside.tx, def, row, at, { cause: null, undoneNow: 1 })),
+            ];
+          }
+          case 'retry': {
+            if (compensating && phase === 'do') return failedWhileCompensating(outcome.error);
+            return [
+              events.NodeFailed({ path, phase, attempt: input.attempt, error: outcome.error, at }),
               events.NodeScheduled({
-                path: input.path,
-                phase: 'do',
+                path,
+                phase,
                 attempt: input.attempt + 1,
                 key: outcome.key,
                 jobId: null,
@@ -587,31 +836,36 @@ export function createWorkflows<
             ];
           }
           case 'dead': {
-            return [
-              events.NodeFailed({ path: input.path, phase: 'do', attempt: input.attempt, error: outcome.error, at }),
-            ];
+            if (compensating && phase === 'do') return failedWhileCompensating(outcome.error);
+            const failedNode = events.NodeFailed({ path, phase, attempt: input.attempt, error: outcome.error, at });
+            // An undo that keeps failing, or a dead step under `onDeadStep: 'wait'`, leaves the run for an operator.
+            if (phase === 'undo' || def.onDeadStep === 'wait') return [failedNode];
+            settled.value = true;
+            return beginCompensation(inside.tx, def, row, at, [failedNode], { closed: true, cause: outcome.error });
           }
           case 'park': {
             // The park of this attempt is already in: the step row stays `scheduled` while a run is parked.
             if (row.state === 'parked') return [];
-            const def = definitionOf(row);
-            const index = def.nodes.findIndex(candidate => candidate.name === input.path);
+            const index = def.nodes.findIndex(candidate => candidate.name === path);
             const node = def.nodes[index];
             if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
-              throw new JournalError(
-                'BAD_DEFINITION',
-                'workflow',
-                row.id,
-                `"${def.name}" has no wait node '${input.path}'`,
-              );
+              throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no wait node '${path}'`);
             }
-            if (pastDeadline(row)) return deadlineEvents(def, at);
+            const dropped = events.NodeSkipped({ path, phase: 'do', reason: COMPENSATING, actorId: null, at });
+            // The run began compensating while this wait was starting: the wait is dropped, not parked.
+            if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
+            if (pastDeadline(row)) {
+              return beginCompensation(inside.tx, def, row, at, [events.DeadlineReached({ at }), dropped], {
+                closed: true,
+                cause: 'the run deadline passed before it finished',
+              });
+            }
             if (node.kind === 'waitFor') {
               // The signal came before the run got here: it was kept, and this wait takes it.
               const early = await takeSignal(inside.tx, row.id, node.signal, node.name);
               if (early !== undefined) return wakeOnSignal(inside.tx, def, index, row, early.payload, at);
             }
-            return [events.Parked({ node: input.path, waitingFor: outcome.waitingFor, wakeAt: outcome.wakeAt, at })];
+            return [events.Parked({ node: path, waitingFor: outcome.waitingFor, wakeAt: outcome.wakeAt, at })];
           }
         }
       });
@@ -620,7 +874,8 @@ export function createWorkflows<
       await queueJobs(tx, input.runId, written.events);
       const ended = endedBy(written.events);
       await cancelTimers(tx, input.runId, { park: before.parked && ended.park, deadline: ended.deadline });
-      return { status: written.events.length === 0 ? 'already' : 'checkpointed' };
+      if (written.events.length === 0) return { status: 'already' };
+      return { status: settled.value ? 'settled' : 'checkpointed' };
     },
   );
 
@@ -761,7 +1016,9 @@ export function createWorkflows<
             before.parked = row.state === 'parked';
             const at = nowIso();
             const received = events.SignalReceived({ name, deliveryId: args.deliveryId, at });
-            if (pastDeadline(row)) return [received, ...deadlineEvents(def, at)];
+            if (pastDeadline(row) && row.state !== 'compensating') {
+              return [received, ...(await deadlineEvents(inside.tx, def, row, at))];
+            }
             const index =
               row.state === 'parked' && row.waitingFor === name ? def.nodes.findIndex(n => n.name === row.node) : -1;
             const node = def.nodes[index];
@@ -780,9 +1037,56 @@ export function createWorkflows<
       );
     };
 
+  /** `def.cancel`: stops a run, undoes what it completed, newest first, and ends it `cancelled`. */
+  const cancelCommandFor = (def: WorkflowDef) =>
+    j.command(`${def.name}.cancel`, cancelSchema, async (args, { write, tx, meta }): Promise<CancelOutcome> => {
+      if (!started.has(`${def.name}@${def.version}`)) {
+        throw new JournalError(
+          'WORKFLOW_UNKNOWN',
+          'workflow',
+          def.name,
+          `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
+        );
+      }
+      const before = { parked: false };
+      const written = await write(run, args.runId, async (row, inside) => {
+        if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
+        if (row.name !== def.name || row.workflowVersion !== def.version) {
+          return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
+        }
+        if (row.finishedAt !== null) {
+          return CommandConflict({ detail: `run "${args.runId}" is already ${row.state}` });
+        }
+        if (row.state === 'compensating') {
+          return CommandConflict({ detail: `run "${args.runId}" is already compensating` });
+        }
+        before.parked = row.state === 'parked';
+        const at = nowIso();
+        const actorId = typeof meta['actorId'] === 'string' ? meta['actorId'] : null;
+        return beginCompensation(
+          inside.tx,
+          def,
+          row,
+          at,
+          [events.CancelRequested({ reason: args.reason, actorId, at })],
+          { closed: false, cause: null, cancelling: true, executionId: args.executionId },
+        );
+      });
+      if (isFailure(written)) return written;
+      await queueJobs(tx, args.runId, written.events);
+      const ended = endedBy(written.events);
+      await cancelTimers(tx, args.runId, { park: before.parked && ended.park, deadline: ended.deadline });
+      debugWorkflow.debug('{name}: run {runId} cancel requested', { name: def.name, runId: args.runId });
+      return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
+    });
+
   /** `j.workflow`: the step-2 builder, with `start` and `signal` on the finished definition. */
   const workflow: JournalDefinitions<Meta, Tx, AppDb>['workflow'] = (name, options) =>
-    workflowWith(name, options, def => ({ start: startCommandFor(def), signal: signalCommandFor(def) }));
+    workflowWith(name, options, def => ({
+      start: startCommandFor(def),
+      signal: signalCommandFor(def),
+      cancel: cancelCommandFor(def),
+    }));
 
   type StepEffectContext = EffectContext<AppDb, RootCommandRunner<Meta, Tx>> & Needed<Needs>;
 
@@ -840,12 +1144,13 @@ export function createWorkflows<
     /** The body of one node attempt, bounded by the step's timeout. A timeout aborts `signal` and fails the attempt. */
     async function runBody(
       node: StepNode,
+      invoke: (ctx: ErasedContext) => unknown,
       build: (signal: AbortSignal) => ErasedContext,
       signal: AbortSignal,
       runId: string,
     ) {
       const timeoutMs = node.options.timeout === undefined ? undefined : parseAge(node.options.timeout);
-      if (timeoutMs === undefined) return node.run(build(signal));
+      if (timeoutMs === undefined) return invoke(build(signal));
       const timeout = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<never>((_, reject) => {
@@ -862,7 +1167,7 @@ export function createWorkflows<
       });
       try {
         return await Promise.race([
-          Promise.resolve().then(() => node.run(build(AbortSignal.any([signal, timeout.signal])))),
+          Promise.resolve().then(() => invoke(build(AbortSignal.any([signal, timeout.signal])))),
           expired,
         ]);
       } finally {
@@ -940,11 +1245,12 @@ export function createWorkflows<
 
       let result: unknown;
       try {
-        result = await runBody(node, make, ctx.signal, row.id);
+        result = await runBody(node, node.run, make, ctx.signal, row.id);
       } catch (error) {
         return failed(error);
       }
-      if (isFailure(result)) return failed(result);
+      // A returned Failure is a decision, not an accident: the step is dead at once, with no retry.
+      if (isFailure(result)) return failed(result, false);
 
       try {
         const parsed = node.options.output === undefined ? result : await parseAsync(node.options.output, result);
@@ -958,6 +1264,40 @@ export function createWorkflows<
       } catch (error) {
         // A router, a `finish` or an output schema that fails will fail again: no retry, the definition needs a fix.
         return failed(error, !(error instanceof JournalError && error.code === 'BAD_DEFINITION'));
+      }
+    }
+
+    /** Runs one attempt of the undo of a step. Its context is the step's, plus `result`: what the step stored. */
+    async function attemptUndo(
+      def: WorkflowDef,
+      node: StepNode,
+      row: Row,
+      event: NodeScheduledEvent,
+      ctx: StepEffectContext,
+      done: Done,
+    ): Promise<Verdict> {
+      const { undo } = node.options;
+      if (undo === undefined) {
+        throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `step '${node.name}' has no undo to run`);
+      }
+      const build = (signal: AbortSignal): ErasedContext => ({
+        ...ctx,
+        runId: row.id,
+        path: event.data.path,
+        attempt: event.data.attempt,
+        input: row.input,
+        results: row.results,
+        key: event.data.key,
+        signal,
+      });
+      try {
+        const result = await runBody(node, step => undo({ ...step, result: done.result }), build, ctx.signal, row.id);
+        if (isFailure(result)) return failed(result);
+        const kept = storable(result, def.limits.payload, `the undo result of step '${node.name}'`, row.id);
+        if (kept instanceof JournalError) return failed(kept);
+        return { kind: 'undone', result: kept.value };
+      } catch (error) {
+        return failed(error);
       }
     }
 
@@ -999,20 +1339,14 @@ export function createWorkflows<
     async function runNode(event: NodeScheduledEvent, ctx: StepEffectContext): Promise<unknown> {
       const { data } = event;
       const runId = event.entityId;
-      if (data.phase !== 'do') {
-        throw new JournalError(
-          'BAD_DEFINITION',
-          'workflow',
-          runId,
-          `step '${data.path}' is an undo; compensation is not run yet`,
-        );
-      }
       const [row] = await ctx.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
       if (row === undefined || row.finishedAt !== null) return undefined;
       const [step] = await ctx.db
         .select()
         .from(workflowSteps)
-        .where(and(eq(workflowSteps.runId, runId), eq(workflowSteps.path, data.path), eq(workflowSteps.phase, 'do')));
+        .where(
+          and(eq(workflowSteps.runId, runId), eq(workflowSteps.path, data.path), eq(workflowSteps.phase, data.phase)),
+        );
       // Already checkpointed, or replaced by a later attempt: this job has nothing left to do.
       if (step === undefined || step.attempt !== data.attempt || step.status === 'done' || step.status === 'skipped') {
         return undefined;
@@ -1045,17 +1379,32 @@ export function createWorkflows<
         );
       }
 
-      const verdict =
-        node.kind === 'step'
-          ? await attemptNode(def, index, node, row, event, ctx)
-          : attemptWait(node, row, event, ctx);
+      let verdict: Verdict;
+      if (data.phase === 'undo') {
+        if (node.kind !== 'step') {
+          throw new JournalError('BAD_DEFINITION', 'workflow', runId, `"${row.name}" has no undo for '${data.path}'`);
+        }
+        const settled = await ctx.db
+          .select({ type: tables.events.type, data: tables.events.data })
+          .from(tables.events)
+          .where(settledOf(runId))
+          .orderBy(asc(tables.events.seq));
+        // This undo is not settled yet, so the newest step still to undo is the one it answers.
+        const [done] = remainingUndos(def, settled);
+        if (done === undefined || done.path !== data.path) {
+          throw new JournalError('BAD_DEFINITION', 'workflow', runId, `no completed step '${data.path}' to undo`);
+        }
+        verdict = await attemptUndo(def, node, row, event, ctx, done);
+      } else {
+        verdict =
+          node.kind === 'step'
+            ? await attemptNode(def, index, node, row, event, ctx)
+            : attemptWait(node, row, event, ctx);
+      }
 
+      const at = { runId, path: data.path, phase: data.phase, attempt: data.attempt };
       if (verdict.kind !== 'failed') {
-        const checkpointed = await ctx.run(
-          checkpoint,
-          { runId, path: data.path, attempt: data.attempt, outcome: verdict },
-          meta,
-        );
+        const checkpointed = await ctx.run(checkpoint, { ...at, outcome: verdict }, meta);
         debugWorkflow.debug('{runId} {path}: {kind}, checkpoint {status}', {
           runId,
           path: data.path,
@@ -1076,22 +1425,14 @@ export function createWorkflows<
       if (wait !== undefined) {
         await ctx.run(
           checkpoint,
-          {
-            runId,
-            path: data.path,
-            attempt: data.attempt,
-            outcome: { kind: 'retry', error, key: step.key ?? data.key, at: inMs(wait) },
-          },
+          { ...at, outcome: { kind: 'retry', error, key: step.key ?? data.key, at: inMs(wait) } },
           meta,
         );
         return undefined;
       }
-      const checkpointed = await ctx.run(
-        checkpoint,
-        { runId, path: data.path, attempt: data.attempt, outcome: { kind: 'dead', error } },
-        meta,
-      );
-      if (checkpointed.status === 'already') return undefined;
+      const checkpointed = await ctx.run(checkpoint, { ...at, outcome: { kind: 'dead', error } }, meta);
+      // Settled: the run compensates (or already was), so no operator is needed and the job ends normally.
+      if (checkpointed.status !== 'checkpointed') return undefined;
       debugWorkflow.warn('{runId} {path}: dead after {attempt} attempts, waiting for an operator', {
         runId,
         path: data.path,
