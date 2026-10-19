@@ -37,9 +37,37 @@ Each row starts as `proposed`. The founder sets it to `accepted` or `rejected`, 
 | A-31 | FD (2026-10-17): `live` joins the infrastructure-adapters wave and Tier stack; supersedes A-28's 'live stays not yet' clause. | accepted | 2026-10-17 | Founder decision 2026-10-17. |
 | A-32 | `@arki/cli` is admitted: it joins the dot-kernel wave (published before `@arki/dot`, whose CLI runs on it) and Tier 1 Stack. An approved exception to the A-06 freeze on new packages. | accepted | 2026-10-17 | Founder decision 2026-10-17. Dot cannot ship while a dependency is in no wave (ORDER_E001). |
 
-## Reconciled guidance (2026-10-17)
+## Framework consolidation (2026-10-19)
+
+The founder approved the [framework implementation plan](../features/arki-framework/.work/plans/2026-10-19-framework.md): implement each task, verify it, commit it, and compact before the next. The [execution record](../features/arki-framework/.work/progress.md) distinguishes accepted design from implemented behavior.
+
+| ID | Decision | Status | Date | Reason / note |
+| --- | --- | --- | --- | --- |
+| A-33 | Typed failures are the error contract of every fallible Arki public operation and every Dot execution component. Preserve exact inferred unions and ordinary success values. Include known operational failures; owned boundaries also normalize cancellation, deadlines, malformed protocols and unknown defects. Defects remain fatal by default. | accepted | 2026-10-19 | Founder: "Everything should have their errors typed", followed by approval to implement the plan. Supersedes A-21/A-24's exclusion of operational/configuration faults from managed outcomes. Preserves A-23/A-30's explicit retry predicates, circuit-breaker policy and Journal acceptance identity. Internal invariants, static definition misuse, foreign exception APIs and unmanaged imports may still throw; framework-owned boundaries supervise them independently of tracing. Process death and unowned foreign work cannot be promised a typed return. |
+| A-34 | Support reusable executable actions and independent adapter contracts through one Dot execution/ownership path. Exposure, principal, authorization, approval, durability and retry remain explicit per adapter. Failure definitions are referenced once and boundary coverage is checked against inferred returns. | accepted | 2026-10-19 | Founder selected both A and B and approved implementation. Extend current Dot manifests/adapters; no new universal RPC, action or workflow package. Queue acceptance, streaming and eventual business results remain distinct. |
+| A-35 | Verify every advertised runtime capability per export. Keep server adapters explicit and A-05's leaf-library distinction. Support both compiled and intentionally source-distributed artifacts with appropriate cold-consumer checks; missing engines or skipped entries cannot pass a release claim. | accepted | 2026-10-19 | Approved framework plan T00/T11/T16 reconciles source distribution already supported by release tooling with the old dist-only RFC. Explicit export/type entries remain required. Type fixtures must exercise real usage with skipLibCheck false. This records the target policy; enforcement upgrades remain tracked work. |
+
+### Error ownership and foundation direction
+
+| Outcome | Definition and owner |
+| --- | --- |
+| Domain refusal | Defined by its business/library capability; propagated unchanged through usecases and adapters. |
+| Known operational failure | Defined at the driver/provider capability; preserve retry metadata and uncertainty. Uncertain commits, payments and mail are reconciled before replay. |
+| Cancellation or deadline | Defined by the execution supervisor; propagate the owned signal and observe late settlements. Timeout cannot forcibly stop noncooperative JavaScript. |
+| Protocol failure | Defined by the receiving adapter; validate bytes and revive original definitions. Unknown codes and malformed known payloads remain distinguishable. |
+| Unexpected defect | Normalized at the nearest owned public execution boundary, retaining a private cause and safe incident data. Fatal by default, with no automatic retry or recovery. |
+| Bootstrap misuse | Invalid static definitions and internal invariants may throw. Managed loaders/configuration supervise those throws; arbitrary static imports are outside that guarantee. |
+| Pure total operation | Its failure type is `never`; do not add wrappers or artificial failure dependencies. |
+
+T01 reverses the foundation dependency to `schema → failure → @standard-schema/spec` (types only). One minimal Standard Schema executor lives in `@arki/failure/schema`; revival and schema parsing share it. Higher-level schema helpers remain in `@arki/schema`. This accepted migration supersedes `packages/failure/AGENTS.md` laws 6 and 12's old dependency direction; those package laws change with the implementation, not ahead of it. Foundation definitions bootstrap without recursively validating failures through themselves.
+
+T03 must prove cleanup/child-task failure inference before changing scopes. Imperative registrations cannot retroactively widen a function's type: use typed descriptors, or original failure-definition references at a dynamic boundary, with registration coverage checked. No generic Failure widening or unsafe assertions may stand in for that proof.
+
+## Reconciled guidance (2026-10-19)
 
 - Deprecation: the no-backward-compatibility rule below 1.0 won over the Dot deprecation cycle. A breaking change updates every caller in the same change and has no shim.
 - Bump size: a breaking change is a minor bump and any other change is a patch. This won over "always patch". Below 1.0, a minor bump is how a break is shown.
 - Changeset text: name and bump must be right. The prose is free. The break is explained in `docs/upgrades/<from>-to-<to>.md`.
 - Package names: they follow `packages/<name>`. So `feature` is a Dot subpath, `emails` is `mail`, and `tanstack-start` is not listed until it exists (A-28).
+- AI names: the final [AI split decision](research/12-ai-split/naming.md#6-founder-decisions-2026-10-17) governs the approved package split; planned packages are not thereby published or release-ready. `text-embeddings` retires only after its consumer migration.
+- Historical inventories and earlier RFC implementation tables are dated snapshots. A-20, A-31 and A-32 govern the later admin/live/CLI admissions; the current [tier catalog](core-packages.md) separates admission, manifest privacy and release evidence.

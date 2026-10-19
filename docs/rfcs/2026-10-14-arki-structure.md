@@ -10,18 +10,20 @@
 
 **One flat folder per product, a portable core with named adapters, six layers that point down, and checks that are run by tools, not remembered by people.**
 
+Current policy amendments: [A-33–A-35](../arki/decisions.md#framework-consolidation-2026-10-19) expand typed failures, specify per-entry runtime proof and permit intentional source distribution. The package map and first-run observations below describe 2026-10-14, not today's inventory. Later fleet moves and admissions are recorded in the [fleet RFC](2026-10-17-fleet-packages.md) and [tier catalog](../arki/core-packages.md). Enforcement gaps remain in framework tasks T11/T16; this amendment does not claim those checks already pass.
+
 ## 2. Principles and the tool that enforces each
 
 | # | Rule | Enforced by |
 |---|---|---|
 | P1 | **Folder = name.** `packages/<name>/` holds exactly `@arki/<name>`. No group folders. The monorepo tree equals the public mirror tree. | `arki-library-check`; root `workspaces` is `packages/*` + `tooling/*` + app globs only. |
 | P2 | **Six layers, arrows point down.** A package imports its own layer or lower (§4). | Boundaries tags in each `turbo.json` hold the layers; `arki-layers` (tooling/library) enforces them per export entry in `lint`. Decided 2026-10-14: `turbo boundaries` counts optional peers as undeclared and cannot see entries, so it stays an advisory report (`bun run boundaries`). |
-| P3 | **Portable core, named adapters.** `.` and plain subpaths run on Node, Bun, Deno, browsers and Hermes. Platform code sits behind an entry named for what it adapts to: `/node`, `/browser`, `/react`, `/native`, `/react-native`, `/dot`, `/drizzle`, `/otel`, `/testing`, `/tanstack-start`, `/orpc`, `/pg`, `/vite`, `/server`, `/zod`, `/tanstack`, `/sentry`, `/mastra`, `/http`, `/redis`, `/file` (exactly the `ADAPTERS` set in `tooling/library/src/adapters.ts`). Adapter deps are optional peers. | `@arki/eslint-config/library` (portable rules on `src/**`, adapters exempt); `arki-runtimes`. |
+| P3 | **Portable core, named adapters.** Leaf libraries retain the five-runtime rule (A-05); app-layer entries declare their real capabilities. Every advertised portable entry is tested on its declared runtimes. Platform code sits behind named adapters such as `/node`, `/browser`, `/native`, `/dot`, `/drizzle` or `/server`; `tooling/library/src/adapters.ts` owns the adapter-name set. Adapter deps are optional peers. Missing engines are incomplete evidence, never a passing release claim (A-35). | `@arki/eslint-config/library`; per-entry `arki-runtimes` coverage and strict release gates (T11/T16 close current gaps). |
 | P4 | **Importing does nothing.** No env reads, IO, timers or registrations at import. | `arki-runtimes` purity leg (`expectImportPure` from `@arki/ts/testing` on every export entry). |
-| P5 | **Explicit exports.** No `"./*"` wildcard. Every entry has `types` and points into `dist/`. | `arki-library-check`. |
+| P5 | **Explicit exports and honest artifacts.** No `"./*"` wildcard. Every entry has a type target. Compiled entries ship `dist/`; intentionally source-distributed entries may ship `src/` when the supported consumer toolchain and cold-consumer build are verified. Neither form may depend on workspace resolution. | `arki-library-check` plus candidate artifact/type/peer checks (A-35; enforcement completed in T11/T16). |
 | P6 | **A Dot plugin lives in the package it wraps (`/dot`), unless Dot already depends on that package** — then it lives in Dot (`@arki/dot/log`). | Boundaries: `foundation` denies `@arki/dot`. |
 | P7 | **`packages/` holds products.** A package must be describable without naming an app. Usage count never decides (house rule). | Review rule. |
-| P8 | **Coded errors, clean breaks before 1.0.** `ARKI_<PKG>_E00n` with remediation; a breaking change is a **minor** changeset; every call site is updated in the same slice; no shims. | Release scorecard; changeset check. |
+| P8 | **Typed failures, stable diagnostics, clean breaks before 1.0.** Canonical dotted failure definitions supply precise returned unions and remediation (A-33). Existing `ARKI_<PKG>_E00n` diagnostic IDs remain stable. A breaking change is a **minor** changeset; every call site is updated in the same slice; no shims. | Failure-use/type tests and owned supervision; release scorecard and changeset check. |
 
 ## 3. Package map
 
@@ -134,7 +136,7 @@ The package keeps only `scripts/smoke.mjs`. `arki-runtimes` reads the manifest a
 
 A missing engine prints `INCOMPLETE` and exits non-zero under `--require-all`, which the release scorecard uses. Today's smoke scripts exit 0 when the engine is missing (`math/scripts/smoke-browser.mjs:12`, `smoke-hermes.mjs:14`), so a release can pass on legs that never ran. `turbo.json`: `test:runtimes` `dependsOn: ["build"]`, `cache: false`.
 
-**Manifest check** — `arki-library-check`, run from `lint`: folder = name, no `./*`, `types` + `default` under `dist/` for every entry, `sideEffects: false`, adapter deps are optional peers, a Boundaries tag is set.
+**Manifest check** — `arki-library-check`, run from `lint`: folder = name, explicit exports with type targets, `sideEffects: false`, adapter deps are optional peers, a Boundaries tag is set. Compiled `dist/` and intentional source distribution follow P5; candidate checks must prove the actual shipped entries. Current wildcard skipping and consumer-test gaps remain assigned to T11/T16.
 
 First adopters: math, log, money, resilience, journal, bench, then string and date (B14).
 
