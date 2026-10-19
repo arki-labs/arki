@@ -8,6 +8,9 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 
 ## Where things are
 
+The [core principles](principles.md) apply across all Arki packages, including
+OpenTelemetry throughout the framework and easy instrumentation for plugins and features.
+
 | File | What it holds |
 | --- | --- |
 | [plan.md](plan.md) | **The execution plan**: weeks 1–13 task by task, Laravel parity matrix, AI pillar, licence product, gates, months 4–12. |
