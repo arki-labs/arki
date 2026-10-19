@@ -34,7 +34,7 @@ export function createTombstoneTable<TUserId extends string = string, TPrefix ex
   schema: PgSchema,
   { name, idPrefix }: TombstoneTableOptions<TPrefix>,
 ) {
-  const id = createIdFactory<TPrefix, `${TPrefix}${string}`>(idPrefix);
+  const id = createIdFactory(idPrefix);
   const table = schema.table(
     name,
     {

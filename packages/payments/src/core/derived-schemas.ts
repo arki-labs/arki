@@ -3,6 +3,21 @@ import { createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle'
 import { instantSchema } from '@arki/date/zod';
 
 import type { CoreTables } from './tables.js';
+import {
+  billingIntervalSchema,
+  paymentMethodTypeSchema,
+  paymentStatusSchema,
+  planTierSchema,
+  subscriptionStatusSchema,
+} from './contracts.js';
+import {
+  customerIdSchema,
+  paymentIdSchema,
+  planIdSchema,
+  subscriptionIdSchema,
+  webhookIdSchema,
+} from './primitives.js';
+import { userIdSchema } from './user-id.js';
 
 /**
  * Factory for the Drizzle-table-derived Zod schemas. The host app calls this
@@ -20,8 +35,54 @@ export function createCoreDerivedSchemas({
   payments,
   webhookEvents,
 }: Pick<CoreTables, 'plans' | 'customers' | 'subscriptions' | 'payments' | 'webhookEvents'>) {
-  const planSelectSchema = createSelectSchema(plans);
+  const timestamps = {
+    createdAt: () => instantSchema(),
+    updatedAt: () => instantSchema(),
+  };
+  const planFields = {
+    ...timestamps,
+    id: () => planIdSchema,
+    features: () => z.array(z.string()),
+    interval: () => billingIntervalSchema,
+    tier: () => planTierSchema,
+  };
+  const customerFields = {
+    ...timestamps,
+    id: () => customerIdSchema,
+    userId: () => userIdSchema,
+  };
+  const subscriptionFields = {
+    ...timestamps,
+    id: () => subscriptionIdSchema,
+    userId: () => userIdSchema,
+    planId: () => planIdSchema,
+    customerId: () => customerIdSchema,
+    status: () => subscriptionStatusSchema,
+    currentPeriodStart: () => instantSchema(),
+    currentPeriodEnd: () => instantSchema(),
+    trialStart: () => instantSchema(),
+    trialEnd: () => instantSchema(),
+    canceledAt: () => instantSchema(),
+  };
+  const paymentFields = {
+    ...timestamps,
+    id: () => paymentIdSchema,
+    subscriptionId: () => subscriptionIdSchema,
+    status: () => paymentStatusSchema,
+    paymentMethod: () => paymentMethodTypeSchema,
+    userId: () => userIdSchema,
+    customerId: () => customerIdSchema,
+  };
+  const webhookFields = {
+    ...timestamps,
+    id: () => webhookIdSchema,
+    processedAt: () => instantSchema(),
+    lastAttemptAt: () => instantSchema(),
+  };
+
+  const planSelectSchema = createSelectSchema(plans, planFields);
   const planInsertSchema = createInsertSchema(plans, {
+    ...planFields,
     // Whole minor units, at most Stripe's 8 digits (99,999,999), as in `core/money.ts`
     priceMinor: z.number().int().positive().max(99_999_999),
     currency: z.string().length(3).toUpperCase(),
@@ -31,16 +92,18 @@ export function createCoreDerivedSchemas({
   });
   const planUpdateSchema = planInsertSchema.partial().omit({ id: true });
 
-  const customerSelectSchema = createSelectSchema(customers);
+  const customerSelectSchema = createSelectSchema(customers, customerFields);
   const customerInsertSchema = createInsertSchema(customers, {
+    ...customerFields,
     email: z.email(),
     name: z.string().min(1).max(255).optional(),
   });
   const customerUpdateSchema = customerInsertSchema.partial().omit({ id: true, userId: true });
 
   // `version` belongs to the journal: it is not part of what the API reads or writes
-  const subscriptionSelectSchema = createSelectSchema(subscriptions).omit({ version: true });
+  const subscriptionSelectSchema = createSelectSchema(subscriptions, subscriptionFields).omit({ version: true });
   const subscriptionInsertSchema = createInsertSchema(subscriptions, {
+    ...subscriptionFields,
     currentPeriodStart: instantSchema(),
     currentPeriodEnd: instantSchema(),
     trialStart: instantSchema().optional(),
@@ -49,8 +112,9 @@ export function createCoreDerivedSchemas({
   }).omit({ version: true });
   const subscriptionUpdateSchema = subscriptionInsertSchema.partial().omit({ id: true, userId: true });
 
-  const paymentSelectSchema = createSelectSchema(payments).omit({ version: true });
+  const paymentSelectSchema = createSelectSchema(payments, paymentFields).omit({ version: true });
   const paymentInsertSchema = createInsertSchema(payments, {
+    ...paymentFields,
     amountMinor: z.number().int().positive().max(99_999_999),
     currency: z.string().length(3).toUpperCase(),
     description: z.string().max(500).optional(),
@@ -60,8 +124,9 @@ export function createCoreDerivedSchemas({
   }).omit({ version: true });
   const paymentUpdateSchema = paymentInsertSchema.partial().omit({ id: true, userId: true });
 
-  const webhookEventSelectSchema = createSelectSchema(webhookEvents);
+  const webhookEventSelectSchema = createSelectSchema(webhookEvents, webhookFields);
   const webhookEventInsertSchema = createInsertSchema(webhookEvents, {
+    ...webhookFields,
     providerEventId: z.string().min(1).max(255),
     data: z.record(z.string(), z.unknown()),
     attempts: z.number().min(0).default(0),

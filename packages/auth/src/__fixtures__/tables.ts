@@ -38,11 +38,11 @@ export const workspaceTables = createWorkspaceTables(schema, {
   fill: 'app',
   user: { id: authTables.User.id },
   ids: {
-    organization: createIdFactory<'org_', `org_${string}`>('org_'),
-    member: createIdFactory<'mem_', `mem_${string}`>('mem_'),
-    invitation: createIdFactory<'inv_', `inv_${string}`>('inv_'),
-    team: createIdFactory<'team_', `team_${string}`>('team_'),
-    teamMember: createIdFactory<'tmem_', `tmem_${string}`>('tmem_'),
+    organization: createIdFactory('org_'),
+    member: createIdFactory('mem_'),
+    invitation: createIdFactory('inv_'),
+    team: createIdFactory('team_'),
+    teamMember: createIdFactory('tmem_'),
   },
 });
 

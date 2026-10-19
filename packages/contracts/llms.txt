@@ -8,7 +8,7 @@ Match errors on `error.code`, never on the message. The main entry never loads D
 
 <!-- llms:start -->
 - `@arki/contracts`: Browser-safe schema tools: Zod, form data, prefixed ids, keyset pagination and coded errors. `$brand`, `$input`, `$output`, `CONTRACTS_ERROR_CODES`, `ContractsError`, `INVALID`, `NEVER`, `TimePrecision`, `ZodAny`, `ZodArray`, `ZodBase64`, `ZodBase64URL`; and 311 more.
-- `@arki/contracts/drizzle`: Branded select, insert and update schemas built from a Drizzle table. `COLUMN_ZOD_SCHEMA`, `bufferSchema`, `createInsertSchema`, `createSchemaFactory`, `createSelectSchema`, `createUpdateSchema`, `jsonSchema`, `literalSchema`.
+- `@arki/contracts/drizzle`: Runtime-backed select, insert and update schemas built from a Drizzle table. `COLUMN_ZOD_SCHEMA`, `bufferSchema`, `createInsertSchema`, `createSchemaFactory`, `createSelectSchema`, `createUpdateSchema`, `jsonColumn`, `jsonSchema`, `literalSchema`.
 - `@arki/contracts/orpc`: Operations: one typed identity per contract procedure. `OPERATION`, `operationAt`, `operationOf`, `operations`; types `AnyOperation`, `ErrorOf`, `Identified`, `InputOf`, `MetaOf`, `Operation`, `OperationOf`, `Operations`; and 1 more.
 <!-- llms:end -->
 

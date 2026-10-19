@@ -41,6 +41,9 @@ See [Ambiguous commit recovery](#ambiguous-commit-recovery).
 
 1. Declare the id in a browser-safe file with `defineId('sty_')` from `@arki/contracts`.
 2. Build the columns with `idColumns(storyId)` from `@arki/db/id`.
+3. Reuse `storyId.schema` in table validator refinements for precise branded output. The metadata enforces runtime prefixes; Drizzle discards its static schema type.
+4. Legacy `createIdFactory(prefix)` now derives its ID only from the prefix; remove its former type arguments. A caller-supplied narrower type was not runtime validation.
+5. JSON storage uses `jsonColumn(name, storageSchema)` from `@arki/contracts/drizzle`. Apply wire codecs only in explicit insert refinements, then store parsed output; select validates the stable storage schema.
 
 ### Paginate with a keyset
 
@@ -118,6 +121,8 @@ swallowed), `57014` (statement timeout), connection errors.
 - A PGlite data directory has one owner. Two handles corrupt it.
 
 ## Errors
+
+ID column metadata uses `ContractsError` code `ARKI_CONTRACTS_E008` when a Drizzle builder has no runtime config. Use a supported builder and matching Drizzle version.
 
 | Code              | Name                | When                                                                                         | Fix                                                                          |
 | ----------------- | ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |

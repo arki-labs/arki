@@ -2,6 +2,24 @@
 
 Comprehensive AI, RAG, and Vector Search library for Arki projects.
 
+## Types and validation
+
+Search and service configuration types are inferred from their runtime schemas.
+`SearchSettings` contains query-less search settings; `SearchOptions` adds the required
+query and optional payload filters. `RAGServiceConfig` selects a RAG provider and its
+generation settings; `AIServiceConfig` configures a provider service's model, retries,
+and sanitization. Their schemas are `searchSettingsSchema`, `searchOptionsSchema`,
+`ragServiceConfigSchema`, and `aiServiceConfigSchema`.
+
+The former root exports `SearchOptionsType` and `AIServiceConfigType` are now
+`SearchSettings` and `RAGServiceConfig`, respectively. `ClassifiedIntent` and its
+`IntentType` category are inferred from the schema used for model responses.
+
+Sanitizer configuration is programmatic: custom injection and PII rules accept actual
+`RegExp` instances. The OpenAI service validates and preserves these rules before
+sanitizing prompts. `sanitizerConfigSchema` is available from `@arki/ai/safety` and
+`@arki/ai/validation`; `SanitizerConfig` is inferred from that schema.
+
 ## Features
 
 - 🔍 **Vector Search**: Production-ready vector search with Qdrant, Pinecone (coming soon), and Weaviate (coming soon)

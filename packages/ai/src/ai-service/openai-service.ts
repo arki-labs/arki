@@ -11,7 +11,7 @@ import { generateText, Output, streamText } from 'ai';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 
-import type { SanitizerConfig } from '../safety/types';
+import type { AIServiceConfig as OpenAIServiceConfig, GenerationOptions as ValidatedGenerationOptions } from '../validation';
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
 import { RateLimited } from '../failures';
@@ -22,20 +22,9 @@ import { aiServiceConfigSchema, validateInput } from '../validation';
 
 type ChatMessage = ModelMessage;
 
-export type OpenAIServiceConfig = {
-  model?: string;
-  apiKey?: string;
-  temperature?: number;
-  maxRetries?: number;
-  /** Enable input sanitization. `true` uses defaults; pass config object for customization. */
-  sanitize?: boolean | SanitizerConfig;
-};
+export type { AIServiceConfig as OpenAIServiceConfig } from '../validation';
 
-export type GenerationOptions = {
-  temperature?: number;
-  maxTokens?: number;
-  maxRetries?: number;
-  systemPrompt?: string;
+export type GenerationOptions = ValidatedGenerationOptions & {
   /**
    * Forwarded as `abortSignal` to the AI SDK so the upstream HTTP
    * call is cancelled when the signal aborts. Required for cockatiel

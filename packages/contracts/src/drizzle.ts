@@ -1,162 +1,175 @@
-/** Branded select, insert and update schemas built from a Drizzle table. */
+/** Runtime-backed select, insert and update schemas built from a Drizzle table. */
+import type { Column, ColumnIsGeneratedAlwaysAs, Table } from 'drizzle-orm';
+import type { GetZodType, jsonSchema as nativeJsonSchema } from 'drizzle-orm/zod';
 import { getColumns } from 'drizzle-orm';
+import { jsonb } from 'drizzle-orm/pg-core';
 import {
-  createInsertSchema as drizzleCreateInsertSchema,
-  createSelectSchema as drizzleCreateSelectSchema,
-  createUpdateSchema as drizzleCreateUpdateSchema,
+  createInsertSchema as drizzleInsert,
+  createSelectSchema as drizzleSelect,
+  createUpdateSchema as drizzleUpdate,
 } from 'drizzle-orm/zod';
-import type { BuildRefine } from 'drizzle-orm/zod';
-import type { z } from 'zod';
-import type { InferInsertModel, InferSelectModel, Table } from 'drizzle-orm';
+import { z } from 'zod';
 
-export {
-  bufferSchema,
-  createSchemaFactory,
-  jsonSchema,
-  literalSchema,
-} from 'drizzle-orm/zod';
+import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+
+export { bufferSchema, createSchemaFactory, jsonSchema, literalSchema } from 'drizzle-orm/zod';
+
+/** Runtime-only column metadata shared with ID factories, including duplicate module copies. */
+export const COLUMN_ZOD_SCHEMA = Symbol.for('@arki/contracts/columnZodSchema');
+
+const jsonValueSchema = z.json();
 
 /**
- * Symbol used to tag a Drizzle column builder with its runtime validation
- * schema. Producers (like `@arki/db`'s ID factories) write to
- * `builder.config[COLUMN_ZOD_SCHEMA]` at column-construction time; this
- * package's `createSelectSchema`/`createInsertSchema`/`createUpdateSchema`
- * wrappers read it back and merge it into the refine map automatically.
- *
- * Using `Symbol.for(...)` keeps the symbol globally registered so any package
- * resolves to the same value, even with multiple module copies.
+ * Declare a JSONB column from its runtime schema. The application type is the
+ * schema output. Reuse that schema in an explicit refinement for precise
+ * validator input/output inference: `{ profile: () => profileSchema }`.
+ * Output must be recursively JSON-compatible and accepted as schema input.
+ * Parsing stored output must preserve its value; types cannot prove stability.
+ * Use a separate wire codec in refinements. Non-finite JSON output is rejected.
+ * This does not install a database driver codec or run transforms on queries.
  */
-export const COLUMN_ZOD_SCHEMA: unique symbol = Symbol.for('@arki/contracts/columnZodSchema') as never;
-
-/**
- * Drizzle column-config side-channel where producers stash their Zod schema.
- * The same `config` object is shared between the builder and the constructed
- * column (see `PgVarcharBuilder.build` → `new PgVarchar(table, this.config)`),
- * so reading at column time recovers what was written at builder time.
- */
-type ColumnConfigWithSchema = { config?: Record<string | symbol, unknown> };
-
-function readColumnSchema(column: unknown): z.ZodTypeAny | undefined {
-  const cfg = (column as ColumnConfigWithSchema).config;
-  const schema = cfg?.[COLUMN_ZOD_SCHEMA];
-  return schema && typeof schema === 'object' && '_zod' in (schema)
-    ? (schema as z.ZodTypeAny)
-    : undefined;
+export function jsonColumn<TSchema extends z.ZodType>(
+  name: string,
+  schema: TSchema &
+    ([z.output<TSchema>] extends [z.core.util.JSONType]
+      ? [z.output<TSchema>] extends [z.input<TSchema>]
+        ? unknown
+        : never
+      : never),
+) {
+  const builder = jsonb(name).$type<z.output<TSchema>>();
+  const config: unknown = Reflect.get(builder, 'config');
+  if (typeof config !== 'object' || config === null) {
+    throw new ContractsError(CONTRACTS_ERROR_CODES.invalidColumnMetadata, 'The Drizzle builder has no column config.');
+  }
+  const storageSchema = schema.refine(
+    value => jsonValueSchema.safeParse(value).success,
+    'Expected JSON storage output',
+  );
+  Object.assign(config, { [COLUMN_ZOD_SCHEMA]: storageSchema });
+  return builder;
 }
 
-/**
- * Walk every column on `table`, look up the optional Zod schema each producer
- * stashed via `COLUMN_ZOD_SCHEMA`, and merge it into the user-provided refine.
- *
- * The schema is registered as a CALLBACK refinement (`(_) => schema`) so that
- * drizzle-zod's `HandleRefinement` correctly wraps `ZodNullable` around it for
- * nullable columns. A bare-schema refinement bypasses the nullability wrap and
- * would refuse `null` at runtime for nullable foreign keys.
- *
- * User-provided refines win over auto-derived ones, so explicit overrides on a
- * specific column always take priority.
- */
-function autoRefine<TTable extends Table>(
-  table: TTable,
-  userRefine: Refine<TTable> | undefined,
-): Refine<TTable> {
-  const columns = getColumns(table);
-  const refine: Record<string, unknown> = { ...userRefine };
-  for (const [key, column] of Object.entries(columns)) {
+function readColumnSchema(column: Column): z.ZodType | undefined {
+  const config: unknown = Reflect.get(column, 'config');
+  if (typeof config !== 'object' || config === null) return;
+  const schema: unknown = Reflect.get(config, COLUMN_ZOD_SCHEMA);
+  return schema instanceof z.ZodType ? schema : undefined;
+}
+
+// A JSON $type annotation can itself be an array; it says nothing about SQL
+// dimensions. The driver parameter preserves actual PostgreSQL array nesting.
+type JsonColumnSchema<TDriver> = unknown extends TDriver
+  ? typeof nativeJsonSchema
+  : [Exclude<TDriver, string>] extends [never]
+    ? typeof nativeJsonSchema
+    : Exclude<TDriver, string> extends (infer TElement)[]
+      ? z.ZodArray<JsonColumnSchema<TElement>>
+      : typeof nativeJsonSchema;
+type ColumnSchema<TColumn extends Column> = TColumn['_']['dataType'] extends 'object json'
+  ? JsonColumnSchema<TColumn['_']['driverParam']>
+  : GetZodType<TColumn, Record<string, never>>;
+type Refine<TTable extends Table> = {
+  [K in keyof TTable['_']['columns']]?: z.ZodType | ((schema: ColumnSchema<TTable['_']['columns'][K]>) => z.ZodType);
+};
+type Mode = 'select' | 'insert' | 'update';
+type Nullable<TColumn extends Column, TSchema extends z.ZodType> = TColumn['_']['notNull'] extends true
+  ? TSchema
+  : z.ZodNullable<TSchema>;
+type Wrapped<TMode extends Mode, TColumn extends Column, TSchema extends z.ZodType> = TMode extends 'select'
+  ? Nullable<TColumn, TSchema>
+  : TMode extends 'update'
+    ? z.ZodOptional<Nullable<TColumn, TSchema>>
+    : TColumn['_']['notNull'] extends true
+      ? TColumn['_']['hasDefault'] extends true
+        ? z.ZodOptional<TSchema>
+        : TSchema
+      : z.ZodOptional<z.ZodNullable<TSchema>>;
+type Field<TMode extends Mode, TColumn extends Column, TRefine> = TRefine extends z.ZodType
+  ? TRefine
+  : TRefine extends (schema: ColumnSchema<TColumn>) => z.ZodType
+    ? Wrapped<TMode, TColumn, ReturnType<TRefine>>
+    : Wrapped<TMode, TColumn, ColumnSchema<TColumn>>;
+type TableSchema<TMode extends Mode, TTable extends Table, TRefine> = z.ZodObject<{
+  [
+    K in keyof TTable['_']['columns'] as TMode extends 'select'
+      ? K
+      : K extends keyof TRefine
+        ? TRefine[K] extends z.ZodType
+          ? K
+          : ColumnIsGeneratedAlwaysAs<TTable['_']['columns'][K]> extends true
+            ? never
+            : K
+        : ColumnIsGeneratedAlwaysAs<TTable['_']['columns'][K]> extends true
+          ? never
+          : K
+  ]: Field<TMode, TTable['_']['columns'][K], K extends keyof TRefine ? TRefine[K] : undefined>;
+}>;
+
+function autoRefine(table: Table, userRefine: Refine<Table> | undefined): Refine<Table> {
+  const refine: Refine<Table> = { ...userRefine };
+  for (const [key, column] of Object.entries(getColumns(table))) {
     if (key in refine) continue;
     const schema = readColumnSchema(column);
     if (schema) {
-      refine[key] = (() => schema);
+      const dimensions: unknown = Reflect.get(column, 'dimensions');
+      let storedSchema = schema;
+      if (typeof dimensions === 'number') {
+        for (let dimension = 0; dimension < dimensions; dimension += 1) storedSchema = z.array(storedSchema);
+      }
+      refine[key] = () => storedSchema;
     }
   }
-  return refine as Refine<TTable>;
+  return refine;
 }
 
-/**
- * Per-key Zod shape derived from a Drizzle table's inferred model.
- * Preserves branded `$type<>()` types and JSON shapes that drizzle-zod's
- * runtime extractor erases (it walks `dataType` strings, not the `_.data` phantom).
- *
- * Two subtleties make this mapping more involved than `[K in keyof T]: ZodType<T[K]>`:
- *
- *  1. The `-?` modifier strips the optional flag from source keys. If we left
- *     it, ZodObject would see `Shape['b']` as `ZodType<...> | undefined` and
- *     collapse the per-key inference to `unknown`.
- *  2. For source keys whose value type includes `undefined` (i.e. were optional),
- *     we wrap the ZodType in `ZodOptional` so Zod re-introduces optionality at
- *     parse time. We exclude `undefined` from the inner type so the parsed
- *     output is the actual value type.
- */
-type StrongShape<TInferred> = {
-  [K in keyof TInferred]-?: undefined extends TInferred[K]
-    ? z.ZodOptional<
-        z.ZodType<Exclude<TInferred[K], undefined>, Exclude<TInferred[K], undefined>>
-      >
-    : z.ZodType<TInferred[K], TInferred[K]>;
-};
-
-type StrongSchema<TInferred> = z.ZodObject<StrongShape<TInferred>, z.core.$strip>;
-
-/**
- * Refine signature reused from drizzle-zod — accepts either a replacement
- * Zod schema or a callback that receives the auto-derived schema for that
- * column and returns a refined schema.
- */
-type Refine<TTable extends Table> = BuildRefine<TTable['_']['columns'], Record<string, never>>;
-
-/**
- * Build a select schema from a Drizzle table that preserves branded ID and
- * `jsonb('col').$type<Shape>()` typings AND auto-applies any runtime validation
- * schema producers stashed on the column via {@link COLUMN_ZOD_SCHEMA}.
- *
- * Runtime behavior matches drizzle-zod's `createSelectSchema` (including any
- * `refine` overrides) PLUS the auto-applied per-column schemas from `@arki/db`
- * ID factories — so `\`plan_\${string}\`` IDs are validated at parse time,
- * not just typed at compile time.
- *
- * The TypeScript output type is widened to the table's `InferSelectModel`
- * shape, so `z.infer<typeof schema>['id']` is `\`plan_\${string}\``, not `string`.
- *
- * @example
- * const planSelectSchema = createSelectSchema(plans);
- * planSelectSchema.parse({ id: 'wrong_prefix_xyz', ... }); // throws
- */
+/** Build a select validator; only explicit runtime schemas promise refined output types. */
 export function createSelectSchema<TTable extends Table>(
   table: TTable,
-  refine?: Refine<TTable>,
-): StrongSchema<InferSelectModel<TTable>> {
-  return drizzleCreateSelectSchema(
-    table as never,
-    autoRefine(table, refine) as never,
-  );
+  refine?: undefined,
+): TableSchema<'select', TTable, Record<never, never>>;
+export function createSelectSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>,
+): TableSchema<'select', TTable, TRefine>;
+export function createSelectSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined,
+): TableSchema<'select', TTable, TRefine> | TableSchema<'select', TTable, Record<never, never>>;
+export function createSelectSchema(table: Table, refine?: Refine<Table>) {
+  return drizzleSelect(table, autoRefine(table, refine));
 }
 
-/**
- * Build an insert schema from a Drizzle table that preserves branded ID and
- * `jsonb('col').$type<Shape>()` typings AND auto-applies any runtime validation
- * schema producers stashed on the column via {@link COLUMN_ZOD_SCHEMA}.
- */
+/** Build an insert validator, preserving defaults and callback schema input/output. */
 export function createInsertSchema<TTable extends Table>(
   table: TTable,
-  refine?: Refine<TTable>,
-): StrongSchema<InferInsertModel<TTable>> {
-  return drizzleCreateInsertSchema(
-    table as never,
-    autoRefine(table, refine) as never,
-  );
+  refine?: undefined,
+): TableSchema<'insert', TTable, Record<never, never>>;
+export function createInsertSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>,
+): TableSchema<'insert', TTable, TRefine>;
+export function createInsertSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined,
+): TableSchema<'insert', TTable, TRefine> | TableSchema<'insert', TTable, Record<never, never>>;
+export function createInsertSchema(table: Table, refine?: Refine<Table>) {
+  return drizzleInsert(table, autoRefine(table, refine));
 }
 
-/**
- * Build an update schema from a Drizzle table — every column becomes optional
- * but otherwise preserves branded ID and `jsonb('col').$type<Shape>()` typings
- * AND auto-applies producer-stashed schemas.
- */
+/** Build an update validator; callback-refined columns retain nullability and become optional. */
 export function createUpdateSchema<TTable extends Table>(
   table: TTable,
-  refine?: Refine<TTable>,
-): StrongSchema<Partial<InferInsertModel<TTable>>> {
-  return drizzleCreateUpdateSchema(
-    table as never,
-    autoRefine(table, refine) as never,
-  );
+  refine?: undefined,
+): TableSchema<'update', TTable, Record<never, never>>;
+export function createUpdateSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>,
+): TableSchema<'update', TTable, TRefine>;
+export function createUpdateSchema<TTable extends Table, TRefine extends Refine<TTable>>(
+  table: TTable,
+  refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined,
+): TableSchema<'update', TTable, TRefine> | TableSchema<'update', TTable, Record<never, never>>;
+export function createUpdateSchema(table: Table, refine?: Refine<Table>) {
+  return drizzleUpdate(table, autoRefine(table, refine));
 }

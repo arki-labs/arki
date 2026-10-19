@@ -4,6 +4,10 @@
 
 import type { EmbeddingSpace } from '@arki/embeddings';
 
+import type { RAGServiceConfig } from './validation';
+
+export type { RAGServiceConfig, SearchMode, SearchSettings } from './validation';
+
 /**
  * Generic embedding provider interface
  */
@@ -90,11 +94,6 @@ export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
 }
 
 /**
- * Search modes
- */
-export type SearchMode = 'semantic' | 'keyword' | 'hybrid';
-
-/**
  * Generic search result
  */
 export type SearchResult<TData = Record<string, unknown>> = {
@@ -103,30 +102,6 @@ export type SearchResult<TData = Record<string, unknown>> = {
   data?: TData;
   highlights?: string[];
   metadata?: Record<string, unknown>;
-}
-
-/**
- * Search options
- */
-export type SearchOptions = {
-  mode?: SearchMode;
-  limit?: number;
-  offset?: number;
-  scoreThreshold?: number;
-  includeMetadata?: boolean;
-  highlightTerms?: boolean;
-}
-
-/**
- * AI service configuration
- */
-export type AIServiceConfig = {
-  provider: 'openai' | 'anthropic' | 'cohere' | 'local';
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
 }
 
 /**
@@ -144,7 +119,7 @@ export type StreamingHandler = {
 export type RAGConfig = {
   embeddingProvider: EmbeddingProvider;
   vectorSearchProvider: VectorSearchProvider;
-  aiService: AIServiceConfig;
+  aiService: RAGServiceConfig;
   chunkSize?: number;
   chunkOverlap?: number;
   topK?: number;

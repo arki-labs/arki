@@ -55,6 +55,13 @@ export const CONTRACTS_ERROR_CODES = {
    * @verify bun run test -- src/orpc.test.ts
    */
   notAnOperation: 'ARKI_CONTRACTS_E007',
+  /**
+   * The Drizzle column builder has no runtime config for its schema metadata.
+   *
+   * @fix Use a supported Drizzle column builder and matching Drizzle version.
+   * @verify bun run test -- src/drizzle.test.ts
+   */
+  invalidColumnMetadata: 'ARKI_CONTRACTS_E008',
 } as const;
 
 /** The code of a {@link ContractsError}. */
@@ -68,6 +75,7 @@ const REMEDIATIONS: Record<ContractsErrorCode, string> = {
   ARKI_CONTRACTS_E004: 'Declare at least one key, and order by NOT NULL columns that end on a unique one.',
   ARKI_CONTRACTS_E005: 'Pass back a cursor exactly as the same keyset returned it, or start from the first page.',
   ARKI_CONTRACTS_E006: 'Rename the contract key: no ".", and not a name the query utils reserve.',
+  ARKI_CONTRACTS_E008: 'Use a supported Drizzle column builder and matching Drizzle version.',
   ARKI_CONTRACTS_E007: 'Pass a leaf of createOrpcUtils, or an object built by operations().',
 };
 

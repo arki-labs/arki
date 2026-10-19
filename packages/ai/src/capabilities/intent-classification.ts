@@ -12,41 +12,21 @@ import { z } from '@arki/contracts';
 import { createLLMProvider, type LLMProviderConfig } from '../ai-service/factory';
 import type { StructuredLLMProvider } from '../ai-service/types';
 
-// ── Types ─────────────────────────────────────────────────────
-
-export type IntentType =
-  | 'search'
-  | 'synthesize'
-  | 'compare'
-  | 'organize'
-  | 'transform'
-  | 'general';
-
-export type ClassifiedIntent = {
-  /** The detected user intent category. */
-  intent: IntentType;
-  /**
-   * Optional time filter extracted from the message.
-   * Short duration strings like "7d", "30d", "1d".
-   */
-  timeFilter?: string;
-  /** Optional topic keywords extracted from the message. */
-  topicHint?: string;
-  /**
-   * Whether the question requires RAG retrieval against the user's library.
-   * Defaults to `true` — it is safer to retrieve context than to miss content.
-   */
-  requiresRAG: boolean;
-};
-
 // ── Schema ────────────────────────────────────────────────────
 
 const IntentSchema = z.object({
+  /** The detected user intent category. */
   intent: z.enum(['search', 'synthesize', 'compare', 'organize', 'transform', 'general']),
+  /** Short duration strings like "7d", "30d", "1d". */
   timeFilter: z.string().optional(),
+  /** Optional topic keywords extracted from the message. */
   topicHint: z.string().optional(),
+  /** Whether the question requires retrieval against the user's library. */
   requiresRAG: z.boolean(),
 });
+
+export type ClassifiedIntent = z.infer<typeof IntentSchema>;
+export type IntentType = ClassifiedIntent['intent'];
 
 // ── System prompt ─────────────────────────────────────────────
 

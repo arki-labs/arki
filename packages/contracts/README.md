@@ -54,13 +54,7 @@ The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and R
 
 ## Why
 
-`drizzle-zod`'s `createSelectSchema` walks Drizzle's `dataType` strings to infer Zod shapes. That mechanism loses three things:
-
-1. Branded ID types declared via `varchar('id').$type<\`usr\_${string}\`>()`collapse to plain`string`.
-2. `jsonb('col').$type<Shape>()` shapes collapse to `unknown`.
-3. Runtime validation schemas stashed on a column by an ID-factory side-channel are not applied automatically.
-
-`@arki/contracts` wraps `drizzle-zod`'s factories so the output schema preserves the branded type _and_ auto-applies any column-stashed runtime schema, with user-provided refines still winning.
+Drizzle's `$type<T>()` changes TypeScript types without validating values. Table validators therefore infer only what their runtime schemas check. `jsonColumn(name, schema)` declares JSONB storage from one stable schema and applies it at runtime. Explicit refinements reuse that schema to preserve precise validator types, because Drizzle does not retain schema types on built columns. Existing ID column metadata still checks prefixes at runtime.
 
 ## Usage
 
@@ -88,38 +82,34 @@ const schema = formData.zfd.formData({
 ### Branded select / insert / update schemas
 
 ```ts run
-import { jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { pgTable, varchar } from 'drizzle-orm/pg-core';
 
-import { z } from '@arki/contracts';
-import { createSelectSchema } from '@arki/contracts/drizzle';
+import { defineId, z } from '@arki/contracts';
+import { createSelectSchema, jsonColumn } from '@arki/contracts/drizzle';
 
+const userId = defineId('usr_');
+const profileSchema = z.object({ displayName: z.string() });
 const users = pgTable('users', {
-  id: varchar('id').$type<`usr_${string}`>().primaryKey(),
+  id: varchar('id').$type<z.output<typeof userId.schema>>().primaryKey(),
   email: varchar('email').notNull(),
-  profile: jsonb('profile').$type<{ displayName: string }>(),
+  profile: jsonColumn('profile', profileSchema),
 });
-
-const userSelect = createSelectSchema(users);
-type User = z.infer<typeof userSelect>;
-// { id: `usr_${string}`; email: string; profile: { displayName: string } | null }
+const userSelect = createSelectSchema(users, {
+  id: () => userId.schema,
+  profile: () => profileSchema,
+});
+type User = z.output<typeof userSelect>;
 const user: User = { id: 'usr_1', email: 'a@example.com', profile: null };
 if (userSelect.parse(user).email !== 'a@example.com') throw new Error('select schema changed the row');
+if (userSelect.safeParse({ ...user, profile: { displayName: 42 } }).success) throw new Error('invalid JSON accepted');
+if (userSelect.safeParse({ ...user, id: 'org_42' }).success) throw new Error('wrong prefix accepted');
 ```
 
-If an ID-factory stashed a Zod schema on a column via `COLUMN_ZOD_SCHEMA`, parsing rejects values with the wrong prefix:
+Callback refinements retain column nullability and insert defaults; bare schema replacements control their own optionality and nullability. Explicit refinements override `COLUMN_ZOD_SCHEMA` metadata. Unannotated JSONB, including a bare `$type<Shape>()`, retains Drizzle's generic JSON validator and type.
 
-```ts continue
-const wrongPrefix = userSelect.safeParse({ id: 'org_42', email: 'a@example.com', profile: null });
-// With a column-stashed schema, wrongPrefix.success is false: id must start with "usr_".
-```
+`jsonColumn` takes a stable storage schema: its output must be recursively JSON-compatible and assignable to its input, and parsing stored output must preserve the value. Validation narrowing and branded JSON values are supported; Date, bigint, Map, Set, functions and required undefined values are not. Its runtime output is checked as JSON, including finite numbers. It does not change Drizzle's JSONB driver codec. Apply a wire transform or codec in an explicit insert refinement, insert its parsed application output, then validate fetched rows against the stable storage schema. Do not tag a column with a wire transform that would run again on an already transformed value.
 
-User-provided refines override the auto-applied schema:
-
-```ts continue
-const strictSelect = createSelectSchema(users, {
-  email: z.email(),
-});
-```
+Breaking migration: replace `jsonb(name).$type<Shape>()` with `jsonColumn(name, storageSchema)` and reuse that schema in precise table refinements. Reuse each ID declaration's schema in refinements for branded output types. A `$type` annotation alone no longer makes the validator claim that type.
 
 ### Prefixed ids: `defineId`
 
@@ -259,6 +249,7 @@ Drizzle entry, `@arki/contracts/drizzle`:
 - `createSelectSchema(table, refine?)` — branded select schema.
 - `createInsertSchema(table, refine?)` — branded insert schema.
 - `createUpdateSchema(table, refine?)` — every field optional, otherwise like insert.
+- `jsonColumn(name, storageSchema)` — JSONB column with a runtime storage schema and inferred application type.
 - `COLUMN_ZOD_SCHEMA` — `Symbol.for('@arki/contracts/columnZodSchema')` side-channel for ID factories.
 - `bufferSchema`, `jsonSchema`, `literalSchema`, `createSchemaFactory` — re-exported from `drizzle-orm/zod`.
 

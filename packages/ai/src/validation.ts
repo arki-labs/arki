@@ -8,6 +8,9 @@ import { InvalidInput, orThrow } from '@arki/failure';
 import { formatIssues, parse, parseAsync, pathOf } from '@arki/schema';
 
 import { ValidationError } from './errors';
+import { sanitizerConfigSchema } from './safety/types';
+
+export { sanitizerConfigSchema } from './safety/types';
 
 /**
  * OpenAI Embedding configuration validation
@@ -104,37 +107,45 @@ export const vectorProviderConfigSchema = z.discriminatedUnion('type', [
 export type VectorProviderConfig = z.infer<typeof vectorProviderConfigSchema>;
 
 /**
- * Search options validation
+ * Settings shared by search requests and query-less search configuration.
  */
-export const searchOptionsSchema = z.object({
-  query: z.string().min(1),
+export const searchSettingsSchema = z.object({
   mode: z.enum(['semantic', 'keyword', 'hybrid']).optional(),
   limit: z.number().min(1).max(1000).optional(),
   offset: z.number().min(0).optional(),
   scoreThreshold: z.number().min(0).max(1).optional(),
-  filters: z.record(z.string(), z.unknown()).optional(),
   highlightTerms: z.boolean().optional(),
   includeMetadata: z.boolean().optional(),
+});
+
+export type SearchSettings = z.infer<typeof searchSettingsSchema>;
+export type SearchMode = NonNullable<SearchSettings['mode']>;
+
+/** A complete search request, including the query and optional payload filters. */
+export const searchOptionsSchema = searchSettingsSchema.extend({
+  query: z.string().min(1),
+  filters: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type SearchOptions = z.infer<typeof searchOptionsSchema>;
 
 /**
- * AI service configuration validation
+ * Provider selection and generation settings for a RAG pipeline.
  */
-/**
- * Sanitization configuration for the AI service.
- * When `true`, uses default sanitizer settings.
- * When an object, configures specific sanitization options.
- */
-export const sanitizerConfigSchema = z.object({
-  maxInputLength: z.number().min(1).optional(),
-  detectPromptInjection: z.boolean().optional(),
-  redactPII: z.boolean().optional(),
-  stripDangerousCharacters: z.boolean().optional(),
-  normalizeWhitespace: z.boolean().optional(),
+export const ragServiceConfigSchema = z.object({
+  provider: z.enum(['openai', 'anthropic', 'cohere', 'local']),
+  apiKey: z.string().optional(),
+  baseUrl: z.string().optional(),
+  model: z.string().optional(),
+  temperature: z.number().optional(),
+  maxTokens: z.number().optional(),
 });
 
+export type RAGServiceConfig = z.infer<typeof ragServiceConfigSchema>;
+
+/**
+ * Provider-service settings. Sanitization accepts defaults or programmatic rules.
+ */
 export const aiServiceConfigSchema = z.object({
   model: z.string().optional(),
   apiKey: z.string().optional(),

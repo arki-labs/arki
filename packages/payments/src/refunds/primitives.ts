@@ -1,8 +1,8 @@
 import { createIdFactory } from '@arki/db/id-factory';
 
-export type RefundId = `rfnd_${string}`;
+export type RefundId = ReturnType<typeof refundIdFactoryInstance.create>;
 
-const refundIdFactoryInstance = createIdFactory<'rfnd', RefundId>('rfnd');
+const refundIdFactoryInstance = createIdFactory('rfnd');
 
 export const createRefundId = refundIdFactoryInstance.create;
 export const refundIdSchema = refundIdFactoryInstance.schema;

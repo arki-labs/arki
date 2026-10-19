@@ -1,9 +1,9 @@
 /** Prefixed id factories (`createIdFactory`) and `idColumns` for ids declared with `defineId`. */
-import { createId as createCuid } from '@paralleldrive/cuid2';
 import type { PgColumn } from 'drizzle-orm/pg-core';
+import { createId as createCuid } from '@paralleldrive/cuid2';
 import { varchar } from 'drizzle-orm/pg-core';
 
-import { z } from '@arki/contracts';
+import { CONTRACTS_ERROR_CODES, ContractsError, z } from '@arki/contracts';
 import { COLUMN_ZOD_SCHEMA } from '@arki/contracts/drizzle';
 
 // Core ID creation
@@ -23,9 +23,12 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` =
  * column (see `PgVarcharBuilder.build` → `new PgVarchar(table, this.config)`),
  * so writing here is readable from the column later.
  */
-function tagColumnSchema<TBuilder>(builder: TBuilder, schema: z.ZodTypeAny): TBuilder {
-  const cfg = (builder as unknown as { config: Record<string | symbol, unknown> }).config;
-  cfg[COLUMN_ZOD_SCHEMA] = schema;
+function tagColumnSchema<TBuilder extends object>(builder: TBuilder, schema: z.ZodType): TBuilder {
+  const config: unknown = Reflect.get(builder, 'config');
+  if (typeof config !== 'object' || config === null) {
+    throw new ContractsError(CONTRACTS_ERROR_CODES.invalidColumnMetadata, 'The Drizzle builder has no column config.');
+  }
+  Object.assign(config, { [COLUMN_ZOD_SCHEMA]: schema });
   return builder;
 }
 
@@ -38,7 +41,7 @@ type OnDelete = 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default
  * from `@arki/contracts` has both, and so does {@link createIdFactory}.
  */
 export type IdColumnSource<TId extends string> = {
-  readonly schema: z.ZodType;
+  readonly schema: z.ZodType<TId>;
   readonly create: () => TId;
 };
 
@@ -57,7 +60,10 @@ export type IdColumnSource<TId extends string> = {
  * });
  * ```
  */
-export function idColumns<TId extends string>(id: IdColumnSource<TId>) {
+export function idColumns<TSchema extends z.ZodType<string>>(
+  id: IdColumnSource<z.output<NoInfer<TSchema>>> & { readonly schema: TSchema },
+) {
+  type TId = z.output<TSchema>;
   const { schema, create } = id;
 
   const columns = {
@@ -132,7 +138,7 @@ export function idColumns<TId extends string>(id: IdColumnSource<TId>) {
  * @example
  * ```typescript
  * export type PoetId = `pt${string}`;
- * const poetId = createIdFactory<'pt', PoetId>('pt');
+ * const poetId = createIdFactory('pt');
  *
  * export const createPoetId = poetId.create;
  * export const poetIdSchema = poetId.schema;
@@ -143,19 +149,13 @@ export function idColumns<TId extends string>(id: IdColumnSource<TId>) {
  * });
  * ```
  */
-export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}${string}`>(prefix: TPrefix) {
-  /**
-   * Zod validation schema for the ID type. Uses refine instead of transform
-   * for better type safety; auto-applied at parse time by @arki/contracts'
-   * schema wrappers when this factory's columns appear on the table.
-   */
-  const schema = z
-    .string()
-    .startsWith(prefix)
-    .brand<TId>()
-    .transform(id => id as TId);
+export function createIdFactory<TPrefix extends string>(prefix: TPrefix) {
+  /** Validate the stored prefix while deriving the output type from that prefix alone. */
+  const schema: z.ZodType<`${TPrefix}${string}`, string> = z.custom<`${TPrefix}${string}`>(
+    value => typeof value === 'string' && value.startsWith(prefix),
+  );
 
-  const create = (): TId => createPrefixedId(prefix) as TId;
+  const create = () => createPrefixedId(prefix);
 
   return {
     /**

@@ -4,7 +4,9 @@
 // the optional peer `@orpc/contract`.
 
 import { oc } from '@orpc/contract';
+import { pgTable } from 'drizzle-orm/pg-core';
 
+import { createInsertSchema, createSelectSchema, createUpdateSchema, jsonColumn } from '../dist/drizzle.js';
 import { ContractsError, defineId, formData, keyset, page, pageInput, z } from '../dist/index.js';
 import { OPERATION, operationAt, operationOf, operations } from '../dist/orpc.js';
 
@@ -85,4 +87,32 @@ try {
 }
 check(threw, 'a key with "." throws TypeError');
 
+// JSON storage metadata rejects nested values on every supported engine.
+const profileSchema = z.object({ age: z.number(), groups: z.array(z.array(z.string())).optional() });
+const profiles = pgTable('profiles', { profile: jsonColumn('profile', profileSchema).notNull() });
+for (const schema of [createSelectSchema(profiles), createInsertSchema(profiles), createUpdateSchema(profiles)]) {
+  check(!schema.safeParse({ profile: { age: 'wrong' } }).success, 'nested JSON age is checked');
+  check(!schema.safeParse({ profile: { age: 1, groups: [[2]] } }).success, 'nested JSON arrays are checked');
+  check(schema.safeParse({ profile: { age: 1 } }).success, 'valid JSON storage parses');
+}
+const storedCount = z.number();
+const countWire = z.codec(z.string(), storedCount, { decode: Number, encode: String });
+const counts = pgTable('counts', { count: jsonColumn('count', storedCount).notNull() });
+const parsedCount = createInsertSchema(counts, { count: () => countWire }).parse({ count: '42' });
+check(parsedCount.count === 42, 'wire codec produces application output');
+check(createSelectSchema(counts).parse(parsedCount).count === 42, 'stored output uses the stable storage schema');
+
+const phantom = pgTable('phantom', { value: jsonColumn('value', z.number()).notNull() });
+check(
+  !createSelectSchema(pgTable('nan', { value: jsonColumn('value', z.nan()).notNull() })).safeParse({ value: NaN })
+    .success,
+  'non-finite storage output is rejected',
+);
+const narrowed = z.object({ id: storyId.schema, count: z.number().default(1) });
+const narrowedRows = pgTable('narrowed', { value: jsonColumn('value', narrowed).notNull() });
+check(
+  createSelectSchema(narrowedRows).parse({ value: { id: 'sty_abc' } }).value.count === 1,
+  'narrowed storage schemas accept their parsed output',
+);
+check(createSelectSchema(phantom).parse({ value: 42 }).value === 42, 'JSON scalar output survives storage validation');
 console.log(`${checks} smoke checks passed`);

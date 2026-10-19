@@ -6,11 +6,11 @@ export type TaxExemptionId = `txe_${string}`;
 export type TaxRecordId = `txr_${string}`;
 export type TaxAuditEntryId = `txa_${string}`;
 
-const taxConfigId = createIdFactory<'txc_', TaxConfigId>('txc_');
-const taxJurisdictionId = createIdFactory<'txj_', TaxJurisdictionId>('txj_');
-const taxExemptionId = createIdFactory<'txe_', TaxExemptionId>('txe_');
-const taxRecordId = createIdFactory<'txr_', TaxRecordId>('txr_');
-const taxAuditEntryId = createIdFactory<'txa_', TaxAuditEntryId>('txa_');
+const taxConfigId = createIdFactory('txc_');
+const taxJurisdictionId = createIdFactory('txj_');
+const taxExemptionId = createIdFactory('txe_');
+const taxRecordId = createIdFactory('txr_');
+const taxAuditEntryId = createIdFactory('txa_');
 
 export const createTaxConfigId = taxConfigId.create;
 export const createTaxJurisdictionId = taxJurisdictionId.create;

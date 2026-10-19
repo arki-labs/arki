@@ -136,6 +136,9 @@ export type {
 } from './types';
 
 export {
+  detectionPatternSchema,
+  piiPatternSchema,
+  sanitizerConfigSchema,
   // Input sanitization constants
   BASE_ISSUE_TYPES,
   DEFAULT_SANITIZER_CONFIG,

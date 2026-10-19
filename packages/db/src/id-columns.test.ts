@@ -6,12 +6,12 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import { defineRelations, sql } from 'drizzle-orm';
-import { pgTable, text } from 'drizzle-orm/pg-core';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
-import { defineId } from '@arki/contracts';
-import { createSelectSchema } from '@arki/contracts/drizzle';
+import { defineId, z } from '@arki/contracts';
+import { createInsertSchema, createSelectSchema, jsonColumn } from '@arki/contracts/drizzle';
 
 import { createIdFactory, idColumns } from './id-factory.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -28,6 +28,11 @@ const stories = pgTable('stories', {
   title: text('title').notNull(),
 });
 const relations = defineRelations({ stories });
+const storedProfile = z.object({ age: z.number() });
+const profiles = pgTable('profiles', {
+  id: integer('id').primaryKey(),
+  profile: jsonColumn('profile', storedProfile).notNull(),
+});
 
 let client: PGlite;
 let db: Awaited<ReturnType<typeof initDbRuntimeLocal<typeof relations>>>['db'];
@@ -37,6 +42,7 @@ beforeAll(async () => {
   await db.execute(
     sql`create table stories (id varchar(256) primary key, universe_id varchar(256) not null, parent_id varchar(256), title text not null)`,
   );
+  await db.execute(sql`create table profiles (id integer primary key, profile jsonb not null)`);
 });
 
 afterAll(async () => {
@@ -67,8 +73,21 @@ describe('idColumns', () => {
     expect(select.safeParse({ ...ok, universeId: storyId.create() }).success).toBe(false);
   });
 
+  it('wire transforms run once before storage; selecting uses the stable storage schema', async () => {
+    const decode = vi.fn(Number);
+    const wireProfile = z.object({ age: z.codec(z.string(), storedProfile.shape.age, { decode, encode: String }) });
+    const insert = createInsertSchema(profiles, { profile: () => wireProfile });
+    const parsed = insert.parse({ id: 1, profile: { age: '42' } });
+    expectTypeOf<typeof parsed.profile>().toEqualTypeOf<z.output<typeof storedProfile>>();
+    expect(parsed.profile).toEqual({ age: 42 });
+    const [row] = await db.insert(profiles).values(parsed).returning();
+    expect(row?.profile).toEqual({ age: 42 });
+    expect(createSelectSchema(profiles).parse(row).profile).toEqual({ age: 42 });
+    expect(decode).toHaveBeenCalledExactlyOnceWith('42', expect.anything());
+  });
+
   it('createIdFactory keeps working for ids declared the old way', () => {
-    const poet = createIdFactory<'pt_', `pt_${string}`>('pt_');
+    const poet = createIdFactory('pt_');
     expect(poet.create()).toMatch(/^pt_/);
     expect(poet.make).toBe(poet.create);
     expect(poet.schema.safeParse('xx_1').success).toBe(false);

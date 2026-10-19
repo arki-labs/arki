@@ -6,7 +6,8 @@
 import type { EmbedFailure, Embedder } from '@arki/embeddings';
 import { embed, embedMany, isEmbedFailure, isSameSpace, SpaceMismatch } from '@arki/embeddings';
 
-import type { SearchOptions as BaseSearchOptions, SearchMode, VectorSearchProvider } from '../types';
+import type { VectorSearchProvider } from '../types';
+import type { SearchOptions } from '../validation';
 import type { SearchCache } from './cache';
 import { debugSemantic } from '../debug.ts';
 import { SearchAnalyticsCollector } from './analytics';
@@ -22,16 +23,7 @@ export type SemanticSearchConfig = {
   cacheTTL?: number;
 };
 
-export type SearchOptions = {
-  query: string;
-  mode?: SearchMode;
-  limit?: number;
-  offset?: number;
-  scoreThreshold?: number;
-  filters?: Record<string, unknown>;
-  highlightTerms?: boolean;
-  includeMetadata?: boolean;
-} & BaseSearchOptions;
+export type { SearchOptions } from '../validation';
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;

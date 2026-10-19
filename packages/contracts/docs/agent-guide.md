@@ -32,7 +32,8 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. Import from `@arki/contracts/drizzle`, not from the main entry.
 2. `createSelectSchema(table)`, `createInsertSchema(table)`, `createUpdateSchema(table)`.
-3. Override one column with a refine: `createSelectSchema(table, { email: z.email() })`.
+3. Declare JSONB with `jsonColumn(name, storageSchema)`; reuse the schema as `{ profile: () => storageSchema }` for precise types. The storage schema output must be JSON-compatible, accepted as input, and stable when parsed again. Optional fields must be omitted rather than set to undefined; apply wire codecs only in explicit refinements. A bare `$type<T>()` is not validation.
+4. Override one column with a refine: `createSelectSchema(table, { email: z.email() })`.
 
 ### Give a contract procedure a typed identity
 
@@ -43,15 +44,15 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 3. **Build the client utils from the contract value**: `export const orpc = createOrpcUtils(rpcContract, client)` (`@fleet/tanstack-start/orpc/client`). Each leaf is oRPC's own utils plus `'~op'`.
 4. **Read the identity** with `operationOf(orpc.posts.create)`. It gives `{ path, name, meta }`. A typed consumer can read it too: `useOfflineMutation(orpc.posts.create)` compiles only when the meta says `offlineSafe: true`.
 
-| Export | Contract |
-| --- | --- |
-| `operations(contract)` | Walks the contract once. Returns a frozen tree with an `Operation` at every leaf. Throws `ContractsError` (naming the path) for a key with `.` or a reserved key. |
-| `operationAt(contract, path)` | The operation at `path`, or `undefined` for a group or a miss. |
-| `operationOf(carrier)` | The operation under `'~op'`. `ContractsError` when there is none or it is malformed. |
-| `OPERATION` | `'~op'`, the carrier key. |
-| `Operation<I, O, E, M>` | `{ path, name, meta }` plus phantom types. `name === path.join('.')`. |
-| `OperationOf<C>`, `Operations<C>` | Inferred from `ContractProcedure<I, O, E, M>`: input before transforms, output after, typed errors, meta. |
-| `InputOf`, `OutputOf`, `ErrorOf`, `MetaOf` | Read one type off an operation. |
+| Export                                     | Contract                                                                                                                                                          |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations(contract)`                     | Walks the contract once. Returns a frozen tree with an `Operation` at every leaf. Throws `ContractsError` (naming the path) for a key with `.` or a reserved key. |
+| `operationAt(contract, path)`              | The operation at `path`, or `undefined` for a group or a miss.                                                                                                    |
+| `operationOf(carrier)`                     | The operation under `'~op'`. `ContractsError` when there is none or it is malformed.                                                                              |
+| `OPERATION`                                | `'~op'`, the carrier key.                                                                                                                                         |
+| `Operation<I, O, E, M>`                    | `{ path, name, meta }` plus phantom types. `name === path.join('.')`.                                                                                             |
+| `OperationOf<C>`, `Operations<C>`          | Inferred from `ContractProcedure<I, O, E, M>`: input before transforms, output after, typed errors, meta.                                                         |
+| `InputOf`, `OutputOf`, `ErrorOf`, `MetaOf` | Read one type off an operation.                                                                                                                                   |
 
 ## Rules that bite
 
@@ -67,15 +68,16 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 
 Every error is a `ContractsError` (a `TypeError`). Match on `error.code`.
 
-| Code | Meaning | What to do |
-| --- | --- | --- |
-| `ARKI_CONTRACTS_E001` | `defineId` got a prefix that is not letters, digits or `_`. | Use letters, digits and `_`, for example `sty_`. |
-| `ARKI_CONTRACTS_E002` | Two prefixes are equal or one starts the other. | Give each id kind a prefix that does not start another. |
-| `ARKI_CONTRACTS_E003` | No `crypto.getRandomValues` on this engine. | Run where it exists, or add a polyfill. |
-| `ARKI_CONTRACTS_E004` | `keyset` got no keys, or a row with a NULL key. | Declare a key. Order by NOT NULL columns. |
-| `ARKI_CONTRACTS_E005` | The cursor is not one this keyset made. | Send the cursor back unchanged, or start from page one. |
-| `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name. | Rename the key. |
-| `ARKI_CONTRACTS_E007` | The value carries no operation. | Pass a `createOrpcUtils` leaf or an `operations()` result. |
+| Code                  | Meaning                                                     | What to do                                                 |
+| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `ARKI_CONTRACTS_E001` | `defineId` got a prefix that is not letters, digits or `_`. | Use letters, digits and `_`, for example `sty_`.           |
+| `ARKI_CONTRACTS_E002` | Two prefixes are equal or one starts the other.             | Give each id kind a prefix that does not start another.    |
+| `ARKI_CONTRACTS_E003` | No `crypto.getRandomValues` on this engine.                 | Run where it exists, or add a polyfill.                    |
+| `ARKI_CONTRACTS_E004` | `keyset` got no keys, or a row with a NULL key.             | Declare a key. Order by NOT NULL columns.                  |
+| `ARKI_CONTRACTS_E005` | The cursor is not one this keyset made.                     | Send the cursor back unchanged, or start from page one.    |
+| `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
+| `ARKI_CONTRACTS_E008` | A Drizzle builder has no runtime metadata config.           | Use a supported Drizzle builder and matching version.      |
+| `ARKI_CONTRACTS_E007` | The value carries no operation.                             | Pass a `createOrpcUtils` leaf or an `operations()` result. |
 
 ## Verify
 

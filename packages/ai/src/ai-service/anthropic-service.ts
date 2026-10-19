@@ -8,6 +8,7 @@ import { anthropic } from '../anthropic';
 import { generateText, Output, streamText } from 'ai';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { AIServiceConfig } from '../validation';
 
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
@@ -40,11 +41,7 @@ type AnthropicStreamOptions = {
   onError?: (error: Error) => void;
 };
 
-export type AnthropicServiceConfig = {
-  model?: string;
-  temperature?: number;
-  maxRetries?: number;
-};
+export type AnthropicServiceConfig = Pick<AIServiceConfig, 'model' | 'temperature' | 'maxRetries'>;
 
 /**
  * Converts a system prompt (string or SystemPart[]) into the format expected by
