@@ -26,6 +26,8 @@ export const env = defineEnv({
 
     // Anthropic
     ANTHROPIC_API_KEY: z.string().optional(),
+    // Required with a user-scoped key (`sk-ant-usr…`): the workspace its requests bill to.
+    ANTHROPIC_WORKSPACE_ID: z.string().optional(),
 
     // Groq (OpenAI-compatible API with fast inference)
     GROQ_API_KEY: z.string().optional(),

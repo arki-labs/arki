@@ -4,7 +4,7 @@
  */
 
 import type { ModelMessage, SystemModelMessage } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { anthropic } from '../anthropic';
 import { generateText, Output, streamText } from 'ai';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';

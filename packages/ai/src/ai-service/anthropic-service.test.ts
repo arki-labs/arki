@@ -11,7 +11,8 @@ import { AnthropicService } from './anthropic-service';
 // ── Mocks ──────────────────────────────────────────────────────────
 
 vi.mock('@ai-sdk/anthropic', () => ({
-  anthropic: vi.fn(() => 'mocked-anthropic-model'),
+  // `@arki/ai/anthropic` builds its default provider with `createAnthropic`.
+  createAnthropic: vi.fn(() => vi.fn(() => 'mocked-anthropic-model')),
 }));
 
 vi.mock('ai', () => ({

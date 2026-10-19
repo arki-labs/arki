@@ -18,7 +18,7 @@
  */
 
 import type { LanguageModel } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { anthropic } from '../anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';

@@ -6,7 +6,7 @@
  */
 
 import type { LanguageModel } from 'ai';
-import { anthropic, createAnthropic } from '@ai-sdk/anthropic';
+import { anthropic, createAnthropic } from '../anthropic';
 import { createGoogleGenerativeAI, google } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createMistral, mistral } from '@ai-sdk/mistral';
