@@ -34,7 +34,7 @@ declare const TypeOf: unique symbol;
  * Phantom type witness for a service. Carries `T` at the type level only —
  * the runtime value is an empty object.
  */
-export type Service<T> = { readonly [TypeOf]?: T };
+export type Service<out T> = { readonly [TypeOf]?: T };
 
 declare const LazyInner: unique symbol;
 
@@ -130,14 +130,18 @@ export type NeedsShape = Record<string, Service<unknown>>;
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type EmptyShape = {};
 
+type WitnessContext<Witness> = [Witness] extends [LazyService<infer Value>]
+  ? Lazy<Value>
+  : [Witness] extends [Service<infer Value>]
+    ? Value
+    : never;
+
 /**
  * Local-alias view of a needs shape — what lifecycle hooks destructure.
  * `{ cache: Token<KV, 'arki.kv'> }` → `{ cache: KV }`.
  * `{ search: service.lazy<S>() }` → `{ search: Lazy<S> }`.
  */
-export type CtxOf<S extends NeedsShape> = {
-  [K in keyof S]: S[K] extends LazyService<infer T> ? Lazy<T> : S[K] extends Service<infer T> ? T : never;
-};
+export type CtxOf<S extends NeedsShape> = { [K in keyof S]: WitnessContext<S[K]> };
 
 /**
  * Wire-key view of a needs shape — what the app builder checks
@@ -256,8 +260,15 @@ export type DotLoggingContext = {
 };
 
 /** What a `logging` factory returns. The kernel closes it after the app's last lifecycle record. */
-export type DotLoggingHandle = {
-  close(): Promise<void>;
+export type DotLoggingHandle<Close extends undefined | Failure = undefined | Failure> = {
+  close(): MaybePromise<Close>;
+};
+
+/** The actual logging callback remains the source of activation and cleanup failures.
+ * @example type Slot = LoggingSlot<DotLoggingHandle>;
+ */
+export type LoggingSlot<Result extends DotLoggingHandle | Failure> = {
+  readonly logging?: (ctx: DotLoggingContext) => Result;
 };
 
 /**
@@ -300,28 +311,33 @@ export function handleOf(key: string, provider: string): Handle<unknown, string>
 
 /** Exact failures owned by a plugin's construction and release callbacks. */
 export type PluginOwnership = { readonly open: Failure; readonly close: Failure };
+/** A unit with no declared construction or cleanup refusals.
+ * @example type OpenFailure = EmptyOwnership['open']; // never
+ */
 export type EmptyOwnership = { readonly open: never; readonly close: never };
 type CallbackFailure<Value, Key extends PropertyKey> =
   Value extends Record<Key, infer Callback extends (...args: never[]) => unknown> ? FailureOf<Callback> : never;
-type EntriesFailure<Values, Key extends PropertyKey> = {
-  [Name in keyof Values]: CallbackFailure<Values[Name], Key>;
-}[keyof Values];
+type EntriesFailure<Values, Key extends PropertyKey> = Values extends unknown
+  ? CallbackFailure<Values[keyof Values], Key>
+  : never;
 /** Consumer-visible successful value of an ordinary or owned provider. */
 type ResourceEntry = Extract<ScopePlan[string], { kind: 'resource' }>;
-export type ProvidedValue<Value> = Value extends ResourceEntry
-  ? Value extends { readonly open: infer Open extends (...args: never[]) => unknown }
-    ? SuccessOf<Open>
+export type ProvidedValue<Value> = Value extends ResourceEntry | Failure
+  ? Value extends ResourceEntry
+    ? Value extends { readonly open: infer Open extends (...args: never[]) => unknown }
+      ? SuccessOf<Open>
+      : never
     : never
-  : Exclude<Value, Failure>;
+  : Value;
 export type ProvidedValues<Values> = { [Name in keyof Values]: ProvidedValue<Awaited<Values[Name]>> };
-type ProviderEntries<Values> = { [Name in keyof Values]: Extract<Awaited<Values[Name]>, ResourceEntry> };
-type ProviderOpen<Values> =
-  Extract<Awaited<Values[keyof Values]>, Failure> | EntriesFailure<ProviderEntries<Values>, 'open'>;
+type ProviderValues<Values> = Values extends unknown ? Awaited<Values[keyof Values]> : never;
+type ProviderEntries<Values> = Extract<ProviderValues<Values>, ResourceEntry>;
+type ProviderOpen<Values> = Extract<ProviderValues<Values>, Failure> | CallbackFailure<ProviderEntries<Values>, 'open'>;
 type LazyClose<Value> = Value extends Lazy<unknown, Failure> ? FailureOf<Value['dispose']> : never;
 type ProviderClose<Values> =
-  | EntriesFailure<ProviderEntries<Values>, 'close'>
-  | { [Name in keyof Values]: LazyClose<Exclude<Awaited<Values[Name]>, ResourceEntry | Failure>> }[keyof Values];
-export type InferredOwnership<Values, Boot> = {
+  | CallbackFailure<ProviderEntries<Values>, 'close'>
+  | LazyClose<Exclude<ProviderValues<Values>, ResourceEntry | Failure>>;
+export type InferredOwnership<in out Values, out Boot> = {
   readonly open:
     | ProviderOpen<Values>
     | Extract<Boot, Failure>
@@ -332,12 +348,25 @@ export type InferredOwnership<Values, Boot> = {
     | EntriesFailure<Exclude<Boot, void | Failure>, 'close'>
     | EntriesFailure<Exclude<Boot, void | Failure>, 'run'>;
 };
-export type PluginOpenFailure<P> = P extends { readonly [OwnershipSym]?: infer Owned extends PluginOwnership }
-  ? Owned['open']
-  : never;
-export type PluginCloseFailure<P> = P extends { readonly [OwnershipSym]?: infer Owned extends PluginOwnership }
-  ? Owned['close']
-  : never;
+/** Failures owned by the runtime's feature preparation, independent of replaceable callbacks.
+ * @example type Prepared = PluginPreparation<typeof database>;
+ */
+export type PluginPreparation<P> = P extends { readonly [OwnershipSym]?: infer Owned extends PluginOwnership }
+  ? Owned
+  : EmptyOwnership;
+type FactoryValue<Factory> = Factory extends (...args: never[]) => infer Value ? Value : never;
+type FactoryValues<Factories> = { [Key in keyof Factories]: FactoryValue<Factories[Key]> };
+type SourceOwnership<P> = P extends { readonly factories: infer Factories; readonly hooks: infer Hooks }
+  ? InferredOwnership<
+      FactoryValues<Factories>,
+      Hooks extends { readonly boot?: (...args: never[]) => infer Boot } ? Awaited<Boot> : never
+    >
+  : EmptyOwnership;
+type LoggingResult<P> = P extends { readonly logging?: (...args: never[]) => infer Result } ? Result : never;
+export type PluginOpenFailure<P> =
+  PluginPreparation<P>['open'] | SourceOwnership<P>['open'] | Extract<LoggingResult<P>, Failure>;
+export type PluginCloseFailure<P> =
+  PluginPreparation<P>['close'] | SourceOwnership<P>['close'] | CallbackFailure<LoggingResult<P>, 'close'>;
 export type PluginCloseOutcome<Close extends Failure> =
   void | Close | SupervisorFailure | ScopeAggregate<Close | SupervisorFailure, Close | SupervisorFailure>;
 export type PluginBootOutcome<Open extends Failure, Close extends Failure> =
@@ -348,13 +377,72 @@ export type PluginConstruction<Close extends Failure> = {
   quiesce(): Promise<PluginCloseOutcome<Close>>;
   close(): Promise<PluginCloseOutcome<Close>>;
 };
-/** Closed operations retain inferred callback outcomes across kernel scheduling. */
-export type PluginRuntime<Open extends Failure, Close extends Failure> = {
-  construct(
+/**
+ * Constraint for the four lifecycle failure channels; infer concrete channels from a plugin.
+ * @example type Phases = PluginPhaseFailures<typeof database>;
+ */
+export type PluginPhases = {
+  readonly configure: Failure;
+  readonly start: Failure;
+  readonly stop: Failure;
+  readonly dispose: Failure;
+};
+/** No declared hook failures.
+ * @example type ConfigureFailure = EmptyPhases['configure']; // never
+ */
+export type EmptyPhases = { readonly [Phase in keyof PluginPhases]: never };
+export type HookReturns = { readonly [Phase in keyof PluginPhases]: undefined | Failure };
+export type EmptyHookReturns = { readonly [Phase in keyof PluginPhases]: undefined };
+/** Derive phase failures from callback results.
+ * @example type Phases = InferredPhases<{ configure: undefined; start: undefined; stop: undefined; dispose: undefined }>;
+ */
+export type InferredPhases<Returns extends HookReturns> = {
+  readonly [Phase in keyof PluginPhases]: Extract<Returns[Phase], Failure>;
+};
+/** Combine failure channels when appending a unit to an app.
+ * @example type Phases = MergePhases<PluginPhaseFailures<typeof database>, PluginPhaseFailures<typeof server>>;
+ */
+export type MergePhases<Left extends PluginPhases, Right extends PluginPhases> = {
+  readonly [Phase in keyof PluginPhases]: Left[Phase] | Right[Phase];
+};
+type HookFailure<Hook> = Hook extends (...args: never[]) => infer Result ? Extract<Awaited<Result>, Failure> : never;
+type PhaseFailure<Hooks, Phase extends keyof PluginPhases> = Hooks extends unknown
+  ? Phase extends keyof Hooks
+    ? HookFailure<Hooks[Phase]>
+    : never
+  : never;
+/** Infer each phase from the actual hooks, including spread replacements.
+ * @example type StartFailure = PluginPhaseFailures<typeof server>['start'];
+ */
+export type PluginPhaseFailures<P> = P extends { readonly hooks: infer Hooks }
+  ? { readonly [Phase in keyof PluginPhases]: PhaseFailure<Hooks, Phase> }
+  : EmptyPhases;
+/** Lifecycle callbacks sharing a context, with concrete results per phase.
+ * @example type Hooks = PhaseHooks<EmptyShape, EmptyHookReturns>;
+ */
+export type PhaseHooks<Context, Returns extends HookReturns> = {
+  readonly configure?: (ctx: DotConfigureContext) => Returns['configure'];
+  readonly start?: (ctx: Context) => MaybePromise<Returns['start']>;
+  readonly stop?: (ctx: Context) => MaybePromise<Returns['stop']>;
+  readonly dispose?: (ctx: Context) => MaybePromise<Returns['dispose']>;
+};
+export type PluginRuntime<out Open extends Failure, out Close extends Failure> = {
+  construct<Values, Boot>(
+    factories: { readonly [Key in keyof Values]: (ctx: never) => Values[Key] },
+    boot: ((ctx: never) => Boot) | undefined,
     ctx: never,
     options: ScopeOptions,
     claimLazy: (value: Lazy<unknown, Failure>) => boolean,
-  ): Promise<PluginConstruction<Close> | Exclude<PluginBootOutcome<Open, Close>, void>>;
+  ): Promise<
+    | PluginConstruction<Close | InferredOwnership<Values, Awaited<Boot>>['close']>
+    | Exclude<
+        PluginBootOutcome<
+          Open | InferredOwnership<Values, Awaited<Boot>>['open'],
+          Close | InferredOwnership<Values, Awaited<Boot>>['close']
+        >,
+        void
+      >
+  >;
 };
 
 /** One factory per published key. Each gets the needs + kernel keys; its key is the publish key. */
@@ -367,13 +455,15 @@ type ResourceCallbacks<Value> = Value extends {
   : unknown;
 type CheckedOutput<Value> = [Value] extends [PlainValue]
   ? unknown
-  : unknown extends Value
+  : void extends Value
     ? never
-    : [Extract<Value, Exclude<ScopePlan[string], ResourceEntry>>] extends [never]
-      ? unknown extends ResourceCallbacks<Extract<Value, ResourceEntry>>
-        ? never
-        : unknown
-      : never;
+    : unknown extends Value
+      ? never
+      : [Extract<Value, Exclude<ScopePlan[string], ResourceEntry>>] extends [never]
+        ? unknown extends ResourceCallbacks<Extract<Value, ResourceEntry>>
+          ? never
+          : unknown
+        : never;
 
 /** Boot plans retain all callback outcomes; erased or untyped plans cannot declare ownership. */
 export type BootGuard<Boot extends void | ScopePlan | Failure> = [Exclude<Boot, void | Failure>] extends [
@@ -387,7 +477,7 @@ type PlainService = object &
     readonly then?: never;
   };
 /** Validate each inferred return locally; an arity guard would freeze sibling factories before contextual inference. */
-type PlainValue = PlainService | string | number | boolean | bigint | symbol | null | void;
+type PlainValue = PlainService | string | number | boolean | bigint | symbol | null | undefined;
 export type CheckedProvider<Value> = PlainValue | PromiseLike<PlainValue> | CheckedOutput<Awaited<Value>>;
 
 /**
@@ -398,7 +488,7 @@ export type CheckedProvider<Value> = PlainValue | PromiseLike<PlainValue> | Chec
 export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
   readonly [K in keyof TProvides]: (
     services: CtxOf<TNeeds> & KernelCtx,
-  ) => TProvides[K] & CheckedProvider<NoInfer<TProvides[K]>>;
+  ) => TProvides[K] & NoInfer<CheckedProvider<TProvides[K]>>;
 };
 
 /** An erased factory record — what the kernel runs at boot. */
@@ -429,11 +519,12 @@ declare const OwnershipSym: unique symbol;
 export type DotPluginRole = 'feature' | 'driving';
 
 export type Plugin<
-  TNeeds extends ServiceRecord = ServiceRecord,
-  TProvides extends ServiceRecord = ServiceRecord,
-  TShape extends NeedsShape = NeedsShape,
-  TOwner extends string = string,
-  TOwnership extends PluginOwnership = EmptyOwnership,
+  out TNeeds extends ServiceRecord = ServiceRecord,
+  out TProvides extends ServiceRecord = ServiceRecord,
+  out TShape extends NeedsShape = NeedsShape,
+  out TOwner extends string = string,
+  out TOwnership extends PluginOwnership = EmptyOwnership,
+  out TPhases extends PluginPhases = EmptyPhases,
 > = {
   readonly runtime: PluginRuntime<TOwnership['open'], TOwnership['close']>;
   readonly [OwnershipSym]?: TOwnership;
@@ -460,46 +551,132 @@ export type Plugin<
   /** The `provides` factories, keyed by publish key (before renames). The kernel runs them in key order at boot. */
   readonly factories: AnyFactories;
   /**
-   * The logging slot. At most one plugin per app fills it. The kernel calls
-   * the factory before its first lifecycle record and closes the handle after
-   * its last one (after `dispose`, or after a failed `configure`/`boot`/`start`).
+   * The logging slot. At most one plugin per app fills it. The kernel activates
+   * it during boot, before provider construction, and closes it after owned
+   * plugin cleanup. Configure never activates logging.
    */
-  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
-  readonly hooks: {
-    readonly configure?: (ctx: DotConfigureContext) => void;
+  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle<undefined | TOwnership['close']> | TOwnership['open'];
+  readonly hooks: PhaseHooks<never, { readonly [Phase in keyof PluginPhases]: undefined | TPhases[Phase] }> & {
     readonly boot?: (ctx: never) => unknown;
-    readonly start?: (ctx: never) => MaybePromise<void>;
-    readonly stop?: (ctx: never) => MaybePromise<void>;
-    readonly dispose?: (ctx: never) => MaybePromise<void>;
   };
   readonly [NeedsSym]?: TNeeds;
   readonly [ProvidesSym]?: TProvides;
   readonly [ProviderIdentitySym]?: TShape;
 };
 
+declare const FactoryContractSym: unique symbol;
+/** The successful outputs that minted a unit's handles; failures stay inferred from the live callbacks.
+ * @example type Contract = FactoryContract<{ count: number }>;
+ */
+export type FactoryContract<Values extends ServiceRecord> = { readonly [FactoryContractSym]?: Values };
+/** Preserve the original factory contract while projecting a unit's wiring.
+ * @example type Contract = FactoryContractOf<typeof database>;
+ */
+export type FactoryContractOf<P> = FactoryContract<P extends FactoryContract<infer Values> ? Values : never>;
+type MatchingFactoryShape<Factories, Expected> = Expected extends unknown
+  ? [Exclude<keyof Factories, keyof Expected> | Exclude<keyof Expected, keyof Factories>] extends [never]
+    ? Expected
+    : never
+  : never;
+type FactoryShapeError<Factories, Expected> = Factories extends unknown
+  ? [MatchingFactoryShape<Factories, Expected>] extends [never]
+    ? { readonly 'DOT: replacement factories must preserve the original factory keys': keyof Expected }
+    : ProvidedValues<FactoryValues<Factories>> extends MatchingFactoryShape<Factories, Expected>
+      ? never
+      : { readonly 'DOT: replacement factories must preserve the services carried by the original handles': Expected }
+  : never;
+type FactoryContractError<P> =
+  P extends FactoryContract<infer Expected>
+    ? [Expected] extends [never]
+      ? never
+      : P extends { readonly factories: infer Factories }
+        ? FactoryShapeError<Factories, Expected>
+        : never
+    : never;
+/** Validate replaceable factories against the handles their original definitions minted.
+ * @example type Guard = PluginFactoryGuard<typeof database>;
+ */
+export type PluginFactoryGuard<P> = [FactoryContractError<P>] extends [never] ? [] : [error: FactoryContractError<P>];
+
+type BootReturnError<P, Boot> =
+  void extends Awaited<Boot>
+    ? Failure extends PluginOpenFailure<P>
+      ? never
+      : { readonly 'DOT: boot must retain concrete returns, including undefined instead of void': Boot }
+    : Awaited<Boot> extends undefined | ScopePlan | Failure
+      ? BootGuard<Awaited<Boot>> extends [error: infer Error]
+        ? Error
+        : never
+      : { readonly 'DOT: boot must return undefined, a typed failure or an owned plan': Boot };
+type HooksBootError<P, Hooks> = Hooks extends unknown
+  ? 'boot' extends keyof Hooks
+    ? BootReturnError<P, ReturnType<Extract<Hooks['boot'], (...args: never[]) => unknown>>>
+    : never
+  : never;
+type SourceBootError<P> = P extends { readonly hooks: infer Hooks } ? HooksBootError<P, Hooks> : never;
+/** Validate the live factories and boot callback before mounting a unit.
+ * @example type MountGuard = PluginSourceGuard<typeof database>;
+ */
+export type PluginSourceGuard<P> = [FactoryContractError<P> | SourceBootError<P>] extends [never]
+  ? []
+  : [error: FactoryContractError<P> | SourceBootError<P>];
+
+/** Authored plugins retain the callbacks that own their runtime failures.
+ * @example const database = plugin({ name: 'db', provides: { count: () => 0 } }); // AuthoredPlugin is inferred.
+ */
+export type AuthoredPlugin<
+  Needs extends ServiceRecord,
+  Provides extends ServiceRecord,
+  Shape extends NeedsShape,
+  Owner extends string,
+  Values extends ServiceRecord,
+  Phases extends PluginPhases,
+  Logging extends DotLoggingHandle | Failure,
+  Boot,
+> = Omit<Plugin<Needs, Provides, Shape, Owner, EmptyOwnership, Phases>, 'logging' | 'factories' | 'hooks'> &
+  LoggingSlot<Logging> &
+  FactoryContract<ProvidedValues<Values>> & {
+    readonly factories: { readonly [Key in keyof Values]: (ctx: never) => Values[Key] };
+    readonly hooks: PhaseHooks<never, { readonly [Phase in keyof PluginPhases]: undefined | Phases[Phase] }> & {
+      readonly boot?: (ctx: CtxOf<Shape> & Provides & KernelCtx) => MaybePromise<Boot>;
+    };
+  };
+
+/** Wiring metadata for a unit whose plugin contract was already checked. */
+export type PluginWiring<P extends AnyPlugin> = {
+  readonly needs: NonNullable<P[typeof NeedsSym]>;
+  readonly provides: NonNullable<P[typeof ProvidesSym]>;
+};
+
 /** Extract a plugin's (wire-keyed) needs record. */
-export type PluginNeeds<P> = P extends Plugin<infer N, ServiceRecord, NeedsShape, string, PluginOwnership> ? N : never;
+export type PluginNeeds<P> = P extends AnyPlugin ? NonNullable<P[typeof NeedsSym]> : never;
 /** Extract a plugin's (wire-keyed) provides record. */
-export type PluginProvides<P> =
-  P extends Plugin<ServiceRecord, infer Pr, NeedsShape, string, PluginOwnership> ? Pr : never;
+export type PluginProvides<P> = P extends AnyPlugin ? NonNullable<P[typeof ProvidesSym]> : never;
 /**
  * Extract a plugin's needs as written (alias → witness). A handle witness
  * carries the identity of the service it names (`provider` + `key`); an
  * anonymous `service<T>()` carries none. `NeedsShape` (every key, every
  * witness) when the plugin was typed without a shape — "unknown".
  */
-export type PluginProviderIdentities<P> =
-  P extends Plugin<ServiceRecord, ServiceRecord, infer S, string, PluginOwnership> ? S : NeedsShape;
+export type PluginProviderIdentities<P> = P extends AnyPlugin ? NonNullable<P[typeof ProviderIdentitySym]> : NeedsShape;
 /** The `provider` literal a plugin's handles carry (`string` when the plugin was typed without its name). */
 export type PluginOwner<P> =
-  P extends Plugin<ServiceRecord, ServiceRecord, NeedsShape, infer O, PluginOwnership> ? O : string;
+  P extends Plugin<ServiceRecord, ServiceRecord, NeedsShape, infer O, PluginOwnership, PluginPhases> ? O : string;
 
 /** Internal type alias used by the kernel to erase plugin service generics. */
-export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord, NeedsShape, string, PluginOwnership>;
+export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord, NeedsShape, string, PluginOwnership, PluginPhases>;
 /** A scheduled plugin whose closed execution operations retain exact phase outcomes. */
-export type RuntimePlugin<Open extends Failure, Close extends Failure> = Omit<AnyPlugin, 'runtime'> & {
+// A named interface compares failure channels without repeatedly expanding the erased plugin members.
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+export interface RuntimePlugin<
+  out Open extends Failure,
+  out Close extends Failure,
+  out Phases extends PluginPhases = EmptyPhases,
+> extends Omit<AnyPlugin, 'runtime' | 'hooks' | 'logging'> {
   readonly runtime: PluginRuntime<Open, Close>;
-};
+  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle<undefined | Close> | Open;
+  readonly hooks: Plugin<ServiceRecord, ServiceRecord, NeedsShape, string, PluginOwnership, Phases>['hooks'];
+}
 
 /**
  * Author a DOT plugin.
@@ -535,32 +712,100 @@ export type PluginDefinition<
   TProvides extends ServiceRecord,
   TName extends string,
   TBoot,
-> = {
+  Returns extends HookReturns = EmptyHookReturns,
+  Logging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+> = PhaseHooks<CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx, Returns> & {
   readonly name: TName;
   readonly needs?: TShape;
   readonly actions?: readonly ActionSource[];
   /** Fill the logging slot (see {@link Plugin.logging}). Called by the kernel, never at import. */
-  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
-  readonly configure?: (ctx: DotConfigureContext) => void;
+  readonly logging?: (ctx: DotLoggingContext) => Logging;
   /** One factory per published key. Each gets the needs + kernel keys. Keys are the publish keys. */
   readonly provides?: ProvidesFactories<TShape, TProvides>;
   /** Runs after the factories; may return a typed private ownership plan or failure. */
-  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
-  readonly start?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly stop?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly dispose?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
+  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
 };
 
+// The first overload supplies concrete undefined context without accepting erased void callbacks.
 export function plugin<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
   const TName extends string = string,
-  TBoot extends void | ScopePlan | Failure = void,
+  TBoot extends undefined = undefined,
 >(
-  def: PluginDefinition<TShape, TProvides, TName, TBoot>,
+  def: PluginDefinition<TShape, TProvides, TName, undefined, EmptyHookReturns, DotLoggingHandle<undefined>>,
   ..._guard: BootGuard<NoInfer<TBoot>>
-): Plugin<WireNeeds<TShape>, ProvidedValues<TProvides>, TShape, TName, InferredOwnership<TProvides, Awaited<TBoot>>> {
-  return createPlugin(def);
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  EmptyPhases,
+  DotLoggingHandle<undefined>,
+  TBoot
+>;
+export function plugin<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: PluginDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+  TLogging,
+  TBoot
+>;
+export function plugin<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: PluginDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+  TLogging,
+  TBoot
+> {
+  return createPlugin<TShape, TProvides, TName, TBoot, TConfigure, TStart, TStop, TDispose, TLogging>(def);
 }
 
 /** Shared constructor after each authoring surface has checked its provider returns. */
@@ -568,13 +813,81 @@ export function createPlugin<
   TShape extends NeedsShape & NoReservedKeys,
   TProvides extends ServiceRecord & NoReservedKeys,
   const TName extends string,
-  TBoot extends void | ScopePlan | Failure,
+  TBoot extends undefined = undefined,
 >(
-  def: PluginDefinition<TShape, TProvides, TName, TBoot>,
-): Plugin<WireNeeds<TShape>, ProvidedValues<TProvides>, TShape, TName, InferredOwnership<TProvides, Awaited<TBoot>>> {
-  const factories: AnyFactories = def.provides ?? {};
+  def: PluginDefinition<TShape, TProvides, TName, undefined, EmptyHookReturns, DotLoggingHandle<undefined>>,
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  EmptyPhases,
+  DotLoggingHandle<undefined>,
+  TBoot
+>;
+export function createPlugin<
+  TShape extends NeedsShape & NoReservedKeys,
+  TProvides extends ServiceRecord & NoReservedKeys,
+  const TName extends string,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: PluginDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+  TLogging,
+  TBoot
+>;
+export function createPlugin<
+  TShape extends NeedsShape & NoReservedKeys,
+  TProvides extends ServiceRecord & NoReservedKeys,
+  const TName extends string,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: PluginDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+): AuthoredPlugin<
+  WireNeeds<TShape>,
+  ProvidedValues<TProvides>,
+  TShape,
+  TName,
+  TProvides,
+  InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+  TLogging,
+  TBoot
+> {
+  const factories = factoriesOf(def.provides);
   const handles: Record<string, AnyHandle> = {};
   for (const key of Object.keys(factories)) handles[key] = handleOf(key, def.name);
+  const runtime = createPluginRuntime();
   return {
     name: def.name,
     needs: def.needs ?? {},
@@ -583,16 +896,34 @@ export function createPlugin<
     // Erasure seam: the record is built by key at runtime; its type comes
     // from the factory returns that `plugin()` inferred, its `provider` from `name`.
     provides: handles as Handles<ProvidedValues<TProvides>, TName>,
-    runtime: createPluginRuntime<TProvides, TBoot>(def.provides, def.boot),
+    runtime,
     factories,
     ...(def.logging === undefined ? {} : { logging: def.logging }),
     hooks: {
-      ...(def.configure === undefined ? {} : { configure: def.configure }),
+      ...createPhaseHooks<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>(def),
       ...(def.boot === undefined ? {} : { boot: def.boot }),
-      ...(def.start === undefined ? {} : { start: def.start }),
-      ...(def.stop === undefined ? {} : { stop: def.stop }),
-      ...(def.dispose === undefined ? {} : { dispose: def.dispose }),
     },
+  };
+}
+
+/** The absent factory record is the empty authored record. */
+function factoriesOf<Values>(factories: { readonly [Key in keyof Values]: (ctx: never) => Values[Key] } | undefined): {
+  readonly [Key in keyof Values]: (ctx: never) => Values[Key];
+};
+function factoriesOf(factories: AnyFactories | undefined): AnyFactories {
+  return factories ?? {};
+}
+
+/** Preserve callback identity while projecting the exhaustive undefined-or-failure authoring domain. */
+function createPhaseHooks<Returns extends HookReturns>(
+  hooks: PhaseHooks<never, Returns>,
+): PhaseHooks<never, { readonly [Phase in keyof PluginPhases]: undefined | InferredPhases<Returns>[Phase] }>;
+function createPhaseHooks(hooks: PhaseHooks<never, HookReturns>): PhaseHooks<never, HookReturns> {
+  return {
+    ...(hooks.configure === undefined ? {} : { configure: hooks.configure }),
+    ...(hooks.start === undefined ? {} : { start: hooks.start }),
+    ...(hooks.stop === undefined ? {} : { stop: hooks.stop }),
+    ...(hooks.dispose === undefined ? {} : { dispose: hooks.dispose }),
   };
 }
 
@@ -600,18 +931,22 @@ function failed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
 }
 
-export function createPluginRuntime<Values, Boot>(
-  factories: { readonly [Name in keyof Values]: (ctx: never) => MaybePromise<Values[Name]> } | undefined,
-  boot?: (ctx: never) => MaybePromise<Boot>,
+export function createPluginRuntime<Prepared extends object | void = void>(
   project?: (services: ServiceRecord, ctx: never) => void,
-): PluginRuntime<InferredOwnership<Values, Awaited<Boot>>['open'], InferredOwnership<Values, Awaited<Boot>>['close']>;
+  prepare?: (ctx: never) => MaybePromise<Prepared>,
+): PluginRuntime<Extract<Awaited<Prepared>, Failure>, never>;
 export function createPluginRuntime(
-  factories: AnyFactories | undefined,
-  boot?: (ctx: never) => unknown,
   project?: (services: ServiceRecord, ctx: never) => void,
+  prepare?: (ctx: never) => MaybePromise<object | void>,
 ): PluginRuntime<Failure, Failure> {
   return {
-    async construct(ctx: Record<string, unknown>, options, claimLazy) {
+    async construct(
+      factories: AnyFactories,
+      boot: ((ctx: never) => unknown) | undefined,
+      ctx: Record<string, unknown>,
+      options,
+      claimLazy,
+    ) {
       const lifetime = createLifetime<Failure, Failure>(options);
       const normalize = async (run: () => unknown) => {
         try {
@@ -633,8 +968,17 @@ export function createPluginRuntime(
       const services: ServiceRecord = {};
       const context: Record<string, unknown> = { ...ctx, $signal: lifetime.signal };
       try {
-        for (const [key, factory] of Object.entries(factories ?? {})) {
-          if (lifetime.signal.aborted) break;
+        if (prepare !== undefined) {
+          const prepared = await lifetime.acquire(async () => {
+            const value = await prepare(context as never);
+            if (failed(value)) return value;
+            return { value, close: () => Promise.resolve() };
+          });
+          if (failed(prepared)) lifetime.fail(prepared);
+          else if (prepared !== undefined) Object.assign(context, prepared);
+        }
+        for (const [key, factory] of Object.entries(factories)) {
+          if (lifetime.signal.aborted || lifetime.hasFailure()) break;
           // Admit the factory before it runs so shutdown also owns a late Lazy.
           const prepareFactory = async () => {
             const provided = await factory(context as never);
@@ -728,7 +1072,19 @@ export function rename<
   },
   map: M,
   newName?: TNewName,
-): Plugin<PluginNeeds<P>, RenamedProvides<PluginProvides<P>, M>, PluginProviderIdentities<P>, TNewName, TOwnership> {
+): Omit<
+  Plugin<
+    PluginNeeds<P>,
+    RenamedProvides<PluginProvides<P>, M>,
+    PluginProviderIdentities<P>,
+    TNewName,
+    TOwnership,
+    PluginPhaseFailures<P>
+  >,
+  'hooks' | 'logging' | 'factories'
+> &
+  Pick<P, 'hooks' | 'logging' | 'factories'> &
+  FactoryContractOf<P> {
   const renames: Record<string, string> = { ...p.renames };
   const entries: Readonly<Record<string, string | undefined>> = map;
   for (const [wireKey, next] of Object.entries(entries)) {

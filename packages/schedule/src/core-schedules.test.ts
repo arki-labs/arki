@@ -10,6 +10,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DepsOf } from '@arki/dot/feature';
+import type { SuccessOf } from '@arki/failure';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
 import { orThrow } from '@arki/failure';
@@ -63,7 +64,7 @@ describe('schedules(core, defs)', () => {
         name: 'typed',
         every: '1m',
         handler: services => {
-          expectTypeOf(services.usecases.sendDue).returns.toEqualTypeOf<string>();
+          expectTypeOf<SuccessOf<typeof services.usecases.sendDue>>().toEqualTypeOf<string>();
           expectTypeOf(services.outbox.pending).returns.toEqualTypeOf<number>();
           return null;
         },
@@ -102,7 +103,7 @@ describe('composeSchedules over both feature forms', () => {
     const client = composeSchedules([digest, billing], app.services.scheduler);
     const sent = await client.trigger('send-digest');
     const closed = await client.trigger('close-books');
-    if (sent.status === 'ran') expectTypeOf(sent.value).toEqualTypeOf<string>();
+    if (sent.status === 'ran') expectTypeOf(orThrow(sent.value)).toEqualTypeOf<string>();
     if (closed.status === 'ran') expectTypeOf(closed.value).toEqualTypeOf<string>();
     expect([sent, closed]).toMatchObject([
       { status: 'ran', value: 'sent 3' },
@@ -157,7 +158,7 @@ describe('nested features', () => {
     const app = await orThrow(bootNested());
     const client = composeSchedules([parent], app.services.scheduler);
     const purged = await client.trigger('purge-old');
-    if (purged.status === 'ran') expectTypeOf(purged.value).toEqualTypeOf<string>();
+    if (purged.status === 'ran') expectTypeOf(orThrow(purged.value)).toEqualTypeOf<string>();
     expect(purged).toMatchObject({ status: 'ran', value: 'purged' });
     await expect(client.trigger('send-digest')).resolves.toMatchObject({ value: 'sent 3' });
     // @ts-expect-error -- no feature in the tree declares this name

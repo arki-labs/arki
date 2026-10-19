@@ -6,6 +6,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
+
 import { defineApp } from '../../define-app.js';
 import { plugin, service } from '../../plugin-contract.js';
 import { runExplain } from '../explain.js';
@@ -61,7 +63,7 @@ describe('runExplain', () => {
     ]);
   });
 
-  it('returns dot.app_lifecycle_failed when configure throws, instead of throwing', async () => {
+  it('preserves the supervised configure defect instead of throwing', async () => {
     const broken = plugin({
       name: 'broken',
       configure: () => {
@@ -70,12 +72,9 @@ describe('runExplain', () => {
     });
     const result = await runExplain(defineApp('broken').use(broken));
     expect(result).toMatchObject({
-      code: 'dot.app_lifecycle_failed',
-      data: { phase: 'configure', causeMessage: expect.stringContaining('configure-boom') },
+      code: UnexpectedDefect.code,
+      cause: expect.objectContaining({ message: expect.stringContaining('configure-boom') }),
     });
-    // Why: the cause may be any kernel code (ARKI_DOT_E020 is plugin order, not a
-    // throwing hook), so the remediation must send the reader to that code's own fix.
-    expect(result).toMatchObject({ remediation: expect.stringContaining('error.data.underlyingCode') });
   });
 
   it('snapshot stability: same app -> same JSON (no random ordering)', async () => {
@@ -101,7 +100,7 @@ describe('renderExplainText', () => {
         ctx.registerAction({ id: 'api.after', binding: 'http', direction: 'in', address: 'GET /after' });
       },
     });
-    const configured = defineApp('synthetic').use(api).configure();
+    const configured = orThrow(defineApp('synthetic').use(api).configure());
     const { ui, text } = textUi();
     renderExplainText(configured.manifest, ui);
     const lines = text().split('\n');
@@ -113,7 +112,7 @@ describe('renderExplainText', () => {
   });
 
   it('includes plugin names, service names, actions, and projections', () => {
-    const configured = syntheticApp().configure();
+    const configured = orThrow(syntheticApp().configure());
     const { ui, text } = textUi();
     renderExplainText(configured.manifest, ui);
     const written = text();

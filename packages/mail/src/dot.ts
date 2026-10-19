@@ -11,7 +11,7 @@
  *   .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
  *   .use(mailOutboxPlugin({ tables }))
  */
-import type { EmptyShape, Plugin, Service } from '@arki/dot/plugin';
+import type { Service } from '@arki/dot/plugin';
 import type { JournalTables } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
 import type { Backoff } from '@arki/resilience';
@@ -23,7 +23,7 @@ import { mailer } from './mailer.js';
 import { mailOutbox } from './pg/index.js';
 
 /** The mailer as a Dot service named `mail`. */
-export function mail(options: MailerOptions | (() => MailerOptions)): Plugin<EmptyShape, { readonly mail: Mailer }> {
+export function mail(options: MailerOptions | (() => MailerOptions)) {
   return plugin({
     name: 'mail',
     configure(ctx) {

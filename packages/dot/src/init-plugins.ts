@@ -3,16 +3,21 @@ import type { Failure } from '@arki/failure';
 
 import type {
   ActionSource,
+  AuthoredPlugin,
   BootGuard,
   CheckedProvider,
   CtxOf,
-  DotConfigureContext,
+  DotLoggingHandle,
+  EmptyHookReturns,
   EmptyShape,
-  InferredOwnership,
+  HookReturns,
+  InferredPhases,
   KernelCtx,
+  LoggingSlot,
   NeedsShape,
   NoReservedKeys,
-  Plugin,
+  PhaseHooks,
+  PluginDefinition,
   ProvidedValues,
   Service,
   ServiceRecord,
@@ -50,53 +55,58 @@ type CheckedFactories<TCtx, TServices extends object, TProvides extends ServiceR
 type CommonPluginDefinition = {
   readonly name: string;
   readonly actions?: readonly ActionSource[];
-  readonly configure?: (ctx: DotConfigureContext) => void;
 };
 
 type KeyArrayPluginDefinition<
   TServices extends object,
   TKeys extends ServiceKeys<TServices>,
   TProvides extends ServiceRecord & NoReservedKeys,
-  TBoot extends void | ScopePlan | Failure = void,
-> = CommonPluginDefinition & {
-  readonly needs?: TKeys;
-  readonly provides?: CheckedFactories<PickServices<TServices, TKeys>, TServices, TProvides>;
-  readonly boot?: (ctx: PickServices<TServices, TKeys> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
-  readonly start?: (ctx: PickServices<TServices, TKeys> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly stop?: (ctx: PickServices<TServices, TKeys> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly dispose?: (
-    ctx: PickServices<TServices, TKeys> & ProvidedValues<TProvides> & KernelCtx,
-  ) => MaybePromise<void>;
-};
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TReturns extends HookReturns = EmptyHookReturns,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+> = CommonPluginDefinition &
+  LoggingSlot<TLogging> &
+  PhaseHooks<PickServices<TServices, TKeys> & ProvidedValues<NoInfer<TProvides>> & KernelCtx, TReturns> & {
+    readonly needs?: TKeys;
+    readonly provides?: CheckedFactories<PickServices<TServices, TKeys>, TServices, TProvides>;
+    readonly boot?: (
+      ctx: PickServices<TServices, TKeys> & ProvidedValues<NoInfer<TProvides>> & KernelCtx,
+    ) => MaybePromise<TBoot>;
+  };
 
 type WitnessPluginDefinition<
   TServices extends object,
   TShape extends NeedsShape & NoReservedKeys,
   TProvides extends ServiceRecord & NoReservedKeys,
-  TBoot extends void | ScopePlan | Failure = void,
-> = CommonPluginDefinition & {
-  readonly needs: TShape;
-  readonly provides?: CheckedFactories<CtxOf<TShape>, TServices, TProvides>;
-  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
-  readonly start?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly stop?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-  readonly dispose?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
-};
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TReturns extends HookReturns = EmptyHookReturns,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+> = CommonPluginDefinition &
+  LoggingSlot<TLogging> &
+  PhaseHooks<CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx, TReturns> & {
+    readonly needs: TShape;
+    readonly provides?: CheckedFactories<CtxOf<TShape>, TServices, TProvides>;
+    readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
+  };
 
 export type InitPluginsFactory<TServices extends object> = ReturnType<typeof createPluginFactory<TServices>>;
 
 type ErasedPluginDefinition<
   TServices extends object,
   TProvides extends ServiceRecord & NoReservedKeys = ServiceRecord & NoReservedKeys,
-  TBoot extends void | ScopePlan | Failure = void | ScopePlan | Failure,
+  TBoot extends undefined | ScopePlan | Failure = undefined | ScopePlan | Failure,
+  TReturns extends HookReturns = HookReturns,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle | Failure,
 > =
-  | KeyArrayPluginDefinition<TServices, ServiceKeys<TServices>, TProvides, TBoot>
-  | WitnessPluginDefinition<TServices, NeedsShape & NoReservedKeys, TProvides, TBoot>;
+  | KeyArrayPluginDefinition<TServices, ServiceKeys<TServices>, TProvides, TBoot, TReturns, TLogging>
+  | WitnessPluginDefinition<TServices, NeedsShape & NoReservedKeys, TProvides, TBoot, TReturns, TLogging>;
 
 type KernelPluginDefinition<
   TProvides extends ServiceRecord & NoReservedKeys,
-  TBoot extends void | ScopePlan | Failure,
-> = Parameters<typeof definePlugin<NeedsShape & NoReservedKeys, TProvides, string, TBoot>>[0];
+  TBoot extends undefined | ScopePlan | Failure,
+  TReturns extends HookReturns,
+  TLogging extends DotLoggingHandle | Failure,
+> = PluginDefinition<NeedsShape & NoReservedKeys, TProvides, string, TBoot, TReturns, TLogging>;
 
 function needsFor<TServices extends object, const TKeys extends ServiceKeys<TServices>>(
   keys: TKeys,
@@ -118,27 +128,125 @@ function createPluginFactory<TServices extends object>() {
   function plugin<
     const TKeys extends ServiceKeys<TServices> = readonly [],
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-    TBoot extends void | ScopePlan | Failure = void,
+    TBoot extends undefined = undefined,
   >(
-    def: KeyArrayPluginDefinition<TServices, TKeys, TProvides, TBoot>,
+    def: KeyArrayPluginDefinition<
+      TServices,
+      TKeys,
+      TProvides,
+      undefined,
+      EmptyHookReturns,
+      DotLoggingHandle<undefined>
+    >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): Plugin<
+  ): AuthoredPlugin<
     PickServices<TServices, TKeys>,
     ProvidedValues<TProvides>,
     WitnessesFor<TServices, TKeys>,
     string,
-    InferredOwnership<TProvides, Awaited<TBoot>>
+    TProvides,
+    InferredPhases<EmptyHookReturns>,
+    DotLoggingHandle<undefined>,
+    TBoot
+  >;
+  function plugin<
+    const TKeys extends ServiceKeys<TServices> = readonly [],
+    TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+    TBoot extends undefined | ScopePlan | Failure = undefined,
+    TConfigure extends undefined | Failure = undefined,
+    TStart extends undefined | Failure = undefined,
+    TStop extends undefined | Failure = undefined,
+    TDispose extends undefined | Failure = undefined,
+    TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+  >(
+    def: KeyArrayPluginDefinition<
+      TServices,
+      TKeys,
+      TProvides,
+      TBoot,
+      { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+      TLogging
+    >,
+    ...guard: BootGuard<NoInfer<TBoot>>
+  ): AuthoredPlugin<
+    PickServices<TServices, TKeys>,
+    ProvidedValues<TProvides>,
+    WitnessesFor<TServices, TKeys>,
+    string,
+    TProvides,
+    InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+    TLogging,
+    TBoot
   >;
   function plugin<
     TShape extends NeedsShape & NoReservedKeys,
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-    TBoot extends void | ScopePlan | Failure = void,
+    TBoot extends undefined = undefined,
   >(
-    def: WitnessPluginDefinition<TServices, TShape, TProvides, TBoot>,
+    def: WitnessPluginDefinition<
+      TServices,
+      TShape,
+      TProvides,
+      undefined,
+      EmptyHookReturns,
+      DotLoggingHandle<undefined>
+    >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): Plugin<WireNeeds<TShape>, ProvidedValues<TProvides>, TShape, string, InferredOwnership<TProvides, Awaited<TBoot>>>;
-  function plugin<TProvides extends ServiceRecord & NoReservedKeys, TBoot extends void | ScopePlan | Failure>(
-    def: ErasedPluginDefinition<TServices, TProvides, TBoot>,
+  ): AuthoredPlugin<
+    WireNeeds<TShape>,
+    ProvidedValues<TProvides>,
+    TShape,
+    string,
+    TProvides,
+    InferredPhases<EmptyHookReturns>,
+    DotLoggingHandle<undefined>,
+    TBoot
+  >;
+  function plugin<
+    TShape extends NeedsShape & NoReservedKeys,
+    TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+    TBoot extends undefined | ScopePlan | Failure = undefined,
+    TConfigure extends undefined | Failure = undefined,
+    TStart extends undefined | Failure = undefined,
+    TStop extends undefined | Failure = undefined,
+    TDispose extends undefined | Failure = undefined,
+    TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+  >(
+    def: WitnessPluginDefinition<
+      TServices,
+      TShape,
+      TProvides,
+      TBoot,
+      { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+      TLogging
+    >,
+    ...guard: BootGuard<NoInfer<TBoot>>
+  ): AuthoredPlugin<
+    WireNeeds<TShape>,
+    ProvidedValues<TProvides>,
+    TShape,
+    string,
+    TProvides,
+    InferredPhases<{ configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }>,
+    TLogging,
+    TBoot
+  >;
+  function plugin<
+    TProvides extends ServiceRecord & NoReservedKeys,
+    TBoot extends undefined | ScopePlan | Failure,
+    TConfigure extends undefined | Failure = undefined,
+    TStart extends undefined | Failure = undefined,
+    TStop extends undefined | Failure = undefined,
+    TDispose extends undefined | Failure = undefined,
+    TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+  >(
+    def: ErasedPluginDefinition<
+      TServices,
+      TProvides,
+      TBoot,
+      { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+      TLogging
+    >,
   ) {
     const rawNeeds = def.needs;
     const needs = isServiceKeyArray<TServices>(rawNeeds)
@@ -146,22 +254,79 @@ function createPluginFactory<TServices extends object>() {
       : rawNeeds;
     // Factory seam: key-array authoring is runtime-compiled to the same
     // witness record that the kernel already understands.
-    const kernelDef: KernelPluginDefinition<TProvides, TBoot> = {
+    const kernelDef: KernelPluginDefinition<
+      TProvides,
+      TBoot,
+      { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+      TLogging
+    > = {
       name: def.name,
       ...(needs === undefined ? {} : { needs }),
       ...(def.actions === undefined ? {} : { actions: def.actions }),
+      ...(def.logging === undefined ? {} : { logging: def.logging }),
       ...(def.configure === undefined ? {} : { configure: def.configure }),
       ...(def.provides === undefined
         ? {}
-        : { provides: def.provides as KernelPluginDefinition<TProvides, TBoot>['provides'] }),
-      ...(def.boot === undefined ? {} : { boot: def.boot as KernelPluginDefinition<TProvides, TBoot>['boot'] }),
-      ...(def.start === undefined ? {} : { start: def.start as KernelPluginDefinition<TProvides, TBoot>['start'] }),
-      ...(def.stop === undefined ? {} : { stop: def.stop as KernelPluginDefinition<TProvides, TBoot>['stop'] }),
+        : {
+            provides: def.provides as KernelPluginDefinition<
+              TProvides,
+              TBoot,
+              { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+              TLogging
+            >['provides'],
+          }),
+      ...(def.boot === undefined
+        ? {}
+        : {
+            boot: def.boot as KernelPluginDefinition<
+              TProvides,
+              TBoot,
+              { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+              TLogging
+            >['boot'],
+          }),
+      ...(def.start === undefined
+        ? {}
+        : {
+            start: def.start as KernelPluginDefinition<
+              TProvides,
+              TBoot,
+              { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+              TLogging
+            >['start'],
+          }),
+      ...(def.stop === undefined
+        ? {}
+        : {
+            stop: def.stop as KernelPluginDefinition<
+              TProvides,
+              TBoot,
+              { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+              TLogging
+            >['stop'],
+          }),
       ...(def.dispose === undefined
         ? {}
-        : { dispose: def.dispose as KernelPluginDefinition<TProvides, TBoot>['dispose'] }),
+        : {
+            dispose: def.dispose as KernelPluginDefinition<
+              TProvides,
+              TBoot,
+              { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+              TLogging
+            >['dispose'],
+          }),
     };
-    return definePlugin<NeedsShape & NoReservedKeys, TProvides, string, TBoot>(kernelDef);
+    return definePlugin<
+      NeedsShape & NoReservedKeys,
+      TProvides,
+      string,
+      TBoot,
+      TConfigure,
+      TStart,
+      TStop,
+      TDispose,
+      TLogging
+    >(kernelDef);
   }
   function needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys> {
     return needsFor<TServices, typeof keys>(keys);

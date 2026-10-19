@@ -21,8 +21,8 @@ A distilled commerce platform showing everything above working together.
 exact boot/teardown ordering.)
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp, lazy, plugin, rename, service, token } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 // ── stand-ins for your own modules ──────────────────────────────────────
 type AppEnv = { OTEL_ENDPOINT: string; REDIS_URL: string; ELASTIC_URL: string; PORT: number };
@@ -65,7 +65,10 @@ const telemetry = plugin({
   name: 'telemetry',
   needs: { env: Env },
   provides: { metrics: ({ env }) => makeMetrics(env.OTEL_ENDPOINT) },
-  dispose: ({ metrics }) => metrics.flush(),
+  dispose: async ({ metrics }) => {
+    await metrics.flush();
+    return undefined;
+  },
 });
 
 const database = (url: string) =>
@@ -82,7 +85,10 @@ const cache = plugin({
   name: 'cache',
   needs: { env: Env },
   provides: { [Cache.key]: ({ env }) => connectRedis(env.REDIS_URL) },
-  dispose: async ctx => ctx[Cache.key].quit(),
+  dispose: async ctx => {
+    await ctx[Cache.key].quit();
+    return undefined;
+  },
 });
 
 const searchCluster = plugin({
@@ -134,8 +140,14 @@ const outboxWorker = plugin({
   name: 'outbox-worker',
   needs: { db: Db, bus: Bus },
   provides: { outbox: ({ db, bus }) => makeOutbox(db, bus) },
-  start: ({ outbox }) => outbox.startPolling(),
-  stop: ({ outbox }) => outbox.drain(), // stop processing, keep resources
+  start: ({ outbox }) => {
+    outbox.startPolling();
+    return undefined;
+  },
+  stop: async ({ outbox }) => {
+    await outbox.drain();
+    return undefined;
+  }, // stop processing, keep resources
 });
 
 const http = plugin({
@@ -149,8 +161,14 @@ const http = plugin({
   provides: {
     server: ({ env, catalog, checkout, reporting }) => buildServer({ port: env.PORT, catalog, checkout, reporting }),
   },
-  start: ({ server }) => server.listen(),
-  stop: ({ server }) => server.close(),
+  start: async ({ server }) => {
+    await server.listen();
+    return undefined;
+  },
+  stop: async ({ server }) => {
+    await server.close();
+    return undefined;
+  },
 });
 
 // ── composition — the order IS the architecture ──────────────────────

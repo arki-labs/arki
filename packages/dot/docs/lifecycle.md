@@ -49,8 +49,9 @@ Terminal states require a fresh `defineApp(...)` to retry.
   contribute manifest entries.
 - **Must not** open sockets, connect to databases, start workers, perform
   async I/O.
-- Returning a Promise is a contract violation. The kernel throws
-  `DotLifecycleError` with code `ARKI_DOT_E001`.
+- Return `undefined` or a concrete typed failure. Returning a Promise is a
+  contract violation: the kernel returns `UnexpectedDefect` with
+  `ARKI_DOT_E001` metadata in its private cause.
 
 ### `boot` — async side effects
 
@@ -59,7 +60,7 @@ Terminal states require a fresh `defineApp(...)` to retry.
 - Side effects only: seed, warm up, validate required runtime
   configuration. It returns nothing, a typed refusal, or a descriptor plan
   owning private resources, cleanup and children.
-- Services are published by `provides` factories into `app.services`.
+- Completed plugin services are published atomically into `app.services`.
   `boot` sees the needs plus the plugin's own provided values.
 - Downstream plugins receive them destructured in their hook context,
   under the local aliases declared in `needs`.
@@ -90,7 +91,8 @@ DOT cleans up exactly what was opened — no more, no less.
 - Stops the lifecycle immediately. **No cleanup hooks run** because no
   resources should have been opened during `configure`.
 - App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E002`.
+- Returns the original typed refusal, or canonical `UnexpectedDefect` for
+  a thrown exception (`ARKI_DOT_E002` metadata in its private cause).
 
 ### `boot` failure
 
@@ -98,7 +100,8 @@ DOT cleans up exactly what was opened — no more, no less.
 - Previously booted plugins dispose in reverse declaration order.
 - App transitions to `failed`; no failed provider publishes a service.
 - The original refusal is returned when cleanup succeeds; unknown throws become
-  `UnexpectedDefect`. Multiple failures retain their members in `ScopeFailed`.
+  `UnexpectedDefect`. Failed rollback returns an inferred `ScopeAggregate`
+  with ordered private `cause.primary` and `cause.cleanup` members.
 
 Use `resource(open, close)` in providers or return a private descriptor plan
 from `boot`; see [Ownership](ownership.md). The legacy `dispose` hook runs only
@@ -109,30 +112,32 @@ for plugins whose boot completed. Descriptor cleanup also covers partial boot.
 - Every started plugin's `stop` runs in reverse declaration order.
 - Then every booted plugin's `dispose` runs in reverse declaration order.
 - App transitions to `failed`.
-- Managed startup returns a typed defect for legacy thrown errors; `ARKI_DOT_E004` remains available in the diagnostic cause.
+- Returns the primary failure unchanged if cleanup succeeds; otherwise
+  returns a `ScopeAggregate` retaining the primary and ordered cleanup failures.
+  Unknown throws become `UnexpectedDefect`; `ARKI_DOT_E004` remains in its private cause.
 
 ### `stop` / `dispose` failure
 
 - The reverse-order pass **continues through individual failures**.
-- Disposal returns inferred ownership failures and typed defects for legacy
-  exceptions. Legacy stop still uses `DotLifecycleError` (`ARKI_DOT_E005`);
-  `ARKI_DOT_E006` identifies legacy dispose diagnostics during migration.
-- The aggregate carries `failures: readonly { plugin, phase, error }[]` so
-  callers and agents can see exactly which plugins failed.
+- Both return failures; neither throws a managed hook failure. One failure
+  returns unchanged; several return `ScopeAggregate` with ordered cleanup
+  members. Public data contains safe counts; private causes retain failures.
+- Unknown exceptions become `UnexpectedDefect`. `ARKI_DOT_E005` / `E006`
+  metadata names the hook phase and owner in its private diagnostic cause.
 
 ## Idempotency rules
 
-| Call                 | From state                                   | Behaviour                          |
-| -------------------- | -------------------------------------------- | ---------------------------------- |
-| `boot()`             | `booted`, `started`, `stopped`               | No-op. Hooks do not re-run.        |
-| `start()`            | `defined` or `configured`                    | Boots first, then starts.          |
-| `start()`            | `stopped`                                    | Re-runs **only** `start` hooks.    |
-| `start()`            | `started`                                    | No-op.                             |
-| `stop()`             | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).           |
-| `dispose()`          | `started`                                    | Runs `stop` first, then `dispose`. |
-| `dispose()`          | `booted` or `stopped`                        | Runs only `dispose`.               |
-| `dispose()`          | `disposed`                                   | Returns its cached complete outcome.                             |
-| `boot()` / `start()` | `failed` or `disposed`                       | Throws `ARKI_DOT_E007` or `E008`.  |
+| Call                 | From state                                   | Behaviour                                                          |
+| -------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| `boot()`             | `booted`, `started`, `stopped`               | No-op. Hooks do not re-run.                                        |
+| `start()`            | `defined` or `configured`                    | Boots first, then starts.                                          |
+| `start()`            | `stopped`                                    | Re-runs **only** `start` hooks.                                    |
+| `start()`            | `started`                                    | No-op.                                                             |
+| `stop()`             | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).                                           |
+| `dispose()`          | `started`                                    | Runs `stop` first, then `dispose`.                                 |
+| `dispose()`          | `booted` or `stopped`                        | Runs only `dispose`.                                               |
+| `dispose()`          | `disposed`                                   | Returns its cached complete outcome.                               |
+| `boot()` / `start()` | `failed` or `disposed`                       | Returns `UnexpectedDefect` with `ARKI_DOT_E007` / `E008` metadata. |
 
 Concurrent calls to the **same** transition share one in-flight promise
 (hooks never double-run). Calls to **different** transitions are
@@ -143,7 +148,10 @@ the app ends `disposed`, never resurrected.
 
 ## Error codes
 
-The kernel emits stable, machine-readable error codes:
+The kernel preserves these stable diagnostic IDs. Managed defects return
+canonical `UnexpectedDefect`; kernel-generated defects retain legacy metadata
+in their private cause. Owned provider/boot task defects retain the original
+cause, while diagnostics record the phase, owner and legacy ID:
 
 | Code            | Meaning                                                                                                                                                                                                        |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,9 +190,9 @@ remediation guidance.
 
 ## Code examples
 
-### Catching a boot failure
+### Checking a boot defect
 
-```ts run expect
+```ts run
 import { defineApp, plugin } from '@arki/dot';
 import { UnexpectedDefect } from '@arki/failure';
 
@@ -196,20 +204,17 @@ const flaky = plugin({
 });
 
 const outcome = await defineApp('my-app').use(flaky).boot();
-if (UnexpectedDefect.is(outcome)) {
-  console.log(outcome.code, outcome.cause instanceof Error ? outcome.cause.message : 'unknown cause');
+if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');
+if (!(outcome.cause instanceof Error) || outcome.cause.message !== 'no network') {
+  throw new Error('original cause was lost');
 }
 ```
 
-```text
-failure.unexpected_defect no network
-```
+Disposal also returns managed defects and continues the remaining finalizers:
 
-Owned disposal returns its failures. Legacy thrown hook errors remain in the diagnostic cause:
-
-```ts run expect
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+```ts run
 import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 const stuck = plugin({
   name: 'stuck',
@@ -222,25 +227,18 @@ const stuck = plugin({
 const app = await defineApp('my-app').use(stuck).boot();
 if (isFailure(app)) throw new Error(app.code);
 const outcome = await app.dispose();
-if (UnexpectedDefect.is(outcome) && outcome.cause instanceof DotLifecycleError) {
-  const error = outcome.cause;
-  console.log(error.code, error.message);
-  for (const failure of error.failures ?? []) {
-    console.log(`${failure.plugin}/${failure.phase}: ${String(failure.error)}`);
-  }
+if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');
+if (!(outcome.cause instanceof DotLifecycleError)) throw new Error('missing diagnostic metadata');
+if (outcome.cause.code !== 'ARKI_DOT_E006' || outcome.cause.plugin !== 'stuck') {
+  throw new Error('expected the disposal phase and owner');
 }
-```
-
-```text
-ARKI_DOT_E006 1 plugin(s) failed during dispose
-stuck/dispose: Error: socket stuck
 ```
 
 ### Idempotent shutdown
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const app = await defineApp('svc').boot();
 if (isFailure(app)) throw new Error(app.code);

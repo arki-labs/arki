@@ -3,6 +3,7 @@
  * manifest, its plugin graph (`--graph`) or a registered projection (`--as`).
  */
 import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 
 import type { DotAppManifest } from '../manifest.js';
 import type { DiscoveredApp } from './discover.js';
@@ -31,7 +32,9 @@ export type ExplainData = DotAppManifest | GraphData | ProjectionData;
 export async function runExplain(discovered: DiscoveredApp, opts: ExplainOptions = {}): Promise<ExplainData | Failure> {
   let manifest: DotAppManifest;
   try {
-    manifest = guards.isDotAppBuilder(discovered) ? discovered.configure().manifest : discovered.manifest;
+    const configured = guards.isDotAppBuilder(discovered) ? discovered.configure() : discovered;
+    if (isFailure(configured)) return configured;
+    manifest = configured.manifest;
   } catch (error) {
     return lifecycleFailed(error, 'configure');
   }

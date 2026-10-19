@@ -8,7 +8,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { discoverApp, guards } from '../discover.js';
 import { tempProject } from './dev-helpers.js';
@@ -48,7 +48,7 @@ describe('discoverApp prefer', () => {
       'dev',
     );
     expect(result.exportName).toBe('dev');
-    expect(guards.isDotAppBuilder(result.app) && result.app.configure().manifest.app.name).toBe('dev-app');
+    expect(guards.isDotAppBuilder(result.app) && orThrow(result.app.configure()).manifest.app.name).toBe('dev-app');
   });
 
   it('keeps the default export without prefer, even when a dev export exists', async () => {

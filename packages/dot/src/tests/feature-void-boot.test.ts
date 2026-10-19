@@ -6,8 +6,9 @@
  *
  * Found by the Drop Studio demo (catalog feature: boot = seed, no provides).
  */
-import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import type { ProvidedOf } from '../feature.js';
 import { defineApp } from '../define-app.js';
@@ -69,13 +70,13 @@ describe('boot is side-effect only', () => {
   });
 
   it('a value-returning boot does not compile — there is one way to publish', () => {
-    // @ts-expect-error -- boot must return an owned plan or void; publish through provides
     feature('legacy', {
       needs: { db: service<Db>() },
+      // @ts-expect-error -- publish values through provides, never boot
       boot: ({ db: handle }) => ({ search: { index: handle.name } }),
     });
-    // @ts-expect-error -- async service publication is also rejected at the authoring call
     feature('legacy-async', {
+      // @ts-expect-error -- async publication also belongs in provides
       boot: async () => {
         await Promise.resolve();
         return { search: 1 };

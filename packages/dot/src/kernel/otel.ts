@@ -1,10 +1,12 @@
 import type { Span } from '@opentelemetry/api';
-import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, INVALID_SPAN_CONTEXT, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
+import packageMetadata from '@arki/dot/package.json' with { type: 'json' };
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 import { nowMs } from './now.js';
+import { chainNativePromise } from './usecase.js';
 
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
@@ -37,7 +39,7 @@ import { nowMs } from './now.js';
  */
 
 const INSTRUMENTATION_NAME = '@arki/dot';
-const INSTRUMENTATION_VERSION = '0.1.0';
+const INSTRUMENTATION_VERSION = packageMetadata.version;
 
 /** OTel tracer for the DOT kernel. No-op when no SDK is registered. */
 export const tracer = trace.getTracer(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION);
@@ -105,8 +107,8 @@ function recordOutcome(span: Span, outcome: unknown): 'ok' | 'failed' {
     span.setStatus({ code: SpanStatusCode.OK });
     return 'ok';
   }
-  span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.message });
-  span.setAttribute('failure.code', outcome.code);
+  span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.code });
+  span.setAttributes({ 'failure.code': outcome.code, 'failure.status': outcome.status });
   if (UnexpectedDefect.is(outcome) && outcome.cause instanceof Error) span.recordException(outcome.cause);
   return 'failed';
 }
@@ -134,54 +136,29 @@ export function withPluginHookSpan<R>(
   },
   fn: (span: Span) => R,
 ): R {
-  const span = tracer.startSpan(`dot.plugin.${opts.hook}`, {
-    attributes: attrs({
-      'dot.app.name': opts.appName,
-      'dot.plugin.name': opts.pluginName,
-      'dot.hook': opts.hook,
-      'dot.plugin.order': opts.order,
+  const span = observe(() =>
+    tracer.startSpan(`dot.plugin.${opts.hook}`, {
+      attributes: attrs({
+        'dot.app.name': opts.appName,
+        'dot.plugin.name': opts.pluginName,
+        'dot.hook': opts.hook,
+        'dot.plugin.order': opts.order,
+      }),
     }),
-  });
+  );
   const started = nowMs();
-  let status: 'ok' | 'failed' = 'ok';
-  const finish = (): void => {
-    const durationMs = nowMs() - started;
-    hookDurationHistogram.record(durationMs, {
-      'dot.app.name': opts.appName,
-      'dot.plugin.name': opts.pluginName,
-      'dot.hook': opts.hook,
-      'dot.status': status,
-    });
-    span.end();
-  };
-  try {
-    const result = fn(span);
-    if (result instanceof Promise) {
-      return result.then(
-        v => {
-          status = recordOutcome(span, v);
-          finish();
-          return v;
-        },
-        (error: unknown) => {
-          status = 'failed';
-          span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
-          if (error instanceof Error) span.recordException(error);
-          finish();
-          throw error;
-        },
-      ) as R;
-    }
-    status = recordOutcome(span, result);
-    finish();
-    return result;
-  } catch (error) {
-    status = 'failed';
-    span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
-    if (error instanceof Error) span.recordException(error);
-    finish();
-    throw error;
-  }
+  return withOutcomeSpan(
+    span,
+    () => fnWithSpan(span, fn),
+    status => {
+      hookDurationHistogram.record(nowMs() - started, {
+        'dot.app.name': opts.appName,
+        'dot.plugin.name': opts.pluginName,
+        'dot.hook': opts.hook,
+        'dot.status': status,
+      });
+    },
+  );
 }
 
 /**
@@ -201,64 +178,79 @@ export function withPhaseSpan<R>(
   },
   fn: (span: Span) => R,
 ): R {
-  return tracer.startActiveSpan(
-    `dot.app.${opts.phase}`,
-    {
+  const span = observe(() =>
+    tracer.startSpan(`dot.app.${opts.phase}`, {
       attributes: attrs({
         'dot.app.name': opts.appName,
         'dot.app.version': opts.appVersion,
         'dot.app.phase': opts.phase,
         'dot.app.plugin.count': opts.pluginCount,
       }),
-    },
-    (span): R => {
-      const started = nowMs();
-      let status: 'ok' | 'failed' = 'ok';
-      const finish = (): void => {
-        const durationMs = nowMs() - started;
-        phaseDurationHistogram.record(durationMs, {
-          'dot.app.name': opts.appName,
-          'dot.app.phase': opts.phase,
-          'dot.status': status,
-        });
-        span.end();
-      };
-      try {
-        const result = fn(span);
-        if (result instanceof Promise) {
-          return result.then(
-            v => {
-              status = recordOutcome(span, v);
-              finish();
-              return v;
-            },
-            (error: unknown) => {
-              status = 'failed';
-              span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
-              if (error instanceof Error) span.recordException(error);
-              finish();
-              throw error;
-            },
-          ) as R;
-        }
-        status = recordOutcome(span, result);
-        finish();
-        return result;
-      } catch (error) {
-        status = 'failed';
-        span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
-        if (error instanceof Error) span.recordException(error);
-        finish();
-        throw error;
-      }
+    }),
+  );
+  const started = nowMs();
+  return withOutcomeSpan(
+    span,
+    () => fnWithSpan(span, fn),
+    status => {
+      phaseDurationHistogram.record(nowMs() - started, {
+        'dot.app.name': opts.appName,
+        'dot.app.phase': opts.phase,
+        'dot.status': status,
+      });
     },
   );
+}
+
+/** Reporting is best effort: its own failure cannot replace or report the primary outcome. */
+function observe<Value>(report: () => Value): Value | undefined {
+  try {
+    return report();
+  } catch {
+    return undefined;
+  }
+}
+
+function fnWithSpan<Value>(span: Span | undefined, fn: (span: Span) => Value): Value {
+  // The API's no-op span keeps the callback contract when a reporter cannot start a span.
+  const activeSpan = span ?? trace.wrapSpanContext(INVALID_SPAN_CONTEXT);
+  return context.with(trace.setSpan(context.active(), activeSpan), fn, undefined, activeSpan);
+}
+
+/** Observe settlement without replacing the callback's value or promise identity. */
+function withOutcomeSpan<Value>(
+  span: Span | undefined,
+  run: () => Value,
+  recordDuration?: (status: 'ok' | 'failed') => void,
+): Value {
+  const returned = (value: unknown): void => {
+    let status: 'ok' | 'failed' = 'ok';
+    observe(() => {
+      status = span === undefined ? (isFailure(value) ? 'failed' : 'ok') : recordOutcome(span, value);
+    });
+    observe(() => recordDuration?.(status));
+    observe(() => span?.end());
+  };
+  const thrown = (cause: unknown): void => {
+    observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(cause) }));
+    if (cause instanceof Error) observe(() => span?.recordException(cause));
+    observe(() => recordDuration?.('failed'));
+    observe(() => span?.end());
+  };
+  try {
+    const result = run();
+    if (chainNativePromise(result, returned, thrown) === undefined) returned(result);
+    return result;
+  } catch (error) {
+    thrown(error);
+    throw error;
+  }
 }
 
 /**
  * Wrap one usecase so each call runs in an active span named
  * `feature.<featureName>.<usecaseName>`. A value that is not a function is
- * returned as is.
+ * returned as is. Invocation supervision is a separate boundary.
  *
  * - Returns (or resolves to) an `@arki/failure` failure: status ERROR with
  *   `failure.code` and `failure.status`, and no exception event — a failure
@@ -278,55 +270,11 @@ export function traceUsecase(featureName: string, usecaseName: string, usecase: 
   const call = usecase;
   const spanName = `feature.${featureName}.${usecaseName}`;
   function traced(this: unknown, ...args: unknown[]): unknown {
-    const span = tracer.startSpan(spanName);
-    if (!span.isRecording()) return Reflect.apply(call, this, args);
-    return context.with(trace.setSpan(context.active(), span), () =>
-      settleUsecaseSpan(span, () => Reflect.apply(call, this, args)),
-    );
+    const span = observe(() => tracer.startSpan(spanName));
+    return withOutcomeSpan(span, () => {
+      if (span === undefined) return Reflect.apply(call, this, args);
+      return context.with(trace.setSpan(context.active(), span), () => Reflect.apply(call, this, args));
+    });
   }
-  Object.defineProperty(traced, 'name', { value: usecase.name });
-  // Own properties a usecase carries (such as its declared errors) stay readable on the wrapper.
-  return Object.assign(traced, usecase);
-}
-
-/** Run `call` and end `span` when its result is known: now, or when its promise settles. */
-function settleUsecaseSpan(span: Span, call: () => unknown): unknown {
-  let result: unknown;
-  try {
-    result = call();
-  } catch (error) {
-    endThrownUsecase(span, error);
-    throw error;
-  }
-  // `instanceof Promise`, as the hook spans do: a thenable such as a query builder must not be run by `.then`.
-  if (result instanceof Promise) {
-    return result.then(
-      (value: unknown) => {
-        endReturnedUsecase(span, value);
-        return value;
-      },
-      (error: unknown) => {
-        endThrownUsecase(span, error);
-        throw error;
-      },
-    );
-  }
-  endReturnedUsecase(span, result);
-  return result;
-}
-
-function endReturnedUsecase(span: Span, value: unknown): void {
-  if (isFailure(value)) {
-    span.setAttributes({ 'failure.code': value.code, 'failure.status': value.status });
-    span.setStatus({ code: SpanStatusCode.ERROR, message: value.code });
-  } else {
-    span.setStatus({ code: SpanStatusCode.OK });
-  }
-  span.end();
-}
-
-function endThrownUsecase(span: Span, error: unknown): void {
-  span.recordException(error instanceof Error ? error : stringifyForSpan(error));
-  span.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(error) });
-  span.end();
+  return Object.defineProperties(traced, Object.getOwnPropertyDescriptors(usecase));
 }

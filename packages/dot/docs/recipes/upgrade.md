@@ -14,7 +14,8 @@ the app.
    after the bump, or on GitHub before it. Dot is `0.x`: a minor version can
    break the API (see [Release policy](../release-policy.md)). Breaking
    changes come with before and after code in the
-   [Upgrade guide](../upgrade-guide.md).
+   [Upgrade guide](../upgrade-guide.md). For inferred phase outcomes and supervised
+   usecases, read [Upgrade typed phases](../upgrade-phases.md).
 
 2. **Bump `@arki/dot` and its adapters together.** Adapters such as
    `@arki/db` and `@arki/env` take `@arki/dot` as a peer dependency, so

@@ -10,7 +10,6 @@
  *
  * The fixture under `fixtures/rpc-app/` is laid out like a real app.
  */
-import { orThrow } from '@arki/failure';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oc } from '@orpc/contract';
@@ -18,6 +17,9 @@ import { os as bare, createRouterClient, implement } from '@orpc/server';
 import ts from 'typescript';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
+
+import type { SuccessOf } from '@arki/failure';
+import { orThrow } from '@arki/failure';
 
 import type { ServicesBag } from '../feature.js';
 import type { RequestContext } from './fixtures/rpc-app/orpc.js';
@@ -65,7 +67,7 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
       .$context<RequestContext>()
       .use(bind(digestLogic))
       .preview.handler(({ context }) => {
-        expectTypeOf(context.usecases.preview).returns.resolves.toHaveProperty('items');
+        expectTypeOf<NonNullable<SuccessOf<typeof context.usecases.preview>>>().toHaveProperty('items');
         expectTypeOf(context.plans.planOf).parameter(0).toEqualTypeOf<string>();
         expectTypeOf(context.session).toEqualTypeOf<RequestContext['session']>();
         return null;

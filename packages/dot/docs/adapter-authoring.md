@@ -45,10 +45,11 @@ adapter only makes sense inside a DOT app.
 
 ## Function shape
 
-An adapter exports a factory function that returns a `Plugin`:
+An adapter exports a factory function with an inferred return type. Keep the
+callbacks visible so Dot can infer their exact services and failures:
 
 ```ts run
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import type { PluginProvides } from '@arki/dot/plugin';
 import { defineApp, plugin } from '@arki/dot/plugin';
 
 // my-pkg/src/index.ts, the framework-agnostic client. A stand-in here.
@@ -67,11 +68,9 @@ export type MyPkgDotOptions = {
   readonly url: string;
 };
 
-export type MyPkgServices = {
-  readonly myClient: MyClient;
-};
+export type MyPkgServices = PluginProvides<ReturnType<typeof myPkg>>;
 
-export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgServices> {
+export function myPkg(options: MyPkgDotOptions) {
   return plugin({
     name: 'my-pkg',
 
@@ -100,6 +99,7 @@ factory above in scope:
 
 ```ts continue
 import { isFailure } from '@arki/failure';
+
 const app = await defineApp('billing')
   .use(myPkg({ url: 'memory://primary' }))
   .boot();
@@ -146,8 +146,8 @@ read this to know what services exist before the app boots.
 ## Resource opening in `provides`
 
 A plugin publishes through `provides`: one factory per key. Factories may be
-async. Open exactly one resource per factory. `boot` is for side effects only
-and returns nothing:
+async. Open exactly one resource per factory. `boot` performs side effects and
+returns `undefined`, a concrete refusal or a private ownership plan:
 
 ```ts continue
 export const withTimeout = plugin({
@@ -378,10 +378,10 @@ Legacy thrown `DotPluginError` values remain private causes of `UnexpectedDefect
 Use `@arki/dot`'s test harness:
 
 ```ts
-import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { bootTestApp, DotPluginError, plugin } from '@arki/dot';
+import { orThrow } from '@arki/failure';
 
 // The adapter under test, as src/dot.ts would export it.
 function strictPkg(options: { readonly url?: string }) {

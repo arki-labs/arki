@@ -60,6 +60,7 @@ export {
   DevRunnerFailed,
   DoctorFailed,
   ObservabilityNoSdk,
+  PreflightFailed,
   ProjectionConflict,
   ProjectionExecutionFailed,
   ProjectionImportFailed,

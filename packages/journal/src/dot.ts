@@ -26,7 +26,7 @@
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
-import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
+import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/plugin';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { driven, driver, entrypointsOf, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
@@ -182,19 +182,7 @@ export const JOURNAL_PROJECTIONS_KIND = 'journal-projections';
  * that boots nothing and provides nothing — its job is the static `handlers`
  * the journal reads before boot.
  */
-export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = Plugin<
-  EmptyShape,
-  EmptyShape,
-  EmptyShape,
-  'journal-projections'
-> & {
-  readonly kind: typeof JOURNAL_PROJECTIONS_KIND;
-  readonly handlers: {
-    readonly projections: readonly Projection<Meta, Tx>[];
-    readonly effects: readonly [];
-    readonly taps: readonly [];
-  };
-};
+export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = ReturnType<typeof journalProjections<Meta, Tx>>;
 
 /**
  * A `defineFeature` feature's projections, for its `.infra(...)`:
@@ -204,14 +192,11 @@ export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = Plugin<
  * when async) and get only the transaction, so they need no services. The
  * unit shows in `dot explain` as `<feature>/journal-projections`.
  */
-export function journalProjections<Meta = unknown, Tx = DbHandle>(
-  ...projections: readonly Projection<Meta, Tx>[]
-): JournalProjectionsPlugin<Meta, Tx> {
-  return {
-    ...plugin({ name: 'journal-projections', provides: {} }),
+export function journalProjections<Meta = unknown, Tx = DbHandle>(...projections: readonly Projection<Meta, Tx>[]) {
+  return Object.assign(plugin({ name: 'journal-projections', provides: {} }), {
     kind: JOURNAL_PROJECTIONS_KIND,
     handlers: { projections, effects: [], taps: [] },
-  };
+  } as const);
 }
 
 /** What `journalEffects(core, …)` puts in a feature's `.entrypoints(...)`. Same slice as `journalHandlers`, plus its `kind`. */
@@ -304,7 +289,7 @@ export type JournalPlugin<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
-> = Plugin<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }, NeedsShape, 'journal'>;
+> = ReturnType<typeof journalPlugin<Meta, Tx, AppDb>>;
 
 /** Feature mode: bound to the app's features when the app is built. */
 export type JournalDriven<
@@ -435,7 +420,7 @@ function journalPlugin<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(build: () => Journal<Meta, Tx, AppDb>): JournalPlugin<Meta, Tx, AppDb> {
+>(build: () => Journal<Meta, Tx, AppDb>) {
   const needs: { readonly db: Service<AppDb & RootDb & TransactionSource<Tx>> } = {
     db: service<AppDb & RootDb & TransactionSource<Tx>>(),
   };

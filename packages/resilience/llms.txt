@@ -7,7 +7,7 @@ An expected outcome is a returned failure, not a throw. Bound every retry with `
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/resilience`: @arki/resilience: retry, circuit breaker, timeout, bulkhead and curated presets, with typed errors and a `backoff` schedule shared with `@arki/queue` and `@arki/journal`. `BulkheadRejectedError`, `CancelledError`, `CircuitOpenError`, `InvalidBackoffError`, `RESILIENCE_ERROR_CODES`, `ResilienceError`, `RetriesExhaustedError`, `TimeoutError`, `attachPolicyLogger`, `backgroundJobPolicy`, `backoff`, `createBulkheadPolicy`; and 43 more.
+- `@arki/resilience`: retry, circuit breaker, timeout, bulkhead and curated presets, with typed errors and a `backoff` schedule shared with `@arki/queue` and `@arki/journal`. `BulkheadRejectedError`, `CancelledError`, `CircuitOpenError`, `InvalidBackoffError`, `RESILIENCE_ERROR_CODES`, `ResilienceError`, `RetriesExhaustedError`, `TimeoutError`, `attachPolicyLogger`, `backgroundJobPolicy`, `backoff`, `createBulkheadPolicy`; and 43 more.
 - `@arki/resilience/dot`: DOT adapter for @arki/resilience. `RESILIENCE_PLUGIN_ERROR_CODES`, `resilience`; types `ResilienceService`.
 <!-- llms:end -->
 

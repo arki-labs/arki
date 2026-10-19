@@ -12,6 +12,7 @@ import { z } from 'zod';
 
 import { feature } from '@arki/dot/feature';
 import { service } from '@arki/dot/plugin';
+import { UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleOutcome } from './dot.js';
 import type { CronContext } from './orpc.js';
@@ -26,7 +27,14 @@ const reader = feature('reader', {
   needs,
   use: [
     schedules(needs, [
-      { name: 'gate', every: '1m', handler: ({ clock }) => ({ gated: clock.now(), skipped: 1 }) },
+      {
+        name: 'gate',
+        every: '1m',
+        handler: ({ clock }) => {
+          if (clock.now() < 0) return UnexpectedDefect({ cause: new Error('clock unavailable') });
+          return { gated: clock.now(), skipped: 1 };
+        },
+      },
       {
         name: 'retain',
         every: '1m',
@@ -86,6 +94,16 @@ describe('cron procedures on the wire', () => {
   it('answers a run with the value as produced: same bytes, key order kept', async () => {
     const shot = await post('gate', { name: 'gate', status: 'ran', value: { gated: 3, skipped: 1 } });
     expect(shot).toMatchObject({ status: 200, text: '{"gated":3,"skipped":1}', type: 'application/json' });
+  });
+
+  it('sends supervised invocation defects to failure policy before any response mapping', async () => {
+    const failure = UnexpectedDefect({ cause: new Error('private usecase defect') });
+    for (const name of ['gate', 'retain']) {
+      const shot = await post(name, { name, status: 'ran', value: failure });
+      expect(shot.status).toBe(500);
+      expect(shot.carried).toBe(failure);
+      expect(shot.text).not.toContain('private usecase defect');
+    }
   });
 
   it('maps a value through `respond`, including a 500 answered from a value', async () => {

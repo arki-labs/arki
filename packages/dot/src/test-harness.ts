@@ -26,18 +26,22 @@
 
 import type { Failure } from '@arki/failure';
 
-import type { DotAppBuilder, DotAppLifecycle, ListGuard, UseAllAvail, UseAllGuard } from './define-app.js';
+import type { DotAppLifecycle, ListGuard, UseAllAvail, UseAllGuard } from './define-app.js';
 import type {
   AnyPlugin,
+  EmptyPhases,
   EmptyShape,
   Handle,
   Handles,
   InferredOwnership,
-  NeedsShape,
   Plugin,
   PluginCloseFailure,
+  PluginNeeds,
   PluginOpenFailure,
-  PluginOwnership,
+  PluginPhaseFailures,
+  PluginPhases,
+  PluginProvides,
+  PluginSourceGuard,
   ProvidedValues,
   RuntimePlugin,
   ServiceRecord,
@@ -56,9 +60,21 @@ export type TestAppOptions = {
 /** Runtime operation lists retain the ownership inferred at their authoring boundaries. */
 function runtimePlugins<const Plugins extends readonly AnyPlugin[]>(
   plugins: Plugins,
-): readonly RuntimePlugin<PluginOpenFailure<Plugins[number]>, PluginCloseFailure<Plugins[number]>>[];
+): readonly RuntimePlugin<
+  PluginOpenFailure<Plugins[number]>,
+  PluginCloseFailure<Plugins[number]>,
+  PluginPhaseFailures<Plugins[number]>
+>[];
 function runtimePlugins(plugins: readonly AnyPlugin[]): readonly AnyPlugin[] {
   return plugins;
+}
+
+/** Project one checked plugin onto the execution contract its callbacks own. */
+function runtimePlugin<P extends AnyPlugin>(
+  plugin: P,
+): RuntimePlugin<PluginOpenFailure<P>, PluginCloseFailure<P>, PluginPhaseFailures<P>>;
+function runtimePlugin(plugin: AnyPlugin): AnyPlugin {
+  return plugin;
 }
 
 /**
@@ -75,7 +91,7 @@ export type TestAppServices<TPlugins extends readonly AnyPlugin[]> = number exte
  * a test may mount a runtime-built array and let the kernel check it at boot.
  */
 type TestAppGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length']
-  ? unknown
+  ? ListGuard<PluginSourceGuard<TPlugins[number]>>
   : ListGuard<UseAllGuard<EmptyShape, TPlugins>>;
 
 /**
@@ -88,11 +104,12 @@ type TestAppGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugi
 export function testApp<const TPlugins extends readonly AnyPlugin[] = readonly []>(
   plugins?: TPlugins & TestAppGuard<TPlugins>,
   options: TestAppOptions = {},
-): DotAppBuilder<TestAppServices<TPlugins>, PluginOpenFailure<TPlugins[number]>, PluginCloseFailure<TPlugins[number]>> {
+) {
   return mountPlugins<
     PluginOpenFailure<TPlugins[number]>,
     PluginCloseFailure<TPlugins[number]>,
-    TestAppServices<TPlugins>
+    TestAppServices<TPlugins>,
+    PluginPhaseFailures<TPlugins[number]>
   >(options.name ?? 'test-app', runtimePlugins(plugins ?? []), { config: options.config });
 }
 
@@ -131,10 +148,12 @@ type TestPluginLifecycle<
   Open extends Failure,
   Close extends Failure,
   Fakes extends ServiceRecord,
+  Phases extends PluginPhases,
 > = DotAppLifecycle<
   Services,
   Open | InferredOwnership<Fakes, void>['open'],
-  Close | InferredOwnership<Fakes, void>['close']
+  Close | InferredOwnership<Fakes, void>['close'],
+  Phases
 >;
 
 export type TestPluginBuilder<
@@ -143,6 +162,7 @@ export type TestPluginBuilder<
   TOpen extends Failure = never,
   TClose extends Failure = never,
   TFakes extends ServiceRecord = EmptyShape,
+  TPhases extends PluginPhases = EmptyPhases,
 > = {
   /**
    * Satisfy one need directly with a fake. Token form — the token names
@@ -160,7 +180,8 @@ export type TestPluginBuilder<
     TServices & Readonly<Record<K, T>>,
     TOpen,
     TClose,
-    TFakes & Readonly<Record<K, T>>
+    TFakes & Readonly<Record<K, T>>,
+    TPhases
   >;
   /**
    * Satisfy one need directly with a fake. Key form — for anonymous
@@ -178,21 +199,27 @@ export type TestPluginBuilder<
     TServices & Readonly<Record<K, T>>,
     TOpen,
     TClose,
-    TFakes & Readonly<Record<K, T>>
+    TFakes & Readonly<Record<K, T>>,
+    TPhases
   >;
   /** Boot the plugin against the provided fakes. Compile error until every need is provided. */
   boot(
-    this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices, TOpen, TClose, TFakes>>,
-  ): ReturnType<TestPluginLifecycle<TServices, TOpen, TClose, TFakes>['boot']>;
+    this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices, TOpen, TClose, TFakes, TPhases>>,
+  ): ReturnType<TestPluginLifecycle<TServices, TOpen, TClose, TFakes, TPhases>['boot']>;
   /** Boot + start. Same guard as {@link TestPluginBuilder.boot}. */
   start(
-    this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices, TOpen, TClose, TFakes>>,
-  ): ReturnType<TestPluginLifecycle<TServices, TOpen, TClose, TFakes>['boot']>;
+    this: BootReady<TRemaining, TestPluginBuilder<TRemaining, TServices, TOpen, TClose, TFakes, TPhases>>,
+  ): ReturnType<TestPluginLifecycle<TServices, TOpen, TClose, TFakes, TPhases>['start']>;
 };
 
 /** Internal accumulating state for {@link testPlugin}. */
-type TestPluginState<Open extends Failure, Close extends Failure, Fakes extends ServiceRecord> = {
-  readonly plugin: RuntimePlugin<Open, Close>;
+type TestPluginState<
+  Open extends Failure,
+  Close extends Failure,
+  Fakes extends ServiceRecord,
+  Phases extends PluginPhases,
+> = {
+  readonly plugin: RuntimePlugin<Open, Close, Phases>;
   readonly fakes: Fakes;
   readonly options: TestAppOptions;
 };
@@ -225,18 +252,19 @@ type TestPluginState<Open extends Failure, Close extends Failure, Fakes extends 
  * synthetic first plugin, so reverse-order teardown and lazy auto-dispose
  * behave exactly as in production.
  */
-export function testPlugin<
-  TNeeds extends ServiceRecord,
-  TProvides extends ServiceRecord,
-  TShape extends NeedsShape,
-  TName extends string,
-  TOwnership extends PluginOwnership,
->(
-  plugin: Plugin<TNeeds, TProvides, TShape, TName, TOwnership>,
+export function testPlugin<const P extends AnyPlugin>(
+  plugin: P & ListGuard<PluginSourceGuard<P>>,
   options: TestAppOptions = {},
-): TestPluginBuilder<TNeeds, TProvides, TOwnership['open'], TOwnership['close']> {
-  return makeTestPluginBuilder<TNeeds, TProvides, TOwnership['open'], TOwnership['close'], EmptyShape>({
-    plugin,
+) {
+  return makeTestPluginBuilder<
+    PluginNeeds<P>,
+    PluginProvides<P>,
+    PluginOpenFailure<P>,
+    PluginCloseFailure<P>,
+    EmptyShape,
+    PluginPhaseFailures<P>
+  >({
+    plugin: runtimePlugin<P>(plugin),
     fakes: {},
     options,
   });
@@ -246,7 +274,9 @@ export function testPlugin<
 function fakePlugin<Fakes extends ServiceRecord>(
   name: string,
   fakes: Fakes,
-): Plugin<EmptyShape, ProvidedValues<Fakes>, EmptyShape, string, InferredOwnership<Fakes, void>> {
+): Omit<Plugin<EmptyShape, ProvidedValues<Fakes>, EmptyShape, string, InferredOwnership<Fakes, void>>, 'hooks'> & {
+  readonly hooks: EmptyShape;
+} {
   const entries = Object.entries(fakes);
   const factories = Object.fromEntries(entries.map(([key, value]) => [key, () => value])) as {
     readonly [K in keyof Fakes]: () => Fakes[K];
@@ -258,7 +288,7 @@ function fakePlugin<Fakes extends ServiceRecord>(
     renames: {},
     provides: Object.fromEntries(entries.map(([key]) => [key, handleOf(key, name)])) as Handles<ProvidedValues<Fakes>>,
     factories,
-    runtime: createPluginRuntime<Fakes, void>(factories),
+    runtime: createPluginRuntime(),
     hooks: {},
   };
 }
@@ -270,18 +300,23 @@ function makeTestPluginBuilder<
   Open extends Failure,
   Close extends Failure,
   Fakes extends ServiceRecord,
->(state: TestPluginState<Open, Close, Fakes>): TestPluginBuilder<Remaining, Services, Open, Close, Fakes> {
+  Phases extends PluginPhases,
+>(
+  state: TestPluginState<Open, Close, Fakes, Phases>,
+): TestPluginBuilder<Remaining, Services, Open, Close, Fakes, Phases> {
   const appBuilder = () => {
     const plugins: RuntimePlugin<
       Open | InferredOwnership<Fakes, void>['open'],
-      Close | InferredOwnership<Fakes, void>['close']
+      Close | InferredOwnership<Fakes, void>['close'],
+      Phases
     >[] = [];
     if (Object.keys(state.fakes).length > 0) plugins.push(fakePlugin(`test:fakes(${state.plugin.name})`, state.fakes));
     plugins.push(state.plugin);
     return mountPlugins<
       Open | InferredOwnership<Fakes, void>['open'],
       Close | InferredOwnership<Fakes, void>['close'],
-      Services
+      Services,
+      Phases
     >(state.options.name ?? `test:${state.plugin.name}`, plugins, { config: state.options.config });
   };
 
@@ -292,7 +327,14 @@ function makeTestPluginBuilder<
     const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
     // Computed-key construction preserves the same key and value supplied by provide().
     const fakes = { ...state.fakes, [key]: value } as Fakes & Readonly<Record<K, Value>>;
-    return makeTestPluginBuilder<Omit<Remaining, K>, Services & Readonly<Record<K, Value>>, Open, Close, typeof fakes>({
+    return makeTestPluginBuilder<
+      Omit<Remaining, K>,
+      Services & Readonly<Record<K, Value>>,
+      Open,
+      Close,
+      typeof fakes,
+      Phases
+    >({
       ...state,
       fakes,
     });

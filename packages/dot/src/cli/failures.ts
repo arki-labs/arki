@@ -13,6 +13,7 @@ import { defineFailure } from '@arki/failure';
 import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
 import type { DotNewOperation } from './json.js';
 import { DotLifecycleError } from '../lifecycle.js';
+import { preflightMessageSchema } from './preflight-message.js';
 
 /** Base URL of the CLI error docs: an envelope's `error.docsUrl` is `<base>#<code with . and _ as ->`. */
 export const DOT_CLI_DOCS_URL = 'https://docs.arki.dev/dot/cli';
@@ -498,4 +499,24 @@ export const DevPreflightFailed = defineFailure('dot.dev_preflight_failed', {
   message: 'The preflight did not report a result: {reason}',
   remediation:
     'Read `.error.data.output`; run `dot doctor --app <file>` in the project to see the same boot in the foreground.',
+});
+
+/**
+ * A managed preflight reported a lifecycle failure, retaining the complete report.
+ * @fix Read `.error.data.failure.code` and apply its message; inspect `.error.data.report` for diagnostics.
+ * @verify dot _preflight --json | jq '.error.data.failure.code'
+ * @example
+ * ```ts
+ * import { PreflightFailed } from '@arki/dot/cli';
+ * const failure = PreflightFailed({
+ *   app: null, migrations: null, report: null,
+ *   failure: { code: 'app.refused', message: 'Setup refused.', data: null },
+ * });
+ * ```
+ */
+export const PreflightFailed = defineFailure('dot.preflight_failed', {
+  data: preflightMessageSchema,
+  message: data => data.failure?.message ?? 'The preflight reported a failure.',
+  remediation:
+    'Read error.data.failure and error.data.report; fix the reported lifecycle failure before starting the app.',
 });

@@ -7,8 +7,9 @@
  * module exists — each would break if the declaration/mount split or the
  * phase order regressed.
  */
-import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from '../feature.js';
 import {
@@ -27,6 +28,7 @@ import {
   tokenOf,
 } from '../feature.js';
 import { defineApp, plugin, service } from '../index.js';
+import { DotLifecycleErrorCode } from '../lifecycle.js';
 
 type FakeDb = { readonly tag: 'db' };
 const fakeDb: FakeDb = { tag: 'db' };
@@ -149,7 +151,7 @@ describe('mounting features (.features)', () => {
 
   it('mounts features in list order (boot order is the list order)', () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const { manifest } = defineApp('order-test').use(dbPlugin).features([orders, billing]).configure();
+    const { manifest } = orThrow(defineApp('order-test').use(dbPlugin).features([orders, billing]).configure());
     expect(manifest.plugins.map(p => p.name)).toEqual(['db', 'orders', 'billing']);
     expect(plug(orders).name).toBe('orders');
   });
@@ -235,7 +237,13 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
     // @ts-expect-error — digest needs `entitlements`, which nothing mounted before it provides.
     const misordered = defineApp('provides-order-test').use(dbPlugin).features([digest, plans]);
-    expect(() => misordered.configure()).toThrow(/entitlements/);
+    expect(misordered.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
+        code: DotLifecycleErrorCode.ProviderMountedLater,
+        message: expect.stringContaining('entitlements'),
+      },
+    });
   });
 
   it('mints one stable handle per key', () => {
@@ -272,15 +280,23 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
     // @ts-expect-error — the gateway spreads every capability into its needs; scoring is mounted after it.
     const halfBuilt = defineApp('half-built').use(dbPlugin).features([plans, gateway, scoring, companion]);
-    expect(() => halfBuilt.configure()).toThrow(/ARKI_DOT_E020|"scorer"/);
+    expect(halfBuilt.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
+        code: DotLifecycleErrorCode.ProviderMountedLater,
+        message: expect.stringContaining('scorer'),
+      },
+    });
   });
 
   it('a procedure resolves its capability to the very instance the app published — one DI system', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = orThrow(await defineApp('bag')
-      .use(dbPlugin)
-      .features([...features, gateway])
-      .boot());
+    const app = orThrow(
+      await defineApp('bag')
+        .use(dbPlugin)
+        .features([...features, gateway])
+        .boot(),
+    );
     const resolved = resolveNeeds(app.services.bag, companionNeeds);
     // Driven services (`db`) are not capabilities: they stay on the context explicitly.
     expectTypeOf(resolved).toEqualTypeOf<{ access: ReturnType<typeof createPlanLookup> }>();
@@ -315,7 +331,9 @@ describe('the hexagon: .use → .features → .serve', () => {
   );
 
   it('binds a driver to the mounted features — the app never lists them twice', async () => {
-    const app = orThrow(await defineApp('serve-test').use(dbPlugin).features([orders, billing]).serve(collector).boot());
+    const app = orThrow(
+      await defineApp('serve-test').use(dbPlugin).features([orders, billing]).serve(collector).boot(),
+    );
     expect(app.services.collected).toEqual([
       ['orders', ['queue']],
       ['billing', []],
@@ -406,7 +424,9 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
     );
     const failure = await defineApp('peek').use(peeking).features([orders]).boot();
     expect(UnexpectedDefect.is(failure)).toBe(true);
-    expect(failure).toMatchObject({ cause: { code: 'ARKI_DOT_E025', message: expect.stringContaining('slice record') } });
+    expect(failure).toMatchObject({
+      cause: { code: 'ARKI_DOT_E025', message: expect.stringContaining('slice record') },
+    });
   });
 });
 

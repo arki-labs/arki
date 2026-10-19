@@ -2,7 +2,8 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes targets.
 // Covers the portable entries only: `.`, `./plugin`, `./feature`, `./log`, `./runtime`.
 
-import { isFailure } from '@arki/failure';
+import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
+
 import { defineFeature } from '../dist/feature.js';
 import {
   defineApp,
@@ -51,12 +52,29 @@ const stateStarted = app.state;
 const disposal = await app.dispose();
 if (isFailure(disposal)) throw new Error(disposal.code);
 
-let duplicate = { code: 'none', remediation: '', docsUrl: '' };
-try {
-  await defineApp('dup').use(store).use(store).boot();
-} catch (error) {
-  if (error instanceof DotLifecycleError) duplicate = error;
-}
+const duplicateResult = await defineApp('dup').use(store).use(store).boot();
+const duplicate =
+  UnexpectedDefect.is(duplicateResult) && duplicateResult.cause instanceof DotLifecycleError
+    ? duplicateResult.cause
+    : { code: 'none', remediation: '', docsUrl: '' };
+
+const Refused = defineFailure('smoke.refused');
+const refusal = Refused();
+const refusedStart = await defineApp('refused')
+  .use(plugin({ name: 'refuses', start: () => refusal }))
+  .start();
+const execution = defineFeature('execution')
+  .usecases({
+    run: () => () => {
+      throw new Error('owned defect');
+    },
+  })
+  .entrypoints();
+const executionApp = await defineApp('execution-smoke').features([execution]).boot();
+if (isFailure(executionApp)) throw new Error(executionApp.code);
+const invocation = executionApp.services['execution.usecases'].run();
+const executionDisposal = await executionApp.dispose();
+if (isFailure(executionDisposal)) throw new Error(executionDisposal.code);
 
 let manifestCode = 'none';
 try {
@@ -79,6 +97,8 @@ const checks = [
   ['the app reports started', stateStarted, 'started'],
   ['stop runs in reverse order', events.join(','), 'store.start,consumer.start,consumer.stop,store.stop'],
   ['the app ends disposed', app.state, 'disposed'],
+  ['start preserves a returned failure', refusedStart === refusal, true],
+  ['usecase invocation contains defects without tracing', UnexpectedDefect.is(invocation), true],
   ['a duplicate plugin is a coded error', duplicate.code, DotLifecycleErrorCode.DuplicatePlugin],
   ['the coded error carries a remediation', duplicate.remediation.length > 0, true],
   ['the coded error links its docs', duplicate.docsUrl.endsWith('#arki_dot_e011'), true],

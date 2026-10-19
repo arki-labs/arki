@@ -16,7 +16,7 @@ import { scopeAggregate, ScopeFailed } from '@arki/async';
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { DotApp, DotAppLifecycle } from './define-app.js';
-import type { ServiceRecord } from './plugin-contract.js';
+import type { EmptyPhases, PluginPhases, ServiceRecord } from './plugin-contract.js';
 import { hookSignals } from './signals.js';
 
 /**
@@ -47,9 +47,9 @@ function failed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
 }
 
-function startedApp<S extends ServiceRecord, Open extends Failure, Close extends Failure>(
-  value: DotApp<S, Close, Open> | Failure,
-): value is DotApp<S, Close, Open> {
+function startedApp<S extends ServiceRecord, Open extends Failure, Close extends Failure, Phases extends PluginPhases>(
+  value: DotApp<S, Close, Open, Phases> | Failure,
+): value is DotApp<S, Close, Open, Phases> {
   return !isFailure<unknown>(value);
 }
 
@@ -86,8 +86,13 @@ async function disposeOwned<Outcome>(dispose: () => Promise<Outcome>) {
  * const runtime = createAppRuntime(app, { hot: import.meta.hot });
  * export const getApp = runtime.get;
  */
-export function createAppRuntime<S extends ServiceRecord, Open extends Failure = never, Close extends Failure = never>(
-  app: DotAppLifecycle<S, Open, Close>,
+export function createAppRuntime<
+  S extends ServiceRecord,
+  Open extends Failure = never,
+  Close extends Failure = never,
+  Phases extends PluginPhases = EmptyPhases,
+>(
+  app: DotAppLifecycle<S, Open, Close, Phases>,
   options: {
     readonly hot?:
       | {
@@ -95,7 +100,7 @@ export function createAppRuntime<S extends ServiceRecord, Open extends Failure =
           dispose(callback: (data: Record<string, unknown>) => void): void;
         }
       | undefined;
-    readonly onStarted?: ((app: DotApp<S, Close, Open>) => void) | undefined;
+    readonly onStarted?: ((app: DotApp<S, Close, Open, Phases>) => void) | undefined;
   } = {},
 ) {
   const { hot, onStarted } = options;

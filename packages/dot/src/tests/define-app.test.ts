@@ -5,13 +5,14 @@
  * cases fail the typecheck if the guard ever stops firing.
  */
 
+import { describe, expect, expectTypeOf, it } from 'vitest';
+
 import type { ScopePlan } from '@arki/async';
 import { child, cleanup } from '@arki/async';
 import { defineFailure, orThrow } from '@arki/failure';
-import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
-import type { EmptyShape, EmptyOwnership, PluginOpenFailure, PluginCloseFailure } from '../plugin-contract.js';
+import type { EmptyShape, PluginCloseFailure, PluginOpenFailure } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
 import { initPlugins } from '../init-plugins.js';
@@ -136,12 +137,13 @@ describe('defineApp', () => {
       },
     });
     const bare = defineApp('app');
-    type UseArg = Parameters<typeof bare.use<{ readonly db: DbService }, EmptyShape, EmptyOwnership>>[0];
+    type UseArg = Parameters<typeof bare.use<typeof consumer>>[0];
     expectTypeOf<UseArg>().toHaveProperty(
       'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)',
     );
-    const withDb = bare.use(makeDbPlugin());
-    type CollisionArg = Parameters<typeof withDb.use<EmptyShape, { readonly db: DbService }, EmptyOwnership>>[0];
+    const _withDb = bare.use(makeDbPlugin());
+    const _duplicate = makeDbPlugin();
+    type CollisionArg = Parameters<typeof _withDb.use<typeof _duplicate>>[0];
     expectTypeOf<CollisionArg>().toHaveProperty(
       'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()',
     );

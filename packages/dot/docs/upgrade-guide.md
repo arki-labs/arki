@@ -1,5 +1,8 @@
 # Upgrade Guide
 
+For the current managed-phase migration, read [Upgrade typed phases](upgrade-phases.md)
+and [Upgrade owned lifetimes](upgrade-ownership.md). Earlier migrations follow.
+
 `@arki/dot` v0.1 is the first public release. The pre-0.1 legacy surface
 (`createDot`, `definePlugin`, the `@arki/dot/legacy/*` barrel,
 `@arki/dot/event-sourcing`, and `@arki/dot/presets/runtime-local`) is **not
@@ -18,7 +21,8 @@ Future breaking changes will be documented here, version by version, with:
 ## Plugin provides
 
 Plugins publish through `provides`: one factory per key. `boot` is side
-effects only, and returning a value from it is a compile error.
+effects and ownership only: return `undefined`, a concrete refusal or an
+ownership plan. Service values belong in factories.
 
 - Before: `plugin({ name: 'db', boot: () => ({ db: openDb() }) })`
 - After: `plugin({ name: 'db', provides: { db: () => openDb() } })`
@@ -26,7 +30,7 @@ effects only, and returning a value from it is a compile error.
 - After: `provides: { billing: ({ db }) => new Billing(db) }`
 
 If the old `boot` had side effects and a return, move the value into a
-factory and keep the side effects in a void `boot`. Factories get the needs
+factory and keep the side effects in `boot` with an `undefined` return. Factories get the needs
 plus `$app`, `$plugin` and `$config`, and may be async (awaited in key order).
 
 Other changes in the same release:

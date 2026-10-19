@@ -7,13 +7,15 @@
  * at another provider (the EU database) without touching the declaration.
  * Each test pins one way a copy could silently share state with the original.
  */
-import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineFeature, instanceOf, mountFeatures, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
+import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { rpc } from '../orpc.js';
 import { plugin, rename, service } from '../plugin-contract.js';
 
@@ -70,7 +72,10 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
       orThrow(await app.dispose());
     }
     // @ts-expect-error -- the same feature twice: one plugin name, one `summary` wire key
-    await expect(defineApp('t').use(database).features([reports, reports]).boot()).rejects.toThrow();
+    await expect(defineApp('t').use(database).features([reports, reports]).boot()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: DotLifecycleErrorCode.DuplicatePlugin },
+    });
   });
 
   it('re-derives a nested child under the copy; a child need on the same handle follows the rebind', async () => {
@@ -116,7 +121,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
         region:
           ({ db }) =>
           async () =>
-            (orThrow(await db.get())).region,
+            orThrow(await db.get()).region,
       })
       .provides({ trail: ({ usecases }) => usecases.region() })
       .entrypoints();
@@ -147,11 +152,11 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     expect(router.us).toBe(us.router);
   });
 
-  it('keeps the instance name through override() and shows the copies in `dot explain`', async () => {
+  it('keeps the instance name through override() and shows the copies in `dot explain`', () => {
     const eu = reports.instance('eu', { db: databaseEu.provides.dbEu });
     const us = reports.instance('us').override({ repos: { region: () => 'faked' } });
     expect(us.name).toBe('reports#us');
-    const configured = await defineApp('t').use(database).use(databaseEu).features([eu, us]).configure();
+    const configured = orThrow(defineApp('t').use(database).use(databaseEu).features([eu, us]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
     const text = explained.text();

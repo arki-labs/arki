@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { plugin, rename, service } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
@@ -210,11 +210,13 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
 describe('dot explain: event → effect edges', () => {
   it('draws each effect from the events it handles, read from the manifest alone', () => {
     const orders = ordersFeature([]);
-    const configured = defineApp('explain')
-      .infra(dbPlugin(), journal({ j }))
-      .features([orders])
-      .entrypoints(journalWorker())
-      .configure();
+    const configured = orThrow(
+      defineApp('explain')
+        .infra(dbPlugin(), journal({ j }))
+        .features([orders])
+        .entrypoints(journalWorker())
+        .configure(),
+    );
 
     expect(configured.manifest.projections).toContainEqual(
       expect.objectContaining({ format: 'journal-flow', module: '@arki/journal/projection', plugin: 'journal' }),
@@ -285,23 +287,25 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
     const configured = defineApp('jobs-missing')
       .infra(dbPlugin(), journal({ j }))
       .features([ordersFeature([])]);
-    await expect(
-      // @ts-expect-error -- the app provides no `mailer`, which the jobs source needs
-      configured.entrypoints(journalWorker({ jobs: mailerSource(seen) })).boot(),
-    ).rejects.toThrow(/mailer/);
+    // @ts-expect-error -- the app provides no `mailer`, which the jobs source needs
+    const failure = await configured.entrypoints(journalWorker({ jobs: mailerSource(seen) })).boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: { message: expect.stringMatching(/mailer/) } });
     expect(seen.features).toEqual([]);
   });
 
   it("adds the source's consumer actions to the worker's manifest", () => {
-    const configured = defineApp('jobs-explain')
-      .infra(
-        dbPlugin(),
-        journal({ j }),
-        mailerPlugin([], () => undefined),
-      )
-      .features([ordersFeature([])])
-      .entrypoints(journalWorker({ jobs: mailerSource({ features: [] }) }))
-      .configure();
+    const configured = orThrow(
+      defineApp('jobs-explain')
+        .infra(
+          dbPlugin(),
+          journal({ j }),
+          mailerPlugin([], () => undefined),
+        )
+        .features([ordersFeature([])])
+        .entrypoints(journalWorker({ jobs: mailerSource({ features: [] }) }))
+        .configure(),
+    );
     expect(configured.manifest.actions).toContainEqual(
       expect.objectContaining({ id: 'welcome.consume', plugin: 'journal-worker' }),
     );
@@ -345,10 +349,12 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
 
   it('names the action of an instance effect after the instance', () => {
     const { reports, us, eu } = reportsFeature([]);
-    const configured = defineApp('instance-actions')
-      .infra(dbPlugin(), journal({ j }), us, eu)
-      .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
-      .configure();
+    const configured = orThrow(
+      defineApp('instance-actions')
+        .infra(dbPlugin(), journal({ j }), us, eu)
+        .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
+        .configure(),
+    );
     const ids = configured.manifest.actions.filter(action => action.binding === 'journal').map(action => action.id);
     expect(ids.toSorted()).toEqual(['send-on-request#eu.run', 'send-on-request#us.run']);
   });

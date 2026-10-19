@@ -13,22 +13,24 @@ reasons behind them.
    auto-loaded from disk. A service exists only because a plugin provides it
    (principle 2).
 2. **`configure` is synchronous and does no I/O.** A `configure` that returns
-   a Promise fails with `ARKI_DOT_E001`. Async work goes in `boot` or in a
+   a Promise returns `UnexpectedDefect` with `ARKI_DOT_E001` metadata. Async work goes in `boot` or in a
    `provides` factory. This is what keeps `dot explain` free of side effects.
 3. **Providers before consumers.** Declaration order is boot order; nothing
    sorts it. The wrong order is a compile error at `.use()`, and
    `ARKI_DOT_E020` (or `ARKI_DOT_E012`) when the types are erased. Never
    "fix" it with a sort.
-4. **Never cast a manifest.** Read it with `.configure().manifest` on a
-   builder or `app.manifest` on a booted app. No `as`, no `as unknown as`:
+4. **Never cast a manifest.** Check `isFailure(builder.configure())` before reading the configured
+   result’s `manifest`, or read `app.manifest` on a booted app. No `as`, no `as unknown as`:
    the manifest types are exported, and a cast hides a wrong path until an
    agent reads `null`.
 5. **The kernel imports no adapter.** `src/**` never imports `@arki/db`,
    `@arki/env`, `@arki/kv`, `@arki/journal` or any other adapter. Adapters
    take `@arki/dot` as an optional peer and live in their own packages
    (principle 5). `@orpc/server` is loaded only by `@arki/dot/orpc`.
-6. **Error codes are API.** Managed construction/disposal returns inferred typed failures under A-33; static declaration/configure defects may throw. Owned resources and child tasks must settle before finalization. Every legacy kernel error has a stable `ARKI_DOT_E*`
-   code, a `remediation` and a `docsUrl`. Codes are never renumbered or
+6. **Error codes are API.** Managed configure/boot/start/stop/dispose return inferred typed failures under A-33; unmanaged static declarations may throw. Owned resources and child tasks must settle before finalization. Kernel-generated defects preserve stable `ARKI_DOT_E*`
+   metadata inside canonical `UnexpectedDefect.cause`; owned provider/boot
+   defects retain their original cause. Diagnostics expose phase, owner,
+   legacy ID, `remediation` and `docsUrl`. Codes are never renumbered or
    reused (E009 and E010 are retired). Each code's JSDoc carries `@fix` and
    `@verify`.
 7. **Deterministic.** Same source, same manifest, byte for byte. No clock,

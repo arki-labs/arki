@@ -50,7 +50,7 @@ describe('doctorStatus', () => {
         throw new Error('boot-boom');
       },
     });
-    const seam = defineApp('test').use(bad).configure();
+    const seam = orThrow(defineApp('test').use(bad).configure());
     expect(await seam.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
 
     expect(doctorStatus(seam.diagnostics)).toBe('failure');

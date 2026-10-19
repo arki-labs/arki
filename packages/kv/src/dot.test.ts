@@ -51,7 +51,7 @@ describe('@arki/kv/dot', () => {
     const builder = defineApp('kv-manifest-test').use(
       kv({ url: 'redis://localhost:6379', namespace: 'manifest-test' }),
     );
-    const configured = builder.configure();
+    const configured = orThrow(builder.configure());
     expect(configured.manifest.services).toEqual([{ name: 'kv', plugin: 'kv', kind: 'kv' }]);
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
   });

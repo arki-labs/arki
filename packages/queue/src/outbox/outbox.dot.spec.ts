@@ -7,19 +7,20 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin, rename, service } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journal, journalWorker } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 
 import type { FeatureJobContext } from '../dot.ts';
+import type { Outbox } from './outbox.ts';
 import { jobs, outboxJobs, outboxPlugin, outboxProducers } from '../dot.ts';
 import { initQueue } from '../init.ts';
 
@@ -40,6 +41,12 @@ afterAll(async () => {
 
 const database = plugin({ name: 'db', provides: { db: (): PgliteDatabase => db } });
 const scheduling = outboxPlugin({ tables });
+const _namedScheduling = outboxPlugin({ tables, name: 'mail-outbox' });
+expectTypeOf(scheduling.provides.schedule.provider).toEqualTypeOf<'outbox'>();
+expectTypeOf(_namedScheduling.provides.schedule.provider).toEqualTypeOf<'mail-outbox'>();
+expectTypeOf<typeof scheduling.factories>().toEqualTypeOf<{
+  readonly schedule: (ctx: never) => Outbox;
+}>();
 
 type Mailed = { readonly userId: string; readonly jobId: string | undefined; readonly tag: string };
 const mailed: Mailed[] = [];
@@ -125,11 +132,13 @@ describe('outboxPlugin + outboxJobs', () => {
   });
 
   it('the worker claims the consumer side of the manifest; the feature only produces', () => {
-    const app = defineApp('outbox-explain')
-      .infra(database, scheduling, journal({ j }))
-      .features([signup])
-      .entrypoints(journalWorker({ jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'x' }) }) }))
-      .configure();
+    const app = orThrow(
+      defineApp('outbox-explain')
+        .infra(database, scheduling, journal({ j }))
+        .features([signup])
+        .entrypoints(journalWorker({ jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'x' }) }) }))
+        .configure(),
+    );
     const actions = app.manifest.actions.map(action => `${action.plugin}:${action.id}`);
     expect(actions).toContain('journal-worker:mail.welcome.v1.consume');
     expect(actions).toContain('signup:mail.welcome.v1.produce');
@@ -150,7 +159,7 @@ describe('outboxPlugin + outboxJobs', () => {
       const ran = new Promise<void>(resolve => {
         remindedOne = resolve;
       });
-      const { id } = await app.services['reminders#eu.reminder'].remind('u2');
+      const { id } = orThrow(await app.services['reminders#eu.reminder'].remind('u2'));
       const [row] = await db.select({ jobName: tables.jobs.jobName }).from(tables.jobs).where(eq(tables.jobs.id, id));
       expect(row?.jobName).toBe('mail.remind.v1#eu');
       await ran;
@@ -169,6 +178,8 @@ describe('outboxPlugin + outboxJobs', () => {
     });
     const configured = defineApp('outbox-missing').infra(database, scheduling, journal({ j })).features([signup]);
     // @ts-expect-error -- the app provides no `mailer`
-    await expect(configured.entrypoints(journalWorker({ jobs: source })).boot()).rejects.toThrow(/mailer/);
+    const failure = await configured.entrypoints(journalWorker({ jobs: source })).boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: { message: expect.stringMatching(/mailer/) } });
   });
 });

@@ -1,6 +1,6 @@
 import { Cron } from 'croner';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { ScheduleDef, ScheduleLock } from './index.js';
@@ -290,17 +290,19 @@ export function createScheduleRuntime<TContext = undefined>(
         scheduleContext,
         held === undefined ? {} : { lock: { signal: held.signal, fence: held.fence } },
       );
+      if (UnexpectedDefect.is(value)) return recordHandlerFailure(schedule.name, value);
       return { name: schedule.name, status: 'ran', value };
     } catch (error) {
-      handlerFailures += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      debugSchedule.debug('[{scheduleName}] handler failed: {failed}', {
-        scheduleName: schedule.name,
-        failed: message,
-      });
-      log.error('schedule handler failed', { schedule: schedule.name, error: message });
-      return { name: schedule.name, status: 'handler-failed', cause: error };
+      return recordHandlerFailure(schedule.name, error);
     }
+  }
+
+  function recordHandlerFailure(scheduleName: string, error: unknown): ScheduleRunResult {
+    handlerFailures += 1;
+    const message = error instanceof Error ? error.message : String(error);
+    debugSchedule.debug('[{scheduleName}] handler failed: {failed}', { scheduleName, failed: message });
+    log.error('schedule handler failed', { schedule: scheduleName, error: message });
+    return { name: scheduleName, status: 'handler-failed', cause: error };
   }
 
   function trackPromise<T>(promise: Promise<T>): Promise<T> {

@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { PluginSourceGuard, Provided } from '@arki/dot/plugin';
 import { defineApp, DotPluginError } from '@arki/dot/plugin';
 import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
@@ -36,7 +37,7 @@ afterEach(() => {
 
 describe('@arki/resilience/dot', () => {
   it('registers one resilience service in the manifest', () => {
-    const configured = defineApp('resilience-manifest').use(resilience(makePresets())).configure();
+    const configured = orThrow(defineApp('resilience-manifest').use(resilience(makePresets())).configure());
     expect(configured.manifest.services).toEqual([{ name: 'resilience', plugin: 'resilience', kind: 'custom' }]);
   });
 
@@ -107,4 +108,12 @@ describe('@arki/resilience/dot', () => {
     expect(thrown).toMatchObject({ code: RESILIENCE_PLUGIN_ERROR_CODES.unknownPreset });
     await orThrow(app.dispose());
   });
+});
+
+it('retains authored hook contracts and preset names through the adapter', () => {
+  const presets = makePresets();
+  const unit = resilience(presets);
+  expectTypeOf<PluginSourceGuard<typeof unit>>().toEqualTypeOf<[]>();
+  expectTypeOf(unit.provides.resilience.provider).toEqualTypeOf<'resilience'>();
+  expectTypeOf<Parameters<Provided<typeof unit.provides.resilience>['for']>[0]>().toEqualTypeOf<keyof typeof presets>();
 });

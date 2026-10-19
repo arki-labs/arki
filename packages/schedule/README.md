@@ -231,7 +231,10 @@ if (carry.rethrow) throw carry.rethrow.cause;
 
 What it checks at compile time: every name is a schedule of some feature,
 and every body schema is exactly the type the run puts on the wire (both
-ways), or that cron must say in `respond` how its value maps. On the wire:
+ways), or that cron must say in `respond` how its value maps. A supervised
+`UnexpectedDefect` goes to the existing `failed` policy before response mapping;
+it never becomes a success body. Declared business refusals keep their explicit
+responder mapping. On the wire:
 
 - a run's body is the value as produced — `checkOnly()` checks it but keeps
   the original, so key order is the run's, not the schema's;

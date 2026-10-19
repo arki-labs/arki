@@ -1,3 +1,5 @@
+import { isFailure } from '@arki/failure';
+
 import type { Tx } from '../../../../db.js';
 import type { DeliverDeps } from '../feature.js';
 
@@ -5,7 +7,9 @@ import type { DeliverDeps } from '../feature.js';
 export const sendFresh =
   ({ compiler, mailer, repos }: Pick<DeliverDeps, 'compiler' | 'mailer' | 'repos'>) =>
   async (tx: Tx, userId: string, items: readonly string[]) => {
-    const { id } = await compiler.compile(tx, userId, items);
+    const compiled = await compiler.compile(tx, userId, items);
+    if (isFailure(compiled)) return compiled;
+    const { id } = compiled;
     if (!(await mailer.send(userId))) throw new Error(`mail to ${userId} failed`);
     await repos.withTx(tx).digests.markSent(id);
     return { status: 'sent', id } as const;

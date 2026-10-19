@@ -4,8 +4,9 @@
  * post-boot manifest and `dot doctor` show the new one.
  */
 
-import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { doctorStatus, renderDoctorText } from '../cli/render-doctor.js';
 import { textUi } from '../cli/tests/text-ui.js';
@@ -26,7 +27,7 @@ describe('$describeAction', () => {
         },
       },
     });
-    const configured = defineApp('t').use(owner).configure();
+    const configured = orThrow(defineApp('t').use(owner).configure());
     const staticManifest = configured.manifest;
     const app = orThrow(await configured.boot());
 
@@ -46,7 +47,7 @@ describe('$describeAction', () => {
         ctx.$describeAction('job.fire', { summary: 'adapter text' });
       },
     });
-    const app = orThrow(await defineApp('t').use(feature).use(adapter).configure().boot());
+    const app = orThrow(await orThrow(defineApp('t').use(feature).use(adapter).configure()).boot());
     expect(app.manifest.actions.find(action => action.id === 'job.fire')?.summary).toBe('adapter text');
     orThrow(await app.dispose());
   });
@@ -60,7 +61,7 @@ describe('$describeAction', () => {
         ctx.describeAction('job.fire', { summary: 'configure text' });
       },
     });
-    const configured = defineApp('t').use(feature).use(adapter).configure();
+    const configured = orThrow(defineApp('t').use(feature).use(adapter).configure());
     expect(configured.manifest.actions[0]?.summary).toBe('configure text');
   });
 
@@ -72,7 +73,7 @@ describe('$describeAction', () => {
         ctx.$describeAction('job.fire', { summary: 'hijacked' });
       },
     });
-    const configured = defineApp('t').use(owner).use(intruder).configure();
+    const configured = orThrow(defineApp('t').use(owner).use(intruder).configure());
     const failure = await configured.boot();
     expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({ cause: { message: expect.stringMatching(/cannot describe action "job\.fire"/) } });
@@ -86,7 +87,7 @@ describe('$describeAction', () => {
         ctx.$describeAction('job.fire', { summary: 'full text' });
       },
     });
-    const app = orThrow(await defineApp('t').use(owner).configure().boot());
+    const app = orThrow(await orThrow(defineApp('t').use(owner).configure()).boot());
     const { ui, text } = textUi();
     const diagnostics = app.diagnostics;
     renderDoctorText({ ...diagnostics, status: doctorStatus(diagnostics) }, ui);

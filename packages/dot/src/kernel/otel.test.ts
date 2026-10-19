@@ -17,13 +17,14 @@
  * assertion for this commit.
  */
 
-import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import type { Context, ContextManager } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import packageMetadata from '@arki/dot/package.json' with { type: 'json' };
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { configure, getLogger, memorySink } from '@arki/log';
 import { otelTrace } from '@arki/log/otel';
 import { fakeLog } from '@arki/log/testing';
@@ -96,6 +97,7 @@ describe('@arki/dot OTel instrumentation', () => {
 
     const phaseSpans = spansByName('dot.app.configure');
     expect(phaseSpans).toHaveLength(1);
+    expect(phaseSpans[0]?.instrumentationScope.version).toBe(packageMetadata.version);
     expect(phaseSpans[0]?.attributes['dot.app.name']).toBe('otel-configure-test');
     expect(phaseSpans[0]?.attributes['dot.app.plugin.count']).toBe(2);
 
@@ -201,16 +203,18 @@ describe('@arki/dot OTel instrumentation', () => {
 
   it('stamps the phase span and each plugin hook span on the kernel lifecycle records', async () => {
     using log = fakeLog();
-    const app = orThrow(await defineApp('trace-thread-test')
-      .use(
-        plugin({
-          name: 'p',
-          boot: () => {
-            /* side effects only */
-          },
-        }),
-      )
-      .boot());
+    const app = orThrow(
+      await defineApp('trace-thread-test')
+        .use(
+          plugin({
+            name: 'p',
+            boot: () => {
+              /* side effects only */
+            },
+          }),
+        )
+        .boot(),
+    );
     orThrow(await app.dispose());
 
     const phase = spansByName('dot.app.boot')[0]?.spanContext();
@@ -223,41 +227,59 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(done).toMatchObject({ traceId: hook?.traceId, spanId: hook?.spanId });
   });
 
-  it('a hook inside an active span logs with its traceId when logging reads the trace from OTel', () => {
+  it('a boot hook inside an active span logs with its traceId after logging activates', async () => {
     context.setGlobalContextManager(syncContextManager());
     const sink = memorySink();
     try {
-      defineApp('active-span-test')
-        .use(
-          plugin({
-            name: 'logging',
-            logging: () =>
-              configure({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] }, trace: otelTrace() }),
-          }),
-        )
-        .use(
-          plugin({
-            name: 'web',
-            configure: () => {
-              getLogger('test:web').info('registering routes');
-            },
-          }),
-        )
-        .configure();
+      const app = orThrow(
+        await defineApp('active-span-test')
+          .use(
+            plugin({
+              name: 'logging',
+              logging: () => {
+                const handle = configure({
+                  channels: { mem: sink },
+                  default: { level: 'info', channels: ['mem'] },
+                  trace: otelTrace(),
+                });
+                return {
+                  async close() {
+                    await handle.close();
+                  },
+                };
+              },
+            }),
+          )
+          .use(
+            plugin({
+              name: 'web',
+              boot: () => {
+                getLogger('test:web').info('registering routes');
+              },
+            }),
+          )
+          .boot(),
+      );
+      orThrow(await app.dispose());
     } finally {
       context.disable();
     }
 
-    const phase = spansByName('dot.app.configure')[0]?.spanContext();
+    const hook = spansByName('dot.plugin.boot')
+      .find(span => span.attributes['dot.plugin.name'] === 'web')
+      ?.spanContext();
     const record = sink.records.find(entry => entry.template === 'registering routes');
-    expect(phase?.traceId).toMatch(/^[0-9a-f]{32}$/);
-    expect(record?.traceId).toBe(phase?.traceId);
+    expect(hook?.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(sink.records.map(entry => entry.template)).toContain('registering routes');
+    expect(record?.traceId).toBe(hook?.traceId);
   });
 
   it('reports a returned refusal without inventing an exception event', async () => {
     const Refused = defineFailure('otel_test.refused');
     const refusal = Refused();
-    const result = await defineApp('otel-refusal').use(plugin({ name: 'refused', boot: () => refusal })).boot();
+    const result = await defineApp('otel-refusal')
+      .use(plugin({ name: 'refused', boot: () => refusal }))
+      .boot();
     expect(result).toBe(refusal);
     for (const name of ['dot.plugin.boot', 'dot.app.boot']) {
       const span = spansByName(name)[0];
@@ -281,7 +303,10 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    expect(await defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('intentional boot failure') });
+    expect(await defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: new Error('intentional boot failure'),
+    });
 
     const bootPluginSpans = spansByName('dot.plugin.boot');
     expect(bootPluginSpans).toHaveLength(2);

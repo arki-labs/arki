@@ -17,7 +17,7 @@ this guide and in the README is compiled by `bun run test:docs`.
    type mismatch, a key collision. The kernel checks again at runtime with
    coded errors (`ARKI_DOT_E012`, `E013`, `E020`).
 4. A plugin has five hooks: `configure` (sync, no I/O), `boot` (side effects,
-   returns nothing), `start`, `stop`, `dispose`.
+   returns undefined, a refusal or an ownership plan), `start`, `stop`, `dispose`.
 5. A feature is one chain: `defineFeature(name).needs(...).infra(...).usecases(...).provides(...).entrypoints(...)`
    from `@arki/dot/feature`. The app mounts it with `.features([...])`.
 6. `app.manifest` is the static graph (plugins, services, actions,
@@ -154,8 +154,8 @@ The same data in code, without the CLI. `configure()` gives the manifest;
 `boot()` gives the diagnostics:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const database = plugin({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
 const reports = plugin({
@@ -166,6 +166,7 @@ const reports = plugin({
 
 // `dot explain --json` prints this manifest under `.data`. No boot hook runs.
 const configured = defineApp('shop').use(database).use(reports).configure();
+if (isFailure(configured)) throw new Error(configured.code);
 const names = configured.manifest.plugins.map(p => p.name).join(',');
 if (names !== 'database,reports') throw new Error(`unexpected plugins: ${names}`);
 const edge = configured.manifest.dependencies.find(d => d.from === 'reports');
@@ -183,7 +184,7 @@ if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
 
 1. Run `npx dot doctor --json`. It exits `0` when the worst issue is a
    warning or less, and `3` with `.error.code == "dot.doctor_failed"` when an
-   issue is an error or boot threw. Read stdout either way.
+   issue is an error or a managed phase failed. Read stdout either way.
 2. On exit 0, `.data` is the diagnostics snapshot plus `.data.status`
    (`success` or `warning`). On exit 3, the same report is `.error.data`, with
    `.error.data.status == "failure"`.
@@ -259,8 +260,10 @@ binding, direction, address })` in `configure`. `rpc()` from
 1. `npx dot doctor -o json | jq '.error.data.plugins[] | select(.status == "failed")'`.
 2. `npx dot doctor --json | jq '.data.plugins[] | select(.status != "ok")'`
    names the plugin.
-3. `ARKI_DOT_E003` means that plugin's `boot` threw. The kernel already
-   rolled back the plugins that booted before it.
+3. A hook may return its canonical refusal; an unknown throw becomes
+   `UnexpectedDefect` retaining its original private cause, while diagnostics
+   record `ARKI_DOT_E003` with the boot phase and plugin.
+   The kernel rolls back owned resources before returning.
 4. Apply the first `remediation`. Run doctor again. Repeat.
 
 ### Boot-check an app
@@ -271,8 +274,10 @@ It refuses a non-local `DB_URL` unless you pass `--allow-remote-db`.
 
 - `ok: true`: `.data.items` lists the events in order: `app`, `db`,
   `migrations` (the names the boot applied), `preflight`.
-- A failure: `.error.code` is a `dot.dev_*` code or `dot.doctor_failed`. The
-  doctor diagnostics are in `.error.data`.
+- A managed preflight failure: `.error.code` is `dot.preflight_failed`;
+  `.error.data` contains `app`, `migrations`, `report` and `failure`. Read
+  `.error.data.failure.code` and `.error.data.report` (either can be null).
+  Process failures use `dot.dev_preflight_failed`; database and runner failures use other `dot.dev_*` codes.
 
 ### Work in a generated app
 
@@ -285,8 +290,10 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 
 - `configure` is sync. A `configure` that returns a Promise fails with
   `ARKI_DOT_E001`.
-- `boot` returns nothing. Values go in `provides`. A value-returning `boot`
-  does not compile.
+- Hooks return `undefined` or a concrete failure; `boot` can also return an
+  ownership plan. Service values go in `provides`. Detached `void` or
+  `Promise<void>` callbacks must return explicit `undefined` or be written inline.
+  See [Upgrade typed phases](upgrade-phases.md).
 - Providers come before consumers in `.use()` and `.features([...])`. The
   wrong order is a compile error, and `ARKI_DOT_E020` for erased code.
 - Two providers of one wire key collide. Use `rename(plugin, { key: 'newKey' }, 'new-name')`
@@ -294,8 +301,8 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 - `$`-prefixed keys are reserved for the kernel (`$app`, `$plugin`,
   `$config`, `$signal`).
 - An app has at most one logging plugin. `log()` from `@arki/dot/log` goes first.
-- Do not cast an app to reach its manifest. Call `.configure().manifest` on
-  the builder, or read `app.manifest` on a booted app.
+- Do not cast an app to reach its manifest. Call `builder.configure()`, check
+  `isFailure`, then read `configured.manifest`; a booted app has `app.manifest`.
 - `.data` is the payload. `jq '.data.manifest'` and `jq '.data.diagnostics'`
   return `null`.
 - `dot doctor` never calls `start()`. Workers and servers in `start` are not
@@ -307,16 +314,18 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 
 ## Ownership
 
-Use `resource`, `cleanup` and `child` from `@arki/async` for owned construction; see [Ownership](ownership.md). Check returned failures from boot/start/dispose and lazy get/dispose. Failed services never publish. Deadlines request cancellation and join admitted work before finalization.
+Use `resource`, `cleanup` and `child` from `@arki/async` for owned construction; see [Ownership](ownership.md). Check returned failures from configure/boot/start/stop/dispose and lazy get/dispose. Failed services never publish. Deadlines request cancellation and join admitted work before finalization.
 
 ## Errors
 
 `dot` exits `0` on success, `1` on a bug (`cli.bug`), `2` on a usage error
-(`cli.*`) and `3` on a returned failure (`dot.*`). Every failure envelope has
+(`cli.*`) and `3` on a returned failure (including `dot.*` and canonical failures). Every failure envelope has
 `.error.code`, `.error.message`, `.error.remediation` and `.error.docsUrl`;
 `jq '.error.remediation'` is the fix. Kernel errors (`ARKI_DOT_E*`) appear as
-issue codes inside the diagnostics, or as `.error.data.underlyingCode` when
-`configure` failed (`dot.app_lifecycle_failed`).
+issue codes inside diagnostics. A returned configure refusal propagates its
+canonical code unchanged; serialized `UnexpectedDefect` data is null.
+Compatibility callbacks that throw can produce `dot.app_lifecycle_failed`
+with `.error.data.underlyingCode`.
 
 | Code                                                                        | Meaning                                                                                                                                                 | What to do                                                                              |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -325,14 +334,15 @@ issue codes inside the diagnostics, or as `.error.data.underlyingCode` when
 | `dot.app_not_found` (exit 3)                                                | No app file found and no `--app`.                                                                                                                       | Pass `--app <path>`, or create `dot.config.ts`.                                         |
 | `dot.app_invalid_export` (exit 3)                                           | The app file has no usable app export: the `default`/`app` export is not a DOT app, there is none, or several are exported and none is `default`/`app`. | `export default defineApp(...)` or `export const app = defineApp(...)`.                 |
 | `dot.app_import_failed` (exit 3)                                            | Importing the app file, or calling its factory export, threw.                                                                                           | Apply `.error.data.causeRemediation` when set; otherwise run `bun <path>` to reproduce. |
-| `dot.app_lifecycle_failed` (exit 3)                                         | `configure` threw while the CLI prepared the app. `.error.data.underlyingCode` is the kernel code.                                                      | Fix that code; `ARKI_DOT_E020` means a provider is mounted after its consumer.          |
-| `dot.doctor_failed` (exit 3)                                                | `doctor` found an error issue, or boot threw. `.error.data` is the report.                                                                              | Apply each issue's `remediation` in `.error.data.plugins[].issues`.                     |
+| `dot.app_lifecycle_failed` (exit 3)                                         | A compatibility callback threw during configure. `.error.data.underlyingCode` is the kernel code when available.                                        | Fix that code; `ARKI_DOT_E020` means a provider is mounted after its consumer.          |
+| `dot.doctor_failed` (exit 3)                                                | `doctor` found an error issue, or a managed phase failed. `.error.data` is the report.                                                                  | Apply each issue's `remediation` in `.error.data.plugins[].issues`.                     |
+| `dot.preflight_failed` (exit 3)                                             | Managed preflight failed. `.error.data` contains `app`, `migrations`, `report` and `failure`.                                                           | Read `.error.data.failure.code` and `.error.data.report`; fix the lifecycle failure.    |
 | `dot.observability_no_sdk`                                                  | `doctor --observability`: no OpenTelemetry SDK registered. A warning issue in `.data.issues`, not a failure.                                            | Register an SDK once at app entry; see `docs/observability.md`.                         |
 | `dot.projection_*` (exit 3)                                                 | `explain --as`: `projection_not_found`, `projection_import_failed`, `projection_execution_failed`, `projection_conflict`.                               | Check the projection module the adapter registers; `--module` tries a replacement.      |
 | `dot.target_not_empty`, `dot.template_missing`, `dot.write_failed` (exit 3) | `dot new`: the target has files, the package ships no templates, or a write failed.                                                                     | Pick an empty `--target` or pass `--force`; reinstall `@arki/dot`; check permissions.   |
-| `dot.lazy_closed` | The lazy owner closed admission. | Use a live handle. |
-| `dot.runtime_replaced` | HMR replaced this module. | Use the current runtime. |
-| `dot.runtime_release_failed` | Prior resources failed to release. | Resolve disposal before restarting. |
+| `dot.lazy_closed`                                                           | The lazy owner closed admission.                                                                                                                        | Use a live handle.                                                                      |
+| `dot.runtime_replaced`                                                      | HMR replaced this module.                                                                                                                               | Use the current runtime.                                                                |
+| `dot.runtime_release_failed`                                                | Prior resources failed to release.                                                                                                                      | Resolve disposal before restarting.                                                     |
 | `ARKI_DOT_E001`                                                             | `configure` returned a Promise.                                                                                                                         | Move async work to `boot`.                                                              |
 | `ARKI_DOT_E002`                                                             | `configure` threw.                                                                                                                                      | Fix the plugin config.                                                                  |
 | `ARKI_DOT_E003`                                                             | `boot` threw. Booted plugins were rolled back.                                                                                                          | Read the issue's `plugin` and `remediation`.                                            |

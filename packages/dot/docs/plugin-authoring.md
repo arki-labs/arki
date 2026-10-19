@@ -158,6 +158,7 @@ Mounted in order, the wiring boots and the manifest records the need:
 
 ```ts continue
 import { isFailure } from '@arki/failure';
+
 const shop = await defineApp('shop').use(apiClientPlugin).use(billing).boot();
 if (isFailure(shop)) throw new Error(shop.code);
 
@@ -386,6 +387,7 @@ export const invoicing = plugin({
 });
 
 const invoicingApp = defineApp('invoices').use(invoicing).configure();
+if (isFailure(invoicingApp)) throw new Error(invoicingApp.code);
 if (invoicingApp.manifest.actions.map(a => a.id).join() !== 'create-invoice') throw new Error('action missing');
 ```
 
@@ -408,7 +410,7 @@ structured error from a hook — the kernel wraps it into a
 
 ```ts run expect
 import { defineApp, DotPluginError, plugin } from '@arki/dot';
-import { UnexpectedDefect } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 const strictBilling = plugin({
   name: 'strict-billing',
@@ -426,6 +428,7 @@ const strictBilling = plugin({
 });
 
 const configured = defineApp('demo').use(strictBilling).configure();
+if (isFailure(configured)) throw new Error(configured.code);
 const outcome = await configured.boot();
 if (UnexpectedDefect.is(outcome) && outcome.cause instanceof DotPluginError) {
   console.log(outcome.code, outcome.cause.code);
@@ -440,8 +443,8 @@ ARKI_DOT_E003 strict-billing
 
 The kernel records one issue under its own code (`ARKI_DOT_E003`, with the
 plugin name and your message) and returns an `UnexpectedDefect` whose
-`cause` is your `DotPluginError`. Your `code`, `remediation` and `docsUrl`
-live on `cause`. See [Diagnostics](./diagnostics.md) for the full shape and
+`cause` is your original `DotPluginError`. Its `code`, `remediation` and
+`docsUrl` stay private; diagnostics retain the phase and plugin metadata. See [Diagnostics](./diagnostics.md) for the full shape and
 stable code conventions.
 
 ## Type-safe services
@@ -450,8 +453,8 @@ Provides are inferred from the `provides` factories and accumulate through the
 builder:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const a = plugin({ name: 'a', provides: { a: () => 1 } });
 const b = plugin({ name: 'b', provides: { b: () => 'x' } });
@@ -474,9 +477,9 @@ anywhere, including inside hooks.
 against the handle:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
+import { isFailure } from '@arki/failure';
 
 type Db = { query(sql: string): Promise<string> };
 const database = plugin({ name: 'database', provides: { db: (): Db => ({ query: async () => 'real' }) } });
@@ -534,6 +537,7 @@ describe('billing plugin', () => {
 
   it('declares its needs in the manifest', () => {
     const configured = testApp([apiClient, billing]).configure();
+    if (isFailure(configured)) throw new Error(configured.code);
     expect(configured.manifest.plugins.find(p => p.name === 'billing')?.dependencies).toEqual(['apiClient']);
   });
 });

@@ -1,3 +1,5 @@
+import { orThrow } from '@arki/failure';
+
 /**
  * entrypoints/procedures.ts: the feature's whole procedure tree in one file.
  * Each leaf is a factory over the feature's implementer. The import below is
@@ -10,9 +12,9 @@ import { authed } from '../orpc.js';
 
 export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
-    impl.preview.use(authed).handler(({ context }) => {
+    impl.preview.use(authed).handler(async ({ context }) => {
       // `db` is entrypoint-only: a procedure may open a transaction with it; usecases never see it.
       void context.db;
-      return context.usecases.preview(context.session.user.id);
+      return orThrow(await context.usecases.preview(context.session.user.id));
     }),
 };

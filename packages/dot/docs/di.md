@@ -226,6 +226,7 @@ import type { DepsOf, ServicesBag } from '@arki/dot/feature';
 import { plugin } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
+import { orThrow } from '@arki/failure';
 
 // core/orpc.ts — once per app
 type Session = { readonly user: { readonly id: string } };
@@ -266,14 +267,18 @@ export type Deps = DepsOf<typeof dailyDigestDeps>;
 export const dailyDigestLogic = dailyDigestDeps.usecases({ preview, purge });
 export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(dailyDigestLogic));
 
+// This example uses an exception boundary at RPC handlers; usecases keep typed outcomes.
 // features/daily-digest/entrypoints/procedures.ts — the whole tree. In its own file it
 // reads the implementer as a type only (`import type { rpcImplementer } from '../feature'`),
 // so there is no runtime import back.
 export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
-    impl.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
+    impl.preview
+      .use(authed)
+      .handler(async ({ context }) => orThrow(await context.usecases.preview(context.session.user.id))),
   admin: {
-    purge: (impl: typeof rpcImplementer) => impl.admin.purge.handler(({ context }) => context.usecases.purge()),
+    purge: (impl: typeof rpcImplementer) =>
+      impl.admin.purge.handler(async ({ context }) => orThrow(await context.usecases.purge())),
   },
 };
 
@@ -430,7 +435,10 @@ const database = plugin({ name: 'database', provides: { db: () => openDb() } });
 export const billing = feature('billing', {
   needs: { db: database.provides.db },
   provides: { entitlements: ({ db }) => createEntitlements(db) },
-  boot: ({ entitlements }) => entitlements.warmUp(), // side effects only; sees the factories' values
+  boot: async ({ entitlements }) => {
+    await entitlements.warmUp();
+    return undefined;
+  }, // sees the factories' values
 });
 
 export const digest = feature('daily-digest', {
@@ -446,19 +454,19 @@ key, stamped with `provider: 'billing'`. The keys are static, so the graph is
 data before anything boots:
 
 - mounting `digest` before `billing` is a compile error, and `configure()`
-  throws `ARKI_DOT_E020` naming both positions for code that skips types.
+  returns `UnexpectedDefect` with `ARKI_DOT_E020` metadata naming both positions for code that skips types.
   The fix line is role-aware: "Move X before Y in .features([...])." for a
   feature provider, "Mount X with .use() before Y." for any other plugin;
 - two features that need each other form a ring: TypeScript reports `TS7022`
   on both `feature()` consts (read the two files it names), and `configure()`
-  throws `ARKI_DOT_E019` printing the ring (through any plugins) for
+  returns `UnexpectedDefect` with `ARKI_DOT_E019` ring metadata (through any plugins) for
   erased graphs;
 - `dot explain` draws one labelled edge per capability, such as
   `daily-digest --[entitlements]--> billing`, without booting.
   A feature's slice record (`feature.<name>`) is one of its plugin's provides.
 
-`boot` is side effects only (seed, warm-up) and returns nothing; a
-value-returning `boot` does not compile.
+`boot` performs side effects (seed, warm-up) and returns `undefined`, a concrete
+failure or an ownership plan. Service values belong in `provides`.
 
 ### Capabilities in the request context
 
@@ -550,9 +558,9 @@ In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
 against the handle:
 
 ```ts continue
-import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
+import { isFailure } from '@arki/failure';
 
 const testDb: Db = { query: async () => [] };
 const app = await defineApp('t')
@@ -602,8 +610,8 @@ compile time. `rename` is the multi-instance primitive, and
 `Token.instance()` derives the matching contract:
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin, rename, token } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 type PgDatabase = { execute(sql: string): Promise<unknown[]> };
 declare function connect(url: string): PgDatabase; // your code
@@ -655,10 +663,10 @@ under the copy (`reports#eu.audit`), and a child need on the same handle follows
 lazy form included.
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin, rename, service } from '@arki/dot';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
+import { isFailure } from '@arki/failure';
 
 type Region = { readonly region: string };
 const regionDb = (region: string) => plugin({ name: 'database', provides: { db: (): Region => ({ region }) } });
@@ -730,6 +738,7 @@ handle, wrapping eager provides and passing lazy ones through by identity:
 
 ```ts continue
 import { isFailure } from '@arki/failure';
+
 export const suggestions = plugin({
   name: 'suggestions',
   needs: { search: service.lazy<SearchClient>() },

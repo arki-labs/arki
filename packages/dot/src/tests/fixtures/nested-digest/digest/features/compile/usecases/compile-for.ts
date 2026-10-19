@@ -1,3 +1,5 @@
+import { isFailure } from '@arki/failure';
+
 import type { Tx } from '../../../../db.js';
 import type { CompileDeps } from '../feature.js';
 
@@ -5,7 +7,9 @@ import type { CompileDeps } from '../feature.js';
 export const compileFor =
   ({ repos, ranking }: Pick<CompileDeps, 'repos' | 'ranking'>) =>
   async (tx: Tx, userId: string, items: readonly string[]) => {
-    const { ranked, stored } = await ranking.top(tx, items);
+    const rankedItems = await ranking.top(tx, items);
+    if (isFailure(rankedItems)) return rankedItems;
+    const { ranked, stored } = rankedItems;
     const id = `d_${userId}_${stored + 1}`;
     await repos.withTx(tx).digests.create({ id, userId, status: 'compiled', items: ranked });
     return { id, items: ranked };

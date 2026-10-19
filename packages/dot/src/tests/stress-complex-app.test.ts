@@ -18,8 +18,9 @@
  * builder's accumulated generics survive real-world depth.
  */
 
-import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
 import type { Lazy } from '../plugin-contract.js';
@@ -70,8 +71,10 @@ const SessionsKv = Kv.instance('sessions'); // wire key 'stress.kv#sessions'
 /* ------------------------------------------------------------------ */
 
 const events: string[] = [];
-const ev = (tag: string): void => {
+const ev = (tag: string) => {
   events.push(tag);
+  // eslint-disable-next-line unicorn/no-useless-undefined -- Explicit undefined prevents void from erasing returned failures.
+  return undefined;
 };
 
 const mkDb = (instance: string): Db => ({ instance, query: async sql => `${instance}:${sql}` });

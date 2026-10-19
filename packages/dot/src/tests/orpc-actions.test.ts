@@ -15,6 +15,8 @@ import { implement, ORPCError } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { program } from '../cli/index.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
@@ -56,7 +58,7 @@ const pods = defineFeature('pods').entrypoints(
 );
 
 const manifestOf = () =>
-  defineApp('rpc-actions').infra(database, billing).features([digest, stories, pods]).configure().manifest;
+  orThrow(defineApp('rpc-actions').infra(database, billing).features([digest, stories, pods]).configure()).manifest;
 
 describe('rpc(): manifest actions', () => {
   it('one action per procedure, nested routers included, owned by the feature', () => {
@@ -115,7 +117,7 @@ describe('dot explain: the policy a procedure declares', () => {
   const orders = defineFeature('orders').entrypoints(
     rpc(orderContract, implement(orderContract), { refund: o => o.refund.handler(() => undefined) }),
   );
-  const manifest = defineApp('policy-explain').features([orders]).configure().manifest;
+  const manifest = orThrow(defineApp('policy-explain').features([orders]).configure()).manifest;
 
   it('prints `policy: order.refund` under the action in the text output', () => {
     const explained = textUi();

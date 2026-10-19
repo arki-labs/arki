@@ -12,9 +12,10 @@
  * import { defineApp } from '@arki/dot';
  * import { definePresets } from '@arki/resilience';
  * import { resilience } from '@arki/resilience/dot';
+ * import { orThrow } from '@arki/failure';
  *
  * const presets = definePresets({ carrier: { timeout: { timeoutMs: 10_000 } } });
- * const app = await defineApp('my-app').use(resilience(presets)).boot();
+ * const app = orThrow(await defineApp('my-app').use(resilience(presets)).boot());
  *
  * await app.services.resilience.run('carrier', () => callCarrier());
  * ```
@@ -23,7 +24,6 @@
  * without `@arki/dot` installed fails at module load: it only makes sense in a DOT app.
  */
 
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import type { Logger } from '@arki/log';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 import { getLogger } from '@arki/log';
@@ -105,9 +105,7 @@ function listen(preset: string, policy: ResiliencePolicy, into: Subscription[]):
  *
  * @param presets - The result of `definePresets(...)`. Its names type `for` and `run`.
  */
-export function resilience<N extends string>(
-  presets: Presets<N>,
-): Plugin<EmptyShape, { readonly resilience: ResilienceService<N> }, EmptyShape, 'resilience'> {
+export function resilience<N extends string>(presets: Presets<N>) {
   return plugin({
     name: 'resilience',
     configure(ctx) {

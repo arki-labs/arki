@@ -27,8 +27,8 @@ The `dot` command ships in the same package.
 ## Quick start
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 // Stand-ins for your real database and Stripe clients.
 type Db = { query(sql: string): Promise<unknown[]>; close(): Promise<void> };
@@ -129,47 +129,48 @@ Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy r
 
 ## Failure behaviour
 
-Owned construction and disposal return typed `@arki/failure` values. Check `isFailure(await app.boot())` before accessing services and inspect disposal outcomes. Callback refusal definitions remain inferred; unknown exceptions become `UnexpectedDefect`. Static declaration and synchronous configure defects still throw during this migration. The `dot` command returns failures in its JSON envelope and exits with code `3`.
+Every managed phase returns typed `@arki/failure` values. Check `isFailure(builder.configure())` before reading the manifest, and inspect awaited boot, start, stop and dispose outcomes. Concrete callback refusals remain inferred; unknown exceptions become canonical `UnexpectedDefect` values. Static declaration helpers can still throw outside a managed boundary. See [Upgrade typed phases](./docs/upgrade-phases.md) for the breaking changes and exact phase outcomes.
 
-Legacy kernel exceptions carry a stable `ARKI_DOT_E*` diagnostic code, a one-sentence `remediation` and a `docsUrl`, the same shape as `DotPluginError`. Match on `code`, never on the message. Codes are never renumbered or reused (E009 and E010 are retired).
+Legacy `ARKI_DOT_E*` IDs remain diagnostic metadata, not top-level failure codes. Kernel-generated defects retain their `DotLifecycleError` (phase, plugin and original cause) inside `UnexpectedDefect.cause`. Owned provider/boot task defects retain the original private cause; diagnostics record phase, owner and legacy ID with safe remediation and docs links. Codes are never renumbered or reused (E009 and E010 are retired). `FeatureError` (E022–E031) and `DotManifestError` (E032) can still escape unmanaged static declarations; CLI module loading supervises them.
 
-`DotLifecycleError` (E001-E021) also carries `phase`, `plugin`, `cause` and, for stop and dispose, `failures`. `FeatureError` (E022-E031) is what `feature()`, `defineFeature()`, `rpc()` and `routerFor()` throw. `DotManifestError` (E032) extends `TypeError`.
+The legacy rows below describe diagnostic IDs and their private cause classes. Match returned failures by their canonical definition; inspect legacy IDs locally in the private cause or in diagnostics.
 
-| Code            | Class               | Meaning                                                                 | Fix                                                    |
-| --------------- | ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
-| `dot.lazy_closed` | Failure value | A lazy handle is used after its owner closed. | Obtain a handle from a live owner. |
-| `dot.runtime_replaced` | Failure value | HMR replaced this runtime. | Use the current module. |
-| `dot.runtime_release_failed` | Failure value | Previous ownership was not safely released. | Resolve disposal before starting another owner. |
-| `ARKI_DOT_E001` | `DotLifecycleError` | `configure` returned a Promise.                                         | Make `configure` synchronous; do async work in `boot`. |
-| `ARKI_DOT_E002` | `DotLifecycleError` | `configure` threw.                                                      | Fix the plugin's config or its `configure` hook.       |
-| `ARKI_DOT_E003` | `DotLifecycleError` | `boot` threw. Booted plugins were rolled back.                          | Read `plugin` and `cause`; fix that `boot` hook.       |
-| `ARKI_DOT_E004` | `DotLifecycleError` | `start` threw.                                                          | Read `plugin` and `cause`; fix that `start` hook.      |
-| `ARKI_DOT_E005` | `DotLifecycleError` | One or more `stop` hooks threw.                                         | Read `failures`; each names the plugin.                |
-| `ARKI_DOT_E006` | `DotLifecycleError` | One or more `dispose` hooks threw.                                      | Read `failures`; each names the plugin.                |
-| `ARKI_DOT_E007` | `DotLifecycleError` | The app was reused after `dispose()`.                                   | Build a fresh app instance.                            |
-| `ARKI_DOT_E008` | `DotLifecycleError` | The app was reused after a failed lifecycle.                            | Build a fresh app instance.                            |
-| `ARKI_DOT_E011` | `DotLifecycleError` | A plugin was registered twice.                                          | Remove the second `.use()`, or `rename` it.            |
-| `ARKI_DOT_E012` | `DotLifecycleError` | A need no plugin provides (erased or JS graphs).                        | Mount the provider before its consumer.                |
-| `ARKI_DOT_E013` | `DotLifecycleError` | A wire key is provided twice.                                           | `rename` one provider.                                 |
-| `ARKI_DOT_E014` | `DotLifecycleError` | A key uses the reserved `$` prefix.                                     | Rename the key.                                        |
-| `ARKI_DOT_E015` | `DotLifecycleError` | A hook ran past `hookTimeoutMs`.                                        | Pass `$signal` to the hook's I/O, or raise the budget. |
-| `ARKI_DOT_E016` | `DotLifecycleError` | Two actions in one binding share an id.                                 | Give each action its own id.                           |
-| `ARKI_DOT_E017` | `DotLifecycleError` | Action `meta` is not plain JSON.                                        | Keep `meta` JSON-safe.                                 |
-| `ARKI_DOT_E018` | `DotLifecycleError` | More than one logging plugin.                                           | Keep one `log()`.                                      |
-| `ARKI_DOT_E019` | `DotLifecycleError` | Needs and provides form a ring.                                         | Move the shared piece into a third unit.               |
-| `ARKI_DOT_E020` | `DotLifecycleError` | A provider is mounted after its consumer.                               | Mount the provider first.                              |
-| `ARKI_DOT_E021` | `DotLifecycleError` | `$describeAction` named an action the plugin may not amend.             | Describe only your own actions.                        |
-| `ARKI_DOT_E022` | `FeatureError`      | Two routers use the same key.                                           | Rename one key.                                        |
-| `ARKI_DOT_E023` | `FeatureError`      | Two repos use the same key.                                             | Rename one key.                                        |
-| `ARKI_DOT_E024` | `FeatureError`      | Two slices use the same key.                                            | Rename one key.                                        |
-| `ARKI_DOT_E025` | `FeatureError`      | A feature has no slices.                                                | Add at least one slice.                                |
-| `ARKI_DOT_E026` | `FeatureError`      | A handle is missing from the services bag.                              | Mount the provider; check the gateway's needs.         |
-| `ARKI_DOT_E027` | `FeatureError`      | A feature key collides with another slot or a reserved name.            | Rename the alias or key.                               |
-| `ARKI_DOT_E028` | `FeatureError`      | `override()` named a key no infra plugin provides.                      | Override a key the feature's infra provides.           |
-| `ARKI_DOT_E029` | `FeatureError`      | `routerFor()`: an app-contract key has zero or several owners.          | Give each key exactly one feature.                     |
-| `ARKI_DOT_E030` | `FeatureError`      | `routerFor()`: a feature's contract is not mounted in the app contract. | Mount it in the app contract.                          |
-| `ARKI_DOT_E031` | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.               | Keep contract `meta` JSON-safe.                        |
-| `ARKI_DOT_E032` | `DotManifestError`  | Manifest data is not plain JSON.                                        | Pass plain JSON only.                                  |
+| Code                         | Class               | Meaning                                                                                       | Fix                                                    |
+| ---------------------------- | ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `dot.preflight_failed`       | Failure value       | Managed preflight failed; `.error.data` contains `app`, `migrations`, `report` and `failure`. | Fix the reported lifecycle failure; exit code is 3.    |
+| `dot.lazy_closed`            | Failure value       | A lazy handle is used after its owner closed.                                                 | Obtain a handle from a live owner.                     |
+| `dot.runtime_replaced`       | Failure value       | HMR replaced this runtime.                                                                    | Use the current module.                                |
+| `dot.runtime_release_failed` | Failure value       | Previous ownership was not safely released.                                                   | Resolve disposal before starting another owner.        |
+| `ARKI_DOT_E001`              | `DotLifecycleError` | `configure` returned a Promise.                                                               | Make `configure` synchronous; do async work in `boot`. |
+| `ARKI_DOT_E002`              | `DotLifecycleError` | `configure` threw.                                                                            | Fix the plugin's config or its `configure` hook.       |
+| `ARKI_DOT_E003`              | `DotLifecycleError` | `boot` threw. Booted plugins were rolled back.                                                | Read `plugin` and `cause`; fix that `boot` hook.       |
+| `ARKI_DOT_E004`              | `DotLifecycleError` | `start` threw.                                                                                | Read `plugin` and `cause`; fix that `start` hook.      |
+| `ARKI_DOT_E005`              | `DotLifecycleError` | One or more `stop` hooks threw.                                                               | Read `failures`; each names the plugin.                |
+| `ARKI_DOT_E006`              | `DotLifecycleError` | One or more `dispose` hooks threw.                                                            | Read `failures`; each names the plugin.                |
+| `ARKI_DOT_E007`              | `DotLifecycleError` | The app was reused after `dispose()`.                                                         | Build a fresh app instance.                            |
+| `ARKI_DOT_E008`              | `DotLifecycleError` | The app was reused after a failed lifecycle.                                                  | Build a fresh app instance.                            |
+| `ARKI_DOT_E011`              | `DotLifecycleError` | A plugin was registered twice.                                                                | Remove the second `.use()`, or `rename` it.            |
+| `ARKI_DOT_E012`              | `DotLifecycleError` | A need no plugin provides (erased or JS graphs).                                              | Mount the provider before its consumer.                |
+| `ARKI_DOT_E013`              | `DotLifecycleError` | A wire key is provided twice.                                                                 | `rename` one provider.                                 |
+| `ARKI_DOT_E014`              | `DotLifecycleError` | A key uses the reserved `$` prefix.                                                           | Rename the key.                                        |
+| `ARKI_DOT_E015`              | `DotLifecycleError` | A hook ran past `hookTimeoutMs`.                                                              | Pass `$signal` to the hook's I/O, or raise the budget. |
+| `ARKI_DOT_E016`              | `DotLifecycleError` | Two actions in one binding share an id.                                                       | Give each action its own id.                           |
+| `ARKI_DOT_E017`              | `DotLifecycleError` | Action `meta` is not plain JSON.                                                              | Keep `meta` JSON-safe.                                 |
+| `ARKI_DOT_E018`              | `DotLifecycleError` | More than one logging plugin.                                                                 | Keep one `log()`.                                      |
+| `ARKI_DOT_E019`              | `DotLifecycleError` | Needs and provides form a ring.                                                               | Move the shared piece into a third unit.               |
+| `ARKI_DOT_E020`              | `DotLifecycleError` | A provider is mounted after its consumer.                                                     | Mount the provider first.                              |
+| `ARKI_DOT_E021`              | `DotLifecycleError` | `$describeAction` named an action the plugin may not amend.                                   | Describe only your own actions.                        |
+| `ARKI_DOT_E022`              | `FeatureError`      | Two routers use the same key.                                                                 | Rename one key.                                        |
+| `ARKI_DOT_E023`              | `FeatureError`      | Two repos use the same key.                                                                   | Rename one key.                                        |
+| `ARKI_DOT_E024`              | `FeatureError`      | Two slices use the same key.                                                                  | Rename one key.                                        |
+| `ARKI_DOT_E025`              | `FeatureError`      | A feature has no slices.                                                                      | Add at least one slice.                                |
+| `ARKI_DOT_E026`              | `FeatureError`      | A handle is missing from the services bag.                                                    | Mount the provider; check the gateway's needs.         |
+| `ARKI_DOT_E027`              | `FeatureError`      | A feature key collides with another slot or a reserved name.                                  | Rename the alias or key.                               |
+| `ARKI_DOT_E028`              | `FeatureError`      | `override()` named a key no infra plugin provides.                                            | Override a key the feature's infra provides.           |
+| `ARKI_DOT_E029`              | `FeatureError`      | `routerFor()`: an app-contract key has zero or several owners.                                | Give each key exactly one feature.                     |
+| `ARKI_DOT_E030`              | `FeatureError`      | `routerFor()`: a feature's contract is not mounted in the app contract.                       | Mount it in the app contract.                          |
+| `ARKI_DOT_E031`              | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.                                     | Keep contract `meta` JSON-safe.                        |
+| `ARKI_DOT_E032`              | `DotManifestError`  | Manifest data is not plain JSON.                                                              | Pass plain JSON only.                                  |
 
 The `dot` command returns `dot.*` failure codes (`dot.app_not_found`, `dot.doctor_failed`, ...) in the `arki.cli/1` envelope; see the [agent guide](./docs/agent-guide.md#errors) and [The `dot` command](./docs/cli.md). Exit codes: `0` ok, `1` bug, `2` usage, `3` a returned failure.
 
@@ -217,6 +218,7 @@ is measured against. Then pick the page for your task. The full index is
 | [Observability](./docs/observability.md)               | export traces and metrics with OpenTelemetry.                       |
 | [Adapter authoring](./docs/adapter-authoring.md)       | expose your package as a `./dot` plugin.                            |
 | [Deploy an app](./docs/recipes/deploy.md)              | ship a generated app in a container.                                |
+| [Upgrade typed phases](./docs/upgrade-phases.md)       | handle inferred phase failures and supervised usecases.             |
 | [Upgrade Dot](./docs/recipes/upgrade.md)               | move to a new version and check the app still boots.                |
 | [Agent guide](./docs/agent-guide.md)                   | let a coding agent inspect and change an app.                       |
 

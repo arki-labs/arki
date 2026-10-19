@@ -46,7 +46,7 @@ describe('auth Dot plugin', () => {
         return { url: 'http://localhost:3000', secret: SECRET, production: false };
       },
     });
-    const app = defineApp('notes').use(providers).use(authn).configure();
+    const app = orThrow(defineApp('notes').use(providers).use(authn).configure());
 
     expect(new Set(Object.keys(authn.needs))).toEqual(new Set(['db', 'mail']));
     expect(app.manifest.services).toContainEqual({ name: 'auth', plugin: 'auth', kind: 'auth' });

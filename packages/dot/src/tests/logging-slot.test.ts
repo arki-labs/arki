@@ -1,17 +1,17 @@
 /**
  * The logging slot (`@arki/log` redesign RFC §9): one plugin may fill it; the
- * kernel switches logging on before its first lifecycle record and off after
- * its last, so nothing the app logs about its own life is lost.
+ * kernel activates logging after pure configure and closes it after the last
+ * boot or teardown record.
  */
 
-import { orThrow, UnexpectedDefect } from '@arki/failure';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { LogRecord, Sink } from '@arki/log';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { configure } from '@arki/log';
 
 import { defineApp } from '../define-app.js';
-import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
+import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { plugin } from '../plugin-contract.js';
 
 /** A sink that records what it got, and how many records it had when it was closed. */
@@ -32,28 +32,37 @@ function recordingSink(): Sink & { readonly records: LogRecord[]; closedAt: numb
 function loggingPlugin(sink: Sink, name = 'logging') {
   return plugin({
     name,
-    logging: () => configure({ channels: { mem: sink }, default: { level: 'trace', channels: ['mem'] } }),
+    logging: () => {
+      const handle = configure({ channels: { mem: sink }, default: { level: 'trace', channels: ['mem'] } });
+      return {
+        async close() {
+          await handle.close();
+        },
+      };
+    },
   });
 }
 
 describe('logging slot', () => {
   it('captures the first and the last lifecycle record, then closes logging', async () => {
     const sink = recordingSink();
-    const app = orThrow(await defineApp('slot-app')
-      .use(loggingPlugin(sink))
-      .use(
-        plugin({
-          name: 'db',
-          boot: () => {
-            /* side effects only */
-          },
-        }),
-      )
-      .boot());
+    const app = orThrow(
+      await defineApp('slot-app')
+        .use(loggingPlugin(sink))
+        .use(
+          plugin({
+            name: 'db',
+            boot: () => {
+              /* side effects only */
+            },
+          }),
+        )
+        .boot(),
+    );
     orThrow(await app.dispose());
 
     const lifecycle = sink.records.filter(record => record.category === 'arki:dot:lifecycle');
-    expect(lifecycle[0]?.template).toBe('configure: starting');
+    expect(lifecycle[0]?.template).toBe('boot: starting');
     expect(lifecycle.at(-1)?.template).toBe('dispose: complete');
     expect(lifecycle[0]?.fields['dot.app.name']).toBe('slot-app');
     // Closed after the last record, not before.
@@ -88,9 +97,113 @@ describe('logging slot', () => {
       .use(loggingPlugin(second, 'log-b'))
       .boot();
 
-    await expect(attempt).rejects.toBeInstanceOf(DotLifecycleError);
-    await expect(attempt).rejects.toMatchObject({ code: DotLifecycleErrorCode.DuplicateLogging });
+    await expect(attempt).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: DotLifecycleErrorCode.DuplicateLogging },
+    });
     expect(first.records).toHaveLength(0);
     expect(second.records).toHaveLength(0);
+  });
+});
+
+describe('owned logging lifetime', () => {
+  it('keeps configure free of logging activation and opens the slot once at boot', async () => {
+    let activations = 0;
+    let closes = 0;
+    const configured = orThrow(
+      defineApp('pure-configure')
+        .use(
+          plugin({
+            name: 'logger',
+            logging: () => {
+              activations += 1;
+              return {
+                async close() {
+                  closes += 1;
+                  await Promise.resolve();
+                },
+              };
+            },
+          }),
+        )
+        .configure(),
+    );
+    expect(activations).toBe(0);
+    const app = orThrow(await configured.boot());
+    expect(activations).toBe(1);
+    orThrow(await app.dispose());
+    expect(closes).toBe(1);
+  });
+
+  it('does not acquire a logging lifetime if configure fails', async () => {
+    const ConfigureFailed = defineFailure('test.logging.configure_failed');
+    const failure = ConfigureFailed();
+    let activations = 0;
+    const outcome = await defineApp('failed-configure')
+      .use(
+        plugin({
+          name: 'logger',
+          logging: () => {
+            activations += 1;
+            return {
+              async close() {
+                await Promise.resolve();
+              },
+            };
+          },
+        }),
+      )
+      .use(plugin({ name: 'failed', configure: () => failure }))
+      .boot();
+    expect(outcome).toBe(failure);
+    expect(activations).toBe(0);
+  });
+
+  it('returns a logging close defect with owner metadata even if its fallback reporter throws', async () => {
+    const cause = new Error('log close failed');
+    const reporter = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error('reporter broke');
+    });
+    try {
+      const app = orThrow(
+        await defineApp('logging-close')
+          .use(plugin({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
+          .boot(),
+      );
+      const result = await app.dispose();
+      expect(result).toMatchObject({
+        code: UnexpectedDefect.code,
+        cause: { code: DotLifecycleErrorCode.DisposeFailed, phase: 'dispose', plugin: 'logger', cause },
+      });
+      expect(reporter).toHaveBeenCalledOnce();
+      expect(await app.dispose()).toBe(result);
+    } finally {
+      reporter.mockRestore();
+    }
+  });
+
+  it('keeps primary identity inside an aggregate when logging cleanup also fails', async () => {
+    const BootFailed = defineFailure('test.logging.boot_failed');
+    const primary = BootFailed();
+    const cause = new Error('log close failed');
+    const reporter = vi.spyOn(console, 'error').mockImplementation(() => {
+      /* Expected fallback report. */
+    });
+    try {
+      const outcome = await defineApp('logging-rollback')
+        .use(plugin({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
+        .use(plugin({ name: 'failed', boot: () => primary }))
+        .boot();
+      expect(outcome).toMatchObject({
+        code: 'async.scope_failed',
+        cause: {
+          primary: [primary],
+          cleanup: [{ code: UnexpectedDefect.code, cause: { phase: 'dispose', plugin: 'logger', cause } }],
+        },
+      });
+      expect(reporter).toHaveBeenCalledOnce();
+    } finally {
+      reporter.mockRestore();
+    }
   });
 });

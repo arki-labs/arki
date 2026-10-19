@@ -23,6 +23,7 @@ import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
+import type { PluginPhases } from '../plugin-contract.js';
 import { AppImportFailed, AppInvalidExport, AppNotFound } from './failures.js';
 
 const debugDiscover = getLogger('arki:dot:cli:discover');
@@ -41,9 +42,9 @@ const DEFAULT_APP_PATHS: readonly string[] = ['dot.config', 'src/app', 'app'];
 const SUPPORTED_EXTENSIONS: readonly string[] = ['.ts', '.mts', '.mjs', '.js'];
 
 export type DiscoveredApp =
-  | DotApp<Record<string, unknown>, Failure, Failure>
-  | DotAppBuilder<Record<string, unknown>, Failure, Failure>
-  | DotAppConfigured<Record<string, unknown>, Failure, Failure>;
+  | DotApp<Record<string, unknown>, Failure, Failure, PluginPhases>
+  | DotAppBuilder<Record<string, unknown>, Failure, Failure, PluginPhases>
+  | DotAppConfigured<Record<string, unknown>, Failure, Failure, PluginPhases>;
 
 export type DiscoveryOptions = {
   /** Explicit app file path. When set, takes precedence over the search list. */
@@ -112,13 +113,17 @@ export async function resolveAppFile(options: DiscoveryOptions = {}): Promise<st
  * `DotAppBuilder` / `DotAppConfigured`. We avoid `instanceof` because the
  * surface types are structural; instead we duck-type the key methods.
  */
-function isDotAppBuilder(value: unknown): value is DotAppBuilder<Record<string, unknown>, Failure, Failure> {
+function isDotAppBuilder(
+  value: unknown,
+): value is DotAppBuilder<Record<string, unknown>, Failure, Failure, PluginPhases> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return typeof v.use === 'function' && typeof v.configure === 'function' && typeof v.boot === 'function';
 }
 
-function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<string, unknown>, Failure, Failure> {
+function isDotAppConfigured(
+  value: unknown,
+): value is DotAppConfigured<Record<string, unknown>, Failure, Failure, PluginPhases> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -130,7 +135,7 @@ function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<st
   );
 }
 
-function isDotApp(value: unknown): value is DotApp<Record<string, unknown>, Failure, Failure> {
+function isDotApp(value: unknown): value is DotApp<Record<string, unknown>, Failure, Failure, PluginPhases> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -184,6 +189,7 @@ function findAppExport(
  * module is imported, so its own code is the useful one to show.
  */
 function codedCause(err: unknown): { readonly code: string; readonly remediation: string | null } | undefined {
+  if (isFailure(err)) return { code: err.code, remediation: err.remediation ?? null };
   if (!(err instanceof Error) || !('code' in err) || typeof err.code !== 'string') return undefined;
   const remediation = 'remediation' in err && typeof err.remediation === 'string' ? err.remediation : null;
   return { code: err.code, remediation };
@@ -255,6 +261,7 @@ async function loadAppExport(
     }
   }
 
+  if (isFailure(candidate)) return candidate;
   if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
     debugDiscover.debug('loaded app from {filePath}', { filePath });
     return { app: candidate, exportName: exported.name };

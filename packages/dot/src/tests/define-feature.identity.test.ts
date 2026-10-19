@@ -12,8 +12,9 @@
  * Both are compile errors now, at the step that can see them. Their
  * compiling twins boot, so the runtime and the types agree either way.
  */
-import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { defineFeature, entrypointOnly } from '../define-feature.js';
@@ -43,7 +44,10 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
   it('the global handle stays a global need: the app must provide it', async () => {
     // @ts-expect-error -- `db` of "parent.child" is `database`'s handle; the parent's private `db` is another service
     const hole = defineApp('hole').features([parent]);
-    await expect(hole.boot()).rejects.toMatchObject({ code: DotLifecycleErrorCode.UnsatisfiedNeed });
+    await expect(hole.boot()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: DotLifecycleErrorCode.UnsatisfiedNeed },
+    });
 
     const app = orThrow(await defineApp('ok').infra(database).features([parent]).start());
     await expect(app.services['parent.child.reader'].run()).resolves.toEqual(['global:x']);
@@ -58,8 +62,9 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
 
   it('the raw unit list says the same thing', async () => {
     // @ts-expect-error -- the raw list needs `db` before anything provides it; the type guard on testApp's argument says so too
-    await expect(testApp(parent.plugins()).boot()).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.UnsatisfiedNeed,
+    await expect(testApp(parent.plugins()).boot()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: DotLifecycleErrorCode.UnsatisfiedNeed },
     });
     const app = orThrow(await testApp(owner.plugins()).boot());
     orThrow(await app.dispose());

@@ -16,7 +16,7 @@ import type { DepsOf } from '@arki/dot/feature';
 import type { Provided } from '@arki/dot/plugin';
 import { defineApp, rename } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Repos, TxRepos } from './dot.js';
 import { db, DB_PLUGIN_ERROR_CODES, reader, repos, txRepos } from './dot.js';
@@ -67,8 +67,9 @@ type Deps = DepsOf<typeof base>;
 const core = base.usecases({
   write:
     ({ repos }: Deps) =>
-    (id: string, body: string) =>
-      repos.notes.add(id, body),
+    async (id: string, body: string): Promise<undefined> => {
+      await repos.notes.add(id, body);
+    },
   read:
     ({ repos }: Deps) =>
     (id: string) =>
@@ -90,7 +91,7 @@ async function bootNotes(f: typeof feature = feature) {
 
 describe('repos(): boot and wiring', () => {
   it('is private to the feature (`notes.repos`) and dot explain draws feature → notes/repos → db', () => {
-    const configured = defineApp('wiring').infra(database).features([feature]).configure();
+    const configured = orThrow(defineApp('wiring').infra(database).features([feature]).configure());
     const byName = new Map(configured.manifest.plugins.map(p => [p.name, p]));
     expect(byName.get('notes/repos')?.provides).toEqual(['notes.repos']);
     expect(byName.get('notes/repos')?.dependencies).toEqual(['db']);
@@ -168,8 +169,9 @@ describe('txRepos(): repositories only inside a transaction', () => {
     .usecases({
       write:
         ({ repos }: ScopedDeps) =>
-        (tx: Transaction, id: string, body: string) =>
-          repos.withTx(tx).notes.add(id, body),
+        async (tx: Transaction, id: string, body: string): Promise<undefined> => {
+          await repos.withTx(tx).notes.add(id, body);
+        },
       count:
         ({ repos }: ScopedDeps) =>
         (tx: Transaction) =>
@@ -182,7 +184,7 @@ describe('txRepos(): repositories only inside a transaction', () => {
     scopedBase.usecases({
       bad:
         ({ repos }: ScopedDeps) =>
-        () =>
+        (): undefined =>
           // @ts-expect-error no database-bound set: `repos.notes` does not exist
           repos.notes,
     });
@@ -205,12 +207,12 @@ describe('txRepos(): repositories only inside a transaction', () => {
       expect(Object.keys(set)).toEqual(['withTx']);
       await expect(
         app.services.db.transaction(async tx => {
-          await usecases.write(tx, 'l1', 'inside');
-          expect(await usecases.count(tx)).toBe(1);
+          orThrow(await usecases.write(tx, 'l1', 'inside'));
+          expect(orThrow(await usecases.count(tx))).toBe(1);
           throw new Error('roll back');
         }),
       ).rejects.toThrow('roll back');
-      expect(await app.services.db.transaction(tx => usecases.count(tx))).toBe(0);
+      expect(await app.services.db.transaction(async tx => orThrow(await usecases.count(tx)))).toBe(0);
     } finally {
       await orThrow(app.dispose());
     }
@@ -339,7 +341,9 @@ describe('repos(): test fakes that type-check', () => {
     try {
       expect(await app.services['notes.usecases'].read('n')).toBe('fake n');
       expect(await app.services['notes.usecases'].count()).toBe(42);
-      await expect(app.services['notes.usecases'].write('n', 'b')).rejects.toThrow('not used by this test');
+      const failure = await app.services['notes.usecases'].write('n', 'b');
+      expect(UnexpectedDefect.is(failure)).toBe(true);
+      expect(failure).toMatchObject({ cause: new Error('not used by this test') });
     } finally {
       await orThrow(app.dispose());
       await pglite.close();

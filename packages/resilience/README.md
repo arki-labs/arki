@@ -362,6 +362,7 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 ```ts
 import { defineApp } from '@arki/dot';
+import { orThrow } from '@arki/failure';
 import { backoff, definePresets } from '@arki/resilience';
 import { resilience } from '@arki/resilience/dot';
 
@@ -371,7 +372,7 @@ const presets = definePresets({
   carrier: { retry: backoff.exponential({ base: 200, max: 5000 }).upTo(3), timeout: { timeoutMs: 10_000 } },
 });
 
-const app = await defineApp('my-app').use(resilience(presets)).boot();
+const app = orThrow(await defineApp('my-app').use(resilience(presets)).boot());
 await app.services.resilience.run('carrier', () => callCarrier());
 ```
 

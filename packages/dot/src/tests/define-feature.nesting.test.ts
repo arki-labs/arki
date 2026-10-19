@@ -8,11 +8,12 @@
  * provenance must survive every copy, remap, lazy form and flag, or a child
  * silently binds to a stranger's service. Each test names the break it pins.
  */
-import { orThrow } from '@arki/failure';
 import { oc } from '@orpc/contract';
 import { createRouterClient, implement } from '@orpc/server';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { AnyDefinedFeature, Provided, ServicesBag } from '../feature.js';
 import type { AnyPlugin } from '../plugin-contract.js';
@@ -166,11 +167,9 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
     const collector = driven(features =>
       plugin({ name: 'collector', provides: { collected: () => features.map(f => f.name) } }),
     );
-    const app = orThrow(await defineApp('adapters')
-      .infra(database, collector)
-      .features([digest])
-      .entrypoints(scheduler)
-      .start());
+    const app = orThrow(
+      await defineApp('adapters').infra(database, collector).features([digest]).entrypoints(scheduler).start(),
+    );
     expect(app.services.collected).toEqual(['digest', 'digest.compile', 'digest.compile.rank', 'digest.deliver']);
     expect(app.services.scheduled).toEqual(['send-digest', 'compile-digest']);
     seenByDriven.push(...app.services.collected);
@@ -260,10 +259,16 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
     const ran = await api.run({ userId: 'u2', items: ['z', 'y'] });
     expect(ran.status).toBe('sent');
     expect(await count()).toBe(before + 1);
-    await expect(api.run({ userId: 'bounce', items: ['x'] })).rejects.toThrow('mail to bounce failed');
+    await expect(api.run({ userId: 'bounce', items: ['x'] })).rejects.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: expect.objectContaining({ message: 'mail to bounce failed' }),
+    });
     expect(await count()).toBe(before + 1);
     // sendFresh compiles through the sibling's provided service: the sibling's write rolls back too.
-    await expect(api.deliver.sendFresh({ userId: 'bounce', items: ['x'] })).rejects.toThrow('mail to bounce failed');
+    await expect(api.deliver.sendFresh({ userId: 'bounce', items: ['x'] })).rejects.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: expect.objectContaining({ message: 'mail to bounce failed' }),
+    });
     expect(await count()).toBe(before + 1);
     orThrow(await app.dispose());
   });
@@ -312,7 +317,7 @@ describe('re-export and override by path', () => {
   it("provides() re-exports a child's service under a public key", async () => {
     const app = orThrow(await start());
     const db = app.services.db;
-    const made = await db.transaction(tx => app.services.digests.compile(tx, 'u3', ['q']));
+    const made = await db.transaction(async tx => orThrow(await app.services.digests.compile(tx, 'u3', ['q'])));
     expect(made.id.startsWith('d_u3_')).toBe(true);
     expectTypeOf<Provided<typeof digest.provides.digests>['compile']>().toEqualTypeOf<
       Provided<typeof compile.provides.compiler>['compile']
@@ -575,13 +580,17 @@ describe('lifecycle and explain', () => {
     const leaf = plugin({
       name: 'leaf',
       provides: { leaf: () => 'leaf' },
-      start: () => Promise.resolve(),
+      start: async () => {
+        /* The hook completes without a failure. */
+      },
       stop: () => void stopped.push('leaf'),
     });
     const root = plugin({
       name: 'root',
       provides: { root: () => 'root' },
-      start: () => Promise.resolve(),
+      start: async () => {
+        /* The hook completes without a failure. */
+      },
       stop: () => void stopped.push('root'),
     });
     const child = defineFeature('tree.child').infra(leaf).entrypoints();
@@ -593,7 +602,7 @@ describe('lifecycle and explain', () => {
   });
 
   it('dot explain shows the tree by name: nested units in boot order and the edges between them', () => {
-    const configured = defineApp('explain').infra(database).features([digest]).configure();
+    const configured = orThrow(defineApp('explain').infra(database).features([digest]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
     const text = explained.text();

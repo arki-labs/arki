@@ -82,6 +82,22 @@ const migrationsOf = (events: readonly DevEvent[]): string[][] =>
   events.flatMap(event => (event.kind === 'migrations' ? [event.pending] : []));
 
 describe('the preflight process', () => {
+  it('retains an app failure reported in an exit-3 error envelope', async () => {
+    const message = {
+      app: null,
+      migrations: null,
+      report: null,
+      failure: { code: 'app.configure_refused', message: 'Configure refused.', data: null },
+    };
+    const envelope = { ok: false, error: { code: 'dot.preflight_failed', data: message } };
+    const { entry } = await fakeChild(
+      `process.stdout.write(${JSON.stringify(`${JSON.stringify(envelope)}\n`)}); process.exitCode = 3;`,
+    );
+    const { result, events } = await session({ cliEntry: entry });
+    expect(await result).toMatchObject({ code: 'dot.preflight_failed', data: message });
+    expect(events).toContainEqual({ kind: 'preflight', status: 'failure', codes: ['app.configure_refused'] });
+  });
+
   it('sees an edit to the app file made between two restarts', async () => {
     const appFile = path.join(workDir, 'app.ts');
     await writeFile(appFile, versionedApp('v1'));

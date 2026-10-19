@@ -10,8 +10,9 @@
  *   fails loudly instead of silently aliasing;
  * - there is one way to publish: a value-returning `boot` does not compile.
  */
-import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Handle, Lazy, Provided } from '../plugin-contract.js';
 import { renderExplainText } from '../cli/render-explain.js';
@@ -66,14 +67,14 @@ describe('plugin handles are data before boot', () => {
   });
 
   it('a value-returning plugin boot does not compile — publish through provides', () => {
-    // @ts-expect-error -- boot must return an owned plan or void; publish through provides
     plugin({
       name: 'legacy',
+      // @ts-expect-error -- publish values through provides, never boot
       boot: () => ({ db: 1 }),
     });
-    // @ts-expect-error -- async service publication is also rejected at the authoring call
     plugin({
       name: 'legacy-async',
+      // @ts-expect-error -- async publication also belongs in provides
       boot: async () => {
         await Promise.resolve();
         return { db: 1 };
@@ -92,14 +93,15 @@ describe('the kernel checks adapters at configure time', () => {
     const digest = feature('daily-digest', { needs: { db: database.provides.db } });
     // @ts-expect-error -- driven adapters cannot follow the domain; the erased path is the kernel's job
     const builder = defineApp('late-adapter').features([digest]).use(database);
-    expect(() => builder.configure()).toThrow(
-      expect.objectContaining({
+    expect(builder.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
         code: DotLifecycleErrorCode.ProviderMountedLater,
         phase: 'configure',
         plugin: 'daily-digest',
         message: expect.stringContaining('Mount "db" with .use() before "daily-digest".'),
-      }),
-    );
+      },
+    });
     expect(opened).toEqual([]);
   });
 
@@ -118,19 +120,20 @@ describe('the kernel checks adapters at configure time', () => {
     });
     // @ts-expect-error -- audit needs entitlements, which nothing before it provides
     const builder = defineApp('ring').use(audit).features([ringed]);
-    expect(() => builder.configure()).toThrow(
-      expect.objectContaining({
+    expect(builder.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
         code: DotLifecycleErrorCode.CapabilityRing,
         message: expect.stringContaining('audit needs entitlements ← billing needs audit ← audit'),
-      }),
-    );
+      },
+    });
   });
 
   it('dot explain draws the labelled db edge for an adapter consumer without booting', async () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
     const digest = feature('daily-digest', { needs: { db: database.provides.db } });
-    const configured = defineApp('explain-db').use(database).features([digest]).configure();
+    const configured = orThrow(defineApp('explain-db').use(database).features([digest]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
     const table = explained.text();
@@ -158,7 +161,10 @@ describe('rename() moves the handle with the mounted object', () => {
     const stale = feature('stale', { needs: { db: makeDb('pg://x').provides.db } });
     // @ts-expect-error -- `db` is not provided: only `reportsDb` is mounted
     const builder = defineApp('stale').use(reportsDb).features([stale]);
-    await expect(builder.boot()).rejects.toMatchObject({ code: DotLifecycleErrorCode.UnsatisfiedNeed });
+    await expect(builder.boot()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: DotLifecycleErrorCode.UnsatisfiedNeed },
+    });
   });
 });
 

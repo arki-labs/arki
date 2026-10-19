@@ -15,6 +15,7 @@ import { oc } from '@orpc/contract';
 import { ORPCError } from '@orpc/server';
 
 import type { MountedFeature } from '@arki/dot/feature';
+import { UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleNameOf, ScheduleOutcome, ScheduleValueOf } from './dot.js';
 
@@ -142,13 +143,19 @@ export type OutcomePolicy = {
   readonly unavailable: (name: string) => Valueless;
 };
 
+/** Supervision defects use the failure policy; domain refusals keep their explicit responder. */
+type CronValue<F extends readonly MountedFeature[], K extends string> = Exclude<
+  ScheduleValueOf<F, K>,
+  ReturnType<typeof UnexpectedDefect>
+>;
+
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** Crons whose schedule value is not exactly the body schema: they MUST say how the value maps. */
 type NeedsRespond<B extends CronSpecs, F extends readonly MountedFeature[]> = {
-  [K in keyof B & string]: Exact<ScheduleValueOf<F, K>, CronBody<B[K]>> extends true ? never : K;
+  [K in keyof B & string]: Exact<CronValue<F, K>, CronBody<B[K]>> extends true ? never : K;
 }[keyof B & string];
 type Respond<B extends CronSpecs, F extends readonly MountedFeature[], K extends keyof B & string> = (
-  value: ScheduleValueOf<F, K>,
+  value: CronValue<F, K>,
 ) => Reply<CronBody<B[K]>>;
 
 /**
@@ -222,6 +229,7 @@ function reply(
 ): Reply<unknown> {
   switch (outcome.status) {
     case 'ran': {
+      if (UnexpectedDefect.is(outcome.value)) return policy.failed(name, outcome.value);
       return respond ? respond(outcome.value) : ok(outcome.value);
     }
     case 'skipped-overlap':

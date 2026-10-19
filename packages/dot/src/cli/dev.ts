@@ -48,6 +48,7 @@ import {
   DevPortInUse,
   DevPreflightFailed,
   DoctorFailed,
+  PreflightFailed,
 } from './failures.js';
 import { preflightMessageSchema } from './preflight-child.js';
 import { renderDoctorText } from './render-doctor.js';
@@ -171,7 +172,13 @@ const PREFLIGHT_FAILURES = [
   DoctorFailed,
 ] as const;
 
-const envelopeSchema = z.looseObject({ ok: z.literal(true), data: preflightMessageSchema });
+const envelopeSchema = z.union([
+  z.looseObject({ ok: z.literal(true), data: preflightMessageSchema }),
+  z.looseObject({
+    ok: z.literal(false),
+    error: z.looseObject({ code: z.literal(PreflightFailed.code), data: preflightMessageSchema }),
+  }),
+]);
 
 /** The report line: the last output line that is a valid `_preflight` envelope. */
 function findReport(lines: readonly string[]): z.infer<typeof preflightMessageSchema> | null {
@@ -180,7 +187,7 @@ function findReport(lines: readonly string[]): z.infer<typeof preflightMessageSc
     if (!line.startsWith('{')) continue;
     try {
       const parsed = envelopeSchema.safeParse(JSON.parse(line));
-      if (parsed.success) return parsed.data.data;
+      if (parsed.success) return parsed.data.ok ? parsed.data.data : parsed.data.error.data;
     } catch {
       // Not JSON: app output.
     }
@@ -213,14 +220,15 @@ function fromMessage(message: z.infer<typeof preflightMessageSchema>, lines: rea
       ValidatorDefect.is(revived) ||
       UnexpectedDefect.is(revived)
     ) {
-      return preflightFailed(`unexpected failure ${message.failure.code}`, null, lines);
+      failure = PreflightFailed(message);
+    } else {
+      failure = revived;
     }
-    failure = revived;
   }
   const migrations: MigrationsEvent | null =
     message.migrations === null ? null : { kind: 'migrations', pending: message.migrations };
   if (failure !== null) {
-    const codes = report === null ? [failure.code] : issueCodes(report);
+    const codes = report === null ? [message.failure?.code ?? failure.code] : issueCodes(report);
     return { app: message.app, migrations, event: { kind: 'preflight', status: 'failure', codes }, report, failure };
   }
   const status = report === null || report.status === 'success' ? 'ok' : report.status;
@@ -305,8 +313,8 @@ async function preflightProcess(options: {
         lines,
       );
     }
-    // `dot _preflight` always exits 0 once it has reported: any other code is a crash after the report.
-    if (outcome.code !== 0) {
+    // Exit 3 accompanies a failed report; other nonzero exits still indicate a child crash.
+    if (outcome.code !== 0 && !(outcome.code === 3 && message.failure !== null)) {
       return preflightFailed(`it exited with code ${String(outcome.code)} after its report`, outcome.code, lines);
     }
     try {

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -53,7 +53,7 @@ function recording() {
 describe('mail()', () => {
   it('the function form is not called to build the manifest, so explain needs no secrets', () => {
     const options = vi.fn((): MailerOptions => ({ transport: logTransport(), from: 'hi@app.dev' }));
-    const configured = defineApp('mail-manifest').use(mail(options)).configure();
+    const configured = orThrow(defineApp('mail-manifest').use(mail(options)).configure());
     expect(configured.manifest.services).toEqual([{ name: 'mail', plugin: 'mail', kind: 'email' }]);
     expect(options).not.toHaveBeenCalled();
   });
@@ -75,7 +75,9 @@ describe('mail()', () => {
 describe('mailOutboxPlugin() and mailJobs()', () => {
   it('without the mail service it does not compile, and at run time it fails at boot', async () => {
     // @ts-expect-error -- boot() asks for the missing `mail` service
-    await expect(defineApp('mail-outbox-alone').use(mailOutboxPlugin({ tables })).boot()).rejects.toThrow(/mail/);
+    const failure = await defineApp('mail-outbox-alone').use(mailOutboxPlugin({ tables })).boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: { message: expect.stringMatching(/mail/) } });
   });
 
   it('a mail queued through the service is sent by the journal worker runner', async () => {

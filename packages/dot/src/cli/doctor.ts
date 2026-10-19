@@ -10,6 +10,7 @@ import { getLogger } from '@arki/log';
 
 import type { DotApp } from '../define-app.js';
 import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
+import type { PluginPhases } from '../plugin-contract.js';
 import type { DiscoveredApp } from './discover.js';
 import type { DoctorReport } from './failures.js';
 import type { GraphData } from './render-graph.js';
@@ -31,7 +32,7 @@ export type DoctorOptions = {
    * `dot dev` reads what the preflight boot published here (the
    * `migrations` service of `dbMigrations`).
    */
-  readonly onBooted?: ((app: DotApp<Record<string, unknown>, Failure, Failure>) => void) | undefined;
+  readonly onBooted?: ((app: DotApp<Record<string, unknown>, Failure, Failure, PluginPhases>) => void) | undefined;
 };
 
 /** Fold the observability probe's issue, if any, into the top-level issues. Never mutates the input. */
@@ -72,6 +73,7 @@ export async function runDoctor(
   } catch (error) {
     return lifecycleFailed(error, 'configure');
   }
+  if (isFailure(configured)) return configured;
 
   let booted;
   try {

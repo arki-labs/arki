@@ -5,7 +5,6 @@
  * throws. Rows are copied in and out, so nothing outside a transaction
  * holds a committed row.
  */
-import type { EmptyShape, Plugin } from '../../../plugin-contract.js';
 import { plugin } from '../../../plugin-contract.js';
 
 export type Digest = { id: string; userId: string; status: 'compiled' | 'sent'; items: string[] };
@@ -43,16 +42,9 @@ export const createDb = (): Db => {
 export const database = plugin({ name: 'database', provides: { db: createDb } });
 
 /** A stand-in for `@arki/journal`'s `journalProjections(...)`: a need-free infra unit the adapter finds by `kind`. */
-export type ProjectionsUnit = Plugin<EmptyShape, EmptyShape> & {
-  readonly kind: 'journal-projections';
-  readonly handlers: {
-    readonly projections: readonly { readonly name: string }[];
-    readonly effects: readonly [];
-    readonly taps: readonly [];
-  };
-};
-export const projectionsUnit = (projection: string): ProjectionsUnit => ({
-  ...plugin({ name: 'projections', provides: {} }),
-  kind: 'journal-projections',
-  handlers: { projections: [{ name: projection }], effects: [], taps: [] },
-});
+export const projectionsUnit = (projection: string) =>
+  Object.assign(plugin({ name: 'projections', provides: {} }), {
+    kind: 'journal-projections' as const,
+    handlers: { projections: [{ name: projection }], effects: [] as const, taps: [] as const },
+  });
+export type ProjectionsUnit = ReturnType<typeof projectionsUnit>;

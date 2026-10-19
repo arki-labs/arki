@@ -138,10 +138,10 @@ The same three steps under their final names (RFC
 order, checked like `.useAll()`:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { defineFeature, driver, sliceOf } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
+import { isFailure } from '@arki/failure';
 
 // Stand-ins: in a real app these come from @arki/log, @arki/db and @arki/http.
 const logger = plugin({ name: 'log', provides: { log: () => ({ info: (_message: string) => {} }) } });
@@ -174,11 +174,11 @@ await shop.dispose();
 A feature is a chain whose steps are its folders:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineApp, plugin } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
+import { isFailure } from '@arki/failure';
 
 // Stand-ins for the units the feature uses.
 const billing = plugin({
@@ -210,6 +210,7 @@ export const dailyDigest = dailyDigestLogic
 const shop = await defineApp('shop').infra(billing).features([dailyDigest]).boot();
 if (isFailure(shop)) throw new Error(shop.code);
 const items = await shop.services.digests.previewFor('u1');
+if (isFailure(items)) throw new Error(items.code);
 if (items.length !== 2) throw new Error(`the plan allows two items, got ${items.length}`);
 await shop.dispose();
 ```
@@ -263,9 +264,9 @@ top-level, and owns its own infra units.
 order — a unit in the wrong step does not compile:
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { driver, feature } from '@arki/dot/feature';
+import { isFailure } from '@arki/failure';
 
 // Stand-ins for adapters from @arki/db, @arki/queue and @arki/http.
 const db = plugin({ name: 'db', provides: { db: () => ({ query: async (_sql: string) => [] }) } });

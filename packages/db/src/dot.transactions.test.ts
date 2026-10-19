@@ -16,7 +16,7 @@ import type { Provided } from '@arki/dot/plugin';
 import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { plugin, rename } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { OpenTransaction, TxOf } from './dot.js';
 import { db, repos, transactions } from './dot.js';
@@ -76,7 +76,7 @@ async function bootLedger() {
 
 describe('transactions(): a usecase opens a transaction and nothing else', () => {
   it('needs db unbound and is private to the feature: dot explain draws ledger → ledger/transactions → db', () => {
-    const configured = defineApp('wiring').infra(database).features([ledger]).configure();
+    const configured = orThrow(defineApp('wiring').infra(database).features([ledger]).configure());
     const byName = new Map(configured.manifest.plugins.map(p => [p.name, p]));
     expect(byName.get('ledger/transactions')?.provides).toEqual(['ledger.transaction']);
     expect(byName.get('ledger/transactions')?.dependencies).toEqual(['db']);
@@ -98,7 +98,9 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
     const app = await bootLedger();
     try {
       const usecases = app.services['ledger.usecases'];
-      await expect(usecases.addPair('a', 'b', true)).rejects.toThrow('after the first write');
+      const failure = await usecases.addPair('a', 'b', true);
+      expect(UnexpectedDefect.is(failure)).toBe(true);
+      expect(failure).toMatchObject({ cause: new Error('after the first write') });
       expect(await usecases.count()).toBe(0);
     } finally {
       await orThrow(app.dispose());

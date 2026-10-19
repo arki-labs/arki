@@ -156,8 +156,8 @@ actionable.
 ## Programmatic access
 
 ```ts run expect
-import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const database = plugin({ name: 'database', provides: { db: () => ({ ready: true }) } });
 const billing = plugin({ name: 'billing', needs: { db: database.provides.db } });
@@ -235,9 +235,10 @@ export function pluginNames(envelope: Envelope<DotAppManifest>): readonly string
 }
 ```
 
-`.data` is the `DotAppManifest` itself. When `configure` throws, the envelope
-is `ok: false` with `.error.code == "dot.app_lifecycle_failed"` and exit 3 —
-it still parses, agents still see the cause.
+`.data` is the `DotAppManifest` itself. When `configure` returns a failure, the envelope
+is `ok: false` with the canonical failure code and exit 3. Private causes do
+not serialize: an `UnexpectedDefect` has null public data. A compatibility
+callback that throws can still produce `dot.app_lifecycle_failed`.
 
 ## CLI: `dot doctor`
 
@@ -251,7 +252,7 @@ npx dot doctor
 npx dot doctor --json | jq '.data.issues'
 ```
 
-If `boot()` throws, `dot doctor` **still emits a diagnostics envelope**
+If a managed boot or disposal phase fails, `dot doctor` **still emits a diagnostics envelope**
 populated with the per-plugin issues from the configured seam. Boot failure
 should be observable, not opaque.
 

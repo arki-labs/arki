@@ -26,9 +26,9 @@ Dot logs through `@arki/log`. The kernel's own records go to the
 does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
+import { isFailure } from '@arki/failure';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 const app = await defineApp('checkout')
@@ -54,8 +54,8 @@ if (isFailure(app)) throw new Error(app.code);
 `log()` fills Dot's **logging slot**. Any plugin can fill it with
 `plugin({ name, logging: ({ appName }) => handle })`, where `handle` has
 `close(): Promise<void>`. The kernel calls the factory before its first
-lifecycle record (`configure: starting`) and closes the handle after its
-last one (`dispose: complete`). On a failed `configure`, `boot` or `start`,
+boot lifecycle record (`boot: starting`) and closes the handle after its
+last one (`dispose: complete`). Logging is inactive during synchronous, I/O-free `configure`. On a failed `boot` or `start`,
 the failure is written first and logging closes last. An app has at most one
 logging plugin: two is `ARKI_DOT_E018`.
 
@@ -68,8 +68,8 @@ Two kernel helpers close the gap between "boots on my machine" and "runs
 under a process manager":
 
 ```ts
-import { isFailure } from '@arki/failure';
 import { defineApp, hookSignals, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const worker = plugin({
   name: 'worker',

@@ -73,7 +73,9 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
   through `dbMigrations`. It prints the migrations that boot applied, then
   disposes the app. Every restart runs a new preflight process, so it checks
   the code and env as they are now. A preflight that crashes, hangs or prints
-  no report fails (`dot.dev_preflight_failed`). Only then does it start
+  no report fails (`dot.dev_preflight_failed`). A reported lifecycle failure uses
+  `dot.preflight_failed` (exit 3): failed JSON reports live under
+  `.error.data.{app,migrations,report,failure}`; successful `.data` paths stay unchanged. Only then does it start
   the runner. A failed preflight prints the doctor text and starts nothing.
 - **Database.** `--db auto` (the default) means Postgres when `DB_URL` /
   `DATABASE_URL` is set (process env or `.env`, `.env.local`, `.env.development`,

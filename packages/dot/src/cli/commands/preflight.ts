@@ -1,8 +1,9 @@
-/** `dot _preflight`: one preflight boot in a fresh process, for `dot dev`. Always succeeds; the report says how the boot went. */
+/** `dot _preflight`: one preflight boot in a fresh process; failed reports exit nonzero. */
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 
+import { PreflightFailed } from '../failures.js';
 import { runPreflightChild } from '../preflight-child.js';
 
 export default defineCommand({
@@ -13,5 +14,8 @@ export default defineCommand({
   }),
   effects: 'write',
   hidden: true,
-  run: ({ input }) => runPreflightChild(input),
+  async run({ input }) {
+    const report = await runPreflightChild(input);
+    return report.failure === null ? report : PreflightFailed(report);
+  },
 });

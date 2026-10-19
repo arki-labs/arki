@@ -20,7 +20,7 @@ import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { initJournal } from './journal.js';
 import { journalTables } from './pg.js';
@@ -111,7 +111,10 @@ describe('repos() in a journal command', () => {
   it('a command that throws takes its writes with it; the repositories see nothing after', async () => {
     const app = await orThrow(defineApp('ledger').infra(database).features([accountsFeature]).start());
     try {
-      await expect(app.services['accounts.usecases'].open('acc_2', 5, true)).rejects.toThrow('rolled back');
+      await expect(app.services['accounts.usecases'].open('acc_2', 5, true)).resolves.toMatchObject({
+        code: UnexpectedDefect.code,
+        cause: new Error('rolled back after the read'),
+      });
       expect(await app.services['accounts.usecases'].balance('acc_2')).toBeNull();
     } finally {
       await orThrow(app.dispose());

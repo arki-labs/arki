@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
+
 import { runExplain } from '../cli/index.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
@@ -38,8 +40,9 @@ describe('configure-time capability checks', () => {
     // @ts-expect-error -- the tuple guard rejects it too: scorer is provided after its consumer
     const ring = defineApp('ring').use(db).features([summarization, scoring]);
 
-    expect(() => ring.configure()).toThrow(
-      expect.objectContaining({
+    expect(ring.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
         code: DotLifecycleErrorCode.CapabilityRing,
         phase: 'configure',
         plugin: 'ai-summarization',
@@ -48,8 +51,8 @@ describe('configure-time capability checks', () => {
           '  ai-summarization needs scorer ← relevance-scoring needs intelligence ← ai-summarization',
           'Break the ring: move the shared piece into a third feature both need, or let one side read through db.query instead of a handle.',
         ].join('\n'),
-      }),
-    );
+      },
+    });
   });
 
   it('a provider mounted after its consumer fails configure() with E020 naming both positions and the fix', () => {
@@ -58,8 +61,9 @@ describe('configure-time capability checks', () => {
     // @ts-expect-error -- the tuple guard rejects the same order at compile time
     const misordered = defineApp('order').use(db).features([digest, billing]);
 
-    expect(() => misordered.configure()).toThrow(
-      expect.objectContaining({
+    expect(misordered.configure()).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: {
         code: DotLifecycleErrorCode.ProviderMountedLater,
         phase: 'configure',
         plugin: 'daily-digest',
@@ -67,8 +71,8 @@ describe('configure-time capability checks', () => {
           'Feature "daily-digest" needs "entitlements", which "billing" provides — but "billing" is mounted after it (position 3; "daily-digest" is 2).',
           'Move "billing" before "daily-digest" in .features([...]).',
         ].join('\n'),
-      }),
-    );
+      },
+    });
   });
 });
 
@@ -88,17 +92,17 @@ describe('dot explain', () => {
     const builder = defineApp('explain-edges').use(db).features([billing, digest]);
 
     const explained = textUi();
-    renderExplainText(builder.configure().manifest, explained.ui);
+    renderExplainText(orThrow(builder.configure()).manifest, explained.ui);
     const table = explained.text();
-    const manifest = await runExplain(builder.configure());
-    const graphed = await runExplain(builder.configure(), { graph: true });
+    const manifest = await runExplain(orThrow(builder.configure()));
+    const graphed = await runExplain(orThrow(builder.configure()), { graph: true });
     const graph = 'source' in graphed ? graphed.source : '';
 
     expect(built).toBe(0);
     expect(table).toContain('daily-digest --[entitlements]--> billing');
     expect(graph).toContain('p2 -->|entitlements| p1');
     expect(manifest).toMatchObject({ manifestVersion: 2 });
-    const configured = builder.configure();
+    const configured = orThrow(builder.configure());
     expect(configured.manifest.plugins.find(p => p.name === 'billing')?.provides).toEqual([
       'entitlements',
       'feature.billing',

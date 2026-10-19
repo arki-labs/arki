@@ -6,8 +6,9 @@
  * edges are observed from actual service wiring at boot time.
  */
 
-import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
@@ -94,7 +95,7 @@ describe('DOT manifest', () => {
       ],
     });
 
-    const configured = defineApp('test').use(health).configure();
+    const configured = orThrow(defineApp('test').use(health).configure());
     expect(configured.manifest.actions).toEqual([
       {
         id: 'health.check',
@@ -124,7 +125,7 @@ describe('DOT manifest', () => {
       },
     });
 
-    const configured = defineApp('test').use(legacy).configure();
+    const configured = orThrow(defineApp('test').use(legacy).configure());
     expect(configured.manifest.actions).toEqual([
       {
         id: 'legacy.health',
@@ -154,7 +155,7 @@ describe('DOT manifest', () => {
       ],
     });
 
-    const configured = defineApp('test').use(duplicate).configure();
+    const configured = orThrow(defineApp('test').use(duplicate).configure());
     expect(configured.manifest.actions.map(action => `${action.binding}:${action.id}`)).toEqual([
       'http:same',
       'http:same',
@@ -181,7 +182,7 @@ describe('DOT manifest', () => {
       ],
     });
 
-    const configured = defineApp('test').use(bad).configure();
+    const configured = orThrow(defineApp('test').use(bad).configure());
     expect(configured.diagnostics.issues).toContainEqual(
       expect.objectContaining({
         code: DotLifecycleErrorCode.ActionMetaNotJson,
@@ -202,7 +203,9 @@ describe('DOT manifest', () => {
 
   it('lifecycle entries include every hook the plugin participates in', async () => {
     const noop = () => {
-      // intentional no-op — we only care that the plugin object exposes the hook.
+      // Explicit absence keeps detached hooks from erasing returned failures.
+      // eslint-disable-next-line unicorn/no-useless-undefined -- Explicit undefined prevents void from erasing returned failures.
+      return undefined;
     };
     const p = plugin({
       name: 'p',

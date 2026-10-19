@@ -11,8 +11,8 @@
  *   .boot();
  * ```
  *
- * - The kernel calls the config thunk before its first lifecycle record and
- *   closes logging after its last one. Importing this module does nothing.
+ * - The kernel calls the config thunk before its first boot record and
+ *   closes logging after its last disposal record. Configure performs no logging I/O. Importing this module does nothing.
  * - `resource['service.name']` defaults to the app's name.
  * - The `configure()` handle is published as the `logging` service.
  * - It reads no env on its own (spread `fromEnv()`), installs no OTel SDK and
@@ -44,7 +44,12 @@ export function log<const C extends string>(config: () => LogConfig<C>) {
     logging: ({ appName }) => {
       const resolved = config();
       handle = configure({ ...resolved, resource: { 'service.name': appName, ...resolved.resource } });
-      return handle;
+      const active = handle;
+      return {
+        async close() {
+          await active.close();
+        },
+      };
     },
     provides: {
       logging: (): LogServices<C>['logging'] => {

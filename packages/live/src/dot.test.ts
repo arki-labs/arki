@@ -20,7 +20,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { defineApp, DotLifecycleError } from '@arki/dot';
+import { defineApp, DotLifecycleErrorCode } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { plugin } from '@arki/dot/plugin';
@@ -181,23 +181,35 @@ describe('liveQueries', () => {
     expect(changeListeners.active).toBe(before + 1);
     await orThrow(started.dispose());
     expect(changeListeners.active).toBe(before);
-    const failure = await blogApp({ triggers: true, failStart: true })
-      .app.start()
-      .catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(DotLifecycleError);
+    const failure = await blogApp({ triggers: true, failStart: true }).app.start();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    if (!UnexpectedDefect.is(failure)) throw new Error('Expected the failed start defect');
+    expect(failure.cause).toMatchObject({
+      code: DotLifecycleErrorCode.StartFailed,
+      phase: 'start',
+      plugin: 'broken',
+      cause: new Error('a later plugin failed to start'),
+    });
     expect(changeListeners.active).toBe(before);
   });
 
   it('a start that fails later in the app rolls back and gives the listen client back', async () => {
     const { app, stats } = blogApp({ triggers: true, failStart: true });
-    const failure = await app.start().catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(DotLifecycleError);
+    const failure = await app.start();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    if (!UnexpectedDefect.is(failure)) throw new Error('Expected the failed start defect');
+    expect(failure.cause).toMatchObject({
+      code: DotLifecycleErrorCode.StartFailed,
+      phase: 'start',
+      plugin: 'broken',
+      cause: new Error('a later plugin failed to start'),
+    });
     expect(stats).toMatchObject({ connects: 1, releases: 1 });
   });
 
   it('dot explain shows each procedure live.reads, without booting', () => {
     const { app } = blogApp({ triggers: true });
-    const actions = app.configure().manifest.actions;
+    const actions = orThrow(app.configure()).manifest.actions;
     // The JSON `dot explain` prints is this manifest: each rpc action carries its contract meta.
     expect(actions.find(action => action.id === 'posts.list')?.meta).toEqual({
       procedure: 'list',

@@ -1,30 +1,18 @@
-/**
- * Usecase spans: `defineFeature(...).usecases(...)` runs every usecase call in
- * a span named `feature.<feature>.<usecase>`, with no code in the usecase.
- *
- * Why these tests exist:
- *
- * - A returned `@arki/failure` failure is an expected outcome, not a bug. The
- *   span says ERROR and names the failure, but records no exception, so
- *   error trackers that read exception events do not page anyone for a
- *   "not found".
- * - A throw is a bug. It is recorded, and the very same value reaches the
- *   caller: tracing never changes control flow.
- * - Without an SDK the wrapper must change nothing: same promise object,
- *   sync stays sync. That is why the no-SDK block runs first, before any
- *   provider is registered (a proxy tracer keeps its SDK once it has one).
- * - The wrapper is runtime only: the usecase types stay exactly as inferred.
- */
+/** Usecase invocation owns defects even when no telemetry SDK is registered. */
+import { runInNewContext } from 'node:vm';
 import type { Context, ContextManager } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import { defineFailure, orThrow } from '@arki/failure';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { SupervisedUsecase } from './usecase.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
+import { hookDurationHistogram, tracer, traceUsecase, withPhaseSpan, withPluginHookSpan } from './otel.js';
+import { superviseUsecase } from './usecase.js';
 
 const OrderNotFound = defineFailure('order.not_found', { status: 404 });
 
@@ -37,12 +25,12 @@ const explode = () => () => {
 const reject = () => () => Promise.reject(new Error('async boom'));
 const pending = (settle: Promise<string>) => () => () => settle;
 const self = () =>
-  function (this: unknown) {
+  function (this: object) {
     return this;
   };
 const activeSpanName = () => () => {
   const span = trace.getActiveSpan();
-  return span !== undefined && 'name' in span ? span.name : undefined;
+  return span !== undefined && 'name' in span && typeof span.name === 'string' ? span.name : undefined;
 };
 
 let openGate: (value: string) => void;
@@ -59,16 +47,35 @@ async function bootOrders() {
 }
 
 describe('with no SDK registered', () => {
-  it('changes nothing: the same promise object comes back and a sync usecase stays sync', async () => {
+  it('preserves settled success and keeps a sync usecase sync', async () => {
     const settled = Promise.resolve('done');
     const plain = defineFeature('plain')
       .usecases({ wait: pending(settled), total })
       .entrypoints();
     const app = orThrow(await defineApp('plain').features([plain]).start());
     const usecases = app.services['plain.usecases'];
-    expect(usecases.wait()).toBe(settled);
+    expect(await usecases.wait()).toBe(await settled);
     expect(usecases.total([1, 2])).toBe(3);
     orThrow(await app.dispose());
+  });
+  it('contains unknown throws and rejections independently of trace recording', async () => {
+    const cause = new Error('without an SDK');
+    const throwSync = traceUsecase(
+      'plain',
+      'throw',
+      superviseUsecase(() => {
+        throw cause;
+      }),
+    );
+    const rejectAsync = traceUsecase(
+      'plain',
+      'reject',
+      superviseUsecase(() => Promise.reject(cause)),
+    );
+    if (typeof throwSync !== 'function' || typeof rejectAsync !== 'function')
+      throw new Error('expected callable wrappers');
+    expect(throwSync()).toMatchObject({ code: UnexpectedDefect.code, cause });
+    expect(await rejectAsync()).toMatchObject({ code: UnexpectedDefect.code, cause });
   });
 });
 
@@ -125,24 +132,141 @@ describe('with an SDK registered', () => {
     orThrow(await app.dispose());
   });
 
-  it('records a throw or a rejection as an exception and rethrows the same value', async () => {
+  it('records the real cause of a supervised throw or rejection', async () => {
     const { app, usecases } = await bootOrders();
-    let thrown: unknown;
-    try {
-      usecases.explode();
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
+    expect(usecases.explode()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boom') });
     const syncSpan = spanNamed('feature.orders.explode');
     expect(syncSpan.status.code).toBe(SpanStatusCode.ERROR);
     expect(syncSpan.events.map(e => e.name)).toEqual(['exception']);
 
-    await expect(usecases.reject()).rejects.toThrow('async boom');
+    expect(await usecases.reject()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('async boom') });
     const asyncSpan = spanNamed('feature.orders.reject');
     expect(asyncSpan.status.code).toBe(SpanStatusCode.ERROR);
     expect(asyncSpan.events.map(e => e.name)).toEqual(['exception']);
     orThrow(await app.dispose());
+  });
+
+  it('activates hook context while the hook runs, including spans created by hook work', () => {
+    withPluginHookSpan({ appName: 'context', pluginName: 'plugin', hook: 'boot', order: 0 }, hookSpan => {
+      expect(trace.getActiveSpan()).toBe(hookSpan);
+      trace.getTracer('test').startSpan('hook.child').end();
+    });
+    const hookSpan = exporter
+      .getFinishedSpans()
+      .find(span => span.attributes['dot.app.name'] === 'context' && span.name === 'dot.plugin.boot');
+    if (hookSpan === undefined) throw new Error('missing context hook span');
+    expect(spanNamed('hook.child').parentSpanContext?.spanId).toBe(hookSpan.spanContext().spanId);
+  });
+
+  it('keeps primary outcomes when span creation fails', async () => {
+    const reporter = vi.spyOn(tracer, 'startSpan').mockImplementation(() => {
+      throw new Error('reporter');
+    });
+    try {
+      const success = Promise.resolve('kept');
+      expect(
+        withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () => success),
+      ).toBe(success);
+      expect(withPhaseSpan({ appName: 'reporter', phase: 'boot', pluginCount: 1 }, () => 'plain')).toBe('plain');
+      const primary = new Error('primary');
+      const wrapped = traceUsecase(
+        'reporter',
+        'fail',
+        superviseUsecase(() => {
+          throw primary;
+        }),
+      );
+      if (typeof wrapped !== 'function') throw new Error('expected function');
+      expect(wrapped()).toMatchObject({ code: UnexpectedDefect.code, cause: primary });
+      expect(await success).toBe('kept');
+      expect(reporter).toHaveBeenCalledTimes(3);
+    } finally {
+      reporter.mockRestore();
+    }
+  });
+
+  it('does not replace a primary failure or recursively report broken reporters', async () => {
+    const span = tracer.startSpan('reporter.broken');
+    const start = vi.spyOn(tracer, 'startSpan').mockReturnValue(span);
+    const status = vi.spyOn(span, 'setStatus').mockImplementation(() => {
+      throw new Error('status reporter');
+    });
+    const end = vi.spyOn(span, 'end').mockImplementation(() => {
+      throw new Error('end reporter');
+    });
+    const duration = vi.spyOn(hookDurationHistogram, 'record').mockImplementation(() => {
+      throw new Error('metric reporter');
+    });
+    try {
+      const primary = OrderNotFound();
+      const result = withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () =>
+        Promise.resolve(primary),
+      );
+      expect(await Promise.resolve(result)).toBe(primary);
+      expect(status).toHaveBeenCalledTimes(1);
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(duration).toHaveBeenCalledTimes(1);
+      const cause = new Error('private');
+      const defect = superviseUsecase(() => {
+        throw cause;
+      });
+      const wrapped = traceUsecase('reporter', 'defect', defect);
+      if (typeof wrapped !== 'function') throw new Error('expected function');
+      expect(wrapped()).toMatchObject({ code: UnexpectedDefect.code, cause });
+      expect(status).toHaveBeenCalledTimes(2);
+      expect(end).toHaveBeenCalledTimes(2);
+    } finally {
+      start.mockRestore();
+      status.mockRestore();
+      end.mockRestore();
+      duration.mockRestore();
+      span.end();
+    }
+  });
+
+  it('keeps a hook rejection when exception reporting throws', async () => {
+    const span = tracer.startSpan('reporter.exception');
+    const start = vi.spyOn(tracer, 'startSpan').mockReturnValue(span);
+    const exception = vi.spyOn(span, 'recordException').mockImplementation(() => {
+      throw new Error('exception reporter');
+    });
+    const cause = new Error('primary rejection');
+    try {
+      const result: unknown = runInNewContext('Promise.reject(cause)', { cause });
+      expect(
+        withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () => result),
+      ).toBe(result);
+      await expect(Promise.resolve(result)).rejects.toBe(cause);
+      expect(exception).toHaveBeenCalledTimes(1);
+    } finally {
+      start.mockRestore();
+      exception.mockRestore();
+      span.end();
+    }
+  });
+
+  it('observes foreign promises without changing their identity or invoking deferred thenables', async () => {
+    const foreign: unknown = runInNewContext('Promise.resolve("foreign success")');
+    const observed = withPluginHookSpan(
+      { appName: 'foreign', pluginName: 'promise', hook: 'boot', order: 0 },
+      () => foreign,
+    );
+    expect(observed).toBe(foreign);
+    expect(await Promise.resolve(observed)).toBe('foreign success');
+    const span = exporter.getFinishedSpans().find(value => value.attributes['dot.app.name'] === 'foreign');
+    expect(span?.status.code).toBe(SpanStatusCode.OK);
+    let inspected = false;
+    // eslint-disable-next-line unicorn/no-thenable -- Verify that observing a native promise never executes deferred query accessors.
+    const deferred = Object.defineProperty({}, 'then', {
+      get() {
+        inspected = true;
+        throw new Error('deferred');
+      },
+    });
+    expect(
+      withPluginHookSpan({ appName: 'deferred', pluginName: 'query', hook: 'boot', order: 0 }, () => deferred),
+    ).toBe(deferred);
+    expect(inspected).toBe(false);
   });
 
   it('ends an async usecase span when the promise settles, not when the call returns', async () => {
@@ -157,11 +281,11 @@ describe('with an SDK registered', () => {
 });
 
 describe('types', () => {
-  it('keeps every usecase type exactly as its factory returns it', () => {
+  it('exposes canonical invocation defects alongside each declared return', () => {
     type Wrapped = Awaited<ReturnType<typeof bootOrders>>['usecases'];
-    expectTypeOf<Wrapped['total']>().toEqualTypeOf<ReturnType<typeof total>>();
-    expectTypeOf<Wrapped['find']>().toEqualTypeOf<ReturnType<typeof find>>();
-    expectTypeOf<Wrapped['self']>().toEqualTypeOf<ReturnType<typeof self>>();
+    expectTypeOf<Wrapped['total']>().toEqualTypeOf<SupervisedUsecase<ReturnType<typeof total>>>();
+    expectTypeOf<Wrapped['find']>().toEqualTypeOf<SupervisedUsecase<ReturnType<typeof find>>>();
+    expectTypeOf<Wrapped['self']>().toEqualTypeOf<SupervisedUsecase<ReturnType<typeof self>>>();
   });
 });
 

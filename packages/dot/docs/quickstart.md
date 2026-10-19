@@ -89,7 +89,7 @@ type check. The example file is JavaScript, so it loads. Run `dot doctor` on
 it:
 
 ```sh
-dot doctor --app src/app.js --json | jq -r '.error.code, .error.data.underlyingCode, .error.data.causeMessage'
+dot doctor --app src/app.js --json | jq '.error.code, .error.data'
 ```
 
 This page runs the same command line in-process with `program.main`:
@@ -105,24 +105,19 @@ await program.main(['doctor', '--app', 'docs/examples/quickstart-wrong-order.mjs
 });
 const { error } = JSON.parse(out);
 console.log(error.code);
-console.log(error.data.underlyingCode);
-console.log(error.data.causeMessage);
+console.log(JSON.stringify(error.data));
 ```
 
 ```text
-dot.app_lifecycle_failed
-ARKI_DOT_E020
-Plugin "orders" needs "db", which "database" provides — but "database" is mounted after it (position 2; "orders" is 1).
-Mount "database" with .use() before "orders".
+failure.unexpected_defect
+null
 ```
 
-Read it from the inside out:
-
-- `dot.app_lifecycle_failed` is the command's failure: the app failed while
-  the CLI prepared it. The process exits with code `3`.
-- `ARKI_DOT_E020` is the kernel's code: a provider is mounted after its
-  consumer. Codes never change meaning, so match on them, not on the text.
-- The message names both plugins and both positions.
+`failure.unexpected_defect` is the canonical managed defect. The process exits
+with code `3`. Its original cause is private, so JSON data is null. In process,
+`UnexpectedDefect.cause` retains the kernel diagnostic error with stable
+`ARKI_DOT_E020` metadata naming both plugins and their positions. Read the local
+cause or correct the wiring using the compiler's provider-order diagnostic.
 
 The kernel caught it at `configure`, before any `boot` hook ran. Nothing was
 opened, so there is nothing to clean up.

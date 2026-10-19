@@ -67,9 +67,11 @@ describe('schedule DOT projection', () => {
       timezone: 'UTC',
       handler: async () => {},
     });
-    const app = defineApp('schedule-app')
-      .serve(schedule({ schedules: [daily] }))
-      .configure();
+    const app = orThrow(
+      defineApp('schedule-app')
+        .serve(schedule({ schedules: [daily] }))
+        .configure(),
+    );
 
     expect(app.manifest.actions).toEqual([
       {

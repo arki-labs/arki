@@ -57,7 +57,7 @@ import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
-import type { EmptyShape, Handle, Plugin } from '@arki/dot/plugin';
+import type { Handle } from '@arki/dot/plugin';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
@@ -145,55 +145,53 @@ export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | '
  */
 export function db<TRelations extends AnyRelations>(
   options: PgDbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pg'>, EmptyShape, 'db'>;
+): ReturnType<typeof createPgPlugin<TRelations>>;
 export function db<TRelations extends AnyRelations>(
   options: PgliteDbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pglite'>, EmptyShape, 'db'>;
-// The overloads spell the type `plugin()` would infer, plus the name: the handles carry `provider: 'db'`, so a feature's
-// identity checks tell this adapter apart from another same-shaped one.
-export function db<TRelations extends AnyRelations>(
-  options: DbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>, EmptyShape, 'db'> {
-  const driver = options.driver ?? 'pg';
+): ReturnType<typeof createPglitePlugin<TRelations>>;
+export function db<TRelations extends AnyRelations>(options: DbDotOptions<TRelations>) {
+  if (options.driver === 'pglite') return createPglitePlugin(options);
+  return createPgPlugin(options);
+}
 
-  if (driver === 'pglite') {
-    const pgliteOptions = options as PgliteDbDotOptions<TRelations>;
-    // PGlite path: open the embedded instance and Drizzle handle at boot.
-    // We capture the raw PGlite client in the factory so `dispose` can close
-    // it deterministically. `services.db` is the Drizzle handle only —
-    // exposing the PGlite client would leak driver-specific surface.
-    let pgliteHandle: { close: () => Promise<void> } | undefined;
-    return plugin({
-      name: 'db',
-      configure(ctx) {
-        ctx.registerService('db', 'db');
+function createPglitePlugin<TRelations extends AnyRelations>(options: PgliteDbDotOptions<TRelations>) {
+  // PGlite path: open the embedded instance and Drizzle handle at boot.
+  // We capture the raw PGlite client in the factory so `dispose` can close
+  // it deterministically. `services.db` is the Drizzle handle only —
+  // exposing the PGlite client would leak driver-specific surface.
+  let pgliteHandle: { close: () => Promise<void> } | undefined;
+  return plugin({
+    name: 'db',
+    configure(ctx) {
+      ctx.registerService('db', 'db');
+    },
+    provides: {
+      db: async (): Promise<DbServices<TRelations, 'pglite'>['db']> => {
+        const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
+          {
+            ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
+            ...(options.memory === undefined ? {} : { memory: options.memory }),
+            ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
+          },
+          {
+            relations: options.relations,
+            ...(options.logger === undefined ? {} : { logger: options.logger }),
+          },
+        );
+        pgliteHandle = pglite;
+        return handle;
       },
-      provides: {
-        db: async (): Promise<DbServices<TRelations, 'pglite'>['db']> => {
-          const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
-            {
-              ...(pgliteOptions.dataDir === undefined ? {} : { dataDir: pgliteOptions.dataDir }),
-              ...(pgliteOptions.memory === undefined ? {} : { memory: pgliteOptions.memory }),
-              ...(pgliteOptions.extensions === undefined ? {} : { extensions: pgliteOptions.extensions }),
-            },
-            {
-              relations: pgliteOptions.relations,
-              ...(pgliteOptions.logger === undefined ? {} : { logger: pgliteOptions.logger }),
-            },
-          );
-          pgliteHandle = pglite;
-          return handle;
-        },
-      },
-      async dispose() {
-        if (pgliteHandle !== undefined) {
-          await pgliteHandle.close();
-          pgliteHandle = undefined;
-        }
-      },
-    });
-  }
+    },
+    async dispose() {
+      if (pgliteHandle !== undefined) {
+        await pgliteHandle.close();
+        pgliteHandle = undefined;
+      }
+    },
+  });
+}
 
+function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions<TRelations>) {
   // Node-postgres path: createDb already reads env vars and constructs the
   // pool. Drizzle owns the pool — closing it goes via the `$client.end()`
   // path that node-postgres exposes through Drizzle's handle.

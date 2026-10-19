@@ -9,18 +9,19 @@
  * Listed under `files` in tsconfig.json: the `@ts-expect-error` lines fail
  * `bun run typecheck` if a wiring guard stops firing.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, plugin, service } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { QueueClient } from './dot.ts';
 import type { QueueBuilder, QueueInstance } from './types/builder.ts';
 import type { QueueMeta } from './types/queue.ts';
 import {
+  durableScheduler,
   jobs,
   queue,
   QUEUE_PLUGIN_ERROR_CODES,
@@ -35,6 +36,20 @@ import { project } from './projection.ts';
 const q = initQueue.create();
 // Never contacted: boot opens no connection and these tests run no real worker.
 const REDIS_URL = 'redis://127.0.0.1:1';
+
+// The constructors derive their exact factories and lifecycle callbacks from plugin().
+const _queuePlugin = queue({ connection: REDIS_URL });
+const _namedQueuePlugin = queue({ connection: REDIS_URL, name: 'mail-queue' });
+const _schedulerPlugin = durableScheduler({ connection: REDIS_URL });
+const _namedSchedulerPlugin = durableScheduler({ connection: REDIS_URL, name: 'mail-scheduler' });
+expectTypeOf(_queuePlugin.provides.queue.provider).toEqualTypeOf<'queue'>();
+expectTypeOf(_namedQueuePlugin.provides.queue.provider).toEqualTypeOf<'mail-queue'>();
+expectTypeOf(_schedulerPlugin.provides['arki.schedule.durable'].provider).toEqualTypeOf<'durable-scheduler'>();
+expectTypeOf(_namedSchedulerPlugin.provides['arki.schedule.durable'].provider).toEqualTypeOf<'mail-scheduler'>();
+expectTypeOf<typeof _queuePlugin.factories>().toEqualTypeOf<{ readonly queue: (ctx: never) => QueueClient }>();
+expectTypeOf<typeof _queuePlugin.hooks.stop>().toEqualTypeOf<
+  ((ctx: never) => undefined | Promise<undefined>) | undefined
+>();
 
 const sendEmail = q.job
   .name('email:send')
@@ -218,10 +233,12 @@ describe('queue() — the driven client', () => {
   it('an API process that only enqueues claims to produce, never to consume', () => {
     // Why: the jobs() slice travels with the feature into every process. Only
     // the process running queueWorker() consumes, so only it may say so.
-    const app = defineApp('api')
-      .use(queue({ connection: REDIS_URL }))
-      .features([orders])
-      .configure();
+    const app = orThrow(
+      defineApp('api')
+        .use(queue({ connection: REDIS_URL }))
+        .features([orders])
+        .configure(),
+    );
 
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
       'orders:email:send.produce',
@@ -366,7 +383,7 @@ describe('queueWorker() — the driving adapter', () => {
     expect(stopped).toEqual(['stopped']);
   });
 
-  it('throws a coded error when blocking startup exceeds the timeout', async () => {
+  it('returns a coded defect when blocking startup exceeds the timeout', async () => {
     const { fakeQ } = fakeBuilder({ ...idleInstance(), start: hang });
 
     const starting = defineApp('worker')
@@ -383,9 +400,15 @@ describe('queueWorker() — the driving adapter', () => {
       )
       .start();
 
-    await expect(starting).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.StartFailed,
-      cause: { code: QUEUE_PLUGIN_ERROR_CODES.startupTimeout },
+    const failure = await starting;
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      cause: {
+        code: DotLifecycleErrorCode.StartFailed,
+        phase: 'start',
+        plugin: 'queue-worker',
+        cause: { code: QUEUE_PLUGIN_ERROR_CODES.startupTimeout },
+      },
     });
   });
 

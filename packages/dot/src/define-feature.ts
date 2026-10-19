@@ -29,7 +29,11 @@
  * `dot explain` see ordinary plugins with ordinary edges
  * (`digest → digest/store → database`, `digest.compile → digest/store`).
  */
+import type { Failure, FailureIn } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
 import type { FeatureSlice } from './feature.js';
+import type { SupervisedUsecase } from './kernel/usecase.js';
 import type {
   ActionSource,
   AnyHandle,
@@ -37,16 +41,19 @@ import type {
   CheckedProvider,
   CtxOf,
   EmptyShape,
+  FactoryContract,
+  FactoryContractOf,
   Handle,
   InferredOwnership,
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
   Plugin,
-  PluginCloseFailure,
   PluginNeeds,
-  PluginOpenFailure,
   PluginOwner,
+  PluginOwnership,
+  PluginPhaseFailures,
+  PluginPreparation,
   PluginProviderIdentities,
   PluginProvides,
   PluginRuntime,
@@ -58,6 +65,7 @@ import type {
 } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { traceUsecase } from './kernel/otel.js';
+import { superviseUsecase } from './kernel/usecase.js';
 import { createPluginRuntime, handleOf, isLazyWitness, rename } from './plugin-contract.js';
 
 type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer I) => void
@@ -112,7 +120,7 @@ export type CoreServices<
   I extends readonly AnyPlugin[],
   C extends readonly AnyDefinedFeature[],
   U,
-> = CtxOf<N> & InfraProvides<I> & ChildProvides<C> & { readonly usecases: U };
+> = CtxOf<N> & InfraProvides<I> & ChildProvides<C> & { readonly usecases: UsecaseValues<U> };
 
 /**
  * An entrypoint descriptor — the protocol adapter packages implement
@@ -293,18 +301,23 @@ type RemappedKey<TName extends string, TLocal, Owners extends string, S extends 
  * record is kept, so its handles stay scoped/internal after the remap (Astra
  * round 3); its needs shape is kept, so a grandparent reads the same identities.
  */
-type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyPlugin> = Plugin<
-  {
-    [
-      K in keyof PluginNeeds<P> as RemappedKey<TName, TLocal, Owners, PluginProviderIdentities<P>, K>
-    ]: PluginNeeds<P>[K];
-  },
-  PluginProvides<P>,
-  PluginProviderIdentities<P>,
-  PluginOwner<P>,
-  { readonly open: PluginOpenFailure<P>; readonly close: PluginCloseFailure<P> }
+type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyPlugin> = Omit<
+  Plugin<
+    {
+      [
+        K in keyof PluginNeeds<P> as RemappedKey<TName, TLocal, Owners, PluginProviderIdentities<P>, K>
+      ]: PluginNeeds<P>[K];
+    },
+    PluginProvides<P>,
+    PluginProviderIdentities<P>,
+    PluginOwner<P>,
+    PluginPreparation<P>,
+    PluginPhaseFailures<P>
+  >,
+  'runtime' | 'hooks' | 'factories' | 'logging'
 > &
-  Pick<P, 'provides'>;
+  Pick<P, 'runtime' | 'hooks' | 'factories' | 'logging' | 'provides'> &
+  FactoryContractOf<P>;
 type RemappedUnits<TName extends string, TLocal, Owners extends string, U extends readonly AnyPlugin[]> = {
   readonly [K in keyof U]: U[K] extends AnyPlugin ? RemappedUnit<TName, TLocal, Owners, U[K]> : never;
 };
@@ -463,27 +476,47 @@ type OwnedShape<N extends NeedsShape, S extends NeedsShape> = string extends key
  * so the sibling — not an app plugin — satisfies it; any other need alias is
  * the feature's need of that alias, on that handle's wire key.
  */
-export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extends AnyPlugin, TLocal> = Plugin<
-  {
-    [
-      K in keyof PluginNeeds<P> as K extends TLocal ? Qualify<TName, K> : K extends keyof N ? WireKeyOfNeed<N[K], K> : K
-    ]: PluginNeeds<P>[K];
-  },
-  { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
-  OwnedShape<N, PluginProviderIdentities<P>>,
-  `${TName}/${string}`,
-  { readonly open: PluginOpenFailure<P>; readonly close: PluginCloseFailure<P> }
-> & {
-  readonly provides: InfraUnitHandles<
-    TName,
-    { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }
-  >;
-};
+export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extends AnyPlugin, TLocal> = Omit<
+  Plugin<
+    {
+      [
+        K in keyof PluginNeeds<P> as K extends TLocal
+          ? Qualify<TName, K>
+          : K extends keyof N
+            ? WireKeyOfNeed<N[K], K>
+            : K
+      ]: PluginNeeds<P>[K];
+    },
+    { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
+    OwnedShape<N, PluginProviderIdentities<P>>,
+    `${TName}/${string}`,
+    PluginPreparation<P>,
+    PluginPhaseFailures<P>
+  >,
+  'runtime' | 'hooks' | 'factories' | 'logging' | 'provides'
+> &
+  Pick<P, 'runtime' | 'hooks' | 'factories' | 'logging'> &
+  FactoryContractOf<P> & {
+    readonly provides: InfraUnitHandles<
+      TName,
+      { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }
+    >;
+  };
 
 /** Every infra plugin qualified, as a tuple in declaration order. */
 export type QualifiedInfra<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = {
   readonly [K in keyof I]: I[K] extends AnyPlugin ? QualifiedPlugin<TName, N, I[K], keyof InfraProvides<I>> : never;
 };
+
+/** Resolve qualification once for the whole published record, preserving property modifiers. */
+type PublishRecord<TName extends string, Values> =
+  Nested<TName> extends true
+    ? { readonly [K in keyof Values as Qualify<TName, K>]: Values[K] }
+    : Instanced<TName> extends true
+      ? { readonly [K in keyof Values as Qualify<TName, K>]: Values[K] }
+      : Values extends unknown
+        ? Pick<Readonly<Values>, Extract<keyof Values, string>>
+        : never;
 
 /**
  * The feature plugin: needs = the feature's needs + its qualified infra + its
@@ -498,26 +531,33 @@ export type FeatureUnit<
   U,
   P extends ServiceRecord,
   E extends readonly AnyEntrypoint[],
-> = Plugin<
-  WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<
-      ChildHandles<C>
-    >,
-  { readonly [K in keyof P as PublishKey<TName, K>]: ProvidedValues<P>[K] } & Readonly<Record<`${TName}.usecases`, U>> &
-    Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
-    Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
-  // The feature's own needs are the only ones a parent may remap; infra and child keys are already qualified (dotted).
-  N,
-  TName,
-  InferredOwnership<P, void>
-> & {
-  readonly provides: UnitHandles<
-    TName,
-    { readonly [K in keyof P as PublishKey<TName, K>]: ProvidedValues<P>[K] },
-    Readonly<Record<`${TName}.usecases`, U>> &
+> = Omit<
+  Plugin<
+    WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<
+        ChildHandles<C>
+      >,
+    PublishRecord<TName, ProvidedValues<P>> &
+      Readonly<Record<`${TName}.usecases`, UsecaseValues<U>>> &
       Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
-      Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>
-  >;
-};
+      Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
+    // The feature's own needs are the only ones a parent may remap; infra and child keys are already qualified (dotted).
+    N,
+    TName,
+    { readonly open: UsecaseCreationFailure<U>; readonly close: never }
+  >,
+  'factories' | 'hooks' | 'provides'
+> &
+  FactoryContract<PublishRecord<TName, ProvidedValues<P>>> & {
+    readonly hooks: EmptyShape;
+    readonly factories: { readonly [Key in keyof P as PublishKey<TName, Key>]: (ctx: never) => P[Key] };
+    readonly provides: UnitHandles<
+      TName,
+      PublishRecord<TName, ProvidedValues<P>>,
+      Readonly<Record<`${TName}.usecases`, UsecaseValues<U>>> &
+        Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
+        Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>
+    >;
+  };
 
 /**
  * Every handle a request resolves for this feature: its needs, its infra
@@ -540,7 +580,7 @@ export type CoreHandles<
     `${TName}/${string}`,
     TName
   >;
-} & ChildHandles<C> & { readonly usecases: ScopedHandle<U, `${TName}.usecases`, TName, TName, true> };
+} & ChildHandles<C> & { readonly usecases: ScopedHandle<UsecaseValues<U>, `${TName}.usecases`, TName, TName, true> };
 
 declare const CoreServicesTag: unique symbol;
 
@@ -834,6 +874,53 @@ export type UsecaseFactoriesOf<D> = Readonly<Record<string, (deps: D) => unknown
 /** The usecases object: each factory's return under its key. */
 export type Usecases<F extends UsecaseFactories> = { readonly [K in keyof F]: ReturnType<F[K]> };
 
+/** Published values exclude creation refusals and expose only invocation defects. */
+export type UsecaseValues<Values> = {
+  readonly [Key in keyof Values]: SupervisedUsecase<Exclude<Awaited<Values[Key]>, Failure>>;
+};
+
+/** Factory refusals belong to boot, independently of invocation outcomes. */
+type UsecaseCreationFailure<Values> = FailureIn<Awaited<Values[keyof Values]>>;
+
+type UnsupportedUsecase<Value> = Value extends (...args: never[]) => infer Result
+  ? void extends Awaited<Result>
+    ? Value
+    : [SupervisedUsecase<Value>] extends [never]
+      ? Value
+      : never
+  : never;
+type UnsupportedUsecases<Factories extends UsecaseFactories> = {
+  [Key in keyof Factories]: [UnsupportedUsecase<Exclude<Awaited<ReturnType<Factories[Key]>>, Failure>>] extends [never]
+    ? never
+    : Key;
+}[keyof Factories];
+type PlainUsecaseCreation =
+  | (object & { readonly '~failure'?: never; readonly then?: never })
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined;
+type CheckedUsecaseCreation<Value> =
+  | PlainUsecaseCreation
+  | PromiseLike<PlainUsecaseCreation>
+  | (void extends Awaited<Value>
+      ? { readonly 'DOT: usecase creation must retain concrete outputs instead of void or unknown': never }
+      : string extends Extract<Awaited<Value>, Failure>['code']
+        ? { readonly 'DOT: usecase creation must retain concrete failure codes instead of broad Failure': never }
+        : unknown);
+type UsecaseSignatureGuard<Factories extends UsecaseFactories> = ([UnsupportedUsecases<Factories>] extends [never]
+  ? unknown
+  : {
+      readonly 'DOT: usecases need concrete invocation returns, including undefined instead of void; dependent generics and overloads are unsupported': UnsupportedUsecases<Factories>;
+    }) & {
+  readonly [Key in keyof Factories]: (
+    ...args: Parameters<Factories[Key]>
+  ) => ReturnType<Factories[Key]> & NoInfer<CheckedUsecaseCreation<ReturnType<Factories[Key]>>>;
+};
+
 type DepsAskedBy<Fn> = Fn extends (deps: infer D) => unknown ? D : never;
 /**
  * The usecases whose factory asks for deps `D` does not satisfy. A factory that asks for `never`
@@ -883,7 +970,7 @@ export type ProvidesStage<
     factories: {
       readonly [K in keyof P]: (
         services: CoreServices<N, I, C, U> & KernelCtx,
-      ) => P[K] & CheckedProvider<NoInfer<P[K]>>;
+      ) => P[K] & NoInfer<CheckedProvider<P[K]>>;
     } & ProvidesGuard<TName, I, P>,
   ): EntrypointsStage<TName, N, I, C, U, P>;
 };
@@ -913,10 +1000,10 @@ export type UsecasesStage<
    * and prints the LAST overload's failure under "No overload matches this call".
    */
   usecases<const F extends UsecaseFactoriesOf<CoreDeps<N, I, C>>>(
-    factories: F & UsecaseGuard<CoreDeps<N, I, C>, F>,
+    factories: F & UsecaseSignatureGuard<F>,
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
   usecases<const F extends UsecaseFactories>(
-    factories: F & UsecaseGuard<CoreDeps<N, I, C>, F>,
+    factories: F & UsecaseGuard<CoreDeps<N, I, C>, F> & UsecaseSignatureGuard<F>,
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
 };
 
@@ -961,17 +1048,18 @@ export type NeedsStage<TName extends string> = InfraStage<TName, EmptyShape> & {
 /** An erased factory: the stage types checked it against the services it is called with. */
 type Factory = (services: never) => unknown;
 
-type FeatureState<P extends ServiceRecord = ServiceRecord> = {
+type FeatureState<P extends ServiceRecord = ServiceRecord, U extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly needs: NeedsShape;
   readonly infra: readonly AnyPlugin[];
   readonly children: readonly RuntimeFeature[];
-  readonly usecases: Readonly<Record<string, Factory>> | undefined;
+  readonly usecases: { readonly [Key in keyof U]: (services: never) => U[Key] } | undefined;
   readonly provides: { readonly [K in keyof P]: (services: never) => P[K] };
 };
 
-type RuntimeFeature<P extends ServiceRecord = ServiceRecord> = {
-  readonly runtime: PluginRuntime<InferredOwnership<P, void>['open'], InferredOwnership<P, void>['close']>;
+/** Recursive copies carry the inferred ownership; raw factory records stay in FeatureState. */
+type RuntimeFeature<out Owned extends PluginOwnership = PluginOwnership> = {
+  readonly runtime: PluginRuntime<Owned['open'], Owned['close']>;
   readonly name: string;
   readonly handles: NeedsShape;
   readonly provides: Readonly<Record<string, AnyHandle>>;
@@ -981,25 +1069,29 @@ type RuntimeFeature<P extends ServiceRecord = ServiceRecord> = {
   readonly contract: unknown;
   readonly router: unknown;
   plugins(): readonly AnyPlugin[];
-  override(values: Readonly<Record<string, unknown>>): RuntimeFeature<P>;
-  instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature<P>;
+  override(values: Readonly<Record<string, unknown>>): RuntimeFeature<Owned>;
+  instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature<Owned>;
   /** Recompile under another name, needs following `follow` (handle → handle). Internal: `instance()` drives it for the children. */
-  [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature<P>;
+  [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature<Owned>;
 };
 
 const REPARENT: unique symbol = Symbol('dot.feature.reparent');
 
-type RuntimeStage<P extends ServiceRecord = ServiceRecord> = {
+type RuntimeStage<in out P extends ServiceRecord = ServiceRecord, in out U extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly handles: NeedsShape;
-  needs(needs: NeedsShape): RuntimeStage<P>;
-  infra(...plugins: readonly AnyPlugin[]): RuntimeStage<P>;
-  features(...children: readonly RuntimeFeature[]): RuntimeStage<P>;
-  usecases(factories: Readonly<Record<string, Factory>>): RuntimeStage<P>;
+  needs(needs: NeedsShape): RuntimeStage<P, U>;
+  infra(...plugins: readonly AnyPlugin[]): RuntimeStage<P, U>;
+  features(...children: readonly RuntimeFeature[]): RuntimeStage<P, U>;
+  usecases<Next extends ServiceRecord>(factories: {
+    readonly [Key in keyof Next]: (services: never) => Next[Key];
+  }): RuntimeStage<P, Next>;
   provides<Next extends ServiceRecord>(factories: {
     readonly [K in keyof Next]: (services: never) => Next[K];
-  }): RuntimeStage<Next>;
-  entrypoints(...entrypoints: readonly AnyEntrypoint[]): RuntimeFeature<P>;
+  }): RuntimeStage<Next, U>;
+  entrypoints(
+    ...entrypoints: readonly AnyEntrypoint[]
+  ): RuntimeFeature<InferredOwnership<P, UsecaseCreationFailure<U>>>;
 };
 
 function collision(feature: string, what: string, remediation: string): FeatureError {
@@ -1275,7 +1367,7 @@ function replaceServices(p: AnyPlugin, values: Readonly<Record<string, unknown>>
     used.add(key);
     touched = true;
   }
-  return touched ? { ...p, factories, runtime: createPluginRuntime(factories), hooks: {} } : p;
+  return touched ? { ...p, factories, runtime: createPluginRuntime(), hooks: {} } : p;
 }
 
 function checkEntrypoints(state: FeatureState, entrypoints: readonly AnyEntrypoint[]): void {
@@ -1314,12 +1406,33 @@ function checkChildContracts(state: FeatureState, entrypoints: readonly AnyEntry
   }
 }
 
-function compile<P extends ServiceRecord>(
-  state: FeatureState<P>,
+/** Keep creation failures typed while the kernel owns and joins asynchronous preparation. */
+async function prepareUsecases<Values extends ServiceRecord>(
+  feature: string,
+  factories: { readonly [Key in keyof Values]: (deps: never) => Values[Key] } | undefined,
+  deps: never,
+): Promise<{ usecases: Record<string, unknown> } | UsecaseCreationFailure<Values>> {
+  const usecases: Record<string, unknown> = {};
+  for (const key in factories) {
+    const create: (deps: never) => Values[keyof Values] = factories[key];
+    const created = await Promise.resolve(create(deps));
+    if (creationFailed(created)) return created;
+    const usecase: unknown = created;
+    usecases[key] = traceUsecase(feature, key, superviseUsecase(usecase));
+  }
+  return { usecases };
+}
+
+function creationFailed<Value>(value: Value): value is FailureIn<Value> {
+  return isFailure<unknown>(value);
+}
+
+function compile<P extends ServiceRecord, U extends ServiceRecord>(
+  state: FeatureState<P, U>,
   infra: ReturnType<typeof qualifyInfra>,
   handles: NeedsShape,
   entrypoints: readonly AnyEntrypoint[],
-): RuntimeFeature<P> {
+): RuntimeFeature<InferredOwnership<P, UsecaseCreationFailure<U>>> {
   checkEntrypoints(state, entrypoints);
   checkChildContracts(state, entrypoints);
   const usecasesKey = `${state.name}.usecases`;
@@ -1346,31 +1459,8 @@ function compile<P extends ServiceRecord>(
       .map(([k]) => k),
   );
 
-  // A kernel factory sees the unit's needs, never its sibling provides, so the
-  // usecases object is built once per boot (the kernel hands every factory of
-  // one unit the same ctx object) and shared by every factory and entrypoint.
-  const built = new WeakMap<object, unknown>();
-  const usecasesOf = (ctx: object): unknown => {
-    if ('usecases' in ctx) return ctx.usecases;
-    if (!built.has(ctx)) {
-      // Erasure seam: each factory was typed against these deps by `.usecases()`.
-      const usecaseDeps = Object.fromEntries(Object.entries(ctx).filter(([k]) => !doorKeys.has(k)));
-      // One object, one key per factory, each built from the same deps; each usecase runs in its own
-      // `feature.<name>.<usecase>` span — the final name, so an instance traces as itself.
-      built.set(
-        ctx,
-        state.usecases === undefined
-          ? {}
-          : Object.fromEntries(
-              Object.entries(state.usecases).map(([key, create]) => [
-                key,
-                traceUsecase(state.name, key, create(usecaseDeps as never)),
-              ]),
-            ),
-      );
-    }
-    return built.get(ctx);
-  };
+  // Preparation enriches the owned kernel context once before any provider can run.
+  const usecasesOf = (ctx: object): unknown => ('usecases' in ctx ? ctx.usecases : undefined);
   const servicesOf = (ctx: object): object => ({ ...ctx, usecases: usecasesOf(ctx) });
 
   const factories: Record<string, (ctx: object) => unknown> = {
@@ -1397,17 +1487,13 @@ function compile<P extends ServiceRecord>(
     const generated = key === usecasesKey || key === servicesKey || key === sliceKey;
     unitHandles[key] = scopedHandleOf(key, state.name, generated ? state.name : parentOf(state.name), generated);
   }
-  const sourceRuntime = createPluginRuntime<P, void>(state.provides, undefined, (services, ctx) => {
-    const published = Object.fromEntries(Object.entries(services).map(([key, value]) => [publishKey(key), value]));
-    for (const key of Object.keys(state.provides)) if (publishKey(key) !== key) delete services[key];
-    Object.assign(services, published);
-    services[usecasesKey] = usecasesOf(ctx);
-    services[servicesKey] = factories[servicesKey]?.(ctx);
-    services[sliceKey] = factories[sliceKey]?.(ctx);
-  });
-  const runtime: PluginRuntime<InferredOwnership<P, void>['open'], InferredOwnership<P, void>['close']> = {
-    construct: (ctx, options, claimLazy) => sourceRuntime.construct(servicesOf(ctx) as never, options, claimLazy),
-  };
+  const runtime = createPluginRuntime<Awaited<ReturnType<typeof prepareUsecases<U>>>>(undefined, ctx =>
+    prepareUsecases(
+      state.name,
+      state.usecases,
+      Object.fromEntries(Object.entries(ctx).filter(([key]) => !doorKeys.has(key))) as never,
+    ),
+  );
   // The record plugin() builds, written out: the needs here are already handles, and the keys already wire keys.
   const unit: AnyPlugin = {
     runtime,
@@ -1443,10 +1529,14 @@ function compile<P extends ServiceRecord>(
   // A copy under another name: needs follow the rebind, children are re-derived under the new parent,
   // everything else is recompiled from the same declarations. Only the root copy gets its own rpc
   // contract identity — a parent's router holds its children's routers by identity.
-  const reparent = (name: string, follow: ReadonlyMap<object, Service<unknown>>, root: boolean): RuntimeFeature<P> => {
+  const reparent = (
+    name: string,
+    follow: ReadonlyMap<object, Service<unknown>>,
+    root: boolean,
+  ): RuntimeFeature<InferredOwnership<P, UsecaseCreationFailure<U>>> => {
     const needs = Object.fromEntries(Object.entries(state.needs).map(([alias, w]) => [alias, followRebind(w, follow)]));
     const children = state.children.map(c => c[REPARENT](`${name}.${c.name.slice(state.name.length + 1)}`, follow));
-    const next: FeatureState<P> = { ...state, name, needs, children };
+    const next: FeatureState<P, U> = { ...state, name, needs, children };
     const nextInfra = qualifyInfra(name, needs, next.infra);
     return compile(next, nextInfra, handlesOf(next, nextInfra), root ? ownContract(entrypoints) : entrypoints);
   };
@@ -1568,7 +1658,7 @@ function handlesOf(state: FeatureState, infra: ReturnType<typeof qualifyInfra>):
   };
 }
 
-function stage<P extends ServiceRecord>(state: FeatureState<P>): RuntimeStage<P> {
+function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureState<P, U>): RuntimeStage<P, U> {
   const infra = qualifyInfra(state.name, state.needs, state.infra);
   const handles = handlesOf(state, infra);
   return {

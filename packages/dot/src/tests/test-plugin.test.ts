@@ -8,8 +8,9 @@
  *      teardown, lazy lifting, and `$config` behave as in production.
  */
 
-import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import { defineFailure, orThrow } from '@arki/failure';
 
 import type { Lazy } from '../plugin-contract.js';
 import { lazyOf, plugin, service, token } from '../plugin-contract.js';
@@ -108,4 +109,17 @@ describe('testPlugin', () => {
     orThrow(await app.dispose());
     expect(order).toEqual(['consumer-dispose:on']);
   });
+});
+
+const HarnessRefused = defineFailure('test.harness.refused');
+
+it('returns provider, boot and logging refusals unchanged through the focused harness', async () => {
+  const refusal = HarnessRefused();
+  for (const unit of [
+    plugin({ name: 'provider-refusal', provides: { value: () => refusal } }),
+    plugin({ name: 'boot-refusal', boot: () => refusal }),
+    plugin({ name: 'logging-refusal', logging: () => refusal }),
+  ]) {
+    expect(await testPlugin(unit).boot()).toBe(refusal);
+  }
 });

@@ -13,29 +13,29 @@
  * `outboxJobs()` lets `journalWorker({ jobs })` run the same `jobs(...)` slices from Postgres.
  */
 import type { AnyFeatureSlice, Driver, MountedFeature } from '@arki/dot/feature';
+import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/plugin';
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
-import type { CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
 import { driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
-import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
+import type { DurableSchedulerOptions } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
+import type { Outbox, OutboxOptions, OutboxTx, Scheduled, ScheduleOptions } from './outbox/outbox.ts';
+import type { QueueRegistry } from './outbox/registry.ts';
 import type { QueueClient, QueueClientHandle, QueueClientOptions } from './queue-client.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
-import type { Outbox, OutboxOptions, OutboxTx, Scheduled, ScheduleOptions } from './outbox/outbox.ts';
-import type { QueueRegistry } from './outbox/registry.ts';
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 import { debugWorker } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
 import { triggerJob } from './job-builder.ts';
-import { createQueueClient } from './queue-client.ts';
 import { outbox } from './outbox/outbox.ts';
 import { collectQueueDefinitions, isFlowDefinition, isJobDefinition, isScheduleDefinition } from './outbox/registry.ts';
 import { outboxRunner } from './outbox/runner.ts';
+import { createQueueClient } from './queue-client.ts';
 
 export { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 export type { QueueClient, QueueClientOptions } from './queue-client.ts';
@@ -380,13 +380,17 @@ export type DurableSchedulerPluginOptions = DurableSchedulerOptions & {
  */
 export function durableScheduler(
   options: DurableSchedulerOptions,
-): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }, EmptyShape, 'durable-scheduler'>;
+): ReturnType<typeof createDurableSchedulerPlugin<'durable-scheduler'>>;
 export function durableScheduler<N extends string>(
   options: DurableSchedulerOptions & { readonly name: N },
-): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }, EmptyShape, N>;
+): ReturnType<typeof createDurableSchedulerPlugin<N>>;
 export function durableScheduler(options: DurableSchedulerPluginOptions) {
+  return createDurableSchedulerPlugin(options.name ?? 'durable-scheduler', options);
+}
+
+function createDurableSchedulerPlugin<const Name extends string>(name: Name, options: DurableSchedulerOptions) {
   return plugin({
-    name: options.name ?? 'durable-scheduler',
+    name,
     configure(ctx) {
       ctx.declareProvides('durable-scheduler');
     },
@@ -411,14 +415,18 @@ export type QueuePluginOptions = QueueClientOptions & {
  * before `.features()`. Its factory opens no connection: each job's BullMQ
  * queue opens on its first `enqueue`. Stop closes them.
  */
-export function queue(options: QueueClientOptions): Plugin<EmptyShape, { readonly queue: QueueClient }, EmptyShape, 'queue'>;
+export function queue(options: QueueClientOptions): ReturnType<typeof createQueuePlugin<'queue'>>;
 export function queue<N extends string>(
   options: QueueClientOptions & { readonly name: N },
-): Plugin<EmptyShape, { readonly queue: QueueClient }, EmptyShape, N>;
+): ReturnType<typeof createQueuePlugin<N>>;
 export function queue(options: QueuePluginOptions) {
+  return createQueuePlugin(options.name ?? 'queue', options);
+}
+
+function createQueuePlugin<const Name extends string>(name: Name, options: QueueClientOptions) {
   let handle: QueueClientHandle | undefined;
   return plugin({
-    name: options.name ?? 'queue',
+    name,
     configure(ctx) {
       ctx.registerProjection({
         format: 'queue-topology',
@@ -606,13 +614,17 @@ export type OutboxPluginOptions = OutboxOptions & {
  * the job row in the caller's transaction. Opens nothing and needs nothing; mount it with `.use()`
  * in every process that schedules, and run the rows with `journalWorker({ jobs: outboxJobs(...) })`.
  */
-export function outboxPlugin(options: OutboxOptions): Plugin<EmptyShape, { readonly schedule: Outbox }, EmptyShape, 'outbox'>;
+export function outboxPlugin(options: OutboxOptions): ReturnType<typeof createOutboxPlugin<'outbox'>>;
 export function outboxPlugin<N extends string>(
   options: OutboxOptions & { readonly name: N },
-): Plugin<EmptyShape, { readonly schedule: Outbox }, EmptyShape, N>;
+): ReturnType<typeof createOutboxPlugin<N>>;
 export function outboxPlugin(options: OutboxPluginOptions) {
+  return createOutboxPlugin(options.name ?? 'outbox', options);
+}
+
+function createOutboxPlugin<const Name extends string>(name: Name, options: OutboxOptions) {
   return plugin({
-    name: options.name ?? 'outbox',
+    name,
     configure(ctx) {
       ctx.declareProvides('outbox');
     },
@@ -728,7 +740,8 @@ export function outboxProducers<const TJobs extends JobsRecord>(jobsToProduce: T
       jobs: ({ schedule, $plugin }): OutboxProducers<TJobs> =>
         // Erasure seam: each producer takes its own job's input; `producersOf` walks them untyped.
         producersOf(jobsToProduce, $plugin, job => ({
-          runAfter: (tx: OutboxTx, args: unknown, options?: ScheduleOptions) => schedule.runAfter(tx, job, args, options),
+          runAfter: (tx: OutboxTx, args: unknown, options?: ScheduleOptions) =>
+            schedule.runAfter(tx, job, args, options),
           runAt: (tx: OutboxTx, args: unknown, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>) =>
             schedule.runAt(tx, job, args, at, options),
         })) as OutboxProducers<TJobs>,

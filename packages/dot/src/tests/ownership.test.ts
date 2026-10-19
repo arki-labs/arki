@@ -29,7 +29,7 @@ describe('plugin ownership', () => {
     const { serve } = features([]);
     const { entrypoints } = serve(plugin({ name: 'driver' }));
     const { configure, boot, start } = entrypoints();
-    const apps = [orThrow(await configure().boot()), orThrow(await boot()), orThrow(await start())];
+    const apps = [orThrow(await orThrow(configure()).boot()), orThrow(await boot()), orThrow(await start())];
     for (const app of apps) {
       expect(app.services.value).toBe(42);
       orThrow(await app.dispose());

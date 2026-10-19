@@ -1,0 +1,327 @@
+/** A void boot annotation can erase returned failures; authoring must retain exact outcomes. */
+import { expectTypeOf } from 'vitest';
+
+import type { FailureOf } from '@arki/failure';
+import { cleanup, resource } from '@arki/async';
+import { defineFailure } from '@arki/failure';
+
+import type {
+  EmptyShape,
+  PluginCloseFailure,
+  PluginOpenFailure,
+  PluginPhaseFailures,
+  Provided,
+} from '../plugin-contract.js';
+import { defineApp } from '../define-app.js';
+import { defineFeature, driven, driver, feature, plug } from '../feature.js';
+import { initPlugins } from '../init-plugins.js';
+import { createPlugin, plugin, rename, service } from '../plugin-contract.js';
+import { testApp, testPlugin } from '../test-harness.js';
+
+const Refused = defineFailure('test.boot_authoring.refused');
+const CloseRefused = defineFailure('test.boot_authoring.close');
+const factory = initPlugins.context<{ count: number }>().create();
+const boot = () => Promise.resolve(Refused());
+const _forms = {
+  direct: plugin({ name: 'direct', boot }),
+  constructed: createPlugin({ name: 'constructed', boot }),
+  object: plug(feature('object', { boot })),
+  keys: factory.plugin({ name: 'keys', boot }),
+  witness: factory.plugin({ name: 'witness', needs: { count: service<number>() }, boot }),
+};
+expectTypeOf<PluginOpenFailure<(typeof _forms)[keyof typeof _forms]>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+expectTypeOf<PluginCloseFailure<(typeof _forms)[keyof typeof _forms]>>().toEqualTypeOf<never>();
+expectTypeOf<PluginPhaseFailures<(typeof _forms)[keyof typeof _forms]>['start']>().toEqualTypeOf<never>();
+
+const _empty = {
+  direct: plugin({
+    name: 'empty',
+    boot() {
+      /* Empty boot must infer undefined. */
+    },
+  }),
+  constructed: createPlugin({
+    name: 'empty',
+    async boot() {
+      await Promise.resolve();
+    },
+  }),
+  object: plug(
+    feature('empty', {
+      async boot() {
+        await Promise.resolve();
+      },
+    }),
+  ),
+  keys: factory.plugin({
+    name: 'empty',
+    async boot() {
+      await Promise.resolve();
+    },
+  }),
+  witness: factory.plugin({
+    name: 'empty',
+    needs: {},
+    boot() {
+      /* Empty boot must infer undefined. */
+    },
+  }),
+};
+expectTypeOf<PluginOpenFailure<(typeof _empty)[keyof typeof _empty]>>().toEqualTypeOf<never>();
+expectTypeOf<PluginCloseFailure<(typeof _empty)[keyof typeof _empty]>>().toEqualTypeOf<never>();
+const _mixed = {
+  direct: plugin({
+    name: 'mixed',
+    async boot() {
+      await Promise.resolve();
+    },
+    start: () => Refused(),
+  }),
+  constructed: createPlugin({
+    name: 'mixed',
+    boot() {
+      /* Empty boot must infer undefined. */
+    },
+    start: () => Refused(),
+  }),
+  object: plug(
+    feature('mixed', {
+      boot() {
+        /* Empty boot must infer undefined. */
+      },
+      start: () => Refused(),
+    }),
+  ),
+  keys: factory.plugin({
+    name: 'mixed',
+    boot() {
+      /* Empty boot must infer undefined. */
+    },
+    start: () => Refused(),
+  }),
+  witness: factory.plugin({
+    name: 'mixed',
+    needs: {},
+    async boot() {
+      await Promise.resolve();
+    },
+    start: () => Refused(),
+  }),
+};
+expectTypeOf<PluginOpenFailure<(typeof _mixed)[keyof typeof _mixed]>>().toEqualTypeOf<never>();
+expectTypeOf<PluginPhaseFailures<(typeof _mixed)[keyof typeof _mixed]>['start']>().toEqualTypeOf<
+  FailureOf<typeof Refused>
+>();
+
+const _owned = plugin({
+  name: 'owned',
+  needs: { count: service<number>() },
+  provides: {
+    db: ({ count }) =>
+      resource(
+        () => ({ count }),
+        () => CloseRefused(),
+      ),
+  },
+  boot({ db, count, $signal }) {
+    expectTypeOf(db.count).toEqualTypeOf<number>();
+    expectTypeOf(count).toEqualTypeOf<number>();
+    expectTypeOf($signal).toEqualTypeOf<AbortSignal>();
+    return { tidy: cleanup(() => CloseRefused()) };
+  },
+});
+expectTypeOf<PluginOpenFailure<typeof _owned>>().toEqualTypeOf<never>();
+expectTypeOf<PluginCloseFailure<typeof _owned>>().toEqualTypeOf<FailureOf<typeof CloseRefused>>();
+expectTypeOf<Provided<typeof _owned.provides.db>>().toEqualTypeOf<{ count: number }>();
+
+const hidden: () => void = () => Refused();
+const hiddenAsync: () => Promise<void> = () => Promise.resolve(hidden());
+// @ts-expect-error void hides the actual returned failure
+plugin({ name: 'hidden', boot: hidden });
+// @ts-expect-error Promise<void> hides the actual returned failure
+plugin({ name: 'hidden', boot: hiddenAsync });
+// @ts-expect-error void hides the actual returned failure
+createPlugin({ name: 'hidden', boot: hidden });
+// @ts-expect-error Promise<void> hides the actual returned failure
+createPlugin({ name: 'hidden', boot: hiddenAsync });
+// @ts-expect-error void hides the actual returned failure
+feature('hidden', { boot: hidden });
+// @ts-expect-error Promise<void> hides the actual returned failure
+feature('hidden', { boot: hiddenAsync });
+// @ts-expect-error void hides the actual returned failure
+factory.plugin({ name: 'hidden', boot: hidden });
+// @ts-expect-error Promise<void> hides the actual returned failure
+factory.plugin({ name: 'hidden', boot: hiddenAsync });
+// @ts-expect-error void hides the actual returned failure
+factory.plugin({ name: 'hidden', needs: {}, boot: hidden });
+// @ts-expect-error Promise<void> hides the actual returned failure
+factory.plugin({ name: 'hidden', needs: {}, boot: hiddenAsync });
+// @ts-expect-error partial explicit generics cannot restore permissive void inference
+plugin<EmptyShape>({ name: 'hidden', boot: hidden });
+// @ts-expect-error partial explicit generics cannot restore permissive void inference
+feature<'hidden'>('hidden', { boot: hiddenAsync });
+// @ts-expect-error partial explicit generics cannot restore permissive void inference
+factory.plugin<readonly []>({ name: 'hidden', boot: hidden });
+
+// No factory may erase the refusal it actually returns behind void.
+const erasedProvider: () => void = () => Refused();
+// @ts-expect-error A provider's value and failure channels must remain visible.
+plugin({ name: 'void-provider', provides: { value: erasedProvider } });
+
+// Replaced callbacks are the sole source of provider and boot ownership.
+const Original = defineFailure('test.boot_authoring.original');
+const base = plugin({
+  name: 'source',
+  provides: { count: (): number | FailureOf<typeof Original> => Original() },
+  boot: () => Original(),
+});
+const replaced = { ...base, factories: { count: () => 1 }, hooks: { boot: () => Refused() } };
+expectTypeOf<PluginOpenFailure<typeof replaced>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+expectTypeOf<PluginCloseFailure<typeof replaced>>().toEqualTypeOf<never>();
+const _renamedSource = rename(replaced, { count: 'total' });
+expectTypeOf<PluginOpenFailure<typeof _renamedSource>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+const _providerReplacement = {
+  ...plugin({ name: 'source', provides: { count: () => 1 } }),
+  factories: { count: () => Refused() },
+};
+expectTypeOf<PluginOpenFailure<typeof _providerReplacement>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+const _featureReplacement = plug({
+  ...feature('source', {
+    provides: { count: (): number | FailureOf<typeof Original> => Original() },
+    boot: () => Original(),
+  }),
+  factories: { count: () => 1 },
+  boot: () => Refused(),
+});
+expectTypeOf<PluginOpenFailure<typeof _featureReplacement>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+const _keysReplacement = {
+  ...factory.plugin({ name: 'source', boot: () => Original() }),
+  hooks: { boot: () => Refused() },
+};
+expectTypeOf<PluginOpenFailure<typeof _keysReplacement>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+
+const _replacedOwnership = {
+  ...plugin({
+    name: 'ownership',
+    provides: {
+      value: () =>
+        resource(
+          () => 1,
+          () => Original(),
+        ),
+    },
+    boot: () => ({ private: cleanup(() => Original()) }),
+  }),
+  factories: {
+    value: () =>
+      resource(
+        () => 2,
+        () => CloseRefused(),
+      ),
+  },
+  hooks: { boot: () => ({ private: cleanup(() => Refused()) }) },
+};
+expectTypeOf<PluginOpenFailure<typeof _replacedOwnership>>().toEqualTypeOf<never>();
+expectTypeOf<PluginCloseFailure<typeof _replacedOwnership>>().toEqualTypeOf<
+  FailureOf<typeof CloseRefused> | FailureOf<typeof Refused>
+>();
+
+// Handles keep their original service contract across all mount forms.
+const _serviceSource = plugin({ name: 'service-source', provides: { value: () => 42 } });
+const _badService = { ..._serviceSource, factories: { value: () => 'text' } };
+// @ts-expect-error replacement success no longer satisfies the original number handle
+defineApp('bad-use').use(_badService);
+// @ts-expect-error tuple registration validates the same contract
+defineApp('bad-all').useAll([_badService]);
+// @ts-expect-error infrastructure registration validates the same contract
+defineApp('bad-infra').infra(_badService);
+// @ts-expect-error a driver cannot change the service behind its handles
+defineApp('bad-serve').serve(_badService);
+// @ts-expect-error variadic driving registration validates the same contract
+defineApp('bad-entrypoints').entrypoints(_badService);
+// @ts-expect-error bound driving adapters retain their factory contract
+defineApp('bad-driver').serve(driver(() => _badService));
+// @ts-expect-error bound driven adapters retain their factory contract
+defineApp('bad-driven').use(driven(() => _badService));
+// @ts-expect-error testing helpers retain the production mount checks
+testApp([_badService]);
+const _badServiceList = [_badService];
+// @ts-expect-error dynamic test arrays still know their elements' original handles
+testApp(_badServiceList);
+// @ts-expect-error rename must preserve the original local factory contract
+defineApp('bad-rename').use(rename(_badService, { value: 'renamed' }));
+const _renamedServiceSource = rename(_serviceSource, { value: 'renamed' });
+// @ts-expect-error replacements after rename retain the original local contract
+defineApp('bad-renamed-replacement').use({ ..._renamedServiceSource, factories: { value: () => 'text' } });
+// @ts-expect-error removed factories cannot leave old handles behind
+defineApp('missing-factory').use({ ..._serviceSource, factories: {} });
+// @ts-expect-error new factory keys have no minted handles
+defineApp('extra-factory').use({ ..._serviceSource, factories: { value: () => 42, extra: () => 1 } });
+const _objectSource = feature('object-source', { provides: { value: () => 42 } });
+// @ts-expect-error object features preserve the original factory contract
+defineApp('bad-object').features([{ ..._objectSource, factories: { value: () => 'text' } }]);
+const _qualifiedBad = defineFeature('parent.child').infra(_badService).usecases({}).entrypoints();
+// @ts-expect-error qualification must preserve the original local factory contract
+defineApp('bad-qualified').features([_qualifiedBad]);
+const _remappedBad = defineFeature('parent').features(_qualifiedBad).usecases({}).entrypoints();
+// @ts-expect-error child remapping must preserve the original local factory contract
+defineApp('bad-remapped').features([_remappedBad]);
+
+const _fallibleService = {
+  ..._serviceSource,
+  factories: { value: (): number | FailureOf<typeof Refused> => Refused() },
+};
+defineApp('new-provider-failure').use(_fallibleService);
+defineApp('always-failed-provider').use({ ..._serviceSource, factories: { value: () => Refused() } });
+defineApp('same-provider-value').use({ ..._serviceSource, factories: { value: () => 17 } });
+defineApp('narrower-provider-value').use({ ..._serviceSource, factories: { value: (): 17 => 17 } });
+defineApp('renamed-provider-failure').use(rename(_fallibleService, { value: 'renamed' }));
+expectTypeOf<PluginOpenFailure<typeof _fallibleService>>().toEqualTypeOf<FailureOf<typeof Refused>>();
+
+// The focused harness uses the same live callback contracts as app mounting.
+const _harness = testPlugin(_forms.direct);
+expectTypeOf<Extract<FailureOf<typeof _harness.boot>, FailureOf<typeof Refused>>>().toEqualTypeOf<
+  FailureOf<typeof Refused>
+>();
+const _harnessOriginal = plugin({ name: 'harness', provides: { value: () => 42 } });
+// @ts-expect-error A test cannot replace a number factory with a string behind the original handle.
+testPlugin({ ..._harnessOriginal, factories: { value: () => 'changed' } });
+
+const erasedBoot: () => void = () => Refused();
+const opaqueBoot: () => unknown = () => Refused();
+const _erasedBootUnit = { ..._harnessOriginal, hooks: { boot: erasedBoot } };
+// @ts-expect-error A spread replacement cannot erase its returned refusal at app mounting.
+defineApp('erased-boot').use(_erasedBootUnit);
+// @ts-expect-error A focused test must keep the same boot contract as production.
+testPlugin(_erasedBootUnit);
+// @ts-expect-error A list mount cannot hide an opaque replacement boot.
+testApp([{ ..._harnessOriginal, hooks: { boot: opaqueBoot } }]);
+// @ts-expect-error Malformed plans cannot cross the mount boundary through a spread replacement.
+defineApp('malformed-boot').use({ ..._harnessOriginal, hooks: { boot: () => ({ task: () => Refused() }) } });
+declare const chooseValid: boolean;
+const _maybeErasedBoot = chooseValid ? _harnessOriginal : _erasedBootUnit;
+// @ts-expect-error One valid branch must not erase the invalid branch's source diagnostic.
+defineApp('union-boot').use(_maybeErasedBoot);
+
+const _unionHooks: { start: () => undefined } | { boot: typeof erasedBoot } = chooseValid
+  ? {
+      start: () => {
+        /* The successful branch contributes no phase failure. */
+      },
+    }
+  : { boot: erasedBoot };
+// @ts-expect-error A hook union cannot hide its invalid boot branch behind absent keys.
+defineApp('nested-union-boot').use({ ..._harnessOriginal, hooks: _unionHooks });
+const _phaseHooks: { stop: () => undefined } | { start: typeof Refused } = chooseValid
+  ? {
+      stop: () => {
+        /* The successful branch contributes no phase failure. */
+      },
+    }
+  : { start: Refused };
+expectTypeOf<PluginPhaseFailures<{ hooks: typeof _phaseHooks }>['start']>().toEqualTypeOf<FailureOf<typeof Refused>>();
+const _unionFactories: { first: () => number } | { second: typeof Refused } = chooseValid
+  ? { first: () => 1 }
+  : { second: Refused };
+// @ts-expect-error Disjoint factory branches still add keys to an originally empty provider.
+defineApp('nested-union-factories').use({ ...plugin({ name: 'empty-contract' }), factories: _unionFactories });

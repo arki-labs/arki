@@ -1,3 +1,5 @@
+import { describe, expect, expectTypeOf, it } from 'vitest';
+
 /**
  * `defineFeature` — the chain form of a feature (RFC 2026-10-15-dot-feature-builder).
  *
@@ -7,8 +9,7 @@
  * declaration. Each test below pins one promise of the design; most of them
  * failed on the Revision 1 prototype (see "regressions" at the bottom).
  */
-import { orThrow } from '@arki/failure';
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type {
   AnyFeatureCore,
@@ -19,6 +20,7 @@ import type {
   ServicesBag,
   UsecaseGuard,
 } from '../feature.js';
+import type { SupervisedUsecase, SupervisedUsecases } from '../kernel/usecase.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import {
@@ -158,7 +160,11 @@ const digest = digestLogic
     rpc(digestContract, procedures(digestLogic)),
     schedules(digestLogic, [{ name: 'nightly-preview', handler: ({ usecases }) => usecases.preview('u1') }]),
     effects(digestLogic, [
-      { name: 'send-on-request', events: ['DigestRequested'], run: ({ usecases }) => usecases.sendDue('u1') },
+      {
+        name: 'send-on-request',
+        events: ['DigestRequested'],
+        run: async ({ usecases }) => orThrow(await usecases.sendDue('u1')),
+      },
     ]),
   );
 
@@ -176,16 +182,18 @@ describe('the chain: each step typed from the earlier ones', () => {
   it('runs a request through the handles: needs, private infra and usecases resolve from the services bag', async () => {
     const app = orThrow(await boot(digest));
     // 'u1' is pro: 6 items survive the cap — the usecase saw both the store and billing.
-    const preview = await digest.router.preview(app.services, 'u1');
+    const preview = orThrow(await digest.router.preview(app.services, 'u1'));
     expect(preview?.items).toHaveLength(6);
     orThrow(await app.dispose());
   });
 
   it('publishes typed public handles another feature can need', async () => {
     const app = orThrow(await boot(digest));
-    const result = await app.services.digests.previewFor('u2');
+    const result = orThrow(await app.services.digests.previewFor('u2'));
     expect(result?.items).toHaveLength(3);
-    expectTypeOf<Provided<typeof digest.provides.digests>['previewFor']>().toEqualTypeOf<ReturnType<typeof preview>>();
+    expectTypeOf<Provided<typeof digest.provides.digests>['previewFor']>().toEqualTypeOf<
+      SupervisedUsecase<ReturnType<typeof preview>>
+    >();
     orThrow(await app.dispose());
   });
 
@@ -213,14 +221,14 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('types the usecases deps, the handles and the entrypoint services from the chain', () => {
-    expectTypeOf<Provided<typeof digestLogic.handles.usecases>>().toEqualTypeOf<DigestUsecases>();
+    expectTypeOf<Provided<typeof digestLogic.handles.usecases>>().toEqualTypeOf<SupervisedUsecases<DigestUsecases>>();
     type HandlerContext = ReturnType<typeof resolveNeeds<typeof digestLogic.handles>>;
     expectTypeOf<HandlerContext>().toHaveProperty('mailer');
     expectTypeOf<HandlerContext>().toHaveProperty('plans');
     expectTypeOf<HandlerContext['store']>().toEqualTypeOf<Store>();
     // `db` is the feature's own need (the store takes it from the feature), so a handler sees it too.
     expectTypeOf<HandlerContext['db']>().toEqualTypeOf<Db>();
-    expectTypeOf<DepsOf<typeof digestLogic>['usecases']>().toEqualTypeOf<DigestUsecases>();
+    expectTypeOf<DepsOf<typeof digestLogic>['usecases']>().toEqualTypeOf<SupervisedUsecases<DigestUsecases>>();
     // Before `.usecases()`, `DepsOf` is what a usecase may ask for: needs + infra, and no `usecases` yet.
     expectTypeOf<keyof DepsOf<typeof digestDeps>>().toEqualTypeOf<'db' | 'plans' | 'store' | 'stats' | 'mailer'>();
   });
@@ -261,10 +269,12 @@ describe('the chain: each step typed from the earlier ones', () => {
         ({ plans, store: digests }) =>
         async (userId: string) => ({ plan: await plans.planOf(userId), pending: await digests.pendingFor(userId) }),
     });
-    expectTypeOf<Provided<typeof logic.handles.usecases>>().toEqualTypeOf<{
-      readonly count: () => Promise<number>;
-      readonly planOf: (userId: string) => Promise<{ plan: string; pending: Digest | null }>;
-    }>();
+    expectTypeOf<Provided<typeof logic.handles.usecases>>().toEqualTypeOf<
+      SupervisedUsecases<{
+        readonly count: () => Promise<number>;
+        readonly planOf: (userId: string) => Promise<{ plan: string; pending: Digest | null }>;
+      }>
+    >();
     expect(logic.name).toBe('x');
   });
 
@@ -312,10 +322,10 @@ describe('the chain: each step typed from the earlier ones', () => {
           fail ? null : store.pendingFor('u1'),
     });
     expectTypeOf<Provided<typeof logic.handles.usecases>['pendingOrNull']>().toEqualTypeOf<
-      ReturnType<typeof pendingOrNull>
+      SupervisedUsecase<ReturnType<typeof pendingOrNull>>
     >();
     expectTypeOf<Provided<typeof logic.handles.usecases>['inline']>().toEqualTypeOf<
-      (fail?: boolean) => Promise<Digest | null> | null
+      SupervisedUsecase<(fail?: boolean) => Promise<Digest | null> | null>
     >();
     expect(logic.name).toBe('x');
     const unused = () => {
@@ -404,7 +414,7 @@ describe('compilation into kernel units', () => {
     expect(featureUnit.actions).toContainEqual(
       expect.objectContaining({ id: 'send-on-request.run', meta: { events: ['DigestRequested'] } }),
     );
-    const configured = defineApp('static').infra(database, billing).features([digest]).configure();
+    const configured = orThrow(defineApp('static').infra(database, billing).features([digest]).configure());
     expect(configured.manifest.actions).toContainEqual(
       expect.objectContaining({ id: 'send-on-request.run', plugin: 'digest' }),
     );
@@ -413,12 +423,14 @@ describe('compilation into kernel units', () => {
   it('keeps the kernel order checks: the feature before its own infra (E020), or without it (E012)', async () => {
     const [storeUnit, mailerUnit, featureUnit] = digest.plugins();
     // @ts-expect-error -- the feature before its own infra: the tuple guard on testApp's argument refuses it too
-    await expect(testApp([database, billing, featureUnit, storeUnit, mailerUnit]).start()).rejects.toMatchObject({
-      code: 'ARKI_DOT_E020',
+    await expect(testApp([database, billing, featureUnit, storeUnit, mailerUnit]).start()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: 'ARKI_DOT_E020' },
     });
     // @ts-expect-error -- the feature without its infra
-    await expect(testApp([database, billing, featureUnit]).start()).rejects.toMatchObject({
-      code: 'ARKI_DOT_E012',
+    await expect(testApp([database, billing, featureUnit]).start()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
+      cause: { code: 'ARKI_DOT_E012' },
     });
   });
 });
@@ -431,7 +443,7 @@ describe('override (tests swap infra before compilation)', () => {
     expectTypeOf(faked).toEqualTypeOf<typeof digest>();
     expect(faked.plugins().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
     const app = orThrow(await boot(faked));
-    const preview = await faked.router.preview(app.services, 'u1');
+    const preview = orThrow(await faked.router.preview(app.services, 'u1'));
     expect(preview?.id).toBe('fake');
     expect(await runnables(app.services['feature.digest'].journal)[0]?.run()).toBe('mailed fake');
     orThrow(await app.dispose());
@@ -508,7 +520,7 @@ describe('routerFor: mount keys written once, in the app contract', () => {
 
 describe('defineApp: .infra() / .features() / .entrypoints()', () => {
   it('mounts .infra() units in argument order, so `log(...)` given first boots first', () => {
-    const configured = defineApp('order').infra(database, billing, store).configure();
+    const configured = orThrow(defineApp('order').infra(database, billing, store).configure());
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['database', 'billing', 'store']);
   });
 
@@ -539,11 +551,9 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
         },
       }),
     );
-    const app = orThrow(await defineApp('mixed')
-      .infra(database, billing)
-      .features([legacy, digest])
-      .entrypoints(scheduler)
-      .start());
+    const app = orThrow(
+      await defineApp('mixed').infra(database, billing).features([legacy, digest]).entrypoints(scheduler).start(),
+    );
     expect(seen.map(entry => (Array.isArray(entry) ? entry[0] : undefined))).toEqual(['legacy', 'digest']);
     expect(app.manifest.plugins.find(p => p.name === 'scheduler')?.role).toBe('driving');
     orThrow(await app.dispose());

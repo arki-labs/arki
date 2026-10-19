@@ -19,7 +19,7 @@ import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from 
 import type { RedisStore } from '@arki/lock/redis';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks, LockError, LockHeld } from '@arki/lock';
 import { locks } from '@arki/lock/dot';
 import { memoryStore } from '@arki/lock/memory';
@@ -159,7 +159,10 @@ describe('schedules(core, [{ lock }])', () => {
     await clock.advance('1s');
     await expect(run).resolves.toMatchObject({
       status: 'handler-failed',
-      cause: expect.objectContaining({ message: 'handler broke' }),
+      cause: expect.objectContaining({
+        code: UnexpectedDefect.code,
+        cause: new Error('handler broke'),
+      }),
     });
     await orThrow(started.dispose());
   });
@@ -227,7 +230,7 @@ describe('schedules(core, [{ lock }])', () => {
   it('shows the lock policy in the manifest, before anything runs', () => {
     const { locks: service } = memoryLocks();
     const { app } = buildApp(service);
-    const actions = app.configure().manifest.actions;
+    const actions = orThrow(app.configure()).manifest.actions;
     const find = (id: string) => actions.find(action => action.id === id);
     expect(find('cluster-assign.fire')?.meta).toMatchObject({
       locked: true,
@@ -244,7 +247,7 @@ describe('schedules(core, [{ lock }])', () => {
   it('puts a one-line lock summary on locked actions and a warning on unlocked ones (host clock: overlapping triggers), so `dot explain` shows who can run twice', () => {
     const { locks: service } = memoryLocks();
     const { app } = buildApp(service);
-    const actions = app.configure().manifest.actions;
+    const actions = orThrow(app.configure()).manifest.actions;
     const summary = (id: string) => actions.find(action => action.id === id)?.summary;
     // The locker exists only at boot, so the declared text has the key and no store details.
     expect(summary('cluster-assign.fire')).toBe('lock cluster-assign');
@@ -440,11 +443,13 @@ describe('booted lock summary', () => {
       needs,
       use: [schedules(needs, [{ name: 'job', every: '1m', lock: true, handler: () => 'done' }])],
     });
-    const configured = defineApp('boot-summary')
-      .use(locks({ namespace: 'ns', store: () => memoryStore() }))
-      .features([billing])
-      .entrypoints(schedule({ clock: 'host' }))
-      .configure();
+    const configured = orThrow(
+      defineApp('boot-summary')
+        .use(locks({ namespace: 'ns', store: () => memoryStore() }))
+        .features([billing])
+        .entrypoints(schedule({ clock: 'host' }))
+        .configure(),
+    );
     const staticSummary = summaryOf(configured.manifest.actions);
     const booted = await orThrow(configured.boot());
     expect(staticSummary).toBe('lock job');

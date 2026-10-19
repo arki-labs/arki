@@ -14,8 +14,8 @@ import { z } from 'zod';
 
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, plugin, rename, service, token } from '@arki/dot/plugin';
-import { orThrow } from '@arki/failure';
+import { defineApp, DotLifecycleErrorCode, plugin, rename, service, token } from '@arki/dot/plugin';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { RouteBundle } from '../bundle.js';
 import { endpoints, routes, rpcMount } from '../bundle.js';
@@ -152,7 +152,9 @@ describe('http() plugin', () => {
           store.all(),
     });
     const orderRoutes = (c: typeof core) =>
-      coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });
+      coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => orThrow(usecases.list())), {
+        contracts: [listOrders],
+      });
     const orders = core.entrypoints(orderRoutes(core));
     const status = feature('status', {
       actions: [health],
@@ -291,7 +293,7 @@ describe('http() plugin', () => {
     await orThrow(app.dispose());
   });
 
-  it('throws the E005 drain watchdog when handlers outlive the budget', async () => {
+  it('returns the E005 drain watchdog when handlers outlive the budget', async () => {
     const hang = route.get('/hang', { id: 'hang', output: z.object({ done: z.boolean() }) });
     const HangRoutes = token<RouteBundle>()('hang.routes');
     const hangPlugin = plugin({
@@ -319,15 +321,18 @@ describe('http() plugin', () => {
     const doomed = fetch(`${url!}/hang`, { signal: controller.signal }).catch(() => 'severed');
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    let caught: unknown;
-    try {
-      await orThrow(app.stop());
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeDefined();
-    const failures = (caught as { failures?: { error: { code?: string } }[] }).failures ?? [];
-    expect(failures.some(f => f.error.code === HTTP_ERROR_CODES.drainTimeout)).toBe(true);
+    const failure = await app.stop();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    if (!UnexpectedDefect.is(failure)) throw new Error('Expected the drain watchdog defect');
+    expect(failure.cause).toMatchObject({
+      code: DotLifecycleErrorCode.StopFailed,
+      phase: 'stop',
+      plugin: 'http',
+      cause: {
+        code: HTTP_ERROR_CODES.drainTimeout,
+        message: expect.stringMatching(/1 request\(s\) still in flight after the 100ms drain budget/),
+      },
+    });
     controller.abort();
     expect(await doomed).toBe('severed');
   });
@@ -371,8 +376,8 @@ describe('http() with feature instances', () => {
       reportsCore,
       ({ usecases }) =>
         routes()
-          .bind(listReports, () => ({ region: usecases.region() }))
-          .bind(reportsHome, () => ({ region: usecases.region() })),
+          .bind(listReports, () => ({ region: orThrow(usecases.region()) }))
+          .bind(reportsHome, () => ({ region: orThrow(usecases.region()) })),
       { contracts: [listReports, reportsHome] },
     ),
   );

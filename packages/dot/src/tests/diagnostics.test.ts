@@ -6,8 +6,9 @@
  * message, remediation, and docsUrl.
  */
 
-import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
+
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { plugin } from '../plugin-contract.js';
@@ -21,7 +22,7 @@ describe('DOT diagnostics', () => {
         ctx.registerAction({ id: 'p.ping', binding: 'orpc', direction: 'in' });
       },
     });
-    const configured = defineApp('test').use(p).configure();
+    const configured = orThrow(defineApp('test').use(p).configure());
     const snap = configured.diagnostics;
     expect(snap.snapshotVersion).toBe(2);
     expect(snap.generatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
@@ -70,7 +71,7 @@ describe('DOT diagnostics', () => {
     });
     // The DotApp wrapper isn't returned on failure, but the configure() seam
     // gives us access through a fresh builder. Re-build to inspect.
-    const configured = defineApp('test').use(bad).configure();
+    const configured = orThrow(defineApp('test').use(bad).configure());
     // configure succeeded — to surface boot diagnostics, drive boot via the
     // builder and re-read diagnostics on the configured object.
     expect(await configured.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
@@ -98,7 +99,7 @@ describe('DOT diagnostics', () => {
         throw new Error('boot-boom');
       },
     });
-    const seam = defineApp('test').use(bootBad).configure();
+    const seam = orThrow(defineApp('test').use(bootBad).configure());
     expect(await seam.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
     const snap = seam.diagnostics;
     for (const issue of snap.issues) {

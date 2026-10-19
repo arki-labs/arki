@@ -10,11 +10,13 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { PluginSourceGuard } from '@arki/dot/plugin';
 import { defineApp, rename } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
 import { plugin, service, token } from '@arki/dot/plugin';
 import { orThrow } from '@arki/failure';
 
+import type { journalProjections } from './dot.js';
 import type { OrderId } from './test-support.js';
 import { journal, journalHandlers, journalWorker } from './dot.js';
 import { need } from './handlers.js';
@@ -139,14 +141,11 @@ const typedJournal = typed.compose({});
 
 describe('journal(...) in direct mode', () => {
   it('publishes a journal built with the typed chain as `services.journal`, so a typed app can mount it', async () => {
-    const app = track(
-      await orThrow(
-        defineApp('typed')
-          .use(dbPlugin())
-          .use(journal({ journal: typedJournal }))
-          .boot(),
-      ),
-    );
+    const journalUnit = journal({ journal: typedJournal });
+    // Public adapters retain their callbacks so mounting can validate the authored lifecycle returns.
+    expectTypeOf<PluginSourceGuard<typeof journalUnit>>().toEqualTypeOf<[]>();
+    expectTypeOf<PluginSourceGuard<ReturnType<typeof journalProjections>>>().toEqualTypeOf<[]>();
+    const app = track(await orThrow(defineApp('typed').use(dbPlugin()).use(journalUnit).boot()));
 
     expectTypeOf(app.services.journal).toEqualTypeOf(typedJournal);
     expect(app.services.journal).toBe(typedJournal);
@@ -186,7 +185,7 @@ describe('journal(...) in direct mode', () => {
     // @ts-expect-error -- this journal's effects read `ctx.db` as a `ReportsDb`; the app publishes another database type.
     withPlainDb.use(journal({ journal: reports }));
 
-    expect(withTx.configure().manifest.plugins.map(p => p.name)).toEqual(['db']);
+    expect(orThrow(withTx.configure()).manifest.plugins.map(p => p.name)).toEqual(['db']);
   });
 
   it('runs effects only through a served `journalWorker()`, between start and stop, so none runs during shutdown', async () => {

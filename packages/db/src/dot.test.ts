@@ -49,9 +49,11 @@ describe('@arki/db/dot', () => {
   });
 
   it('contributes a db-kind service to the manifest', () => {
-    const configured = defineApp('db-manifest-test')
-      .use(db({ driver: 'pglite', memory: true, relations }))
-      .configure();
+    const configured = orThrow(
+      defineApp('db-manifest-test')
+        .use(db({ driver: 'pglite', memory: true, relations }))
+        .configure(),
+    );
     expect(configured.manifest.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['db']);
   });
@@ -124,7 +126,7 @@ describe('@arki/db/dot', () => {
     });
     expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });
     const builder = defineApp('db-url-thunk').use(database);
-    builder.configure();
+    orThrow(builder.configure());
     expect(reads).toBe(0);
 
     const caught = await builder.boot();
