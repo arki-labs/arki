@@ -2,7 +2,7 @@
   "name": "@arki/admin",
   "version": "0.0.2",
   "private": true,
-  "description": "Fleet administration contract for ARKI apps \u2014 the shared snapshot schema, app-side request handler, and Foreman-side federation client behind admin.fork.works.",
+  "description": "Fleet administration contract for ARKI apps — the shared snapshot schema, app-side request handler, and Foreman-side federation client behind admin.fork.works.",
   "keywords": [
     "arki",
     "typescript",
@@ -95,10 +95,10 @@
   "dependencies": {
     "@arki/clock": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
-    "zod": "catalog:",
-    "@arki/failure": "workspace:*"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/dot": "workspace:*",

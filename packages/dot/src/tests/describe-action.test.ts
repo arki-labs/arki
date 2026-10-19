@@ -4,6 +4,7 @@
  * post-boot manifest and `dot doctor` show the new one.
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { doctorStatus, renderDoctorText } from '../cli/render-doctor.js';
@@ -27,11 +28,11 @@ describe('$describeAction', () => {
     });
     const configured = defineApp('t').use(owner).configure();
     const staticManifest = configured.manifest;
-    const app = await configured.boot();
+    const app = orThrow(await configured.boot());
 
     expect(staticManifest.actions[0]?.summary).toBe('static text');
     expect(app.manifest.actions[0]?.summary).toBe('full text');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('lets an adapter amend actions in a binding it registered a projection for', async () => {
@@ -45,9 +46,9 @@ describe('$describeAction', () => {
         ctx.$describeAction('job.fire', { summary: 'adapter text' });
       },
     });
-    const app = await defineApp('t').use(feature).use(adapter).configure().boot();
+    const app = orThrow(await defineApp('t').use(feature).use(adapter).configure().boot());
     expect(app.manifest.actions.find(action => action.id === 'job.fire')?.summary).toBe('adapter text');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('lets configure amend the static manifest, for actions of plugins mounted earlier', () => {
@@ -63,7 +64,7 @@ describe('$describeAction', () => {
     expect(configured.manifest.actions[0]?.summary).toBe('configure text');
   });
 
-  it('throws a coded error when the plugin does not own the action', async () => {
+  it('returns a defect when the plugin does not own the action', async () => {
     const owner = plugin({ name: 'owner', actions: [declared] });
     const intruder = plugin({
       name: 'intruder',
@@ -72,7 +73,9 @@ describe('$describeAction', () => {
       },
     });
     const configured = defineApp('t').use(owner).use(intruder).configure();
-    await expect(configured.boot()).rejects.toThrow(/cannot describe action "job\.fire"/);
+    const failure = await configured.boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: { message: expect.stringMatching(/cannot describe action "job\.fire"/) } });
   });
 
   it('shows the summary under the action in the doctor text', async () => {
@@ -83,11 +86,11 @@ describe('$describeAction', () => {
         ctx.$describeAction('job.fire', { summary: 'full text' });
       },
     });
-    const app = await defineApp('t').use(owner).configure().boot();
+    const app = orThrow(await defineApp('t').use(owner).configure().boot());
     const { ui, text } = textUi();
     const diagnostics = app.diagnostics;
     renderDoctorText({ ...diagnostics, status: doctorStatus(diagnostics) }, ui);
     expect(text()).toContain('jobs:job.fire (plugin: owner)\n      ↳ full text');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });

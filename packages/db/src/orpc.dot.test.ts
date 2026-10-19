@@ -18,6 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } f
 import type { ServicesBag } from '@arki/dot/feature';
 import { defineApp } from '@arki/dot';
 import { routerFor } from '@arki/dot/feature';
+import { orThrow } from '@arki/failure';
 
 import type { RequestContext } from './__fixtures__/dot-app/src/core/orpc.js';
 import type { AccountsTx } from './__fixtures__/dot-app/src/features/accounts/feature.js';
@@ -54,25 +55,25 @@ afterAll(async () => {
 
 describe('transactionalProcedure in a Dot feature', () => {
   it('commits a transfer; the usecase reads its own writes through the bound repos', async () => {
-    const app = await start();
+    const app = await orThrow(start());
     try {
       const rpc = clientFor(app.services);
       expect(await rpc.accounts.transfer({ from: 'a', to: 'b', cents: 30 })).toEqual({ from: 70, to: 130 });
       expect(await rpc.accounts.balance({ id: 'b' })).toBe(130);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
   it('rolls back a failed transfer; the boot-bound repositories still read the pool, untouched', async () => {
-    const app = await start();
+    const app = await orThrow(start());
     try {
       const rpc = clientFor(app.services);
       await expect(rpc.accounts.transfer({ from: 'a', to: 'b', cents: 500 })).rejects.toBeDefined();
       expect(await rpc.accounts.balance({ id: 'a' })).toBe(100);
       expect(await app.services['accounts.usecases'].balance('b')).toBe(100);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 

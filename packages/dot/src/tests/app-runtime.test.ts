@@ -9,9 +9,15 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { createAppRuntime } from '../runtime.js';
+import { resource, ScopeFailed } from '@arki/async';
+import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+
 import { defineApp } from '../define-app.js';
 import { plugin } from '../plugin-contract.js';
+import { createAppRuntime, RuntimeReleaseFailed, RuntimeReplaced } from '../runtime.js';
+
+const Unavailable = defineFailure('runtime_test.unavailable');
+const ReleaseRefused = defineFailure('runtime_test.release_refused');
 
 /** A fake `import.meta.hot` per module instance; `replace()` is the hot update. */
 function hotModule(data: Record<string, unknown>) {
@@ -62,7 +68,7 @@ describe('createAppRuntime', () => {
           flaky: () => {
             if (failNext) {
               failNext = false;
-              throw new Error('database not up yet');
+              return Unavailable();
             }
             return 'up';
           },
@@ -71,11 +77,12 @@ describe('createAppRuntime', () => {
     );
     const runtime = createAppRuntime(app);
 
-    await expect(runtime.get()).rejects.toThrow();
+    expect(Unavailable.is(await runtime.get())).toBe(true);
     const [a, b] = await Promise.all([runtime.get(), runtime.get()]);
     expect(a).toBe(b);
-    expect(a.services.flaky).toBe('up');
-    await a.dispose();
+    const started = orThrow(a);
+    expect(started.services.flaky).toBe('up');
+    await started.dispose();
   });
 
   it('starts the replacing module only after the replaced app finished disposing', async () => {
@@ -87,7 +94,7 @@ describe('createAppRuntime', () => {
     first.replace();
 
     const second = hotModule(data);
-    const started = await createAppRuntime(app, { hot: second.hot }).get();
+    const started = orThrow(await createAppRuntime(app, { hot: second.hot }).get());
 
     expect(counts.maxLive).toBe(1);
     expect(counts.live).toBe(1);
@@ -102,8 +109,8 @@ describe('createAppRuntime', () => {
     await oldRuntime.get();
     old.replace();
 
-    await expect(oldRuntime.get()).rejects.toThrow(/replaced by a hot update/);
-    const current = await createAppRuntime(app, { hot: hotModule(data).hot }).get();
+    expect(RuntimeReplaced.is(await oldRuntime.get())).toBe(true);
+    const current = orThrow(await createAppRuntime(app, { hot: hotModule(data).hot }).get());
     await current.dispose();
   });
 
@@ -118,8 +125,71 @@ describe('createAppRuntime', () => {
     first.replace();
     expect(process.listenerCount('SIGTERM')).toBe(before);
 
-    const current = await createAppRuntime(app, { hot: hotModule(data).hot }).get();
+    const current = orThrow(await createAppRuntime(app, { hot: hotModule(data).hot }).get());
     expect(process.listenerCount('SIGTERM')).toBe(before + 1);
     await current.dispose();
+  });
+
+  it('blocks HMR replacement when the previous owner could not release its resource', async () => {
+    let acquisitions = 0;
+    const app = defineApp('exclusive').use(
+      plugin({
+        name: 'lease',
+        provides: {
+          lease: () =>
+            resource(
+              () => ++acquisitions,
+              () => ReleaseRefused(),
+            ),
+        },
+      }),
+    );
+    const data: Record<string, unknown> = {};
+    const old = hotModule(data);
+    orThrow(await createAppRuntime(app, { hot: old.hot }).get());
+    old.replace();
+    const replacement = createAppRuntime(app, { hot: hotModule(data).hot });
+    expect(RuntimeReleaseFailed.is(await replacement.get())).toBe(true);
+    expect(RuntimeReleaseFailed.is(await replacement.get())).toBe(true);
+    expect(acquisitions).toBe(1);
+  });
+
+  it('preserves observer and cleanup defects and refuses another exclusive owner', async () => {
+    let acquisitions = 0;
+    const app = defineApp('observer').use(
+      plugin({
+        name: 'lease',
+        provides: {
+          lease: () =>
+            resource(
+              () => ++acquisitions,
+              () => ReleaseRefused(),
+            ),
+        },
+      }),
+    );
+    const observerDefect = new Error('observer failed');
+    const runtime = createAppRuntime(app, {
+      onStarted() {
+        throw observerDefect;
+      },
+    });
+    const first = await runtime.get();
+    expect(ScopeFailed.is(first)).toBe(true);
+    if (!isFailure(first) || !ScopeFailed.is(first)) throw new Error('Expected both owned failures');
+    expect(first.data).toEqual({ primaryCount: 1, cleanupCount: 1 });
+    expect(RuntimeReleaseFailed.is(await runtime.get())).toBe(true);
+    expect(acquisitions).toBe(1);
+  });
+
+  it('normalizes an unmanaged start rejection and keeps uncertain ownership closed', async () => {
+    const app = defineApp('unmanaged');
+    const defect = new Error('foreign start');
+    const runtime = createAppRuntime({ ...app, start: () => Promise.reject(defect) });
+    const first = await runtime.get();
+    expect(UnexpectedDefect.is(first)).toBe(true);
+    if (!UnexpectedDefect.is(first)) throw new Error('Expected normalized defect');
+    expect(first.cause).toBe(defect);
+    expect(RuntimeReleaseFailed.is(await runtime.get())).toBe(true);
   });
 });

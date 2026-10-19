@@ -60,13 +60,15 @@ describe('mail()', () => {
 
   it('boot provides a typed mailer', async () => {
     const { transport, sent } = recording();
-    const app = await defineApp('mail-boot')
-      .use(mail({ transport, from: 'hi@app.dev' }))
-      .boot();
+    const app = await orThrow(
+      defineApp('mail-boot')
+        .use(mail({ transport, from: 'hi@app.dev' }))
+        .boot(),
+    );
     const result = await app.services.mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
     expect(result).toMatchObject({ id: 'm1' });
     expect(sent[0]?.subject).toBe('Welcome, Ada');
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });
 
@@ -78,16 +80,18 @@ describe('mailOutboxPlugin() and mailJobs()', () => {
 
   it('a mail queued through the service is sent by the journal worker runner', async () => {
     const { transport, sent } = recording();
-    const app = await defineApp('mail-outbox')
-      .use(mail({ transport, from: 'hi@app.dev' }))
-      .use(mailOutboxPlugin({ tables }))
-      .boot();
+    const app = await orThrow(
+      defineApp('mail-outbox')
+        .use(mail({ transport, from: 'hi@app.dev' }))
+        .use(mailOutboxPlugin({ tables }))
+        .boot(),
+    );
     await orThrow(
       db.transaction(tx => app.services.mailOutbox.enqueue(tx, welcome, { name: 'Ada' }, { to: 'ada@example.com' })),
     );
     const runner = await mailJobs().build([], { mailOutbox: app.services.mailOutbox, db });
     while ((await journal.drain(db, { jobs: runner })) > 0);
     expect(sent.map(message => message.to)).toEqual(['ada@example.com']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

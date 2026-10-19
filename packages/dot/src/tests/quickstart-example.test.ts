@@ -8,6 +8,7 @@
  * package, not a reader. The quoted type error is prose; this test pins it to
  * the guard in `define-app.ts`, so a renamed guard cannot leave the page stale.
  */
+import { orThrow } from '@arki/failure';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -17,11 +18,11 @@ const read = (relative: string): string => readFileSync(new URL(relative, import
 
 describe('quickstart example', () => {
   it('boots provider first, places an order through the needed db, and disposes', async () => {
-    const app = await shop.boot();
+    const app = orThrow(await shop.boot());
     expect(app.manifest.plugins.map(entry => entry.name)).toEqual(['database', 'orders']);
     expect(app.services.orders.place(1250)).toEqual({ id: 1, cents: 1250 });
     expect(app.services.db.count()).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('quotes the guard message that the compiler prints for the wrong order', () => {

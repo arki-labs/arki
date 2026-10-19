@@ -157,7 +157,9 @@ composition.
 Mounted in order, the wiring boots and the manifest records the need:
 
 ```ts continue
+import { isFailure } from '@arki/failure';
 const shop = await defineApp('shop').use(apiClientPlugin).use(billing).boot();
+if (isFailure(shop)) throw new Error(shop.code);
 
 const billingEntry = shop.manifest.plugins.find(p => p.name === 'billing');
 if (billingEntry?.dependencies.join() !== 'apiClient') throw new Error('billing should need apiClient');
@@ -197,6 +199,7 @@ const orders = await defineApp('orders')
   .use(db('primary'))
   .use(rename(db('reports'), { db: 'reportsDb' }, 'reports-db'))
   .boot();
+if (isFailure(orders)) throw new Error(orders.code);
 
 if (orders.services.db.label !== 'primary') throw new Error('primary instance lost');
 if (orders.services.reportsDb.label !== 'reports') throw new Error('second instance missing'); // same type
@@ -262,9 +265,11 @@ and consumers acquire it explicitly:
 export const indexer = plugin({
   name: 'indexer',
   needs: { search: searchPlugin.provides.search },
-  async start({ search }) {
+  async boot({ search }) {
     const client = await search.get(); // first call initializes
+    if (isFailure(client)) return client;
     await client.query('warm up');
+    return;
   },
 });
 ```
@@ -280,13 +285,17 @@ import { service } from '@arki/dot';
 export const agnosticIndexer = plugin({
   name: 'agnostic-indexer',
   needs: { search: service.lazy<SearchClient>() },
-  async start({ search }) {
-    await (await search.get()).query('warm up');
+  async boot({ search }) {
+    const client = await search.get();
+    if (isFailure(client)) return client;
+    await client.query('warm up');
+    return;
   },
 });
 
 // Works against a lazy provider (passed through) ...
 const lazyApp = await defineApp('lazy').use(searchPlugin).use(agnosticIndexer).start();
+if (isFailure(lazyApp)) throw new Error(lazyApp.code);
 
 // ... and against an eager one, whose value is lifted and arrives warm.
 const eagerSearch = plugin({
@@ -294,6 +303,7 @@ const eagerSearch = plugin({
   provides: { search: async (): Promise<SearchClient> => connectSearchCluster() },
 });
 const eagerApp = await defineApp('eager').use(eagerSearch).use(agnosticIndexer).start();
+if (isFailure(eagerApp)) throw new Error(eagerApp.code);
 
 await lazyApp.dispose();
 await eagerApp.dispose();
@@ -352,6 +362,7 @@ const SessionsKv = Kv.instance('sessions'); // key 'acme.kv#sessions'
 if (SessionsKv.key !== 'acme.kv#sessions') throw new Error(`unexpected key ${SessionsKv.key}`);
 
 const cacheApp = await defineApp('cache-demo').use(kvPlugin).use(cachePlugin).boot();
+if (isFailure(cacheApp)) throw new Error(cacheApp.code);
 await cacheApp.dispose();
 ```
 
@@ -396,7 +407,8 @@ structured error from a hook — the kernel wraps it into a
 `DiagnosticIssue` with the plugin name attached.
 
 ```ts run expect
-import { defineApp, DotLifecycleError, DotPluginError, plugin } from '@arki/dot';
+import { defineApp, DotPluginError, plugin } from '@arki/dot';
+import { UnexpectedDefect } from '@arki/failure';
 
 const strictBilling = plugin({
   name: 'strict-billing',
@@ -414,22 +426,20 @@ const strictBilling = plugin({
 });
 
 const configured = defineApp('demo').use(strictBilling).configure();
-try {
-  await configured.boot();
-} catch (err) {
-  if (!(err instanceof DotLifecycleError) || !(err.cause instanceof DotPluginError)) throw err;
-  console.log(err.code, err.cause.code);
+const outcome = await configured.boot();
+if (UnexpectedDefect.is(outcome) && outcome.cause instanceof DotPluginError) {
+  console.log(outcome.code, outcome.cause.code);
   console.log(configured.diagnostics.issues.map(issue => `${issue.code} ${issue.plugin}`).join());
 }
 ```
 
 ```text
-ARKI_DOT_E003 BILLING_E001
+failure.unexpected_defect BILLING_E001
 ARKI_DOT_E003 strict-billing
 ```
 
 The kernel records one issue under its own code (`ARKI_DOT_E003`, with the
-plugin name and your message) and rethrows a `DotLifecycleError` whose
+plugin name and your message) and returns an `UnexpectedDefect` whose
 `cause` is your `DotPluginError`. Your `code`, `remediation` and `docsUrl`
 live on `cause`. See [Diagnostics](./diagnostics.md) for the full shape and
 stable code conventions.
@@ -440,12 +450,14 @@ Provides are inferred from the `provides` factories and accumulate through the
 builder:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 
 const a = plugin({ name: 'a', provides: { a: () => 1 } });
 const b = plugin({ name: 'b', provides: { b: () => 'x' } });
 
 const app = await defineApp('demo').use(a).use(b).boot();
+if (isFailure(app)) throw new Error(app.code);
 const first: number = app.services.a;
 const second: string = app.services.b;
 if (first !== 1 || second !== 'x') throw new Error('services lost their values');
@@ -462,6 +474,7 @@ anywhere, including inside hooks.
 against the handle:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
 
@@ -475,6 +488,7 @@ const reports = plugin({
 
 const fakeDb: Db = { query: async () => 'fake' };
 const app = await defineApp('t').use(fake(database.provides.db, fakeDb)).use(reports).boot();
+if (isFailure(app)) throw new Error(app.code);
 if (app.services.report !== 'fake') throw new Error('the fake did not replace the database');
 await app.dispose();
 ```
@@ -496,6 +510,7 @@ composition in module space.
 import { describe, expect, it } from 'vitest';
 
 import { bootTestApp, plugin, testApp } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 // The plugins under test, as ../src/billing-plugin.ts would export them.
 type Client = { ping(): Promise<void> };
@@ -512,6 +527,7 @@ const billing = plugin({
 describe('billing plugin', () => {
   it('publishes a billing service', async () => {
     const app = await bootTestApp([apiClient, billing]);
+    if (isFailure(app)) throw new Error(app.code);
     expect(app.services.billing).toBeDefined();
     await app.dispose();
   });

@@ -18,10 +18,11 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineApp, DotLifecycleError } from '@arki/dot';
+import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { plugin } from '@arki/dot/plugin';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { http } from '@arki/http/dot';
 
 import type { LiveMeta } from '../index.js';
@@ -112,8 +113,8 @@ function teamApp(options: { readonly withoutMemberships?: boolean } = {}) {
 describe('liveQueries with scopes', () => {
   it('fails boot with E002 when a reauthorize table has no trigger', async () => {
     const { app } = teamApp({ withoutMemberships: true });
-    const failure = await app.boot().catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(DotLifecycleError);
+    const failure = await app.boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({
       cause: {
         code: LIVE_ERROR_CODES.triggers,
@@ -124,7 +125,7 @@ describe('liveQueries with scopes', () => {
 
   it('boots with the migration’s maxKeys; a write reaches only its org’s stream; a membership write sends bye', async () => {
     const { app, orgsOf } = teamApp();
-    const started = await app.start();
+    const started = await orThrow(app.start());
     const readers: SseReader[] = [];
     try {
       const url = started.services.httpServer.url();
@@ -153,7 +154,7 @@ describe('liveQueries with scopes', () => {
       expect(await u1.next()).toEqual({ kind: 'bye' });
     } finally {
       for (const reader of readers) await reader.cancel();
-      await started.dispose();
+      await orThrow(started.dispose());
     }
   });
 });

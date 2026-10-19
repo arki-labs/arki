@@ -156,12 +156,14 @@ actionable.
 ## Programmatic access
 
 ```ts run expect
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 
 const database = plugin({ name: 'database', provides: { db: () => ({ ready: true }) } });
 const billing = plugin({ name: 'billing', needs: { db: database.provides.db } });
 
 const app = await defineApp('my-app').use(database).use(billing).boot();
+if (isFailure(app)) throw new Error(app.code);
 
 // Static graph
 console.log(app.manifest.plugins.map(p => p.name).join());

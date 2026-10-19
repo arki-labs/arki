@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { QueueClient } from './dot.ts';
 import type { QueueBuilder, QueueInstance } from './types/builder.ts';
@@ -190,10 +191,12 @@ describe('queue() — the driven client', () => {
       },
     });
 
-    const app = await defineApp('api')
-      .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
-      .features([checkout])
-      .start();
+    const app = await orThrow(
+      defineApp('api')
+        .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
+        .features([checkout])
+        .start(),
+    );
 
     expect(seen?.keyPrefix).toBe('shop:');
     expect(app.services.queue).toBe(seen);
@@ -201,7 +204,7 @@ describe('queue() — the driven client', () => {
       { format: 'queue-topology', binding: 'queue', module: '@arki/queue/projection', plugin: 'queue' },
     ]);
     // Boot opened no connection, so dispose has nothing to drain.
-    await app.dispose();
+    await orThrow(app.dispose());
     expect(app.state).toBe('disposed');
   });
 
@@ -248,22 +251,24 @@ describe('queueWorker() — the driving adapter', () => {
     });
     let contextCalls = 0;
 
-    const app = await defineApp('worker')
-      .use(dependency)
-      .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
-      .features([orders, billing])
-      .serve(
-        queueWorker({
-          q: fakeQ,
-          needs: { dependency: service<Dependency>() },
-          blocking: true,
-          context: ({ dependency: dep }) => {
-            contextCalls += 1;
-            return { dependencyName: dep.name };
-          },
-        }),
-      )
-      .start();
+    const app = await orThrow(
+      defineApp('worker')
+        .use(dependency)
+        .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
+        .features([orders, billing])
+        .serve(
+          queueWorker({
+            q: fakeQ,
+            needs: { dependency: service<Dependency>() },
+            blocking: true,
+            context: ({ dependency: dep }) => {
+              contextCalls += 1;
+              return { dependencyName: dep.name };
+            },
+          }),
+        )
+        .start(),
+    );
 
     // Only features with a jobs() slice contribute; billing is skipped.
     expect(registered).toEqual({ orders: registry });
@@ -288,7 +293,7 @@ describe('queueWorker() — the driving adapter', () => {
       'queue-worker:image:resize.consume',
     ]);
 
-    await app.dispose();
+    await orThrow(app.dispose());
     expect(stopped).toBe(1);
   });
 
@@ -303,11 +308,13 @@ describe('queueWorker() — the driving adapter', () => {
       .handler(() => Promise.resolve({ ok: true }));
     const media = defineFeature('media').entrypoints(jobs(q.registry({ encodeVideo })));
 
-    const app = await defineApp('mixed-worker')
-      .infra(dependency, queue({ connection: REDIS_URL }))
-      .features([orders, media])
-      .entrypoints(queueWorker({ q: fakeQ, needs: {}, blocking: true, context: () => ({ dependencyName: 'x' }) }))
-      .start();
+    const app = await orThrow(
+      defineApp('mixed-worker')
+        .infra(dependency, queue({ connection: REDIS_URL }))
+        .features([orders, media])
+        .entrypoints(queueWorker({ q: fakeQ, needs: {}, blocking: true, context: () => ({ dependencyName: 'x' }) }))
+        .start(),
+    );
 
     expect(Object.keys(registered ?? {})).toEqual(['orders', 'media']);
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
@@ -318,7 +325,7 @@ describe('queueWorker() — the driving adapter', () => {
       'queue-worker:image:resize.consume',
       'queue-worker:video:encode.consume',
     ]);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('does not compile without the queue client it shares connection with', () => {
@@ -344,15 +351,17 @@ describe('queueWorker() — the driving adapter', () => {
       },
     });
 
-    const app = await defineApp('worker')
-      .use(queue({ connection: REDIS_URL }))
-      .features([orders])
-      .serve(queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) }))
-      .start();
+    const app = await orThrow(
+      defineApp('worker')
+        .use(queue({ connection: REDIS_URL }))
+        .features([orders])
+        .serve(queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) }))
+        .start(),
+    );
 
     // app.start() resolved while the workers are still starting.
     releaseStart?.();
-    await app.dispose();
+    await orThrow(app.dispose());
 
     expect(stopped).toEqual(['stopped']);
   });
@@ -383,14 +392,16 @@ describe('queueWorker() — the driving adapter', () => {
   it('degrades on non-blocking startup timeout and lets app shutdown continue', async () => {
     const { fakeQ } = fakeBuilder({ ...idleInstance(), start: hang });
 
-    const app = await defineApp('worker')
-      .use(queue({ connection: REDIS_URL }))
-      .features([orders])
-      .serve(queueWorker({ q: fakeQ, needs: {}, startupTimeoutMs: 1, context: () => ({ dependencyName: 'x' }) }))
-      .start();
+    const app = await orThrow(
+      defineApp('worker')
+        .use(queue({ connection: REDIS_URL }))
+        .features([orders])
+        .serve(queueWorker({ q: fakeQ, needs: {}, startupTimeoutMs: 1, context: () => ({ dependencyName: 'x' }) }))
+        .start(),
+    );
 
     await wait(5);
-    await app.dispose();
+    await orThrow(app.dispose());
 
     expect(app.state).toBe('disposed');
   });

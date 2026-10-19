@@ -26,6 +26,7 @@ Dot logs through `@arki/log`. The kernel's own records go to the
 does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
@@ -40,6 +41,7 @@ const app = await defineApp('checkout')
     })),
   )
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 ```
 
 - The config is a thunk. It runs when the app boots, never at import.
@@ -66,6 +68,7 @@ Two kernel helpers close the gap between "boots on my machine" and "runs
 under a process manager":
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp, hookSignals, plugin } from '@arki/dot';
 
 const worker = plugin({
@@ -77,6 +80,7 @@ const worker = plugin({
 });
 
 const app = await defineApp('shop', { hookTimeoutMs: 30_000 }).use(worker).start();
+if (isFailure(app)) throw new Error(app.code);
 
 hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
 ```
@@ -90,11 +94,12 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
   `@arki/dot/runtime`) — one
   started app per server process, for hosts that boot the app lazily (TanStack
   Start, Vite SSR). `get()` starts the app once and retries a failed start;
-  the started app gets `hookSignals`. On a Vite hot update the old app is
+  the started app gets `hookSignals`. Returned failures are never cached as ready;
+  failed disposal blocks a replacement owner. On a Vite hot update the old app is
   disposed, and the replacing module starts its app only after that disposal
   finished — `import.meta.hot.dispose` alone does not wait, so two apps would
   share the pool or the PGlite directory.
-- **`hookTimeoutMs`** — a per-hook watchdog. Any `boot`/`start`/`stop`/
-  `dispose` hook exceeding the budget fails with `ARKI_DOT_E015`
-  naming the plugin and hook, and the kernel applies its normal rollback or
-  aggregation rules. Your app cannot hang silently at boot.
+- **`hookTimeoutMs`** — a per-hook watchdog. It requests cancellation and records
+  `ARKI_DOT_E015` diagnostics. Owned construction returns `Deadline` after
+  admitted work settles; cleanup never races a callback still using resources.
+  A hook that ignores cancellation can keep teardown pending. See [Ownership](ownership.md).

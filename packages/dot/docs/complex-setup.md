@@ -21,6 +21,7 @@ A distilled commerce platform showing everything above working together.
 exact boot/teardown ordering.)
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp, lazy, plugin, rename, service, token } from '@arki/dot';
 
 // ── stand-ins for your own modules ──────────────────────────────────────
@@ -167,6 +168,7 @@ const app = await defineApp('shop', { config: process.env })
   .use(outboxWorker)
   .use(http)
   .start();
+if (isFailure(app)) throw new Error(app.code);
 
 // SIGTERM → dispose() cascades stop() first, tears down in exact reverse:
 // http, outbox (drained), reporting, checkout, catalog, bus,

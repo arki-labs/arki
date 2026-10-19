@@ -8,16 +8,18 @@
  * readers keep `this`; `txRepos` publishes `withTx` only; and tests replace
  * the whole set with fakes that type-check. PGlite throughout.
  */
-import { defineApp, rename } from '@arki/dot';
-import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import type { Provided } from '@arki/dot/plugin';
 import { defineRelations, eq, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { DepsOf } from '@arki/dot/feature';
+import type { Provided } from '@arki/dot/plugin';
+import { defineApp, rename } from '@arki/dot';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
+import { orThrow } from '@arki/failure';
+
 import type { Repos, TxRepos } from './dot.js';
-import { DB_PLUGIN_ERROR_CODES, db, reader, repos, txRepos } from './dot.js';
+import { db, DB_PLUGIN_ERROR_CODES, reader, repos, txRepos } from './dot.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 const notes = pgTable('notes', { id: text('id').primaryKey(), body: text('body').notNull() });
@@ -81,7 +83,7 @@ const feature = core.provides({ noteReader: ({ repos }) => reader(repos.notes, [
 const createTable = (handle: Db) => handle.execute(sql`create table notes (id text primary key, body text not null)`);
 
 async function bootNotes(f: typeof feature = feature) {
-  const app = await defineApp('notes-app').infra(database).features([f]).start();
+  const app = await orThrow(defineApp('notes-app').infra(database).features([f]).start());
   await createTable(app.services.db);
   return app;
 }
@@ -106,7 +108,7 @@ describe('repos(): boot and wiring', () => {
       expect(await usecases.count()).toBe(2);
       expect(built).toBe(1);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -115,9 +117,14 @@ describe('repos(): boot and wiring', () => {
     const reportRepos = repos({ counts: createCountRepository });
     const statsBase = defineFeature('stats').needs({ db: reports.provides.reportsDb }).infra(reportRepos);
     const stats = statsBase
-      .usecases({ count: ({ repos }: DepsOf<typeof statsBase>) => () => repos.counts.count() })
+      .usecases({
+        count:
+          ({ repos }: DepsOf<typeof statsBase>) =>
+          () =>
+            repos.counts.count(),
+      })
       .entrypoints();
-    const app = await defineApp('two-dbs').infra(database, reports).features([stats]).start();
+    const app = await orThrow(defineApp('two-dbs').infra(database, reports).features([stats]).start());
     try {
       await createTable(app.services.db);
       await createTable(app.services.reportsDb);
@@ -125,7 +132,7 @@ describe('repos(): boot and wiring', () => {
       // The primary database is empty; only the reports database has a row.
       expect(await app.services['stats.usecases'].count()).toBe(1);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -145,13 +152,17 @@ describe('repos(): boot and wiring', () => {
     // @ts-expect-error withTx is the rebinding helper, not a repository name
     expect(() => repos({ withTx })).toThrow(expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }));
     // @ts-expect-error same rule for the transaction-only store
-    expect(() => txRepos({ withTx })).toThrow(expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }));
+    expect(() => txRepos({ withTx })).toThrow(
+      expect.objectContaining({ code: DB_PLUGIN_ERROR_CODES.reservedRepoName }),
+    );
   });
 });
 
 describe('txRepos(): repositories only inside a transaction', () => {
   const store = txRepos(factories);
-  const scopedBase = defineFeature('ledger').needs({ db: entrypointOnly(database.provides.db) }).infra(store);
+  const scopedBase = defineFeature('ledger')
+    .needs({ db: entrypointOnly(database.provides.db) })
+    .infra(store);
   type ScopedDeps = DepsOf<typeof scopedBase>;
   const ledger = scopedBase
     .usecases({
@@ -168,15 +179,25 @@ describe('txRepos(): repositories only inside a transaction', () => {
 
   it('publishes withTx and nothing else; usecases never see the db', () => {
     expectTypeOf<Provided<typeof store.provides.repos>>().toEqualTypeOf<TxRepos<typeof factories>>();
-    // @ts-expect-error no database-bound set: `repos.notes` does not exist
-    scopedBase.usecases({ bad: ({ repos }: ScopedDeps) => () => repos.notes });
+    scopedBase.usecases({
+      bad:
+        ({ repos }: ScopedDeps) =>
+        () =>
+          // @ts-expect-error no database-bound set: `repos.notes` does not exist
+          repos.notes,
+    });
     // @ts-expect-error `db` is entrypoint-only: a usecase cannot open its own transaction
-    scopedBase.usecases({ bad: ({ db }: { db: Db }) => () => db });
+    scopedBase.usecases({
+      bad:
+        ({ db }: { db: Db }) =>
+        () =>
+          db,
+    });
     expectTypeOf<keyof ScopedDeps>().toEqualTypeOf<'repos'>();
   });
 
   it('a rollback undoes the writes made through withTx(tx)', async () => {
-    const app = await defineApp('ledger-app').infra(database).features([ledger]).start();
+    const app = await orThrow(defineApp('ledger-app').infra(database).features([ledger]).start());
     try {
       await createTable(app.services.db);
       const usecases = app.services['ledger.usecases'];
@@ -191,7 +212,7 @@ describe('txRepos(): repositories only inside a transaction', () => {
       ).rejects.toThrow('roll back');
       expect(await app.services.db.transaction(tx => usecases.count(tx))).toBe(0);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });
@@ -213,7 +234,7 @@ describe('repos(): transactions', () => {
       // …and gone after the rollback.
       expect(await set.notes.get('t1')).toBeNull();
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -233,7 +254,7 @@ describe('repos(): transactions', () => {
       expect(await set.notes.get('outer')).toBe('kept');
       expect(await set.notes.get('inner')).toBeNull();
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -246,7 +267,7 @@ describe('repos(): transactions', () => {
         expect('withTx' in set.withTx(tx)).toBe(false);
       });
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });
@@ -264,7 +285,7 @@ describe('reader(): cross-feature reads', () => {
       await expect(unbound.get('x')).rejects.toThrow(TypeError);
       expectTypeOf(app.services.noteReader).toEqualTypeOf<Pick<NoteRepository, 'get'>>();
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -291,7 +312,7 @@ describe('repos(): test fakes that type-check', () => {
       expect(await app.services['notes.usecases'].read('anything')).toBe('stubbed');
       expect(get).toHaveBeenCalledWith('anything');
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -309,13 +330,18 @@ describe('repos(): test fakes that type-check', () => {
     }
     const fakeSet: RepoSetOf = { notes: new FakeNotes(handle), counts: { count: async () => 42 } };
     const fakeRepos: Repos<typeof factories> = { ...fakeSet, withTx: () => fakeSet };
-    const app = await defineApp('faked').infra(database).features([feature.override({ repos: fakeRepos })]).start();
+    const app = await orThrow(
+      defineApp('faked')
+        .infra(database)
+        .features([feature.override({ repos: fakeRepos })])
+        .start(),
+    );
     try {
       expect(await app.services['notes.usecases'].read('n')).toBe('fake n');
       expect(await app.services['notes.usecases'].count()).toBe(42);
       await expect(app.services['notes.usecases'].write('n', 'b')).rejects.toThrow('not used by this test');
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
       await pglite.close();
     }
   });

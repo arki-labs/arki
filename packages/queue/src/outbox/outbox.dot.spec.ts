@@ -98,17 +98,19 @@ const reminders = defineFeature('reminders')
 
 describe('outboxPlugin + outboxJobs', () => {
   it('a feature schedules in its transaction and the journal worker runs its jobs slice', async () => {
-    const app = await defineApp('outbox-worker')
-      .infra(database, scheduling, journal({ j }))
-      .features([signup])
-      .entrypoints(
-        journalWorker({
-          pollMs: 20,
-          jobs: outboxJobs({ needs: {}, context: ({ db: root }) => ({ tag: typeof root }) }),
-        }),
-      )
-      .boot();
-    await app.start();
+    const app = await orThrow(
+      defineApp('outbox-worker')
+        .infra(database, scheduling, journal({ j }))
+        .features([signup])
+        .entrypoints(
+          journalWorker({
+            pollMs: 20,
+            jobs: outboxJobs({ needs: {}, context: ({ db: root }) => ({ tag: typeof root }) }),
+          }),
+        )
+        .boot(),
+    );
+    await orThrow(app.start());
     try {
       const ran = new Promise<void>(resolve => {
         delivered = resolve;
@@ -117,8 +119,8 @@ describe('outboxPlugin + outboxJobs', () => {
       await ran;
       expect(mailed).toEqual([{ userId: 'u1', jobId: id, tag: 'object' }]);
     } finally {
-      await app.stop();
-      await app.dispose();
+      await orThrow(app.stop());
+      await orThrow(app.dispose());
     }
   });
 
@@ -134,12 +136,16 @@ describe('outboxPlugin + outboxJobs', () => {
   });
 
   it("an instance's row carries its instance and runs that instance's job, with its rebound need", async () => {
-    const app = await defineApp('outbox-regions')
-      .infra(database, scheduling, regionUs, regionEu, journal({ j }))
-      .features([reminders.instance('eu', { region: regionEu.provides.regionEu }), reminders.instance('us')])
-      .entrypoints(journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'regions' }) }) }))
-      .boot();
-    await app.start();
+    const app = await orThrow(
+      defineApp('outbox-regions')
+        .infra(database, scheduling, regionUs, regionEu, journal({ j }))
+        .features([reminders.instance('eu', { region: regionEu.provides.regionEu }), reminders.instance('us')])
+        .entrypoints(
+          journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: () => ({ tag: 'regions' }) }) }),
+        )
+        .boot(),
+    );
+    await orThrow(app.start());
     try {
       const ran = new Promise<void>(resolve => {
         remindedOne = resolve;
@@ -150,8 +156,8 @@ describe('outboxPlugin + outboxJobs', () => {
       await ran;
       expect(reminded).toEqual(['eu:mail.remind.v1#eu:u2']);
     } finally {
-      await app.stop();
-      await app.dispose();
+      await orThrow(app.stop());
+      await orThrow(app.dispose());
     }
   });
 

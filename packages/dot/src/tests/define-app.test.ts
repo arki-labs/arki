@@ -5,17 +5,21 @@
  * cases fail the typecheck if the guard ever stops firing.
  */
 
+import type { ScopePlan } from '@arki/async';
+import { child, cleanup } from '@arki/async';
+import { defineFailure, orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
-import type { EmptyShape } from '../plugin-contract.js';
+import type { EmptyShape, EmptyOwnership, PluginOpenFailure, PluginCloseFailure } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
+import { feature } from '../feature.js';
 import { initPlugins } from '../init-plugins.js';
 import { plugin, rename, service } from '../plugin-contract.js';
 import { testApp } from '../test-harness.js';
 
 type DbService = {
-  query(sql: string): Promise<unknown>;
+  query(sql: string): Promise<null>;
 };
 type AuthService = {
   verify(token: string): boolean;
@@ -25,7 +29,7 @@ const makeDbPlugin = () =>
   plugin({
     name: 'db',
     provides: {
-      db: () => ({ query: async (_sql: string) => null }) as DbService,
+      db: (): DbService => ({ query: async (_sql: string) => null }),
     },
   });
 
@@ -52,10 +56,10 @@ describe('defineApp', () => {
         /* side effects only */
       },
     });
-    const app = await defineApp('app').use(p).boot();
+    const app = orThrow(await defineApp('app').use(p).boot());
     expect(app.state).toBe('booted');
     expect(app.name).toBe('app');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('type-level: app.services is correctly typed from accumulated .use() calls', async () => {
@@ -63,15 +67,15 @@ describe('defineApp', () => {
     const authPlugin = plugin({
       name: 'auth',
       provides: {
-        auth: () => ({ verify: (_token: string) => true }) as AuthService,
+        auth: () => ({ verify: (_token: string) => true }) satisfies AuthService,
       },
     });
 
-    const app = await defineApp('app').use(dbPlugin).use(authPlugin).boot();
+    const app = orThrow(await defineApp('app').use(dbPlugin).use(authPlugin).boot());
     expectTypeOf(app.services).toMatchTypeOf<{ db: DbService; auth: AuthService }>();
     expect(app.services.db).toBeDefined();
     expect(app.services.auth).toBeDefined();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('boot destructures typed services from the needs shape', async () => {
@@ -88,9 +92,9 @@ describe('defineApp', () => {
       },
     });
 
-    const app = await defineApp('app').use(dbPlugin).use(consumer).boot();
+    const app = orThrow(await defineApp('app').use(dbPlugin).use(consumer).boot());
     expect(observed).toBe(app.services.db);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('compile-time guard: unsatisfied needs fail .use() at the call site', () => {
@@ -115,12 +119,12 @@ describe('defineApp', () => {
     defineApp('app').use(dbPlugin).use(makeDbPlugin());
 
     const reportsPlugin = rename(makeDbPlugin(), { db: 'reportsDb' }, 'reports-db');
-    const app = await defineApp('app').use(dbPlugin).use(reportsPlugin).boot();
+    const app = orThrow(await defineApp('app').use(dbPlugin).use(reportsPlugin).boot());
     expectTypeOf(app.services.reportsDb).toEqualTypeOf<DbService>();
     expect(app.services.db).toBeDefined();
     expect(app.services.reportsDb).toBeDefined();
     expect(app.services.db).not.toBe(app.services.reportsDb);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('the wiring errors sit on the argument, with the DOT label; testApp types its services from the tuple', async () => {
@@ -132,23 +136,23 @@ describe('defineApp', () => {
       },
     });
     const bare = defineApp('app');
-    type UseArg = Parameters<typeof bare.use<{ readonly db: DbService }, EmptyShape>>[0];
+    type UseArg = Parameters<typeof bare.use<{ readonly db: DbService }, EmptyShape, EmptyOwnership>>[0];
     expectTypeOf<UseArg>().toHaveProperty(
       'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)',
     );
     const withDb = bare.use(makeDbPlugin());
-    type CollisionArg = Parameters<typeof withDb.use<EmptyShape, { readonly db: DbService }>>[0];
+    type CollisionArg = Parameters<typeof withDb.use<EmptyShape, { readonly db: DbService }, EmptyOwnership>>[0];
     expectTypeOf<CollisionArg>().toHaveProperty(
       'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()',
     );
     type ListArg = Parameters<typeof bare.useAll<readonly [typeof consumer]>>[0];
     expectTypeOf<ListArg>().toHaveProperty('DOT: a unit in this list cannot be mounted at its position');
 
-    const app = await testApp([makeDbPlugin(), consumer]).boot();
+    const app = orThrow(await testApp([makeDbPlugin(), consumer]).boot());
     expectTypeOf(app.services.db).toEqualTypeOf<DbService>();
     // @ts-expect-error — the tuple would not mount: consumer before its provider
     testApp([consumer, makeDbPlugin()]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('test harness produces a runnable builder', async () => {
@@ -158,9 +162,9 @@ describe('defineApp', () => {
         /* side effects only */
       },
     });
-    const app = await testApp([p]).boot();
+    const app = orThrow(await testApp([p]).boot());
     expect(app.state).toBe('booted');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('synthetic two-plugin app surfaces manifest + diagnostics shape', async () => {
@@ -182,7 +186,7 @@ describe('defineApp', () => {
       },
     });
 
-    const app: DotApp<{ db: { name: string } }> = await defineApp('synthetic').use(db).use(api).boot();
+    const app: DotApp<{ db: { name: string } }> = orThrow(await defineApp('synthetic').use(db).use(api).boot());
     expect(app.state).toBe('booted');
     expect(app.services.db.name).toBe('primary');
 
@@ -203,7 +207,7 @@ describe('defineApp', () => {
     expect(d.plugins).toHaveLength(2);
     expect(d.plugins.every(p => p.status === 'ok')).toBe(true);
 
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -226,10 +230,10 @@ describe('void-boot provides inference (constraint-fallback regression)', () => 
       provides: { doubled: ({ thing }) => thing * 2 },
     });
 
-    const app = await defineApp('void-boot').use(provider).use(sideEffect).use(consumer).boot();
+    const app = orThrow(await defineApp('void-boot').use(provider).use(sideEffect).use(consumer).boot());
     expect(app.services.doubled).toBe(84);
     expectTypeOf(app.services.doubled).toEqualTypeOf<number>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -263,15 +267,15 @@ describe('initPlugins.context', () => {
       },
     });
 
-    const app = await defineApp('feature-plugins')
+    const app = orThrow(await defineApp('feature-plugins')
       .useAll([dbPlugin, authPlugin, ordersPlugin] as const)
-      .boot();
+      .boot());
 
     expect(app.services.ordersService.list()).toEqual(['o1']);
     expectTypeOf(app.services.db).toEqualTypeOf<DbService>();
     expectTypeOf(app.services.auth).toMatchTypeOf<AuthService>();
     expectTypeOf(app.services.ordersService).toMatchTypeOf<AppServices['ordersService']>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('bridges app service keys to witness records for adapter plugins', async () => {
@@ -287,10 +291,10 @@ describe('initPlugins.context', () => {
       },
     });
 
-    const app = await defineApp('bridge').use(dbPlugin).use(consumer).boot();
+    const app = orThrow(await defineApp('bridge').use(dbPlugin).use(consumer).boot());
     // An async factory is awaited: the kernel publishes the resolved value.
     expect(app.services.rows).toBeNull();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('keeps the same ordering and collision guard through useAll', () => {
@@ -314,5 +318,80 @@ describe('initPlugins.context', () => {
     p.plugin({ name: 'bad-provide', provides: { db: () => ({ nope: true }) } });
 
     expect(true).toBe(true);
+  });
+});
+
+
+describe('ordinary service methods', () => {
+  it('keeps open and close methods as service values without inferring resource ownership', async () => {
+    const OpenRefused = defineFailure('test.ordinary_open_refused', { status: 503 });
+    const CloseRefused = defineFailure('test.ordinary_close_refused', { status: 503 });
+    const openFailure = OpenRefused();
+    const closeFailure = CloseRefused();
+    const calls: string[] = [];
+    const connection = plugin({
+      name: 'connection',
+      provides: {
+        connection: () => ({
+          open: () => {
+            calls.push('open');
+            return openFailure;
+          },
+          close: () => {
+            calls.push('close');
+            return closeFailure;
+          },
+        }),
+      },
+    });
+    expectTypeOf<PluginOpenFailure<typeof connection>>().toEqualTypeOf<never>();
+    expectTypeOf<PluginCloseFailure<typeof connection>>().toEqualTypeOf<never>();
+
+    const app = orThrow(await defineApp('ordinary-methods').use(connection).boot());
+    expectTypeOf(app.services.connection.open).returns.toEqualTypeOf<ReturnType<typeof OpenRefused>>();
+    expectTypeOf(app.services.connection.close).returns.toEqualTypeOf<ReturnType<typeof CloseRefused>>();
+    expect(calls).toEqual([]);
+    expect(app.services.connection.open()).toBe(openFailure);
+    expect(app.services.connection.close()).toBe(closeFailure);
+    orThrow(await app.dispose());
+    expect(calls).toEqual(['open', 'close']);
+  });
+});
+
+
+describe('boot callback boundaries', () => {
+  it('rejects unknown callback outcomes and erased plans across authoring forms', () => {
+    const untyped = (): unknown => undefined;
+    const erased: ScopePlan = { worker: child(() => void 0) };
+    const factories = initPlugins.context<EmptyShape>().create();
+
+    // @ts-expect-error -- an unknown boot outcome could conceal a returned failure.
+    plugin({ name: 'unknown-boot', boot: untyped });
+    // @ts-expect-error -- an unknown cleanup outcome could conceal a disposal failure.
+    plugin({ name: 'unknown-cleanup', boot: () => ({ flush: cleanup(untyped) }) });
+    // @ts-expect-error -- an unknown child outcome could conceal a worker failure.
+    plugin({ name: 'unknown-child', boot: () => ({ worker: child(untyped) }) });
+    // @ts-expect-error -- erasing callback outputs to ScopePlan loses the failure contract.
+    plugin({ name: 'erased-plan', boot: () => erased });
+
+    // @ts-expect-error -- factory plugins enforce the same typed boot boundary.
+    factories.plugin({ name: 'unknown-boot', boot: untyped });
+    // @ts-expect-error -- factory cleanup callbacks must retain their outcomes.
+    factories.plugin({ name: 'unknown-cleanup', boot: () => ({ flush: cleanup(untyped) }) });
+    // @ts-expect-error -- factory child callbacks must retain their outcomes.
+    factories.plugin({ name: 'unknown-child', boot: () => ({ worker: child(untyped) }) });
+    // @ts-expect-error -- a factory cannot recover callback outcomes from an erased plan.
+    factories.plugin({ name: 'erased-plan', boot: () => erased });
+
+    // @ts-expect-error -- object features enforce the same typed boot boundary.
+    feature('unknown-boot', { boot: untyped });
+    // @ts-expect-error -- feature cleanup callbacks must retain their outcomes.
+    feature('unknown-cleanup', { boot: () => ({ flush: cleanup(untyped) }) });
+    // @ts-expect-error -- feature child callbacks must retain their outcomes.
+    feature('unknown-child', { boot: () => ({ worker: child(untyped) }) });
+    // @ts-expect-error -- an object feature cannot recover an erased plan's failure contract.
+    feature('erased-plan', { boot: () => erased });
+
+    expect(Object.keys(erased)).toEqual(['worker']);
   });
 });

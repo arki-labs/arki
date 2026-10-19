@@ -7,6 +7,7 @@
  * at another provider (the EU database) without touching the declaration.
  * Each test pins one way a copy could silently share state with the original.
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { renderExplainText } from '../cli/render-explain.js';
@@ -49,24 +50,24 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     expectTypeOf(eu.handles.db.key).toEqualTypeOf<'dbEu'>();
     expect(eu.plugins().map(u => u.name)).toEqual(['reports#eu/store', 'reports#eu']);
 
-    const app = await defineApp('t').use(database).use(databaseEu).features([eu, us]).boot();
+    const app = orThrow(await defineApp('t').use(database).use(databaseEu).features([eu, us]).boot());
     try {
       expect(app.services['reports#eu.summary']).toEqual({ region: 'eu' });
       expect(app.services['reports#us.summary']).toEqual({ region: 'us' });
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 
   it('mounts the original next to a copy; the original twice is still refused', async () => {
     const eu = reports.instance('eu', { db: databaseEu.provides.dbEu });
     expect(() => mountFeatures([reports, eu])).not.toThrow();
-    const app = await defineApp('t').use(database).use(databaseEu).features([reports, eu]).boot();
+    const app = orThrow(await defineApp('t').use(database).use(databaseEu).features([reports, eu]).boot());
     try {
       expect(app.services.summary).toEqual({ region: 'us' });
       expect(app.services['reports#eu.summary']).toEqual({ region: 'eu' });
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
     // @ts-expect-error -- the same feature twice: one plugin name, one `summary` wire key
     await expect(defineApp('t').use(database).features([reports, reports]).boot()).rejects.toThrow();
@@ -100,11 +101,11 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
       .flatMap(u => Object.values(u.needs).map(w => ('key' in w ? w.key : undefined)));
     expect(childNeeds).toEqual(['dbEu']);
 
-    const app = await defineApp('t').use(databaseEu).features([eu]).boot();
+    const app = orThrow(await defineApp('t').use(databaseEu).features([eu]).boot());
     try {
       expect(app.services['reports#eu.audit.trail']).toBe('eu');
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 
@@ -115,7 +116,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
         region:
           ({ db }) =>
           async () =>
-            (await db.get()).region,
+            (orThrow(await db.get())).region,
       })
       .provides({ trail: ({ usecases }) => usecases.region() })
       .entrypoints();
@@ -127,12 +128,12 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
       .entrypoints();
     const eu = parent.instance('eu', { db: databaseEu.provides.dbEu });
     expectTypeOf(eu.features[0].handles.db).toEqualTypeOf<typeof databaseEu.provides.dbEu.lazy>();
-    const app = await defineApp('t').use(databaseEu).features([eu]).boot();
+    const app = orThrow(await defineApp('t').use(databaseEu).features([eu]).boot());
     try {
       // The kernel awaits a provides factory, so the resolved trail is the EU region string.
       expect(app.services['reports#eu.audit.trail']).toBe('eu');
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 

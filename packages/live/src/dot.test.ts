@@ -24,6 +24,7 @@ import { defineApp, DotLifecycleError } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { plugin } from '@arki/dot/plugin';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { http } from '@arki/http/dot';
 
 import type * as hubModule from './hub.js';
@@ -132,8 +133,8 @@ function blogApp(options: { readonly triggers: boolean; readonly failStart?: boo
 describe('liveQueries', () => {
   it('fails boot with E002 when a declared table has no trigger, before anything listens', async () => {
     const { app, stats } = blogApp({ triggers: false });
-    const failure = await app.boot().catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(DotLifecycleError);
+    const failure = await app.boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({
       cause: {
         code: LIVE_ERROR_CODES.triggers,
@@ -145,7 +146,7 @@ describe('liveQueries', () => {
 
   it('serves /api/live from http(): a commit in the database reaches the stream; stop releases the listener', async () => {
     const { app, stats } = blogApp({ triggers: true });
-    const started = await app.start();
+    const started = await orThrow(app.start());
     try {
       const url = started.services.httpServer.url();
       if (url === undefined) throw new Error('the server has no url');
@@ -167,7 +168,7 @@ describe('liveQueries', () => {
       expect(started.services.live.connections()).toBe(1);
       await client.cancel();
     } finally {
-      await started.dispose();
+      await orThrow(started.dispose());
     }
     expect(stats).toMatchObject({ connects: 1, releases: 1 });
     expect(stats.queries).toContain('UNLISTEN "arki_live_blog_v1"');
@@ -176,9 +177,9 @@ describe('liveQueries', () => {
   it("stop releases the endpoint's onChange subscription, and so does a rolled-back start", async () => {
     // Earlier tests (a boot that fails builds the hub and never stops it) leave their own count.
     const before = changeListeners.active;
-    const started = await blogApp({ triggers: true }).app.start();
+    const started = await orThrow(blogApp({ triggers: true }).app.start());
     expect(changeListeners.active).toBe(before + 1);
-    await started.dispose();
+    await orThrow(started.dispose());
     expect(changeListeners.active).toBe(before);
     const failure = await blogApp({ triggers: true, failStart: true })
       .app.start()

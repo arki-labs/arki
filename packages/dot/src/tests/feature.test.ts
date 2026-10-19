@@ -7,6 +7,7 @@
  * module exists — each would break if the declaration/mount split or the
  * phase order regressed.
  */
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from '../feature.js';
@@ -123,7 +124,7 @@ describe('slice keys', () => {
 describe('mounting features (.features)', () => {
   it('publishes slice payloads under the derived feature token and merges boot provides', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = await defineApp('feature-test').use(dbPlugin).features([orders, billing, authish]).boot();
+    const app = orThrow(await defineApp('feature-test').use(dbPlugin).features([orders, billing, authish]).boot());
 
     const manifest = app.manifest;
     const ordersUnit = manifest.plugins.find(p => p.name === 'orders');
@@ -135,7 +136,7 @@ describe('mounting features (.features)', () => {
     expect(services['feature.billing']).toEqual({});
     expect(services['session']).toEqual({ via: 'db' });
 
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('derives key-stable tokens without shared state', () => {
@@ -160,10 +161,10 @@ describe('mounting features (.features)', () => {
       use: [{ key: 'routes', actions: [], resolve: ({ db }: { db: FakeDb }) => ({ boundTo: db.tag }) }],
     });
 
-    const app = await defineApp('slice-services-test').use(dbPlugin).features([serving]).boot();
+    const app = orThrow(await defineApp('slice-services-test').use(dbPlugin).features([serving]).boot());
     const services = app.services as Record<string, unknown>;
     expect(services['feature.serving']).toEqual({ routes: { boundTo: 'db' } });
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -221,13 +222,13 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
 
   it('wires the consumer to the instance the provider built, on the same wire key', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = await defineApp('provides-test').use(dbPlugin).features([plans, digest]).boot();
+    const app = orThrow(await defineApp('provides-test').use(dbPlugin).features([plans, digest]).boot());
 
     expect(app.services.digestPlan('usr_pro')).toBe('pro');
     expect(app.services.digestPlan('usr_free')).toBe('free');
     expect(app.services.entitlements.planOf('usr_pro')).toBe('pro');
     expect(app.services.warmedAt).toBe(42);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('keeps boot order honest: a consumer mounted before its provider fails to compile and to configure', () => {
@@ -276,16 +277,16 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
 
   it('a procedure resolves its capability to the very instance the app published — one DI system', async () => {
     const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = await defineApp('bag')
+    const app = orThrow(await defineApp('bag')
       .use(dbPlugin)
       .features([...features, gateway])
-      .boot();
+      .boot());
     const resolved = resolveNeeds(app.services.bag, companionNeeds);
     // Driven services (`db`) are not capabilities: they stay on the context explicitly.
     expectTypeOf(resolved).toEqualTypeOf<{ access: ReturnType<typeof createPlanLookup> }>();
     expect(Object.keys(resolved)).toEqual(['access']);
     expect(resolved.access).toBe(app.services.entitlements);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('a capability missing from the bag throws ARKI_DOT_E026 naming alias, key, provider and the fix', () => {
@@ -314,13 +315,13 @@ describe('the hexagon: .use → .features → .serve', () => {
   );
 
   it('binds a driver to the mounted features — the app never lists them twice', async () => {
-    const app = await defineApp('serve-test').use(dbPlugin).features([orders, billing]).serve(collector).boot();
+    const app = orThrow(await defineApp('serve-test').use(dbPlugin).features([orders, billing]).serve(collector).boot());
     expect(app.services.collected).toEqual([
       ['orders', ['queue']],
       ['billing', []],
     ]);
     expect(app.manifest.plugins.map(p => p.name)).toEqual(['db', 'orders', 'billing', 'collector']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('mounts a plain plugin in .serve() unchanged', async () => {
@@ -329,9 +330,9 @@ describe('the hexagon: .use → .features → .serve', () => {
       needs: { db: service<FakeDb>() },
       provides: { health: ({ db }) => db.tag },
     });
-    const app = await defineApp('serve-plain').use(dbPlugin).features([billing]).serve(health).boot();
+    const app = orThrow(await defineApp('serve-plain').use(dbPlugin).features([billing]).serve(health).boot());
     expect(app.services.health).toBe('db');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('rejects infrastructure after the domain, and the domain outside .features()', () => {
@@ -360,12 +361,12 @@ describe('the hexagon: .use → .features → .serve', () => {
       needs: { session: service<{ via: 'db' }>() },
       provides: { profile: ({ session }) => `profile:${session.via}` },
     });
-    const app = await defineApp('chain').use(dbPlugin).features([authish, profile]).boot();
+    const app = orThrow(await defineApp('chain').use(dbPlugin).features([authish, profile]).boot());
     expectTypeOf(app.services.profile).toEqualTypeOf<string>();
     expect(app.services.profile).toBe('profile:db');
     // @ts-expect-error — profile needs session, which authish only provides if it comes first
     defineApp('chain-wrong').use(dbPlugin).features([profile, authish]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -389,23 +390,23 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
       needs: { registry: service<{ handlers: readonly string[] }>() },
       provides: { seenAtBoot: ({ registry: r }) => r.handlers },
     });
-    const app = await defineApp('driven-binding').use(registry).features([orders, writer]).boot();
+    const app = orThrow(await defineApp('driven-binding').use(registry).features([orders, writer]).boot());
     expect(app.services.seenAtBoot).toEqual(['orders:queue']);
     expect(app.manifest.plugins.map(p => [p.name, p.role])).toEqual([
       ['registry', undefined],
       ['orders', 'feature'],
       ['writer', 'feature'],
     ]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('gets no slice records: those exist only once the features boot', async () => {
     const peeking = driven(features =>
       plugin({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }),
     );
-    await expect(defineApp('peek').use(peeking).features([orders]).boot()).rejects.toThrow(
-      /ARKI_DOT_E025|slice record/,
-    );
+    const failure = await defineApp('peek').use(peeking).features([orders]).boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: { code: 'ARKI_DOT_E025', message: expect.stringContaining('slice record') } });
   });
 });
 

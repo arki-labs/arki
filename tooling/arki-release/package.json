@@ -37,6 +37,7 @@
     "@arki/dot": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",

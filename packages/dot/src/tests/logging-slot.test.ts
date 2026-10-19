@@ -4,6 +4,7 @@
  * its last, so nothing the app logs about its own life is lost.
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import type { LogRecord, Sink } from '@arki/log';
@@ -38,7 +39,7 @@ function loggingPlugin(sink: Sink, name = 'logging') {
 describe('logging slot', () => {
   it('captures the first and the last lifecycle record, then closes logging', async () => {
     const sink = recordingSink();
-    const app = await defineApp('slot-app')
+    const app = orThrow(await defineApp('slot-app')
       .use(loggingPlugin(sink))
       .use(
         plugin({
@@ -48,8 +49,8 @@ describe('logging slot', () => {
           },
         }),
       )
-      .boot();
-    await app.dispose();
+      .boot());
+    orThrow(await app.dispose());
 
     const lifecycle = sink.records.filter(record => record.category === 'arki:dot:lifecycle');
     expect(lifecycle[0]?.template).toBe('configure: starting');
@@ -68,9 +69,9 @@ describe('logging slot', () => {
       },
     });
 
-    await expect(defineApp('failing-app').use(loggingPlugin(sink)).use(failing).boot()).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.BootFailed,
-    });
+    const failure = await defineApp('failing-app').use(loggingPlugin(sink)).use(failing).boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ cause: new Error('database unreachable') });
 
     expect(
       sink.records.some(record => record.levelName === 'error' && record.template.startsWith('boot: FAILED')),

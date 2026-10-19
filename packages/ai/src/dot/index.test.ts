@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineApp } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import { createEmbeddingRuntime } from '../embeddings/runtime';
 import { MockVectorProvider } from '../vector-search/providers/mock';
@@ -17,9 +18,11 @@ type Payload = { userId: string; kind: 'item'; model: string; dimensions: number
 describe('vectorIndex()', () => {
   it('boots an embedder and a mock index from the env thunk, reading it once', async () => {
     const env = vi.fn(() => ({ EMBEDDING_PROVIDER: 'mock', EMBEDDING_DIMENSIONS: '4' }));
-    const app = await defineApp('vi-mock')
-      .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], env }))
-      .boot();
+    const app = await orThrow(
+      defineApp('vi-mock')
+        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], env }))
+        .boot(),
+    );
 
     expect(env).toHaveBeenCalledTimes(1);
     const index = app.services.vectorIndex;
@@ -32,9 +35,11 @@ describe('vectorIndex()', () => {
   });
 
   it('boots with no provider configured: index provider null, embedder answers null', async () => {
-    const app = await defineApp('vi-none')
-      .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], env: () => ({}) }))
-      .boot();
+    const app = await orThrow(
+      defineApp('vi-none')
+        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], env: () => ({}) }))
+        .boot(),
+    );
 
     expect(app.services.vectorIndex).toEqual({ provider: null, durable: false });
     await expect(app.services.embedder.embedQuery('q')).resolves.toBeNull();
@@ -53,11 +58,20 @@ describe('vectorIndex()', () => {
       instructionVersion: 0,
     } as const;
     const provider = new MockVectorProvider<Payload>({ space });
-    const app = await defineApp('vi-injected')
-      .use(
-        vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], env, runtime, provider, durable: true }),
-      )
-      .boot();
+    const app = await orThrow(
+      defineApp('vi-injected')
+        .use(
+          vectorIndex<Payload>({
+            collection: 'test',
+            payloadIndexes: ['userId'],
+            env,
+            runtime,
+            provider,
+            durable: true,
+          }),
+        )
+        .boot(),
+    );
 
     expect(app.services.vectorIndex.provider).toBe(provider);
     expect(app.services.vectorIndex.durable).toBe(true);

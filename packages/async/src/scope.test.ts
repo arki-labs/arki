@@ -1,207 +1,609 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { assert, it } from 'vitest';
 
-import { AsyncError } from './errors.js';
-import { scoped } from './scope.js';
+import type { Failure, FailureOf } from '@arki/failure';
+import { MockClock } from '@arki/clock';
+import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type { ScopeAggregate } from './errors.js';
+import { timeout } from './concurrency.js';
+import { Cancelled, Deadline } from './errors.js';
+import { child, cleanup, createLifetime, dynamicScope, openScope, resource, scoped } from './scope.js';
 import { sleep } from './sleep.js';
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-async function settled<T>(promise: Promise<T>): Promise<{ value: T } | { error: unknown }> {
-  return promise.then(
-    value => ({ value }),
-    (error: unknown) => ({ error }),
+const Refused = defineFailure('executor.refused');
+const CloseRefused = defineFailure('executor.close_refused');
+const ChildRefused = defineFailure('executor.child_refused');
+const Foreign = defineFailure('executor.foreign');
+function gate<Value>() {
+  let complete: ((value: Value) => void) | undefined;
+  const promise = new Promise<Value>(resolve => {
+    complete = resolve;
+  });
+  return {
+    promise,
+    resolve(value: Value) {
+      if (complete === undefined) throw new Error('Missing resolver');
+      complete(value);
+    },
+  };
+}
+function localAggregate(value: unknown): asserts value is ScopeAggregate<Failure, Failure> {
+  assert(isFailure(value));
+  assert.equal(value.code, 'async.scope_failed');
+  assert(
+    typeof value.cause === 'object' && value.cause !== null && 'primary' in value.cause && 'cleanup' in value.cause,
   );
 }
 
-describe('scoped', () => {
-  it('resolves with the body value and runs finalizers newest first', async () => {
-    const log: string[] = [];
-    const value = await scoped(scope => {
-      scope.defer(() => void log.push('a'));
-      scope.defer(() => void log.push('b'));
-      scope.defer(() => void log.push('c'));
-      return Promise.resolve(42);
-    });
-    expect(value).toBe(42);
-    expect(log).toEqual(['c', 'b', 'a']);
-  });
-
-  it('awaits each finalizer before the next, so a later cleanup never races an earlier one', async () => {
-    const log: string[] = [];
-    const promise = scoped(scope => {
-      scope.defer(() => void log.push('outer'));
-      scope.defer(async () => {
-        log.push('inner start');
-        await sleep(10);
-        log.push('inner end');
-      });
-      return Promise.resolve();
-    });
-    await vi.advanceTimersByTimeAsync(10);
-    await promise;
-    expect(log).toEqual(['inner start', 'inner end', 'outer']);
-  });
-
-  it('rethrows the body error unchanged when cleanup is clean', async () => {
-    const boom = new Error('boom');
-    const cleaned = vi.fn();
-    const result = await settled(
-      scoped(scope => {
-        scope.defer(cleaned);
-        return Promise.reject(boom);
+it('ordinary success and finalizer order', async () => {
+  const order: string[] = [];
+  const value = await scoped(
+    {
+      db: resource(
+        () => ({ query: () => 42 }),
+        db => {
+          assert.equal(db.query(), 42);
+          order.push('db');
+        },
+      ),
+      flush: cleanup(() => {
+        order.push('flush');
       }),
-    );
-    expect(result).toEqual({ error: boom });
-    expect(cleaned).toHaveBeenCalledOnce();
+    },
+    ({ db }) => db.query(),
+  );
+  assert.equal(value, 42);
+  assert.deepEqual(order, ['flush', 'db']);
+});
+it('refusal never becomes resource and partial resources close', async () => {
+  let closed = 0;
+  let refusedClosed = 0;
+  const refusal = Refused();
+  const result = await scoped(
+    {
+      first: resource(
+        () => 1,
+        () => {
+          closed++;
+        },
+      ),
+      refused: resource(
+        () => refusal,
+        () => {
+          refusedClosed++;
+        },
+      ),
+    },
+    () => {
+      throw new Error('Body must not run');
+    },
+  );
+  assert.equal(result, refusal);
+  assert.equal(closed, 1);
+  assert.equal(refusedClosed, 0);
+});
+it('primary and every cleanup failure retain identity', async () => {
+  const primary = Refused();
+  const first = CloseRefused();
+  const second = CloseRefused();
+  const result = await scoped({ a: cleanup(() => first), b: cleanup(() => second) }, () => primary);
+  localAggregate(result);
+  assert.deepEqual(result.cause.primary, [primary]);
+  assert.deepEqual(result.cause.cleanup, [second, first]);
+});
+it('thrown failures become private defects', async () => {
+  const secret = new Error('driver private');
+  const result = await scoped(
+    {
+      a: cleanup(() => {
+        throw secret;
+      }),
+    },
+    () => 42,
+  );
+  assert(UnexpectedDefect.is(result));
+  assert.equal(result.cause, secret);
+});
+it('real sleep owner abort joins child before cleanup', async () => {
+  const clock = new MockClock();
+  const started = gate<void>();
+  const order: string[] = [];
+  const result = await scoped(
+    {
+      db: resource(
+        () => ({ query: () => 42 }),
+        () => {
+          order.push('close');
+        },
+      ),
+      watch: child(async signal => {
+        started.resolve();
+        try {
+          await sleep(1000, { signal, clock });
+        } finally {
+          order.push('child');
+        }
+      }),
+    },
+    async ({ db }) => {
+      await started.promise;
+      return db.query();
+    },
+  );
+  assert.equal(result, 42);
+  assert.deepEqual(order, ['child', 'close']);
+  await clock.advanceAsync(2000);
+});
+it('foreign exception after owner abort is never suppressed', async () => {
+  const clock = new MockClock();
+  const started = gate<void>();
+  const secret = new Error('foreign after abort');
+  const result = await scoped(
+    {
+      child: child(async signal => {
+        started.resolve();
+        try {
+          await sleep(1000, { signal, clock });
+        } catch {
+          throw secret;
+        }
+      }),
+    },
+    async () => {
+      await started.promise;
+      return 42;
+    },
+  );
+  assert(UnexpectedDefect.is(result));
+  assert.equal(result.cause, secret);
+});
+it('child refusal cancels owned body without adding false defect', async () => {
+  const clock = new MockClock();
+  const fail = gate<void>();
+  const refusal = ChildRefused();
+  const result = await scoped(
+    {
+      watch: child(async () => {
+        await fail.promise;
+        return refusal;
+      }),
+    },
+    async (_values, signal) => {
+      fail.resolve();
+      await sleep(1000, { signal, clock });
+      return 42;
+    },
+  );
+  assert.equal(result, refusal);
+});
+it('preaborted external reason is normalized and body skipped', async () => {
+  let called = false;
+  const result = await scoped(
+    {},
+    () => {
+      called = true;
+    },
+    { signal: AbortSignal.abort('foreign reason') },
+  );
+  assert(Cancelled.is(result));
+  assert.equal(result.cause, 'foreign reason');
+  assert.equal(called, false);
+});
+it('deadline remains distinct and Clock owns trigger', async () => {
+  const clock = new MockClock();
+  const deadline = new AbortController();
+  const started = gate<void>();
+  const pending = scoped(
+    {},
+    async (_values, signal) => {
+      started.resolve();
+      await sleep(1000, { signal, clock });
+    },
+    { deadline: deadline.signal },
+  );
+  await started.promise;
+  clock.setTimer(() => deadline.abort('deadline private'), 10);
+  await clock.advanceAsync(10);
+  const result = await pending;
+  assert(Deadline.is(result));
+  assert.equal(result.cause, 'deadline private');
+});
+it('late acquisition closes before close settles and retains cleanup refusal', async () => {
+  const lifetime = createLifetime<never, FailureOf<typeof CloseRefused>>({});
+  const opened = gate<number>();
+  let closed = 0;
+  const refusal = CloseRefused();
+  const acquiring = lifetime.acquire(
+    resource(
+      () => opened.promise,
+      value => {
+        assert.equal(value, 42);
+        closed++;
+        return refusal;
+      },
+    ).prepare,
+  );
+  let settled = false;
+  const closing = lifetime.close().then(value => {
+    settled = true;
+    return value;
   });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  opened.resolve(42);
+  assert(Cancelled.is(await acquiring));
+  assert.equal(await closing, refusal);
+  assert.equal(closed, 1);
+});
+it('noncooperative child keeps close pending and cleanup waits', async () => {
+  const lifetime = createLifetime({});
+  const finish = gate<void>();
+  let finalized = false;
+  lifetime.defer(() => {
+    finalized = true;
+  });
+  lifetime.fork(() => finish.promise);
+  const closing = lifetime.close();
+  await Promise.resolve();
+  assert.equal(finalized, false);
+  finish.resolve();
+  assert.equal(await closing, undefined);
+  assert.equal(finalized, true);
+});
+it('cached closure is exact-once and preserves result identity', async () => {
+  let count = 0;
+  const first = CloseRefused();
+  const second = CloseRefused();
+  const owned = await openScope({
+    first: cleanup(() => {
+      count++;
+      return first;
+    }),
+    second: cleanup(() => second),
+  });
+  assert(!isFailure(owned));
+  const one = owned.close();
+  const two = owned.close();
+  assert.equal(one, two);
+  assert.equal(await one, await two);
+  assert.equal(count, 1);
+});
+it('dependent child reads db during shutdown before outer close', async () => {
+  let alive = true;
+  const started = gate<void>();
+  const clock = new MockClock();
+  const result = await scoped(
+    {
+      db: resource(
+        () => ({
+          query: () => {
+            assert(alive);
+            return 42;
+          },
+        }),
+        () => {
+          alive = false;
+        },
+      ),
+    },
+    ({ db }, signal) =>
+      scoped(
+        {
+          dependent: resource(
+            () => ({ answer: db.query() }),
+            value => {
+              assert.equal(value.answer, 42);
+            },
+          ),
+          watch: child(async childSignal => {
+            started.resolve();
+            try {
+              await sleep(1000, { signal: childSignal, clock });
+            } finally {
+              db.query();
+            }
+          }),
+        },
+        async ({ dependent }) => {
+          await started.promise;
+          return dependent.answer;
+        },
+        { signal },
+      ),
+  );
+  assert.equal(result, 42);
+  assert.equal(alive, false);
+});
+it('dynamic registered callback failures are checked at runtime', async () => {
+  const accepted = [Refused, CloseRefused, ChildRefused] as const;
+  const result = await dynamicScope(accepted).run(async scope => {
+    scope.defer(() => CloseRefused());
+    const db = await scope.acquire(
+      () => ({ query: () => 42 }),
+      db => {
+        void db.query();
+      },
+    );
+    if (isFailure(db)) return db;
+    return db.query();
+  });
+  assert(CloseRefused.is(result));
+});
+it('untyped dynamic caller cannot smuggle a foreign refusal', async () => {
+  // The intentional Reflect seam models external JS bypassing TS. The actual
+  // dynamic runtime edge must still validate against the canonical allowlist.
+  const result = await dynamicScope([]).run(scope => {
+    Reflect.apply(scope.defer, scope, [() => Foreign()]);
+    return 42;
+  });
+  assert(UnexpectedDefect.is(result));
+  assert(Foreign.is(result.cause));
+});
+it('admission closes before cancellation and late registration is refused', async () => {
+  const lifetime = createLifetime({});
+  const closing = lifetime.close();
+  let ran = false;
+  assert(
+    Cancelled.is(
+      lifetime.defer(() => {
+        ran = true;
+      }),
+    ),
+  );
+  assert(
+    Cancelled.is(
+      lifetime.fork(() => {
+        ran = true;
+      }),
+    ),
+  );
+  await closing;
+  assert.equal(ran, false);
+});
 
-  it('runs every finalizer even when one throws, then rejects with E003 listing the errors in run order', async () => {
-    const first = new Error('first to run');
-    const second = new Error('second to run');
-    const log: string[] = [];
-    const result = await settled(
-      scoped(scope => {
-        scope.defer(() => {
-          log.push('a');
-          throw second;
+it('multiple children retain every primary refusal in settlement order', async () => {
+  const first = ChildRefused();
+  const second = ChildRefused();
+  const result = await scoped({ a: child(() => first), b: child(() => second) }, () => 42);
+  localAggregate(result);
+  assert.deepEqual(result.cause.primary, [first, second]);
+});
+it('an early-returning foreign wrapper does not confer ownership', async () => {
+  const clock = new MockClock();
+  const foreign = gate<number>();
+  const started = gate<void>();
+  let closed = false;
+  const pending = scoped(
+    {
+      db: resource(
+        () => 42,
+        () => {
+          closed = true;
+        },
+      ),
+    },
+    () =>
+      timeout(
+        () => {
+          started.resolve();
+          return foreign.promise;
+        },
+        10,
+        { clock },
+      ),
+  );
+  await started.promise;
+  await clock.advanceAsync(10);
+  const result = await pending;
+  assert(UnexpectedDefect.is(result)); // Legacy timeout rejection, not scope's deadline signal.
+  assert.equal(closed, true);
+  // The original promise was never registered with this scope. Complete it and
+  // observe it explicitly; no API can discover hidden foreign work automatically.
+  foreign.resolve(42);
+  assert.equal(await foreign.promise, 42);
+});
+it('registering the original child settlement survives early wrapper return', async () => {
+  const clock = new MockClock();
+  const childWork = gate<number>();
+  const started = gate<void>();
+  let closed = false;
+  let settled = false;
+  const pending = scoped(
+    {
+      db: resource(
+        () => 42,
+        () => {
+          closed = true;
+        },
+      ),
+      original: child(() => childWork.promise),
+    },
+    () =>
+      timeout(
+        () => {
+          started.resolve();
+          return childWork.promise;
+        },
+        10,
+        { clock },
+      ),
+  );
+  void pending.then(() => {
+    settled = true;
+  });
+  await started.promise;
+  await clock.advanceAsync(10);
+  assert.equal(closed, false);
+  assert.equal(settled, false);
+  childWork.resolve(42);
+  assert(UnexpectedDefect.is(await pending));
+  assert.equal(closed, true);
+});
+
+it('unawaited late acquisition refusal is owned and not lost', async () => {
+  const failed = gate<ReturnType<typeof Refused>>();
+  const refusal = Refused();
+  const resultPromise = dynamicScope([Refused]).run(scope => {
+    void scope.acquire(
+      () => failed.promise,
+      () => void 0,
+    );
+    return 42;
+  });
+  failed.resolve(refusal);
+  assert.equal(await resultPromise, refusal);
+});
+it('returned acquisition refusal is identity-deduplicated', async () => {
+  const refusal = Refused();
+  const result = await dynamicScope([Refused]).run(async scope => {
+    return await scope.acquire(
+      () => refusal,
+      () => void 0,
+    );
+  });
+  assert.equal(result, refusal);
+});
+it('unawaited acquisition defect is owned and not lost', async () => {
+  const secret = new Error('unawaited acquisition defect');
+  const result = await dynamicScope([]).run(scope => {
+    void scope.acquire(
+      () => Promise.reject(secret),
+      () => void 0,
+    );
+    return 42;
+  });
+  assert(UnexpectedDefect.is(result));
+  assert.equal(result.cause, secret);
+});
+it('prototype-shaped resource names are own data properties', async () => {
+  const result = await scoped(
+    {
+      ['__proto__']: resource(
+        () => ({ answer: 42 }),
+        () => void 0,
+      ),
+    },
+    values => values.__proto__.answer,
+  );
+  assert.equal(result, 42);
+});
+it('Clock.sleep owned cancellation uses trusted cause identity', async () => {
+  const clock = new MockClock();
+  const started = gate<void>();
+  const result = await scoped(
+    {
+      watcher: child(async signal => {
+        started.resolve();
+        await clock.sleep(1000, signal);
+      }),
+    },
+    async () => {
+      await started.promise;
+      return 42;
+    },
+  );
+  assert.equal(result, 42);
+});
+it('dynamic options normalize an external deadline', async () => {
+  const result = await dynamicScope([]).run(() => 42, { deadline: AbortSignal.abort('expired') });
+  assert(Deadline.is(result));
+});
+
+it('quiesces children before a dispose hook, then runs registered finalizers', async () => {
+  const clock = new MockClock();
+  const started = gate<void>();
+  const order: string[] = [];
+  const lifetime = createLifetime({});
+  lifetime.defer(() => {
+    order.push('finalizer');
+  });
+  const watcher = child(async signal => {
+    started.resolve();
+    try {
+      await clock.sleep(1000, signal);
+    } finally {
+      order.push('child');
+    }
+  });
+  lifetime.fork(watcher.run);
+  await started.promise;
+  const first = lifetime.quiesce();
+  assert.equal(first, lifetime.quiesce());
+  assert.equal(await first, undefined);
+  assert.deepEqual(order, ['child']);
+  order.push('dispose hook');
+  assert.equal(await lifetime.close(), undefined);
+  assert.deepEqual(order, ['child', 'dispose hook', 'finalizer']);
+});
+
+it('reentrant abort listeners share one close and one finalization', async () => {
+  const lifetime = createLifetime({});
+  let finalized = 0;
+  lifetime.defer(() => {
+    finalized++;
+  });
+  let nested: ReturnType<typeof lifetime.close> | undefined;
+  lifetime.signal.addEventListener('abort', () => {
+    nested = lifetime.close();
+  });
+  const closing = lifetime.close();
+  assert.equal(closing, nested);
+  assert.equal(await closing, undefined);
+  assert.equal(finalized, 1);
+});
+
+it('a synchronous close during acquisition still waits for that acquisition and its cleanup', async () => {
+  const lifetime = createLifetime({});
+  const opened = gate<number>();
+  const finalized = gate<void>();
+  let settled = false;
+  let closing: ReturnType<typeof lifetime.close> | undefined;
+  const acquiring = lifetime.acquire(
+    resource(
+      () => {
+        closing = lifetime.close();
+        void closing.then(() => {
+          settled = true;
         });
-        scope.defer(() => void log.push('b'));
-        scope.defer(() => {
-          log.push('c');
-          throw first;
-        });
-        return Promise.resolve('lost');
-      }),
-    );
-    expect(log).toEqual(['c', 'b', 'a']);
-    const error = (result as { error: AsyncError }).error;
-    expect(error).toBeInstanceOf(AsyncError);
-    expect(error.code).toBe('ARKI_ASYNC_E003');
-    expect(error.errors).toEqual([first, second]);
-    expect(error.cause).toBeUndefined();
-    expect(error.remediation).not.toBe('');
-  });
+        return opened.promise;
+      },
+      () => finalized.promise,
+    ).prepare,
+  );
+  await Promise.resolve();
+  assert.equal(settled, false);
+  opened.resolve(42);
+  assert(Cancelled.is(await acquiring));
+  assert.equal(settled, false);
+  finalized.resolve();
+  assert.equal(await closing, undefined);
+  assert.equal(settled, true);
+});
 
-  it('keeps the body error as `cause` when cleanup also fails, so neither error is lost', async () => {
-    const bodyError = new Error('body');
-    const closeError = new Error('close');
-    const result = await settled(
-      scoped(scope => {
-        scope.defer(() => {
-          throw closeError;
-        });
-        return Promise.reject(bodyError);
-      }),
-    );
-    expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E003', cause: bodyError, errors: [closeError] } });
+it('late-acquired resources stay open until admitted children settle', async () => {
+  const lifetime = createLifetime({});
+  const opened = gate<number>();
+  const childDone = gate<void>();
+  let joined = false;
+  let finalized = false;
+  lifetime.fork(async () => {
+    await childDone.promise;
+    joined = true;
   });
-
-  it('aborts scope.signal before finalizers run, with the body error as the reason', async () => {
-    const boom = new Error('boom');
-    let seen: { aborted: boolean; reason: unknown } | undefined;
-    await settled(
-      scoped(scope => {
-        scope.defer(() => {
-          seen = { aborted: scope.signal.aborted, reason: scope.signal.reason };
-        });
-        return Promise.reject(boom);
-      }),
-    );
-    expect(seen).toEqual({ aborted: true, reason: boom });
-  });
-
-  it('stops stragglers: work started on scope.signal and not awaited is aborted when the scope ends', async () => {
-    let straggler: Promise<{ value: void } | { error: unknown }> | undefined;
-    await scoped(scope => {
-      straggler = settled(sleep(10_000, { signal: scope.signal }));
-      return Promise.resolve();
-    });
-    expect(await straggler).toMatchObject({ error: { code: 'ARKI_ASYNC_E002' } });
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('acquire registers close only after open succeeds, and closes resources newest first', async () => {
-    const closed: string[] = [];
-    const close = vi.fn((name: string) => void closed.push(name));
-    const failure = new Error('open failed');
-    const result = await settled(
-      scoped(async scope => {
-        const a = await scope.acquire(() => 'a', close);
-        const b = await scope.acquire(() => Promise.resolve('b'), close);
-        expect([a, b]).toEqual(['a', 'b']);
-        await scope.acquire(() => Promise.reject(failure), close);
-      }),
-    );
-    expect(result).toEqual({ error: failure });
-    expect(closed).toEqual(['b', 'a']);
-  });
-
-  it('acquire passes scope.signal to open, so a slow open can be cancelled with the scope', async () => {
-    const controller = new AbortController();
-    const close = vi.fn();
-    const promise = settled(
-      scoped(scope => scope.acquire(signal => sleep(1000, { signal }), close), { signal: controller.signal }),
-    );
-    controller.abort('cancel');
-    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'cancel' } });
-    expect(close).not.toHaveBeenCalled();
-  });
-
-  it('a straggling acquire that opens after the scope ended closes its resource at once and rejects', async () => {
-    const close = vi.fn();
-    let late: Promise<{ value: string } | { error: unknown }> | undefined;
-    await scoped(scope => {
-      late = settled(
-        scope.acquire(async () => {
-          await sleep(10);
-          return 'late';
-        }, close),
-      );
-      return Promise.resolve();
-    });
-    await vi.advanceTimersByTimeAsync(10);
-    expect(await late).toMatchObject({ error: { code: 'ARKI_ASYNC_E002' } });
-    expect(close).toHaveBeenCalledWith('late');
-  });
-
-  it('defer after the scope ended throws E002 instead of silently never running', async () => {
-    let escaped: Parameters<Parameters<typeof scoped>[0]>[0] | undefined;
-    await scoped(scope => {
-      escaped = scope;
-      return Promise.resolve();
-    });
-    expect(() => escaped?.defer(vi.fn())).toThrow(expect.objectContaining({ code: 'ARKI_ASYNC_E002' }));
-  });
-
-  it('an already-aborted outer signal rejects with E002 and never runs the body', async () => {
-    const body = vi.fn(() => Promise.resolve(1));
-    const result = await settled(scoped(body, { signal: AbortSignal.abort('gone') }));
-    expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'gone' } });
-    expect(body).not.toHaveBeenCalled();
-  });
-
-  it('an outer abort during the body aborts scope.signal with the outer reason', async () => {
-    const controller = new AbortController();
-    const promise = settled(scoped(scope => sleep(1000, { signal: scope.signal }), { signal: controller.signal }));
-    controller.abort('outer');
-    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'outer' } });
-  });
-
-  it('treats a synchronous throw in the body like a rejection and still cleans up', async () => {
-    const boom = new Error('sync');
-    const cleaned = vi.fn();
-    const result = await settled(
-      scoped(scope => {
-        scope.defer(cleaned);
-        throw boom;
-      }),
-    );
-    expect(result).toEqual({ error: boom });
-    expect(cleaned).toHaveBeenCalledOnce();
-  });
+  const acquiring = lifetime.acquire(
+    resource(
+      () => opened.promise,
+      () => {
+        assert.equal(joined, true);
+        finalized = true;
+      },
+    ).prepare,
+  );
+  const closing = lifetime.close();
+  opened.resolve(42);
+  assert(Cancelled.is(await acquiring));
+  assert.equal(finalized, false);
+  childDone.resolve();
+  assert.equal(await closing, undefined);
+  assert.equal(finalized, true);
 });

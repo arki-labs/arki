@@ -7,14 +7,16 @@
  * `db` entrypoint-only a usecase can open a transaction and nothing else.
  * PGlite throughout.
  */
-import { defineApp } from '@arki/dot';
-import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import type { Provided } from '@arki/dot/plugin';
-import { plugin, rename } from '@arki/dot/plugin';
 import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+
+import type { DepsOf } from '@arki/dot/feature';
+import type { Provided } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
+import { plugin, rename } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { OpenTransaction, TxOf } from './dot.js';
 import { db, repos, transactions } from './dot.js';
@@ -67,7 +69,7 @@ const ledger = ledgerDeps
   .entrypoints();
 
 async function bootLedger() {
-  const app = await defineApp('ledger-app').infra(database).features([ledger]).start();
+  const app = await orThrow(defineApp('ledger-app').infra(database).features([ledger]).start());
   await app.services.db.execute(sql`create table notes (id text primary key, body text not null)`);
   return app;
 }
@@ -88,7 +90,7 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
       expect(await usecases.addPair('a', 'b', false)).toBe(2);
       expect(await usecases.count()).toBe(2);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -99,7 +101,7 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
       await expect(usecases.addPair('a', 'b', true)).rejects.toThrow('after the first write');
       expect(await usecases.count()).toBe(0);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 

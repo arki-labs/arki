@@ -24,7 +24,9 @@
  *    read it correctly.
  */
 
+import type { Failure } from '@arki/failure';
 import type { Logger } from '@arki/log';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 /**
@@ -54,7 +56,7 @@ export type HookSignalsOptions = {
 /** The app surface the hook needs — satisfied by any `DotApp`. */
 export type Disposable = {
   readonly name: string;
-  dispose(): Promise<void>;
+  dispose(): Promise<void | Failure>;
 };
 
 /** The global `process` as a {@link SignalTarget}, or `undefined` where the runtime has none. Read at call time, never at import. */
@@ -131,11 +133,16 @@ async function drainAndReraise(args: {
   });
 
   try {
-    const outcome = await Promise.race([app.dispose().then(() => 'disposed' as const), timedOut]);
+    const outcome = await Promise.race([app.dispose(), timedOut]);
     if (outcome === 'timeout') {
       logger.error('drain timed out — terminating without a clean dispose', {
         'dot.signal': signal,
         'dot.drain.timeout.ms': timeoutMs,
+      });
+    } else if (isFailure(outcome)) {
+      logger.error('dispose failed during drain — terminating', {
+        'dot.signal': signal,
+        'dot.failure.code': outcome.code,
       });
     } else {
       logger.info('drain complete', { 'dot.signal': signal });

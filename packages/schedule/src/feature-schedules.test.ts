@@ -10,6 +10,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { ScheduleClock, ScheduleService } from './dot.js';
 import { composeSchedules, DurableSchedules, schedule, schedules } from './dot.js';
@@ -54,12 +55,14 @@ async function bootApp(clock: ScheduleClock) {
       return 'closed';
     },
   };
-  const app = await defineApp('digest-app')
-    .use(plugin({ name: 'mailer', provides: { mailer: () => mailer } }))
-    .use(plugin({ name: 'ledger', provides: { ledger: () => ledger } }))
-    .features([digest, billing])
-    .serve(schedule({ clock }))
-    .boot();
+  const app = await orThrow(
+    defineApp('digest-app')
+      .use(plugin({ name: 'mailer', provides: { mailer: () => mailer } }))
+      .use(plugin({ name: 'ledger', provides: { ledger: () => ledger } }))
+      .features([digest, billing])
+      .serve(schedule({ clock }))
+      .boot(),
+  );
   return { app, calls };
 }
 
@@ -84,7 +87,7 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
       value: 'closed',
     });
     expect(calls).toEqual(['mailer:subscribers', 'ledger:close']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('joins the feature manifest at declaration, like schedules(defs)', async () => {
@@ -94,7 +97,7 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
       'digest:send-digest.fire',
       'billing:close-books.fire',
     ]);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('types the handler parameter from needs, with no annotation', () => {
@@ -124,8 +127,8 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
   // A durable tick runs in another process that does not hold these services.
   it('refuses durable: true in the type and with a coded error at declaration', () => {
     try {
+      // @ts-expect-error feature-owned schedules cannot be durable.
       schedules(mailerNeeds, [
-        // @ts-expect-error feature-owned schedules cannot be durable.
         { name: 'durable-digest', every: '1h', durable: true, handler: ({ mailer }) => mailer.send('x') },
       ]);
       throw new Error('Expected schedules() to throw.');
@@ -147,15 +150,15 @@ describe("schedule({ clock: 'host' })", () => {
   it('fires nothing on its own; each trigger runs the schedule once', async () => {
     vi.useFakeTimers();
     const { app, calls } = await bootApp('host');
-    await app.start();
+    await orThrow(app.start());
 
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(calls).toEqual([]);
 
     await app.services.scheduler.trigger('send-digest');
     expect(calls).toEqual(['mailer:subscribers']);
-    await app.stop();
-    await app.dispose();
+    await orThrow(app.stop());
+    await orThrow(app.dispose());
   });
 
   // Control for the test above: the same app on the internal clock does fire,
@@ -163,12 +166,12 @@ describe("schedule({ clock: 'host' })", () => {
   it('the internal clock fires the same schedules on its timers', async () => {
     vi.useFakeTimers();
     const { app, calls } = await bootApp('internal');
-    await app.start();
+    await orThrow(app.start());
 
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(calls.filter(call => call === 'mailer:subscribers').length).toBeGreaterThanOrEqual(4);
-    await app.stop();
-    await app.dispose();
+    await orThrow(app.stop());
+    await orThrow(app.dispose());
   });
 
   it('publishes the clock and every schedule name on the scheduler service', async () => {
@@ -176,7 +179,7 @@ describe("schedule({ clock: 'host' })", () => {
 
     expect(app.services.scheduler.clock).toBe('host');
     expect(app.services.scheduler.names).toEqual(['send-digest', 'close-books']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   // Two clocks would fire the same tick twice.
@@ -192,7 +195,10 @@ describe("schedule({ clock: 'host' })", () => {
       defineApp('host-durable')
         .serve(schedule({ clock: 'host', schedules: [nightly] }))
         .boot(),
-    ).rejects.toMatchObject({ cause: { code: SCHEDULE_ERROR_CODES.durableWithHostClock } });
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: { code: SCHEDULE_ERROR_CODES.durableWithHostClock },
+    });
   });
 
   it('fails boot with a coded error for a durable backend', async () => {
@@ -206,7 +212,10 @@ describe("schedule({ clock: 'host' })", () => {
         .use(backend)
         .serve(schedule({ clock: 'host', durable: DurableSchedules }))
         .boot(),
-    ).rejects.toMatchObject({ cause: { code: SCHEDULE_ERROR_CODES.durableWithHostClock } });
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: { code: SCHEDULE_ERROR_CODES.durableWithHostClock },
+    });
   });
 
   it('a bare runtime refuses the same combination at construction', () => {
@@ -228,7 +237,7 @@ describe('the scheduler service', () => {
     const { app } = await bootApp('host');
 
     expectTypeOf(app.services.scheduler).toEqualTypeOf<ScheduleService>();
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('keeps the failure cause on handler-failed', async () => {
@@ -246,22 +255,24 @@ describe('the scheduler service', () => {
         ]),
       ],
     });
-    const app = await defineApp('failing-app')
-      .features([failing])
-      .serve(schedule({ clock: 'host' }))
-      .boot();
+    const app = await orThrow(
+      defineApp('failing-app')
+        .features([failing])
+        .serve(schedule({ clock: 'host' }))
+        .boot(),
+    );
 
     const outcome = await app.services.scheduler.trigger('fails');
     expect(outcome).toEqual({ name: 'fails', status: 'handler-failed', cause: boom });
     expect(outcome.status === 'handler-failed' && outcome.cause).toBe(boom);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('reports unknown for a name it does not run, instead of throwing', async () => {
     const { app } = await bootApp('host');
 
     await expect(app.services.scheduler.trigger('nope')).resolves.toEqual({ name: 'nope', status: 'unknown' });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('runs before start (the runtime is built at boot)', async () => {
@@ -269,20 +280,20 @@ describe('the scheduler service', () => {
 
     await expect(app.services.scheduler.trigger('close-books')).resolves.toMatchObject({ status: 'ran' });
     expect(calls).toEqual(['ledger:close']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('refuses triggers after stop as unavailable', async () => {
     const { app, calls } = await bootApp('host');
-    await app.start();
-    await app.stop();
+    await orThrow(app.start());
+    await orThrow(app.stop());
 
     await expect(app.services.scheduler.trigger('send-digest')).resolves.toEqual({
       name: 'send-digest',
       status: 'unavailable',
     });
     expect(calls).toEqual([]);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   // Stop drains accepted runs and refuses new ones, so a late host trigger
@@ -359,17 +370,19 @@ describe('composeSchedules', () => {
 
     // @ts-expect-error no feature declares a schedule named "nope".
     await expect(client.trigger('nope')).resolves.toEqual({ name: 'nope', status: 'unknown' });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('throws a coded error when the scheduler does not run a declared schedule', async () => {
-    const app = await defineApp('no-features')
-      .serve(schedule({ clock: 'host' }))
-      .boot();
+    const app = await orThrow(
+      defineApp('no-features')
+        .serve(schedule({ clock: 'host' }))
+        .boot(),
+    );
 
     expect(() => composeSchedules([digest], app.services.scheduler)).toThrow(
       expect.objectContaining({ code: SCHEDULE_ERROR_CODES.scheduleNotServed }),
     );
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

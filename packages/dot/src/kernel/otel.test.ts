@@ -17,6 +17,7 @@
  * assertion for this commit.
  */
 
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import type { Context, ContextManager } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
@@ -91,7 +92,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await defineApp('otel-configure-test').use(envPlugin).use(dbPlugin).boot();
+    orThrow(await defineApp('otel-configure-test').use(envPlugin).use(dbPlugin).boot());
 
     const phaseSpans = spansByName('dot.app.configure');
     expect(phaseSpans).toHaveLength(1);
@@ -123,7 +124,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await defineApp('otel-boot-test').use(envPlugin).boot();
+    orThrow(await defineApp('otel-boot-test').use(envPlugin).boot());
 
     const bootPhaseSpans = spansByName('dot.app.boot');
     expect(bootPhaseSpans).toHaveLength(1);
@@ -170,9 +171,9 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    const app = await defineApp('otel-full-lifecycle-test').use(envPlugin).use(webPlugin).start();
+    const app = orThrow(await defineApp('otel-full-lifecycle-test').use(envPlugin).use(webPlugin).start());
     await app.stop();
-    await app.dispose();
+    orThrow(await app.dispose());
 
     // One root phase span per public phase call.
     for (const phase of ['configure', 'boot', 'start', 'stop', 'dispose'] as const) {
@@ -200,7 +201,7 @@ describe('@arki/dot OTel instrumentation', () => {
 
   it('stamps the phase span and each plugin hook span on the kernel lifecycle records', async () => {
     using log = fakeLog();
-    const app = await defineApp('trace-thread-test')
+    const app = orThrow(await defineApp('trace-thread-test')
       .use(
         plugin({
           name: 'p',
@@ -209,8 +210,8 @@ describe('@arki/dot OTel instrumentation', () => {
           },
         }),
       )
-      .boot();
-    await app.dispose();
+      .boot());
+    orThrow(await app.dispose());
 
     const phase = spansByName('dot.app.boot')[0]?.spanContext();
     const hook = spansByName('dot.plugin.boot')[0]?.spanContext();
@@ -253,6 +254,19 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(record?.traceId).toBe(phase?.traceId);
   });
 
+  it('reports a returned refusal without inventing an exception event', async () => {
+    const Refused = defineFailure('otel_test.refused');
+    const refusal = Refused();
+    const result = await defineApp('otel-refusal').use(plugin({ name: 'refused', boot: () => refusal })).boot();
+    expect(result).toBe(refusal);
+    for (const name of ['dot.plugin.boot', 'dot.app.boot']) {
+      const span = spansByName(name)[0];
+      expect(span?.status.code).toBe(2);
+      expect(span?.attributes['failure.code']).toBe(Refused.code);
+      expect(span?.events.some(event => event.name === 'exception')).toBe(false);
+    }
+  });
+
   it('marks the failing plugin span ERROR when boot throws', async () => {
     const goodPlugin = plugin({
       name: 'good',
@@ -267,7 +281,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await expect(defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).rejects.toThrow();
+    expect(await defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('intentional boot failure') });
 
     const bootPluginSpans = spansByName('dot.plugin.boot');
     expect(bootPluginSpans).toHaveLength(2);

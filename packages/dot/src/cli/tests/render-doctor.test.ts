@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../../define-app.js';
 import { plugin } from '../../plugin-contract.js';
@@ -28,7 +28,7 @@ const quiet = () =>
 
 describe('doctorStatus', () => {
   it('a clean boot is success: the snapshot has all 5 diagnostics arrays and no error issue', async () => {
-    const app = await testApp([quiet()]).boot();
+    const app = orThrow(await testApp([quiet()]).boot());
     const diagnostics = app.diagnostics;
 
     expect(doctorStatus(diagnostics)).toBe('success');
@@ -40,7 +40,7 @@ describe('doctorStatus', () => {
     expect(diagnostics.issues).toBeInstanceOf(Array);
     expect(allIssues(diagnostics).filter(issue => issue.severity === 'error')).toHaveLength(0);
 
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('a failed boot is failure, with a failed plugin and a structured issue', async () => {
@@ -51,11 +51,7 @@ describe('doctorStatus', () => {
       },
     });
     const seam = defineApp('test').use(bad).configure();
-    try {
-      await seam.boot();
-    } catch {
-      // expected
-    }
+    expect(await seam.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
 
     expect(doctorStatus(seam.diagnostics)).toBe('failure');
     const badPlugin = seam.diagnostics.plugins.find(p => p.plugin === 'bad');
@@ -70,13 +66,13 @@ describe('doctorStatus', () => {
 
 describe('renderDoctorText', () => {
   it('includes per-plugin status markers and the verdict', async () => {
-    const app = await testApp([quiet()]).boot();
+    const app = orThrow(await testApp([quiet()]).boot());
     const { ui, text } = textUi();
     renderDoctorText({ ...app.diagnostics, status: 'success' }, ui);
     expect(text()).toContain('[OK]');
     expect(text()).toContain('p');
     expect(text()).toContain('Summary: SUCCESS');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -111,14 +107,14 @@ describe('runDoctor', () => {
       },
     });
 
-    const app = await testApp([p]).boot();
+    const app = orThrow(await testApp([p]).boot());
     const report = await runDoctor(app);
 
     expect(report).toMatchObject({ status: 'success' });
     expect(disposeSpy).not.toHaveBeenCalled();
 
     // We're still responsible for disposing it since the CLI didn't.
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 

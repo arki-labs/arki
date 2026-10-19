@@ -40,6 +40,7 @@ import { db } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { program } from '@arki/dot/cli';
 import { env } from '@arki/env/dot';
+import { isFailure } from '@arki/failure';
 import { kv } from '@arki/kv/dot';
 
 import type { DotProbeResult } from './types';
@@ -121,9 +122,13 @@ function hasArrays(value: unknown, keys: readonly string[]): boolean {
 
 async function runProbe(): Promise<DotProbeResult> {
   const app = await probeApp().boot();
+  if (isFailure(app)) return { status: 'fail', reason: `Dot boot failed: ${app.code}` };
 
-  const tempTarget = mkdtempSync(path.join(tmpdir(), 'arki-dot-probe-'));
+  let tempTarget: string | undefined;
+  let report: DotProbeResult;
+  let disposal: Awaited<ReturnType<typeof app.dispose>>;
   try {
+    tempTarget = mkdtempSync(path.join(tmpdir(), 'arki-dot-probe-'));
     const manifest = app.manifest;
     const diagnostics = app.diagnostics;
 
@@ -158,14 +163,14 @@ async function runProbe(): Promise<DotProbeResult> {
     const doctored = await dot(['doctor', '--app', THIS_FILE]);
     const doctorPassed = doctored.code === 0 && at(doctored.envelope, 'ok') === true;
     const doctorFailed = doctored.code === 3 && at(doctored.envelope, 'error', 'code') === 'dot.doctor_failed';
-    const report = doctorPassed ? at(doctored.envelope, 'data') : at(doctored.envelope, 'error', 'data');
+    const doctorReport = doctorPassed ? at(doctored.envelope, 'data') : at(doctored.envelope, 'error', 'data');
     const doctorEnvelopeOk =
       (doctorPassed || doctorFailed) &&
       isEnvelopeFor(doctored.envelope, 'doctor') &&
-      typeof at(report, 'status') === 'string' &&
-      at(report, 'app', 'name') === diagnostics.app.name &&
-      typeof at(report, 'app', 'state') === 'string' &&
-      hasArrays(report, ['plugins', 'actions', 'services', 'lifecycle', 'issues']);
+      typeof at(doctorReport, 'status') === 'string' &&
+      at(doctorReport, 'app', 'name') === diagnostics.app.name &&
+      typeof at(doctorReport, 'app', 'state') === 'string' &&
+      hasArrays(doctorReport, ['plugins', 'actions', 'services', 'lifecycle', 'issues']);
 
     // `dot new --dry-run` plans the scaffold and writes nothing.
     const scaffolded = await dot(['new', 'probe-app', '--target', tempTarget, '--dry-run']);
@@ -192,7 +197,7 @@ async function runProbe(): Promise<DotProbeResult> {
           typeof at(op, 'reason') === 'string',
       );
 
-    return {
+    report = {
       status: 'pass',
       pluginCount: manifest.plugins.length,
       manifestArrays,
@@ -204,14 +209,19 @@ async function runProbe(): Promise<DotProbeResult> {
       newRequiredFilesPresent,
       appState: String(app.state),
     };
+  } catch (cause) {
+    report = { status: 'fail', reason: cause instanceof Error ? cause.message : String(cause) };
   } finally {
-    rmSync(tempTarget, { recursive: true, force: true });
-    try {
-      await app.dispose();
-    } catch {
-      /* dispose errors don't invalidate the probe — diagnostics already captured */
-    }
+    disposal = await app.dispose();
+    if (tempTarget !== undefined) rmSync(tempTarget, { recursive: true, force: true });
   }
+  if (isFailure(disposal)) {
+    return {
+      status: 'fail',
+      reason: `${report.status === 'fail' ? `${report.reason}; ` : ''}Dot disposal failed: ${disposal.code}`,
+    };
+  }
+  return report;
 }
 
 void (async (): Promise<void> => {

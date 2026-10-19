@@ -109,6 +109,7 @@
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/http": "workspace:*",
     "@arki/journal": "workspace:*",
     "@arki/library-tooling": "workspace:*",

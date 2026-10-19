@@ -41,7 +41,9 @@ const DEFAULT_APP_PATHS: readonly string[] = ['dot.config', 'src/app', 'app'];
 const SUPPORTED_EXTENSIONS: readonly string[] = ['.ts', '.mts', '.mjs', '.js'];
 
 export type DiscoveredApp =
-  DotApp<Record<string, unknown>> | DotAppBuilder<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
+  | DotApp<Record<string, unknown>, Failure, Failure>
+  | DotAppBuilder<Record<string, unknown>, Failure, Failure>
+  | DotAppConfigured<Record<string, unknown>, Failure, Failure>;
 
 export type DiscoveryOptions = {
   /** Explicit app file path. When set, takes precedence over the search list. */
@@ -110,13 +112,13 @@ export async function resolveAppFile(options: DiscoveryOptions = {}): Promise<st
  * `DotAppBuilder` / `DotAppConfigured`. We avoid `instanceof` because the
  * surface types are structural; instead we duck-type the key methods.
  */
-function isDotAppBuilder(value: unknown): value is DotAppBuilder<Record<string, unknown>> {
+function isDotAppBuilder(value: unknown): value is DotAppBuilder<Record<string, unknown>, Failure, Failure> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return typeof v.use === 'function' && typeof v.configure === 'function' && typeof v.boot === 'function';
 }
 
-function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<string, unknown>> {
+function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<string, unknown>, Failure, Failure> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -128,7 +130,7 @@ function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<st
   );
 }
 
-function isDotApp(value: unknown): value is DotApp<Record<string, unknown>> {
+function isDotApp(value: unknown): value is DotApp<Record<string, unknown>, Failure, Failure> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (

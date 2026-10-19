@@ -42,7 +42,7 @@ const QUIET_MS = 200;
 let db: PgliteDatabase;
 let client: PGlite;
 let next = 0;
-const apps: { stop(): Promise<void>; dispose(): Promise<void> }[] = [];
+const apps: Parameters<typeof track>[0][] = [];
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -50,8 +50,8 @@ beforeAll(async () => {
 
 afterEach(async () => {
   for (const app of apps.splice(0)) {
-    await app.stop();
-    await app.dispose();
+    await orThrow(app.stop());
+    await orThrow(app.dispose());
   }
   // A job left by one test must not reach the next test's worker.
   await db.delete(tables.jobs).where(sql`true`);
@@ -62,7 +62,7 @@ afterAll(async () => {
 });
 
 /** Remember the app so `afterEach` stops its worker even when the test fails. */
-function track<App extends { stop(): Promise<void>; dispose(): Promise<void> }>(app: App): App {
+function track<App extends { stop(): Promise<unknown>; dispose(): Promise<unknown> }>(app: App): App {
   apps.push(app);
   return app;
 }
@@ -140,10 +140,12 @@ const typedJournal = typed.compose({});
 describe('journal(...) in direct mode', () => {
   it('publishes a journal built with the typed chain as `services.journal`, so a typed app can mount it', async () => {
     const app = track(
-      await defineApp('typed')
-        .use(dbPlugin())
-        .use(journal({ journal: typedJournal }))
-        .boot(),
+      await orThrow(
+        defineApp('typed')
+          .use(dbPlugin())
+          .use(journal({ journal: typedJournal }))
+          .boot(),
+      ),
     );
 
     expectTypeOf(app.services.journal).toEqualTypeOf(typedJournal);
@@ -156,10 +158,12 @@ describe('journal(...) in direct mode', () => {
   it('accepts a journal from the untyped `initJournal({ tables, meta })`, so small apps need no type steps', async () => {
     const untyped = j.compose({});
     const app = track(
-      await defineApp('untyped')
-        .use(dbPlugin())
-        .use(journal({ journal: untyped }))
-        .boot(),
+      await orThrow(
+        defineApp('untyped')
+          .use(dbPlugin())
+          .use(journal({ journal: untyped }))
+          .boot(),
+      ),
     );
 
     expectTypeOf(app.services.journal).toEqualTypeOf<TestJournal>();
@@ -189,19 +193,21 @@ describe('journal(...) in direct mode', () => {
     const mail = recorder('dot-direct-mail');
     const composed = j.compose({ effects: [mail.effect] });
     const app = track(
-      await defineApp('direct-worker')
-        .use(dbPlugin())
-        .use(journal({ journal: composed }))
-        .serve(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('direct-worker')
+          .use(dbPlugin())
+          .use(journal({ journal: composed }))
+          .serve(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     const first = orderId(++next);
     orThrow(await app.services.journal.run(db, placeOrder, { id: first }, meta));
     await mail.seen(first);
 
-    await app.stop();
+    await orThrow(app.stop());
     orThrow(await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta));
     await pause(QUIET_MS);
 
@@ -213,12 +219,14 @@ describe('journal(...) in direct mode', () => {
     const mail = recorder('dot-no-worker-mail');
     const composed = j.compose({ effects: [mail.effect] });
     const app = track(
-      await defineApp('web-only')
-        .use(dbPlugin())
-        .use(journal({ journal: composed }))
-        .boot(),
+      await orThrow(
+        defineApp('web-only')
+          .use(dbPlugin())
+          .use(journal({ journal: composed }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     orThrow(await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta));
     await pause(QUIET_MS);
@@ -231,11 +239,13 @@ describe('journal(...) in direct mode', () => {
     const main = j.compose({});
     const reports = j.compose({});
     const app = track(
-      await defineApp('two-journals')
-        .use(dbPlugin())
-        .use(journal({ journal: main }))
-        .use(rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal'))
-        .boot(),
+      await orThrow(
+        defineApp('two-journals')
+          .use(dbPlugin())
+          .use(journal({ journal: main }))
+          .use(rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal'))
+          .boot(),
+      ),
     );
 
     expect(app.services.journal).toBe(main);
@@ -263,14 +273,16 @@ describe('journal({ j }) with features', () => {
 
     // The features are listed once: `journal` and `journalWorker` are both bound to them.
     const app = track(
-      await defineApp('feature-mode')
-        .use(dbPlugin())
-        .use(journal({ j }))
-        .features([orders, billing, plain])
-        .serve(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('feature-mode')
+          .use(dbPlugin())
+          .use(journal({ j }))
+          .features([orders, billing, plain])
+          .serve(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     expect(app.services.journal.catalog.projections).toEqual(['dot-orders-count', 'dot-billing-count']);
     expect(app.services.journal.catalog.effects).toEqual(['dot-orders-mail', 'dot-billing-mail']);
@@ -305,7 +317,9 @@ describe('journal({ j }) with features', () => {
       },
     });
 
-    track(await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot());
+    track(
+      await orThrow(defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot()),
+    );
 
     expect(await placedCount('boot:at-boot')).toBe(1);
   });
@@ -333,14 +347,16 @@ describe('journal({ j }) with features', () => {
       use: [journalHandlers({ effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })] })],
     });
     const app = track(
-      await defineApp('cross-feature')
-        .use(dbPlugin())
-        .use(journal({ j }))
-        .features([ordering, billing])
-        .serve(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('cross-feature')
+          .use(dbPlugin())
+          .use(journal({ j }))
+          .features([ordering, billing])
+          .serve(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     const id = orderId(++next);
     orThrow(await app.services.journal.run(db, placeOrder, { id }, meta));
@@ -409,16 +425,18 @@ describe('journal({ j }) with features', () => {
     const billing = emitterFeature('billing');
 
     const app = track(
-      await defineApp('per-feature-services')
-        .use(dbPlugin())
-        .use(orders.emitter)
-        .use(billing.emitter)
-        .use(journal({ j }))
-        .features([orders.feature, billing.feature])
-        .serve(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('per-feature-services')
+          .use(dbPlugin())
+          .use(orders.emitter)
+          .use(billing.emitter)
+          .use(journal({ j }))
+          .features([orders.feature, billing.feature])
+          .serve(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     const id = orderId(++next);
     orThrow(await app.services.journal.run(db, placeOrder, { id }, meta));
@@ -463,7 +481,12 @@ describe('journal({ j }) with features', () => {
 
     await expect(
       defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
-    ).rejects.toThrow('duplicate effect name "dot-twice" (features "first" and "second")');
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('duplicate effect name "dot-twice" (features "first" and "second")'),
+      }),
+    });
   });
 
   it('fails the boot and names both features when two features declare the same projection name, so one read model is never written by two handlers', async () => {
@@ -476,7 +499,12 @@ describe('journal({ j }) with features', () => {
 
     await expect(
       defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
-    ).rejects.toThrow('duplicate projection name "dot-count-twice" (features "first" and "second")');
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('duplicate projection name "dot-count-twice" (features "first" and "second")'),
+      }),
+    });
   });
 
   it('says so when one feature lists the same effect name twice, so the message does not send the reader to a second feature', async () => {
@@ -484,16 +512,22 @@ describe('journal({ j }) with features', () => {
       use: [journalHandlers({ effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] })],
     });
 
-    await expect(defineApp('once').use(dbPlugin()).use(journal({ j })).features([only]).boot()).rejects.toThrow(
-      'duplicate effect name "dot-same-feature" (feature "only", twice)',
-    );
+    await expect(defineApp('once').use(dbPlugin()).use(journal({ j })).features([only]).boot()).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('duplicate effect name "dot-same-feature" (feature "only", twice)'),
+      }),
+    });
   });
 
   it('refuses a `journal` slice that `journalHandlers` did not make, so a wiring mistake fails at boot and not inside a write', async () => {
     const broken = feature('broken', { use: [{ key: 'journal', actions: [], resolve: () => ({}) }] });
 
-    await expect(defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot()).rejects.toThrow(
-      /feature "broken"/,
-    );
+    await expect(
+      defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot(),
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({ message: expect.stringMatching(/feature "broken"/) }),
+    });
   });
 });

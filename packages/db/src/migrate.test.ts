@@ -8,16 +8,19 @@
  *   - `dbMigrations()` runs inside a DOT boot, after `db`, before dependents
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
 import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
+
+import type { MigratableDb } from './migrate.js';
 import { db, dbMigrations } from './dot.js';
-import { migrateDb, readMigrations, type MigratableDb } from './migrate.js';
+import { migrateDb, readMigrations } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 const widgets = pgTable('widgets', { id: text('id').primaryKey(), label: text('label').notNull() });
@@ -84,16 +87,18 @@ describe('dbMigrations()', () => {
       },
     });
 
-    const app = await defineApp('migrate-test')
-      .use(db({ driver: 'pglite', memory: true, relations }))
-      .use(dbMigrations<typeof relations>({ migrationsFolder }))
-      .use(reader)
-      .boot();
+    const app = await orThrow(
+      defineApp('migrate-test')
+        .use(db({ driver: 'pglite', memory: true, relations }))
+        .use(dbMigrations<typeof relations>({ migrationsFolder }))
+        .use(reader)
+        .boot(),
+    );
     try {
       expect(seenLabels).toEqual(['first']);
       expect(app.manifest.plugins.map(entry => entry.name)).toEqual(['db', 'db-migrations', 'reader']);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });

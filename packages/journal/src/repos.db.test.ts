@@ -99,22 +99,22 @@ afterAll(async () => {
 
 describe('repos() in a journal command', () => {
   it('reads through withTx(tx) see the command’s own writes, before the commit', async () => {
-    const app = await defineApp('ledger').infra(database).features([accountsFeature]).start();
+    const app = await orThrow(defineApp('ledger').infra(database).features([accountsFeature]).start());
     try {
       expect(await app.services['accounts.usecases'].open('acc_1', 10)).toBe(10);
       expect(await app.services['accounts.usecases'].balance('acc_1')).toBe(10);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
   it('a command that throws takes its writes with it; the repositories see nothing after', async () => {
-    const app = await defineApp('ledger').infra(database).features([accountsFeature]).start();
+    const app = await orThrow(defineApp('ledger').infra(database).features([accountsFeature]).start());
     try {
       await expect(app.services['accounts.usecases'].open('acc_2', 5, true)).rejects.toThrow('rolled back');
       expect(await app.services['accounts.usecases'].balance('acc_2')).toBeNull();
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 

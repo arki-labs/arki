@@ -138,6 +138,7 @@ The same three steps under their final names (RFC
 order, checked like `.useAll()`:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { defineFeature, driver, sliceOf } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
@@ -163,6 +164,7 @@ const shop = await defineApp('shop')
   .features(features) // defineFeature() values (feature() during the migration)
   .entrypoints(gateway) // what calls into the features
   .boot();
+if (isFailure(shop)) throw new Error(shop.code);
 
 const order = shop.manifest.plugins.map(p => p.name).join(' → ');
 if (order !== 'log → database → orders → gateway') throw new Error(`unexpected boot order ${order}`);
@@ -172,6 +174,7 @@ await shop.dispose();
 A feature is a chain whose steps are its folders:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineApp, plugin } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
@@ -205,6 +208,7 @@ export const dailyDigest = dailyDigestLogic
   .entrypoints(rpc({}, {}, {})); // entrypoints/ — the contract is empty here
 
 const shop = await defineApp('shop').infra(billing).features([dailyDigest]).boot();
+if (isFailure(shop)) throw new Error(shop.code);
 const items = await shop.services.digests.previewFor('u1');
 if (items.length !== 2) throw new Error(`the plan allows two items, got ${items.length}`);
 await shop.dispose();
@@ -259,6 +263,7 @@ top-level, and owns its own infra units.
 order — a unit in the wrong step does not compile:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 import { driver, feature } from '@arki/dot/feature';
 
@@ -276,6 +281,7 @@ const app = await defineApp('shop')
   .serve(http) // driving adapters — what calls the features
   .serve(queueWorker)
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 
 const order = app.manifest.plugins.map(p => p.name).join(' → ');
 if (order !== 'db → queue → orders → http → queue-worker') throw new Error(`unexpected boot order ${order}`);

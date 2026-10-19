@@ -19,7 +19,14 @@
  *    through individual plugin failures, reporting an aggregate error.
  */
 
+import type { CheckedPlan, ScopeAggregate, ScopeOptions, ScopePlan, SupervisorFailure } from '@arki/async';
+import type { Failure, FailureIn, FailureOf, SuccessOf } from '@arki/failure';
+import { createLifetime, isScopeEntry } from '@arki/async';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type { Lazy } from './lazy.js';
 import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
+import { isLazy } from './lazy.js';
 
 declare const TypeOf: unique symbol;
 
@@ -112,141 +119,8 @@ export function provide<T, K extends string>(tok: Token<T, K>, value: T): Record
 /** Record of wire-keyed services. */
 export type ServiceRecord = Record<string, unknown>;
 
-/** Runtime brand for lazy service handles (kernel detects these for auto-dispose). */
-export const LazyTag: unique symbol = Symbol('dot.lazy');
-
-/**
- * A lazily-initialized service handle. Return one from a `provides`
- * factory to defer an expensive open until first use:
- *
- * ```ts
- * provides: { db: () => lazy(() => openDb(), { dispose: db => db.close() }) }
- * ```
- *
- * Laziness is visible in the type — consumers declare
- * `needs: { db: dbPlugin.provides.db }` and call `await db.get()`. The
- * kernel auto-disposes initialized handles in reverse declaration order
- * during `dispose` (and boot rollback), even when the publishing plugin has
- * no `dispose` hook. A handle that was never `get()`ed never initializes
- * and never runs cleanup.
- */
-export type Lazy<T> = {
-  readonly [LazyTag]: true;
-  /**
-   * Initialize (once) and return the value. Concurrent callers share one
-   * attempt. A failed attempt is NOT cached — the next call retries.
-   * Throws if the handle has been disposed.
-   */
-  get(): Promise<T>;
-  /** True once an initialization attempt has succeeded. */
-  readonly initialized: boolean;
-  /** The value if initialized, else `undefined`. Never triggers initialization. */
-  peek(): T | undefined;
-  /**
-   * Run cleanup if initialized (awaits an in-flight initialization first).
-   * Idempotent. Called automatically by the kernel for published handles.
-   */
-  dispose(): Promise<void>;
-};
-
-type LazyState<T> =
-  | { readonly status: 'idle' }
-  | { readonly status: 'pending'; readonly promise: Promise<T> }
-  | { readonly status: 'ready'; readonly value: T }
-  | { readonly status: 'disposed' };
-
-/**
- * Create a lazy service handle. See {@link Lazy} for semantics.
- *
- * @param init - Opens the resource. Runs at most once concurrently; a
- *   rejected attempt is not cached, so a later `get()` retries.
- * @param options.dispose - Cleanup for the initialized value. Skipped when
- *   the handle was never initialized.
- */
-export function lazy<T>(
-  init: () => Promise<T> | T,
-  options: { readonly dispose?: (value: T) => Promise<void> | void } = {},
-): Lazy<T> {
-  let state: LazyState<T> = { status: 'idle' };
-
-  return {
-    [LazyTag]: true,
-    get(): Promise<T> {
-      if (state.status === 'ready') return Promise.resolve(state.value);
-      if (state.status === 'pending') return state.promise;
-      if (state.status === 'disposed') {
-        return Promise.reject(new Error('Lazy service handle is disposed — the app has shut down.'));
-      }
-      const promise = Promise.resolve()
-        .then(init)
-        .then(
-          value => {
-            state = { status: 'ready', value };
-            return value;
-          },
-          (error: unknown) => {
-            // Failed initialization is not cached — allow retry.
-            state = { status: 'idle' };
-            throw error;
-          },
-        );
-      state = { status: 'pending', promise };
-      return promise;
-    },
-    get initialized(): boolean {
-      return state.status === 'ready';
-    },
-    peek(): T | undefined {
-      return state.status === 'ready' ? state.value : undefined;
-    },
-    async dispose(): Promise<void> {
-      if (state.status === 'pending') {
-        try {
-          await state.promise;
-        } catch {
-          // Failed init: nothing to clean up.
-        }
-      }
-      if (state.status === 'ready') {
-        const { value } = state;
-        state = { status: 'disposed' };
-        await options.dispose?.(value);
-        return;
-      }
-      state = { status: 'disposed' };
-    },
-  };
-}
-
-/** Type guard: is this published value a lazy service handle? */
-export function isLazy(value: unknown): value is Lazy<unknown> {
-  return typeof value === 'object' && value !== null && LazyTag in value;
-}
-
-/**
- * Wrap an already-available value in a pre-initialized `Lazy<T>` handle.
- * Used by the kernel to lift eager provides for `service.lazy` consumers;
- * also handy for handing fakes to lazy-consuming plugins in tests. The handle
- * has no cleanup of its own — the underlying value's lifecycle belongs to
- * whoever created it.
- */
-export function lazyOf<T>(value: T): Lazy<T> {
-  let disposed = false;
-  return {
-    [LazyTag]: true,
-    get: () =>
-      disposed
-        ? Promise.reject(new Error('Lazy service handle is disposed — the app has shut down.'))
-        : Promise.resolve(value),
-    get initialized(): boolean {
-      return !disposed;
-    },
-    peek: () => (disposed ? undefined : value),
-    async dispose(): Promise<void> {
-      disposed = true;
-    },
-  };
-}
+export { LazyTag, LazyClosed, lazy, lazyOf, isLazy } from './lazy.js';
+export type { Lazy } from './lazy.js';
 
 /** A `needs` declaration: local alias → witness (anonymous or token). */
 export type NeedsShape = Record<string, Service<unknown>>;
@@ -424,9 +298,107 @@ export function handleOf(key: string, provider: string): Handle<unknown, string>
   return { ...tok, provider, lazy: { ...tok, provider, lazy: true } };
 }
 
+/** Exact failures owned by a plugin's construction and release callbacks. */
+export type PluginOwnership = { readonly open: Failure; readonly close: Failure };
+export type EmptyOwnership = { readonly open: never; readonly close: never };
+type CallbackFailure<Value, Key extends PropertyKey> =
+  Value extends Record<Key, infer Callback extends (...args: never[]) => unknown> ? FailureOf<Callback> : never;
+type EntriesFailure<Values, Key extends PropertyKey> = {
+  [Name in keyof Values]: CallbackFailure<Values[Name], Key>;
+}[keyof Values];
+/** Consumer-visible successful value of an ordinary or owned provider. */
+type ResourceEntry = Extract<ScopePlan[string], { kind: 'resource' }>;
+export type ProvidedValue<Value> = Value extends ResourceEntry
+  ? Value extends { readonly open: infer Open extends (...args: never[]) => unknown }
+    ? SuccessOf<Open>
+    : never
+  : Exclude<Value, Failure>;
+export type ProvidedValues<Values> = { [Name in keyof Values]: ProvidedValue<Awaited<Values[Name]>> };
+type ProviderEntries<Values> = { [Name in keyof Values]: Extract<Awaited<Values[Name]>, ResourceEntry> };
+type ProviderOpen<Values> =
+  Extract<Awaited<Values[keyof Values]>, Failure> | EntriesFailure<ProviderEntries<Values>, 'open'>;
+type LazyClose<Value> = Value extends Lazy<unknown, Failure> ? FailureOf<Value['dispose']> : never;
+type ProviderClose<Values> =
+  | EntriesFailure<ProviderEntries<Values>, 'close'>
+  | { [Name in keyof Values]: LazyClose<Exclude<Awaited<Values[Name]>, ResourceEntry | Failure>> }[keyof Values];
+export type InferredOwnership<Values, Boot> = {
+  readonly open:
+    | ProviderOpen<Values>
+    | Extract<Boot, Failure>
+    | EntriesFailure<Exclude<Boot, void | Failure>, 'open'>
+    | EntriesFailure<Exclude<Boot, void | Failure>, 'run'>;
+  readonly close:
+    | ProviderClose<Values>
+    | EntriesFailure<Exclude<Boot, void | Failure>, 'close'>
+    | EntriesFailure<Exclude<Boot, void | Failure>, 'run'>;
+};
+export type PluginOpenFailure<P> = P extends { readonly [OwnershipSym]?: infer Owned extends PluginOwnership }
+  ? Owned['open']
+  : never;
+export type PluginCloseFailure<P> = P extends { readonly [OwnershipSym]?: infer Owned extends PluginOwnership }
+  ? Owned['close']
+  : never;
+export type PluginCloseOutcome<Close extends Failure> =
+  void | Close | SupervisorFailure | ScopeAggregate<Close | SupervisorFailure, Close | SupervisorFailure>;
+export type PluginBootOutcome<Open extends Failure, Close extends Failure> =
+  void | Open | Close | SupervisorFailure | ScopeAggregate<Open | Close | SupervisorFailure, Close | SupervisorFailure>;
+/** A successfully constructed plugin lifetime, transferred unchanged to its app. */
+export type PluginConstruction<Close extends Failure> = {
+  readonly services: ServiceRecord;
+  quiesce(): Promise<PluginCloseOutcome<Close>>;
+  close(): Promise<PluginCloseOutcome<Close>>;
+};
+/** Closed operations retain inferred callback outcomes across kernel scheduling. */
+export type PluginRuntime<Open extends Failure, Close extends Failure> = {
+  construct(
+    ctx: never,
+    options: ScopeOptions,
+    claimLazy: (value: Lazy<unknown, Failure>) => boolean,
+  ): Promise<PluginConstruction<Close> | Exclude<PluginBootOutcome<Open, Close>, void>>;
+};
+
 /** One factory per published key. Each gets the needs + kernel keys; its key is the publish key. */
+type ResourceCallbacks<Value> = Value extends {
+  readonly open: (...args: never[]) => unknown;
+  readonly close: (...args: never[]) => unknown;
+}
+  ? { [Key in 'open' | 'close']: Value[Key] extends (...args: never[]) => infer Result ? Awaited<Result> : never }[
+      'open' | 'close']
+  : unknown;
+type CheckedOutput<Value> = [Value] extends [PlainValue]
+  ? unknown
+  : unknown extends Value
+    ? never
+    : [Extract<Value, Exclude<ScopePlan[string], ResourceEntry>>] extends [never]
+      ? unknown extends ResourceCallbacks<Extract<Value, ResourceEntry>>
+        ? never
+        : unknown
+      : never;
+
+/** Boot plans retain all callback outcomes; erased or untyped plans cannot declare ownership. */
+export type BootGuard<Boot extends void | ScopePlan | Failure> = [Exclude<Boot, void | Failure>] extends [
+  CheckedPlan<Exclude<Boot, void | Failure>>,
+]
+  ? []
+  : [error: { readonly 'DOT: boot plans must retain typed callback outcomes': Boot }];
+/** Plain service objects cannot carry an ownership entry brand or hide an entry in a promise. */
+type PlainService = object &
+  Readonly<Partial<Record<Extract<keyof ScopePlan[string], symbol>, never>>> & {
+    readonly then?: never;
+  };
+/** Validate each inferred return locally; an arity guard would freeze sibling factories before contextual inference. */
+type PlainValue = PlainService | string | number | boolean | bigint | symbol | null | void;
+export type CheckedProvider<Value> = PlainValue | PromiseLike<PlainValue> | CheckedOutput<Awaited<Value>>;
+
+/**
+ * Infer raw factory returns once, including Promise wrappers. Explicit
+ * TProvides annotations describe those raw returns, not the resolved services.
+ * Services and ownership resolve promises through their shared projections.
+ */
 export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
-  readonly [K in keyof TProvides]: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides[K]>;
+  readonly [K in keyof TProvides]: (
+    services: CtxOf<TNeeds> & KernelCtx,
+  ) => TProvides[K] & CheckedProvider<NoInfer<TProvides[K]>>;
 };
 
 /** An erased factory record — what the kernel runs at boot. */
@@ -435,6 +407,7 @@ export type AnyFactories = Readonly<Record<string, (ctx: never) => unknown>>;
 declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
 declare const ProviderIdentitySym: unique symbol;
+declare const OwnershipSym: unique symbol;
 
 /**
  * The DOT plugin (v2). Author through {@link plugin} — never construct directly.
@@ -460,7 +433,10 @@ export type Plugin<
   TProvides extends ServiceRecord = ServiceRecord,
   TShape extends NeedsShape = NeedsShape,
   TOwner extends string = string,
+  TOwnership extends PluginOwnership = EmptyOwnership,
 > = {
+  readonly runtime: PluginRuntime<TOwnership['open'], TOwnership['close']>;
+  readonly [OwnershipSym]?: TOwnership;
   /** Unique identifier for this plugin within the app. */
   readonly name: string;
   /** Runtime needs shape (local alias → witness). */
@@ -491,7 +467,7 @@ export type Plugin<
   readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
   readonly hooks: {
     readonly configure?: (ctx: DotConfigureContext) => void;
-    readonly boot?: (ctx: never) => MaybePromise<void>;
+    readonly boot?: (ctx: never) => unknown;
     readonly start?: (ctx: never) => MaybePromise<void>;
     readonly stop?: (ctx: never) => MaybePromise<void>;
     readonly dispose?: (ctx: never) => MaybePromise<void>;
@@ -502,33 +478,41 @@ export type Plugin<
 };
 
 /** Extract a plugin's (wire-keyed) needs record. */
-export type PluginNeeds<P> = P extends Plugin<infer N, ServiceRecord> ? N : never;
+export type PluginNeeds<P> = P extends Plugin<infer N, ServiceRecord, NeedsShape, string, PluginOwnership> ? N : never;
 /** Extract a plugin's (wire-keyed) provides record. */
-export type PluginProvides<P> = P extends Plugin<ServiceRecord, infer Pr> ? Pr : never;
+export type PluginProvides<P> =
+  P extends Plugin<ServiceRecord, infer Pr, NeedsShape, string, PluginOwnership> ? Pr : never;
 /**
  * Extract a plugin's needs as written (alias → witness). A handle witness
  * carries the identity of the service it names (`provider` + `key`); an
  * anonymous `service<T>()` carries none. `NeedsShape` (every key, every
  * witness) when the plugin was typed without a shape — "unknown".
  */
-export type PluginProviderIdentities<P> = P extends Plugin<ServiceRecord, ServiceRecord, infer S> ? S : NeedsShape;
+export type PluginProviderIdentities<P> =
+  P extends Plugin<ServiceRecord, ServiceRecord, infer S, string, PluginOwnership> ? S : NeedsShape;
 /** The `provider` literal a plugin's handles carry (`string` when the plugin was typed without its name). */
-export type PluginOwner<P> = P extends Plugin<ServiceRecord, ServiceRecord, NeedsShape, infer O> ? O : string;
+export type PluginOwner<P> =
+  P extends Plugin<ServiceRecord, ServiceRecord, NeedsShape, infer O, PluginOwnership> ? O : string;
 
 /** Internal type alias used by the kernel to erase plugin service generics. */
-export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
+export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord, NeedsShape, string, PluginOwnership>;
+/** A scheduled plugin whose closed execution operations retain exact phase outcomes. */
+export type RuntimePlugin<Open extends Failure, Close extends Failure> = Omit<AnyPlugin, 'runtime'> & {
+  readonly runtime: PluginRuntime<Open, Close>;
+};
 
 /**
  * Author a DOT plugin.
  *
  * - `TShape` is inferred from the `needs` object literal.
- * - `TProvides` is inferred from the `provides` factories — no generic
- *   argument. Each factory gets the needs (under their local aliases) plus
+ * - `TProvides` is inferred from the raw `provides` factory returns, including
+ *   Promise wrappers — no generic argument. Each factory gets the needs
+ *   (under their local aliases) plus
  *   the `$`-prefixed kernel keys; it may be async. The kernel runs them in
  *   key order at boot.
- * - `boot` is side effects only: it runs after the factories and sees their
- *   values. Returning a value from it is a compile error — publish through
- *   `provides`.
+ * - `boot` runs after the factories and sees their successful values. It may
+ *   return a typed private ownership plan or a business failure. Publish
+ *   services through `provides`.
  * - `start` / `stop` / `dispose` additionally receive the plugin's own
  *   provides. Reverse-order teardown guarantees needs are still alive in
  *   `dispose`.
@@ -546,11 +530,12 @@ export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
  * // billing.provides.billing is a typed handle, before anything boots.
  * ```
  */
-export function plugin<
-  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
-  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-  const TName extends string = string,
->(def: {
+export type PluginDefinition<
+  TShape extends NeedsShape,
+  TProvides extends ServiceRecord,
+  TName extends string,
+  TBoot,
+> = {
   readonly name: TName;
   readonly needs?: TShape;
   readonly actions?: readonly ActionSource[];
@@ -559,12 +544,34 @@ export function plugin<
   readonly configure?: (ctx: DotConfigureContext) => void;
   /** One factory per published key. Each gets the needs + kernel keys. Keys are the publish keys. */
   readonly provides?: ProvidesFactories<TShape, TProvides>;
-  /** Side effects only. Runs after the factories and sees their values. */
-  readonly boot?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-  readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-  readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-  readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Plugin<WireNeeds<TShape>, TProvides, TShape, TName> {
+  /** Runs after the factories; may return a typed private ownership plan or failure. */
+  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
+  readonly start?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
+  readonly stop?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
+  readonly dispose?: (ctx: CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<void>;
+};
+
+export function plugin<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TBoot extends void | ScopePlan | Failure = void,
+>(
+  def: PluginDefinition<TShape, TProvides, TName, TBoot>,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): Plugin<WireNeeds<TShape>, ProvidedValues<TProvides>, TShape, TName, InferredOwnership<TProvides, Awaited<TBoot>>> {
+  return createPlugin(def);
+}
+
+/** Shared constructor after each authoring surface has checked its provider returns. */
+export function createPlugin<
+  TShape extends NeedsShape & NoReservedKeys,
+  TProvides extends ServiceRecord & NoReservedKeys,
+  const TName extends string,
+  TBoot extends void | ScopePlan | Failure,
+>(
+  def: PluginDefinition<TShape, TProvides, TName, TBoot>,
+): Plugin<WireNeeds<TShape>, ProvidedValues<TProvides>, TShape, TName, InferredOwnership<TProvides, Awaited<TBoot>>> {
   const factories: AnyFactories = def.provides ?? {};
   const handles: Record<string, AnyHandle> = {};
   for (const key of Object.keys(factories)) handles[key] = handleOf(key, def.name);
@@ -575,7 +582,8 @@ export function plugin<
     renames: {},
     // Erasure seam: the record is built by key at runtime; its type comes
     // from the factory returns that `plugin()` inferred, its `provider` from `name`.
-    provides: handles as Handles<TProvides, TName>,
+    provides: handles as Handles<ProvidedValues<TProvides>, TName>,
+    runtime: createPluginRuntime<TProvides, TBoot>(def.provides, def.boot),
     factories,
     ...(def.logging === undefined ? {} : { logging: def.logging }),
     hooks: {
@@ -584,6 +592,108 @@ export function plugin<
       ...(def.start === undefined ? {} : { start: def.start }),
       ...(def.stop === undefined ? {} : { stop: def.stop }),
       ...(def.dispose === undefined ? {} : { dispose: def.dispose }),
+    },
+  };
+}
+
+function failed<Value>(value: Value): value is FailureIn<Value> {
+  return isFailure<unknown>(value);
+}
+
+export function createPluginRuntime<Values, Boot>(
+  factories: { readonly [Name in keyof Values]: (ctx: never) => MaybePromise<Values[Name]> } | undefined,
+  boot?: (ctx: never) => MaybePromise<Boot>,
+  project?: (services: ServiceRecord, ctx: never) => void,
+): PluginRuntime<InferredOwnership<Values, Awaited<Boot>>['open'], InferredOwnership<Values, Awaited<Boot>>['close']>;
+export function createPluginRuntime(
+  factories: AnyFactories | undefined,
+  boot?: (ctx: never) => unknown,
+  project?: (services: ServiceRecord, ctx: never) => void,
+): PluginRuntime<Failure, Failure> {
+  return {
+    async construct(ctx: Record<string, unknown>, options, claimLazy) {
+      const lifetime = createLifetime<Failure, Failure>(options);
+      const normalize = async (run: () => unknown) => {
+        try {
+          const result = await run();
+          if (failed(result)) return result;
+        } catch (error) {
+          return UnexpectedDefect({ cause: error });
+        }
+        return;
+      };
+      const acquire = (prepare: Extract<ScopePlan[string], { kind: 'resource' }>['prepare']) => {
+        const run = async (signal: AbortSignal) => {
+          const prepared = await prepare(signal);
+          if (failed(prepared)) return prepared;
+          return { value: prepared.value, close: () => normalize(prepared.close) };
+        };
+        return lifetime.acquire<typeof run>(run);
+      };
+      const services: ServiceRecord = {};
+      const context: Record<string, unknown> = { ...ctx, $signal: lifetime.signal };
+      try {
+        for (const [key, factory] of Object.entries(factories ?? {})) {
+          if (lifetime.signal.aborted) break;
+          // Admit the factory before it runs so shutdown also owns a late Lazy.
+          const prepareFactory = async () => {
+            const provided = await factory(context as never);
+            if (failed(provided)) return provided;
+            const ownedLazy = isLazy(provided) && claimLazy(provided) ? provided : undefined;
+            return { value: provided, close: () => normalize(() => ownedLazy?.dispose()) };
+          };
+          const provided = await lifetime.acquire(prepareFactory);
+          if (failed(provided)) {
+            lifetime.fail(provided);
+            break;
+          }
+          const value =
+            isScopeEntry(provided) && provided.kind === 'resource' ? await acquire(provided.prepare) : provided;
+          if (failed(value)) {
+            lifetime.fail(value);
+            break;
+          }
+          services[key] = value;
+        }
+        if (!lifetime.signal.aborted && !lifetime.hasFailure()) project?.(services, context as never);
+        if (!lifetime.signal.aborted && !lifetime.hasFailure() && boot !== undefined) {
+          const result = await boot({ ...context, ...services } as never);
+          if (failed(result)) lifetime.fail(result);
+          else if (result !== undefined) {
+            if (typeof result !== 'object' || result === null) lifetime.fail(UnexpectedDefect({ cause: result }));
+            else
+              for (const value of Object.values(result)) {
+                if (!isScopeEntry(value)) {
+                  lifetime.fail(UnexpectedDefect({ cause: result }));
+                  break;
+                }
+                if (value.kind === 'resource') {
+                  const opened = await acquire(value.prepare);
+                  if (failed(opened)) {
+                    lifetime.fail(opened);
+                    break;
+                  }
+                } else if (value.kind === 'cleanup') lifetime.defer(() => normalize(value.close));
+                else {
+                  const run = async (signal: AbortSignal) => {
+                    const result = await value.run(signal);
+                    if (failed(result)) return result;
+                    return;
+                  };
+                  lifetime.fork(run);
+                }
+              }
+          }
+        }
+      } catch (error) {
+        const defect = lifetime.defect(error);
+        if (defect !== undefined) lifetime.fail(defect);
+      }
+      if (lifetime.signal.aborted || lifetime.hasFailure()) {
+        const closed = await lifetime.close();
+        return failed(closed) ? closed : UnexpectedDefect({ cause: new Error('Plugin construction lost its failure') });
+      }
+      return { services, quiesce: lifetime.quiesce, close: lifetime.close };
     },
   };
 }
@@ -608,13 +718,17 @@ export type RenamedProvides<TP, M> = {
  */
 export function rename<
   P extends AnyPlugin,
+  TOwnership extends PluginOwnership,
   const M extends { readonly [K in keyof PluginProvides<P>]?: string },
   const TNewName extends string = PluginOwner<P>,
 >(
-  p: P,
+  p: P & {
+    readonly runtime: PluginRuntime<TOwnership['open'], TOwnership['close']>;
+    readonly [OwnershipSym]?: TOwnership;
+  },
   map: M,
   newName?: TNewName,
-): Plugin<PluginNeeds<P>, RenamedProvides<PluginProvides<P>, M>, PluginProviderIdentities<P>, TNewName> {
+): Plugin<PluginNeeds<P>, RenamedProvides<PluginProvides<P>, M>, PluginProviderIdentities<P>, TNewName, TOwnership> {
   const renames: Record<string, string> = { ...p.renames };
   const entries: Readonly<Record<string, string | undefined>> = map;
   for (const [wireKey, next] of Object.entries(entries)) {
@@ -631,15 +745,19 @@ export function rename<
     const key = typeof next === 'string' ? next : wireKey;
     handles[key] = handleOf(key, name);
   }
-  // Phantom-only cast: the handles are rebuilt by key at runtime; only the
-  // [ProvidesSym] carrier and the handle record retype.
-  const renamed: AnyPlugin = { ...p, name, renames, provides: handles };
-  return renamed as Plugin<
-    PluginNeeds<P>,
-    RenamedProvides<PluginProvides<P>, M>,
-    PluginProviderIdentities<P>,
-    TNewName
-  >;
+  // Only rebuilt wire handles need the existing service-shape assertion;
+  // the source runtime operation retains its checked ownership parameters.
+  const metadata: Omit<
+    AnyPlugin,
+    typeof NeedsSym | typeof ProvidesSym | typeof ProviderIdentitySym | typeof OwnershipSym
+  > = p;
+  return {
+    ...metadata,
+    name,
+    renames,
+    provides: handles as Handles<RenamedProvides<PluginProvides<P>, M>, TNewName>,
+    runtime: p.runtime,
+  };
 }
 
 /**

@@ -27,6 +27,7 @@ export {
   token,
   DotPluginError,
 } from './plugin-contract.js';
+export { LazyClosed } from './lazy.js';
 export type {
   AnyHandle,
   AnyPlugin,
@@ -46,6 +47,12 @@ export type {
   NoReservedKeys,
   Plugin,
   PluginNeeds,
+  InferredOwnership,
+  ProvidedValues,
+  ProvidedValue,
+  PluginOwnership,
+  PluginOpenFailure,
+  PluginCloseFailure,
   PluginProvides,
   Provided,
   ProvidesFactories,

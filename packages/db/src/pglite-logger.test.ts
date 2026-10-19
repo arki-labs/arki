@@ -4,9 +4,12 @@
  * `initDbRuntimeLocal(..., { logger })` silently dropped it, so nothing built
  * on the logger (query tracing, the Drop Studio X-ray rail) saw any SQL.
  */
-import { defineApp } from '@arki/dot/plugin';
-import { defineRelations, sql, type Logger } from 'drizzle-orm';
+import type { Logger } from 'drizzle-orm';
+import { defineRelations, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+
+import { defineApp } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import { db } from './dot.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -39,12 +42,16 @@ describe('pglite driver + logger', () => {
 
   it('the db DOT plugin passes a custom logger through for the pglite driver', async () => {
     const { logger, queries } = recordingLogger();
-    const app = await defineApp('pglite-logger').use(db({ driver: 'pglite', memory: true, relations, logger })).boot();
+    const app = await orThrow(
+      defineApp('pglite-logger')
+        .use(db({ driver: 'pglite', memory: true, relations, logger }))
+        .boot(),
+    );
     try {
       await app.services.db.execute(sql`select 2 as two`);
       expect(queries).toEqual(['select 2 as two']);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });

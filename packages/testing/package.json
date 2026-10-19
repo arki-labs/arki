@@ -131,13 +131,13 @@
   "dependencies": {
     "@arki/date": "workspace:*",
     "@arki/db": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
     "drizzle-orm": "catalog:drizzle",
-    "pg": "catalog:drizzle",
-    "@arki/failure": "workspace:*"
+    "pg": "catalog:drizzle"
   },
   "devDependencies": {
     "@arki/auth": "workspace:*",

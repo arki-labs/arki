@@ -274,6 +274,7 @@ synchronous event stream to registered `DotLifecycleObserver`s. The two
 signals are peers; neither layers under the other.
 
 ```ts run expect
+import { isFailure } from '@arki/failure';
 import type { DotLifecycleEvent } from '@arki/dot';
 import { defineApp, plugin } from '@arki/dot';
 
@@ -288,6 +289,7 @@ const app = await defineApp('my-app', {
   .use(envPlugin)
   .use(dbPlugin)
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 
 for (const event of events) {
   const who = event.kind === 'plugin-hook' ? ` ${event.plugin}` : '';

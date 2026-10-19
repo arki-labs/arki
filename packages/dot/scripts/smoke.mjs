@@ -2,6 +2,7 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes targets.
 // Covers the portable entries only: `.`, `./plugin`, `./feature`, `./log`, `./runtime`.
 
+import { isFailure } from '@arki/failure';
 import { defineFeature } from '../dist/feature.js';
 import {
   defineApp,
@@ -44,9 +45,11 @@ const consumer = plugin({
 });
 
 const app = await defineApp('smoke').use(store).use(consumer).start();
+if (isFailure(app)) throw new Error(app.code);
 const looked = app.services.lookup('a');
 const stateStarted = app.state;
-await app.dispose();
+const disposal = await app.dispose();
+if (isFailure(disposal)) throw new Error(disposal.code);
 
 let duplicate = { code: 'none', remediation: '', docsUrl: '' };
 try {
@@ -66,8 +69,10 @@ try {
 const ticker = plugin({ name: 'ticker', provides: { ticker: () => 'tick' } });
 const appRuntime = createAppRuntime(defineApp('runtime-smoke').use(ticker));
 const [firstRun, secondRun] = await Promise.all([appRuntime.get(), appRuntime.get()]);
+if (isFailure(firstRun) || isFailure(secondRun)) throw new Error('Runtime did not start');
 const runtimeSharesOneApp = firstRun === secondRun && firstRun.state === 'started';
-await firstRun.dispose();
+const runtimeDisposal = await firstRun.dispose();
+if (isFailure(runtimeDisposal)) throw new Error(runtimeDisposal.code);
 
 const checks = [
   ['plugins boot in order and serve through needs', looked, 'value:a'],

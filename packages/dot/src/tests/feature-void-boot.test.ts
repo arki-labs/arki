@@ -6,6 +6,7 @@
  *
  * Found by the Drop Studio demo (catalog feature: boot = seed, no provides).
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { ProvidedOf } from '../feature.js';
@@ -33,14 +34,14 @@ describe('boot is side-effect only', () => {
     expect(Object.keys(catalog.provides)).toEqual([]);
 
     // Both forms must type-check: the guard tuple is `[]` when there is no error.
-    const app = await defineApp('void-boot').use(db).features([catalog]).boot();
-    const viaAll = await defineApp('void-boot-all').use(db).features([catalog]).boot();
+    const app = orThrow(await defineApp('void-boot').use(db).features([catalog]).boot());
+    const viaAll = orThrow(await defineApp('void-boot-all').use(db).features([catalog]).boot());
 
     expect(seededWith).toBe('pglite');
     expect(Object.keys(app.services)).toEqual(['db', 'feature.catalog']);
     expect(Object.keys(viaAll.services)).toEqual(['db', 'feature.catalog']);
-    await app.dispose();
-    await viaAll.dispose();
+    orThrow(await app.dispose());
+    orThrow(await viaAll.dispose());
   });
 
   it('publishes only through provides factories; boot runs after them and sees their values', async () => {
@@ -59,22 +60,22 @@ describe('boot is side-effect only', () => {
         bootSaw = built;
       },
     });
-    const app = await defineApp('provides').use(db).features([search]).boot();
+    const app = orThrow(await defineApp('provides').use(db).features([search]).boot());
     expect(app.services.search).toEqual({ index: 'pglite' });
     expect(order).toEqual(['factory', 'boot']);
     // One instance: boot sees the very value the kernel publishes.
     expect(bootSaw).toBe(app.services.search);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('a value-returning boot does not compile — there is one way to publish', () => {
+    // @ts-expect-error -- boot must return an owned plan or void; publish through provides
     feature('legacy', {
       needs: { db: service<Db>() },
-      // @ts-expect-error -- boot returns void; publish through `provides` instead
       boot: ({ db: handle }) => ({ search: { index: handle.name } }),
     });
+    // @ts-expect-error -- async service publication is also rejected at the authoring call
     feature('legacy-async', {
-      // @ts-expect-error -- an async boot resolving to a value is the same mistake
       boot: async () => {
         await Promise.resolve();
         return { search: 1 };

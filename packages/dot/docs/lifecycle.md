@@ -57,8 +57,8 @@ Terminal states require a fresh `defineApp(...)` to retry.
 - Runs **async** in declaration order, after the plugin's `provides`
   factories (one per key, awaited in key order).
 - Side effects only: seed, warm up, validate required runtime
-  configuration. It returns nothing; a value-returning `boot` does not
-  compile.
+  configuration. It returns nothing, a typed refusal, or a descriptor plan
+  owning private resources, cleanup and children.
 - Services are published by `provides` factories into `app.services`.
   `boot` sees the needs plus the plugin's own provided values.
 - Downstream plugins receive them destructured in their hook context,
@@ -94,67 +94,29 @@ DOT cleans up exactly what was opened — no more, no less.
 
 ### `boot` failure
 
-- The throwing plugin is **not** disposed (its `boot` did not complete).
-- Every plugin whose `boot` already completed is disposed in
-  reverse declaration order.
-- App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E003`.
+- The constructing plugin closes its partially acquired descriptors first.
+- Previously booted plugins dispose in reverse declaration order.
+- App transitions to `failed`; no failed provider publishes a service.
+- The original refusal is returned when cleanup succeeds; unknown throws become
+  `UnexpectedDefect`. Multiple failures retain their members in `ScopeFailed`.
 
-A plugin whose `provides` factory or `boot` opens partial resources before
-throwing **must clean those up itself**:
-
-```ts run
-import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
-
-let aClosed = false;
-const openA = async () => ({
-  close: async () => {
-    aClosed = true;
-  },
-});
-const openB = async (): Promise<{ close(): Promise<void> }> => {
-  throw new Error('b is down');
-};
-
-const pairPlugin = plugin({
-  name: 'pair',
-  provides: {
-    pair: async () => {
-      const a = await openA();
-      try {
-        const b = await openB();
-        return { a, b };
-      } catch (err) {
-        await a.close(); // clean up our own partial state
-        throw err;
-      }
-    },
-  },
-});
-
-try {
-  await defineApp('pair-demo').use(pairPlugin).boot();
-} catch (err) {
-  if (!(err instanceof DotLifecycleError) || err.code !== 'ARKI_DOT_E003') throw err;
-}
-if (!aClosed) throw new Error('the factory left resource a open');
-```
-
-The kernel only disposes plugins whose `boot` returned successfully.
+Use `resource(open, close)` in providers or return a private descriptor plan
+from `boot`; see [Ownership](ownership.md). The legacy `dispose` hook runs only
+for plugins whose boot completed. Descriptor cleanup also covers partial boot.
 
 ### `start` failure
 
 - Every started plugin's `stop` runs in reverse declaration order.
 - Then every booted plugin's `dispose` runs in reverse declaration order.
 - App transitions to `failed`.
-- Kernel throws `DotLifecycleError` with code `ARKI_DOT_E004`.
+- Managed startup returns a typed defect for legacy thrown errors; `ARKI_DOT_E004` remains available in the diagnostic cause.
 
 ### `stop` / `dispose` failure
 
 - The reverse-order pass **continues through individual failures**.
-- The kernel collects per-plugin failures and throws a single aggregate
-  `DotLifecycleError` (`ARKI_DOT_E005` for stop, `ARKI_DOT_E006`
-  for dispose).
+- Disposal returns inferred ownership failures and typed defects for legacy
+  exceptions. Legacy stop still uses `DotLifecycleError` (`ARKI_DOT_E005`);
+  `ARKI_DOT_E006` identifies legacy dispose diagnostics during migration.
 - The aggregate carries `failures: readonly { plugin, phase, error }[]` so
   callers and agents can see exactly which plugins failed.
 
@@ -169,7 +131,7 @@ The kernel only disposes plugins whose `boot` returned successfully.
 | `stop()`             | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).           |
 | `dispose()`          | `started`                                    | Runs `stop` first, then `dispose`. |
 | `dispose()`          | `booted` or `stopped`                        | Runs only `dispose`.               |
-| `dispose()`          | `disposed`                                   | No-op.                             |
+| `dispose()`          | `disposed`                                   | Returns its cached complete outcome.                             |
 | `boot()` / `start()` | `failed` or `disposed`                       | Throws `ARKI_DOT_E007` or `E008`.  |
 
 Concurrent calls to the **same** transition share one in-flight promise
@@ -223,7 +185,8 @@ remediation guidance.
 ### Catching a boot failure
 
 ```ts run expect
-import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+import { defineApp, plugin } from '@arki/dot';
+import { UnexpectedDefect } from '@arki/failure';
 
 const flaky = plugin({
   name: 'flaky',
@@ -232,22 +195,20 @@ const flaky = plugin({
   },
 });
 
-try {
-  await defineApp('my-app').use(flaky).boot();
-} catch (err) {
-  if (!(err instanceof DotLifecycleError)) throw err;
-  console.log(`${err.code} in ${err.plugin}: ${err.message}`);
+const outcome = await defineApp('my-app').use(flaky).boot();
+if (UnexpectedDefect.is(outcome)) {
+  console.log(outcome.code, outcome.cause instanceof Error ? outcome.cause.message : 'unknown cause');
 }
 ```
 
 ```text
-ARKI_DOT_E003 in flaky: boot hook threw for plugin "flaky": no network
+failure.unexpected_defect no network
 ```
 
-`stop` and `dispose` failures arrive as one aggregate. Read `failures` to see
-which plugin failed in which phase:
+Owned disposal returns its failures. Legacy thrown hook errors remain in the diagnostic cause:
 
 ```ts run expect
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
 
 const stuck = plugin({
@@ -259,13 +220,13 @@ const stuck = plugin({
 });
 
 const app = await defineApp('my-app').use(stuck).boot();
-try {
-  await app.dispose();
-} catch (err) {
-  if (!(err instanceof DotLifecycleError)) throw err;
-  console.log(err.code, err.message);
-  for (const f of err.failures ?? []) {
-    console.log(`${f.plugin}/${f.phase}: ${String(f.error)}`);
+if (isFailure(app)) throw new Error(app.code);
+const outcome = await app.dispose();
+if (UnexpectedDefect.is(outcome) && outcome.cause instanceof DotLifecycleError) {
+  const error = outcome.cause;
+  console.log(error.code, error.message);
+  for (const failure of error.failures ?? []) {
+    console.log(`${failure.plugin}/${failure.phase}: ${String(failure.error)}`);
   }
 }
 ```
@@ -278,15 +239,17 @@ stuck/dispose: Error: socket stuck
 ### Idempotent shutdown
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
 
 const app = await defineApp('svc').boot();
+if (isFailure(app)) throw new Error(app.code);
 
-async function shutdown() {
+const shutdown = async () => {
   // Both calls are safe to repeat; the kernel tracks state.
   await app.stop();
   await app.dispose();
-}
+};
 
 process.on('SIGTERM', () => void shutdown());
 process.on('SIGINT', () => void shutdown());

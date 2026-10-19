@@ -8,6 +8,7 @@
  * for handles: what it lists is what every infra plugin gets, so `db` is
  * named once and `fake(database.provides.db, x)` reaches every store.
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DepsOf } from '../feature.js';
@@ -86,7 +87,7 @@ describe('binding: the feature need is what every infra plugin gets', () => {
   });
 
   it('boots on the real db: the store builds on the bound handle, the child reads through the parent store', async () => {
-    const app = await defineApp('probe').infra(database).features([digest]).start();
+    const app = orThrow(await defineApp('probe').infra(database).features([digest]).start());
     expect(app.services.digests.namespace).toBe('probe');
     expect(await app.services.digests.count()).toBe(0);
     const db = app.services.db;
@@ -94,7 +95,7 @@ describe('binding: the feature need is what every infra plugin gets', () => {
       app.services['digest.repos'].withTx(tx).digests.create({ id: 'd1', userId: 'u', status: 'compiled', items: [] }),
     );
     expect(await db.transaction(tx => app.services['digest.compile.compiler'].stored(tx))).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('one fake db reaches every infra plugin through the one need', async () => {
@@ -105,13 +106,13 @@ describe('binding: the feature need is what every infra plugin gets', () => {
         return createDb().transaction(fn);
       },
     };
-    const app = await defineApp('fake')
+    const app = orThrow(await defineApp('fake')
       .infra(plugin({ name: 'fake-db', provides: { db: () => fakeDb } }))
       .features([digest])
-      .start();
+      .start());
     await app.services.digests.count();
     expect(calls).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('override() keeps the bound need and replaces the service', async () => {
@@ -127,9 +128,9 @@ describe('binding: the feature need is what every infra plugin gets', () => {
     };
     const overridden = digest.override({ repos: fakeRepos });
     expect(canonical(overridden.plugins()[0].needs['db'] as Witness)).toBe(database.provides.db);
-    const app = await defineApp('o').infra(database).features([overridden]).start();
+    const app = orThrow(await defineApp('o').infra(database).features([overridden]).start());
     expect(await app.services.digests.count()).toBe(42);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 

@@ -21,7 +21,7 @@ import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import { defineFailure } from '@arki/failure';
+import { defineFailure, orThrow } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
@@ -54,7 +54,7 @@ const orders = defineFeature('orders')
   .entrypoints();
 
 async function bootOrders() {
-  const app = await defineApp('shop').features([orders]).start();
+  const app = orThrow(await defineApp('shop').features([orders]).start());
   return { app, usecases: app.services['orders.usecases'] };
 }
 
@@ -64,11 +64,11 @@ describe('with no SDK registered', () => {
     const plain = defineFeature('plain')
       .usecases({ wait: pending(settled), total })
       .entrypoints();
-    const app = await defineApp('plain').features([plain]).start();
+    const app = orThrow(await defineApp('plain').features([plain]).start());
     const usecases = app.services['plain.usecases'];
     expect(usecases.wait()).toBe(settled);
     expect(usecases.total([1, 2])).toBe(3);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -100,13 +100,13 @@ describe('with an SDK registered', () => {
     const span = spanNamed('feature.orders.total');
     expect(span.status.code).toBe(SpanStatusCode.OK);
     expect(span.events).toEqual([]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('makes the span active, so spans the usecase starts nest under it', async () => {
     const { app, usecases } = await bootOrders();
     expect(usecases.activeSpanName()).toBe('feature.orders.activeSpanName');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('marks a returned failure ERROR with its code and status, and records no exception: a failure is not a bug', async () => {
@@ -122,7 +122,7 @@ describe('with an SDK registered', () => {
     const syncSpan = spanNamed('feature.orders.findSync');
     expect(syncSpan.status.code).toBe(SpanStatusCode.ERROR);
     expect(syncSpan.events).toEqual([]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('records a throw or a rejection as an exception and rethrows the same value', async () => {
@@ -142,7 +142,7 @@ describe('with an SDK registered', () => {
     const asyncSpan = spanNamed('feature.orders.reject');
     expect(asyncSpan.status.code).toBe(SpanStatusCode.ERROR);
     expect(asyncSpan.events.map(e => e.name)).toEqual(['exception']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('ends an async usecase span when the promise settles, not when the call returns', async () => {
@@ -152,7 +152,7 @@ describe('with an SDK registered', () => {
     openGate('late');
     expect(await result).toBe('late');
     expect(spanNamed('feature.orders.wait').status.code).toBe(SpanStatusCode.OK);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 

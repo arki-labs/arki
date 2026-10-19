@@ -8,6 +8,7 @@
  * provenance must survive every copy, remap, lazy form and flag, or a child
  * silently binds to a stranger's service. Each test names the break it pins.
  */
+import { orThrow } from '@arki/failure';
 import { oc } from '@orpc/contract';
 import { createRouterClient, implement } from '@orpc/server';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -82,7 +83,7 @@ describe('identity: a child is a finished feature named <parent>.<child>', () =>
   });
 
   it('qualifies keys by path; only the top-level provides stay bare', async () => {
-    const app = await start();
+    const app = orThrow(await start());
     const keys = Object.keys(app.services);
     expect(keys).toEqual(
       expect.arrayContaining(['digest.repos', 'digest.services', 'digest.compile.services', 'digests']),
@@ -93,7 +94,7 @@ describe('identity: a child is a finished feature named <parent>.<child>', () =>
     expectTypeOf(compile.provides.compiler.key).toEqualTypeOf<'digest.compile.compiler'>();
     expectTypeOf(digest.provides.digests.key).toEqualTypeOf<'digests'>();
     expectTypeOf(compile.features[0].provides.ranking.key).toEqualTypeOf<'digest.compile.rank.ranking'>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('refuses a child not named <parent>.<child>, at compile time and at runtime', () => {
@@ -165,15 +166,15 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
     const collector = driven(features =>
       plugin({ name: 'collector', provides: { collected: () => features.map(f => f.name) } }),
     );
-    const app = await defineApp('adapters')
+    const app = orThrow(await defineApp('adapters')
       .infra(database, collector)
       .features([digest])
       .entrypoints(scheduler)
-      .start();
+      .start());
     expect(app.services.collected).toEqual(['digest', 'digest.compile', 'digest.compile.rank', 'digest.deliver']);
     expect(app.services.scheduled).toEqual(['send-digest', 'compile-digest']);
     seenByDriven.push(...app.services.collected);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it("ownUnits reads a node's OWN units only, so a child's projections register once (Astra round 2: the journal threw)", () => {
@@ -213,13 +214,13 @@ describe('rpc: the parent mounts the children (Astra round 1 #5)', () => {
   });
 
   it('routes wire paths app key + parent key + procedure; the grandchild ranks, the grandparent stores', async () => {
-    const app = await start();
+    const app = orThrow(await start());
     const api = clientFor(app.services);
     expect(await api.admin.ping()).toBe('pong');
     const compiled = await api.compile.run({ userId: 'u1', items: ['pear', 'apple', 'fig', 'kiwi'] });
     expect(compiled.items).toEqual(['apple', 'fig', 'kiwi']);
     expect(await api.deliver.send({ digestId: compiled.id })).toEqual({ status: 'sent' });
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it("refuses a child rpc contract the parent's contract does not mount, at compile time and at runtime", () => {
@@ -250,7 +251,7 @@ describe('rpc: the parent mounts the children (Astra round 1 #5)', () => {
 
 describe('transactions (Astra round 1 #3): entrypoints open them, usecases take tx', () => {
   it('commits compile + deliver together and rolls both back when delivery fails', async () => {
-    const app = await start();
+    const app = orThrow(await start());
     const api = clientFor(app.services);
     const db = app.services.db;
     const repos = app.services['digest.repos'];
@@ -264,7 +265,7 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
     // sendFresh compiles through the sibling's provided service: the sibling's write rolls back too.
     await expect(api.deliver.sendFresh({ userId: 'bounce', items: ['x'] })).rejects.toThrow('mail to bounce failed');
     expect(await count()).toBe(before + 1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('entrypointOnly(db): absent from the usecases deps, present in the entrypoints services — types and runtime', async () => {
@@ -276,7 +277,7 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
       .usecases({ sees: (deps: Record<string, unknown>) => () => Object.keys(deps) })
       .provides({ door: ({ db }) => db.transaction(() => Promise.resolve('opened')) })
       .entrypoints();
-    const app = await defineApp('peek').infra(database).features([peek]).start();
+    const app = orThrow(await defineApp('peek').infra(database).features([peek]).start());
     const seen = app.services['peek.usecases'].sees();
     expect(seen).toContain('raw');
     expect(seen).not.toContain('db');
@@ -291,7 +292,7 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
     });
     expectTypeOf<keyof (typeof app.services)['peek.usecases']>().toEqualTypeOf<'sees'>();
     expectTypeOf(peekDeps.handles.db.lazy.entrypointOnly).toEqualTypeOf<true>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('a plain Db is not a Tx, and repos exist only rebound to one (fixture contract)', async () => {
@@ -309,14 +310,14 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
 
 describe('re-export and override by path', () => {
   it("provides() re-exports a child's service under a public key", async () => {
-    const app = await start();
+    const app = orThrow(await start());
     const db = app.services.db;
     const made = await db.transaction(tx => app.services.digests.compile(tx, 'u3', ['q']));
     expect(made.id.startsWith('d_u3_')).toBe(true);
     expectTypeOf<Provided<typeof digest.provides.digests>['compile']>().toEqualTypeOf<
       Provided<typeof compile.provides.compiler>['compile']
     >();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('override("compile.ranker") reaches the child infra; unknown paths are compile and runtime errors', async () => {
@@ -331,10 +332,10 @@ describe('re-export and override by path', () => {
         stored: () => Promise.resolve(0),
       },
     });
-    const app = await start(faked);
+    const app = orThrow(await start(faked));
     const reversed = await clientFor(app.services).compile.run({ userId: 'u1', items: ['a', 'b'] });
     expect(reversed.items).toEqual(['b', 'a']);
-    await app.dispose();
+    orThrow(await app.dispose());
     // @ts-expect-error unknown child
     expect(() => digest.override({ 'nope.ranker': 1 })).toThrow(/names no child feature/);
     // @ts-expect-error unknown service of a known child
@@ -559,11 +560,11 @@ describe('tests at depth: fake() the one need, override by path', () => {
         return createDb().transaction(fn);
       },
     };
-    const app = await defineApp('faked').infra(fake(database.provides.db, fakeDb)).features([digest]).start();
+    const app = orThrow(await defineApp('faked').infra(fake(database.provides.db, fakeDb)).features([digest]).start());
     const compiled = await clientFor(app.services).compile.run({ userId: 'u1', items: ['b', 'a'] });
     expect(compiled.items).toEqual(['a', 'b']);
     expect(opened).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -585,7 +586,7 @@ describe('lifecycle and explain', () => {
     });
     const child = defineFeature('tree.child').infra(leaf).entrypoints();
     const tree = defineFeature('tree').infra(root).features(child).entrypoints();
-    const app = await defineApp('order').features([tree]).start();
+    const app = orThrow(await defineApp('order').features([tree]).start());
     await app.stop();
     expect(stopped).toEqual(['leaf', 'root']);
     expect(tree.plugins().map(u => u.name)).toEqual(['tree/root', 'tree.child/leaf', 'tree.child', 'tree']);
@@ -636,7 +637,7 @@ describe('requestServices: what a gateway needs to serve the tree', () => {
       .usecases({})
       .provides({ bag: ctx => servicesOf(ctx, units) })
       .entrypoints();
-    const app = await defineApp('gateway-app').infra(database).features([digest, gateway]).start();
+    const app = orThrow(await defineApp('gateway-app').infra(database).features([digest, gateway]).start());
     try {
       const bag = app.services.bag;
       expect(bag['digest.compile.services']).toBe(app.services['digest.compile.services']);
@@ -645,7 +646,7 @@ describe('requestServices: what a gateway needs to serve the tree', () => {
       const run = await clientFor(bag).compile.run({ userId: 'u1', items: ['b', 'a'] });
       expect(run.items).toEqual(['a', 'b']);
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 });

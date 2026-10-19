@@ -154,6 +154,7 @@ The same data in code, without the CLI. `configure()` gives the manifest;
 `boot()` gives the diagnostics:
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 
 const database = plugin({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
@@ -172,6 +173,7 @@ if (edge?.to !== 'database' || edge.key !== 'db') throw new Error('reports must 
 
 // `dot doctor --json` prints this snapshot under `.data`: boot, read, dispose.
 const app = await configured.boot();
+if (isFailure(app)) throw new Error(app.code);
 const notOk = app.diagnostics.plugins.filter(p => p.status !== 'ok').map(p => p.plugin);
 await app.dispose();
 if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
@@ -303,6 +305,10 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
   `@arki/journal/dot`) live in their own packages. `@arki/dot` never imports
   them.
 
+## Ownership
+
+Use `resource`, `cleanup` and `child` from `@arki/async` for owned construction; see [Ownership](ownership.md). Check returned failures from boot/start/dispose and lazy get/dispose. Failed services never publish. Deadlines request cancellation and join admitted work before finalization.
+
 ## Errors
 
 `dot` exits `0` on success, `1` on a bug (`cli.bug`), `2` on a usage error
@@ -324,6 +330,9 @@ issue codes inside the diagnostics, or as `.error.data.underlyingCode` when
 | `dot.observability_no_sdk`                                                  | `doctor --observability`: no OpenTelemetry SDK registered. A warning issue in `.data.issues`, not a failure.                                            | Register an SDK once at app entry; see `docs/observability.md`.                         |
 | `dot.projection_*` (exit 3)                                                 | `explain --as`: `projection_not_found`, `projection_import_failed`, `projection_execution_failed`, `projection_conflict`.                               | Check the projection module the adapter registers; `--module` tries a replacement.      |
 | `dot.target_not_empty`, `dot.template_missing`, `dot.write_failed` (exit 3) | `dot new`: the target has files, the package ships no templates, or a write failed.                                                                     | Pick an empty `--target` or pass `--force`; reinstall `@arki/dot`; check permissions.   |
+| `dot.lazy_closed` | The lazy owner closed admission. | Use a live handle. |
+| `dot.runtime_replaced` | HMR replaced this module. | Use the current runtime. |
+| `dot.runtime_release_failed` | Prior resources failed to release. | Resolve disposal before restarting. |
 | `ARKI_DOT_E001`                                                             | `configure` returned a Promise.                                                                                                                         | Move async work to `boot`.                                                              |
 | `ARKI_DOT_E002`                                                             | `configure` threw.                                                                                                                                      | Fix the plugin config.                                                                  |
 | `ARKI_DOT_E003`                                                             | `boot` threw. Booted plugins were rolled back.                                                                                                          | Read the issue's `plugin` and `remediation`.                                            |

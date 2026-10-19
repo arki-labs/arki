@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { DurableScheduler, DurableScheduleRegistration } from './runtime.js';
 import { DurableSchedules, schedule, scheduleActions, schedules } from './dot.js';
@@ -122,26 +123,28 @@ describe('schedule DOT projection', () => {
     const dependency = plugin({ name: 'dependency', provides: { dependency: () => ({ name: 'dep' }) } });
     const backend = plugin({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
 
-    const app = await defineApp('schedule-feature')
-      .use(dependency)
-      .use(backend)
-      .features([reports, quiet])
-      .serve(
-        schedule({
-          needs: { dependency: service<{ readonly name: string }>() },
-          context: ({ dependency: dep }) => ({ dependencyName: dep.name }),
-          durable: DurableSchedules,
-        }),
-      )
-      .boot();
+    const app = await orThrow(
+      defineApp('schedule-feature')
+        .use(dependency)
+        .use(backend)
+        .features([reports, quiet])
+        .serve(
+          schedule({
+            needs: { dependency: service<{ readonly name: string }>() },
+            context: ({ dependency: dep }) => ({ dependencyName: dep.name }),
+            durable: DurableSchedules,
+          }),
+        )
+        .boot(),
+    );
 
     // Schedule actions belong to the feature; the driver declares none of its own.
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['reports:feature-daily.fire']);
-    await app.start();
+    await orThrow(app.start());
     await expect(registration(fake, 'feature-daily').run()).resolves.toEqual({ name: 'feature-daily', status: 'ran' });
     expect(calls).toEqual(['dep']);
-    await app.stop();
-    await app.dispose();
+    await orThrow(app.stop());
+    await orThrow(app.dispose());
   });
 
   it('runs feature and app-level schedules on one runtime, so their names must not clash', async () => {
@@ -153,13 +156,17 @@ describe('schedule DOT projection', () => {
         .features([owner])
         .serve(schedule({ schedules: [plain] }))
         .boot(),
-    ).rejects.toMatchObject({ cause: { code: SCHEDULE_ERROR_CODES.duplicateSchedule } });
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: { code: SCHEDULE_ERROR_CODES.duplicateSchedule },
+    });
   });
 
   it('fails boot with a coded error when a feature publishes a schedules slice that is not a schedule list', async () => {
     const broken = feature('broken', { use: [{ key: 'schedules', actions: [], resolve: () => ({ not: 'a list' }) }] });
 
-    await expect(defineApp('schedule-broken').features([broken]).serve(schedule({})).boot()).rejects.toMatchObject({
+    await expect(defineApp('schedule-broken').features([broken]).serve(schedule({})).boot()).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
       cause: { code: SCHEDULE_ERROR_CODES.invalidDefinition },
     });
   });
@@ -415,7 +422,8 @@ describe('durable schedules', () => {
       defineApp('durable-missing')
         .serve(schedule({ schedules: [nightly] }))
         .boot(),
-    ).rejects.toMatchObject({
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
       cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing },
     });
   });
@@ -426,7 +434,8 @@ describe('durable schedules', () => {
 
     await expect(
       defineApp('durable-missing-feature').features([durableFeature]).serve(schedule({})).boot(),
-    ).rejects.toMatchObject({
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
       cause: {
         code: SCHEDULE_ERROR_CODES.durableBackendMissing,
         message: expect.stringContaining('"feature-nightly"'),
@@ -446,18 +455,20 @@ describe('durable schedules', () => {
         calls.push('nightly');
       },
     });
-    const app = await defineApp('durable-app')
-      .use(backend)
-      .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
-      .boot();
+    const app = await orThrow(
+      defineApp('durable-app')
+        .use(backend)
+        .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
+        .boot(),
+    );
 
-    await app.start();
+    await orThrow(app.start());
     await expect(registration(fake, 'nightly').run()).resolves.toEqual({ name: 'nightly', status: 'ran' });
     expect(calls).toEqual(['nightly']);
     expect(app.manifest.actions[0]?.meta).toMatchObject({ durable: true });
-    await app.stop();
+    await orThrow(app.stop());
     expect(fake.stops).toBe(1);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('requires a mounted backend at the type level once durable is passed', () => {

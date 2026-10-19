@@ -7,6 +7,7 @@
  * recorded while satisfying needs, not anything declared up front.
  */
 
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
@@ -83,12 +84,12 @@ describe('renderGraph', () => {
       provides: { billing: ({ db }) => db.ok },
     });
 
-    const app = await defineApp('graph-int').use(provider).use(consumer).boot();
+    const app = orThrow(await defineApp('graph-int').use(provider).use(consumer).boot());
     const source = buildMermaidGraph(app.manifest);
     expect(source).toContain('p0["1 · db"]');
     expect(source).toContain('p1["2 · billing"]');
     expect(source).toContain('p1 -->|db| p0');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('draws a .features()/.serve() app as the hexagon: driven → features → driving, numbered in boot order', async () => {
@@ -100,7 +101,7 @@ describe('renderGraph', () => {
       provides: { health: ({ db: handle }) => handle.ok },
     });
 
-    const app = await defineApp('hexagon').use(db).features([orders]).serve(health).boot();
+    const app = orThrow(await defineApp('hexagon').use(db).features([orders]).serve(health).boot());
     const source = buildMermaidGraph(app.manifest);
     const groups = source.split('\n').filter(line => line.trim().startsWith('subgraph'));
     // The groups appear in boot order, so the drawing reads like the builder chain.
@@ -111,6 +112,6 @@ describe('renderGraph', () => {
     ]);
     expect(source).toContain('    p1["2 · orders"]');
     expect(source).toContain('p1 -->|db| p0');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });

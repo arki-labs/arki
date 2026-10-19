@@ -3,6 +3,7 @@
  * whole life of a Dot app, so its boot and shutdown records are never lost.
  */
 
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import type { Configured } from '@arki/log';
@@ -18,10 +19,10 @@ describe('log()', () => {
     let closedWith = -1;
     const closing = { ...sink, close: () => void (closedWith = sink.records.length) };
 
-    const app = await defineApp('checkout')
+    const app = orThrow(await defineApp('checkout')
       .use(log(() => ({ channels: { mem: closing }, default: { level: 'debug', channels: ['mem'] } })))
-      .boot();
-    await app.dispose();
+      .boot());
+    orThrow(await app.dispose());
 
     const lifecycle = sink.records.filter(record => record.category === 'arki:dot:lifecycle');
     expect(lifecycle[0]?.template).toBe('configure: starting');
@@ -31,15 +32,15 @@ describe('log()', () => {
 
   it('names the service after the app unless the config says otherwise', async () => {
     const sink = memorySink();
-    const app = await defineApp('checkout')
+    const app = orThrow(await defineApp('checkout')
       .use(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
-      .boot();
+      .boot());
     getLogger('app').info('ready');
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(sink.records.find(record => record.category === 'app')?.resource['service.name']).toBe('checkout');
 
     const named = memorySink();
-    const second = await defineApp('checkout')
+    const second = orThrow(await defineApp('checkout')
       .use(
         log(() => ({
           channels: { mem: named },
@@ -47,16 +48,16 @@ describe('log()', () => {
           resource: { 'service.name': 'checkout-worker' },
         })),
       )
-      .boot();
+      .boot());
     getLogger('app').info('ready');
-    await second.dispose();
+    orThrow(await second.dispose());
     expect(named.records.find(record => record.category === 'app')?.resource['service.name']).toBe('checkout-worker');
   });
 
   it('publishes the configure() handle as the logging service', async () => {
     const sink = memorySink();
     let flushedInBoot = false;
-    const app = await defineApp('checkout')
+    const app = orThrow(await defineApp('checkout')
       .use(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
       .use(
         plugin({
@@ -68,9 +69,9 @@ describe('log()', () => {
           },
         }),
       )
-      .boot();
+      .boot());
     expect(flushedInBoot).toBe(true);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('runs the config thunk at boot, not when log() is called', () => {

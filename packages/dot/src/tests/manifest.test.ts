@@ -6,6 +6,7 @@
  * edges are observed from actual service wiring at boot time.
  */
 
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
@@ -15,7 +16,7 @@ import { plugin, service } from '../plugin-contract.js';
 
 describe('DOT manifest', () => {
   it('exposes all six arrays on an empty app', async () => {
-    const app = await defineApp('empty-app', { version: '1.0.0' }).boot();
+    const app = orThrow(await defineApp('empty-app', { version: '1.0.0' }).boot());
     expect(app.manifest).toEqual({
       manifestVersion: 2,
       app: { name: 'empty-app', version: '1.0.0' },
@@ -26,7 +27,7 @@ describe('DOT manifest', () => {
       dependencies: [],
       projections: [],
     });
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('reflects plugin contributions: services, actions, and projections registered in configure', async () => {
@@ -55,7 +56,7 @@ describe('DOT manifest', () => {
       },
     });
 
-    const app = await defineApp('test').use(billing).boot();
+    const app = orThrow(await defineApp('test').use(billing).boot());
     const m = app.manifest;
     expect(m.plugins).toEqual([{ name: 'billing', dependencies: [], provides: ['payments'] }]);
     expect(m.actions).toEqual([
@@ -77,7 +78,7 @@ describe('DOT manifest', () => {
       { format: 'openapi', binding: 'http', module: '@arki/http/projection', plugin: 'billing' },
     ]);
     expect(m.services).toEqual([{ name: 'stripe', plugin: 'billing', kind: 'custom' }]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('collects declarative actions from hook-less plugins without adding configure lifecycle entries', () => {
@@ -213,7 +214,7 @@ describe('DOT manifest', () => {
       stop: noop,
       dispose: noop,
     });
-    const app = await defineApp('test').use(p).start();
+    const app = orThrow(await defineApp('test').use(p).start());
     expect(app.manifest.lifecycle).toEqual([
       { plugin: 'p', hooks: expect.arrayContaining(['configure', 'boot', 'start']) },
     ]);
@@ -221,7 +222,7 @@ describe('DOT manifest', () => {
     expect(app.manifest.lifecycle[0]!.hooks).toEqual(
       expect.arrayContaining(['configure', 'boot', 'start', 'stop', 'dispose']),
     );
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('dependency edges are observed from service wiring at boot', async () => {
@@ -238,7 +239,7 @@ describe('DOT manifest', () => {
         /* side effects only */
       },
     });
-    const app = await defineApp('test').use(a).use(b).use(c).boot();
+    const app = orThrow(await defineApp('test').use(a).use(b).use(c).boot());
     expect(app.manifest.dependencies).toEqual(
       expect.arrayContaining([
         { from: 'b', to: 'a', kind: 'requires', key: 'alpha' },
@@ -250,7 +251,7 @@ describe('DOT manifest', () => {
     expect(app.manifest.plugins.find(p => p.name === 'b')?.dependencies).toEqual(['alpha']);
     // Published wire keys surface in `provides`.
     expect(app.manifest.plugins.find(p => p.name === 'a')?.provides).toEqual(['alpha']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('snapshot stability — same plugins produce equal manifests across runs', async () => {
@@ -262,10 +263,10 @@ describe('DOT manifest', () => {
       },
     });
 
-    const app1 = await defineApp('test').use(p).boot();
-    const app2 = await defineApp('test').use(p).boot();
+    const app1 = orThrow(await defineApp('test').use(p).boot());
+    const app2 = orThrow(await defineApp('test').use(p).boot());
     expect(app1.manifest).toEqual(app2.manifest);
-    await app1.dispose();
-    await app2.dispose();
+    orThrow(await app1.dispose());
+    orThrow(await app2.dispose());
   });
 });

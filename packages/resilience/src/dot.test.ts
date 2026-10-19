@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { defineApp, DotPluginError } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
 import { resilience, RESILIENCE_PLUGIN_ERROR_CODES } from './dot.js';
@@ -41,16 +42,16 @@ describe('@arki/resilience/dot', () => {
 
   it('publishes the presets under their names; the handle is the preset itself', async () => {
     const presets = makePresets();
-    const app = await defineApp('resilience-publish').use(resilience(presets)).boot();
+    const app = await orThrow(defineApp('resilience-publish').use(resilience(presets)).boot());
     expect(app.services.resilience.for('carrier')).toBe(presets.carrier);
     expect(await app.services.resilience.run('carrier', () => 7)).toBe(7);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('logs retry and breaker events at debug, and stops after dispose', async () => {
     fake = fakeLog();
     const presets = makePresets();
-    const app = await defineApp('resilience-logs').use(resilience(presets)).boot();
+    const app = await orThrow(defineApp('resilience-logs').use(resilience(presets)).boot());
     await app.services.resilience.run('carrier', boom).catch(swallow);
 
     fake.assertLogged({
@@ -66,7 +67,7 @@ describe('@arki/resilience/dot', () => {
     });
     const before = resilienceRecords(fake);
 
-    await app.dispose();
+    await orThrow(app.dispose());
     await presets.carrier.components.retry.execute(boom).catch(swallow);
     expect(resilienceRecords(fake)).toBe(before);
   });
@@ -74,25 +75,25 @@ describe('@arki/resilience/dot', () => {
   it('disposing one app leaves another app logging', async () => {
     fake = fakeLog();
     const presets = definePresets({ solo: { retry: backoff.constant(1).upTo(1) } });
-    const a = await defineApp('resilience-a').use(resilience(presets)).boot();
-    const b = await defineApp('resilience-b').use(resilience(presets)).boot();
-    await a.dispose();
+    const a = await orThrow(defineApp('resilience-a').use(resilience(presets)).boot());
+    const b = await orThrow(defineApp('resilience-b').use(resilience(presets)).boot());
+    await orThrow(a.dispose());
     const before = resilienceRecords(fake);
     await presets.solo.components.retry.execute(boom).catch(swallow);
 
     // One retry record from app b only; app a's subscriptions are gone.
     expect(resilienceRecords(fake) - before).toBe(1 + 1); // retry + give up
-    await b.dispose();
+    await orThrow(b.dispose());
   });
 
   it('dispose twice is harmless', async () => {
-    const app = await defineApp('resilience-twice').use(resilience(makePresets())).boot();
-    await app.dispose();
+    const app = await orThrow(defineApp('resilience-twice').use(resilience(makePresets())).boot());
+    await orThrow(app.dispose());
     await expect(app.dispose()).resolves.toBeUndefined();
   });
 
   it('an unknown name from untyped code throws a coded error', async () => {
-    const app = await defineApp('resilience-unknown').use(resilience(makePresets())).boot();
+    const app = await orThrow(defineApp('resilience-unknown').use(resilience(makePresets())).boot());
     const service = app.services.resilience;
     let thrown: unknown;
     try {
@@ -104,6 +105,6 @@ describe('@arki/resilience/dot', () => {
     }
     expect(thrown).toBeInstanceOf(DotPluginError);
     expect(thrown).toMatchObject({ code: RESILIENCE_PLUGIN_ERROR_CODES.unknownPreset });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

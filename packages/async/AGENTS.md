@@ -10,11 +10,11 @@ Timing and structured concurrency on plain Promises and `AbortSignal`. Read [doc
 2. Time comes from a `Clock` (`@arki/clock`). The default is the system clock. Never call `setTimeout` or `Date.now` directly in `src/`. A test passes a `MockClock`.
 3. No task outlives the call that started it. `all`, `mapConcurrent` and `race` settle only after every started task has settled.
 4. Cancellation is cooperative. Every task gets a `signal`. The library never kills code that ignores it, and the docs say so.
-5. `scoped` runs finalizers newest first, one at a time, each awaited. All of them run even when one throws. No error is lost: the body error and every finalizer error reach the caller.
-6. Only `sleep`, `scoped`, `all`, `mapConcurrent`, `race` and `timeout` return promises, and they reject instead of throwing. `debounce` and `throttle` throw `ARKI_ASYNC_E001` when called with a bad wait.
+5. Owned scopes close admission, cancel and join admitted work, then run finalizers newest first, one at a time. Every finalizer runs. Returned failures are never resources. A single failure keeps its identity; multiple failures retain exact local primary/cleanup members through `ScopeFailed`.
+6. `scoped` and `openScope` infer typed outcomes from resource/cleanup/child descriptors. Dynamic registrations must fit the scope's canonical definition tuple. Success remains unwrapped. The other timing/concurrency helpers retain their documented rejection contract during the A-33 migration; `debounce` and `throttle` throw `ARKI_ASYNC_E001` for a bad wait.
 7. Settling cleans up. A finished `sleep` leaves no timer and no abort listener behind.
 8. The runtime floor is Hermes. Use no `Promise.withResolvers`, no `AbortSignal.any` and no `async function*` in `src/`. Build a linked signal with `src/signal.ts`.
-9. Every error is an `AsyncError` with a stable `code` and a `remediation`. Each code in `ASYNC_ERROR_CODES` has JSDoc with `@fix` and `@verify`.
+9. Managed scope boundaries return canonical `@arki/failure` values for cancellation, deadlines and defects as well as callback refusals. Other helpers retain `AsyncError`. Every error definition has a stable code, remediation, and JSDoc with `@fix` and `@verify`. Aggregate member causes are private; wire revival promises only canonical public data.
 10. A semaphore, mutex or deferred does not belong here. Point readers to `@arki/lock` and `Promise.withResolvers()`.
 11. Never write benchmark numbers by hand. `bun run bench --write-readme` writes them from an idle machine.
 

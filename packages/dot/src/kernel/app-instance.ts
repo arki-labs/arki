@@ -5,7 +5,12 @@
  * `defineApp(...)` and its returned `DotApp` interface.
  */
 
+import type { Clock } from '@arki/clock';
+import type { Failure, FailureIn } from '@arki/failure';
 import type { Logger } from '@arki/log';
+import { Deadline, scopeAggregate } from '@arki/async';
+import { SystemClock } from '@arki/clock';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type {
@@ -28,7 +33,18 @@ import type {
   ProjectionManifest,
   ServiceManifest,
 } from '../manifest.js';
-import type { AnyPlugin, DotConfigureContext, DotLoggingHandle, Lazy, ServiceRecord } from '../plugin-contract.js';
+import type {
+  AnyPlugin,
+  DotConfigureContext,
+  DotLoggingHandle,
+  Lazy,
+  PluginBootOutcome,
+  PluginCloseOutcome,
+  PluginConstruction,
+  PluginRuntime,
+  RuntimePlugin,
+  ServiceRecord,
+} from '../plugin-contract.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
@@ -48,9 +64,42 @@ function reportLoggingCloseFailure(error: unknown): void {
 
 const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 
+function failed<Value>(value: Value): value is FailureIn<Value> {
+  return isFailure<unknown>(value);
+}
+type CloseMember<Close extends Failure> = Exclude<PluginCloseOutcome<Close>, void>;
+function closeOutcome<Close extends Failure>(failures: readonly CloseMember<Close>[]) {
+  if (failures.length === 1) return failures[0];
+  if (failures.length > 1) return scopeAggregate([], failures);
+  return;
+}
+function releaseOutcome<Close extends Failure>(
+  legacy: ReturnType<typeof UnexpectedDefect> | undefined,
+  owned: ReturnType<typeof closeOutcome<Close>>,
+) {
+  if (legacy === undefined) return owned;
+  return owned === undefined ? legacy : scopeAggregate([legacy], [owned]);
+}
+export type DotDisposeOutcome<Close extends Failure> = ReturnType<typeof releaseOutcome<Close>>;
+function bootOutcome<Open extends Failure, Close extends Failure>(
+  primary: Exclude<PluginBootOutcome<Open, Close>, void>,
+  cleanup: DotDisposeOutcome<Close>,
+) {
+  return cleanup === undefined ? primary : scopeAggregate([primary], [cleanup]);
+}
+export type DotBootOutcome<Open extends Failure, Close extends Failure> = void | ReturnType<
+  typeof bootOutcome<Open, Close>
+>;
+
+function constructed<Open extends Failure, Close extends Failure>(
+  value: Awaited<ReturnType<PluginRuntime<Open, Close>['construct']>>,
+): value is PluginConstruction<Close> {
+  return !isFailure<unknown>(value);
+}
 /** Per-plugin mutable bookkeeping. */
-type PluginRecord = {
-  plugin: AnyPlugin;
+type PluginRecord<Open extends Failure, Close extends Failure> = {
+  plugin: RuntimePlugin<Open, Close>;
+  lifetime?: { quiesce(): Promise<PluginCloseOutcome<Close>>; close(): Promise<PluginCloseOutcome<Close>> };
   /** Declaration order (0-based) — v2 boot order IS declaration order. */
   order: number;
   /** Actions declared statically or registered during `configure`. */
@@ -105,10 +154,10 @@ function makeIssue(args: {
   };
 }
 
-export type DotAppInternalConfig = {
+export type DotAppInternalConfig<Open extends Failure, Close extends Failure> = {
   appName: string;
   appVersion?: string;
-  plugins: readonly AnyPlugin[];
+  plugins: readonly RuntimePlugin<Open, Close>[];
   /** Runtime config bag passed to every `boot` hook. */
   config?: Readonly<Record<string, unknown>>;
   /**
@@ -119,26 +168,29 @@ export type DotAppInternalConfig = {
   observers?: readonly DotLifecycleObserver[];
   /** Per-hook watchdog budget in ms — see `defineApp`'s option of the same name. */
   hookTimeoutMs?: number;
+  clock?: Clock;
 };
 
 /**
  * Internal app implementation. Public consumers see the `DotApp` interface
  * from `../define-app.ts`.
  */
-export class DotAppImpl {
+export class DotAppImpl<TOpen extends Failure = never, TClose extends Failure = never> {
   readonly #appName: string;
   readonly #appVersion: string | undefined;
   readonly #config: Readonly<Record<string, unknown>>;
 
   /** Plugins in declaration order — v2 boot order IS declaration order. */
-  readonly #ordered: readonly AnyPlugin[];
-  readonly #records: Map<string, PluginRecord>;
+  readonly #ordered: readonly RuntimePlugin<TOpen, TClose>[];
+  readonly #records: Map<string, PluginRecord<TOpen, TClose>>;
 
   /** Macro-state of the app. */
   #state: DotLifecycleState = 'defined';
 
   /** Per-hook watchdog budget (ms); `undefined` = no watchdog. */
   readonly #hookTimeoutMs: number | undefined;
+  readonly #clock: Clock;
+  readonly #lazyOwners = new Set<Lazy<unknown, Failure>>();
 
   /** Manifest finalised after `configure`. */
   #manifest: DotAppManifest;
@@ -159,13 +211,13 @@ export class DotAppImpl {
   #configured = false;
 
   /** In-flight boot promise — used for concurrent boot() coalescing. */
-  #bootInflight: Promise<void> | null = null;
+  #bootInflight: Promise<DotBootOutcome<TOpen, TClose>> | null = null;
   /** In-flight start promise — used for concurrent start() coalescing. */
-  #startInflight: Promise<void> | null = null;
+  #startInflight: Promise<DotBootOutcome<TOpen, TClose>> | null = null;
   /** In-flight stop promise — used for concurrent stop() coalescing. */
   #stopInflight: Promise<void> | null = null;
   /** In-flight dispose promise — used for concurrent dispose() coalescing. */
-  #disposeInflight: Promise<void> | null = null;
+  #disposeInflight: Promise<DotDisposeOutcome<TClose>> | null = null;
   /**
    * Serializes lifecycle transitions. Each of boot/start/stop/dispose
    * queues behind whatever transition is in flight and re-checks
@@ -202,10 +254,11 @@ export class DotAppImpl {
    */
   readonly #observers: Set<DotLifecycleObserver>;
 
-  constructor(config: DotAppInternalConfig) {
+  constructor(config: DotAppInternalConfig<TOpen, TClose>) {
     this.#appName = config.appName;
     this.#appVersion = config.appVersion;
     this.#hookTimeoutMs = config.hookTimeoutMs;
+    this.#clock = config.clock ?? new SystemClock();
     this.#config = Object.freeze({ ...config.config });
     this.#logger = getLogger('arki:dot:lifecycle').with({ 'dot.app.name': config.appName });
     this.#observers = new Set(config.observers);
@@ -296,7 +349,7 @@ export class DotAppImpl {
    * left to E012 at boot.
    */
   #checkStaticCapabilities(): void {
-    const providerByKey = new Map<string, PluginRecord>();
+    const providerByKey = new Map<string, PluginRecord<TOpen, TClose>>();
     for (const record of this.#records.values()) {
       // The handles are wire-keyed already: rename() rebuilds them on the new keys.
       for (const wireKey of Object.keys(record.plugin.provides)) {
@@ -306,7 +359,9 @@ export class DotAppImpl {
     }
     if (providerByKey.size === 0) return;
 
-    const staticNeeds = (record: PluginRecord): { key: string; provider: PluginRecord }[] =>
+    const staticNeeds = (
+      record: PluginRecord<TOpen, TClose>,
+    ): { key: string; provider: PluginRecord<TOpen, TClose> }[] =>
       Object.entries(record.plugin.needs).flatMap(([alias, witness]) => {
         const key = wireKeyOf(witness, alias);
         const provider = providerByKey.get(key);
@@ -314,7 +369,11 @@ export class DotAppImpl {
       });
 
     /** The ring `start needs k1 ← p1 needs k2 ← … ← start`, or undefined when `from` never leads back. */
-    const ringBack = (start: PluginRecord, from: PluginRecord, seen: Set<string>): string[] | undefined => {
+    const ringBack = (
+      start: PluginRecord<TOpen, TClose>,
+      from: PluginRecord<TOpen, TClose>,
+      seen: Set<string>,
+    ): string[] | undefined => {
       if (from === start) return [start.plugin.name];
       if (seen.has(from.plugin.name)) return undefined;
       seen.add(from.plugin.name);
@@ -440,7 +499,7 @@ export class DotAppImpl {
     this.#emit(event);
   }
 
-  #registerAction(record: PluginRecord, action: Omit<ActionManifest, 'plugin'>): void {
+  #registerAction(record: PluginRecord<TOpen, TClose>, action: Omit<ActionManifest, 'plugin'>): void {
     let meta: Readonly<JsonObject> | undefined;
     if (action.meta !== undefined) {
       try {
@@ -495,7 +554,7 @@ export class DotAppImpl {
 
   /** Replace an action with a copy carrying the new summary, so manifests taken earlier keep the old one. */
   #describeAction(
-    record: PluginRecord,
+    record: PluginRecord<TOpen, TClose>,
     phase: DotLifecycleHook,
     actionId: string,
     patch: { readonly summary: string },
@@ -518,11 +577,14 @@ export class DotAppImpl {
     });
   }
 
-  #registerProjection(record: PluginRecord, projection: Omit<ProjectionManifest, 'plugin'>): void {
+  #registerProjection(record: PluginRecord<TOpen, TClose>, projection: Omit<ProjectionManifest, 'plugin'>): void {
     record.projections.push({ ...projection, plugin: record.plugin.name });
   }
 
-  #registerRouteShim(record: PluginRecord, route: Parameters<DotConfigureContext['registerRoute']>[0]): void {
+  #registerRouteShim(
+    record: PluginRecord<TOpen, TClose>,
+    route: Parameters<DotConfigureContext['registerRoute']>[0],
+  ): void {
     const meta: JsonObject = {};
     if (route.method !== undefined) meta['method'] = route.method;
     if (route.path !== undefined) meta['path'] = route.path;
@@ -591,7 +653,7 @@ export class DotAppImpl {
   }
 
   /** Async variant of {@link #withPhaseEmit}. */
-  async #withPhaseEmitAsync(phase: DotLifecycleHook, fn: () => Promise<void>): Promise<void> {
+  async #withPhaseEmitAsync<Value>(phase: DotLifecycleHook, fn: () => Promise<Value>): Promise<Value> {
     const phaseStart = nowMs();
     this.#emitIfObserved(() => ({
       kind: 'phase',
@@ -601,15 +663,28 @@ export class DotAppImpl {
       timestamp: Date.now(),
     }));
     try {
-      await fn();
-      this.#emitIfObserved(() => ({
-        kind: 'phase',
-        phase,
-        status: 'completed',
-        appName: this.#appName,
-        durationMs: nowMs() - phaseStart,
-        timestamp: Date.now(),
-      }));
+      const result = await fn();
+      if (failed(result)) {
+        this.#emitIfObserved(() => ({
+          kind: 'phase',
+          phase,
+          status: 'failed',
+          appName: this.#appName,
+          durationMs: nowMs() - phaseStart,
+          error: result,
+          timestamp: Date.now(),
+        }));
+      } else {
+        this.#emitIfObserved(() => ({
+          kind: 'phase',
+          phase,
+          status: 'completed',
+          appName: this.#appName,
+          durationMs: nowMs() - phaseStart,
+          timestamp: Date.now(),
+        }));
+      }
+      return result;
     } catch (error) {
       this.#emitIfObserved(() => ({
         kind: 'phase',
@@ -909,7 +984,7 @@ export class DotAppImpl {
   }
 
   /** Public boot() — idempotent + concurrent-safe. */
-  async boot(): Promise<void> {
+  async boot(): Promise<DotBootOutcome<TOpen, TClose>> {
     if (this.#bootInflight) return this.#bootInflight;
     this.#bootInflight = this.#enqueueTransition(() => this.#bootTransition()).finally(() => {
       this.#bootInflight = null;
@@ -918,7 +993,7 @@ export class DotAppImpl {
   }
 
   /** State checks + boot body. Runs at the head of the transition queue. */
-  async #bootTransition(): Promise<void> {
+  async #bootTransition(): Promise<DotBootOutcome<TOpen, TClose>> {
     if (this.#state === 'failed' || this.#state === 'disposed') {
       throw this.#reuseError('boot');
     }
@@ -932,16 +1007,18 @@ export class DotAppImpl {
    * Run a phase. If it leaves the app `failed`, close logging after the
    * failure and its rollback are written, then rethrow the original error.
    */
-  async #closeLoggingOnFailure(run: () => Promise<void>): Promise<void> {
+  async #closeLoggingOnFailure<Value>(run: () => Promise<Value>): Promise<Value> {
     try {
-      await run();
+      const result = await run();
+      await this.#closeLoggingIn('failed');
+      return result;
     } catch (error) {
       await this.#closeLoggingIn('failed');
       throw error;
     }
   }
 
-  async #runBoot(): Promise<void> {
+  async #runBoot(): Promise<DotBootOutcome<TOpen, TClose>> {
     if (!this.#configured) {
       this.runConfigure();
     }
@@ -972,7 +1049,7 @@ export class DotAppImpl {
    *   providers alive until their consumers are done.
    */
   #buildHookCtx(
-    record: PluginRecord,
+    record: PluginRecord<TOpen, TClose>,
     phase: DotLifecycleHook,
     includeOwnProvides: boolean,
     signal: AbortSignal,
@@ -1019,15 +1096,10 @@ export class DotAppImpl {
   }
 
   /**
-   * Race one hook invocation against the app's `hookTimeoutMs` watchdog.
-   * No budget configured → plain pass-through. On timeout the returned
-   * promise rejects with `ARKI_DOT_E015` naming the plugin and hook,
-   * and the call site's existing catch path applies the phase's normal
-   * failure rules (boot rollback, start cascade, teardown aggregation).
-   * A promise cannot be killed, so on timeout the watchdog first aborts the
-   * hook's `$signal` (reason: the E015 error). A hook that passes `$signal`
-   * to its I/O stops the hung work; one that ignores it still leaves the
-   * hang visible and bounded.
+   * Request cancellation when the injected Clock reaches the hook budget.
+   * Owned work must settle before cleanup; JavaScript that ignores its signal
+   * cannot be forcibly stopped. Construction reports canonical Deadline, while
+   * legacy hooks retain the lifecycle timeout diagnostic after they settle.
    */
   async #withHookBudget<T>(
     pluginName: string,
@@ -1037,29 +1109,23 @@ export class DotAppImpl {
   ): Promise<T> {
     const budget = this.#hookTimeoutMs;
     if (budget === undefined) return run();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const watchdog = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        const error = new DotLifecycleError({
-          code: DotLifecycleErrorCode.HookTimeout,
-          phase: hook,
-          plugin: pluginName,
-          message:
-            `${hook} hook of plugin "${pluginName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
-            `The kernel aborted the hook's $signal and treats the hook as failed with its normal ` +
-            `rollback/aggregation rules. Pass $signal to the hook's I/O so the work stops, find the hang ` +
-            `(a missing await? a connection that never settles?) or raise the budget in defineApp(name, { hookTimeoutMs }).`,
-        });
-        hookAbort.abort(error);
-        reject(error);
-      }, budget);
-      // A pending watchdog must never keep an otherwise-finished process alive.
-      timer.unref?.();
-    });
+    let timeout: DotLifecycleError | undefined;
+    const cancel = this.#clock.setTimer(() => {
+      timeout = new DotLifecycleError({
+        code: DotLifecycleErrorCode.HookTimeout,
+        phase: hook,
+        plugin: pluginName,
+        message: `${hook} hook of plugin "${pluginName}" exceeded its ${budget}ms budget; cancellation was requested and owned work must settle before cleanup.`,
+      });
+      hookAbort.abort(timeout);
+    }, budget);
     try {
-      return await Promise.race([Promise.resolve(run()), watchdog]);
+      const result = await run();
+      // Owned construction reports the canonical deadline after joining its scope.
+      if (timeout !== undefined && !isFailure<unknown>(result)) throw timeout;
+      return result;
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      cancel();
     }
   }
 
@@ -1068,12 +1134,12 @@ export class DotAppImpl {
    * stays thin and the loop body — which orchestrates rollback on
    * partial failure — stays unindented.
    */
-  async #runBootInner(phaseLogger: Logger): Promise<void> {
-    const bootedRecords: PluginRecord[] = [];
+  async #runBootInner(phaseLogger: Logger): Promise<DotBootOutcome<TOpen, TClose>> {
+    const bootedRecords: PluginRecord<TOpen, TClose>[] = [];
 
     /** Shared failure path: mark diagnostics, roll back, throw. */
     const fail = async (args: {
-      record: PluginRecord;
+      record: PluginRecord<TOpen, TClose>;
       code: (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
       message: string;
       remediation: string;
@@ -1081,7 +1147,7 @@ export class DotAppImpl {
       durationMs: number;
       cause?: unknown;
       /** Records to dispose (reverse order applied here). */
-      rollback: readonly PluginRecord[];
+      rollback: readonly PluginRecord<TOpen, TClose>[];
     }): Promise<never> => {
       const issue = makeIssue({
         code: args.code,
@@ -1116,7 +1182,12 @@ export class DotAppImpl {
         plugin: args.record.plugin.name,
         message: args.message,
         cause: args.cause,
-        failures: disposeFailures.length > 0 ? disposeFailures : undefined,
+        failures: [
+          ...disposeFailures.diagnostics,
+          ...(disposeFailures.outcome === undefined
+            ? []
+            : [{ plugin: args.record.plugin.name, phase: 'dispose' as const, error: disposeFailures.outcome }]),
+        ],
       });
     };
 
@@ -1159,53 +1230,58 @@ export class DotAppImpl {
       record.hooks.add('boot');
 
       this.#emitHook('boot', plugin.name, record.order, 'starting');
-      let result: ServiceRecord;
+      let construction: Awaited<ReturnType<typeof plugin.runtime.construct>>;
       try {
-        result = await this.#withHookBudget(plugin.name, 'boot', hookAbort, () =>
+        construction = await this.#withHookBudget(plugin.name, 'boot', hookAbort, () =>
           withPluginHookSpan(
-            {
-              appName: this.#appName,
-              pluginName: plugin.name,
-              hook: 'boot',
-              order: record.order,
-            },
-            // Erasure boundary: factories and hooks are stored as
-            // `(ctx: never) => ...`; the kernel is the one caller allowed to
-            // cross it. Factories run in key order and see the needs only;
-            // `boot` (side effects) runs after them and sees their values.
-            async span => {
-              // Later records of this plugin's hook carry its span too.
+            { appName: this.#appName, pluginName: plugin.name, hook: 'boot', order: record.order },
+            span => {
               pluginLogger = pluginLogger.withTrace(span.spanContext());
-              const published: ServiceRecord = {};
-              for (const [key, factory] of factories) {
-                published[key] = await factory(ctx as never);
-              }
-              if (bootHook) await bootHook({ ...ctx, ...published } as never);
-              return published;
+              return plugin.runtime.construct(ctx as never, { deadline: hookAbort.signal }, value => {
+                if (this.#lazyOwners.has(value)) return false;
+                this.#lazyOwners.add(value);
+                return true;
+              });
             },
           ),
         );
       } catch (error) {
-        const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
-        return fail({
-          record,
-          code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
-          message: timedOut ? error.message : `boot hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
-          remediation: timedOut
-            ? `Find the hang in the boot() hook of "${plugin.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
-            : `Fix the error in the provides factories or boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
-          docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
-          durationMs: nowMs() - started,
-          cause: error,
-          rollback: bootedRecords,
-        });
+        construction = UnexpectedDefect({ cause: error });
       }
+      if (!constructed<TOpen, TClose>(construction)) {
+        const timedOut = Deadline.is(construction);
+        const durationMs = nowMs() - started;
+        const issue = makeIssue({
+          code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
+          plugin: plugin.name,
+          message: `Plugin "${plugin.name}" construction failed.`,
+          remediation: 'Inspect the plugin failure and its owned cleanup outcomes.',
+          docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
+        });
+        record.issues.push(issue);
+        record.lifecycleDiagnostics.push({
+          plugin: plugin.name,
+          hook: 'boot',
+          state: 'failed',
+          order: record.order,
+          durationMs,
+          issues: [issue],
+        });
+        this.#emitHook('boot', plugin.name, record.order, 'failed', { durationMs, error: construction });
+        pluginLogger.error('boot: FAILED — closing owned scopes', { 'dot.plugin.name': plugin.name });
+        const cleanup = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
+        this.#state = 'failed';
+        this.#manifest = this.#buildManifest();
+        return bootOutcome<TOpen, TClose>(construction, cleanup.outcome);
+      }
+      record.lifetime = construction;
+      const result = construction.services;
 
       const publishedServices: ServiceRecord = result;
       record.publishedServices = publishedServices;
       record.booted = true;
 
-      for (const [localKey, value] of Object.entries(publishedServices)) {
+      for (const localKey of Object.keys(publishedServices)) {
         const wireKey = plugin.renames[localKey] ?? localKey;
         if (localKey.startsWith('$') || wireKey.startsWith('$')) {
           // The plugin() constraint bans this at compile time; erased plugins can
@@ -1236,6 +1312,9 @@ export class DotAppImpl {
             rollback: [...bootedRecords, record],
           });
         }
+      }
+      for (const [localKey, value] of Object.entries(publishedServices)) {
+        const wireKey = plugin.renames[localKey] ?? localKey;
         this.#serviceMap.set(wireKey, value);
         this.#providerByWireKey.set(wireKey, plugin.name);
         this.#aggregatedServices[wireKey] = value;
@@ -1265,7 +1344,7 @@ export class DotAppImpl {
   }
 
   /** Public start(). Boots first if needed. Idempotent + concurrent-safe. */
-  async start(): Promise<void> {
+  async start(): Promise<DotBootOutcome<TOpen, TClose>> {
     if (this.#startInflight) return this.#startInflight;
     this.#startInflight = this.#enqueueTransition(() =>
       this.#closeLoggingOnFailure(() => this.#startTransition()),
@@ -1276,7 +1355,7 @@ export class DotAppImpl {
   }
 
   /** State checks + start body. Runs at the head of the transition queue. */
-  async #startTransition(): Promise<void> {
+  async #startTransition(): Promise<DotBootOutcome<TOpen, TClose>> {
     if (this.#state === 'failed' || this.#state === 'disposed') {
       throw this.#reuseError('start');
     }
@@ -1285,7 +1364,8 @@ export class DotAppImpl {
       // Direct #runBoot — we already hold the head of the transition
       // queue; going through public boot() would enqueue behind
       // ourselves and deadlock.
-      await this.#runBoot();
+      const booted = await this.#runBoot();
+      if (failed(booted)) return booted;
     }
     // From booted or stopped, run start hooks.
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'start' });
@@ -1307,8 +1387,8 @@ export class DotAppImpl {
    * Inner start loop. Separated from `start()` so the phase span wrapper
    * stays thin and the rollback-cascade error path stays readable.
    */
-  async #runStartInner(phaseLogger: Logger): Promise<void> {
-    const startedRecords: PluginRecord[] = [];
+  async #runStartInner(phaseLogger: Logger): Promise<DotBootOutcome<TOpen, TClose>> {
+    const startedRecords: PluginRecord<TOpen, TClose>[] = [];
     for (const plugin of this.#ordered) {
       const record = this.#records.get(plugin.name)!;
       let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
@@ -1335,7 +1415,10 @@ export class DotAppImpl {
             span => {
               // Later records of this plugin's hook carry its span too.
               pluginLogger = pluginLogger.withTrace(span.spanContext());
-              return plugin.hooks.start!(ctx as never);
+              return Promise.resolve(plugin.hooks.start!(ctx as never)).then(result => {
+                if (isFailure<unknown>(result)) throw new Error('Lifecycle hook returned a Failure', { cause: result });
+                return result;
+              });
             },
           ),
         );
@@ -1370,7 +1453,13 @@ export class DotAppImpl {
         const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedForDispose), phaseLogger);
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
-        const failures = [...stopFailures, ...disposeFailures];
+        const failures = [
+          ...stopFailures,
+          ...disposeFailures.diagnostics,
+          ...(disposeFailures.outcome === undefined
+            ? []
+            : [{ plugin: this.#appName, phase: 'dispose' as const, error: disposeFailures.outcome }]),
+        ];
         throw new DotLifecycleError({
           code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
           phase: 'start',
@@ -1458,7 +1547,7 @@ export class DotAppImpl {
   }
 
   async #runStopForRecords(
-    records: readonly PluginRecord[],
+    records: readonly PluginRecord<TOpen, TClose>[],
     phaseLogger: Logger,
   ): Promise<DotLifecyclePluginFailure[]> {
     const failures: DotLifecyclePluginFailure[] = [];
@@ -1482,7 +1571,10 @@ export class DotAppImpl {
             span => {
               // Later records of this plugin's hook carry its span too.
               pluginLogger = pluginLogger.withTrace(span.spanContext());
-              return record.plugin.hooks.stop!(ctx as never);
+              return Promise.resolve(record.plugin.hooks.stop!(ctx as never)).then(result => {
+                if (isFailure<unknown>(result)) throw new Error('Lifecycle hook returned a Failure', { cause: result });
+                return result;
+              });
             },
           ),
         );
@@ -1527,26 +1619,24 @@ export class DotAppImpl {
   }
 
   /** Public dispose(). Idempotent + concurrent-safe. */
-  async dispose(): Promise<void> {
+  async dispose(): Promise<DotDisposeOutcome<TClose>> {
     if (this.#disposeInflight) return this.#disposeInflight;
-    this.#disposeInflight = this.#enqueueTransition(() => this.#disposeTransition()).finally(() => {
-      this.#disposeInflight = null;
-    });
+    this.#disposeInflight = this.#enqueueTransition(() => this.#disposeTransition());
     return this.#disposeInflight;
   }
 
   /** State check + dispose body. Runs at the head of the transition queue. */
-  async #disposeTransition(): Promise<void> {
+  async #disposeTransition(): Promise<DotDisposeOutcome<TClose>> {
     if (this.#state === 'disposed') return;
     try {
-      await this.#runDispose();
+      return await this.#runDispose();
     } finally {
       // After `dispose: complete` (or its failure record): logging closes last.
       await this.#closeLoggingIn('disposed');
     }
   }
 
-  async #runDispose(): Promise<void> {
+  async #runDispose(): Promise<DotDisposeOutcome<TClose>> {
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'dispose' });
     phaseLogger.debug('dispose: starting', { 'dot.app.plugin.count': this.#ordered.length });
 
@@ -1568,7 +1658,7 @@ export class DotAppImpl {
    * → stop+dispose, failed → no-op, default → dispose-only) stays
    * readable.
    */
-  async #runDisposeInner(phaseLogger: Logger): Promise<void> {
+  async #runDisposeInner(phaseLogger: Logger): Promise<DotDisposeOutcome<TClose>> {
     // From started, stop first.
     if (this.#state === 'started') {
       phaseLogger.debug('dispose: cascading from started — running stop first');
@@ -1581,18 +1671,23 @@ export class DotAppImpl {
       const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
       this.#state = 'disposed';
       this.#manifest = this.#buildManifest();
-      const failures = [...stopFailures, ...disposeFailures];
+      const failures = [...stopFailures, ...disposeFailures.diagnostics];
       if (failures.length > 0) {
         phaseLogger.warn('dispose: complete with failures', { 'dot.app.failure.count': failures.length });
-        throw new DotLifecycleError({
-          code: DotLifecycleErrorCode.DisposeFailed,
-          phase: 'dispose',
-          message: `${failures.length} plugin(s) failed during stop+dispose cascade`,
-          failures,
-        });
+        return releaseOutcome<TClose>(
+          UnexpectedDefect({
+            cause: new DotLifecycleError({
+              code: DotLifecycleErrorCode.DisposeFailed,
+              phase: 'dispose',
+              message: `${failures.length} plugin(s) failed during stop+dispose cascade`,
+              failures,
+            }),
+          }),
+          disposeFailures.outcome,
+        );
       }
       phaseLogger.debug('dispose: complete (cascaded from started)');
-      return;
+      return disposeFailures.outcome;
     }
 
     // From booted/stopped/configured/defined: only dispose booted plugins.
@@ -1605,91 +1700,80 @@ export class DotAppImpl {
     }
 
     const bootedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.booted);
-    const failures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
+    const disposal = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
+    const failures = disposal.diagnostics;
     this.#state = 'disposed';
     this.#manifest = this.#buildManifest();
     if (failures.length > 0) {
       phaseLogger.warn('dispose: complete with failures', { 'dot.app.failure.count': failures.length });
-      throw new DotLifecycleError({
-        code: DotLifecycleErrorCode.DisposeFailed,
-        phase: 'dispose',
-        message: `${failures.length} plugin(s) failed during dispose`,
-        failures,
-      });
+      return releaseOutcome<TClose>(
+        UnexpectedDefect({
+          cause: new DotLifecycleError({
+            code: DotLifecycleErrorCode.DisposeFailed,
+            phase: 'dispose',
+            message: `${failures.length} plugin(s) failed during dispose`,
+            failures,
+          }),
+        }),
+        disposal.outcome,
+      );
     }
     phaseLogger.debug('dispose: complete', { 'dot.app.plugin.count': this.#ordered.length });
+    return disposal.outcome;
   }
 
   async #runDisposeForRecords(
-    records: readonly PluginRecord[],
+    records: readonly PluginRecord<TOpen, TClose>[],
     phaseLogger: Logger,
-  ): Promise<DotLifecyclePluginFailure[]> {
-    const failures: DotLifecyclePluginFailure[] = [];
-
-    // A lazy handle can be published under several keys — a `service.lazy`
-    // consumer republishing its provider's handle passes it through by
-    // identity. Auto-dispose belongs to the handle's FIRST publisher
-    // (declaration order): dispose runs in reverse, so cleaning the handle
-    // with a republisher would kill it before the original provider's own
-    // dispose hook gets to use it. `records` arrives reversed, so plain
-    // overwrite leaves the earliest-declared plugin as each handle's owner.
-    const ownerOf = new Map<Lazy<unknown>, PluginRecord>();
+  ): Promise<{
+    readonly diagnostics: DotLifecyclePluginFailure[];
+    readonly outcome: ReturnType<typeof closeOutcome<TClose>>;
+  }> {
+    const diagnostics: DotLifecyclePluginFailure[] = [];
+    const failures: CloseMember<TClose>[] = [];
     for (const record of records) {
-      for (const value of Object.values(record.publishedServices)) {
-        if (isLazy(value)) ownerOf.set(value, record);
-      }
-    }
-
-    for (const record of records) {
-      const seen = new Set<Lazy<unknown>>();
-      const lazyPublishes = Object.entries(record.publishedServices).filter(
-        (entry): entry is [string, Lazy<unknown>] => {
-          const value = entry[1];
-          if (!isLazy(value) || ownerOf.get(value) !== record || seen.has(value)) return false;
-          seen.add(value);
-          return true;
-        },
-      );
-      const hasHook = record.plugin.hooks.dispose !== undefined;
-      if (!hasHook && lazyPublishes.length === 0) {
-        record.booted = false;
-        continue;
-      }
-      const pluginLogger = phaseLogger.with({ 'dot.plugin.name': record.plugin.name });
-      if (hasHook) {
-        await this.#runDisposeHook(record, pluginLogger, failures);
-      }
-      // Auto-dispose lazy service handles AFTER the plugin's own dispose hook
-      // (the hook may still use them). Never-initialized handles no-op.
-      for (const [serviceKey, handle] of lazyPublishes) {
+      const lifetime = record.lifetime;
+      if (lifetime !== undefined) await lifetime.quiesce();
+      if (record.plugin.hooks.dispose !== undefined)
+        await this.#runDisposeHook(record, phaseLogger.with({ 'dot.plugin.name': record.plugin.name }), diagnostics);
+      if (lifetime !== undefined) {
+        const startedAt = nowMs();
         try {
-          await handle.dispose();
-        } catch (error) {
-          const issue = makeIssue({
-            code: DotLifecycleErrorCode.DisposeFailed,
-            plugin: record.plugin.name,
-            message: `lazy service "${serviceKey}" cleanup threw for plugin "${record.plugin.name}": ${stringifyError(error)}`,
-            remediation: `Fix the error in the dispose callback passed to lazy(...) for service "${serviceKey}". Dispose continues through individual failures and reports an aggregate error.`,
-            docsAnchor: 'dispose-failed',
-          });
-          record.issues.push(issue);
-          failures.push({ plugin: record.plugin.name, phase: 'dispose', error });
-          pluginLogger.error('dispose: lazy service cleanup failed (continuing)', {
-            'dot.plugin.service.key': serviceKey,
-            'dot.plugin.error.message': stringifyError(error),
-          });
+          const result = await lifetime.close();
+          if (failed(result)) {
+            failures.push(result);
+            const durationMs = nowMs() - startedAt;
+            const issue = makeIssue({
+              code: DotLifecycleErrorCode.DisposeFailed,
+              plugin: record.plugin.name,
+              message: `Owned cleanup failed for plugin "${record.plugin.name}".`,
+              remediation: 'Inspect the returned cleanup failures and release every owned resource.',
+              docsAnchor: 'dispose-failed',
+            });
+            record.issues.push(issue);
+            record.lifecycleDiagnostics.push({
+              plugin: record.plugin.name,
+              hook: 'dispose',
+              state: 'failed',
+              order: record.order,
+              durationMs,
+              issues: [issue],
+            });
+            this.#emitHook('dispose', record.plugin.name, record.order, 'failed', { durationMs, error: result });
+            phaseLogger.error('owned cleanup: failed (continuing)', { 'dot.plugin.name': record.plugin.name });
+          }
+        } finally {
+          record.lifetime = undefined;
         }
       }
-      if (!hasHook) {
-        record.booted = false;
-      }
+      record.booted = false;
     }
-    return failures;
+    return { diagnostics, outcome: closeOutcome<TClose>(failures) };
   }
 
   /** Run a single plugin's dispose hook with spans/events/diagnostics. */
   async #runDisposeHook(
-    record: PluginRecord,
+    record: PluginRecord<TOpen, TClose>,
     recordLogger: Logger,
     failures: DotLifecyclePluginFailure[],
   ): Promise<void> {
@@ -1711,7 +1795,10 @@ export class DotAppImpl {
           span => {
             // Later records of this plugin's hook carry its span too.
             pluginLogger = pluginLogger.withTrace(span.spanContext());
-            return record.plugin.hooks.dispose!(ctx as never);
+            return Promise.resolve(record.plugin.hooks.dispose!(ctx as never)).then(result => {
+              if (isFailure<unknown>(result)) throw new Error('Lifecycle hook returned a Failure', { cause: result });
+              return result;
+            });
           },
         ),
       );
@@ -1888,7 +1975,9 @@ function stringifyError(error: unknown): string {
   }
 }
 
-function reverseRecords(records: readonly PluginRecord[]): readonly PluginRecord[] {
+function reverseRecords<Open extends Failure, Close extends Failure>(
+  records: readonly PluginRecord<Open, Close>[],
+): readonly PluginRecord<Open, Close>[] {
   return [...records].reverse();
 }
 

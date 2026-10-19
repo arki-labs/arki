@@ -13,8 +13,11 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import type { DotApp } from '@arki/dot';
+import type { Failure } from '@arki/failure';
 import { defineFeature } from '@arki/dot/feature';
 import { defineApp, plugin } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 import { createLocks } from '@arki/lock';
 import { ensureLockTable, pgLease } from '@arki/lock/pg/lease';
 
@@ -27,7 +30,7 @@ const TTL = '2s';
 // Undefined when startup failed: then afterAll must not hide that error behind its own.
 let container: StartedPostgreSqlContainer | undefined;
 const pools: pg.Pool[] = [];
-const running: { dispose(): Promise<void> }[] = [];
+const running: Pick<DotApp<Record<string, never>, Failure>, 'dispose'>[] = [];
 
 beforeAll(async () => {
   const started = await new PostgreSqlContainer('postgres:17-alpine').start();
@@ -38,7 +41,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterEach(async () => {
-  await Promise.all(running.splice(0).map(app => app.dispose()));
+  await Promise.all(running.splice(0).map(app => orThrow(app.dispose())));
   await pools[0]?.query(`DELETE FROM ${TABLE}`);
 });
 
@@ -62,10 +65,12 @@ async function replica(name: string, work: Work) {
       { name: 'nightly-report', cron: '0 3 * * *', lock: { holdAtLeast: 0 }, handler: (_deps, run) => work(name, run) },
     ]),
   );
-  const started = await defineApp(`reports-${name}`)
-    .features([reports])
-    .entrypoints(schedule({ clock: 'host' }))
-    .start();
+  const started = await orThrow(
+    defineApp(`reports-${name}`)
+      .features([reports])
+      .entrypoints(schedule({ clock: 'host' }))
+      .start(),
+  );
   running.push(started);
   return { name, trigger: () => started.services.scheduler.trigger('nightly-report') };
 }

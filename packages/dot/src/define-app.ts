@@ -1,3 +1,7 @@
+import type { Clock } from '@arki/clock';
+import type { Failure, FailureIn } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
 /**
  * Public entry point for the DOT kernel (v2).
  *
@@ -27,15 +31,30 @@
 import type { AnyDefinedFeature } from './define-feature.js';
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 import type { AnyFeature, Driven, Driver, MountedFeature, PluginOf } from './feature.js';
+import type { DotBootOutcome, DotDisposeOutcome } from './kernel/app-instance.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
+import type {
+  AnyPlugin,
+  EmptyShape,
+  NeedsShape,
+  Plugin,
+  PluginCloseFailure,
+  PluginOpenFailure,
+  PluginOwnership,
+  RuntimePlugin,
+  ServiceRecord,
+} from './plugin-contract.js';
 import type { MaxIndex, NextIndex } from './tuple-index.js';
 import { allFeatures, mountFeatures } from './define-feature.js';
 import { bindDriver, plug } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
+
+function failed<Value>(value: Value): value is FailureIn<Value> {
+  return isFailure<unknown>(value);
+}
 
 /* ------------------------------------------------------------------ */
 /* Compile-time wiring guard                                           */
@@ -124,7 +143,7 @@ type UseAllWalk<
         readonly avail: TAvail;
         readonly error: { readonly 'DOT: a list may hold at most this many units': MaxIndex };
       }
-    : TPlugins[I] extends Plugin<infer TNeeds, infer TProvides>
+    : TPlugins[I] extends Plugin<infer TNeeds, infer TProvides, NeedsShape, string, PluginOwnership>
       ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends []
         ? UseAllWalk<TAvail & NormalizeProvides<TProvides>, TPlugins, NextIndex[I]>
         : {
@@ -218,7 +237,7 @@ export type FeatureUnits<TFeatures extends readonly (AnyFeature | AnyDefinedFeat
  * Public DotApp surface. The internal `DotAppImpl` implements this; consumers
  * see only these members.
  */
-export type DotApp<TServices extends ServiceRecord> = {
+export type DotApp<TServices extends ServiceRecord, TClose extends Failure = never, TOpen extends Failure = never> = {
   /** App name (passed to `defineApp`). */
   readonly name: string;
   /** Current lifecycle state. */
@@ -236,7 +255,7 @@ export type DotApp<TServices extends ServiceRecord> = {
    * Start active work. Boots first if app is `defined` or `configured`.
    * Idempotent while `started`. Throws if app is `failed` or `disposed`.
    */
-  start(): Promise<void>;
+  start(): Promise<DotBootOutcome<TOpen, TClose>>;
   /**
    * Stop active work. Keeps booted resources for later cleanup.
    * Idempotent while not `started`.
@@ -246,7 +265,7 @@ export type DotApp<TServices extends ServiceRecord> = {
    * Release booted resources. Runs stop() first if `started`.
    * Idempotent while `disposed`.
    */
-  dispose(): Promise<void>;
+  dispose(): Promise<DotDisposeOutcome<TClose>>;
   /**
    * Register an in-process lifecycle observer. Returns an unsubscribe
    * function. Observers added here see events from this point onward —
@@ -266,14 +285,18 @@ export type DotApp<TServices extends ServiceRecord> = {
  * Intermediate type after `configure()` but before `boot()`.
  * Exposes the manifest and diagnostics already, but no `services` yet.
  */
-export type DotAppConfigured<TServices extends ServiceRecord> = {
+export type DotAppConfigured<
+  TServices extends ServiceRecord,
+  TOpen extends Failure = never,
+  TClose extends Failure = never,
+> = {
   readonly name: string;
   readonly state: DotLifecycleState;
   readonly manifest: DotAppManifest;
   readonly diagnostics: DotDiagnosticsSnapshot;
   /** Continue the lifecycle. */
-  boot(): Promise<DotApp<TServices>>;
-  start(): Promise<DotApp<TServices>>;
+  boot(): Promise<DotApp<TServices, TClose, TOpen> | Exclude<DotBootOutcome<TOpen, TClose>, void>>;
+  start(): Promise<DotApp<TServices, TClose, TOpen> | Exclude<DotBootOutcome<TOpen, TClose>, void>>;
   /** See {@link DotApp.subscribe}. */
   subscribe(observer: DotLifecycleObserver): () => void;
   /** See {@link DotApp.timeline}. */
@@ -281,40 +304,22 @@ export type DotAppConfigured<TServices extends ServiceRecord> = {
 };
 
 /** Lifecycle entry points every builder phase shares. */
-export type DotAppLifecycle<TAvail extends ServiceRecord> = {
-  /** Run the configure phase synchronously. Throws on configure failure. */
-  configure(): DotAppConfigured<TAvail>;
-  /** Run configure + boot. Throws on configure or boot failure. */
-  boot(): Promise<DotApp<TAvail>>;
-  /** Convenience: configure + boot + start. */
-  start(): Promise<DotApp<TAvail>>;
-};
+export type DotAppLifecycle<
+  TAvail extends ServiceRecord,
+  TOpen extends Failure = never,
+  TClose extends Failure = never,
+> = Pick<Builder<TAvail, TOpen, TClose>, 'configure' | 'boot' | 'start'>;
 
 /**
  * Builder after `.features()` or `.serve()` — only driving adapters remain.
  * Driven adapters (`.use`) cannot follow the domain: infrastructure never
  * depends on a feature.
  */
-export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
-  /**
-   * Register a driving adapter (HTTP server, job worker, scheduler). A
-   * `driver(...)` is bound to the features mounted by `.features()`; a
-   * plain plugin is mounted as-is. Same compile-time guard as `.use()`.
-   */
-  serve<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-    adapter: (Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>) &
-      ListGuard<UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>>,
-  ): DotServeBuilder<TAvail & NormalizeProvides<TProvides>>;
-  /**
-   * Register the app's entrypoints — what calls into the features (HTTP
-   * gateway, scheduler, job worker), in order. Each `driver(...)` is bound to
-   * the mounted features; a plain plugin is mounted as-is. The whole list is
-   * checked like `.useAll()`.
-   */
-  entrypoints<const TAdapters extends readonly (AnyPlugin | Driver)[]>(
-    ...adapters: TAdapters & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<TAdapters>, readonly AnyPlugin[]>>>
-  ): DotServeBuilder<UseAllAvail<TAvail, Extract<AsPlugins<TAdapters>, readonly AnyPlugin[]>>>;
-};
+export type DotServeBuilder<
+  TAvail extends ServiceRecord,
+  TOpen extends Failure = never,
+  TClose extends Failure = never,
+> = Pick<Builder<TAvail, TOpen, TClose>, keyof DotAppLifecycle<TAvail, TOpen, TClose> | 'serve' | 'entrypoints'>;
 
 /**
  * Builder produced by `defineApp(name)`. The app reads as a hexagon:
@@ -327,58 +332,23 @@ export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAva
  * satisfied by the services accumulated so far, and its `provides` merge
  * into the accumulated record for the next step.
  */
-export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
-  /**
-   * Register a driven adapter. Compile error when the plugin's needs are
-   * unsatisfied or its provides collide with existing wire keys.
-   *
-   * A `driven(...)` adapter is bound when the app is built, to the full
-   * feature list — so it can read the features' static declarations (their
-   * `use` slices) while still booting BEFORE them. A `driver(...)` is
-   * rejected here: it calls into the features, so it belongs in `.serve()`.
-   */
-  use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-    plugin: (Plugin<TNeeds, TProvides> | Driven<TNeeds, TProvides>) &
-      ListGuard<UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>>,
-  ): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
-  /**
-   * Register a tuple of plugins in declaration order. This is type-equivalent
-   * to calling `.use()` for each item and keeps the same ordering/collision
-   * guard across the whole tuple.
-   */
-  useAll<const TPlugins extends readonly AnyPlugin[]>(
-    plugins: TPlugins & ListGuard<UseAllGuard<TAvail, TPlugins>>,
-  ): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
-  /**
-   * Register what the app runs on — logging, observability, database,
-   * cache, auth, the journal — in boot order (argument order; keep `log(...)`
-   * first). Plugins and `driven(...)` adapters; the whole list is checked
-   * like `.useAll()`. Every feature sees these by handle.
-   */
-  infra<const TUnits extends readonly (AnyPlugin | Driven)[]>(
-    ...units: TUnits & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<TUnits>, readonly AnyPlugin[]>>>
-  ): DotAppBuilder<UseAllAvail<TAvail, Extract<AsPlugins<TUnits>, readonly AnyPlugin[]>>>;
-  /**
-   * Mount the domain features, in order. A feature may need what earlier
-   * features provide. Takes object-form `feature()` values and
-   * `defineFeature()` features (each mounts its infra plugins, then itself).
-   * Called once: after it, only `.serve()` / `.entrypoints()` remain.
-   */
-  features<const TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]>(
-    features: TFeatures & ListGuard<UseAllGuard<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>>,
-  ): DotServeBuilder<UseAllAvail<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>>;
-} & Pick<DotServeBuilder<TAvail>, 'serve' | 'entrypoints'>;
+export type DotAppBuilder<
+  TAvail extends ServiceRecord,
+  TOpen extends Failure = never,
+  TClose extends Failure = never,
+> = Pick<Builder<TAvail, TOpen, TClose>, keyof Builder<TAvail, TOpen, TClose>>;
 
-type BuilderState = {
+type BuilderState<TOpen extends Failure = never, TClose extends Failure = never> = {
   appName: string;
   appVersion?: string;
   /** A `Driven` is bound to the final feature list at build time. */
-  plugins: (AnyPlugin | Driven)[];
+  plugins: (RuntimePlugin<TOpen, TClose> | Driven<ServiceRecord, ServiceRecord, { open: TOpen; close: TClose }>)[];
   /** The features mounted by `.features()`, as written — what drivers are bound to. */
   features: readonly MountedFeature[];
   config?: Readonly<Record<string, unknown>>;
   observers?: readonly DotLifecycleObserver[];
   hookTimeoutMs?: number;
+  clock?: Clock;
 };
 
 /**
@@ -417,6 +387,7 @@ export function defineApp(
      * no watchdog.
      */
     hookTimeoutMs?: number;
+    clock?: Clock;
   } = {},
 ): DotAppBuilder<EmptyShape> {
   const state: BuilderState = {
@@ -427,18 +398,22 @@ export function defineApp(
     config: options.config,
     observers: options.observers,
     hookTimeoutMs: options.hookTimeoutMs,
+    clock: options.clock,
   };
   return makeBuilder<EmptyShape>(state);
 }
 
-function buildImpl(state: BuilderState): DotAppImpl {
+function buildImpl<TOpen extends Failure, TClose extends Failure>(
+  state: BuilderState<TOpen, TClose>,
+): DotAppImpl<TOpen, TClose> {
   return new DotAppImpl({
     appName: state.appName,
     appVersion: state.appVersion,
-    plugins: state.plugins.map(unit => ('bind' in unit ? (unit.bind(state.features) as AnyPlugin) : unit)),
+    plugins: state.plugins.map(unit => ('bind' in unit ? unit.bind(state.features) : unit)),
     config: state.config,
     observers: state.observers,
     hookTimeoutMs: state.hookTimeoutMs,
+    clock: state.clock,
   });
 }
 
@@ -451,85 +426,210 @@ function bindAdapter(adapter: AnyPlugin | Driver, features: readonly MountedFeat
   return { ...bound, role: 'driving' };
 }
 
-function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppBuilder<TAvail> {
-  // The `use` implementation is signature-erased (the guard exists purely
-  // at the type level); the single cast below is the same kernel boundary
-  // v1 crossed in its wrapApp helper. The phase split is type-only too:
-  // one runtime object serves every phase.
-  const impl = {
-    features(features: readonly (AnyFeature | AnyDefinedFeature)[]): DotAppBuilder<ServiceRecord> {
-      // Assembly: a chain feature's raw infra handles may be held only inside its scope (ARKI_DOT_E026 otherwise).
-      mountFeatures(features.filter(f => isDefinedFeature(f)));
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [
-          ...state.plugins,
-          ...features.flatMap((f): readonly AnyPlugin[] =>
-            isDefinedFeature(f) ? f.plugins() : [{ ...(plug(f) as AnyPlugin), role: 'feature' }],
-          ),
-        ],
-        // Adapters read both forms through the descriptor protocol (`entrypointsOf`). The list is the
-        // normalized node list — each nested feature once, depth-first — so a driver (`.entrypoints`) and a
-        // driven adapter (`.infra`) read each node's own declarations exactly once.
-        features: [...state.features, ...allFeatures(features)],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    serve(adapter: AnyPlugin | Driver): DotAppBuilder<ServiceRecord> {
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [...state.plugins, bindAdapter(adapter, state.features)],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    entrypoints(...adapters: readonly (AnyPlugin | Driver)[]): DotAppBuilder<ServiceRecord> {
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [...state.plugins, ...adapters.map(adapter => bindAdapter(adapter, state.features))],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    infra(...units: readonly (AnyPlugin | Driven)[]): DotAppBuilder<ServiceRecord> {
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [...state.plugins, ...units],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    use(plugin: AnyPlugin | Driven): DotAppBuilder<ServiceRecord> {
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [...state.plugins, plugin],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    useAll(plugins: readonly AnyPlugin[]): DotAppBuilder<ServiceRecord> {
-      const nextState: BuilderState = {
-        ...state,
-        plugins: [...state.plugins, ...plugins],
-      };
-      return makeBuilder<ServiceRecord>(nextState);
-    },
-    configure(): DotAppConfigured<ServiceRecord> {
-      const appImpl = buildImpl(state);
-      appImpl.runConfigure();
-      return wrapConfigured<ServiceRecord>(appImpl);
-    },
-    async boot(): Promise<DotApp<ServiceRecord>> {
-      const appImpl = buildImpl(state);
-      await appImpl.boot();
-      return wrapApp<ServiceRecord>(appImpl);
-    },
-    async start(): Promise<DotApp<ServiceRecord>> {
-      const appImpl = buildImpl(state);
-      await appImpl.start();
-      return wrapApp<ServiceRecord>(appImpl);
-    },
-  };
-  return impl as DotAppBuilder<TAvail>;
+/** Runtime lists retain the checked construct/close objects from their source plugins. */
+function pluginRuntime<const Plugins extends readonly AnyPlugin[]>(
+  plugins: Plugins,
+): readonly RuntimePlugin<PluginOpenFailure<Plugins[number]>, PluginCloseFailure<Plugins[number]>>[];
+function pluginRuntime(plugins: readonly AnyPlugin[]): readonly AnyPlugin[] {
+  return plugins;
+}
+function runtimeUnits<const Units extends readonly (AnyPlugin | Driven)[]>(
+  units: Units,
+): readonly (
+  | RuntimePlugin<PluginOpenFailure<AsPlugins<Units>[number]>, PluginCloseFailure<AsPlugins<Units>[number]>>
+  | Driven<
+      ServiceRecord,
+      ServiceRecord,
+      { open: PluginOpenFailure<AsPlugins<Units>[number]>; close: PluginCloseFailure<AsPlugins<Units>[number]> }
+    >
+)[];
+function runtimeUnits(units: readonly (AnyPlugin | Driven)[]): readonly (AnyPlugin | Driven)[] {
+  return units;
+}
+function featureRuntime<const Features extends readonly (AnyFeature | AnyDefinedFeature)[]>(
+  features: Features,
+): readonly RuntimePlugin<
+  PluginOpenFailure<FeatureUnits<Features>[number]>,
+  PluginCloseFailure<FeatureUnits<Features>[number]>
+>[];
+function featureRuntime(features: readonly (AnyFeature | AnyDefinedFeature)[]): readonly AnyPlugin[] {
+  mountFeatures(features.filter(f => isDefinedFeature(f)));
+  return features.flatMap(f => (isDefinedFeature(f) ? f.plugins() : [{ ...plug(f), role: 'feature' as const }]));
+}
+function drivingRuntime<const Adapters extends readonly (AnyPlugin | Driver)[]>(
+  adapters: Adapters,
+  features: readonly MountedFeature[],
+): readonly RuntimePlugin<
+  PluginOpenFailure<AsPlugins<Adapters>[number]>,
+  PluginCloseFailure<AsPlugins<Adapters>[number]>
+>[];
+function drivingRuntime(
+  adapters: readonly (AnyPlugin | Driver)[],
+  features: readonly MountedFeature[],
+): readonly AnyPlugin[] {
+  return adapters.map(adapter => bindAdapter(adapter, features));
 }
 
-function wrapApp<TServices extends ServiceRecord>(impl: DotAppImpl): DotApp<TServices> {
+/** Internal dynamic-list entrypoint; unlike useAll, this does not claim tuple wiring checks. */
+export function mountPlugins<
+  Open extends Failure,
+  Close extends Failure,
+  Services extends ServiceRecord = ServiceRecord,
+>(
+  name: string,
+  plugins: readonly RuntimePlugin<Open, Close>[],
+  options: Parameters<typeof defineApp>[1] = {},
+): DotAppBuilder<Services, Open, Close> {
+  return makeBuilder<Services, Open, Close>({
+    appName: name,
+    appVersion: options.version,
+    plugins: [...plugins],
+    features: [],
+    config: options.config,
+    observers: options.observers,
+    hookTimeoutMs: options.hookTimeoutMs,
+    clock: options.clock,
+  });
+}
+
+function makeBuilder<TAvail extends ServiceRecord, TOpen extends Failure = never, TClose extends Failure = never>(
+  state: BuilderState<TOpen, TClose>,
+): DotAppBuilder<TAvail, TOpen, TClose> {
+  return new Builder<TAvail, TOpen, TClose>(state);
+}
+
+/** One checked implementation supplies both public builder phases. */
+class Builder<TAvail extends ServiceRecord, TOpen extends Failure, TClose extends Failure> {
+  readonly #state: BuilderState<TOpen, TClose>;
+
+  constructor(state: BuilderState<TOpen, TClose>) {
+    this.#state = state;
+
+    this.use = this.use.bind(this);
+    this.useAll = this.useAll.bind(this);
+    this.infra = this.infra.bind(this);
+    this.features = this.features.bind(this);
+    this.serve = this.serve.bind(this);
+    this.entrypoints = this.entrypoints.bind(this);
+    this.configure = this.configure.bind(this);
+    this.boot = this.boot.bind(this);
+    this.start = this.start.bind(this);
+  }
+
+  private append<Avail extends ServiceRecord, Open extends Failure, Close extends Failure>(
+    units: readonly (RuntimePlugin<Open, Close> | Driven<ServiceRecord, ServiceRecord, { open: Open; close: Close }>)[],
+    features = this.#state.features,
+  ): Builder<Avail, TOpen | Open, TClose | Close> {
+    return new Builder<Avail, TOpen | Open, TClose | Close>({
+      ...this.#state,
+      plugins: [...this.#state.plugins, ...units],
+      features,
+    });
+  }
+
+  /** Register a driven adapter whose needs are already available. */
+  use<Needs extends ServiceRecord, Provides extends ServiceRecord, Owned extends PluginOwnership>(
+    unit: (Plugin<Needs, Provides, NeedsShape, string, Owned> | Driven<Needs, Provides, Owned>) &
+      ListGuard<UseGuard<TAvail, Needs, NormalizeProvides<Provides>>>,
+  ): DotAppBuilder<TAvail & NormalizeProvides<Provides>, TOpen | Owned['open'], TClose | Owned['close']> {
+    return this.append<TAvail & NormalizeProvides<Provides>, Owned['open'], Owned['close']>([unit]);
+  }
+
+  /** Register a tuple of plugins in declaration order. */
+  useAll<const Plugins extends readonly AnyPlugin[]>(
+    plugins: Plugins & ListGuard<UseAllGuard<TAvail, Plugins>>,
+  ): DotAppBuilder<
+    UseAllAvail<TAvail, Plugins>,
+    TOpen | PluginOpenFailure<Plugins[number]>,
+    TClose | PluginCloseFailure<Plugins[number]>
+  > {
+    return this.append<
+      UseAllAvail<TAvail, Plugins>,
+      PluginOpenFailure<Plugins[number]>,
+      PluginCloseFailure<Plugins[number]>
+    >(pluginRuntime<Plugins>(plugins));
+  }
+
+  /** Register infrastructure in boot order, before the domain. */
+  infra<const Units extends readonly (AnyPlugin | Driven)[]>(
+    ...units: Units & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<Units>, readonly AnyPlugin[]>>>
+  ): DotAppBuilder<
+    UseAllAvail<TAvail, Extract<AsPlugins<Units>, readonly AnyPlugin[]>>,
+    TOpen | PluginOpenFailure<AsPlugins<Units>[number]>,
+    TClose | PluginCloseFailure<AsPlugins<Units>[number]>
+  > {
+    return this.append<
+      UseAllAvail<TAvail, Extract<AsPlugins<Units>, readonly AnyPlugin[]>>,
+      PluginOpenFailure<AsPlugins<Units>[number]>,
+      PluginCloseFailure<AsPlugins<Units>[number]>
+    >(runtimeUnits<Units>(units));
+  }
+
+  /** Mount the domain; later steps can register only driving adapters. */
+  features<const Features extends readonly (AnyFeature | AnyDefinedFeature)[]>(
+    features: Features & ListGuard<UseAllGuard<TAvail, Extract<FeatureUnits<Features>, readonly AnyPlugin[]>>>,
+  ): DotServeBuilder<
+    UseAllAvail<TAvail, Extract<FeatureUnits<Features>, readonly AnyPlugin[]>>,
+    TOpen | PluginOpenFailure<FeatureUnits<Features>[number]>,
+    TClose | PluginCloseFailure<FeatureUnits<Features>[number]>
+  > {
+    return this.append<
+      UseAllAvail<TAvail, Extract<FeatureUnits<Features>, readonly AnyPlugin[]>>,
+      PluginOpenFailure<FeatureUnits<Features>[number]>,
+      PluginCloseFailure<FeatureUnits<Features>[number]>
+    >(featureRuntime<Features>(features), [...this.#state.features, ...allFeatures(features)]);
+  }
+
+  /** Bind a driving adapter to the features mounted by features(). */
+  serve<Needs extends ServiceRecord, Provides extends ServiceRecord, Owned extends PluginOwnership>(
+    adapter: (Plugin<Needs, Provides, NeedsShape, string, Owned> | Driver<Needs, Provides, Owned>) &
+      ListGuard<UseGuard<TAvail, Needs, NormalizeProvides<Provides>>>,
+  ): DotServeBuilder<TAvail & NormalizeProvides<Provides>, TOpen | Owned['open'], TClose | Owned['close']> {
+    const bound = 'bind' in adapter ? bindDriver(adapter, this.#state.features) : adapter;
+    return this.append<TAvail & NormalizeProvides<Provides>, Owned['open'], Owned['close']>([
+      { ...bound, role: 'driving' },
+    ]);
+  }
+
+  /** Register the app's driving adapters in argument order. */
+  entrypoints<const Adapters extends readonly (AnyPlugin | Driver)[]>(
+    ...adapters: Adapters & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<Adapters>, readonly AnyPlugin[]>>>
+  ): DotServeBuilder<
+    UseAllAvail<TAvail, Extract<AsPlugins<Adapters>, readonly AnyPlugin[]>>,
+    TOpen | PluginOpenFailure<AsPlugins<Adapters>[number]>,
+    TClose | PluginCloseFailure<AsPlugins<Adapters>[number]>
+  > {
+    return this.append<
+      UseAllAvail<TAvail, Extract<AsPlugins<Adapters>, readonly AnyPlugin[]>>,
+      PluginOpenFailure<AsPlugins<Adapters>[number]>,
+      PluginCloseFailure<AsPlugins<Adapters>[number]>
+    >(drivingRuntime<Adapters>(adapters, this.#state.features));
+  }
+
+  configure() {
+    const impl = buildImpl(this.#state);
+    impl.runConfigure();
+    return wrapConfigured<TAvail, TOpen, TClose>(impl);
+  }
+
+  async boot(): Promise<DotApp<TAvail, TClose, TOpen> | Exclude<DotBootOutcome<TOpen, TClose>, void>> {
+    const impl = buildImpl(this.#state);
+    const outcome = await impl.boot();
+    if (failed(outcome)) return outcome;
+    return wrapApp<TAvail, TOpen, TClose>(impl);
+  }
+
+  async start(): Promise<DotApp<TAvail, TClose, TOpen> | Exclude<DotBootOutcome<TOpen, TClose>, void>> {
+    const impl = buildImpl(this.#state);
+    const outcome = await impl.start();
+    if (failed(outcome)) return outcome;
+    return wrapApp<TAvail, TOpen, TClose>(impl);
+  }
+}
+
+function wrapApp<TServices extends ServiceRecord, TOpen extends Failure, TClose extends Failure>(
+  impl: DotAppImpl<TOpen, TClose>,
+): DotApp<TServices, TClose, TOpen> {
   return {
     get name() {
       return impl.name;
@@ -554,7 +654,9 @@ function wrapApp<TServices extends ServiceRecord>(impl: DotAppImpl): DotApp<TSer
   };
 }
 
-function wrapConfigured<TServices extends ServiceRecord>(impl: DotAppImpl): DotAppConfigured<TServices> {
+function wrapConfigured<TServices extends ServiceRecord, TOpen extends Failure, TClose extends Failure>(
+  impl: DotAppImpl<TOpen, TClose>,
+): DotAppConfigured<TServices, TOpen, TClose> {
   return {
     get name() {
       return impl.name;
@@ -569,12 +671,14 @@ function wrapConfigured<TServices extends ServiceRecord>(impl: DotAppImpl): DotA
       return impl.diagnostics;
     },
     async boot() {
-      await impl.boot();
-      return wrapApp<TServices>(impl);
+      const result = await impl.boot();
+      if (failed(result)) return result;
+      return wrapApp<TServices, TOpen, TClose>(impl);
     },
     async start() {
-      await impl.start();
-      return wrapApp<TServices>(impl);
+      const result = await impl.start();
+      if (failed(result)) return result;
+      return wrapApp<TServices, TOpen, TClose>(impl);
     },
     subscribe: observer => impl.subscribe(observer),
     timeline: () => renderTimeline(impl.diagnostics),

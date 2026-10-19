@@ -24,10 +24,12 @@ let redisContainer: StartedTestContainer;
 let redisUrl: string;
 
 beforeAll(async () => {
-  redisContainer = await new GenericContainer('redis:7-alpine')
-    .withExposedPorts(6379)
-    .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
-    .start();
+  redisContainer = await orThrow(
+    new GenericContainer('redis:7-alpine')
+      .withExposedPorts(6379)
+      .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+      .start(),
+  );
   redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
 }, 60_000);
 
@@ -58,15 +60,19 @@ describe('queue() client + queueWorker() in separate apps', () => {
     const mail = feature('mail', { use: [jobs({ sendMail })] });
     const keyPrefix = `split-${crypto.randomUUID()}:`;
 
-    const api = await defineApp('api')
-      .use(queue({ connection: redisUrl, keyPrefix }))
-      .features([mail])
-      .start();
-    const worker = await defineApp('worker')
-      .use(queue({ connection: redisUrl, keyPrefix }))
-      .features([mail])
-      .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
-      .start();
+    const api = await orThrow(
+      defineApp('api')
+        .use(queue({ connection: redisUrl, keyPrefix }))
+        .features([mail])
+        .start(),
+    );
+    const worker = await orThrow(
+      defineApp('worker')
+        .use(queue({ connection: redisUrl, keyPrefix }))
+        .features([mail])
+        .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+        .start(),
+    );
 
     try {
       const jobId = await api.services.queue.enqueue(sendMail, { to: 'a@b.c' });
@@ -119,15 +125,19 @@ describe('queue() client + queueWorker() in separate apps', () => {
     const orders = feature('orders', { use: [jobs({ reserve, notify, orderFlow })] });
     const keyPrefix = `flow-${crypto.randomUUID()}:`;
 
-    const api = await defineApp('api')
-      .use(queue({ connection: redisUrl, keyPrefix }))
-      .features([orders])
-      .start();
-    const worker = await defineApp('worker')
-      .use(queue({ connection: redisUrl, keyPrefix }))
-      .features([orders])
-      .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
-      .start();
+    const api = await orThrow(
+      defineApp('api')
+        .use(queue({ connection: redisUrl, keyPrefix }))
+        .features([orders])
+        .start(),
+    );
+    const worker = await orThrow(
+      defineApp('worker')
+        .use(queue({ connection: redisUrl, keyPrefix }))
+        .features([orders])
+        .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+        .start(),
+    );
 
     try {
       const started = orThrow(await api.services.queue.enqueue(orderFlow, { orderId: 'o-1' }));

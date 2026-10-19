@@ -12,6 +12,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import { composeSchedules, schedule, schedules } from './dot.js';
 
@@ -74,30 +75,30 @@ describe('schedules(core, defs)', () => {
   });
 
   it("runs the handler on the feature's private infra and usecases, next to an object-form feature", async () => {
-    const app = await boot();
+    const app = await orThrow(boot());
     await expect(app.services.scheduler.trigger('send-digest')).resolves.toEqual({
       name: 'send-digest',
       status: 'ran',
       value: 'sent 3',
     });
     await expect(app.services.scheduler.trigger('close-books')).resolves.toMatchObject({ value: 'closed' });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('puts the schedule in the manifest under the feature, before anything runs', async () => {
-    const app = await boot();
+    const app = await orThrow(boot());
     expect(app.manifest.actions.find(action => action.id === 'send-digest.fire')).toMatchObject({
       binding: 'schedule',
       address: '*/15 * * * *',
       plugin: 'digest',
     });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });
 
 describe('composeSchedules over both feature forms', () => {
   it("accepts either form's names and types each result from its own handler", async () => {
-    const app = await boot();
+    const app = await orThrow(boot());
     const client = composeSchedules([digest, billing], app.services.scheduler);
     const sent = await client.trigger('send-digest');
     const closed = await client.trigger('close-books');
@@ -109,7 +110,7 @@ describe('composeSchedules over both feature forms', () => {
     ]);
     // @ts-expect-error -- no feature declares this name
     void client.trigger('nope');
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });
 
@@ -123,28 +124,37 @@ const parentCore = defineFeature('digest')
   .needs({ db: database.provides.db })
   .infra(outbox)
   .features(cleanup)
-  .usecases({ sendDue: ({ outbox }: DepsOf<typeof base>) => () => `sent ${outbox.pending()}` });
+  .usecases({
+    sendDue:
+      ({ outbox }: DepsOf<typeof base>) =>
+      () =>
+        `sent ${outbox.pending()}`,
+  });
 const parent = parentCore.entrypoints(
   schedules(parentCore, [{ name: 'send-digest', cron: '*/15 * * * *', handler: ({ usecases }) => usecases.sendDue() }]),
 );
 
 const bootNested = () =>
-  defineApp('nested').infra(database).features([parent]).entrypoints(schedule({ clock: 'host' })).start();
+  defineApp('nested')
+    .infra(database)
+    .features([parent])
+    .entrypoints(schedule({ clock: 'host' }))
+    .start();
 
 describe('nested features', () => {
   it("runs the child's schedule once, under the child's name in the manifest", async () => {
-    const app = await bootNested();
+    const app = await orThrow(bootNested());
     expect(app.services.scheduler.names.filter(name => name === 'purge-old')).toEqual(['purge-old']);
     expect(app.manifest.actions.find(action => action.id === 'purge-old.fire')).toMatchObject({
       binding: 'schedule',
       plugin: 'digest.cleanup',
     });
     await expect(app.services.scheduler.trigger('purge-old')).resolves.toMatchObject({ value: 'purged' });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('composeSchedules over the parent alone knows the child names, typed from the child handler', async () => {
-    const app = await bootNested();
+    const app = await orThrow(bootNested());
     const client = composeSchedules([parent], app.services.scheduler);
     const purged = await client.trigger('purge-old');
     if (purged.status === 'ran') expectTypeOf(purged.value).toEqualTypeOf<string>();
@@ -152,6 +162,6 @@ describe('nested features', () => {
     await expect(client.trigger('send-digest')).resolves.toMatchObject({ value: 'sent 3' });
     // @ts-expect-error -- no feature in the tree declares this name
     void client.trigger('nope');
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

@@ -13,6 +13,7 @@
  *     existing 89-test suite stays green (no regression).
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import type { DotLifecycleEvent, DotLifecycleObserver } from './lifecycle-observer.js';
@@ -82,11 +83,11 @@ describe('DotLifecycleObserver — happy path', () => {
       },
     });
 
-    const app = await defineApp('full-lifecycle', { observers: [e => events.push(e)] })
+    const app = orThrow(await defineApp('full-lifecycle', { observers: [e => events.push(e)] })
       .use(pluginA)
-      .boot();
+      .boot());
 
-    await app.dispose();
+    orThrow(await app.dispose());
 
     // The full stream — configure (phase start, hook start, hook done, phase done)
     // + boot (phase start, hook start, hook done, phase done)
@@ -124,12 +125,8 @@ describe('DotLifecycleObserver — failure path', () => {
       },
     });
 
-    await defineApp('boot-fail', { observers: [e => events.push(e)] })
-      .use(badPlugin)
-      .boot()
-      .catch(() => {
-        /* noop */
-      });
+    const failure = await defineApp('boot-fail', { observers: [e => events.push(e)] }).use(badPlugin).boot();
+    expect(failure).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-broken') });
 
     // Find the boot-phase hook-failed event.
     const hookFailed = events.find(
@@ -138,8 +135,8 @@ describe('DotLifecycleObserver — failure path', () => {
     );
     expect(hookFailed).toBeDefined();
     expect(hookFailed?.plugin).toBe('bad');
-    expect(hookFailed?.error).toBeInstanceOf(Error);
-    expect((hookFailed?.error as Error).message).toBe('boot-broken');
+    expect(hookFailed?.error).toBe(failure);
+    expect(hookFailed?.error).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-broken') });
     expect(hookFailed?.durationMs).toBeGreaterThanOrEqual(0);
 
     // And the boot phase itself must end as `failed`.
@@ -148,7 +145,7 @@ describe('DotLifecycleObserver — failure path', () => {
         e.kind === 'phase' && e.phase === 'boot' && e.status === 'failed',
     );
     expect(phaseFailed).toBeDefined();
-    expect(phaseFailed?.error).toBeInstanceOf(Error);
+    expect(phaseFailed?.error).toBe(failure);
   });
 });
 
@@ -168,7 +165,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
       },
     });
 
-    const app = await defineApp('subscribe-test').use(pluginA).start();
+    const app = orThrow(await defineApp('subscribe-test').use(pluginA).start());
 
     // No observer was registered at construction — so events is empty so far.
     expect(events).toEqual([]);
@@ -181,7 +178,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
     unsubscribe();
     events.length = 0;
 
-    await app.dispose();
+    orThrow(await app.dispose());
     // No dispose events should land after unsubscribe.
     expect(events).toEqual([]);
   });
@@ -204,9 +201,9 @@ describe('DotLifecycleObserver — fault isolation', () => {
 
     // Bad observer registered FIRST — if it could break the chain, the
     // good observer would see zero events.
-    await defineApp('isolated-observers', { observers: [badObserver, goodObserver] })
+    orThrow(await defineApp('isolated-observers', { observers: [badObserver, goodObserver] })
       .use(pluginA)
-      .boot();
+      .boot());
 
     // The good observer must still have received the full event stream.
     expect(events.length).toBeGreaterThan(0);
@@ -235,7 +232,7 @@ describe('renderTimeline integration', () => {
       },
     });
 
-    const app = await defineApp('timeline-test').use(pluginA).use(pluginB).boot();
+    const app = orThrow(await defineApp('timeline-test').use(pluginA).use(pluginB).boot());
     try {
       const timeline = app.timeline();
       // Header line is present
@@ -249,7 +246,7 @@ describe('renderTimeline integration', () => {
       // At least one bar character is rendered
       expect(timeline).toMatch(/█/);
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 });

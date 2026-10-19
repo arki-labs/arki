@@ -104,7 +104,9 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/async": "workspace:*",
     "@arki/cli": "workspace:*",
+    "@arki/clock": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",

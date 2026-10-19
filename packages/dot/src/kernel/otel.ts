@@ -1,7 +1,7 @@
 import type { Span } from '@opentelemetry/api';
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 import { nowMs } from './now.js';
@@ -99,6 +99,18 @@ function stringifyForSpan(value: unknown): string {
   }
 }
 
+/** Record returned outcomes without manufacturing exceptions for expected refusals. */
+function recordOutcome(span: Span, outcome: unknown): 'ok' | 'failed' {
+  if (!isFailure(outcome)) {
+    span.setStatus({ code: SpanStatusCode.OK });
+    return 'ok';
+  }
+  span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.message });
+  span.setAttribute('failure.code', outcome.code);
+  if (UnexpectedDefect.is(outcome) && outcome.cause instanceof Error) span.recordException(outcome.cause);
+  return 'failed';
+}
+
 /**
  * Wrap a single plugin-hook execution in a child span and record its
  * duration in the histogram. The span auto-links to the active phase
@@ -147,7 +159,7 @@ export function withPluginHookSpan<R>(
     if (result instanceof Promise) {
       return result.then(
         v => {
-          span.setStatus({ code: SpanStatusCode.OK });
+          status = recordOutcome(span, v);
           finish();
           return v;
         },
@@ -160,7 +172,7 @@ export function withPluginHookSpan<R>(
         },
       ) as R;
     }
-    span.setStatus({ code: SpanStatusCode.OK });
+    status = recordOutcome(span, result);
     finish();
     return result;
   } catch (error) {
@@ -216,7 +228,7 @@ export function withPhaseSpan<R>(
         if (result instanceof Promise) {
           return result.then(
             v => {
-              span.setStatus({ code: SpanStatusCode.OK });
+              status = recordOutcome(span, v);
               finish();
               return v;
             },
@@ -229,7 +241,7 @@ export function withPhaseSpan<R>(
             },
           ) as R;
         }
-        span.setStatus({ code: SpanStatusCode.OK });
+        status = recordOutcome(span, result);
         finish();
         return result;
       } catch (error) {

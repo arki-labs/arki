@@ -11,6 +11,7 @@ does not compile; a fake of the wrong shape fails at the `.provide()`
 call site:
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { expect } from 'vitest';
 
 import { plugin, service, token } from '@arki/dot';
@@ -35,6 +36,7 @@ const app = await testPlugin(catalog)
   .provide(Db, fakeDb) // token need
   .provide('cache', fakeKv) // anonymous need — wire key is the alias
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 
 expect(await app.services.catalog.list()).toEqual([]);
 await app.dispose();

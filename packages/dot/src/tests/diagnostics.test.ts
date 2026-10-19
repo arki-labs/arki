@@ -6,6 +6,7 @@
  * message, remediation, and docsUrl.
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
@@ -36,14 +37,14 @@ describe('DOT diagnostics', () => {
   });
 
   it('empty app still exposes all five arrays', async () => {
-    const app = await defineApp('empty').boot();
+    const app = orThrow(await defineApp('empty').boot());
     const snap = app.diagnostics;
     expect(snap.plugins).toEqual([]);
     expect(snap.actions).toEqual([]);
     expect(snap.services).toEqual([]);
     expect(snap.lifecycle).toEqual([]);
     expect(snap.issues).toEqual([]);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('post-boot diagnostics include per-plugin status', async () => {
@@ -53,11 +54,11 @@ describe('DOT diagnostics', () => {
         /* side effects only */
       },
     });
-    const app = await defineApp('test').use(a).boot();
+    const app = orThrow(await defineApp('test').use(a).boot());
     const snap = app.diagnostics;
     expect(snap.plugins).toEqual([{ plugin: 'a', status: 'ok', issues: [] }]);
     expect(snap.lifecycle.some(l => l.hook === 'boot' && l.plugin === 'a')).toBe(true);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('boot failure surfaces a failed plugin diagnostic with structured issue', async () => {
@@ -72,11 +73,7 @@ describe('DOT diagnostics', () => {
     const configured = defineApp('test').use(bad).configure();
     // configure succeeded — to surface boot diagnostics, drive boot via the
     // builder and re-read diagnostics on the configured object.
-    try {
-      await configured.boot();
-    } catch {
-      // expected — boot threw.
-    }
+    expect(await configured.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
     const bootedSnap = configured.diagnostics;
     expect(bootedSnap.app.state).toBe('failed');
     const badDiag = bootedSnap.plugins.find(p => p.plugin === 'bad');
@@ -102,11 +99,7 @@ describe('DOT diagnostics', () => {
       },
     });
     const seam = defineApp('test').use(bootBad).configure();
-    try {
-      await seam.boot();
-    } catch {
-      // expected
-    }
+    expect(await seam.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
     const snap = seam.diagnostics;
     for (const issue of snap.issues) {
       expect(issue.code).toBeTruthy();

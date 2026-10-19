@@ -35,7 +35,7 @@ const POLL_MS = 20;
 let db: PgliteDatabase;
 let client: PGlite;
 let next = 9000;
-const apps: { stop(): Promise<void>; dispose(): Promise<void> }[] = [];
+const apps: Parameters<typeof track>[0][] = [];
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -43,8 +43,8 @@ beforeAll(async () => {
 
 afterEach(async () => {
   for (const app of apps.splice(0)) {
-    await app.stop();
-    await app.dispose();
+    await orThrow(app.stop());
+    await orThrow(app.dispose());
   }
   await db.delete(tables.jobs).where(sql`true`);
 });
@@ -53,7 +53,7 @@ afterAll(async () => {
   await client.close();
 });
 
-function track<App extends { stop(): Promise<void>; dispose(): Promise<void> }>(app: App): App {
+function track<App extends { stop(): Promise<unknown>; dispose(): Promise<unknown> }>(app: App): App {
   apps.push(app);
   return app;
 }
@@ -120,13 +120,15 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     });
 
     const app = track(
-      await defineApp('chain-journal')
-        .infra(dbPlugin(), journal({ j }))
-        .features([orders, billing])
-        .entrypoints(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('chain-journal')
+          .infra(dbPlugin(), journal({ j }))
+          .features([orders, billing])
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
 
     // One journal, both forms folded in, in feature order.
     expect(app.services.journal.catalog.projections).toEqual(['chain-orders-count', 'legacy-billing-count']);
@@ -153,8 +155,10 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
       .features(audit)
       .usecases({})
       .entrypoints();
-    const app = track(await defineApp('nested-journal').infra(dbPlugin(), journal({ j })).features([orders]).boot());
-    await app.start();
+    const app = track(
+      await orThrow(defineApp('nested-journal').infra(dbPlugin(), journal({ j })).features([orders]).boot()),
+    );
+    await orThrow(app.start());
     // Without `ownUnits`, the parent's `plugins()` would list the child's unit too and `audit` would be a duplicate owner.
     expect(app.services.journal.catalog.projections).toEqual(['parent-orders-count', 'child-audit-count']);
     const id = orderId(++next);
@@ -169,9 +173,14 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
       .entrypoints();
     const legacy = feature('legacy', { use: [journalHandlers({ projections: [countPlaced('twice-count', 'b')] })] });
 
-    await expect(defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot()).rejects.toThrow(
-      'duplicate projection name "twice-count" (features "chain" and "legacy")',
-    );
+    await expect(
+      defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot(),
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('duplicate projection name "twice-count" (features "chain" and "legacy")'),
+      }),
+    });
   });
 
   it("checks an effect's needs against the core where it is listed, at compile time", () => {
@@ -191,7 +200,10 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
         .infra(dbPlugin(), journal({ j }))
         .features([bare.entrypoints(entry)])
         .boot(),
-    ).rejects.toThrow(/mailer/);
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({ message: expect.stringMatching(/mailer/) }),
+    });
   });
 });
 
@@ -249,17 +261,19 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
     });
     const seen = { features: [] as string[] };
     const app = track(
-      await defineApp('jobs-worker')
-        .infra(
-          dbPlugin(),
-          journal({ j }),
-          mailerPlugin(sent, () => done()),
-        )
-        .features([ordersFeature([])])
-        .entrypoints(journalWorker({ pollMs: POLL_MS, jobs: mailerSource(seen) }))
-        .boot(),
+      await orThrow(
+        defineApp('jobs-worker')
+          .infra(
+            dbPlugin(),
+            journal({ j }),
+            mailerPlugin(sent, () => done()),
+          )
+          .features([ordersFeature([])])
+          .entrypoints(journalWorker({ pollMs: POLL_MS, jobs: mailerSource(seen) }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
     expect(seen.features).toEqual(['orders']);
     await db.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'welcome', args: 42 });
     await ran;
@@ -313,13 +327,15 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     const sent: string[] = [];
     const { reports, us, eu } = reportsFeature(sent);
     const app = track(
-      await defineApp('instance-effects')
-        .infra(dbPlugin(), journal({ j }), us, eu)
-        .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
-        .entrypoints(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('instance-effects')
+          .infra(dbPlugin(), journal({ j }), us, eu)
+          .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')])
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
-    await app.start();
+    await orThrow(app.start());
     expect(app.services.journal.catalog.effects).toEqual(['send-on-request#eu', 'send-on-request#us']);
 
     const id = orderId(++next);
@@ -343,21 +359,28 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     const clash = rival.entrypoints(journalEffects(rival, { effects: [mail('send-on-request')] }));
     await expect(
       defineApp('plain-duplicate').infra(dbPlugin(), journal({ j }), us).features([reports, clash]).boot(),
-    ).rejects.toThrow('duplicate effect name "send-on-request" (features "reports" and "rival")');
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('duplicate effect name "send-on-request" (features "reports" and "rival")'),
+      }),
+    });
     const instances = defineApp('instances-ok')
       .infra(dbPlugin(), journal({ j }), us, eu)
       .features([reports.instance('eu', { mailer: eu.provides.mailerEu }), reports.instance('us')]);
-    await expect(instances.boot().then(app => track(app))).resolves.toBeDefined();
+    await expect(orThrow(instances.boot()).then(app => track(app))).resolves.toBeDefined();
   });
 
   it('leaves a plain feature byte-identical: same effect name, same action id', async () => {
     const { reports, us } = reportsFeature([]);
     const app = track(
-      await defineApp('plain-names')
-        .infra(dbPlugin(), journal({ j }), us)
-        .features([reports])
-        .entrypoints(journalWorker({ pollMs: POLL_MS }))
-        .boot(),
+      await orThrow(
+        defineApp('plain-names')
+          .infra(dbPlugin(), journal({ j }), us)
+          .features([reports])
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
     );
     expect(app.services.journal.catalog.effects).toEqual(['send-on-request']);
     expect(app.manifest.actions.filter(action => action.binding === 'journal').map(action => action.id)).toEqual([

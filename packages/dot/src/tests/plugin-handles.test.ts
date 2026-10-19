@@ -10,6 +10,7 @@
  *   fails loudly instead of silently aliasing;
  * - there is one way to publish: a value-returning `boot` does not compile.
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Handle, Lazy, Provided } from '../plugin-contract.js';
@@ -57,22 +58,22 @@ describe('plugin handles are data before boot', () => {
       needs: { db: database.provides.db },
       provides: { report: ({ db }) => db.query('select 1') },
     });
-    const app = await defineApp('handles').use(database).features([reports]).boot();
+    const app = orThrow(await defineApp('handles').use(database).features([reports]).boot());
     expectTypeOf(app.services.report).toEqualTypeOf<readonly string[]>();
     expect(app.services.report).toEqual(['pg://main:select 1']);
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(opened).toEqual(['pg://main', 'closed:pg://main']);
   });
 
   it('a value-returning plugin boot does not compile — publish through provides', () => {
+    // @ts-expect-error -- boot must return an owned plan or void; publish through provides
     plugin({
       name: 'legacy',
-      // @ts-expect-error -- boot is side effects only
       boot: () => ({ db: 1 }),
     });
+    // @ts-expect-error -- async service publication is also rejected at the authoring call
     plugin({
       name: 'legacy-async',
-      // @ts-expect-error -- an async boot resolving to a value is the same mistake
       boot: async () => {
         await Promise.resolve();
         return { db: 1 };
@@ -149,9 +150,9 @@ describe('rename() moves the handle with the mounted object', () => {
     expect(reportsDb.provides.db).toBeUndefined();
 
     const fresh = feature('analytics', { needs: { db: reportsDb.provides.reportsDb } });
-    const app = await defineApp('renamed').use(reportsDb).features([fresh]).boot();
+    const app = orThrow(await defineApp('renamed').use(reportsDb).features([fresh]).boot());
     expect(app.services.reportsDb.url).toBe('pg://reports');
-    await app.dispose();
+    orThrow(await app.dispose());
 
     // A handle taken from the object before the rename keeps the old key.
     const stale = feature('stale', { needs: { db: makeDb('pg://x').provides.db } });
@@ -169,7 +170,7 @@ describe('handle.lazy', () => {
       needs: { db: database.provides.db.lazy },
       provides: {
         first: async ({ db }) => {
-          const rows = await db.get();
+          const rows = orThrow(await db.get());
           return rows.query('q')[0];
         },
       },
@@ -177,9 +178,9 @@ describe('handle.lazy', () => {
         expectTypeOf(db).toEqualTypeOf<Lazy<Rows>>();
       },
     });
-    const app = await defineApp('lazy').use(database).use(slow).boot();
+    const app = orThrow(await defineApp('lazy').use(database).use(slow).boot());
     expect(app.services.first).toBe('pg://main:q');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -191,10 +192,10 @@ describe('fake(handle, value) and providesOf over plugins', () => {
       provides: { report: ({ db }) => db.query('q') },
     });
     const fakeDb: Rows = { url: 'fake', query: () => ['faked'] };
-    const app = await defineApp('faked').use(fake(database.provides.db, fakeDb)).features([reports]).boot();
+    const app = orThrow(await defineApp('faked').use(fake(database.provides.db, fakeDb)).features([reports]).boot());
     expect(app.services.report).toEqual(['faked']);
     expect(app.manifest.plugins[0]?.name).toBe('fake:db');
-    await app.dispose();
+    orThrow(await app.dispose());
 
     // @ts-expect-error -- a wrong-shaped fake fails at the call site
     fake(database.provides.db, { url: 'fake' });

@@ -4,6 +4,8 @@
  * plugin failed, so failure stays observable instead of opaque.
  */
 import type { Failure } from '@arki/failure';
+import { scopeAggregate } from '@arki/async';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { DotApp } from '../define-app.js';
@@ -29,7 +31,7 @@ export type DoctorOptions = {
    * `dot dev` reads what the preflight boot published here (the
    * `migrations` service of `dbMigrations`).
    */
-  readonly onBooted?: ((app: DotApp<Record<string, unknown>>) => void) | undefined;
+  readonly onBooted?: ((app: DotApp<Record<string, unknown>, Failure, Failure>) => void) | undefined;
 };
 
 /** Fold the observability probe's issue, if any, into the top-level issues. Never mutates the input. */
@@ -41,15 +43,11 @@ function withObservability(diagnostics: DotDiagnosticsSnapshot, enabled: boolean
 }
 
 /** The report, or `dot.doctor_failed` carrying it when an issue is an error or boot threw. */
-function reportOf(
-  snapshot: DotDiagnosticsSnapshot,
-  observability: boolean,
-  bootThrew: boolean,
-): DoctorReport | Failure {
+function reportOf(snapshot: DotDiagnosticsSnapshot, observability: boolean, bootThrew: boolean, cause?: Failure) {
   const diagnostics = withObservability(snapshot, observability);
   const status = bootThrew ? 'failure' : doctorStatus(diagnostics);
   const report: DoctorReport = { ...diagnostics, status };
-  return status === 'failure' ? DoctorFailed(report) : report;
+  return status === 'failure' ? DoctorFailed(report, { cause }) : report;
 }
 
 /**
@@ -75,29 +73,32 @@ export async function runDoctor(
     return lifecycleFailed(error, 'configure');
   }
 
-  let booted: DotApp<Record<string, unknown>> | null = null;
+  let booted;
   try {
     booted = await configured.boot();
   } catch (error) {
-    // Swallowed on purpose: the configured app's diagnostics name the failing plugin.
     debugDoctor.debug('boot threw, falling back to configured diagnostics', {
       error: error instanceof Error ? error : String(error),
     });
+    return reportOf(configured.diagnostics, observability, true);
   }
+  if (isFailure(booted)) return reportOf(configured.diagnostics, observability, true, booted);
 
+  let report: DoctorReport | GraphData | Failure;
   try {
-    if (booted === null) return reportOf(configured.diagnostics, observability, true);
     opts.onBooted?.(booted);
-    // The booted manifest carries the wiring edges observed during boot.
-    if (opts.graph === true) return renderGraph(booted.manifest);
-    return reportOf(booted.diagnostics, observability, false);
-  } finally {
-    if (booted) {
-      try {
-        await booted.dispose();
-      } catch (error) {
-        debugDoctor.debug('dispose threw', { error: error instanceof Error ? error : String(error) });
-      }
-    }
+    report = opts.graph === true ? renderGraph(booted.manifest) : reportOf(booted.diagnostics, observability, false);
+  } catch (error) {
+    report = UnexpectedDefect({ cause: error });
   }
+  let disposed;
+  try {
+    disposed = await booted.dispose();
+  } catch (error) {
+    disposed = UnexpectedDefect({ cause: error });
+  }
+  if (isFailure(disposed)) {
+    return isFailure(report) ? scopeAggregate([report], [disposed]) : disposed;
+  }
+  return report;
 }

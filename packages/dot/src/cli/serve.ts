@@ -5,7 +5,8 @@
  * disposes it within 10 s.
  */
 import type { Failure } from '@arki/failure';
-import { isFailure } from '@arki/failure';
+import { Deadline } from '@arki/async';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import { sleep } from './dev-net.js';
@@ -36,6 +37,8 @@ export async function runServe(options: RunServeOptions): Promise<{ readonly app
   } catch (error) {
     return lifecycleFailed(error, 'boot');
   }
+  if (isFailure(app)) return app;
+  let disposalFailure: Failure | undefined;
   // An app with no server holds no handle; this timer keeps the process alive until the stop.
   const keepAlive = setInterval(() => {
     // Nothing to do: the timer only keeps the event loop alive.
@@ -49,16 +52,19 @@ export async function runServe(options: RunServeOptions): Promise<{ readonly app
     clearInterval(keepAlive);
     const timeoutMs = options.disposeTimeoutMs ?? 10_000;
     const gaveUp = new AbortController();
-    const disposed = app.dispose().then(
-      () => true,
-      (error: unknown) => {
-        debugServe.debug('dispose threw', { error: error instanceof Error ? error : String(error) });
-        return true;
-      },
-    );
-    const finished = await Promise.race([disposed, sleep(timeoutMs, gaveUp.signal).then(() => false)]);
+    const disposed = app
+      .dispose()
+      .catch((error: unknown) => UnexpectedDefect({ cause: error }))
+      .then(outcome => {
+        if (isFailure(outcome)) {
+          debugServe.error('dispose failed: {code}', { code: outcome.code });
+        }
+        return outcome;
+      });
+    const outcome = await Promise.race([disposed, sleep(timeoutMs, gaveUp.signal).then(() => Deadline())]);
     gaveUp.abort();
-    if (!finished) debugServe.debug('dispose did not finish within {timeoutMs} ms', { timeoutMs });
+    if (isFailure(outcome)) disposalFailure = outcome;
   }
+  if (disposalFailure !== undefined) return disposalFailure;
   return { app: app.name };
 }

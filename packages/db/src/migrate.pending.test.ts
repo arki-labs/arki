@@ -12,6 +12,7 @@ import { defineRelations } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import { db, dbMigrations } from './dot.js';
 import { migrateDb, pendingMigrations } from './migrate.js';
@@ -55,15 +56,17 @@ describe('pendingMigrations', () => {
   });
 
   it('dbMigrations publishes what this boot found pending, then applies it', async () => {
-    const app = await defineApp('pending')
-      .use(db({ driver: 'pglite', memory: true, relations }))
-      .use(dbMigrations({ migrationsFolder }))
-      .boot();
+    const app = await orThrow(
+      defineApp('pending')
+        .use(db({ driver: 'pglite', memory: true, relations }))
+        .use(dbMigrations({ migrationsFolder }))
+        .boot(),
+    );
     try {
       expect(app.services.migrations.pending).toEqual(['20260101000000_widgets', '20260102000000_gadgets']);
       expect(await pendingMigrations(app.services.db, { migrationsFolder })).toEqual([]);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });

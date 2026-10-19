@@ -19,6 +19,7 @@ import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from 
 import type { RedisStore } from '@arki/lock/redis';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 import { createLocks, LockError, LockHeld } from '@arki/lock';
 import { locks } from '@arki/lock/dot';
 import { memoryStore } from '@arki/lock/memory';
@@ -99,7 +100,7 @@ describe('schedules(core, [{ lock }])', () => {
   it('runs the handler inside the lock, keyed by the schedule name for `lock: true`', async () => {
     const { locks: service, clock } = memoryLocks();
     const { app, calls } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     // `cluster-assign` holds 1 s by default: its run does not end before the clock moves.
     let finished = false;
     const assign = started.services.scheduler.trigger('cluster-assign').then(outcome => {
@@ -111,13 +112,13 @@ describe('schedules(core, [{ lock }])', () => {
     expect(finished).toBe(false);
     await clock.advance('1s');
     await expect(assign).resolves.toEqual({ name: 'cluster-assign', status: 'ran', value: 'assigned' });
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('a held lock is skipped-lock, and the handler never starts', async () => {
     const { locks: service } = memoryLocks();
     const { app, calls } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     const blocker = Promise.withResolvers<void>();
     const holding = service.mutex('cluster-assign').tryRun(() => blocker.promise);
     await settle();
@@ -128,7 +129,7 @@ describe('schedules(core, [{ lock }])', () => {
     expect(calls()).toBe(0);
     blocker.resolve();
     await holding;
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('a lock that cannot be taken is lock-failed, not a silent skip', async () => {
@@ -138,19 +139,19 @@ describe('schedules(core, [{ lock }])', () => {
       }),
     };
     const { app, calls } = buildApp(broken);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     await expect(started.services.scheduler.trigger('cluster-assign')).resolves.toMatchObject({
       status: 'lock-failed',
       cause: expect.objectContaining({ message: 'connection lost' }),
     });
     expect(calls()).toBe(0);
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('a handler that throws inside the lock is handler-failed, and the named key is used', async () => {
     const { locks: service, clock } = memoryLocks();
     const { app } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     const run = started.services.scheduler.trigger('cluster-batch');
     await settle();
     // The named key is the one held, not the schedule name.
@@ -160,24 +161,24 @@ describe('schedules(core, [{ lock }])', () => {
       status: 'handler-failed',
       cause: expect.objectContaining({ message: 'handler broke' }),
     });
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('hands the handler the lock signal and fence, so a long job can stop when it loses the lock', async () => {
     const { locks: service } = memoryLocks();
     const { app, seen } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     await started.services.scheduler.trigger('cluster-peek');
     expect(seen.signal).toBeInstanceOf(AbortSignal);
     expect(seen.signal?.aborted).toBe(false);
     expect(typeof seen.fence).toBe('bigint');
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('keeps the key for 1 s by default after a 10 ms job, so a replica with a slow clock cannot run the same tick again', async () => {
     const { locks: service, clock } = memoryLocks();
     const { app } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     const run = started.services.scheduler.trigger('cluster-assign');
     await settle();
     await clock.advance('10ms');
@@ -191,16 +192,16 @@ describe('schedules(core, [{ lock }])', () => {
     await clock.advance('1ms');
     await expect(run).resolves.toMatchObject({ status: 'ran' });
     await expect(service.mutex('cluster-assign').tryRun(() => 'next tick')).resolves.toBe('next tick');
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('holdAtLeast: 0 frees the key as soon as the job ends, for jobs that must be able to run back to back', async () => {
     const { locks: service } = memoryLocks();
     const { app } = buildApp(service);
-    const started = await app.start();
+    const started = await orThrow(app.start());
     await expect(started.services.scheduler.trigger('cluster-instant')).resolves.toMatchObject({ status: 'ran' });
     await expect(service.mutex('cluster-instant').tryRun(() => 'next')).resolves.toBe('next');
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 
   it('shutdown waits through the hold, so a stopped app never frees a key early', async () => {
@@ -273,17 +274,19 @@ describe('schedules(core, [{ lock }])', () => {
       needs,
       use: [schedules(needs, [{ name: 'bill', every: '1m', lock: { holdAtLeast: 0 }, handler: () => 'done' }])],
     });
-    const started = await defineApp('plugin-app')
-      .use(locks({ namespace: 'billing', store: () => memoryStore() }))
-      .features([billing])
-      .entrypoints(schedule({ clock: 'host' }))
-      .start();
+    const started = await orThrow(
+      defineApp('plugin-app')
+        .use(locks({ namespace: 'billing', store: () => memoryStore() }))
+        .features([billing])
+        .entrypoints(schedule({ clock: 'host' }))
+        .start(),
+    );
     await expect(started.services.scheduler.trigger('bill')).resolves.toEqual({
       name: 'bill',
       status: 'ran',
       value: 'done',
     });
-    await started.dispose();
+    await orThrow(started.dispose());
   });
 });
 
@@ -443,11 +446,11 @@ describe('booted lock summary', () => {
       .entrypoints(schedule({ clock: 'host' }))
       .configure();
     const staticSummary = summaryOf(configured.manifest.actions);
-    const booted = await configured.boot();
+    const booted = await orThrow(configured.boot());
     expect(staticSummary).toBe('lock job');
     expect(summaryOf(booted.manifest.actions)).toBe(
       'lock ns:job  [memory · hold · process · crash→immediate · fence process · hold≥1s]',
     );
-    await booted.dispose();
+    await orThrow(booted.dispose());
   });
 });

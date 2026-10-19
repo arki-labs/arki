@@ -5,8 +5,8 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/async`: Abortable sleep, debounce and throttle, and structured concurrency (scoped, all, mapConcurrent, race, timeout) on plain Promises and AbortSignal. `ASYNC_ERROR_CODES`, `AsyncError`, `MAX_WAIT_MS`, `all`, `debounce`, `mapConcurrent`, `race`, `scoped`, `sleep`, `throttle`, `timeout`; types `AsyncErrorCode`; and 9 more.
-- `@arki/async/errors`: Every failure this package raises on purpose is an {@link AsyncError} with a stable `code`. `ASYNC_ERROR_CODES`, `AsyncError`, `MAX_WAIT_MS`, `abortedError`, `assertWait`, `cleanupFailed`, `invalidConcurrency`, `invalidWait`, `isValidConcurrency`, `isValidWait`, `timedOut`; types `AsyncErrorCode`.
+- `@arki/async`: Abortable sleep, debounce and throttle, and structured concurrency (scoped, all, mapConcurrent, race, timeout) on plain Promises and AbortSignal. `ASYNC_ERROR_CODES`, `AsyncError`, `Cancelled`, `Deadline`, `MAX_WAIT_MS`, `SUPERVISOR_FAILURES`, `ScopeFailed`, `all`, `child`, `cleanup`, `createLifetime`, `debounce`; and 32 more.
+- `@arki/async/errors`: `ASYNC_ERROR_CODES`, `AsyncError`, `Cancelled`, `Deadline`, `MAX_WAIT_MS`, `SUPERVISOR_FAILURES`, `ScopeFailed`, `abortedError`, `assertWait`, `cleanupFailed`, `invalidConcurrency`, `invalidWait`; and 7 more.
 <!-- llms:end -->
 
 ## Start here

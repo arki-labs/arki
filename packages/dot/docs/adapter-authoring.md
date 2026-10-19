@@ -99,9 +99,11 @@ export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgService
 factory above in scope:
 
 ```ts continue
+import { isFailure } from '@arki/failure';
 const app = await defineApp('billing')
   .use(myPkg({ url: 'memory://primary' }))
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 
 if (!(app.services.myClient instanceof MyClient)) throw new Error('myClient was not published');
 await app.dispose();
@@ -117,6 +119,7 @@ const twoClients = await defineApp('billing')
   .use(myPkg({ url: 'memory://primary' }))
   .use(rename(myPkg({ url: 'memory://replica' }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
   .boot();
+if (isFailure(twoClients)) throw new Error(twoClients.code);
 
 if (twoClients.services.replicaClient.url !== 'memory://replica') throw new Error('rename did not retarget the key');
 await twoClients.dispose();
@@ -342,61 +345,40 @@ Rules an adapter's `features:` option must follow:
 
 ## Diagnostics — stable codes and remediation
 
-Throw a `DotPluginError` when a hook cannot continue. It carries a stable
-`code`, a `remediation` line and a `docsUrl`, so a person or an agent can act
-without parsing the message:
+Return a canonical failure from an owned provider or boot hook. Its code and remediation come from one definition; the app's result infers that definition.
 
 ```ts run expect
-import { defineApp, DotLifecycleError, DotPluginError, plugin } from '@arki/dot/plugin';
+import { defineApp, plugin } from '@arki/dot/plugin';
+import { defineFailure } from '@arki/failure';
 
+const UrlRequired = defineFailure('strict_pkg.url_required', {
+  remediation: 'Pass options.url to strictPkg(...) or set MY_PKG_URL.',
+});
 export function strictPkg(options: { readonly url?: string }) {
   return plugin({
     name: 'strict-pkg',
     boot() {
-      if (!options.url) {
-        throw new DotPluginError({
-          code: 'MY_PKG_E001',
-          message: '[strict-pkg] url is required',
-          remediation: 'Pass options.url to strictPkg(...) or set MY_PKG_URL.',
-          docsUrl: 'https://example.com/my-pkg/docs#configuration',
-        });
-      }
+      if (!options.url) return UrlRequired();
+      return;
     },
   });
 }
-
-try {
-  await defineApp('billing').use(strictPkg({})).boot();
-} catch (err) {
-  if (!(err instanceof DotLifecycleError)) throw err;
-  const cause = err.cause;
-  if (!(cause instanceof DotPluginError)) throw err;
-  console.log(err.code, err.plugin);
-  console.log(cause.code, cause.remediation);
-}
+const result = await defineApp('billing').use(strictPkg({})).boot();
+if (UrlRequired.is(result)) console.log(result.code, result.remediation);
 ```
 
 ```text
-ARKI_DOT_E003 strict-pkg
-MY_PKG_E001 Pass options.url to strictPkg(...) or set MY_PKG_URL.
+strict_pkg.url_required Pass options.url to strictPkg(...) or set MY_PKG_URL.
 ```
 
-The kernel does not copy your code into its own list. It wraps the throw in a
-`DotLifecycleError` with code `ARKI_DOT_E003` (`ARKI_DOT_E004` for `start`),
-records an issue under that kernel code, and keeps your error as `cause`.
-Your `code`, `remediation` and `docsUrl` stay on `cause`, as the run above
-prints.
-
-Use the prefix `<PKG>_E<NNN>` (e.g., `MY_PKG_E001`) to keep codes
-package-scoped and simple to grep. The kernel's issue for the failed hook
-(`app.diagnostics.issues`, readable on a configured app) names the plugin and
-carries your message text.
+Legacy thrown `DotPluginError` values remain private causes of `UnexpectedDefect`. Stable `ARKI_DOT_E*` diagnostics still identify the failing phase and owner; match the returned canonical failure to handle an expected refusal.
 
 ## Testing your adapter
 
 Use `@arki/dot`'s test harness:
 
 ```ts
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { bootTestApp, DotPluginError, plugin } from '@arki/dot';
@@ -420,7 +402,7 @@ function strictPkg(options: { readonly url?: string }) {
 
 describe('strictPkg adapter', () => {
   it('mounts and disposes with a url', async () => {
-    const app = await bootTestApp([strictPkg({ url: 'memory://' })]);
+    const app = orThrow(await bootTestApp([strictPkg({ url: 'memory://' })]));
     expect(app.manifest.plugins.map(p => p.name)).toEqual(['strict-pkg']);
     await app.dispose();
   });

@@ -71,7 +71,9 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/clock": "workspace:*"
+    "@arki/clock": "workspace:*",
+    "@arki/failure": "workspace:*",
+    "@standard-schema/spec": "^1.1.0"
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",

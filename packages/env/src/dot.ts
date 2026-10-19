@@ -36,8 +36,6 @@
  */
 
 import type { StandardSchemaV1 } from '@arki/schema';
-
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 
 import { defineEnv, formatIssues } from './core/define-env.js';
@@ -80,9 +78,7 @@ export type EnvServices<TSchema extends Record<string, StandardSchemaV1>> = {
  * @param options - Schema + optional config.
  * @returns A plugin that publishes `services.env`.
  */
-export function env<TSchema extends Record<string, StandardSchemaV1>>(
-  options: EnvDotOptions<TSchema>,
-): Plugin<EmptyShape, EnvServices<TSchema>, EmptyShape, 'env'> {
+export function env<TSchema extends Record<string, StandardSchemaV1>>(options: EnvDotOptions<TSchema>) {
   return plugin({
     name: 'env',
     configure(ctx) {

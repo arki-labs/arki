@@ -27,7 +27,7 @@ reasons behind them.
    `@arki/env`, `@arki/kv`, `@arki/journal` or any other adapter. Adapters
    take `@arki/dot` as an optional peer and live in their own packages
    (principle 5). `@orpc/server` is loaded only by `@arki/dot/orpc`.
-6. **Error codes are API.** Every kernel error has a stable `ARKI_DOT_E*`
+6. **Error codes are API.** Managed construction/disposal returns inferred typed failures under A-33; static declaration/configure defects may throw. Owned resources and child tasks must settle before finalization. Every legacy kernel error has a stable `ARKI_DOT_E*`
    code, a `remediation` and a `docsUrl`. Codes are never renumbered or
    reused (E009 and E010 are retired). Each code's JSDoc carries `@fix` and
    `@verify`.

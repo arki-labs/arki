@@ -12,6 +12,7 @@
  * Both are compile errors now, at the step that can see them. Their
  * compiling twins boot, so the runtime and the types agree either way.
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
@@ -44,15 +45,15 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
     const hole = defineApp('hole').features([parent]);
     await expect(hole.boot()).rejects.toMatchObject({ code: DotLifecycleErrorCode.UnsatisfiedNeed });
 
-    const app = await defineApp('ok').infra(database).features([parent]).start();
+    const app = orThrow(await defineApp('ok').infra(database).features([parent]).start());
     await expect(app.services['parent.child.reader'].run()).resolves.toEqual(['global:x']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('the parent’s own infra handle is remapped: no global provider needed', async () => {
-    const app = await defineApp('own').features([owner]).start();
+    const app = orThrow(await defineApp('own').features([owner]).start());
     await expect(app.services['owner.child.reader'].run()).resolves.toEqual(['private:x']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('the raw unit list says the same thing', async () => {
@@ -60,8 +61,8 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
     await expect(testApp(parent.plugins()).boot()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.UnsatisfiedNeed,
     });
-    const app = await testApp(owner.plugins()).boot();
-    await app.dispose();
+    const app = orThrow(await testApp(owner.plugins()).boot());
+    orThrow(await app.dispose());
   });
 });
 
@@ -87,9 +88,9 @@ describe('A2: an infra plugin bound to a handle must be bound to the feature’s
       .needs({ db: entrypointOnly(dbB.provides.db) })
       .infra(storeBoundToB)
       .entrypoints();
-    const app = await defineApp('ok').infra(dbB).features([plain, flagged]).start();
+    const app = orThrow(await defineApp('ok').infra(dbB).features([plain, flagged]).start());
     await expect(app.services['g.repos'].all()).resolves.toEqual(['b:all']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('a feature that declares the need anonymously cannot take a bound plugin', () => {

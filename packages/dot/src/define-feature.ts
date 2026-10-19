@@ -34,26 +34,31 @@ import type {
   ActionSource,
   AnyHandle,
   AnyPlugin,
+  CheckedProvider,
   CtxOf,
   EmptyShape,
   Handle,
+  InferredOwnership,
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
   Plugin,
+  PluginCloseFailure,
   PluginNeeds,
+  PluginOpenFailure,
+  PluginOwner,
   PluginProviderIdentities,
   PluginProvides,
+  PluginRuntime,
   Provided,
+  ProvidedValues,
   Service,
   ServiceRecord,
   WireNeeds,
 } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { traceUsecase } from './kernel/otel.js';
-import { handleOf, isLazyWitness, rename } from './plugin-contract.js';
-
-type MaybePromise<T> = T | Promise<T>;
+import { createPluginRuntime, handleOf, isLazyWitness, rename } from './plugin-contract.js';
 
 type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer I) => void
   ? I
@@ -295,7 +300,9 @@ type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends
     ]: PluginNeeds<P>[K];
   },
   PluginProvides<P>,
-  PluginProviderIdentities<P>
+  PluginProviderIdentities<P>,
+  PluginOwner<P>,
+  { readonly open: PluginOpenFailure<P>; readonly close: PluginCloseFailure<P> }
 > &
   Pick<P, 'provides'>;
 type RemappedUnits<TName extends string, TLocal, Owners extends string, U extends readonly AnyPlugin[]> = {
@@ -463,7 +470,9 @@ export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extend
     ]: PluginNeeds<P>[K];
   },
   { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
-  OwnedShape<N, PluginProviderIdentities<P>>
+  OwnedShape<N, PluginProviderIdentities<P>>,
+  `${TName}/${string}`,
+  { readonly open: PluginOpenFailure<P>; readonly close: PluginCloseFailure<P> }
 > & {
   readonly provides: InfraUnitHandles<
     TName,
@@ -493,15 +502,17 @@ export type FeatureUnit<
   WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<
       ChildHandles<C>
     >,
-  { readonly [K in keyof P as PublishKey<TName, K>]: P[K] } & Readonly<Record<`${TName}.usecases`, U>> &
+  { readonly [K in keyof P as PublishKey<TName, K>]: ProvidedValues<P>[K] } & Readonly<Record<`${TName}.usecases`, U>> &
     Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
     Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
   // The feature's own needs are the only ones a parent may remap; infra and child keys are already qualified (dotted).
-  N
+  N,
+  TName,
+  InferredOwnership<P, void>
 > & {
   readonly provides: UnitHandles<
     TName,
-    { readonly [K in keyof P as PublishKey<TName, K>]: P[K] },
+    { readonly [K in keyof P as PublishKey<TName, K>]: ProvidedValues<P>[K] },
     Readonly<Record<`${TName}.usecases`, U>> &
       Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
       Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>
@@ -652,7 +663,7 @@ export type DefinedFeature<
 > = FeatureCore<TName, N, I, C, U> & {
   readonly [FeatureParamsTag]?: FeatureParams<TName, N, I, C, U, P, E>;
   /** Public handles, one per provided key — what other features name in their `needs`. Inside a parent they are scoped (`<name>.<key>`). */
-  readonly provides: ScopedHandles<P, TName>;
+  readonly provides: ScopedHandles<ProvidedValues<P>, TName>;
   /** The nested features, as declared. Drivers and `dot explain` walk them. */
   readonly features: C;
   /** Raw infra handles this feature (or a descendant) owns → the owning feature. Checked by `mountFeatures`. */
@@ -870,7 +881,9 @@ export type ProvidesStage<
   /** Public services, one factory per key; each gets needs, infra, the children's services and usecases. */
   provides<P extends ServiceRecord & NoReservedKeys & NoKeys<ReservedAlias> = EmptyShape>(
     factories: {
-      readonly [K in keyof P]: (services: CoreServices<N, I, C, U> & KernelCtx) => MaybePromise<P[K]>;
+      readonly [K in keyof P]: (
+        services: CoreServices<N, I, C, U> & KernelCtx,
+      ) => P[K] & CheckedProvider<NoInfer<P[K]>>;
     } & ProvidesGuard<TName, I, P>,
   ): EntrypointsStage<TName, N, I, C, U, P>;
 };
@@ -948,16 +961,17 @@ export type NeedsStage<TName extends string> = InfraStage<TName, EmptyShape> & {
 /** An erased factory: the stage types checked it against the services it is called with. */
 type Factory = (services: never) => unknown;
 
-type FeatureState = {
+type FeatureState<P extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly needs: NeedsShape;
   readonly infra: readonly AnyPlugin[];
   readonly children: readonly RuntimeFeature[];
   readonly usecases: Readonly<Record<string, Factory>> | undefined;
-  readonly provides: Readonly<Record<string, Factory>>;
+  readonly provides: { readonly [K in keyof P]: (services: never) => P[K] };
 };
 
-type RuntimeFeature = {
+type RuntimeFeature<P extends ServiceRecord = ServiceRecord> = {
+  readonly runtime: PluginRuntime<InferredOwnership<P, void>['open'], InferredOwnership<P, void>['close']>;
   readonly name: string;
   readonly handles: NeedsShape;
   readonly provides: Readonly<Record<string, AnyHandle>>;
@@ -967,23 +981,25 @@ type RuntimeFeature = {
   readonly contract: unknown;
   readonly router: unknown;
   plugins(): readonly AnyPlugin[];
-  override(values: Readonly<Record<string, unknown>>): RuntimeFeature;
-  instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature;
+  override(values: Readonly<Record<string, unknown>>): RuntimeFeature<P>;
+  instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature<P>;
   /** Recompile under another name, needs following `follow` (handle → handle). Internal: `instance()` drives it for the children. */
-  [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature;
+  [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature<P>;
 };
 
 const REPARENT: unique symbol = Symbol('dot.feature.reparent');
 
-type RuntimeStage = {
+type RuntimeStage<P extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly handles: NeedsShape;
-  needs(needs: NeedsShape): RuntimeStage;
-  infra(...plugins: readonly AnyPlugin[]): RuntimeStage;
-  features(...children: readonly RuntimeFeature[]): RuntimeStage;
-  usecases(factories: Readonly<Record<string, Factory>>): RuntimeStage;
-  provides(factories: Readonly<Record<string, Factory>>): RuntimeStage;
-  entrypoints(...entrypoints: readonly AnyEntrypoint[]): RuntimeFeature;
+  needs(needs: NeedsShape): RuntimeStage<P>;
+  infra(...plugins: readonly AnyPlugin[]): RuntimeStage<P>;
+  features(...children: readonly RuntimeFeature[]): RuntimeStage<P>;
+  usecases(factories: Readonly<Record<string, Factory>>): RuntimeStage<P>;
+  provides<Next extends ServiceRecord>(factories: {
+    readonly [K in keyof Next]: (services: never) => Next[K];
+  }): RuntimeStage<Next>;
+  entrypoints(...entrypoints: readonly AnyEntrypoint[]): RuntimeFeature<P>;
 };
 
 function collision(feature: string, what: string, remediation: string): FeatureError {
@@ -1259,7 +1275,7 @@ function replaceServices(p: AnyPlugin, values: Readonly<Record<string, unknown>>
     used.add(key);
     touched = true;
   }
-  return touched ? { ...p, factories, hooks: {} } : p;
+  return touched ? { ...p, factories, runtime: createPluginRuntime(factories), hooks: {} } : p;
 }
 
 function checkEntrypoints(state: FeatureState, entrypoints: readonly AnyEntrypoint[]): void {
@@ -1298,12 +1314,12 @@ function checkChildContracts(state: FeatureState, entrypoints: readonly AnyEntry
   }
 }
 
-function compile(
-  state: FeatureState,
+function compile<P extends ServiceRecord>(
+  state: FeatureState<P>,
   infra: ReturnType<typeof qualifyInfra>,
   handles: NeedsShape,
   entrypoints: readonly AnyEntrypoint[],
-): RuntimeFeature {
+): RuntimeFeature<P> {
   checkEntrypoints(state, entrypoints);
   checkChildContracts(state, entrypoints);
   const usecasesKey = `${state.name}.usecases`;
@@ -1335,6 +1351,7 @@ function compile(
   // one unit the same ctx object) and shared by every factory and entrypoint.
   const built = new WeakMap<object, unknown>();
   const usecasesOf = (ctx: object): unknown => {
+    if ('usecases' in ctx) return ctx.usecases;
     if (!built.has(ctx)) {
       // Erasure seam: each factory was typed against these deps by `.usecases()`.
       const usecaseDeps = Object.fromEntries(Object.entries(ctx).filter(([k]) => !doorKeys.has(k)));
@@ -1371,7 +1388,7 @@ function compile(
   };
   for (const [key, factory] of Object.entries(state.provides)) {
     // Erasure seam: each factory was typed against these services by `.provides()`.
-    factories[publishKey(key)] = ctx => factory(servicesOf(ctx) as never);
+    factories[publishKey(key)] = ctx => factory(servicesOf(ctx));
   }
 
   // The unit's published handles keep ownership too: provides scoped to the parent, generated keys internal.
@@ -1380,8 +1397,20 @@ function compile(
     const generated = key === usecasesKey || key === servicesKey || key === sliceKey;
     unitHandles[key] = scopedHandleOf(key, state.name, generated ? state.name : parentOf(state.name), generated);
   }
+  const sourceRuntime = createPluginRuntime<P, void>(state.provides, undefined, (services, ctx) => {
+    const published = Object.fromEntries(Object.entries(services).map(([key, value]) => [publishKey(key), value]));
+    for (const key of Object.keys(state.provides)) if (publishKey(key) !== key) delete services[key];
+    Object.assign(services, published);
+    services[usecasesKey] = usecasesOf(ctx);
+    services[servicesKey] = factories[servicesKey]?.(ctx);
+    services[sliceKey] = factories[sliceKey]?.(ctx);
+  });
+  const runtime: PluginRuntime<InferredOwnership<P, void>['open'], InferredOwnership<P, void>['close']> = {
+    construct: (ctx, options, claimLazy) => sourceRuntime.construct(servicesOf(ctx) as never, options, claimLazy),
+  };
   // The record plugin() builds, written out: the needs here are already handles, and the keys already wire keys.
   const unit: AnyPlugin = {
+    runtime,
     name: state.name,
     needs: { ...state.needs, ...infra.handles, ...childHandles(state.children) },
     actions: entrypoints.flatMap(e => [...e.actions, ...(e.actionsOf?.(state.name, state.children) ?? [])]),
@@ -1414,15 +1443,16 @@ function compile(
   // A copy under another name: needs follow the rebind, children are re-derived under the new parent,
   // everything else is recompiled from the same declarations. Only the root copy gets its own rpc
   // contract identity — a parent's router holds its children's routers by identity.
-  const reparent = (name: string, follow: ReadonlyMap<object, Service<unknown>>, root: boolean): RuntimeFeature => {
+  const reparent = (name: string, follow: ReadonlyMap<object, Service<unknown>>, root: boolean): RuntimeFeature<P> => {
     const needs = Object.fromEntries(Object.entries(state.needs).map(([alias, w]) => [alias, followRebind(w, follow)]));
     const children = state.children.map(c => c[REPARENT](`${name}.${c.name.slice(state.name.length + 1)}`, follow));
-    const next: FeatureState = { ...state, name, needs, children };
+    const next: FeatureState<P> = { ...state, name, needs, children };
     const nextInfra = qualifyInfra(name, needs, next.infra);
     return compile(next, nextInfra, handlesOf(next, nextInfra), root ? ownContract(entrypoints) : entrypoints);
   };
 
   return {
+    runtime,
     name: state.name,
     handles,
     provides,
@@ -1538,7 +1568,7 @@ function handlesOf(state: FeatureState, infra: ReturnType<typeof qualifyInfra>):
   };
 }
 
-function stage(state: FeatureState): RuntimeStage {
+function stage<P extends ServiceRecord>(state: FeatureState<P>): RuntimeStage<P> {
   const infra = qualifyInfra(state.name, state.needs, state.infra);
   const handles = handlesOf(state, infra);
   return {

@@ -1,6 +1,7 @@
 import type { Clock } from '@arki/clock';
+import { SystemClock } from '@arki/clock';
 
-import { mapConcurrent, scoped, timeout } from '../src/index.js';
+import { mapConcurrent, resource, scoped } from '../src/index.js';
 
 // #region load-pages
 /** A connection that loads one page at a time and must be closed when the work ends. */
@@ -10,21 +11,33 @@ export type PageClient = {
 };
 
 /**
- * Loads every page, four at a time, and gives up after five seconds.
- * The client is closed on success, on failure and on timeout.
+ * Loads every page, four at a time, and requests cancellation after five seconds.
+ * All started loads settle before the client closes, including on a deadline.
  */
 export function loadPages(
   urls: readonly string[],
   openClient: () => Promise<PageClient>,
   options: { readonly clock?: Clock } = {},
-): Promise<string[]> {
-  return scoped(async scope => {
-    const client = await scope.acquire(openClient, opened => opened.close());
-    return timeout(
-      signal => mapConcurrent(urls, (url, taskSignal) => client.load(url, taskSignal), { concurrency: 4, signal }),
-      5000,
-      { signal: scope.signal, ...options },
-    );
-  });
+) {
+  const clock = options.clock ?? new SystemClock();
+  return scoped(
+    {
+      deadline: resource(() => {
+        const controller = new AbortController();
+        const cancel = clock.setTimer(() => controller.abort(), 5000);
+        return { signal: controller.signal, cancel };
+      }, deadline => deadline.cancel()),
+    },
+    ({ deadline }, signal) =>
+      scoped(
+        { client: resource(openClient, client => client.close()) },
+        ({ client }, taskSignal) =>
+          mapConcurrent(urls, (url, pageSignal) => client.load(url, pageSignal), {
+            concurrency: 4,
+            signal: taskSignal,
+          }),
+        { signal, deadline: deadline.signal },
+      ),
+  );
 }
 // #endregion

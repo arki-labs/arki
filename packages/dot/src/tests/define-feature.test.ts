@@ -7,6 +7,7 @@
  * declaration. Each test below pins one promise of the design; most of them
  * failed on the Revision 1 prototype (see "regressions" at the bottom).
  */
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type {
@@ -173,28 +174,28 @@ const boot = (f: typeof digest) => defineApp('digest-app').infra(database, billi
 
 describe('the chain: each step typed from the earlier ones', () => {
   it('runs a request through the handles: needs, private infra and usecases resolve from the services bag', async () => {
-    const app = await boot(digest);
+    const app = orThrow(await boot(digest));
     // 'u1' is pro: 6 items survive the cap — the usecase saw both the store and billing.
     const preview = await digest.router.preview(app.services, 'u1');
     expect(preview?.items).toHaveLength(6);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('publishes typed public handles another feature can need', async () => {
-    const app = await boot(digest);
+    const app = orThrow(await boot(digest));
     const result = await app.services.digests.previewFor('u2');
     expect(result?.items).toHaveLength(3);
     expectTypeOf<Provided<typeof digest.provides.digests>['previewFor']>().toEqualTypeOf<ReturnType<typeof preview>>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('hands every entrypoint the usecases: schedules and effects run through them', async () => {
-    const app = await boot(digest);
+    const app = orThrow(await boot(digest));
     const slices = app.services['feature.digest'];
     expect(await runnables(slices.schedules)[0]?.run()).toMatchObject({ id: 'd_2' });
     // The effect goes usecases → mailer → store: the mailer's need on its sibling resolved.
     expect(await runnables(slices.journal)[0]?.run()).toBe('mailed d_2');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('builds the usecases object once per boot and anew for the next boot', async () => {
@@ -203,10 +204,10 @@ describe('the chain: each step typed from the earlier ones', () => {
       .usecases({ id: () => ++builds })
       .provides({ a: ({ usecases }) => usecases, b: ({ usecases }) => usecases })
       .entrypoints();
-    const first = await defineApp('a').features([counted]).start();
+    const first = orThrow(await defineApp('a').features([counted]).start());
     expect(first.services.a).toBe(first.services.b);
     expect(first.services['counted.usecases']).toBe(first.services.a);
-    const second = await defineApp('b').features([counted]).start();
+    const second = orThrow(await defineApp('b').features([counted]).start());
     expect(second.services.a.id).toBe(2);
     await Promise.all([first.dispose(), second.dispose()]);
   });
@@ -343,10 +344,10 @@ describe('the chain: each step typed from the earlier ones', () => {
       .usecases({ raw: ({ store }: { store: Store }) => store.pendingFor, ping: () => () => 'pong' })
       .provides({ lean: ({ usecases }) => usecases })
       .entrypoints();
-    const app = await defineApp('lean').infra(database).features([lean]).start();
+    const app = orThrow(await defineApp('lean').infra(database).features([lean]).start());
     expect(app.services.lean.ping()).toBe('pong');
     expect(await app.services.lean.raw('u1')).toMatchObject({ id: 'd_2' });
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('types schedule handlers in another file by the logic stage alone', () => {
@@ -370,13 +371,13 @@ describe('compilation into kernel units', () => {
       .infra(store)
       .provides({ n: ({ stats }) => stats })
       .entrypoints();
-    const app = await defineApp('two').infra(database, billing).features([digest, other]).start();
+    const app = orThrow(await defineApp('two').infra(database, billing).features([digest, other]).start());
     expect(app.services['digest.store']).not.toBe(app.services['other.store']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('puts every edge in the manifest and in `dot explain`: feature → private infra → app infra', async () => {
-    const app = await boot(digest);
+    const app = orThrow(await boot(digest));
     const unit = (name: string) => app.manifest.plugins.find(p => p.name === name);
     expect(unit('digest')?.dependencies).toEqual([
       'db',
@@ -394,7 +395,7 @@ describe('compilation into kernel units', () => {
     expect(text).toContain('digest/mailer --[digest.store]--> digest/store');
     expect(text).toContain('digest/store --[db]--> database');
     expect(text).toContain('digest --[entitlements]--> billing');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('exposes entrypoint metadata before boot: journal effects carry their event names', () => {
@@ -429,11 +430,11 @@ describe('override (tests swap infra before compilation)', () => {
     const faked = digest.override({ store: fakeStore });
     expectTypeOf(faked).toEqualTypeOf<typeof digest>();
     expect(faked.plugins().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
-    const app = await boot(faked);
+    const app = orThrow(await boot(faked));
     const preview = await faked.router.preview(app.services, 'u1');
     expect(preview?.id).toBe('fake');
     expect(await runnables(app.services['feature.digest'].journal)[0]?.run()).toBe('mailed fake');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('is typed by the port and rejects keys no infra plugin provides', () => {
@@ -538,14 +539,14 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
         },
       }),
     );
-    const app = await defineApp('mixed')
+    const app = orThrow(await defineApp('mixed')
       .infra(database, billing)
       .features([legacy, digest])
       .entrypoints(scheduler)
-      .start();
+      .start());
     expect(seen.map(entry => (Array.isArray(entry) ? entry[0] : undefined))).toEqual(['legacy', 'digest']);
     expect(app.manifest.plugins.find(p => p.name === 'scheduler')?.role).toBe('driving');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('lets a driven adapter in .infra() read entrypoint declarations before the features boot', async () => {
@@ -558,9 +559,9 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
         },
       }),
     );
-    const app = await defineApp('collect').infra(database, billing, collector).features([digest]).start();
+    const app = orThrow(await defineApp('collect').infra(database, billing, collector).features([digest]).start());
     expect(declared).toEqual(['digest:rpc', 'digest:schedules', 'digest:journal']);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 
@@ -571,16 +572,16 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
 describe('regressions (Astra review of Revision 1)', () => {
   it('1. override of one service keeps the sibling services of the same plugin', async () => {
     // Revision 1 turned the plugin into a fake of the first matching key and dropped `stats`.
-    const app = await boot(digest.override({ store: { pendingFor: async () => null } }));
+    const app = orThrow(await boot(digest.override({ store: { pendingFor: async () => null } })));
     expect(await app.services['digest.stats'].count()).toBe(5);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('2. a qualified infra key remaps the needs of its siblings (no E012)', async () => {
     // Revision 1 left mailer needing the wire key `store` after qualifying it to `digest.store`.
-    const app = await boot(digest);
+    const app = orThrow(await boot(digest));
     expect(await app.services['digest.mailer'].sendPending('u1')).toBe('mailed d_2');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('3. a reserved alias or a key collision never silently overwrites the request context or a factory', () => {

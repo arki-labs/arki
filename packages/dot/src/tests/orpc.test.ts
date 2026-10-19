@@ -10,6 +10,7 @@
  *
  * The fixture under `fixtures/rpc-app/` is laid out like a real app.
  */
+import { orThrow } from '@arki/failure';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oc } from '@orpc/contract';
@@ -42,7 +43,7 @@ const start = () => defineApp('rpc').infra(database, billing).features([digest])
 
 describe('bind(digestLogic): the handler context is what the feature declared', () => {
   it('runs a procedure through the needs, the private store and the usecases, all typed', async () => {
-    const app = await start();
+    const app = orThrow(await start());
     // u1 is on the pro plan: the usecase reads the plan (a need) and the store (private infra).
     expect(await clientFor(app.services).digest.preview()).toEqual({
       id: 'd_2',
@@ -50,13 +51,13 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
     });
     const free = await clientFor(app.services, 'u2').digest.preview();
     expect(free?.items).toHaveLength(3);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('keeps the request context: `authed` after `bind` still narrows the session', async () => {
-    const app = await start();
+    const app = orThrow(await start());
     await expect(clientFor(app.services, null).digest.preview()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('types usecases from the factory, written once', () => {

@@ -26,6 +26,7 @@ export type {
 } from './define-app.js';
 
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
+export { LazyClosed } from './lazy.js';
 export type {
   AnyPlugin,
   DotPluginRole,
@@ -45,6 +46,12 @@ export type {
   NoReservedKeys,
   Plugin,
   PluginNeeds,
+  InferredOwnership,
+  ProvidedValues,
+  ProvidedValue,
+  PluginOwnership,
+  PluginOpenFailure,
+  PluginCloseFailure,
   PluginProvides,
   Provided,
   ProvidesFactories,

@@ -14,7 +14,8 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { Provided } from '@arki/dot/plugin';
-import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
+import { defineApp, DotPluginError, rename } from '@arki/dot/plugin';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type * as KvModule from './index.js';
 import { kv, KV_PLUGIN_ERROR_CODES } from './dot.js';
@@ -55,22 +56,17 @@ describe('@arki/kv/dot', () => {
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
   });
 
-  it('throws a coded DotPluginError when no URL is configured', async () => {
-    // The kernel wraps any throw from a boot hook in DotLifecycleError so
-    // every boot failure has a uniform outer shape. The original throw is
-    // preserved on `.cause` — that's what consumers and coding agents
-    // match against for the stable code / remediation / docsUrl.
+  it('returns a defect preserving the coded DotPluginError when no URL is configured', async () => {
+    // Legacy plugin throws return a defect with the original coded cause.
     const previous = process.env['KV_URL'];
     delete process.env['KV_URL'];
     try {
-      const caught = await defineApp('kv-missing-url')
-        .use(kv())
-        .boot()
-        .catch((error: unknown) => error);
-      expect(caught).toBeInstanceOf(DotLifecycleError);
-      const cause = (caught as DotLifecycleError).cause;
+      const caught = await defineApp('kv-missing-url').use(kv()).boot();
+      if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
+      const cause = caught.cause;
       expect(cause).toBeInstanceOf(DotPluginError);
-      const pluginErr = cause as DotPluginError;
+      if (!(cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+      const pluginErr = cause;
       expect(pluginErr.code).toBe(KV_PLUGIN_ERROR_CODES.urlNotConfigured);
       expect(pluginErr.code).toBe('ARKI_KV_PLUGIN_E001');
       expect(pluginErr.message).toMatch(/KV URL is not configured/);
@@ -82,33 +78,37 @@ describe('@arki/kv/dot', () => {
   });
 
   it('boots and exposes a KV instance, then disposes', async () => {
-    const app = await defineApp('kv-lifecycle-test')
-      .use(
-        kv({
-          url: 'redis://127.0.0.1:1', // unreachable but well-formed URL
-          namespace: 'lifecycle-test',
-        }),
-      )
-      .boot();
+    const app = await orThrow(
+      defineApp('kv-lifecycle-test')
+        .use(
+          kv({
+            url: 'redis://127.0.0.1:1', // unreachable but well-formed URL
+            namespace: 'lifecycle-test',
+          }),
+        )
+        .boot(),
+    );
     try {
       expect(app.services.kv).toBeInstanceOf(KV);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
   it('mounts a second KV scope via rename()', async () => {
-    const app = await defineApp('kv-named-test')
-      .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'app' }))
-      .use(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
-      .boot();
+    const app = await orThrow(
+      defineApp('kv-named-test')
+        .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'app' }))
+        .use(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
+        .boot(),
+    );
     try {
       expect(app.manifest.plugins.map(p => p.name)).toEqual(['kv', 'sessions-kv']);
       expect(app.services.kv).toBeInstanceOf(KV);
       expect(app.services.sessionsKv).toBeInstanceOf(KV);
       expect(app.services.kv).not.toBe(app.services.sessionsKv);
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
@@ -116,12 +116,12 @@ describe('@arki/kv/dot', () => {
     // A bad URL must stop the app at boot, not at the first request.
     const caught = await defineApp('kv-probe-fails')
       .use(kv({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
-      .boot()
-      .catch((error: unknown) => error);
-    expect(caught).toBeInstanceOf(DotLifecycleError);
-    const cause = (caught as DotLifecycleError).cause;
+      .boot();
+    if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
+    const cause = caught.cause;
     expect(cause).toBeInstanceOf(DotPluginError);
-    expect((cause as DotPluginError).code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
+    if (!(cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+    expect(cause.code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
   });
 });
 
@@ -142,51 +142,58 @@ describe('@arki/kv/dot kv.optional', () => {
   it('publishes null and opens no client when no URL is configured', async () => {
     // Dev and tests run without Redis: boot must succeed and nothing may connect.
     await withoutKvUrl(async () => {
-      const app = await defineApp('kv-optional-null').use(kv.optional()).boot();
+      const app = await orThrow(defineApp('kv-optional-null').use(kv.optional()).boot());
       try {
         expect(app.services.kv).toBeNull();
         expect(constructed.count).toBe(0);
       } finally {
-        await app.dispose();
+        await orThrow(app.dispose());
       }
     });
   });
 
   it('treats an empty URL (an empty env var) as unset', async () => {
-    const app = await defineApp('kv-optional-empty')
-      .use(kv.optional(() => ({ url: '' })))
-      .boot();
+    const app = await orThrow(
+      defineApp('kv-optional-empty')
+        .use(kv.optional(() => ({ url: '' })))
+        .boot(),
+    );
     try {
       expect(app.services.kv).toBeNull();
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 
   it('opens the same client kv() opens when a URL is configured, and closes it on dispose', async () => {
     const close = vi.spyOn(KV.prototype, 'close');
-    const app = await defineApp('kv-optional-url')
-      .use(kv.optional({ url: 'redis://127.0.0.1:1', namespace: 'optional-test' }))
-      .boot();
+    const app = await orThrow(
+      defineApp('kv-optional-url')
+        .use(kv.optional({ url: 'redis://127.0.0.1:1', namespace: 'optional-test' }))
+        .boot(),
+    );
     expect(app.services.kv).toBeInstanceOf(KV);
     expect(constructed.count).toBe(1);
-    await app.dispose();
+    await orThrow(app.dispose());
     expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('probe: true still fails boot on a bad URL — optional means "no URL", not "ignore errors"', async () => {
     const caught = await defineApp('kv-optional-probe-fails')
       .use(kv.optional({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
-      .boot()
-      .catch((error: unknown) => error);
-    expect(((caught as DotLifecycleError).cause as DotPluginError).code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
+      .boot();
+    if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
+    if (!(caught.cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+    expect(caught.cause.code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
   });
 
   // Needs a real Redis: `KV_TEST_URL=redis://127.0.0.1:6379 bun run test`.
   it.runIf(process.env['KV_TEST_URL'])('passes the probe and round-trips a value against a real Redis', async () => {
-    const app = await defineApp('kv-optional-real')
-      .use(kv.optional({ url: process.env['KV_TEST_URL'], namespace: 'arki-kv-dot-test', probe: true }))
-      .boot();
+    const app = await orThrow(
+      defineApp('kv-optional-real')
+        .use(kv.optional({ url: process.env['KV_TEST_URL'], namespace: 'arki-kv-dot-test', probe: true }))
+        .boot(),
+    );
     try {
       const client = app.services.kv;
       expect(client).toBeInstanceOf(KV);
@@ -194,7 +201,7 @@ describe('@arki/kv/dot kv.optional', () => {
       expect(await client?.get('greeting')).toBe('hello');
       await client?.delete('greeting');
     } finally {
-      await app.dispose();
+      await orThrow(app.dispose());
     }
   });
 });

@@ -16,7 +16,7 @@
  * - `needs` / `provides` / `boot` — the runtime escape hatch for genuine
  *   lifecycle (an auth instance, an event store). `provides` holds one
  *   factory per capability; its keys are static, so the graph is data
- *   before anything boots. `boot` is side effects only (seed, warm-up).
+ *   before anything boots. `boot` may return a typed private ownership plan or business failure.
  *   Most features never use any of them.
  *
  * The app mounts features in the middle phase of the hexagon:
@@ -29,19 +29,27 @@
  * `.features()` turns each feature into a plugin; driving adapters are
  * `driver(...)` values that `.serve()` binds to the mounted feature list.
  */
+import type { ScopePlan } from '@arki/async';
+import type { Failure } from '@arki/failure';
+
 import type { AnyDefinedFeature } from './define-feature.js';
 import type {
   ActionSource,
   AnyFactories,
   AnyHandle,
-  AnyPlugin,
+  BootGuard,
   CtxOf,
+  EmptyOwnership,
   EmptyShape,
   Handles,
+  InferredOwnership,
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
   Plugin,
+  PluginOwnership,
+  PluginRuntime,
+  ProvidedValues,
   ProvidesFactories,
   Service,
   ServiceRecord,
@@ -49,7 +57,7 @@ import type {
   WireNeeds,
 } from './plugin-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
-import { handleOf, isLazy, isLazyWitness, lazyOf, plugin, token } from './plugin-contract.js';
+import { createPluginRuntime, handleOf, isLazy, isLazyWitness, lazyOf, token } from './plugin-contract.js';
 
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 export type { FeatureErrorCode } from './feature-error.js';
@@ -161,7 +169,12 @@ export type Feature<
   TUse extends readonly AnyFeatureSlice[] = readonly AnyFeatureSlice[],
   TRouter extends RouterFragments = RouterFragments,
   TRepos extends RepoFactories = RepoFactories,
+  TBoot extends void | ScopePlan | Failure = void,
 > = {
+  readonly runtime: PluginRuntime<
+    InferredOwnership<TProvides, Awaited<TBoot>>['open'],
+    InferredOwnership<TProvides, Awaited<TBoot>>['close']
+  >;
   readonly name: TName;
   /** Compile-time fragments, folded by `composeRouter` / `composeRepos`. */
   readonly router: TRouter;
@@ -173,8 +186,8 @@ export type Feature<
   readonly needs: TNeeds;
   /** One factory per capability, run in key order when the feature boots. */
   readonly factories: ProvidesFactories<TNeeds, TProvides>;
-  /** Side effects only (seed, warm-up). Runs after the factories and sees their values. */
-  readonly boot?: (services: CtxOf<TNeeds> & TProvides & KernelCtx) => MaybePromise<void>;
+  /** Runs after providers; may return a typed private ownership plan or failure. */
+  readonly boot?: (services: CtxOf<TNeeds> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
   /**
    * Typed handles for what the feature provides: `billing.provides.entitlements`
    * is a `Token` on the same wire key, typed from billing's factory and
@@ -183,7 +196,7 @@ export type Feature<
    * `references(() => table.column)` of features. The keys are static, so
    * `Object.keys(billing.provides)` is known before anything boots.
    */
-  readonly provides: Handles<TProvides, TName>;
+  readonly provides: Handles<ProvidedValues<TProvides>, TName>;
 };
 
 /**
@@ -199,7 +212,8 @@ export type AnyFeature = {
   readonly actions: readonly ActionSource[];
   readonly needs: NeedsShape;
   readonly factories: Readonly<Record<string, (services: never) => unknown>>;
-  readonly boot?: (services: never) => MaybePromise<void>;
+  readonly boot?: (services: never) => unknown;
+  readonly runtime: PluginRuntime<Failure, Failure>;
   readonly provides: Readonly<Record<string, AnyHandle>>;
 };
 
@@ -224,6 +238,29 @@ export function entrypointsOf(f: MountedFeature): readonly AnyFeatureSlice[] {
  * Declare a feature. Pure data capture — nothing executes here; the app
  * builder's `.features()` turns it into a plugin.
  */
+type FeatureConfig<
+  TNeeds extends NeedsShape,
+  TProvides extends ServiceRecord,
+  TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[],
+  TRouter extends RouterFragments,
+  TRepos extends RepoFactories,
+  TBoot,
+> = {
+  /** oRPC router fragment(s), keyed by mount name. */
+  readonly router?: TRouter;
+  /** Repository factories, keyed by their `ctx.repo` name. */
+  readonly repos?: TRepos;
+  /** Boot-time slice contracts (`jobs(...)`, `schedules(...)`, `endpoints(...)`). */
+  readonly use?: TUse;
+  /** Extra static manifest actions (e.g. route contracts). */
+  readonly actions?: readonly ActionSource[];
+  readonly needs?: TNeeds;
+  /** One factory per capability. Each gets the feature's needs. Keys are the wire keys. */
+  readonly provides?: ProvidesFactories<TNeeds, TProvides>;
+  /** Runs after providers; may return a typed private ownership plan or failure. */
+  readonly boot?: (services: CtxOf<TNeeds> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
+};
+
 export function feature<
   const TName extends string,
   TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
@@ -231,24 +268,12 @@ export function feature<
   const TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[] = readonly [],
   const TRouter extends RouterFragments = EmptyShape,
   const TRepos extends RepoFactories = EmptyShape,
+  TBoot extends void | ScopePlan | Failure = void,
 >(
   name: TName,
-  config: {
-    /** oRPC router fragment(s), keyed by mount name. */
-    readonly router?: TRouter;
-    /** Repository factories, keyed by their `ctx.repo` name. */
-    readonly repos?: TRepos;
-    /** Boot-time slice contracts (`jobs(...)`, `schedules(...)`, `endpoints(...)`). */
-    readonly use?: TUse;
-    /** Extra static manifest actions (e.g. route contracts). */
-    readonly actions?: readonly ActionSource[];
-    readonly needs?: TNeeds;
-    /** One factory per capability. Each gets the feature's needs. Keys are the wire keys. */
-    readonly provides?: ProvidesFactories<TNeeds, TProvides>;
-    /** Side effects only (seed, warm-up). Runs after the factories and sees their values. */
-    readonly boot?: (services: CtxOf<TNeeds> & TProvides & KernelCtx) => MaybePromise<void>;
-  },
-): Feature<TName, TNeeds, TProvides, TUse, TRouter, TRepos> {
+  config: FeatureConfig<TNeeds, TProvides, TUse, TRouter, TRepos, TBoot>,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): Feature<TName, TNeeds, NoInfer<TProvides>, TUse, TRouter, TRepos, NoInfer<TBoot>> {
   const sliceKeys = new Set<string>();
   for (const slice of config.use ?? []) {
     // A second slice under one key would silently replace the first once the
@@ -267,7 +292,13 @@ export function feature<
   for (const key of Object.keys(factories)) {
     handles[key] = handleOf(key, name);
   }
+  const runtime = createPluginRuntime<TProvides, TBoot>(config.provides, config.boot, (services, ctx) => {
+    const payloads: Record<string, unknown> = {};
+    for (const slice of config.use ?? []) payloads[slice.key] = slice.resolve(ctx);
+    services[`feature.${name}`] = payloads;
+  });
   return {
+    runtime,
     name,
     router: (config.router ?? {}) as TRouter,
     repos: (config.repos ?? {}) as TRepos,
@@ -278,7 +309,7 @@ export function feature<
     boot: config.boot,
     // Erasure seam: the record is built by key at runtime; its type comes
     // from the factory returns that `feature()` inferred.
-    provides: handles as Feature<TName, TNeeds, TProvides>['provides'],
+    provides: handles as Handles<ProvidedValues<TProvides>, TName>,
   };
 }
 
@@ -423,10 +454,20 @@ export type ProvidedOf<F extends HasProvides> = F extends HasProvides
  * the witness record to value types — the builder guard compares
  * availability against values, exactly as `plugin()` returns.
  */
-export type PluginOf<F extends AnyFeature> = Plugin<
-  WireNeeds<F['needs']>,
-  ProvidedOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>
->;
+type FeatureOwnership<F extends AnyFeature> =
+  F['runtime'] extends PluginRuntime<infer Open, infer Close> ? { readonly open: Open; readonly close: Close } : never;
+
+export type PluginOf<F extends AnyFeature> = Omit<
+  Plugin<
+    WireNeeds<F['needs']>,
+    ProvidedOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>,
+    NeedsShape,
+    string,
+    FeatureOwnership<F>
+  >,
+  'runtime'
+> &
+  Pick<F, 'runtime'>;
 
 /** Tuple map from features to the plugins `.features()` mounts. */
 export type PluginsOf<T extends readonly AnyFeature[]> = {
@@ -445,7 +486,7 @@ export function tokenOf<F extends AnyFeature>(f: F): FeatureTokenOf<F> {
  * Compile one feature into the kernel unit the app mounts. Called by
  * `.features()`. The feature's factories run as the plugin's factories, and
  * its slice record is one more provides entry under `feature.<name>`, so
- * `boot` stays side effects only. The feature's own handles pass through
+ * `boot` retains its private ownership plan. The feature's own handles pass through
  * unchanged: `billing.provides.x === plug(billing).provides.x`.
  */
 export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
@@ -465,19 +506,17 @@ export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
   };
   const factories: AnyFactories = { ...f.factories, [sliceKey]: slices };
 
-  // Factory seam: plugin()'s inference through the erased factory record is
-  // re-typed to the true shape below. feature()'s signature already enforced
-  // NoReservedKeys on the caller's needs and provides.
-  const unit = plugin({
+  return {
     name: f.name,
     actions,
-    needs: f.needs as NeedsShape & NoReservedKeys,
-    provides: factories as ProvidesFactories<NeedsShape, ServiceRecord & NoReservedKeys>,
-    ...(f.boot === undefined
-      ? {}
-      : { boot: f.boot as (services: CtxOf<NeedsShape> & ServiceRecord & KernelCtx) => MaybePromise<void> }),
-  });
-  return { ...unit, provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } } as unknown as PluginOf<F>;
+    needs: f.needs,
+    renames: {},
+    factories,
+    hooks: { ...(f.boot === undefined ? {} : { boot: f.boot }) },
+    // Dynamic slice keys share the same handle-record seam as plugin().
+    provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } as PluginOf<F>['provides'],
+    runtime: f.runtime,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -602,15 +641,23 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
  * `.serve()` only exists after `.features()` — and the adapter reads the
  * records with {@link sliceOf}.
  */
-export type Driver<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
+export type Driver<
+  TNeeds extends ServiceRecord = ServiceRecord,
+  TProvides extends ServiceRecord = ServiceRecord,
+  TOwnership extends PluginOwnership = PluginOwnership,
+> = {
   readonly side: 'driving';
-  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>;
+  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership>;
 };
 
 /** Author a driving adapter. `bind` receives the app's mounted features, in order. */
-export function driver<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>,
-): Driver<TNeeds, TProvides> {
+export function driver<
+  TNeeds extends ServiceRecord,
+  TProvides extends ServiceRecord,
+  TOwnership extends PluginOwnership = EmptyOwnership,
+>(
+  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership>,
+): Driver<TNeeds, TProvides, TOwnership> {
   return { side: 'driving', bind };
 }
 
@@ -622,15 +669,23 @@ export function driver<TNeeds extends ServiceRecord, TProvides extends ServiceRe
  * declarations ({@link entrypointsOf}, and a chain feature's `plugins()`),
  * never slice records — {@link sliceOf} throws there.
  */
-export type Driven<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
+export type Driven<
+  TNeeds extends ServiceRecord = ServiceRecord,
+  TProvides extends ServiceRecord = ServiceRecord,
+  TOwnership extends PluginOwnership = PluginOwnership,
+> = {
   readonly side: 'driven';
-  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>;
+  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership>;
 };
 
 /** Author a driven adapter that reads the features' declarations. */
-export function driven<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>,
-): Driven<TNeeds, TProvides> {
+export function driven<
+  TNeeds extends ServiceRecord,
+  TProvides extends ServiceRecord,
+  TOwnership extends PluginOwnership = EmptyOwnership,
+>(
+  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership>,
+): Driven<TNeeds, TProvides, TOwnership> {
   return { side: 'driven', bind };
 }
 
@@ -649,8 +704,11 @@ function sliceTokenOf(f: MountedFeature): Token<Readonly<Record<string, unknown>
  * so the kernel hands it every slice record and `dot explain` draws the
  * feature → driver edges. Called by `.serve()`.
  */
-export function bindDriver(adapter: Driver, features: readonly MountedFeature[]): AnyPlugin {
-  const bound = adapter.bind(features) as AnyPlugin;
+export function bindDriver<N extends ServiceRecord, P extends ServiceRecord, O extends PluginOwnership>(
+  adapter: Driver<N, P, O>,
+  features: readonly MountedFeature[],
+): Plugin<N, P, NeedsShape, string, O> {
+  const bound = adapter.bind(features);
   const sliceNeeds = Object.fromEntries(features.map(f => [sliceKeyOf(f), sliceTokenOf(f)]));
   return { ...bound, needs: { ...sliceNeeds, ...bound.needs } };
 }

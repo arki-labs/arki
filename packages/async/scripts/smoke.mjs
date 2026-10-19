@@ -4,7 +4,7 @@
 
 import { MockClock } from '@arki/clock';
 
-import { all, AsyncError, debounce, mapConcurrent, race, scoped, sleep, throttle, timeout } from '../dist/index.js';
+import { all, AsyncError, debounce, mapConcurrent, race, resource, cleanup, scoped, sleep, throttle, timeout } from '../dist/index.js';
 
 async function main() {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -96,17 +96,18 @@ async function main() {
   );
 
   const order = [];
-  const cleanup = await rejection(
-    scoped(async scope => {
-      scope.defer(() => void order.push('a'));
-      await scope.acquire(
+  const cleanupResult = await scoped(
+    {
+      first: cleanup(() => void order.push('a')),
+      second: resource(
         () => 'b',
         () => {
           order.push('b');
           throw new Error('close failed');
         },
-      );
-    }),
+      ),
+    },
+    () => undefined,
   );
 
   // Long waits on a MockClock: debounce and sleep follow its time, not real time.
@@ -143,7 +144,7 @@ async function main() {
     ['race aborts and awaits the loser', loserAborted, true],
     ['timeout rejects at the deadline', timedOut, 'ARKI_ASYNC_E004'],
     ['timeout aborts the task signal', timeoutSignalAborted, true],
-    ['scoped cleanup failure', cleanup, 'ARKI_ASYNC_E003'],
+    ['scoped cleanup failure', cleanupResult?.code, 'failure.unexpected_defect'],
     ['scoped finalizers run newest first', order.join(','), 'b,a'],
   ];
 

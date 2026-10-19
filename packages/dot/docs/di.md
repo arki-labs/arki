@@ -550,6 +550,7 @@ In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
 against the handle:
 
 ```ts continue
+import { isFailure } from '@arki/failure';
 import { defineApp } from '@arki/dot';
 import { fake } from '@arki/dot/test-harness';
 
@@ -559,6 +560,7 @@ const app = await defineApp('t')
   .use(fake(cache.provides.kv, { get: async () => null }))
   .use(reports)
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 await app.dispose();
 ```
 
@@ -600,6 +602,7 @@ compile time. `rename` is the multi-instance primitive, and
 `Token.instance()` derives the matching contract:
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin, rename, token } from '@arki/dot';
 
 type PgDatabase = { execute(sql: string): Promise<unknown[]> };
@@ -630,6 +633,7 @@ const app = await defineApp('shop')
     }),
   )
   .boot();
+if (isFailure(app)) throw new Error(app.code);
 await app.dispose();
 ```
 
@@ -651,6 +655,7 @@ under the copy (`reports#eu.audit`), and a child need on the same handle follows
 lazy form included.
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin, rename, service } from '@arki/dot';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
@@ -681,6 +686,7 @@ const eu = reports.instance('eu', { db: databaseEu.provides.dbEu }); // `reports
 const us = reports.instance('us'); // `reports#us`, on the primary
 
 const app = await defineApp('shop').use(database).use(databaseEu).features([eu, us]).boot();
+if (isFailure(app)) throw new Error(app.code);
 app.services['reports#eu.summary'].region; // 'eu'
 app.services['reports#us.summary'].region; // 'us'
 routerFor({ eu: eu.contract, us: us.contract }, [eu, us]); // each copy has its own contract identity
@@ -723,12 +729,15 @@ Consumers that shouldn't care whether a provider is eager or lazy declare a
 handle, wrapping eager provides and passing lazy ones through by identity:
 
 ```ts continue
+import { isFailure } from '@arki/failure';
 export const suggestions = plugin({
   name: 'suggestions',
   needs: { search: service.lazy<SearchClient>() },
-  async start({ search }) {
+  async boot({ search }) {
     const client = await search.get(); // first access initializes
+    if (isFailure(client)) return client;
     await client.query('warm-up');
+    return;
   },
 });
 ```

@@ -8,6 +8,7 @@
  *      teardown, lazy lifting, and `$config` behave as in production.
  */
 
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Lazy } from '../plugin-contract.js';
@@ -32,14 +33,14 @@ describe('testPlugin', () => {
     const fakeDb: Db = { query: () => ['row'] };
     const fakeCache: Cache = { get: () => 'hit' };
 
-    const app = await testPlugin(consumer)
+    const app = orThrow(await testPlugin(consumer)
       .provide(Db, fakeDb) // token form
       .provide('cache', fakeCache) // anonymous form — wire key is the alias
-      .boot();
+      .boot());
 
     expect(app.services.answer).toEqual({ rows: ['row'], cached: 'hit' });
     expectTypeOf(app.services.answer.rows).toEqualTypeOf<readonly string[]>();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('boot() does not compile until every need is provided; wrong shapes fail at provide()', () => {
@@ -72,23 +73,23 @@ describe('testPlugin', () => {
       provides: {
         rows: async ({ db }) => {
           expectTypeOf(db).toEqualTypeOf<Lazy<Db>>();
-          const handle = await db.get();
+          const handle = orThrow(await db.get());
           return handle.query('q');
         },
       },
     });
 
-    const plain = await testPlugin(consumer)
+    const plain = orThrow(await testPlugin(consumer)
       .provide('db', { query: () => ['plain'] })
-      .boot();
+      .boot());
     expect(plain.services.rows).toEqual(['plain']);
-    await plain.dispose();
+    orThrow(await plain.dispose());
 
-    const handle = await testPlugin(consumer)
+    const handle = orThrow(await testPlugin(consumer)
       .provide('db', lazyOf<Db>({ query: () => ['handle'] }))
-      .boot();
+      .boot());
     expect(handle.services.rows).toEqual(['handle']);
-    await handle.dispose();
+    orThrow(await handle.dispose());
   });
 
   it('runs the real kernel: teardown order, own provides in dispose, $config', async () => {
@@ -96,15 +97,15 @@ describe('testPlugin', () => {
     const consumer = plugin({
       name: 'consumer',
       needs: { db: Db },
-      provides: { rows: ({ db }) => db.query('q'), flag: ({ $config }) => $config['flag'] },
+      provides: { rows: ({ db }) => db.query('q'), flag: ({ $config }) => String($config['flag']) },
       dispose: ({ flag }) => void order.push(`consumer-dispose:${String(flag)}`),
     });
 
-    const app = await testPlugin(consumer, { config: { flag: 'on' } })
+    const app = orThrow(await testPlugin(consumer, { config: { flag: 'on' } })
       .provide(Db, { query: () => [] })
-      .start();
+      .start());
     expect(app.state).toBe('started');
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(order).toEqual(['consumer-dispose:on']);
   });
 });

@@ -14,7 +14,8 @@ import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
-import { createAppRuntime } from '@arki/dot/runtime';
+import { createAppRuntime, RuntimeReplaced } from '@arki/dot/runtime';
+import { orThrow } from '@arki/failure';
 
 import { db } from './dot.js';
 
@@ -36,11 +37,11 @@ function hotModule(data: Record<string, unknown>) {
 
 /** How a request to one module instance ended: the app, refused as replaced, or another error. */
 const settle = (promise: Promise<unknown>) =>
-  promise.then(
-    () => 'started',
-    (error: unknown) =>
-      error instanceof Error && error.message.includes('replaced by a hot update') ? 'replaced' : String(error),
-  );
+  promise.then(result => {
+    if (RuntimeReplaced.is(result)) return 'replaced';
+    orThrow(result);
+    return 'started';
+  });
 
 describe('db({ driver: "pglite" }) under hot updates', () => {
   it('20 fast edits: one app at a time, one handle on the data directory', async () => {
@@ -57,13 +58,13 @@ describe('db({ driver: "pglite" }) under hot updates', () => {
         module.replace();
         module = hotModule(data);
       }
-      const current = await createAppRuntime(app, { hot: module.hot }).get();
+      const current = await orThrow(createAppRuntime(app, { hot: module.hot }).get());
 
       // Requests to replaced modules were refused; none started a second app or hit the owner lock.
       expect(await Promise.all(requests)).toEqual(Array.from({ length: 20 }, () => 'replaced'));
       const rows = await current.services.db.execute(sql`select 1 as one`);
       expect(rows.rows).toEqual([{ one: 1 }]);
-      await current.dispose();
+      await orThrow(current.dispose());
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }

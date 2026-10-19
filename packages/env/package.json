@@ -1,7 +1,7 @@
 {
   "name": "@arki/env",
   "version": "0.0.11",
-  "description": "Type-safe environment variable parsing for ARKI \u2014 defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
+  "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -79,11 +79,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
-    "zod": "catalog:",
-    "@arki/failure": "workspace:*"
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*"

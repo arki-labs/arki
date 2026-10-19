@@ -17,7 +17,7 @@ import { trace } from '@opentelemetry/api';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { DoctorReport } from '../failures.js';
 import { defineApp } from '../../define-app.js';
@@ -79,12 +79,12 @@ describe('runDoctor — --observability flag', () => {
         /* side effects only */
       },
     });
-    const app = await testApp([p]).boot();
+    const app = orThrow(await testApp([p]).boot());
     try {
       const envelope = reportOf(await runDoctor(app));
       expect(allIssues(envelope).some(e => e.code === 'dot.observability_no_sdk')).toBe(false);
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 
@@ -95,7 +95,7 @@ describe('runDoctor — --observability flag', () => {
         /* side effects only */
       },
     });
-    const app = await testApp([p]).boot();
+    const app = orThrow(await testApp([p]).boot());
     try {
       const envelope = reportOf(await runDoctor(app, { observability: true }));
       const obsIssue = allIssues(envelope).find(e => e.code === 'dot.observability_no_sdk');
@@ -104,7 +104,7 @@ describe('runDoctor — --observability flag', () => {
       // Warning-only: the report must not be `failure` solely because of OTel.
       expect(envelope.status).not.toBe('failure');
     } finally {
-      await app.dispose();
+      orThrow(await app.dispose());
     }
   });
 
@@ -118,12 +118,12 @@ describe('runDoctor — --observability flag', () => {
           /* side effects only */
         },
       });
-      const app = await testApp([p]).boot();
+      const app = orThrow(await testApp([p]).boot());
       try {
         const envelope = reportOf(await runDoctor(app, { observability: true }));
         expect(allIssues(envelope).some(e => e.code === 'dot.observability_no_sdk')).toBe(false);
       } finally {
-        await app.dispose();
+        orThrow(await app.dispose());
       }
     } finally {
       trace.disable();

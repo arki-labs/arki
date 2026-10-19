@@ -9,6 +9,7 @@
  * longer exists.
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
@@ -51,8 +52,8 @@ describe('DOT lifecycle', () => {
     const a = loggingPlugin('a', calls);
     const b = loggingPlugin('b', calls);
 
-    const app = await defineApp('test').use(a).use(b).start();
-    await app.dispose();
+    const app = orThrow(await defineApp('test').use(a).use(b).start());
+    orThrow(await app.dispose());
 
     expect(calls).toEqual([
       { hook: 'configure', plugin: 'a' },
@@ -87,7 +88,9 @@ describe('DOT lifecycle', () => {
     const a = loggingPlugin('a', calls);
     const b = loggingPlugin('b', calls, { failIn: 'boot' });
 
-    await expect(defineApp('test').use(a).use(b).boot()).rejects.toBeInstanceOf(DotLifecycleError);
+    const outcome = await defineApp('test').use(a).use(b).boot();
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({ cause: new Error('boom-b') });
 
     // Plugin a booted, then b threw — a's dispose runs, b's dispose does NOT
     // (its boot never completed).
@@ -116,7 +119,9 @@ describe('DOT lifecycle', () => {
       },
     });
 
-    await expect(defineApp('test').use(a).use(partial).boot()).rejects.toBeInstanceOf(DotLifecycleError);
+    const outcome = await defineApp('test').use(a).use(partial).boot();
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({ cause: new Error('partial-failed') });
     expect(partialCleanup).toBe(true);
     expect(calls.filter(c => c.plugin === 'partial' && c.hook === 'dispose')).toEqual([]);
     expect(calls.filter(c => c.plugin === 'a' && c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'a' }]);
@@ -150,7 +155,7 @@ describe('DOT lifecycle', () => {
     const b = loggingPlugin('b', calls, { failIn: 'stop' });
     const c = loggingPlugin('c', calls);
 
-    const app = await defineApp('test').use(a).use(b).use(c).start();
+    const app = orThrow(await defineApp('test').use(a).use(b).use(c).start());
     await expect(app.stop()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.StopFailed,
     });
@@ -170,14 +175,14 @@ describe('DOT lifecycle', () => {
         bootCalls += 1;
       },
     });
-    const app = await defineApp('test').use(p).boot();
+    const app = orThrow(await defineApp('test').use(p).boot());
     expect(bootCalls).toBe(1);
-    await app.start();
+    orThrow(await app.start());
     expect(bootCalls).toBe(1);
     // Calling start() again should not re-boot or re-start.
-    await app.start();
+    orThrow(await app.start());
     expect(bootCalls).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('concurrent boot() calls share the same in-flight promise', async () => {
@@ -202,7 +207,7 @@ describe('DOT lifecycle', () => {
     const p1 = configured.boot();
     const p2 = configured.boot();
     resolveBoot();
-    const [app1, app2] = await Promise.all([p1, p2]);
+    const [app1, app2] = await Promise.all([p1.then(value => orThrow(value)), p2.then(value => orThrow(value))]);
     // Strongest contract: the shared in-flight promise means boot() ran once,
     // even with two concurrent callers. Wrappers may differ (each call wraps
     // the underlying impl), but they proxy to the same state.
@@ -210,17 +215,17 @@ describe('DOT lifecycle', () => {
     expect(app1.state).toBe('booted');
     expect(app2.state).toBe('booted');
     expect(app1.name).toBe(app2.name);
-    await app1.dispose();
+    orThrow(await app1.dispose());
     expect(app2.state).toBe('disposed');
   });
 
   it('start() from defined runs configure + boot first', async () => {
     const calls: CallLog[] = [];
     const p = loggingPlugin('p', calls);
-    const app = await defineApp('test').use(p).start();
+    const app = orThrow(await defineApp('test').use(p).start());
     expect(calls.map(c => c.hook)).toEqual(['configure', 'boot', 'start']);
     expect(app.state).toBe('started');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('stop() on a booted-but-never-started app is a no-op', async () => {
@@ -234,11 +239,11 @@ describe('DOT lifecycle', () => {
         stopCalls += 1;
       },
     });
-    const app = await defineApp('test').use(p).boot();
+    const app = orThrow(await defineApp('test').use(p).boot());
     await app.stop();
     expect(stopCalls).toBe(0);
     expect(app.state).toBe('stopped');
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('dispose() from started runs stop then dispose', async () => {
@@ -255,8 +260,8 @@ describe('DOT lifecycle', () => {
         calls.push({ hook: 'dispose', plugin: 'p' });
       },
     });
-    const app = await defineApp('test').use(p).start();
-    await app.dispose();
+    const app = orThrow(await defineApp('test').use(p).start());
+    orThrow(await app.dispose());
     expect(calls.map(c => c.hook)).toEqual(['start', 'stop', 'dispose']);
     expect(app.state).toBe('disposed');
   });
@@ -268,8 +273,8 @@ describe('DOT lifecycle', () => {
         /* side effects only */
       },
     });
-    const app = await defineApp('test').use(p).boot();
-    await app.dispose();
+    const app = orThrow(await defineApp('test').use(p).boot());
+    orThrow(await app.dispose());
     await expect(app.start()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.ReuseAfterDispose,
     });
@@ -410,7 +415,7 @@ describe('lifecycle transition serialization', () => {
       dispose: () => void order.push('dispose'),
     });
 
-    const app = await defineApp('race-start-dispose').use(slow).boot();
+    const app = orThrow(await defineApp('race-start-dispose').use(slow).boot());
     const starting = app.start();
     await entered.promise; // start hook is mid-flight at its await point
     const disposing = app.dispose();
@@ -418,7 +423,7 @@ describe('lifecycle transition serialization', () => {
     expect(order).toEqual(['boot', 'start:begin']); // dispose queued, not interleaved
 
     gate.resolve();
-    await Promise.all([starting, disposing]);
+    await Promise.all([starting.then(value => orThrow(value)), disposing.then(value => orThrow(value))]);
     // Start completes first, THEN the queued dispose cascades stop+dispose.
     expect(order).toEqual(['boot', 'start:begin', 'start:end', 'stop', 'dispose']);
     expect(app.state).toBe('disposed'); // start must not stamp `started` over `disposed`
@@ -435,11 +440,11 @@ describe('lifecycle transition serialization', () => {
       },
     });
 
-    const app = await defineApp('race-double-start').use(p).boot();
+    const app = orThrow(await defineApp('race-double-start').use(p).boot());
     const first = app.start();
     const second = app.start();
     gate.resolve();
-    await Promise.all([first, second]);
+    await Promise.all([first.then(value => orThrow(value)), second.then(value => orThrow(value))]);
     expect(startRuns).toBe(1);
     expect(app.state).toBe('started');
   });
@@ -458,12 +463,12 @@ describe('lifecycle transition serialization', () => {
       },
     });
 
-    const app = await defineApp('race-dispose-start').use(p).boot();
+    const app = orThrow(await defineApp('race-dispose-start').use(p).boot());
     const disposing = app.dispose();
     await entered.promise; // dispose hook is mid-flight
     const starting = app.start();
     gate.resolve();
-    await disposing;
+    orThrow(await disposing);
     await expect(starting).rejects.toMatchObject({
       code: DotLifecycleErrorCode.ReuseAfterDispose,
     });
@@ -472,100 +477,115 @@ describe('lifecycle transition serialization', () => {
 });
 
 describe('hookTimeoutMs watchdog (E015)', () => {
-  const never = () =>
-    new Promise<void>(() => {
-      /* never settles — the watchdog must catch it */
-    });
-
-  it('a hanging boot hook fails with HookTimeout and rolls back earlier plugins', async () => {
+  it('a boot deadline joins owned work before rolling back earlier plugins', async () => {
     const calls: CallLog[] = [];
-    const good = loggingPlugin('good', calls);
+    const cancelled = deferred();
+    const gate = deferred();
     const hung = plugin({
       name: 'hung',
-      boot: async () => {
-        await never();
+      boot: async ({ $signal }) => {
+        $signal.addEventListener('abort', cancelled.resolve, { once: true });
+        await gate.promise;
       },
     });
-
-    await expect(defineApp('watchdog-boot', { hookTimeoutMs: 30 }).use(good).use(hung).boot()).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.HookTimeout,
-      plugin: 'hung',
-    });
+    const pending = defineApp('watchdog-boot', { hookTimeoutMs: 30 })
+      .use(loggingPlugin('good', calls))
+      .use(hung)
+      .boot();
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await cancelled.promise;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([]);
+    gate.resolve();
+    expect(await pending).toMatchObject({ code: 'async.deadline' });
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'good' }]);
   });
 
-  it('a hanging start hook fails with HookTimeout and cascades the rollback', async () => {
+  it('a start deadline joins the hook before cascading rollback', async () => {
     const calls: CallLog[] = [];
-    const good = loggingPlugin('good', calls);
+    const cancelled = deferred();
+    const gate = deferred();
     const hung = plugin({
       name: 'hung-start',
-      start: () => never(),
+      start: async ({ $signal }) => {
+        $signal.addEventListener('abort', cancelled.resolve, { once: true });
+        await gate.promise;
+      },
     });
-
-    await expect(defineApp('watchdog-start', { hookTimeoutMs: 30 }).use(good).use(hung).start()).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.HookTimeout,
-      plugin: 'hung-start',
-    });
-    // Already-started plugins stopped, booted plugins disposed.
+    const pending = defineApp('watchdog-start', { hookTimeoutMs: 30 })
+      .use(loggingPlugin('good', calls))
+      .use(hung)
+      .start();
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await cancelled.promise;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(calls.filter(c => c.hook === 'stop' || c.hook === 'dispose')).toEqual([]);
+    gate.resolve();
+    await expect(pending).rejects.toMatchObject({ code: DotLifecycleErrorCode.HookTimeout, plugin: 'hung-start' });
     expect(calls.filter(c => c.hook === 'stop')).toEqual([{ hook: 'stop', plugin: 'good' }]);
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'good' }]);
   });
 
-  it('a hanging dispose hook is bounded — teardown aggregates the timeout and continues', async () => {
+  it('a dispose deadline joins cleanup before disposing earlier plugins', async () => {
     const order: string[] = [];
+    const cancelled = deferred();
+    const gate = deferred();
     const hung = plugin({
       name: 'hung-dispose',
-      boot: () => {
-        /* side effects only */
+      dispose: async ({ $signal }) => {
+        $signal.addEventListener('abort', cancelled.resolve, { once: true });
+        await gate.promise;
       },
-      dispose: () => never(),
     });
-    const tidy = plugin({
-      name: 'tidy',
-      boot: () => {
-        /* side effects only */
+    const tidy = plugin({ name: 'tidy', dispose: () => void order.push('tidy') });
+    const app = orThrow(await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).use(tidy).use(hung).boot());
+    const pending = app.dispose();
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await cancelled.promise;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(order).toEqual([]);
+    gate.resolve();
+    const outcome = await pending;
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({
+      cause: {
+        code: DotLifecycleErrorCode.DisposeFailed,
+        failures: [
+          expect.objectContaining({
+            plugin: 'hung-dispose',
+            phase: 'dispose',
+            error: expect.objectContaining({ code: DotLifecycleErrorCode.HookTimeout }),
+          }),
+        ],
       },
-      dispose: () => void order.push('tidy'),
     });
-
-    const app = await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).use(tidy).use(hung).boot();
-    const error = await app.dispose().then(
-      () => {
-        /* noop */
-      },
-      (error_: unknown) => error_,
-    );
-    expect(error).toBeInstanceOf(DotLifecycleError);
-    expect((error as DotLifecycleError).failures).toEqual([
-      expect.objectContaining({ plugin: 'hung-dispose', phase: 'dispose' }),
-    ]);
-    expect(order).toEqual(['tidy']); // reverse order continued past the hang
+    expect(order).toEqual(['tidy']);
   });
 
-  it("aborts the hung hook's $signal, so work that listens actually stops", async () => {
-    // Why: a promise cannot be killed. Without the signal, a hook stuck on a
-    // connect keeps running (and holding sockets) after the kernel gave up.
+  it("aborts an owned boot hook's signal and reports Deadline after it stops", async () => {
     let seen: AbortSignal | undefined;
     let stopped = false;
     const hung = plugin({
       name: 'hung-io',
-      start: ({ $signal }) => {
+      boot: ({ $signal }) => {
         seen = $signal;
-        return new Promise<void>((_resolve, reject) => {
+        return new Promise<void>(resolve => {
           $signal.addEventListener('abort', () => {
             stopped = true;
-            reject(new Error('connect cancelled', { cause: $signal.reason }));
-          });
+            resolve();
+          }, { once: true });
         });
       },
     });
-
-    await expect(defineApp('watchdog-signal', { hookTimeoutMs: 30 }).use(hung).start()).rejects.toMatchObject({
-      code: DotLifecycleErrorCode.HookTimeout,
-      plugin: 'hung-io',
-    });
+    expect(await defineApp('watchdog-signal', { hookTimeoutMs: 30 }).use(hung).boot()).toMatchObject({ code: 'async.deadline' });
     expect(stopped).toBe(true);
-    expect(seen?.reason).toMatchObject({ code: DotLifecycleErrorCode.HookTimeout, plugin: 'hung-io' });
+    expect(seen?.aborted).toBe(true);
   });
 
   it('gives each hook call its own signal, not aborted when the hook finishes in time', async () => {
@@ -575,12 +595,12 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       boot: ({ $signal }) => void signals.push($signal),
       start: ({ $signal }) => void signals.push($signal),
     });
-    const app = await defineApp('watchdog-signal-ok', { hookTimeoutMs: 1000 }).use(quick).start();
+    const app = orThrow(await defineApp('watchdog-signal-ok', { hookTimeoutMs: 1000 }).use(quick).start());
     expect(signals).toHaveLength(2);
     expect(signals[0]).not.toBe(signals[1]);
     expect(signals.some(signal => signal.aborted)).toBe(false);
     await app.stop();
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 
   it('hooks under budget are untouched by the watchdog', async () => {
@@ -593,9 +613,9 @@ describe('hookTimeoutMs watchdog (E015)', () => {
         },
       },
     });
-    const app = await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).use(quick).boot();
+    const app = orThrow(await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).use(quick).boot());
     expect(app.services.ok).toBe(true);
-    await app.dispose();
+    orThrow(await app.dispose());
   });
 });
 

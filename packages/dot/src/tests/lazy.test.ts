@@ -9,12 +9,12 @@
  *      the publishing plugin has no dispose hook; cleanup failures aggregate.
  */
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Lazy } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
-import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { isLazy, lazy, plugin, service } from '../plugin-contract.js';
+import { isLazy, lazy, LazyClosed, plugin, service } from '../plugin-contract.js';
 
 describe('lazy() handle semantics', () => {
   it('does not initialize until first get(); memoizes the value', async () => {
@@ -28,8 +28,8 @@ describe('lazy() handle semantics', () => {
     expect(handle.initialized).toBe(false);
     expect(handle.peek()).toBeUndefined();
 
-    const first = await handle.get();
-    const second = await handle.get();
+    const first = orThrow(await handle.get());
+    const second = orThrow(await handle.get());
     expect(inits).toBe(1);
     expect(first).toBe(second);
     expect(handle.initialized).toBe(true);
@@ -51,7 +51,7 @@ describe('lazy() handle semantics', () => {
     const p1 = handle.get();
     const p2 = handle.get();
     release();
-    const [a, b] = await Promise.all([p1, p2]);
+    const [a, b] = await Promise.all([p1.then(value => orThrow(value)), p2.then(value => orThrow(value))]);
     expect(inits).toBe(1);
     expect(a).toBe(b);
   });
@@ -64,24 +64,26 @@ describe('lazy() handle semantics', () => {
       return 'ok';
     });
 
-    await expect(handle.get()).rejects.toThrow('flaky');
+    const failure = await handle.get();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('flaky') });
     expect(handle.initialized).toBe(false);
     await expect(handle.get()).resolves.toBe('ok');
     expect(attempts).toBe(2);
   });
 
-  it('dispose runs cleanup once, only if initialized; get() after dispose throws', async () => {
+  it('dispose runs cleanup once, only if initialized; get() after dispose returns LazyClosed', async () => {
     let cleanups = 0;
     const untouched = lazy(() => 'x', { dispose: () => void (cleanups += 1) });
-    await untouched.dispose();
+    orThrow(await untouched.dispose());
     expect(cleanups).toBe(0); // never initialized → no cleanup
 
     const touched = lazy(() => 'x', { dispose: () => void (cleanups += 1) });
-    await touched.get();
-    await touched.dispose();
-    await touched.dispose(); // idempotent
+    orThrow(await touched.get());
+    orThrow(await touched.dispose());
+    orThrow(await touched.dispose()); // idempotent
     expect(cleanups).toBe(1);
-    await expect(touched.get()).rejects.toThrow(/disposed/);
+    expect(await touched.get()).toEqual(LazyClosed());
   });
 
   it('dispose awaits an in-flight initialization before cleaning up', async () => {
@@ -102,7 +104,7 @@ describe('lazy() handle semantics', () => {
     const getting = handle.get();
     const disposing = handle.dispose();
     release();
-    await Promise.all([getting, disposing]);
+    await Promise.all([getting.then(value => orThrow(value)), disposing.then(value => orThrow(value))]);
     expect(events).toEqual(['initialized', 'cleaned']);
   });
 
@@ -135,20 +137,20 @@ describe('lazy services in the kernel', () => {
 
   it('a never-accessed lazy service never initializes and never cleans up', async () => {
     const log: string[] = [];
-    const app = await defineApp('lazy-untouched').use(makeLazyDbPlugin(log)).boot();
+    const app = orThrow(await defineApp('lazy-untouched').use(makeLazyDbPlugin(log)).boot());
     expect(log).toEqual([]);
     expect(app.services.db.initialized).toBe(false);
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(log).toEqual([]); // no init → no close
   });
 
   it('an initialized lazy service is auto-disposed at app.dispose() without a dispose hook', async () => {
     const log: string[] = [];
-    const app = await defineApp('lazy-touched').use(makeLazyDbPlugin(log)).boot();
-    const db = await app.services.db.get();
+    const app = orThrow(await defineApp('lazy-touched').use(makeLazyDbPlugin(log)).boot());
+    const db = orThrow(await app.services.db.get());
     expect(db.id).toBe(1);
     expect(log).toEqual(['init']);
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(log).toEqual(['init', 'close']);
   });
 
@@ -163,14 +165,14 @@ describe('lazy services in the kernel', () => {
         expect(db.initialized).toBe(false); // still cold at consumer boot
       },
       async start({ db }) {
-        seen = await db.get(); // first access initializes
+        seen = orThrow(await db.get()); // first access initializes
       },
     });
 
-    const app = await defineApp('lazy-consumer').use(makeLazyDbPlugin(log)).use(consumer).start();
+    const app = orThrow(await defineApp('lazy-consumer').use(makeLazyDbPlugin(log)).use(consumer).start());
     expect(log).toEqual(['init']);
     expect(seen?.id).toBe(1);
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(log).toEqual(['init', 'close']);
   });
 
@@ -181,7 +183,7 @@ describe('lazy services in the kernel', () => {
       needs: { db: service<Lazy<Db>>() },
       // Forces initialization during boot, then a later plugin fails.
       boot: async ({ db }) => {
-        await db.get();
+        orThrow(await db.get());
       },
     });
     const bomb = plugin({
@@ -191,13 +193,13 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    await expect(defineApp('lazy-rollback').use(makeLazyDbPlugin(log)).use(eager).use(bomb).boot()).rejects.toThrow(
-      'boom',
-    );
+    const outcome = await defineApp('lazy-rollback').use(makeLazyDbPlugin(log)).use(eager).use(bomb).boot();
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({ cause: new Error('boom') });
     expect(log).toEqual(['init', 'close']); // rollback cleaned the initialized handle
   });
 
-  it('lazy cleanup failures aggregate into the dispose error with the plugin name', async () => {
+  it('lazy cleanup failures retain their cause and name the owning plugin', async () => {
     const broken = plugin({
       name: 'broken',
       provides: {
@@ -210,19 +212,12 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = await defineApp('lazy-cleanup-fail').use(broken).boot();
-    await app.services.svc.get();
-    const error = await app.dispose().then(
-      () => {
-        /* noop */
-      },
-      (error_: unknown) => error_,
-    );
-    expect(error).toBeInstanceOf(DotLifecycleError);
-    expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DisposeFailed);
-    expect((error as DotLifecycleError).failures).toEqual([
-      expect.objectContaining({ plugin: 'broken', phase: 'dispose' }),
-    ]);
+    const app = orThrow(await defineApp('lazy-cleanup-fail').use(broken).boot());
+    orThrow(await app.services.svc.get());
+    const outcome = await app.dispose();
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({ cause: new Error('cleanup-broken') });
+    expect(app.diagnostics.plugins).toContainEqual(expect.objectContaining({ plugin: 'broken', status: 'failed' }));
   });
 
   it('service.lazy lifts an EAGER provider into a pre-initialized handle', async () => {
@@ -241,19 +236,19 @@ describe('lazy services in the kernel', () => {
         expectTypeOf(db).toEqualTypeOf<Lazy<Db>>();
         expect(db.initialized).toBe(true); // lifted eager value is already live
         expect(db.peek()).toBe(eagerDb);
-        expect(await db.get()).toBe(eagerDb);
+        expect(orThrow(await db.get())).toBe(eagerDb);
         handleSeen = db;
       },
     });
 
-    const app = await defineApp('lift-eager').use(provider).use(consumer).boot();
+    const app = orThrow(await defineApp('lift-eager').use(provider).use(consumer).boot());
     expect(handleSeen).toBeDefined();
     // The lifted wrapper is per-injection and unpublished — app-level access
     // still sees the plain value, and dispose leaves it untouched.
     expectTypeOf(app.services.db).toEqualTypeOf<Db>();
     expect(app.services.db).toBe(eagerDb);
-    await app.dispose();
-    expect(await handleSeen!.get().catch(() => 'rejected')).not.toBe('rejected');
+    orThrow(await app.dispose());
+    expect(orThrow(await handleSeen!.get())).toBe(eagerDb);
   });
 
   it('service.lazy passes a LAZY provider handle through by identity', async () => {
@@ -270,12 +265,12 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = await defineApp('lift-lazy').use(makeLazyDbPlugin(log)).use(consumer).boot();
+    const app = orThrow(await defineApp('lift-lazy').use(makeLazyDbPlugin(log)).use(consumer).boot());
     expect(app.services.consumerDb).toBe(app.services.db); // same handle object
     expect(log).toEqual([]);
-    await app.services.consumerDb.get();
+    orThrow(await app.services.consumerDb.get());
     expect(log).toEqual(['init']);
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(log).toEqual(['init', 'close']); // provider-side cleanup still owns it
   });
 
@@ -293,7 +288,7 @@ describe('lazy services in the kernel', () => {
         // The provider's own teardown still needs the handle alive, even
         // though a later plugin republished it under another key. Reverse
         // dispose order must not let the republisher close it first.
-        expect(await db.get()).toMatchObject({ id: 3 });
+        expect(orThrow(await db.get())).toMatchObject({ id: 3 });
         order.push('provider-hook');
       },
     });
@@ -304,9 +299,9 @@ describe('lazy services in the kernel', () => {
       dispose: () => void order.push('alias-hook'),
     });
 
-    const app = await defineApp('lazy-ownership').use(provider).use(alias).boot();
-    await app.services.aliasDb.get();
-    await app.dispose();
+    const app = orThrow(await defineApp('lazy-ownership').use(provider).use(alias).boot());
+    orThrow(await app.services.aliasDb.get());
+    orThrow(await app.dispose());
     expect(order).toEqual(['alias-hook', 'provider-hook', 'lazy-cleanup']);
   });
 
@@ -339,14 +334,14 @@ describe('lazy services in the kernel', () => {
       },
       async dispose({ svc }) {
         // The handle is still usable inside the plugin's own dispose hook.
-        expect(await svc.get()).toBe('value');
+        expect(orThrow(await svc.get())).toBe('value');
         order.push('hook');
       },
     });
 
-    const app = await defineApp('lazy-order').use(p).boot();
-    await app.services.svc.get();
-    await app.dispose();
+    const app = orThrow(await defineApp('lazy-order').use(p).boot());
+    orThrow(await app.services.svc.get());
+    orThrow(await app.dispose());
     expect(order).toEqual(['hook', 'lazy-cleanup']);
   });
 });

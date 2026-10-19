@@ -27,6 +27,7 @@ The `dot` command ships in the same package.
 ## Quick start
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { defineApp, plugin } from '@arki/dot';
 
 // Stand-ins for your real database and Stripe clients.
@@ -69,6 +70,7 @@ const app = await defineApp('acme')
   .use(dbPlugin) // providers before consumers — enforced at compile time
   .use(billingPlugin)
   .start();
+if (isFailure(app)) throw new Error(app.code);
 
 // app.manifest, app.diagnostics — agent-friendly envelopes.
 const order = app.manifest.plugins.map(p => p.name).join(' → ');
@@ -123,18 +125,21 @@ The adapter entries need more:
 | `@arki/dot/test-harness` | `testPlugin`, `testApp`, `bootTestApp`, `fake`.                                                                |
 | `@arki/dot/cli`          | `program` (the `dot` command), `runExplain`, `runDoctor`, `runNew`, `runDev` and the `dot.*` failures.         |
 
+Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy retries and cancellation.
+
 ## Failure behaviour
 
-Dot throws. It does not return error values from the kernel. The `dot`
-command is the exception: it returns failures in its JSON envelope and exits
-with code `3`.
+Owned construction and disposal return typed `@arki/failure` values. Check `isFailure(await app.boot())` before accessing services and inspect disposal outcomes. Callback refusal definitions remain inferred; unknown exceptions become `UnexpectedDefect`. Static declaration and synchronous configure defects still throw during this migration. The `dot` command returns failures in its JSON envelope and exits with code `3`.
 
-Every error the kernel throws carries a stable `code`, a one-sentence `remediation` and a `docsUrl`, the same shape as `DotPluginError`. Match on `code`, never on the message. Codes are never renumbered or reused (E009 and E010 are retired).
+Legacy kernel exceptions carry a stable `ARKI_DOT_E*` diagnostic code, a one-sentence `remediation` and a `docsUrl`, the same shape as `DotPluginError`. Match on `code`, never on the message. Codes are never renumbered or reused (E009 and E010 are retired).
 
 `DotLifecycleError` (E001-E021) also carries `phase`, `plugin`, `cause` and, for stop and dispose, `failures`. `FeatureError` (E022-E031) is what `feature()`, `defineFeature()`, `rpc()` and `routerFor()` throw. `DotManifestError` (E032) extends `TypeError`.
 
 | Code            | Class               | Meaning                                                                 | Fix                                                    |
 | --------------- | ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
+| `dot.lazy_closed` | Failure value | A lazy handle is used after its owner closed. | Obtain a handle from a live owner. |
+| `dot.runtime_replaced` | Failure value | HMR replaced this runtime. | Use the current module. |
+| `dot.runtime_release_failed` | Failure value | Previous ownership was not safely released. | Resolve disposal before starting another owner. |
 | `ARKI_DOT_E001` | `DotLifecycleError` | `configure` returned a Promise.                                         | Make `configure` synchronous; do async work in `boot`. |
 | `ARKI_DOT_E002` | `DotLifecycleError` | `configure` threw.                                                      | Fix the plugin's config or its `configure` hook.       |
 | `ARKI_DOT_E003` | `DotLifecycleError` | `boot` threw. Booted plugins were rolled back.                          | Read `plugin` and `cause`; fix that `boot` hook.       |

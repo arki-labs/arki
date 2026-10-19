@@ -9,16 +9,18 @@
  * socket layer.
  */
 
-import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, rename, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+
+import type { DepsOf } from '@arki/dot/feature';
+import { defineFeature, feature } from '@arki/dot/feature';
+import { defineApp, plugin, rename, service, token } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { RouteBundle } from '../bundle.js';
 import { endpoints, routes, rpcMount } from '../bundle.js';
 import { route } from '../contract.js';
-import { endpoints as coreEndpoints, HTTP_PLUGIN_ERROR_CODES, http, registerRoutes } from '../dot.js';
+import { endpoints as coreEndpoints, http, HTTP_PLUGIN_ERROR_CODES, registerRoutes } from '../dot.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 
 const listOrders = route.get('/orders', {
@@ -62,21 +64,25 @@ const ordersPlugin = plugin({
   configure(ctx) {
     registerRoutes(ctx, [listOrders, progress]);
   },
-  provides: { [OrdersRoutes.key]: ({ ordersDb }) =>
-    routes()
+  provides: {
+    [OrdersRoutes.key]: ({ ordersDb }) =>
+      routes()
         .bind(listOrders, () => ordersDb.list())
         .bind(progress, async function* ({ params }) {
           yield { step: Number(params.id === 'o1') };
-        }) },
+        }),
+  },
 });
 
 describe('http() plugin', () => {
   it('collects bundles, serves via the socketless fetch seam, and registers manifest actions', async () => {
-    const app = await defineApp('http-test')
-      .use(ordersDbPlugin)
-      .use(ordersPlugin)
-      .serve(http({ port: 0, bundles: [OrdersRoutes] }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-test')
+        .use(ordersDbPlugin)
+        .use(ordersPlugin)
+        .serve(http({ port: 0, bundles: [OrdersRoutes] }))
+        .boot(),
+    );
 
     const { httpServer } = app.services;
     // Not started: no socket, but the composed handler works.
@@ -96,7 +102,7 @@ describe('http() plugin', () => {
       plugin: 'http',
     });
 
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   // The point of a driver: the app lists its features once, in
@@ -106,23 +112,27 @@ describe('http() plugin', () => {
     const orders = feature('orders', {
       needs: { ordersDb: service<OrdersDb>() },
       actions: [listOrders],
-      use: [endpoints(({ ordersDb }: { readonly ordersDb: OrdersDb }) => routes().bind(listOrders, () => ordersDb.list()))],
+      use: [
+        endpoints(({ ordersDb }: { readonly ordersDb: OrdersDb }) => routes().bind(listOrders, () => ordersDb.list())),
+      ],
     });
     // A feature with no HTTP surface is skipped, not an error.
     const quiet = feature('quiet', {});
 
-    const app = await defineApp('http-feature-test')
-      .use(ordersDbPlugin)
-      .features([orders, quiet])
-      .serve(http({ port: 0 }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-feature-test')
+        .use(ordersDbPlugin)
+        .features([orders, quiet])
+        .serve(http({ port: 0 }))
+        .boot(),
+    );
 
     const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
     // Route contracts belong to the feature; the driver declares none of its own.
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders:orders.list']);
 
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it("serves a defineFeature feature's endpoints(core, build) next to an object-form feature", async () => {
@@ -135,7 +145,12 @@ describe('http() plugin', () => {
     });
     // The store needs `ordersDb` unbound; the feature names the handle once, in `.needs()`.
     const base = defineFeature('orders').needs({ ordersDb: ordersDbPlugin.provides.ordersDb }).infra(store);
-    const core = base.usecases({ list: ({ store }: DepsOf<typeof base>) => () => store.all() });
+    const core = base.usecases({
+      list:
+        ({ store }: DepsOf<typeof base>) =>
+        () =>
+          store.all(),
+    });
     const orderRoutes = (c: typeof core) =>
       coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });
     const orders = core.entrypoints(orderRoutes(core));
@@ -144,11 +159,13 @@ describe('http() plugin', () => {
       use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
     });
 
-    const app = await defineApp('http-mixed')
-      .infra(ordersDbPlugin)
-      .features([orders, status])
-      .entrypoints(http({ port: 0 }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-mixed')
+        .infra(ordersDbPlugin)
+        .features([orders, status])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    );
 
     const { httpServer } = app.services;
     const ordersRes = await httpServer.fetch(new Request('http://in-process/orders'));
@@ -160,7 +177,7 @@ describe('http() plugin', () => {
       'orders:orders.list',
       'status:health.get',
     ]);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('types endpoints(core, build) services from the core', () => {
@@ -180,8 +197,11 @@ describe('http() plugin', () => {
       use: [endpoints(() => routes().bind(listOrders, () => []))],
     });
 
-    // @ts-expect-error — http() is a driving adapter: it belongs in .serve(), after .features()
-    const tooEarly = () => defineApp('http-too-early').use(http({ port: 0 })).features([orders]);
+    const tooEarly = () =>
+      defineApp('http-too-early')
+        // @ts-expect-error — http() is a driving adapter: it belongs in .serve(), after .features()
+        .use(http({ port: 0 }))
+        .features([orders]);
     expect(tooEarly).toBeTypeOf('function');
   });
 
@@ -191,12 +211,14 @@ describe('http() plugin', () => {
       use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
     });
 
-    const app = await defineApp('http-mixed-test')
-      .use(ordersDbPlugin)
-      .use(ordersPlugin)
-      .features([status])
-      .serve(http({ port: 0, bundles: [OrdersRoutes] }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-mixed-test')
+        .use(ordersDbPlugin)
+        .use(ordersPlugin)
+        .features([status])
+        .serve(http({ port: 0, bundles: [OrdersRoutes] }))
+        .boot(),
+    );
 
     const { httpServer } = app.services;
     const ordersRes = await httpServer.fetch(new Request('http://in-process/orders'));
@@ -204,7 +226,7 @@ describe('http() plugin', () => {
     const healthRes = await httpServer.fetch(new Request('http://in-process/health'));
     expect(await healthRes.json()).toEqual({ ok: true });
 
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('fails boot with E010 when a feature publishes a routes slice that is not a bundle', async () => {
@@ -212,7 +234,13 @@ describe('http() plugin', () => {
       use: [{ key: 'routes', actions: [], resolve: () => ({ not: 'a bundle' }) }],
     });
 
-    await expect(defineApp('http-broken-slice').features([broken]).serve(http({ port: 0 })).boot()).rejects.toMatchObject({
+    await expect(
+      defineApp('http-broken-slice')
+        .features([broken])
+        .serve(http({ port: 0 }))
+        .boot(),
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
       cause: { code: HTTP_PLUGIN_ERROR_CODES.routesSliceInvalid },
     });
   });
@@ -224,18 +252,22 @@ describe('http() plugin', () => {
     const SlowRoutes = token<RouteBundle>()('slow.routes');
     const slowPlugin = plugin({
       name: 'slow',
-      provides: { [SlowRoutes.key]: () =>
-        routes().bind(slow, async () => {
+      provides: {
+        [SlowRoutes.key]: () =>
+          routes().bind(slow, async () => {
             entered.resolve();
             await gate.promise;
             return { done: true };
-          }) },
+          }),
+      },
     });
 
-    const app = await defineApp('http-drain')
-      .use(slowPlugin)
-      .serve(http({ port: 0, bundles: [SlowRoutes] }))
-      .start();
+    const app = await orThrow(
+      defineApp('http-drain')
+        .use(slowPlugin)
+        .serve(http({ port: 0, bundles: [SlowRoutes] }))
+        .start(),
+    );
 
     const url = app.services.httpServer.url();
     expect(url).toBeDefined();
@@ -256,7 +288,7 @@ describe('http() plugin', () => {
     expect(app.services.httpServer.inflight()).toBe(0);
     expect(app.services.httpServer.port()).toBeUndefined();
 
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('throws the E005 drain watchdog when handlers outlive the budget', async () => {
@@ -264,19 +296,23 @@ describe('http() plugin', () => {
     const HangRoutes = token<RouteBundle>()('hang.routes');
     const hangPlugin = plugin({
       name: 'hang',
-      provides: { [HangRoutes.key]: () =>
-        routes().bind(hang, async () => {
+      provides: {
+        [HangRoutes.key]: () =>
+          routes().bind(hang, async () => {
             await new Promise<never>(() => {
               // Deliberately never settles — the drain watchdog is the subject.
             });
             return { done: true };
-          }) },
+          }),
+      },
     });
 
-    const app = await defineApp('http-hang')
-      .use(hangPlugin)
-      .serve(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
-      .start();
+    const app = await orThrow(
+      defineApp('http-hang')
+        .use(hangPlugin)
+        .serve(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
+        .start(),
+    );
 
     const url = app.services.httpServer.url();
     const controller = new AbortController();
@@ -285,7 +321,7 @@ describe('http() plugin', () => {
 
     let caught: unknown;
     try {
-      await app.stop();
+      await orThrow(app.stop());
     } catch (error) {
       caught = error;
     }
@@ -347,37 +383,43 @@ describe('http() with feature instances', () => {
   ) => app.services.httpServer.fetch(new Request(`http://in-process${path}`));
 
   it('serves each instance under /<instance>, each on its own rebound need', async () => {
-    const app = await defineApp('http-instances')
-      .infra(database)
-      .infra(databaseEu)
-      .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
-      .entrypoints(http({ port: 0 }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-instances')
+        .infra(database)
+        .infra(databaseEu)
+        .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    );
     expect(await (await get(app, '/eu/reports')).json()).toEqual({ region: 'eu' });
     expect(await (await get(app, '/us/reports')).json()).toEqual({ region: 'us' });
     expect(await (await get(app, '/eu')).json()).toEqual({ region: 'eu' });
     expect((await get(app, '/reports')).status).toBe(404);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('honours a custom instancePath', async () => {
-    const app = await defineApp('http-instances-custom')
-      .infra(database)
-      .infra(databaseEu)
-      .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
-      .entrypoints(http({ port: 0, instancePath: (instance, path) => `/v1${path}.${instance}` }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-instances-custom')
+        .infra(database)
+        .infra(databaseEu)
+        .features([reports.instance('eu', { db: databaseEu.provides.dbEu }), reports.instance('us')])
+        .entrypoints(http({ port: 0, instancePath: (instance, path) => `/v1${path}.${instance}` }))
+        .boot(),
+    );
     expect(await (await get(app, '/v1/reports.eu')).json()).toEqual({ region: 'eu' });
     expect(await (await get(app, '/v1/reports.us')).json()).toEqual({ region: 'us' });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('leaves a plain feature unprefixed, and still refuses the same plain feature twice', async () => {
-    const plain = await defineApp('http-plain')
-      .infra(database)
-      .features([reports])
-      .entrypoints(http({ port: 0 }))
-      .boot();
+    const plain = await orThrow(
+      defineApp('http-plain')
+        .infra(database)
+        .features([reports])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    );
     expect(await (await get(plain, '/reports')).json()).toEqual({ region: 'us' });
     await plain.dispose();
 
@@ -393,7 +435,10 @@ describe('http() with feature instances', () => {
         .features([reports, other])
         .entrypoints(http({ port: 0 }))
         .boot(),
-    ).rejects.toThrow(/duplicate route GET \/reports/);
+    ).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({ message: expect.stringMatching(/duplicate route GET \/reports/) }),
+    });
   });
 
   it('serves an instance rpc mount under /<instance> and hands the handler the un-prefixed URL', async () => {
@@ -409,12 +454,14 @@ describe('http() with feature instances', () => {
         }),
       ),
     );
-    const app = await defineApp('http-instances-rpc')
-      .features([gateway.instance('eu')])
-      .entrypoints(http({ port: 0 }))
-      .boot();
+    const app = await orThrow(
+      defineApp('http-instances-rpc')
+        .features([gateway.instance('eu')])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    );
     expect(await (await get(app, '/eu/rpc/orders.list')).json()).toEqual({ path: '/rpc/orders.list' });
     expect((await get(app, '/rpc/orders.list')).status).toBe(404);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

@@ -11,6 +11,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { defineFeature } from '@arki/dot/feature';
 import { defineApp, plugin, rename } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { ScheduleNameOf } from './dot.js';
 import type { Locker } from './index.js';
@@ -71,7 +72,7 @@ function build(lock: true | string | undefined) {
 
 describe('feature instance schedules', () => {
   it('registers one schedule per instance, and a trigger runs only that instance', async () => {
-    const app = await build(undefined).instances.start();
+    const app = await orThrow(build(undefined).instances.start());
     expect(app.services.scheduler.names).toEqual(['send-digest#eu', 'send-digest#us']);
     await expect(app.services.scheduler.trigger('send-digest#eu')).resolves.toEqual({
       name: 'send-digest#eu',
@@ -83,7 +84,7 @@ describe('feature instance schedules', () => {
       name: 'send-digest',
       status: 'unknown',
     });
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('types an instance trigger name as `<name>#<instance>` and a plain one as `<name>`', () => {
@@ -94,39 +95,39 @@ describe('feature instance schedules', () => {
 
   it('gives each instance its own default lock key', async () => {
     const { keys, instances } = build(true);
-    const app = await instances.start();
+    const app = await orThrow(instances.start());
     await app.services.scheduler.trigger('send-digest#eu');
     await app.services.scheduler.trigger('send-digest#us');
     expect(keys).toEqual(['send-digest#eu', 'send-digest#us']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('keeps a custom lock key shared by both instances', async () => {
     const { keys, instances } = build('shared');
-    const app = await instances.start();
+    const app = await orThrow(instances.start());
     await app.services.scheduler.trigger('send-digest#eu');
     await app.services.scheduler.trigger('send-digest#us');
     expect(keys).toEqual(['shared', 'shared']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('names the manifest actions of each instance under its own plugin', async () => {
-    const app = await build(true).instances.start();
+    const app = await orThrow(build(true).instances.start());
     const fires = app.manifest.actions.filter(action => action.binding === 'schedule');
     expect(fires.map(action => `${action.plugin}:${action.id}`)).toEqual([
       'reports#eu:send-digest.fire',
       'reports#us:send-digest.fire',
     ]);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 
   it('leaves a plain feature byte-identical: name, action id and default lock key', async () => {
     const { keys, plain } = build(true);
-    const app = await plain.start();
+    const app = await orThrow(plain.start());
     expect(app.services.scheduler.names).toEqual(['send-digest']);
     expect(app.manifest.actions.map(action => action.id)).toContain('send-digest.fire');
     await app.services.scheduler.trigger('send-digest');
     expect(keys).toEqual(['send-digest']);
-    await app.dispose();
+    await orThrow(app.dispose());
   });
 });

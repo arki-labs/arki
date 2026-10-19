@@ -5,7 +5,7 @@
  *
  * Hand-rolled instead of `AbortSignal.any`, which Hermes (React Native) lacks.
  */
-export function linkedController(parent: AbortSignal | undefined): {
+export function linkedController(parent?: AbortSignal): {
   readonly controller: AbortController;
   readonly unlink: () => void;
 } {
@@ -13,6 +13,7 @@ export function linkedController(parent: AbortSignal | undefined): {
   const onAbort = (): void => {
     controller.abort(parent?.reason);
   };
-  parent?.addEventListener('abort', onAbort, { once: true });
+  if (parent?.aborted) controller.abort(parent.reason);
+  else parent?.addEventListener('abort', onAbort, { once: true });
   return { controller, unlink: () => parent?.removeEventListener('abort', onAbort) };
 }

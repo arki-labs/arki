@@ -11,56 +11,83 @@
  * leaves the old app's disposal in `hot.data`, and the new instance's first
  * `get()` waits for it before `start()`.
  */
-import { getLogger } from '@arki/log';
+import type { Failure, FailureIn } from '@arki/failure';
+import { scopeAggregate, ScopeFailed } from '@arki/async';
+import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { DotApp, DotAppLifecycle } from './define-app.js';
 import type { ServiceRecord } from './plugin-contract.js';
 import { hookSignals } from './signals.js';
 
-const log = getLogger('arki:dot:app-runtime');
-
-/** The `hot.data` key where a replaced module instance leaves its app's disposal. */
-const DISPOSING_KEY = 'arki.appRuntime.disposing';
+/**
+ * A replaced module no longer owns the application's runtime.
+ * @fix Obtain the runtime exported by the current module.
+ * @verify bun run test -- src/tests/app-runtime.test.ts
+ */
+export const RuntimeReplaced = defineFailure('dot.runtime_replaced', {
+  status: 503,
+  message: 'This module was replaced; the current module owns the application.',
+  remediation: 'Obtain the runtime exported by the current module.',
+});
 
 /**
- * Wait for the app disposal a replaced module instance left in `hot.data`. A
- * failed disposal is logged, not rethrown: if it left a handle open, the new
- * start fails loudly on its own.
+ * Previous ownership could not be released, so starting another app is unsafe.
+ * @fix Resolve the disposal failure before starting another owner of the resources.
+ * @verify bun run test -- src/tests/app-runtime.test.ts
  */
-async function settled(previous: unknown): Promise<void> {
-  if (!(previous instanceof Promise)) return;
+export const RuntimeReleaseFailed = defineFailure('dot.runtime_release_failed', {
+  status: 500,
+  message: 'The previous application could not release its resources.',
+  remediation: 'Resolve the disposal failure before starting another owner of the resources.',
+});
+
+const DISPOSING_KEY = 'arki.appRuntime.disposing';
+
+function failed<Value>(value: Value): value is FailureIn<Value> {
+  return isFailure<unknown>(value);
+}
+
+function startedApp<S extends ServiceRecord, Open extends Failure, Close extends Failure>(
+  value: DotApp<S, Close, Open> | Failure,
+): value is DotApp<S, Close, Open> {
+  return !isFailure<unknown>(value);
+}
+
+function cleanupFailed(outcome: unknown): boolean {
+  return ScopeFailed.is(outcome) && outcome.data.cleanupCount > 0;
+}
+
+/** HMR data is an untyped edge; preserve its failure privately under one canonical definition. */
+async function previousDisposal(previous: unknown) {
+  if (previous === undefined) return;
   try {
-    await previous;
+    const outcome: unknown = await Promise.resolve(previous);
+    if (outcome !== undefined) return RuntimeReleaseFailed({ cause: outcome });
   } catch (error) {
-    log.error('the replaced app failed to dispose', { error: error instanceof Error ? error : String(error) });
+    return RuntimeReleaseFailed({ cause: error });
+  }
+  return;
+}
+
+async function disposeOwned<Outcome>(dispose: () => Promise<Outcome>) {
+  try {
+    return await dispose();
+  } catch (error) {
+    return UnexpectedDefect({ cause: error });
   }
 }
 
-function replacedError(): Error {
-  return new Error('[app-runtime] this module was replaced by a hot update; the new module instance owns the app.');
-}
-
 /**
- * Start `app` once per module instance and hand out the started app.
- *
- * - `get()` returns the cached start. A failed start is not cached, so the
- *   next call tries again (a database that comes up late needs no restart).
- * - With `hot` (`import.meta.hot`), a hot update disposes the app, and the
- *   replacing instance starts only after that disposal finished. The replaced
- *   instance's `get()` then rejects: the new instance owns the app.
- * - The started app is hooked to SIGTERM / SIGINT (`hookSignals`): a signal
- *   drains it before the process exits. A hot update unhooks it.
- * - `onStarted` runs once per started app, before `get()` resolves. If it
- *   throws, the app is disposed and `get()` rejects.
+ * Start one Dot app per module instance and wait for prior HMR disposal.
+ * Resolved start failures are never cached as ready. A failed release prevents
+ * another owner from starting. Replaced modules return RuntimeReplaced.
  *
  * @example
- * ```ts
  * const runtime = createAppRuntime(app, { hot: import.meta.hot });
  * export const getApp = runtime.get;
- * ```
  */
-export function createAppRuntime<S extends ServiceRecord>(
-  app: DotAppLifecycle<S>,
+export function createAppRuntime<S extends ServiceRecord, Open extends Failure = never, Close extends Failure = never>(
+  app: DotAppLifecycle<S, Open, Close>,
   options: {
     readonly hot?:
       | {
@@ -68,33 +95,47 @@ export function createAppRuntime<S extends ServiceRecord>(
           dispose(callback: (data: Record<string, unknown>) => void): void;
         }
       | undefined;
-    readonly onStarted?: ((app: DotApp<S>) => void) | undefined;
+    readonly onStarted?: ((app: DotApp<S, Close, Open>) => void) | undefined;
   } = {},
-): { get(): Promise<DotApp<S>> } {
+) {
   const { hot, onStarted } = options;
-  const previousGone = settled(hot?.data[DISPOSING_KEY]);
-  let running: Promise<DotApp<S>> | undefined;
+  const previousGone = previousDisposal(hot?.data[DISPOSING_KEY]);
+  let running: ReturnType<typeof start> | undefined;
   let unhookSignals: (() => void) | undefined;
   let replaced = false;
+  let releaseFailure: ReturnType<typeof RuntimeReleaseFailed> | undefined;
 
-  /** Throw when a hot update replaced this module instance. A function, so later reads of `replaced` are not narrowed. */
-  const assertCurrent = (): void => {
-    if (replaced) throw replacedError();
-  };
-
-  async function start(): Promise<DotApp<S>> {
-    await previousGone;
-    // Replaced before it began: never start an app only to dispose it.
-    assertCurrent();
-    const started = await app.start();
+  async function start() {
+    const previous = await previousGone;
+    if (previous !== undefined) return previous;
+    if (releaseFailure !== undefined) return releaseFailure;
+    if (replaced) return RuntimeReplaced();
+    let started;
+    try {
+      started = await app.start();
+    } catch (error) {
+      // An unmanaged thrown start has no typed proof that rollback completed.
+      releaseFailure = RuntimeReleaseFailed({ cause: error });
+      return UnexpectedDefect({ cause: error });
+    }
+    if (!startedApp(started)) {
+      if (cleanupFailed(started)) {
+        releaseFailure = RuntimeReleaseFailed({ cause: started });
+      }
+      return started;
+    }
     try {
       onStarted?.(started);
+      if (!replaced) unhookSignals = hookSignals(started);
     } catch (error) {
-      await started.dispose();
-      throw error;
+      const failure = UnexpectedDefect({ cause: error });
+      const disposed = await disposeOwned(() => started.dispose());
+      if (failed(disposed)) {
+        releaseFailure = RuntimeReleaseFailed({ cause: disposed });
+        return scopeAggregate([failure], [disposed]);
+      }
+      return failure;
     }
-    // Replaced while starting: the hot dispose below disposes this app, so it gets no signal hook.
-    if (!replaced) unhookSignals = hookSignals(started);
     return started;
   }
 
@@ -104,24 +145,25 @@ export function createAppRuntime<S extends ServiceRecord>(
     running = undefined;
     unhookSignals?.();
     unhookSignals = undefined;
+    // This promise always resolves, so HMR without a replacement module cannot
+    // leave an unobserved rejection. The next module validates its outcome.
     data[DISPOSING_KEY] = (async () => {
-      await previousGone;
+      const previous = await previousGone;
+      if (previous !== undefined) return previous;
+      if (releaseFailure !== undefined) return releaseFailure;
       if (current === undefined) return;
-      let started: DotApp<S>;
-      try {
-        started = await current;
-      } catch {
-        return; // a start that failed left nothing to dispose
-      }
-      await started.dispose();
+      const started = await current;
+      if (!startedApp(started)) return releaseFailure;
+      return disposeOwned(() => started.dispose());
     })();
   });
 
   return {
     get() {
-      running ??= start().catch((error: unknown) => {
-        running = undefined;
-        throw error;
+      if (replaced) return Promise.resolve(RuntimeReplaced());
+      running ??= start().then(outcome => {
+        if (failed(outcome)) running = undefined;
+        return outcome;
       });
       return running;
     },

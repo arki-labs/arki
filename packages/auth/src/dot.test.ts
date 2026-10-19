@@ -9,6 +9,7 @@ import type { Mailer } from '@arki/mail';
 import { defineApp } from '@arki/dot';
 import { plugin } from '@arki/dot/plugin';
 import { testPlugin } from '@arki/dot/test-harness';
+import { orThrow } from '@arki/failure';
 import { mailer } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
@@ -56,23 +57,25 @@ describe('auth Dot plugin', () => {
   it('boots on the graph db and mailer and serves sessions', async () => {
     const { db, dispose } = await testAuth(definition, { tables: authTables });
     try {
-      const app = await testPlugin(
-        auth(definition, {
-          tables: authTables,
-          rateLimit: false,
-          runtime: () => ({ url: 'http://localhost:3000', secret: SECRET, production: false }),
-        }),
-      )
-        .provide('db', db)
-        .provide('mail', mailer({ transport: mailSink(), from: 'Notes <auth@notes.test>' }))
-        .boot();
+      const app = await orThrow(
+        testPlugin(
+          auth(definition, {
+            tables: authTables,
+            rateLimit: false,
+            runtime: () => ({ url: 'http://localhost:3000', secret: SECRET, production: false }),
+          }),
+        )
+          .provide('db', db)
+          .provide('mail', mailer({ transport: mailSink(), from: 'Notes <auth@notes.test>' }))
+          .boot(),
+      );
       try {
         const { headers } = await actingAs(app.services.auth, { email: 'ada@notes.test' });
         await expect(app.services.auth.principal(headers)).resolves.toMatchObject({
           user: { email: 'ada@notes.test' },
         });
       } finally {
-        await app.dispose();
+        await orThrow(app.dispose());
       }
     } finally {
       await dispose();

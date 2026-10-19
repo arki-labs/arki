@@ -18,6 +18,7 @@
  * builder's accumulated generics survive real-world depth.
  */
 
+import { orThrow } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
@@ -279,7 +280,7 @@ const catalogPlugin = plugin({
         async addProduct(id) {
           await db.query(`insert ${id}`);
           products.push(id);
-          const index = await search.get(); // initializes search on first product
+          const index = orThrow(await search.get()); // initializes search on first product
           index.index(id);
         },
       };
@@ -396,7 +397,7 @@ const notificationsPlugin = plugin({
       ev('boot:notifications');
       return {
         welcome: async user => {
-          const client = await mailer.get(); // initializes mailer on first use
+          const client = orThrow(await mailer.get()); // initializes mailer on first use
           client.send(user);
         },
       };
@@ -489,7 +490,7 @@ const indexerPlugin = plugin({
   start: async ({ search }) => {
     ev('start:worker-indexer');
     // Warms the search connection — second get() elsewhere must reuse it.
-    await search.get();
+    orThrow(await search.get());
   },
   stop: () => ev('stop:worker-indexer'),
 });
@@ -594,7 +595,7 @@ describe('stress: 28-plugin commerce composition', () => {
     const observed: DotLifecycleEvent[] = [];
 
     const builder = composeStressApp();
-    const app = await builder.start();
+    const app = orThrow(await builder.start());
     app.subscribe(e => observed.push(e));
 
     /* ---- type-level spot checks across the 28-way intersection ---- */
@@ -632,9 +633,9 @@ describe('stress: 28-plugin commerce composition', () => {
     expect(txn).toBe('txn-100');
     expect(app.services.analytics.seen).toEqual(['order.placed']); // bus fan-out worked
     expect(await app.services.api.handle('/admin/stats')).toBe('reports:report: 1 products, 1 orders');
-    const searchState = await app.services.search.get();
+    const searchState = orThrow(await app.services.search.get());
     expect(searchState.docs).toEqual(['sku-1']);
-    const mailerState = await app.services.mailer.get();
+    const mailerState = orThrow(await app.services.mailer.get());
     expect(mailerState.sent).toEqual(['noreply@stress.test -> alice@example.com']);
     expect(events.filter(e => e.startsWith('lazyinit:'))).toHaveLength(2); // still single-flight
 
@@ -669,7 +670,7 @@ describe('stress: 28-plugin commerce composition', () => {
 
     /* ---- teardown: reverse stop, then reverse dispose + lazy cleanup ---- */
     events.length = 0;
-    await app.dispose();
+    orThrow(await app.dispose());
     expect(app.state).toBe('disposed');
     expect(events.filter(e => e.startsWith('stop:'))).toEqual([
       'stop:healthcheck',
@@ -693,7 +694,7 @@ describe('stress: 28-plugin commerce composition', () => {
       'dispose:db',
     ]);
     // The disposed lazy handle refuses further use.
-    await expect(app.services.search.get()).rejects.toThrow(/disposed/);
+    expect(await app.services.search.get()).toMatchObject({ code: 'dot.lazy_closed' });
     // Observer saw the teardown phases.
     expect(observed.some(e => e.kind === 'phase' && e.phase === 'dispose' && e.status === 'completed')).toBe(true);
   });
