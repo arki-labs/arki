@@ -394,6 +394,36 @@ describe('revision', () => {
     expect(CODES.staleRevision).toBe('ARKI_JOURNAL_E010');
     await settle();
   });
+
+  it('a retry of dead jobs is refused when another job of the run died after the preview', async () => {
+    const mod = module();
+    // Another deploy, without this workflow's code, claims the run's first step: the job dies stranded.
+    const deployless = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+    const other = deployless
+      .workflow('test.fm.other', { version: 1, input: z.object({}) })
+      .step('noop', () => null)
+      .finish();
+    const deploylessJournal = deployless.compose({ workflows: [other], workflowMeta });
+    const id = newId('dead');
+    expectOk(await journal.run(db, checkout.start, { input: {}, id }, caller));
+    await deploylessJournal.drain(db);
+
+    const input = { runId: id, path: 'hold', phase: 'do' as const };
+    const preview = await mod.actions.retryStep.runPreview(input, NO_CTX);
+    expect(preview).toMatchObject({ how: 'jobRetried', count: 1 });
+
+    // A job's death writes no event, so the run's version is the same; the approval still must not cover a new death.
+    const [dead] = await db
+      .select()
+      .from(tables.jobs)
+      .where(and(eq(tables.jobs.runId, id), isNotNull(tables.jobs.deadAt)));
+    if (dead === undefined) throw new Error('the stranded step job should be dead');
+    await db.insert(tables.jobs).values({ ...dead, id: `${dead.id}_late`, effect: 'workflow.timer' });
+    await expect(mod.actions.retryStep.runExecute(input, NO_CTX, permit(preview.revision))).rejects.toMatchObject({
+      code: CODES.staleRevision,
+      status: 409,
+    });
+  });
 });
 
 describe('error mapping', () => {

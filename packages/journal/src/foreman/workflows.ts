@@ -263,6 +263,8 @@ async function guarded<T>(runId: string, run: () => Promise<T>): Promise<T> {
 
 const isOver = (detail: RunDetail) => detail.run.finishedAt !== null;
 const revisionOf = (detail: RunDetail) => String(detail.run.version);
+/** The revision of a retry of dead jobs: the run's version and the exact jobs, so the approval covers what is retried. */
+const deadJobsRevision = (detail: RunDetail, ids: readonly string[]) => `${revisionOf(detail)}:${ids.join(',')}`;
 
 /** How many of a failed child node's children are failed now: the latest try of each child, `~2` after `~1`. */
 function failedChildren(children: RunDetail['children'], path: string): number {
@@ -333,8 +335,8 @@ export function journalWorkflowsModule<
   }
 
   /** The dead jobs of one run: what an operator retries when the run's code came back after the jobs died. */
-  async function deadJobsOfRun(runId: string): Promise<number> {
-    let count = 0;
+  async function deadJobsOfRun(runId: string): Promise<readonly string[]> {
+    const ids: string[] = [];
     let after: string | undefined;
     for (;;) {
       const page = await journal.jobs(db, {
@@ -342,8 +344,8 @@ export function journalWorkflowsModule<
         limit: MAX_PAGE,
         ...(after === undefined ? {} : { after }),
       });
-      count += page.jobs.filter(job => job.runId === runId).length;
-      if (page.next === null) return count;
+      ids.push(...page.jobs.filter(job => job.runId === runId).map(job => job.id));
+      if (page.next === null) return ids.toSorted();
       after = page.next;
     }
   }
@@ -620,13 +622,16 @@ export function journalWorkflowsModule<
       // A step whose job died while the run was stranded: every dead job of the run goes again.
       if (step.status === 'scheduled') {
         const dead = await deadJobsOfRun(runId);
-        if (dead === 0) throw stepNotDead(runId, `Step "${path}" (${phase}) is waiting and the run has no dead job`);
+        if (dead.length === 0) {
+          throw stepNotDead(runId, `Step "${path}" (${phase}) is waiting and the run has no dead job`);
+        }
         if (detail.run.stranded !== null) throw stranded(runId, 'its code is not registered');
         return {
           ...base,
+          revision: deadJobsRevision(detail, dead),
           how: 'jobRetried' as const,
-          count: dead,
-          consequence: `${dead} dead job(s) of this run go back to pending and run again. If they ran side effects before they died, those may repeat.`,
+          count: dead.length,
+          consequence: `${dead.length} dead job(s) of this run go back to pending and run again. If they ran side effects before they died, those may repeat.`,
         };
       }
       if (step.status !== 'failed') throw stepNotDead(runId, `Step "${path}" (${phase}) is ${step.status}, not failed`);
@@ -655,7 +660,12 @@ export function journalWorkflowsModule<
       };
     },
     execute: async ({ runId, path, phase, reason }, _ctx: Record<string, never>, permit) => {
-      await assertUnchanged(runId, permit);
+      const detail = await openRun(runId);
+      const step = detail.steps.find(candidate => candidate.path === path && candidate.phase === phase);
+      // A job's death writes no event, so the run's version alone would not see one more dead job since the preview.
+      const revision =
+        step?.status === 'scheduled' ? deadJobsRevision(detail, await deadJobsOfRun(runId)) : revisionOf(detail);
+      if (revision !== permit.expectedRevision) throw stale(runId);
       const done = await guarded(runId, () =>
         journal.workflows.retryStep(db, { runId, path, phase }, operationOf(permit, reason)),
       );
