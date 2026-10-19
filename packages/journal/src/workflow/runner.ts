@@ -31,6 +31,7 @@ import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
 import { workflowWith } from './define.js';
 import { workflowMachine } from './machine.js';
+import { codeOf, isStrandedError } from './stranded.js';
 
 /** The library-owned effect that runs one node attempt. */
 export const STEP_EFFECT = 'workflow.step';
@@ -446,17 +447,29 @@ export function createWorkflows<
 
   /** Every definition a `compose({ workflows })` of this `initJournal()` registered, by `name@version`. A start of any other has no step effect to queue its job for. */
   const started = new Map<string, WorkflowDef>();
+  /** The code of the run's own pinned `(name, version)`, never another version. A stranded run throws: it is never run with other code. */
   const definitionOf = (row: Row): WorkflowDef => {
-    const def = started.get(`${row.name}@${row.workflowVersion}`);
-    if (def === undefined) {
-      throw new JournalError(
-        'WORKFLOW_UNKNOWN',
-        'workflow',
-        row.id,
-        `no registered workflow "${row.name}" v${row.workflowVersion}`,
-      );
-    }
-    return def;
+    const code = codeOf(row, started);
+    if (code instanceof JournalError) throw code;
+    return code;
+  };
+  const newestVersionOf = (name: string) =>
+    Math.max(0, ...[...started.values()].filter(def => def.name === name).map(def => def.version));
+  /** A stranded job is seen on every retry; the warning is given once per `(name, version)` per process. */
+  const warnedStranded = new Set<string>();
+  const warnStranded = (row: Row, error: JournalError) => {
+    const id = `${row.name}@${row.workflowVersion}`;
+    if (warnedStranded.has(id)) return;
+    warnedStranded.add(id);
+    debugWorkflow.warn(
+      '{name} v{version}: run {runId} is stranded ({code}); its jobs are dead until the code is back',
+      {
+        name: row.name,
+        version: row.workflowVersion,
+        runId: row.id,
+        code: error.code,
+      },
+    );
   };
 
   /**
@@ -1316,6 +1329,15 @@ export function createWorkflows<
         `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
       );
     }
+    // A new run starts the newest version. A child starts the version its parent's code names, so a parent of an older version keeps working.
+    if (parent === undefined && def.version < newestVersionOf(def.name)) {
+      throw new JournalError(
+        'WORKFLOW_VERSION_RETIRED',
+        'workflow',
+        def.name,
+        `workflow "${def.name}" v${def.version} no longer starts runs: v${newestVersionOf(def.name)} is registered`,
+      );
+    }
     const first = def.nodes[0];
     if (first === undefined) throw new JournalError('BAD_DEFINITION', 'workflow', def.name, 'a workflow needs a node');
     const stored = storable(args.input, def.limits.payload, 'the input', def.name);
@@ -1401,50 +1423,41 @@ export function createWorkflows<
       if (waiting === undefined || waiting.kind !== 'waitFor') {
         throw new JournalError('BAD_DEFINITION', 'workflow', def.name, `no waitFor node waits for signal '${name}'`);
       }
-      const payloadSchema = waiting.schema;
       return j.command(
         `${def.name}.signal.${name}`,
         signalSchemaFor<Signals[Name]>(),
         async (args, context): Promise<SignalOutcome> => {
           const { write } = context;
-          if (!started.has(`${def.name}@${def.version}`)) {
-            throw new JournalError(
-              'WORKFLOW_UNKNOWN',
-              'workflow',
-              def.name,
-              `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
-            );
-          }
-          // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
-          const stored = storable(args.payload, def.limits.payload, `the payload of signal '${name}'`, args.runId);
-          if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
-          try {
-            await parseAsync(payloadSchema, stored.value);
-          } catch (error) {
-            if (error instanceof SchemaError) {
-              return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(error)}` });
-            }
-            throw error;
-          }
           const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
           const before = { parked: false };
           const written = await write(run, args.runId, async (row, inside) => {
             if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
-            if (row.name !== def.name || row.workflowVersion !== def.version) {
+            if (row.name !== def.name) {
               return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
-            }
-            if (row.shapeHash !== def.shapeHash) {
-              throw new JournalError(
-                'WORKFLOW_SHAPE_CHANGED',
-                'workflow',
-                row.id,
-                `"${def.name}" v${def.version} has other nodes than this run started with`,
-              );
             }
             // A signal for a finished run is dropped: a late webhook is not an error the sender should retry.
             if (row.finishedAt !== null) {
               result.status = 'finished';
               return [];
+            }
+            // The run's own version handles the signal, whichever version's `signal` command the caller used.
+            const own = definitionOf(row);
+            const ownWait = own.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
+            if (ownWait === undefined || ownWait.kind !== 'waitFor') {
+              return CommandConflict({
+                detail: `run "${args.runId}" is v${row.workflowVersion}, which has no wait for signal '${name}'`,
+              });
+            }
+            // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
+            const stored = storable(args.payload, own.limits.payload, `the payload of signal '${name}'`, args.runId);
+            if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
+            try {
+              await parseAsync(ownWait.schema, stored.value);
+            } catch (error) {
+              if (error instanceof SchemaError) {
+                return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(error)}` });
+              }
+              throw error;
             }
             const [inserted] = await inside.tx
               .insert(workflowSignals)
@@ -1465,16 +1478,16 @@ export function createWorkflows<
             const at = nowIso();
             const received = events.SignalReceived({ name, deliveryId: args.deliveryId, at });
             if (pastDeadline(row) && row.state !== 'compensating') {
-              return [received, ...(await deadlineEvents(inside.tx, def, row, at))];
+              return [received, ...(await deadlineEvents(inside.tx, own, row, at))];
             }
             const index =
-              row.state === 'parked' && row.waitingFor === name ? def.nodes.findIndex(n => n.name === row.node) : -1;
-            const node = def.nodes[index];
+              row.state === 'parked' && row.waitingFor === name ? own.nodes.findIndex(n => n.name === row.node) : -1;
+            const node = own.nodes[index];
             if (node === undefined || node.kind !== 'waitFor' || node.signal !== name) return [received];
             // The run waits for this signal: it is taken now, and the run moves on in this same commit.
             await takeSignal(inside.tx, row.id, name, node.name);
             result.status = 'woke';
-            return [received, ...(await wakeOnSignal(inside.tx, def, index, row, stored.value, at))];
+            return [received, ...(await wakeOnSignal(inside.tx, own, index, row, stored.value, at))];
           });
           if (isFailure(written)) return written;
           await settle(context, args.runId, written, before.parked);
@@ -1487,18 +1500,10 @@ export function createWorkflows<
   const cancelCommandFor = (def: WorkflowDef) =>
     j.command(`${def.name}.cancel`, cancelSchema, async (args, context): Promise<CancelOutcome> => {
       const { write, meta } = context;
-      if (!started.has(`${def.name}@${def.version}`)) {
-        throw new JournalError(
-          'WORKFLOW_UNKNOWN',
-          'workflow',
-          def.name,
-          `workflow "${def.name}" v${def.version} is not registered; pass it to compose({ workflows })`,
-        );
-      }
       const before = { parked: false };
       const written = await write(run, args.runId, async (row, inside) => {
         if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
-        if (row.name !== def.name || row.workflowVersion !== def.version) {
+        if (row.name !== def.name) {
           return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
         }
         if (row.finishedAt !== null) {
@@ -1507,12 +1512,14 @@ export function createWorkflows<
         if (row.state === 'compensating') {
           return CommandConflict({ detail: `run "${args.runId}" is already compensating` });
         }
+        // The run's own version undoes its work. A stranded run has no code to do that: the cancel is refused, not half done.
+        const own = definitionOf(row);
         before.parked = row.state === 'parked';
         const at = nowIso();
         const actorId = typeof meta['actorId'] === 'string' ? meta['actorId'] : null;
         return beginCompensation(
           inside.tx,
-          def,
+          own,
           row,
           at,
           [events.CancelRequested({ reason: args.reason, actorId, at })],
@@ -1555,15 +1562,28 @@ export function createWorkflows<
    * `meta` is the actor recorded on every checkpoint the library commits.
    */
   function register(defs: readonly WorkflowDef[], meta: SchemaInput<Meta>) {
+    // The commands (`start`, `signal`, `cancel`) find a run's code in `started`, the worker in this compose's
+    // registry: one compose with workflows per `initJournal()` keeps the two the same.
+    if (started.size > 0) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'workflow',
+        defs[0]?.name ?? 'workflows',
+        'this initJournal() already composed a journal with workflows; compose workflows once per initJournal()',
+      );
+    }
     const registry = new Map<string, WorkflowDef>();
     for (const def of defs) {
       const id = `${def.name}@${def.version}`;
-      if (registry.has(id)) {
+      const twin = registry.get(id);
+      if (twin !== undefined) {
         throw new JournalError(
           'BAD_DEFINITION',
           'workflow',
           def.name,
-          `workflow "${def.name}" v${def.version} is registered twice`,
+          twin.shapeHash === def.shapeHash
+            ? `workflow "${def.name}" v${def.version} is registered twice`
+            : `workflow "${def.name}" v${def.version} is registered twice with different nodes; bump the version for a changed shape`,
         );
       }
       registry.set(id, def);
@@ -1893,22 +1913,10 @@ export function createWorkflows<
       if (step === undefined || step.attempt !== data.attempt || step.status === 'done' || step.status === 'skipped') {
         return undefined;
       }
-      const def = registry.get(`${row.name}@${row.workflowVersion}`);
-      if (def === undefined) {
-        throw new JournalError(
-          'WORKFLOW_UNKNOWN',
-          'workflow',
-          runId,
-          `no registered workflow "${row.name}" v${row.workflowVersion}`,
-        );
-      }
-      if (def.shapeHash !== row.shapeHash) {
-        throw new JournalError(
-          'WORKFLOW_SHAPE_CHANGED',
-          'workflow',
-          runId,
-          `"${row.name}" v${row.workflowVersion} has other nodes than this run started with`,
-        );
+      const def = codeOf(row, registry);
+      if (def instanceof JournalError) {
+        warnStranded(row, def);
+        throw def;
       }
       const index = def.nodes.findIndex(candidate => candidate.name === data.path);
       const node = def.nodes[index];
@@ -1983,12 +1991,30 @@ export function createWorkflows<
       return StepDead({ detail: `step '${data.path}' of run ${runId} is dead: ${error}` });
     }
 
+    /**
+     * The retry of the step and timer jobs: the worker's default, except that a stranded run's job is dead at once.
+     * Retrying cannot help until the code is back, and then an operator retries the dead job. A returned failure
+     * (a dead step) is not retried either, as before.
+     */
+    const strandedRetry = defaultEffectRetry.while(reason => !isFailure(reason) && !isStrandedError(reason));
+
     const effect = j
       .effect(STEP_EFFECT, machine.run, needs, { NodeScheduled: (event, ctx) => runNode(event, ctx) })
       .withSchedule({
         // A retry is due at the time its event names; a first try is due now.
         runAt: event => new Date(dueAtOf(event.data)),
+        retry: strandedRetry,
       });
+
+    /** A timer of a stranded run writes nothing and throws, so the job is dead and visible, as a step job is. */
+    const refuseStranded = async (runId: string, db: StepEffectContext['db']) => {
+      const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
+      if (row === undefined || row.finishedAt !== null) return;
+      const code = codeOf(row, registry);
+      if (!(code instanceof JournalError)) return;
+      warnStranded(row, code);
+      throw code;
+    };
 
     /**
      * A park's wake time and a run's deadline. The job is due at the event's time; when it fires, the checkpoint
@@ -1997,6 +2023,7 @@ export function createWorkflows<
     const timer = j
       .effect(TIMER_EFFECT, machine.run, {
         Parked: async (event, ctx) => {
+          await refuseStranded(event.entityId, ctx.db);
           await ctx.run(
             checkpoint,
             { runId: event.entityId, fired: { kind: 'wake', node: event.data.node, parkSeq: event.seq } },
@@ -2004,6 +2031,7 @@ export function createWorkflows<
           );
         },
         RunStarted: async (event, ctx) => {
+          await refuseStranded(event.entityId, ctx.db);
           await ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'deadline' } }, meta);
         },
       })
@@ -2011,6 +2039,7 @@ export function createWorkflows<
         // Only a park with a wake time and a run with a deadline have anything to time.
         when: event => timerAt(event.data) !== null,
         runAt: event => timerDueAt(event.data),
+        retry: strandedRetry,
       });
 
     return { effects: [effect, timer], steps: machine.steps };

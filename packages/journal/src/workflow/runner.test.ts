@@ -385,7 +385,9 @@ describe('the checkpoint fence', () => {
       );
   };
   const supersedeFirst = { id: '' };
-  const stale = j
+  // One compose with workflows per initJournal(): this block composes its own journal.
+  const staleInit = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+  const stale = staleInit
     .workflow('test.stale', { version: 1, input: z.object({}) })
     .step('slow', async ctx => {
       note('slow', ctx);
@@ -393,7 +395,7 @@ describe('the checkpoint fence', () => {
       return 'late';
     })
     .finish();
-  const staleJournal = j.compose({ workflows: [stale], workflowMeta });
+  const staleJournal = staleInit.compose({ workflows: [stale], workflowMeta });
 
   it('a stale owner checkpoint is rejected with LEASE_LOST, so a superseded worker writes nothing', async () => {
     const id = newId('stale');
@@ -409,14 +411,15 @@ describe('the checkpoint fence', () => {
 });
 
 describe('a crash between the body and the checkpoint', () => {
-  const crashing = j
+  const crashInit = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+  const crashing = crashInit
     .workflow('test.crashing', { version: 1, input: z.object({}) })
     .step('chargeCard', ctx => {
       note('chargeCard', ctx);
       return { chargeId: 'ch_1' };
     })
     .finish();
-  const crashJournal = j.compose({ workflows: [crashing], workflowMeta });
+  const crashJournal = crashInit.compose({ workflows: [crashing], workflowMeta });
   let died = false;
   crashJournal.hooks.command.around(async (ctx, next) => {
     // The process dies after the body answered, before the checkpoint commits.
