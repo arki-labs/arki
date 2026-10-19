@@ -1,3 +1,5 @@
+import type { Failure } from '@arki/failure';
+
 /**
  * Route bundles — the dynamic half of an HTTP surface.
  *
@@ -28,6 +30,8 @@
 
 import type {
   ContractLike,
+  CoversFailures,
+  FailureDefinitionLike,
   ResponseSchemas,
   RouteContract,
   RouteDef,
@@ -36,12 +40,12 @@ import type {
   SseContract,
   SseDef,
 } from './contract.js';
-import type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
+import type { BaseRequestCtx, Deriver, ErasedDeriver, FailureHeaders } from './derive.js';
+import type { RawOutput } from './raw.js';
+import type { Wire, WireValue } from './wire.js';
 import { BASE_CTX_KEYS } from './derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { HTTP_ACTION_META_SCHEMA } from './openapi.js';
-import type { RawOutput } from './raw.js';
-import type { Wire, WireValue } from './wire.js';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -126,7 +130,8 @@ export type MountMeta = {
 };
 
 /** A contract bound to its (generics-erased) handler. */
-export type RouteBinding = {
+export type RouteBinding = FailureHeaders<Failure> & {
+  readonly derivers?: readonly ErasedDeriver[];
   readonly contract: ContractLike;
   /**
    * Stored erased (`never` parameters) — typed handlers are assignable
@@ -164,6 +169,7 @@ export type RpcActionMeta = {
  */
 export type RpcMountContract = {
   readonly kind: 'rpc-mount';
+  readonly failures?: readonly FailureDefinitionLike[];
   /** Stable manifest id, e.g. 'orders.rpc'. */
   readonly id: string;
   /** Path prefix the RPC handler owns, e.g. '/rpc/orders'. */
@@ -174,6 +180,7 @@ export type RpcMountContract = {
 };
 
 export type RpcMountOptions = {
+  readonly failures?: readonly FailureDefinitionLike[];
   readonly id: string;
   /** Manifest binding name. Defaults to `'orpc'`. */
   readonly transport?: MountTransport;
@@ -192,6 +199,8 @@ export type RpcMountHandlers<TDerived extends BaseRequestCtx, TRpcCtx> = {
 
 /** Erased rpc binding a bundle stores — same seam as {@link RouteBinding}. */
 export type RpcBinding = {
+  readonly contract?: RpcMountContract;
+  readonly derivers?: readonly ErasedDeriver[];
   readonly id: string;
   readonly path: string;
   readonly transport: MountTransport;
@@ -206,10 +215,15 @@ export type RpcBinding = {
 export type MountPath = `/${string}`;
 
 /** Declare the static half of an RPC mount. See {@link RpcMountContract}. */
+export function rpcMount<const Options extends RpcMountOptions>(
+  path: MountPath,
+  options: Options,
+): RpcMountContract & Options;
 export function rpcMount(path: MountPath, options: RpcMountOptions): RpcMountContract {
   assertMountPath(path, options.id);
   const transport = options.transport ?? 'orpc';
   return {
+    ...options,
     kind: 'rpc-mount',
     id: options.id,
     path,
@@ -246,28 +260,42 @@ export type RouteBundle = {
  * Immutable bundle builder. Every method returns a new builder; deriver
  * keys accumulate in `TCtx` so later `bind` handlers see them typed.
  */
-export type RouteBundleBuilder<TCtx extends BaseRequestCtx = BaseRequestCtx> = RouteBundle & {
+export type RouteBundleBuilder<
+  TCtx extends BaseRequestCtx = BaseRequestCtx,
+  TFailures extends Failure = never,
+> = RouteBundle & {
   /** Add a reusable deriver (see {@link Deriver}). */
-  derive<K extends string, V>(deriver: Deriver<K, V, TCtx>): RouteBundleBuilder<TCtx & Readonly<Record<K, V>>>;
+  derive<K extends string, V>(
+    deriver: Deriver<K, V, TCtx>,
+  ): RouteBundleBuilder<
+    TCtx & Readonly<Record<K, Exclude<Awaited<V>, Failure>>>,
+    TFailures | Extract<Awaited<V>, Failure>
+  >;
   /** Add an inline deriver. */
   derive<K extends string, V>(
     key: K,
     fn: (req: Request, ctx: TCtx) => V | Promise<V>,
-  ): RouteBundleBuilder<TCtx & Readonly<Record<K, V>>>;
+    options?: FailureHeaders<NoInfer<V>>,
+  ): RouteBundleBuilder<
+    TCtx & Readonly<Record<K, Exclude<Awaited<V>, Failure>>>,
+    TFailures | Extract<Awaited<V>, Failure>
+  >;
   /**
    * Bind a JSON contract to its handler. `NoInfer` pins the input/result
    * types to the contract — without it, a handler returning the wrong
    * shape would silently widen `TDef` instead of failing to compile.
    */
   bind<TPath extends string, TDef extends RouteDef<TPath>>(
-    contract: RouteContract<TPath, TDef>,
+    contract: RouteContract<TPath, TDef> & CoversFailures<NoInfer<TDef>, TFailures>,
     handler: RouteHandler<TPath, NoInfer<TDef>, TCtx>,
-  ): RouteBundleBuilder<TCtx>;
+    options?: FailureHeaders<RouteFailure<NoInfer<TDef>>>,
+  ): RouteBundleBuilder<TCtx, TFailures>;
   /** Bind an SSE contract to its event generator. */
   bind<TPath extends string, TDef extends SseDef<TPath>>(
-    contract: SseContract<TPath, TDef>,
+    contract: SseContract<TPath, TDef> & CoversFailures<NoInfer<TDef>, TFailures>,
     handler: SseHandler<TPath, NoInfer<TDef>, TCtx>,
-  ): RouteBundleBuilder<TCtx>;
+    options?: FailureHeaders<RouteFailure<NoInfer<TDef>>>,
+  ): RouteBundleBuilder<TCtx, TFailures>;
   /**
    * Mount a foreign fetch handler under a path prefix — an oRPC router, a
    * tRPC fetch adapter, a static-file handler. One manifest route, no
@@ -277,14 +305,17 @@ export type RouteBundleBuilder<TCtx extends BaseRequestCtx = BaseRequestCtx> = R
     path: MountPath,
     handler: (req: Request) => Response | Promise<Response>,
     meta: MountMeta,
-  ): RouteBundleBuilder<TCtx>;
+  ): RouteBundleBuilder<TCtx, TFailures>;
   /**
    * Bind a static {@link RpcMountContract} to its boot-time handlers.
    * Unlike `mount`, the bundle's derivers RUN before dispatch, and the
    * context factory receives the accumulated derived ctx — derivers
    * added before `.rpc()` are typed into it.
    */
-  rpc<TRpcCtx>(contract: RpcMountContract, handlers: RpcMountHandlers<TCtx, TRpcCtx>): RouteBundleBuilder<TCtx>;
+  rpc<TRpcCtx, const Contract extends RpcMountContract>(
+    contract: Contract & CoversFailures<NoInfer<Contract>, TFailures>,
+    handlers: RpcMountHandlers<TCtx, TRpcCtx>,
+  ): RouteBundleBuilder<TCtx, TFailures>;
 };
 
 type BundleState = {
@@ -317,13 +348,18 @@ function assertFreshDeriverKey(key: string, existing: readonly ErasedDeriver[]):
   });
 }
 
-function makeBuilder(state: BundleState): RouteBundleBuilder {
+function makeBuilder(state: BundleState): RouteBundleBuilder;
+function makeBuilder(state: BundleState): unknown {
   const impl = {
     derivers: state.derivers,
     bindings: state.bindings,
     mounts: state.mounts,
     rpcs: state.rpcs,
-    derive(keyOrDeriver: string | ErasedDeriver, fn?: (req: Request, ctx: never) => unknown): RouteBundleBuilder {
+    derive(
+      keyOrDeriver: string | ErasedDeriver,
+      fn?: (req: Request, ctx: never) => unknown,
+      options: FailureHeaders<Failure> = {},
+    ): RouteBundleBuilder {
       let deriver: ErasedDeriver;
       if (typeof keyOrDeriver === 'string') {
         if (fn === undefined) {
@@ -333,17 +369,28 @@ function makeBuilder(state: BundleState): RouteBundleBuilder {
             remediation: 'Pass derive(key, fn) or derive(deriverObject).',
           });
         }
-        deriver = { key: keyOrDeriver, derive: fn };
+        deriver = { key: keyOrDeriver, derive: fn, ...options };
       } else {
         deriver = keyOrDeriver;
       }
       assertFreshDeriverKey(deriver.key, state.derivers);
       return makeBuilder({ ...state, derivers: [...state.derivers, deriver] });
     },
-    bind(contract: ContractLike, handler: (input: never, ctx: never) => unknown): RouteBundleBuilder {
-      return makeBuilder({ ...state, bindings: [...state.bindings, { contract, handler }] });
+    bind(
+      contract: ContractLike,
+      handler: (input: never, ctx: never) => unknown,
+      options: FailureHeaders<Failure> = {},
+    ): RouteBundleBuilder {
+      return makeBuilder({
+        ...state,
+        bindings: [...state.bindings, { contract, handler, derivers: state.derivers, ...options }],
+      });
     },
-    mount(path: MountPath, handler: (req: Request) => Response | Promise<Response>, meta: MountMeta): RouteBundleBuilder {
+    mount(
+      path: MountPath,
+      handler: (req: Request) => Response | Promise<Response>,
+      meta: MountMeta,
+    ): RouteBundleBuilder {
       assertMountPath(path, meta.id);
       return makeBuilder({
         ...state,
@@ -356,22 +403,21 @@ function makeBuilder(state: BundleState): RouteBundleBuilder {
         rpcs: [
           ...state.rpcs,
           {
+            contract,
+            derivers: state.derivers,
             id: contract.id,
             path: contract.path,
             transport: contract.transport,
-            context: handlers.context as (req: Request, ctx: never) => unknown,
-            handle: handlers.handle as (req: Request, ctx: never) => Response | Promise<Response>,
+            context: handlers.context,
+            handle: handlers.handle,
           },
         ],
       });
     },
   };
-  // Erasure seam: the implementation works on erased contracts/handlers/
-  // derivers; the public builder type re-attaches the generics. The typed
-  // methods' arguments are structurally assignable to the erased
-  // parameters, so the only unsafe step is this widening of the return
-  // type — same seam as the DOT app builder's makeBuilder.
-  return impl as unknown as RouteBundleBuilder;
+  // Public overloads retain inferred contracts, context and failure sets;
+  // this implementation stores erased callbacks without altering their values.
+  return impl;
 }
 
 /** Start an empty bundle. See the module docs for the authoring pattern. */

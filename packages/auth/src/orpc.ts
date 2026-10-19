@@ -6,7 +6,7 @@
  * call, and narrows the row to non-null for the rest of the handler — no
  * later `!` or `as`.
  *
- * NOT_FOUND or FORBIDDEN is a choice the procedure makes, by name:
+ * `auth.not_found` or `auth.forbidden` is a choice the procedure makes, by name:
  *
  * - {@link assertOwnedOrNotFound} — reads. Someone else's row looks exactly
  *   like a missing one, so ids cannot be probed for existence.
@@ -23,44 +23,56 @@
  * `@orpc/server` is an optional peer: import this module only in an app
  * that serves oRPC.
  */
-import type { Context, Meta, MiddlewareOptions, MiddlewareResult } from '@orpc/server';
-import { ORPCError } from '@orpc/server';
+import type { Context, Meta, MiddlewareOptions, MiddlewareResult, ORPCErrorConstructorMap } from '@orpc/server';
 
+import type { DeclaredErrors, ErrorMapOf } from '@arki/failure/orpc';
+import { orThrowRpc } from '@arki/failure/orpc';
+
+import type {
+  AUTH_FAILURES,
+  AUTH_POLICY_FAILURES,
+  AUTH_PRINCIPAL_FAILURES,
+  AuthenticationRequired,
+} from './boundary-failures.js';
 import type { GroupOf, Loaded, PoliciesFor, PolicyName, SubjectOf } from './policies.js';
 import type { AnyPrincipal } from './principal.js';
+import { AccessDenied, checkPrincipal, requirePrincipal, ResourceMissing } from './boundary-failures.js';
 import { AUTH_ERROR_CODES, AuthError } from './errors.js';
-import { decide, groupOf, keyed } from './policies.js';
+import { authorizePolicy, groupOf, keyed } from './policies.js';
 
 /** Anything with an owner: the row's `userId`. */
 export type Owned = { readonly userId: string };
 
-/** Missing → NOT_FOUND. For rows the query already scoped to the caller (`getOwned`). */
-export function assertFound<T>(row: T | null | undefined, label: string): asserts row is T {
+/** Missing → `auth.not_found`. For rows the query already scoped to the caller (`getOwned`). */
+export function assertFound<T>(
+  row: T | null | undefined,
+  errors: DeclaredErrors<ReturnType<typeof ResourceMissing>>,
+): asserts row is T {
   if (row === null || row === undefined) {
-    throw new ORPCError('NOT_FOUND', { message: `${label} not found` });
+    orThrowRpc(ResourceMissing(), errors);
   }
 }
 
-/** Reads: missing OR someone else's → NOT_FOUND. A stranger cannot tell the two apart. */
+/** Reads: missing OR someone else's → `auth.not_found`. A stranger cannot tell the two apart. */
 export function assertOwnedOrNotFound<T extends Owned>(
   row: T | null | undefined,
   actorId: string,
-  label: string,
+  errors: DeclaredErrors<ReturnType<typeof ResourceMissing>>,
 ): asserts row is T {
   if (row === null || row === undefined || row.userId !== actorId) {
-    throw new ORPCError('NOT_FOUND', { message: `${label} not found` });
+    orThrowRpc(ResourceMissing(), errors);
   }
 }
 
-/** Mutations: missing → NOT_FOUND; someone else's → FORBIDDEN (the caller already had the id). */
+/** Mutations: missing → `auth.not_found`; someone else's → `auth.forbidden` (the caller already had the id). */
 export function assertOwnedOrForbidden<T extends Owned>(
   row: T | null | undefined,
   actorId: string,
-  label: string,
+  errors: DeclaredErrors<ReturnType<typeof ResourceMissing>> & DeclaredErrors<ReturnType<typeof AccessDenied>>,
 ): asserts row is T {
-  assertFound(row, label);
+  assertFound(row, errors);
   if (row.userId !== actorId) {
-    throw new ORPCError('FORBIDDEN', { message: `You do not have access to this ${label}` });
+    orThrowRpc(AccessDenied(), errors);
   }
 }
 
@@ -68,18 +80,15 @@ export function assertOwnedOrForbidden<T extends Owned>(
  * Principal guards for oRPC procedures. `C` is the app's request context; its `principal` is the
  * auth's principal or `null` for a guest. Each guard narrows `context.principal` to non-null.
  *
- * - `authed`: a guest → `UNAUTHORIZED` with `data.code` `ARKI_AUTH_E401`.
- * - `verified`: also refuses an unverified email → `FORBIDDEN`, `ARKI_AUTH_E403`.
- * - `role(name)`: also refuses a principal without that role → `FORBIDDEN`, `ARKI_AUTH_E403`.
+ * - `authed`: a guest → `auth.unauthenticated` (401).
+ * - `verified`: also refuses an unverified email → `auth.forbidden` (403).
+ * - `role(name)`: also refuses a principal without that role → `auth.forbidden` (403).
  * - `can(policies)(name, load)`: signs in, loads the subject and runs one policy (see below).
  *
  * @example
  * export const { authed, verified, role } = guards<RequestContext>();
  * impl.adminStats.use(role('admin')).handler(({ context }) => stats(context.principal.user.id));
  */
-const forbidden = (message: string) =>
-  new ORPCError('FORBIDDEN', { message, data: { code: AUTH_ERROR_CODES.forbidden } });
-
 /** The contract meta must name the policy `can` checks, so `dot explain` never shows a wrong one. */
 function assertDeclared(meta: Meta, name: string): void {
   const declared: unknown = meta['policy'];
@@ -90,8 +99,11 @@ function assertDeclared(meta: Meta, name: string): void {
   );
 }
 
-export type PrincipalGuard<C extends { readonly principal: AnyPrincipal | null }> = <TOutput>(
-  options: MiddlewareOptions<C, TOutput, Record<never, never>, Meta>,
+export type PrincipalGuard<
+  C extends { readonly principal: AnyPrincipal | null },
+  Definitions extends readonly (typeof AUTH_FAILURES)[number][] = typeof AUTH_PRINCIPAL_FAILURES,
+> = <TOutput>(
+  options: MiddlewareOptions<C, TOutput, ORPCErrorConstructorMap<ErrorMapOf<Definitions>>, Meta>,
 ) => MiddlewareResult<{ readonly principal: NonNullable<C['principal']> }, TOutput>;
 
 /**
@@ -100,7 +112,12 @@ export type PrincipalGuard<C extends { readonly principal: AnyPrincipal | null }
  * group's name (`context.order`).
  */
 export type PolicyGuard<X, I, P, K extends string, S> = <TOutput>(
-  options: MiddlewareOptions<X & Context, TOutput, Record<never, never>, Meta>,
+  options: MiddlewareOptions<
+    X & Context,
+    TOutput,
+    ORPCErrorConstructorMap<ErrorMapOf<typeof AUTH_POLICY_FAILURES>>,
+    Meta
+  >,
   input: I,
 ) => Promise<MiddlewareResult<{ readonly principal: P } & Readonly<Record<K, S>>, TOutput>>;
 
@@ -108,7 +125,7 @@ export type PolicyGuard<X, I, P, K extends string, S> = <TOutput>(
 export type PolicyLoader<I, X, P, S> = (input: I, context: X & { readonly principal: P }) => Loaded<S>;
 
 export function guards<C extends { readonly principal: AnyPrincipal | null }>(): {
-  readonly authed: PrincipalGuard<C>;
+  readonly authed: PrincipalGuard<C, readonly [typeof AuthenticationRequired]>;
   readonly verified: PrincipalGuard<C>;
   readonly role: (name: string) => PrincipalGuard<C>;
   /**
@@ -116,9 +133,9 @@ export function guards<C extends { readonly principal: AnyPrincipal | null }>():
    * the same policy (`.meta({ policy: 'order.refund' })`), so `dot explain` shows it; a missing or
    * different name is `ARKI_AUTH_E008`.
    *
-   * - a guest → `UNAUTHORIZED`, `ARKI_AUTH_E401`; the loader does not run;
-   * - no such subject, or the group's `view` refuses → `NOT_FOUND` (no auth code: it looks missing);
-   * - the policy refuses → `FORBIDDEN`, `ARKI_AUTH_E403`.
+   * - a guest → `auth.unauthenticated` (401); the loader does not run;
+   * - no such subject, or the group's `view` refuses → `auth.not_found` (404; hidden and missing look identical);
+   * - the policy refuses → `auth.forbidden` (403).
    *
    * @example
    * export const { can } = guards<RequestContext>();
@@ -133,38 +150,27 @@ export function guards<C extends { readonly principal: AnyPrincipal | null }>():
     load: PolicyLoader<I, X, NonNullable<C['principal']>, SubjectOf<T, N>>,
   ) => PolicyGuard<X, I, NonNullable<C['principal']>, GroupOf<N>, SubjectOf<T, N>>;
 } {
-  const signedIn = (principal: C['principal']): NonNullable<C['principal']> => {
-    if (principal === null) {
-      throw new ORPCError('UNAUTHORIZED', {
-        message: 'Sign in to continue.',
-        data: { code: AUTH_ERROR_CODES.unauthenticated },
-      });
-    }
-    return principal;
-  };
   return {
-    authed: ({ context, next }) => next({ context: { principal: signedIn(context.principal) } }),
-    verified: ({ context, next }) => {
-      const principal = signedIn(context.principal);
-      if (!principal.user.emailVerified) throw forbidden('Verify your email address first.');
-      return next({ context: { principal } });
-    },
+    authed: ({ context, next, errors }) =>
+      next({ context: { principal: orThrowRpc(requirePrincipal(context.principal), errors) } }),
+    verified: ({ context, next, errors }) =>
+      next({ context: { principal: orThrowRpc(checkPrincipal(context.principal, { verified: true }), errors) } }),
     role:
       name =>
-      ({ context, next }) => {
-        const principal = signedIn(context.principal);
-        if (!principal.roles.includes(name)) throw forbidden('You do not have access to this.');
-        return next({ context: { principal } });
-      },
+      ({ context, next, errors }) =>
+        next({ context: { principal: orThrowRpc(checkPrincipal(context.principal, { role: name }), errors) } }),
     can: policies => (name, load) => async (options, input) => {
       assertDeclared(options.procedure['~orpc'].meta, name);
-      const principal = signedIn(options.context.principal);
-      const decision = await decide(policies, name, principal, await load(input, { ...options.context, principal }));
-      if (!decision.allowed) {
-        if (decision.outcome === 'forbidden') throw forbidden('You do not have access to this.');
-        throw new ORPCError('NOT_FOUND', { message: `${groupOf(name)} not found` });
-      }
-      return options.next({ context: { principal, ...keyed(groupOf(name), decision.subject) } });
+      const principal = orThrowRpc(requirePrincipal(options.context.principal), options.errors);
+      const subject = await authorizePolicy(
+        policies,
+        name,
+        principal,
+        await load(input, { ...options.context, principal }),
+      );
+      if (AccessDenied.is(subject)) return orThrowRpc(AccessDenied(), options.errors);
+      if (ResourceMissing.is(subject)) return orThrowRpc(ResourceMissing(), options.errors);
+      return options.next({ context: { principal, ...keyed(groupOf(name), subject) } });
     },
   };
 }

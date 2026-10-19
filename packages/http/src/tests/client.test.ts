@@ -7,6 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { InvalidEnvelope, InvalidInput, isFailure } from '@arki/failure';
+
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
@@ -68,6 +70,7 @@ describe('createClient', () => {
     const events = createClient({ getEvent, moveEvent }, { baseUrl: BASE, fetch: wire.fetch });
 
     const moved = await events.moveEvent({ params: { id: 'e1' }, body: { at: new Date(5000) } });
+    if (isFailure(moved)) throw new Error(moved.code);
     expect(moved.at).toBeInstanceOf(Date);
     expect(moved).toEqual({ id: 'e1', at: new Date(5000) });
     expect(await wire.sent[0]?.json()).toEqual({ at: '1970-01-01T00:00:05.000Z' });
@@ -87,14 +90,11 @@ describe('createClient', () => {
     expect(wire.sent[0]?.url).toBe(`${BASE}/events/a%20b%2Fc`);
   });
 
-  it('throws the server error code as an HttpError', async () => {
+  it('classifies an undeclared server code as an invalid envelope', async () => {
     const remove = createClient(lockedEvent, { baseUrl: BASE, fetch: recordingFetch(engine.fetch).fetch });
-    await expect(remove({ params: { id: 'e1' } })).rejects.toMatchObject({
-      name: 'HttpError',
-      status: 403,
-      code: HTTP_ERROR_CODES.forbidden,
-      message: 'events are locked',
-      remediation: 'Ask an admin.',
+    await expect(remove({ params: { id: 'e1' } })).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'unknown_code' },
     });
   });
 
@@ -103,10 +103,10 @@ describe('createClient', () => {
     const wire = recordingFetch(engine.fetch);
     const move = createClient(moveEvent, { baseUrl: BASE, fetch: wire.fetch });
     for (const id of ['..', '.', '']) {
-      await expect(move({ params: { id }, body: { at: new Date(0) } })).rejects.toMatchObject({
+      await expect(move({ params: { id }, body: { at: new Date(0) } })).resolves.toMatchObject({
         status: 400,
-        code: HTTP_ERROR_CODES.badRequest,
-        message: expect.stringContaining('"id"'),
+        code: InvalidInput.code,
+        data: { issues: [{ message: expect.stringContaining('"id"') }] },
       });
     }
     expect(wire.sent).toHaveLength(0);
@@ -119,9 +119,9 @@ describe('createClient', () => {
     const wire = recordingFetch(engine.fetch);
     const move = createClient(moveEvent, { baseUrl: BASE, fetch: wire.fetch });
     // The type allows any Date, but an invalid Date has no ISO form.
-    await expect(move({ params: { id: 'e1' }, body: { at: new Date('yesterday') } })).rejects.toMatchObject({
+    await expect(move({ params: { id: 'e1' }, body: { at: new Date('yesterday') } })).resolves.toMatchObject({
       status: 400,
-      code: HTTP_ERROR_CODES.badRequest,
+      code: InvalidInput.code,
     });
     expect(wire.sent).toHaveLength(0);
   });
@@ -132,10 +132,10 @@ describe('createClient', () => {
 
     await expect(
       createClient(getEvent, { baseUrl: BASE, fetch: gateway.fetch })({ params: { id: 'e1' } }),
-    ).rejects.toMatchObject({ status: 502, code: HTTP_ERROR_CODES.internal });
+    ).resolves.toMatchObject({ code: InvalidEnvelope.code, data: { reason: 'invalid_json' } });
     await expect(
       createClient(getEvent, { baseUrl: BASE, fetch: notFound.fetch })({ params: { id: 'e1' } }),
-    ).rejects.toMatchObject({ status: 404, code: HTTP_ERROR_CODES.notFound });
+    ).resolves.toMatchObject({ code: InvalidEnvelope.code, data: { reason: 'invalid_json' } });
   });
 
   it('fails loudly when the response does not match the output schema', async () => {
@@ -143,13 +143,14 @@ describe('createClient', () => {
     const skewed = recordingFetch(() => Promise.resolve(Response.json({ id: 'e1', at: 'not a date', since: null })));
     await expect(
       createClient(getEvent, { baseUrl: BASE, fetch: skewed.fetch })({ params: { id: 'e1' } }),
-    ).rejects.toMatchObject({ status: 500, code: HTTP_ERROR_CODES.internal });
+    ).resolves.toMatchObject({ code: InvalidEnvelope.code, data: { reason: 'invalid_data' } });
   });
 
   it('hands back the raw Response when the contract declares output: raw()', async () => {
     const raw = createClient(rawEvent, { baseUrl: BASE, fetch: recordingFetch(engine.fetch).fetch });
     const res = await raw({ params: { id: 'e1' } });
     expect(res).toBeInstanceOf(Response);
+    if (isFailure(res)) throw new Error(res.code);
     expect(await res.text()).toBe('raw e1');
   });
 });

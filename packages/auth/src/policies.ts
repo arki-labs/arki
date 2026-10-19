@@ -18,6 +18,7 @@
  * });
  */
 import type { AnyPrincipal } from './principal.js';
+import { AccessDenied, ResourceMissing } from './boundary-failures.js';
 import { log } from './log.js';
 
 /** What every policy of group `K` receives: the principal, and the subject under the group's name. */
@@ -178,4 +179,16 @@ export function keyed<K extends string, V>(key: K, value: V): Readonly<Record<K,
 
 function holds<K extends string, V>(entry: object, key: K, value: V): entry is Readonly<Record<K, V>> {
   return Object.hasOwn(entry, key) && Reflect.get(entry, key) === value;
+}
+
+/** A policy result as a canonical value; missing and hidden never disclose different data. */
+export async function authorizePolicy<S>(
+  policies: AnyPolicies,
+  name: string,
+  principal: AnyPrincipal,
+  subject: S | null,
+) {
+  const decision = await decide(policies, name, principal, subject);
+  if (decision.allowed) return decision.subject;
+  return decision.outcome === 'forbidden' ? AccessDenied() : ResourceMissing();
 }

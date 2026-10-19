@@ -123,6 +123,9 @@ The adapter entries need more:
 | `@arki/dot/log`          | `log()`, the logging plugin. Mount it first.                                                                   |
 | `@arki/dot/runtime`      | `createAppRuntime`: one started app per server process, safe under Vite hot updates.                           |
 | `@arki/dot/test-harness` | `testPlugin`, `testApp`, `bootTestApp`, `fake`.                                                                |
+| `@arki/dot/action` | Browser-safe `action`, canonical execution failures and exposure policy. |
+| `@arki/dot/execute` | Server `bindAction`: `run` validates raw values; `handle` reuses native parsing. |
+| `@arki/dot/telemetry` | Identity-scoped `telemetryFor`, spans, events, metrics and correlated logs. |
 | `@arki/dot/cli`          | `program` (the `dot` command), `runExplain`, `runDoctor`, `runNew`, `runDev` and the `dot.*` failures.         |
 
 Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy retries and cancellation.
@@ -137,6 +140,9 @@ The legacy rows below describe diagnostic IDs and their private cause classes. M
 
 | Code                         | Class               | Meaning                                                                                       | Fix                                                    |
 | ---------------------------- | ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `dot.action_not_exposed` | Failure value | The adapter is not exposed by the action. | Use a declared binding. |
+| `dot.action_principal_required` | Failure value | No authenticated principal attestation. | Authenticate credentials and expiry at the adapter. |
+| `dot.action_approval_required` | Failure value | No invocation approval attestation. | Verify caller, action and input approval at the adapter. |
 | `dot.preflight_failed`       | Failure value       | Managed preflight failed; `.error.data` contains `app`, `migrations`, `report` and `failure`. | Fix the reported lifecycle failure; exit code is 3.    |
 | `dot.lazy_closed`            | Failure value       | A lazy handle is used after its owner closed.                                                 | Obtain a handle from a live owner.                     |
 | `dot.runtime_replaced`       | Failure value       | HMR replaced this runtime.                                                                    | Use the current module.                                |
@@ -272,3 +278,5 @@ Changes are listed in [CHANGELOG.md](./CHANGELOG.md).
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+Read [Action boundaries](./docs/actions.md) and [Upgrade action boundaries](./docs/upgrade-actions.md).

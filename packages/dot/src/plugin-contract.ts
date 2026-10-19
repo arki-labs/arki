@@ -26,6 +26,7 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { Lazy } from './lazy.js';
 import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
+import type { DotTelemetry } from './telemetry.js';
 import { isLazy } from './lazy.js';
 
 declare const TypeOf: unique symbol;
@@ -180,6 +181,8 @@ export type KernelCtx = {
   readonly $app: string;
   /** This plugin's name. */
   readonly $plugin: string;
+  /** Custom spans, events, metrics and correlated logs scoped to this mounted plugin or feature. */
+  readonly $telemetry: DotTelemetry;
   /** Read-only runtime config bag from `defineApp(name, { config })`. */
   readonly $config: Readonly<Record<string, unknown>>;
   /**
@@ -224,6 +227,8 @@ type LegacyRouteDeclaration = {
 };
 
 export type DotConfigureContext = {
+  /** Custom telemetry scoped to this plugin, sharing its active configure span. */
+  readonly $telemetry: DotTelemetry;
   pluginName: string;
   /** App name. */
   appName: string;

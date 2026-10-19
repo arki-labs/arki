@@ -11,9 +11,23 @@ import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
 
+import type { ContractLike, CoversFailures } from './contract.js';
 import type { HttpMiddleware } from './engine.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
-import { HTTP_ERROR_CODES, HttpError } from './error.js';
+import { HTTP_ERROR_CODES, HttpConfigError, orThrowHttp } from './error.js';
+import {
+  IDEMPOTENCY_FAILURES,
+  IdempotencyInProgress,
+  IdempotencyKeyRequired,
+  IdempotencyKeyReused,
+} from './failures.js';
+
+export {
+  IDEMPOTENCY_FAILURES,
+  IdempotencyKeyRequired,
+  IdempotencyKeyReused,
+  IdempotencyInProgress,
+} from './failures.js';
 
 /** A response as the cache keeps it: the status, the allowlisted headers, and the body as base64. */
 export type StoredResponse = { status: number; headers: Record<string, string>; body: string };
@@ -50,7 +64,7 @@ export type ResponseCache = {
   abandon(key: string, owner: string): Promise<void>;
 };
 
-export type IdempotentOptions = {
+export type IdempotentOptions<Routes extends readonly ContractLike[] = readonly ContractLike[]> = {
   readonly cache: ResponseCache;
   /**
    * Who is asking: a user id, a tenant plus user, an API key id. Runs for each listed request.
@@ -59,8 +73,8 @@ export type IdempotentOptions = {
    * so two callers can use the same key without meeting.
    */
   readonly scope: (req: Request) => string | undefined | Promise<string | undefined>;
-  /** Routes that need a key, as `'METHOD /path'`. `:name` matches one segment, `:name?` one optional trailing segment. Include any mount prefix. */
-  readonly routes: readonly string[];
+  /** Canonical route descriptors; each must list every IDEMPOTENCY_FAILURES definition. Paths include any mount prefix. */
+  readonly routes: Routes;
   /** Default `Idempotency-Key`. */
   readonly header?: string;
   /** How long a key lives, in milliseconds. */
@@ -82,19 +96,15 @@ const sha256 = async (data: Uint8Array<ArrayBuffer> | string): Promise<string> =
 type RoutePattern = { readonly method: string; readonly path: RegExp };
 
 /** `'POST /orders/:id'` to a method and an anchored path pattern. */
-const compileRoute = (route: string): RoutePattern => {
-  const space = route.indexOf(' ');
-  if (space < 1) throw new TypeError(`idempotent: route ${JSON.stringify(route)} must look like "POST /path"`);
-  const path = route
-    .slice(space + 1)
-    .trim()
+const compileRoute = (route: ContractLike): RoutePattern => {
+  const path = route.path
     .split('/')
     .map(segment => {
       if (segment.startsWith(':')) return segment.endsWith('?') ? '(?:/[^/]+)?' : '/[^/]+';
       return segment === '' ? '' : `/${segment.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`)}`;
     })
     .join('');
-  return { method: route.slice(0, space).toUpperCase(), path: new RegExp(`^${path === '' ? '/' : path}/?$`) };
+  return { method: route.method, path: new RegExp(`^${path === '' ? '/' : path}/?$`) };
 };
 
 /** Method + path + sorted query + body hash, hashed. Two requests share a fingerprint only when they ask for the same thing. */
@@ -129,12 +139,29 @@ const isCacheable = (status: number): boolean => status < 500 && status !== 409 
  * The same key while the first is running is 409 with `retry-after`. If the cache itself fails,
  * the request fails: running it unprotected could do the work twice.
  */
+export function idempotent<const Routes extends readonly ContractLike[]>(
+  options: IdempotentOptions<Routes> & {
+    readonly routes: {
+      readonly [Key in keyof Routes]: Routes[Key] &
+        CoversFailures<NoInfer<Routes[Key]>, ReturnType<(typeof IDEMPOTENCY_FAILURES)[number]>>;
+    };
+  },
+): HttpMiddleware;
 export function idempotent(options: IdempotentOptions): HttpMiddleware {
   const { cache, scope, ttl } = options;
   const headerName = options.header ?? 'Idempotency-Key';
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const allowed = new Set((options.replayHeaders ?? DEFAULT_REPLAY_HEADERS).map(name => name.toLowerCase()));
-  const patterns = options.routes.map(route => compileRoute(route));
+  const patterns = options.routes.map(route => {
+    if (!IDEMPOTENCY_FAILURES.every(failure => route.failures?.some(candidate => candidate.code === failure.code))) {
+      throw new HttpConfigError({
+        code: HTTP_ERROR_CODES.invalidContract,
+        message: 'Every idempotent route must declare IDEMPOTENCY_FAILURES.',
+        remediation: 'List IDEMPOTENCY_FAILURES on each protected route contract.',
+      });
+    }
+    return compileRoute(route);
+  });
 
   return async (req, next) => {
     const url = new URL(req.url);
@@ -144,15 +171,9 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
     if (principal === undefined) return next(req);
 
     const supplied = req.headers.get(headerName)?.trim();
-    if (supplied === undefined || supplied === '' || supplied.length > MAX_KEY_LENGTH)
-      throw new HttpError(
-        400,
-        HTTP_ERROR_CODES.idempotencyKeyMissing,
-        `${headerName} is required on ${req.method} ${url.pathname} and must be 1 to ${MAX_KEY_LENGTH} characters`,
-        {
-          remediation: `Send a unique ${headerName} header, for example a UUID, and repeat it only to retry the same request.`,
-        },
-      );
+    if (supplied === undefined || supplied === '' || supplied.length > MAX_KEY_LENGTH) {
+      orThrowHttp(IdempotencyKeyRequired(), IDEMPOTENCY_FAILURES);
+    }
 
     const declared = Number(req.headers.get('content-length') ?? 0);
     if (declared > maxBodyBytes) return next(req);
@@ -164,21 +185,10 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
     const owner = crypto.randomUUID();
 
     const outcome = await cache.begin(key, fingerprint, owner, ttl);
-    if (outcome === 'conflict')
-      throw new HttpError(
-        422,
-        HTTP_ERROR_CODES.idempotencyKeyReused,
-        `${headerName} was already used for a different request`,
-        {
-          remediation:
-            'Use a new key for a different request. Repeat a key only with the same method, path, query and body.',
-        },
-      );
-    if (outcome === 'in-progress')
-      throw new HttpError(409, HTTP_ERROR_CODES.idempotencyInProgress, 'A request with this key is still running', {
-        headers: { 'retry-after': '1' },
-        remediation: 'Wait and send the same request again.',
-      });
+    if (outcome === 'conflict') return orThrowHttp(IdempotencyKeyReused(), IDEMPOTENCY_FAILURES);
+    if (outcome === 'in-progress') {
+      return orThrowHttp(IdempotencyInProgress(), IDEMPOTENCY_FAILURES, { headers: { 'retry-after': '1' } });
+    }
     if (outcome !== 'started') return replayResponse(outcome.replay);
 
     let response: Response;

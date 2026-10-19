@@ -68,3 +68,6 @@ Each recipe ends in one command and its expected output.
 - [`examples/quickstart.ts`](./examples/quickstart.ts): the quickstart app.
   `src/tests/quickstart-example.test.ts` boots it, and the quickstart runs
   `dot explain` and `dot doctor` on it.
+
+- [Action boundaries](./actions.md): shared contracts, native adapters and authority.
+- [Upgrade action boundaries](./upgrade-actions.md): typed failures and validation ownership.

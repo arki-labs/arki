@@ -7,9 +7,12 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { InvalidInput, isFailure } from '@arki/failure';
+
+import type { HttpClientFailure } from '../client.js';
+import type { ParamsOf } from '../contract.js';
 import { reply, routes } from '../bundle.js';
 import { createClient } from '../client.js';
-import type { ParamsOf } from '../contract.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../engine.js';
 import { HTTP_ERROR_CODES } from '../error.js';
@@ -30,7 +33,10 @@ const answerNothing = (): void => {
 const jsonOf = (request: Promise<Response>): Promise<unknown> => request.then(res => res.json());
 const statusOf = (request: Promise<Response>): Promise<number> => request.then(res => res.status);
 
-const OrderId = z.string().regex(/^o\d+$/).brand<'OrderId'>();
+const OrderId = z
+  .string()
+  .regex(/^o\d+$/)
+  .brand<'OrderId'>();
 const Order = z.object({ id: z.string() });
 const Gone = z.object({ reason: z.string() });
 
@@ -122,18 +128,22 @@ describe('params and headers', () => {
     const badParam = await engine.fetch(new Request(`${BASE}/orders/nope`, { headers: { 'x-tenant': 't1' } }));
     expect(badParam.status).toBe(400);
     expect(await badParam.json()).toMatchObject({
-      error: { code: HTTP_ERROR_CODES.badRequest, message: expect.stringContaining('params.id:') as string },
+      error: { code: InvalidInput.code, data: { issues: [{ path: ['params', 'id'] }] } },
     });
     const noHeader = await engine.fetch(new Request(`${BASE}/orders/o1`));
     expect(noHeader.status).toBe(400);
     expect(await noHeader.json()).toMatchObject({
-      error: { message: expect.stringContaining('headers.x-tenant:') as string },
+      error: { code: InvalidInput.code, data: { issues: [{ path: ['headers', 'x-tenant'] }] } },
     });
     expect(calls).not.toHaveBeenCalled();
   });
 
   it('validates params on the async path too (a deriver makes the route async)', async () => {
-    const derived = buildEngine([routes().derive('who', () => 'ada').bind(getOrder, () => ({ id: 'x' }))]);
+    const derived = buildEngine([
+      routes()
+        .derive('who', () => 'ada')
+        .bind(getOrder, () => ({ id: 'x' })),
+    ]);
     const res = await derived.fetch(new Request(`${BASE}/orders/nope`, { headers: { 'x-tenant': 't1' } }));
     expect(res.status).toBe(400);
   });
@@ -155,8 +165,12 @@ describe('params and headers', () => {
       }
       buildEngine([builder]);
     };
-    expect(() => claim('plain', 'optional')).toThrowError(expect.objectContaining({ code: HTTP_ERROR_CODES.duplicateRoute }));
-    expect(() => claim('optional', 'plain')).toThrowError(expect.objectContaining({ code: HTTP_ERROR_CODES.duplicateRoute }));
+    expect(() => claim('plain', 'optional')).toThrowError(
+      expect.objectContaining({ code: HTTP_ERROR_CODES.duplicateRoute }),
+    );
+    expect(() => claim('optional', 'plain')).toThrowError(
+      expect.objectContaining({ code: HTTP_ERROR_CODES.duplicateRoute }),
+    );
   });
 });
 
@@ -310,7 +324,9 @@ describe('OpenAPI', () => {
       expect.objectContaining({ name: 'x-tenant', in: 'header', required: true, schema: { type: 'string' } }),
     ]);
     expect(Object.keys(op['responses'] as object)).toEqual(['200', '410']);
-    expect(op['responses']).toMatchObject({ '410': { content: { 'application/json': { schema: { type: 'object' } } } } });
+    expect(op['responses']).toMatchObject({
+      '410': { content: { 'application/json': { schema: { type: 'object' } } } },
+    });
   });
 
   it('renders an optional placeholder as two paths with distinct operation ids', () => {
@@ -404,13 +420,16 @@ describe('client', () => {
   it('resolves undefined on 204 and the Response for raw()', async () => {
     expect(await api.remove({ params: { id: '1' } })).toBeUndefined();
     const file = await api.file();
+    if (isFailure(file)) throw new Error(file.code);
     expect(await file.text()).toBe('bytes');
   });
 
   it('types the result from the contract', () => {
-    expectTypeOf(api.remove).returns.resolves.toEqualTypeOf<undefined>();
-    expectTypeOf(api.file).returns.resolves.toEqualTypeOf<Response>();
-    expectTypeOf(api.getOrder).returns.resolves.toEqualTypeOf<z.output<typeof Order> | z.output<typeof Gone>>();
+    expectTypeOf(api.remove).returns.resolves.toEqualTypeOf<undefined | HttpClientFailure>();
+    expectTypeOf(api.file).returns.resolves.toEqualTypeOf<Response | HttpClientFailure>();
+    expectTypeOf(api.getOrder).returns.resolves.toEqualTypeOf<
+      z.output<typeof Order> | z.output<typeof Gone> | HttpClientFailure
+    >();
     // @ts-expect-error -- the order id is branded; a plain string is rejected
     void api.getOrder({ params: { id: 'o1' }, headers: { 'x-tenant': 't' } });
   });

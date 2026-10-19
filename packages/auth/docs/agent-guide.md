@@ -78,23 +78,27 @@ export type Principal = PrincipalOf<Auth>;
 
 1. oRPC: `export const { authed, verified, role } = guards<RequestContext>()` from `@arki/auth/orpc` (`src/orpc.ts`). Each guard narrows `context.principal` to non-null.
 2. `@arki/http`: `routes().derive(withPrincipal(auth))` from `@arki/auth/http` (`src/http.ts`). Options: `{ verified: true }`, `{ role: 'admin' }`.
-3. A guest gets 401 `ARKI_AUTH_E401`. A missing role or an unverified email gets 403 `ARKI_AUTH_E403`.
+3. A guest or expired session gets 401 `auth.unauthenticated`. A missing role or unverified email gets 403 `auth.forbidden`. Declare these with `.errors(errorMap(...AUTH_FAILURES))` or HTTP `failures: AUTH_FAILURES`.
 
 ```ts
 import { os } from '@orpc/server';
 
 import type { AnyPrincipal } from '@arki/auth';
+import { AUTH_FAILURES } from '@arki/auth';
 import { guards } from '@arki/auth/orpc';
+import { errorMap } from '@arki/failure/orpc';
 
 type RequestContext = { readonly principal: AnyPrincipal | null };
 const { authed, role } = guards<RequestContext>();
 
 export const whoAmI = os
   .$context<RequestContext>()
+  .errors(errorMap(...AUTH_FAILURES))
   .use(authed)
   .handler(({ context }) => context.principal.user.id);
 export const adminOnly = os
   .$context<RequestContext>()
+  .errors(errorMap(...AUTH_FAILURES))
   .use(role('admin'))
   .handler(() => 'ok');
 ```
@@ -104,7 +108,7 @@ export const adminOnly = os
 1. Write the rules in the feature's `model/policies.ts`: `export const orderPolicies = definePolicies<{ order: Order }>()({ order: { view: …, refund: … } })` (`src/policies.ts`). `view` is optional: `false` answers like a missing row (404). The action `false` answers 403.
 2. oRPC: `export const { can } = guards<RequestContext>()`, then `impl.refund.use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))`. The handler reads `context.order` and `context.principal`.
 3. Name the policy in the contract too: `oc.$meta<{ policy?: string }>({})…meta({ policy: 'order.refund' })`. A missing or different name is `ARKI_AUTH_E008` on the first call. `dot explain` shows it as `↳ policy: order.refund`.
-4. `@arki/http`: `routes().derive(withOptionalPrincipal(auth)).bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => load(params.id), (_input, { order }) => refund(order)))`.
+4. `@arki/http`: use `routes().derive(withOptionalPrincipal(auth)).bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => load(params.id), (_input, { order }) => refund(order)), { failureHeaders: authFailureHeaders })`. Import `authFailureHeaders` from `@arki/auth/http`; the route declares `failures: AUTH_FAILURES`.
 5. The loader returns `null` for a missing row. It may check workspace membership; the policy never queries.
 
 ```ts
@@ -112,8 +116,9 @@ import { os } from '@orpc/server';
 import { z } from 'zod';
 
 import type { AnyPrincipal } from '@arki/auth';
-import { definePolicies } from '@arki/auth';
+import { AUTH_FAILURES, definePolicies } from '@arki/auth';
 import { guards } from '@arki/auth/orpc';
+import { errorMap } from '@arki/failure/orpc';
 
 type Insight = { readonly id: string; readonly userId: string };
 type RequestContext = {
@@ -128,6 +133,7 @@ const { can } = guards<RequestContext>();
 
 export const dismiss = os
   .$context<RequestContext>()
+  .errors(errorMap(...AUTH_FAILURES))
   .$meta<{ policy?: string }>({})
   .meta({ policy: 'insight.dismiss' })
   .input(z.object({ insightId: z.string() }))
@@ -214,7 +220,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - `workspaces` needs `Session.activeOrganizationId` and `Session.activeTeamId` columns (`ARKI_AUTH_E007`). `principal.workspace` is the selection, not proof of membership.
 - `expo` is `false` by default. Native apps set `expo: true`.
 - A policy never gets the input and never queries. Input rules go in the schema; membership checks go in the loader.
-- `can` needs the same policy name in the contract meta (`ARKI_AUTH_E008`). Someone else's row answers `NOT_FOUND` with no auth code, on purpose.
+- `can` needs the same policy name in the contract meta (`ARKI_AUTH_E008`). Someone else's row and a missing row both answer `auth.not_found` (404).
 - Events are observers. They never change the response. Only `beforeUserCreate` can refuse, by throwing an `AuthError`.
 
 ## Errors

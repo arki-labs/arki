@@ -142,3 +142,6 @@ export type {
 
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
+
+export { telemetryFor } from './telemetry.js';
+export type { DotTelemetry } from './telemetry.js';

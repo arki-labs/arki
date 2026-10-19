@@ -131,7 +131,7 @@ async function main() {
     new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
   const timedOut =
     typeof AbortController === 'undefined'
-      ? { error: { code: 'ARKI_HTTP_E408' } }
+      ? { value: { code: 'http.request_timeout' } }
       : await outcome(
           createClient(getEvent, { baseUrl: 'https://api.test', fetch: hanging, timeoutMs: 10 })({
             params: { id: 'e1' },
@@ -147,18 +147,18 @@ async function main() {
       'https://api.test/events/a%20b%2Fc/move?since=1970-01-01T00%3A00%3A01.000Z',
     ],
     ['JSON content type', echo.sent[0].init.headers['content-type'], 'application/json'],
-    ['envelope becomes HttpError', denied.error && denied.error.name, 'HttpError'],
-    ['server code kept', denied.error && denied.error.code, 'ARKI_HTTP_E403'],
-    ['server status kept', denied.error && denied.error.status, 403],
-    ['bad input is E400', invalid.error && invalid.error.code, 'ARKI_HTTP_E400'],
+    ['unknown envelope is a protocol failure', denied.value && denied.value.code, 'failure.invalid_envelope'],
+    ['unknown code is classified', denied.value && denied.value.data.reason, 'unknown_code'],
+    ['remote status is not trusted', denied.value && denied.value.status, 400],
+    ['bad input is canonical', invalid.value && invalid.value.code, 'schema.invalid_input'],
     ['bad input never sent', unused.sent.length, 0],
     ['listed failure is revived, not thrown', isFailure(notFound) && EventNotFound.is(notFound), true],
     ['revived failure keeps its data', notFound.data && notFound.data.id, 'e9'],
-    ['".." path param is E400', escaped.error && escaped.error.code, 'ARKI_HTTP_E400'],
+    ['".." path param is canonical', escaped.value && escaped.value.code, 'schema.invalid_input'],
     ['".." path param never sent', traversal.sent.length, 0],
     ['a 503 GET is retried through the policy', flaky.sent.length, 2],
     ['the retried call decodes the success', retried.id, 'e1'],
-    ['timeoutMs rejects with E408', timedOut.error && timedOut.error.code, 'ARKI_HTTP_E408'],
+    ['timeoutMs returns a canonical failure', timedOut.value && timedOut.value.code, 'http.request_timeout'],
   ];
 
   let failedChecks = 0;

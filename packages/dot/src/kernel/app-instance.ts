@@ -50,6 +50,7 @@ import type {
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
+import { telemetryFor } from '../telemetry.js';
 import { nowMs } from './now.js';
 import { withPhaseSpan, withPluginHookSpan } from './otel.js';
 
@@ -901,6 +902,7 @@ export class DotAppImpl<
       record.hooks.add('configure');
 
       const ctx: DotConfigureContext = {
+        $telemetry: telemetryFor(plugin),
         pluginName: plugin.name,
         appName: this.#appName,
         registerService: (name, kind) => {
@@ -1130,6 +1132,7 @@ export class DotAppImpl<
     const ctx: Record<string, unknown> = {
       $app: this.#appName,
       $plugin: record.plugin.name,
+      $telemetry: telemetryFor(record.plugin),
       $config: this.#config,
       $signal: signal,
       $describeAction: (actionId: string, patch: { readonly summary: string }) =>

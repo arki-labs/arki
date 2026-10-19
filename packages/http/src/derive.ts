@@ -1,16 +1,19 @@
+import type { Failure } from '@arki/failure';
+
 /**
  * Request-scope derivers — "scope is data, not containers."
  *
  * A deriver is a named function from `(req, ctx)` to a value; each one
  * adds a typed key to the per-request context handlers receive. Derivers
  * run in declaration order, later derivers see earlier keys typed, and a
- * deriver that throws {@link HttpError} short-circuits into the wire
- * envelope — which is the entire "guard" story:
+ * a returned canonical failure short-circuits into the wire envelope.
+ * Each bound contract must declare the derivers' inferred failures:
  *
  * ```ts
+ * const SignIn = defineFailure('auth.sign_in', { status: 401 });
  * const withPrincipal = derive('principal', async req => {
  *   const p = await auth.verify(req.headers.get('authorization'));
- *   if (!p) throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');
+ *   if (!p) return SignIn();
  *   return p;
  * });
  * ```
@@ -42,7 +45,19 @@ export const BASE_CTX_KEYS = ['req', 'url', 'requestId', 'signal'] as const;
  * any bundle; one written against a richer context can only be added
  * after the derivers that provide it.
  */
-export type Deriver<K extends string = string, V = unknown, TIn extends BaseRequestCtx = BaseRequestCtx> = {
+/** Transport metadata for an inferred returned failure; execution remains server-bound. */
+export type FailureHeaders<Value> = {
+  readonly failureHeaders?: (
+    this: void,
+    failure: Extract<Awaited<Value>, Failure>,
+  ) => Readonly<Record<string, string>> | undefined;
+};
+
+export type Deriver<
+  K extends string = string,
+  V = unknown,
+  TIn extends BaseRequestCtx = BaseRequestCtx,
+> = FailureHeaders<V> & {
   readonly key: K;
   readonly derive: (req: Request, ctx: TIn) => V | Promise<V>;
 };
@@ -51,8 +66,9 @@ export type Deriver<K extends string = string, V = unknown, TIn extends BaseRequ
 export function derive<K extends string, V, TIn extends BaseRequestCtx = BaseRequestCtx>(
   key: K,
   fn: (req: Request, ctx: TIn) => V | Promise<V>,
+  options: FailureHeaders<NoInfer<V>> = {},
 ): Deriver<K, V, TIn> {
-  return { key, derive: fn };
+  return { key, derive: fn, ...options };
 }
 
 /**
@@ -61,7 +77,11 @@ export function derive<K extends string, V, TIn extends BaseRequestCtx = BaseReq
  * engine crosses the erasure boundary at the call site (`ctx as never`),
  * mirroring the DOT kernel's hook-storage pattern.
  */
-export type ErasedDeriver = {
+export type ErasedFailureHeaders = {
+  failureHeaders?(this: void, failure: Failure): ReturnType<NonNullable<FailureHeaders<Failure>['failureHeaders']>>;
+};
+
+export type ErasedDeriver = ErasedFailureHeaders & {
   readonly key: string;
   readonly derive: (req: Request, ctx: never) => unknown;
 };

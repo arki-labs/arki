@@ -54,7 +54,7 @@ describe('buildEngine', () => {
     const res = await engine.fetch(new Request(`${BASE}/orders?status=lost`));
     expect(res.status).toBe(400);
     const error = await envelopeOf(res);
-    expect(error.code).toBe(HTTP_ERROR_CODES.badRequest);
+    expect(error.code).toBe('schema.invalid_input');
     expect(error.message).toContain('status');
   });
 

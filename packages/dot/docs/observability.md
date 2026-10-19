@@ -1,9 +1,7 @@
 # Observability
 
 DOT is OTel-first. Traces, metrics, and logs come out of the kernel
-without you wiring anything — you wire the _exporter_. Skip the OTel
-SDK and you pay zero allocation per lifecycle call; the OTel API returns
-no-op implementations and the cost vanishes.
+without you wiring anything — you wire the _exporter_. Without an OTel SDK, tracing and metrics safely use the API’s no-op implementations.
 
 This page is the short version. If you've used `@opentelemetry/api`
 before, you can skim straight to the [attribute table](#attribute-conventions).
@@ -93,9 +91,9 @@ average?" needs all plugins' `dot.plugin.boot` spans to share a name.
 | `dot.hook`             | plugin | string | Which hook (same set as `dot.app.phase`)    |
 | `dot.plugin.order`     | plugin | int    | Topological order (0-based, deterministic)  |
 
-On failure, the span gets `SpanStatusCode.ERROR` and an `exception`
-event with the thrown error recorded via `span.recordException()`. No
-manual scrubbing needed; standard OTel viewers render it.
+Typed failures mark the span as failed with canonical failure attributes.
+Unexpected exceptions are classified as defects; private failure payloads are not
+automatically copied into span attributes. See the outcome handling source below.
 
 ---
 
@@ -252,7 +250,7 @@ agents that don't care about observability won't see the issue.
 
 - **No built-in exporter.** DOT does not pick stdout, OTLP, Jaeger, or
   Datadog for you. The kernel registers nothing; the SDK is yours.
-- **No auto-instrumentation.** DOT only instruments its own lifecycle.
+- **No auto-instrumentation.** DOT instruments its own lifecycle, usecases and action execution.
   HTTP, database, and queue spans come from each adapter or from
   `@opentelemetry/auto-instrumentations-node`. The kernel does not
   reach into your plugins.
@@ -274,9 +272,9 @@ synchronous event stream to registered `DotLifecycleObserver`s. The two
 signals are peers; neither layers under the other.
 
 ```ts run expect
-import { isFailure } from '@arki/failure';
 import type { DotLifecycleEvent } from '@arki/dot';
 import { defineApp, plugin } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
 const envPlugin = plugin({ name: 'env', provides: { env: () => ({ mode: 'test' }) } });
 const dbPlugin = plugin({ name: 'db', provides: { db: () => ({ ready: true }) } });
@@ -390,3 +388,39 @@ serialised app state from another process).
   actually does and when each hook fires.
 - [OpenTelemetry JS docs](https://opentelemetry.io/docs/languages/js/) —
   for the SDK side, which the kernel deliberately leaves to you.
+
+## Custom instrumentation
+
+The application owns SDK registration, exporters and the context manager.
+`$telemetry` in plugin configure/hook contexts uses the existing plugin identity;
+`telemetryFor(feature)` also accepts a feature or `{ name }` identity. Both retain
+active context across custom work when the app has registered a context manager.
+
+```ts run expect
+import { telemetryFor } from '@arki/dot/telemetry';
+
+const telemetry = telemetryFor({ name: 'catalog' });
+const lookups = telemetry.counter('catalog.lookups');
+const duration = telemetry.histogram('catalog.lookup.duration', { unit: 'ms' });
+const result = await telemetry.span('catalog.cache.lookup', async () => {
+  telemetry.event('catalog.cache.hit', { tier: 'memory' });
+  lookups.add(1, { tier: 'memory' });
+  duration.record(2, { tier: 'memory' });
+  return 'book';
+});
+console.log(result);
+```
+
+```text
+book
+```
+
+Use `telemetry.log('debug', 'Catalog lookup completed', { tier: 'memory' })`
+for logs correlated with the active valid trace. The app configures `@arki/log`.
+Keep metric dimensions bounded and record explicit safe fields only.
+Custom instrumentation is safe without an SDK; reporter exceptions cannot replace
+the operation's outcome. Typed failures classify outcomes consistently for A/B
+action execution. Keep existing HTTP, RPC and provider instrumentation; add a
+custom span only for a distinct operation, or annotate its active span with an event.
+
+Sources: [telemetry](../src/telemetry.ts), [outcome/context handling](../src/kernel/otel.ts).

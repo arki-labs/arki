@@ -15,13 +15,13 @@ import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { isStandardSchema } from '@arki/schema';
 
-import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import type { RouteMeta } from './openapi.js';
+import type { RawOutput } from './raw.js';
+import type { Field, Fields, FieldsOf, Wire, WireValue } from './wire.js';
+import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { contractMeta } from './openapi.js';
 import { pathPlaceholders } from './path.js';
-import type { RawOutput } from './raw.js';
 import { isRawOutput } from './raw.js';
-import type { Field, Fields, FieldsOf, Wire, WireValue } from './wire.js';
 import { fieldParts, isField, isWire } from './wire.js';
 
 /** Methods a {@link RouteContract} can declare. */
@@ -39,17 +39,11 @@ type RawParams<TPath extends string> = TPath extends `${string}:${infer Rest}`
  * `'/orders/:id/items/:itemId'` → `'id' | 'itemId'`. An optional
  * placeholder (`:itemId?`) counts under its plain name.
  */
-export type PathParams<TPath extends string> = RawParams<TPath> extends infer P extends string
-  ? P extends `${infer Name}?`
-    ? Name
-    : P
-  : never;
+export type PathParams<TPath extends string> =
+  RawParams<TPath> extends infer P extends string ? (P extends `${infer Name}?` ? Name : P) : never;
 
-type OptionalParams<TPath extends string> = RawParams<TPath> extends infer P extends string
-  ? P extends `${infer Name}?`
-    ? Name
-    : never
-  : never;
+type OptionalParams<TPath extends string> =
+  RawParams<TPath> extends infer P extends string ? (P extends `${infer Name}?` ? Name : never) : never;
 
 /** Typed view of a path's parameters: every value is a string, an optional one may be missing. */
 export type ParamsOf<TPath extends string> = Readonly<
@@ -72,6 +66,16 @@ export type RouteFailure<TContract> = TContract extends {
   readonly failures: infer TFailures extends readonly FailureDefinitionLike[];
 }
   ? ReturnType<TFailures[number]>
+  : never;
+
+/** Reject every possible contract that omits any owned failure, including widened unions. */
+type IncompleteFailureContract<Contract, Outcomes> = Contract extends unknown
+  ? [Outcomes] extends [RouteFailure<Contract>]
+    ? never
+    : Contract
+  : never;
+export type CoversFailures<Contract, Outcomes> = [IncompleteFailureContract<Contract, Outcomes>] extends [never]
+  ? unknown
   : never;
 
 /**
@@ -171,7 +175,7 @@ export type RouteContract<TPath extends string = string, TDef extends RouteDef<T
 /** What a typed SSE route declares. */
 export type SseDef<TPath extends string> = Pick<
   RouteDef<TPath>,
-  'id' | 'summary' | 'params' | 'query' | 'headers' | 'check'
+  'id' | 'summary' | 'params' | 'query' | 'headers' | 'check' | 'failures'
 > & {
   /** Schema every yielded event is encoded with. */
   readonly event: Wire;
@@ -357,7 +361,11 @@ function fieldsOf(id: string, where: 'params' | 'headers' | 'query', value: unkn
 /** `value` as a wire; throws naming where it sits. */
 function wireOf(id: string, where: string, value: unknown): Wire {
   if (!isWire(value)) {
-    invalid(id, `${where} is not a schema.`, 'Use a Standard Schema (zod, valibot, arktype, …) or codec(decode, encode).');
+    invalid(
+      id,
+      `${where} is not a schema.`,
+      'Use a Standard Schema (zod, valibot, arktype, …) or codec(decode, encode).',
+    );
   }
   return value;
 }

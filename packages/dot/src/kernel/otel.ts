@@ -203,7 +203,7 @@ export function withPhaseSpan<R>(
 }
 
 /** Reporting is best effort: its own failure cannot replace or report the primary outcome. */
-function observe<Value>(report: () => Value): Value | undefined {
+export function observe<Value>(report: () => Value): Value | undefined {
   try {
     return report();
   } catch {
@@ -214,11 +214,34 @@ function observe<Value>(report: () => Value): Value | undefined {
 function fnWithSpan<Value>(span: Span | undefined, fn: (span: Span) => Value): Value {
   // The API's no-op span keeps the callback contract when a reporter cannot start a span.
   const activeSpan = span ?? trace.wrapSpanContext(INVALID_SPAN_CONTEXT);
-  return context.with(trace.setSpan(context.active(), activeSpan), fn, undefined, activeSpan);
+  return withSpanContext(span, () => fn(activeSpan));
+}
+
+/**
+ * Activate app-owned context without letting a defective context manager control execution.
+ * The local outcome retains the one callback invocation when a manager skips, repeats,
+ * swallows or throws after it. Reporter failures never become application failures.
+ */
+export function withSpanContext<Value>(span: Span | undefined, run: () => Value): Value {
+  if (span === undefined) return run();
+  const invocation: { outcome?: { value: Value } | { cause: unknown } } = {};
+  const invoke = (): Value => {
+    if (invocation.outcome === undefined) {
+      try {
+        invocation.outcome = { value: run() };
+      } catch (error) {
+        invocation.outcome = { cause: error };
+      }
+    }
+    if ('cause' in invocation.outcome) throw invocation.outcome.cause;
+    return invocation.outcome.value;
+  };
+  observe(() => context.with(trace.setSpan(context.active(), span), invoke));
+  return invoke();
 }
 
 /** Observe settlement without replacing the callback's value or promise identity. */
-function withOutcomeSpan<Value>(
+export function withOutcomeSpan<Value>(
   span: Span | undefined,
   run: () => Value,
   recordDuration?: (status: 'ok' | 'failed') => void,
@@ -271,10 +294,7 @@ export function traceUsecase(featureName: string, usecaseName: string, usecase: 
   const spanName = `feature.${featureName}.${usecaseName}`;
   function traced(this: unknown, ...args: unknown[]): unknown {
     const span = observe(() => tracer.startSpan(spanName));
-    return withOutcomeSpan(span, () => {
-      if (span === undefined) return Reflect.apply(call, this, args);
-      return context.with(trace.setSpan(context.active(), span), () => Reflect.apply(call, this, args));
-    });
+    return withOutcomeSpan(span, () => withSpanContext(span, () => Reflect.apply(call, this, args)));
   }
   return Object.defineProperties(traced, Object.getOwnPropertyDescriptors(usecase));
 }

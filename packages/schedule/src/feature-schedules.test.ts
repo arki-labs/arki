@@ -127,8 +127,8 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
   // A durable tick runs in another process that does not hold these services.
   it('refuses durable: true in the type and with a coded error at declaration', () => {
     try {
-      // @ts-expect-error feature-owned schedules cannot be durable.
       schedules(mailerNeeds, [
+        // @ts-expect-error feature-owned schedules cannot be durable.
         { name: 'durable-digest', every: '1h', durable: true, handler: ({ mailer }) => mailer.send('x') },
       ]);
       throw new Error('Expected schedules() to throw.');

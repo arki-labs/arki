@@ -7,11 +7,11 @@ Match errors on `error.code`, never on the message. Output is only as narrow as 
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/http`: typed HTTP for ARKI. `BASE_CTX_KEYS`, `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `UnsafeUrlError`, `buildEngine`, `codec`, `composeMiddleware`, `contractMeta`, `derive`, `describeInternalError`, `endpoints`; and 61 more.
+- `@arki/http`: typed HTTP for ARKI. `BASE_CTX_KEYS`, `HTTP_CLIENT_FAILURES`, `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `IDEMPOTENCY_FAILURES`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `NetworkFailure`, `RequestCancelled`, `RequestTimeout`; and 72 more.
 - `@arki/http/dot`: DOT adapter for @arki/http — the `http()` driving adapter. `HTTP_PLUGIN_ERROR_CODES`, `endpoints`, `http`, `registerRoutes`; types `BundleNeeds`, `BundleToken`, `EndpointsEntrypoint`, `HttpOptions`, `HttpServer`, `HttpServices`.
 - `@arki/http/projection`: DOT projection entry point for `dot explain --as openapi`. `project`.
-- `@arki/http/client`: A typed fetch client built from the same route contracts the server binds. `createClient`, `retryTransient`; types `ClientCall`, `ClientInput`, `ClientOptions`, `ClientOutput`, `ClientPolicy`, `RetryOutcome`.
-- `@arki/http/idempotency`: Idempotency keys for HTTP: `idempotent(...)` is an `HttpMiddleware` that runs a request once per key and answers a repeat with the stored response. `idempotent`, `storedResponse`; types `BeginResult`, `IdempotentOptions`, `ResponseCache`, `StoredResponse`.
+- `@arki/http/client`: A typed fetch client built from the same route contracts the server binds. `HTTP_CLIENT_FAILURES`, `NetworkFailure`, `RequestCancelled`, `RequestTimeout`, `createClient`, `retryTransient`; types `ClientCall`, `ClientInput`, `ClientOptions`, `ClientOutput`, `ClientPolicy`, `HttpClientFailure`; and 1 more.
+- `@arki/http/idempotency`: Idempotency keys for HTTP: `idempotent(...)` is an `HttpMiddleware` that runs a request once per key and answers a repeat with the stored response. `IDEMPOTENCY_FAILURES`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `idempotent`, `storedResponse`; types `BeginResult`, `IdempotentOptions`, `ResponseCache`, `StoredResponse`.
 - `@arki/http/webhooks`: Signed webhooks in: check that a request comes from the sender who holds the secret. `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `hmac`, `standardWebhooks`, `stripe`, `verifyWebhook`; types `HmacSchemeOptions`, `SignOptions`, `VerifiedWebhook`, `VerifyOptions`, `VerifyWebhookOptions`; and 4 more.
 - `@arki/http/context`: Ambient request context — the last resort. `requestContext`, `runWithRequestContext`.
 - `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `UnsafeUrlError`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`, `systemTransport`, `validatePublicURL`; types `PublicFetchTransport`.

@@ -7,7 +7,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { ClientInput } from '../client.js';
+import type { ClientInput, HttpClientFailure } from '../client.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { raw } from '../raw.js';
@@ -55,12 +55,16 @@ const typeOnly = (): void => {
 
 describe('createClient types', () => {
   it('resolves to the output schema output type', () => {
-    expectTypeOf(orders.getOrder).returns.resolves.toEqualTypeOf<z.output<typeof Order.decode>>();
-    expectTypeOf(orders.listOrders).returns.resolves.toEqualTypeOf<z.output<typeof Order.decode>[]>();
+    expectTypeOf(orders.getOrder).returns.resolves.toEqualTypeOf<z.output<typeof Order.decode> | HttpClientFailure>();
+    expectTypeOf(orders.listOrders).returns.resolves.toEqualTypeOf<
+      z.output<typeof Order.decode>[] | HttpClientFailure
+    >();
     // The codec's decoded side, not its wire string.
-    expectTypeOf(orders.getOrder).returns.resolves.toHaveProperty('placedAt').toEqualTypeOf<Date>();
+    expectTypeOf<Exclude<Awaited<ReturnType<typeof orders.getOrder>>, HttpClientFailure>>()
+      .toHaveProperty('placedAt')
+      .toEqualTypeOf<Date>();
     // No output schema: the raw Response.
-    expectTypeOf(orders.download).returns.resolves.toEqualTypeOf<Response>();
+    expectTypeOf(orders.download).returns.resolves.toEqualTypeOf<Response | HttpClientFailure>();
   });
 
   it('types input from the path, query and body', () => {

@@ -198,10 +198,10 @@ describe('defineCommand types', () => {
         ask: { name: 'Who?' },
         run: () => 0,
       });
-      // @ts-expect-error -- `nam` is not a key of the input
       defineCommand({
         describe: 'ask, wrong key',
         input: z.object({ name: z.string() }),
+        // @ts-expect-error -- `nam` is not a key of the input
         ask: { nam: 'Who?' },
         run: () => 0,
       });

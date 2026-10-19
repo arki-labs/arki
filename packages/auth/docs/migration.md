@@ -45,7 +45,9 @@ The old exports stay until every app has moved. Then they are deleted in one ste
 | `@arki/auth/client-base-url`                                                               | `@arki/auth/react`                                                                     | —                                                                                                                              |
 | `user.deleteUser`, `user.changeEmail`, `account.accountLinking`                            | `account: { delete, changeEmail, linking }` in the definition                          | No old-address confirmation mail and no delete-confirmation mail.                                                              |
 
-Unchanged: `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`, `hashPassword`, `verifyPassword`, `createAuthTables`, `createWorkspaceTables`, `tweaksColumn`, `ArkiAuthProvider`, `TanStackAuthProvider`.
+Ownership assertions now require the handler’s declared `errors` instead of a label: `assertFound(row, errors)`, `assertOwnedOrNotFound(row, actorId, errors)` and `assertOwnedOrForbidden(row, actorId, errors)`. Declare `ResourceMissing` for reads and also `AccessDenied` for mutations through `errorMap`.
+
+Unchanged: `hashPassword`, `verifyPassword`, `createAuthTables`, `createWorkspaceTables`, `tweaksColumn`, `ArkiAuthProvider`, `TanStackAuthProvider`.
 
 ## Steps for one app
 
@@ -160,3 +162,7 @@ grep -rn "user\.id as UserId\|user as UserModel" apps/<app>/backend/src  # nothi
 ```
 
 Commit one app at a time, by pathspec.
+
+For shared action execution and the validation owner, see Dot’s
+[action migration guide](../../dot/docs/upgrade-actions.md). Native adapters retain
+their own authorization, response headers and declared failures.

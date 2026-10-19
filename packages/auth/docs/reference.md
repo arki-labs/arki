@@ -85,13 +85,13 @@ export const orderPolicies = definePolicies<{ order: Order }>()({
 
 One check runs in this order, on both transports:
 
-| Step                                 | oRPC                             | `@arki/http`         |
-| ------------------------------------ | -------------------------------- | -------------------- |
-| No principal. The loader never runs. | `UNAUTHORIZED`, `ARKI_AUTH_E401` | 401 `ARKI_AUTH_E401` |
-| The loader returns `null`.           | `NOT_FOUND`, `order not found`   | 404 `ARKI_HTTP_E404` |
-| The group's `view` returns `false`.  | `NOT_FOUND`, the same answer     | 404, the same answer |
-| The named policy returns `false`.    | `FORBIDDEN`, `ARKI_AUTH_E403`    | 403 `ARKI_AUTH_E403` |
-| A policy throws.                     | rethrown (500), never a refusal  | rethrown (500)       |
+| Step                                 | oRPC                              | `@arki/http`               |
+| ------------------------------------ | --------------------------------- | -------------------------- |
+| No principal. The loader never runs. | `auth.unauthenticated`            | 401 `auth.unauthenticated` |
+| The loader returns `null`.           | `auth.not_found`                  | 404 `auth.not_found`       |
+| The group's `view` returns `false`.  | `auth.not_found`, the same answer | 404, the same answer       |
+| The named policy returns `false`.    | `auth.forbidden`                  | 403 `auth.forbidden`       |
+| A policy throws.                     | rethrown (500), never a refusal   | rethrown (500)             |
 
 Someone else's order looks exactly like a missing one, so ids cannot be probed. `order.view` itself is the `view` check alone.
 
@@ -102,7 +102,9 @@ import { os } from '@orpc/server';
 import { z } from 'zod';
 
 import type { AnyPrincipal } from '@arki/auth';
+import { AUTH_FAILURES } from '@arki/auth';
 import { guards } from '@arki/auth/orpc';
+import { errorMap } from '@arki/failure/orpc';
 
 type RequestContext = {
   readonly principal: AnyPrincipal | null;
@@ -112,6 +114,7 @@ export const { can } = guards<RequestContext>();
 
 export const refund = os
   .$context<RequestContext>()
+  .errors(errorMap(...AUTH_FAILURES))
   .$meta<{ policy?: string }>({})
   .meta({ policy: 'order.refund' })
   .input(z.object({ id: z.string() }))
@@ -124,11 +127,12 @@ The procedure's meta must name the same policy. In a contract-first app that is 
 `@arki/http`: `authorize` wraps the handler, because it must run after the input is decoded. The bundle derives `principal` first; without it, the bind does not compile.
 
 ```ts continue
-import { authorize, withOptionalPrincipal } from '@arki/auth/http';
+import { authFailureHeaders, authorize, withOptionalPrincipal } from '@arki/auth/http';
 import { route, routes } from '@arki/http';
 
 const refundOrder = route.post('/orders/:id/refund', {
   id: 'orders.refund',
+  failures: AUTH_FAILURES,
   output: z.object({ refunded: z.string() }),
 });
 
@@ -145,6 +149,7 @@ export const orderRoutes = (
         ({ params }) => orders.byId(params.id),
         (_input, { order }) => ({ refunded: order.id }),
       ),
+      { failureHeaders: authFailureHeaders },
     );
 ```
 

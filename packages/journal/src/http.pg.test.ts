@@ -14,8 +14,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { composeMiddleware } from '@arki/http';
-import { idempotent } from '@arki/http/idempotency';
+import { composeMiddleware, route } from '@arki/http';
+import { IDEMPOTENCY_FAILURES, idempotent } from '@arki/http/idempotency';
 
 import { responseCache } from './http.js';
 import { journalTables } from './pg.js';
@@ -62,7 +62,7 @@ function app(cache: ReturnType<typeof cacheA>, handler: () => Promise<Response>,
     idempotent({
       cache,
       scope: req => req.headers.get('x-user') ?? undefined,
-      routes: ['POST /orders'],
+      routes: [route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES })],
       ttl,
       replayHeaders: ['content-type', 'x-order'],
     }),

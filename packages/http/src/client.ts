@@ -20,8 +20,8 @@
  * resolves `undefined` (it answers 204), and a `raw()` route resolves the
  * `Response`. A failed call whose code is one of the contract's `failures`
  * resolves to that failure, revived and its data checked with the
- * definition's schema; any other failed call throws {@link HttpError} with
- * the server's error code.
+ * definition's schema. Client-owned validation, network, cancellation and protocol
+ * outcomes resolve to their canonical failures too.
  *
  * Uses only `fetch` — no Node APIs — so it runs in browsers, React Native,
  * Deno, Bun and Node. This is why it lives at its own subpath: the root entry
@@ -30,15 +30,29 @@
 
 import { z } from 'zod';
 
-import { InvalidEnvelope, InvalidInput, orThrow, revive } from '@arki/failure';
+import {
+  InvalidEnvelope,
+  InvalidInput,
+  isFailure,
+  REVIVAL_FAILURES,
+  revive,
+  UnexpectedDefect,
+  UnexpectedFailure,
+  ValidatorDefect,
+} from '@arki/failure';
 import { formatIssues, parseAsync } from '@arki/schema';
 
 import type { PathParams, ResponseSchemas, RouteContract, RouteDef, RouteFailure, RouteInput } from './contract.js';
+import type { HttpClientFailure } from './failures.js';
 import type { RawOutput } from './raw.js';
 import type { Fields, Job, Ran, Where, Wire, WireValue } from './wire.js';
 import { HTTP_ERROR_CODES, HttpError } from './error.js';
+import { NetworkFailure, RequestCancelled, RequestTimeout } from './failures.js';
 import { isRawOutput } from './raw.js';
 import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs } from './wire.js';
+
+export { HTTP_CLIENT_FAILURES, NetworkFailure, RequestCancelled, RequestTimeout } from './failures.js';
+export type { HttpClientFailure } from './failures.js';
 
 /** Any JSON route contract — what {@link createClient} accepts. */
 type AnyRoute = RouteContract<string, RouteDef<string>>;
@@ -96,8 +110,8 @@ type StatusBodies<TRoute> = TRoute extends { readonly responses: infer TResponse
  * contract lists.
  */
 export type ClientOutput<TRoute> = TRoute extends { readonly output: RawOutput }
-  ? Response | RouteFailure<TRoute>
-  : SuccessOf<TRoute> | StatusBodies<TRoute> | RouteFailure<TRoute>;
+  ? Response | RouteFailure<TRoute> | HttpClientFailure
+  : SuccessOf<TRoute> | StatusBodies<TRoute> | RouteFailure<TRoute> | HttpClientFailure;
 
 /** Per-call options: an abort signal and extra request headers. */
 type CallInit = {
@@ -137,7 +151,7 @@ export type ClientOptions = {
   readonly fetch?: (input: string, init: RequestInit) => Promise<Response>;
   /**
    * Gives up once the response has not arrived within this many milliseconds, retries included,
-   * and throws `HttpError` 408 (`ARKI_HTTP_E408`). Reading the body is not timed.
+   * and returns `RequestTimeout` (408). Reading the body is not timed.
    */
   readonly timeoutMs?: number;
   /**
@@ -219,7 +233,18 @@ function isRoute(value: AnyRoute | Readonly<Record<string, AnyRoute>>): value is
 }
 
 function buildCall(contract: AnyRoute, transport: Transport): ErasedCall {
-  return (input, init) => call(contract, transport, input ?? {}, init ?? {});
+  return async (input, init) => {
+    try {
+      return await call(contract, transport, input ?? {}, init ?? {});
+    } catch (error) {
+      if (error instanceof UnexpectedFailure && ValidatorDefect.is(error.failure)) return error.failure;
+      if (error instanceof HttpError && InvalidInput.is(error.cause)) return error.cause;
+      if (error instanceof HttpError && error.status === 400) {
+        return InvalidInput({ issues: [{ message: error.message }] });
+      }
+      return UnexpectedDefect({ cause: error });
+    }
+  };
 }
 
 async function call(contract: AnyRoute, transport: Transport, input: ErasedInput, init: CallInit): Promise<unknown> {
@@ -243,6 +268,7 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
   const repeatable = REPEATABLE_METHODS.has(contract.method) || hasHeader(headers, 'idempotency-key');
   // The route template, not the URL: the URL may carry tokens, and this text can reach a log or the wire.
   const response = await send(transport, url, request, init.signal, repeatable, `${contract.method} ${contract.path}`);
+  if (isFailure(response)) return response;
   // A status the contract lists answers with that schema's body, ok or not.
   const listed = isRawOutput(contract.output) ? undefined : contract.responses?.[response.status];
   if (listed !== undefined) return decodeBody(contract, listed, response);
@@ -328,8 +354,22 @@ class RetryableResponse extends Error {
 
 type Attempt = { readonly response: Response } | { readonly error: unknown };
 
+/** Own fetch exceptions without widening the public result to an arbitrary failure. */
+async function send(...args: Parameters<typeof sendOnceOrRetry>): Promise<Response | HttpClientFailure> {
+  try {
+    return await sendOnceOrRetry(...args);
+  } catch (error) {
+    if (args[3]?.aborted === true) return RequestCancelled({ cause: error });
+    if (error instanceof HttpError && error.code === HTTP_ERROR_CODES.requestTimeout) {
+      return RequestTimeout({ cause: error });
+    }
+    if (error instanceof TypeError) return NetworkFailure({ cause: error });
+    return UnexpectedDefect({ cause: error });
+  }
+}
+
 /** Send once, or through the policy; either way under the deadline. */
-async function send(
+async function sendOnceOrRetry(
   transport: Transport,
   url: string,
   request: RequestInit,
@@ -453,97 +493,36 @@ function scalarString(where: string, key: string, value: unknown): string {
   );
 }
 
-async function decodeBody(contract: AnyRoute, output: Wire, response: Response): Promise<unknown> {
+async function decodeBody(_contract: AnyRoute, output: Wire, response: Response): Promise<unknown> {
   let body: unknown;
   try {
     body = await response.json();
   } catch (error) {
-    throw new HttpError(500, HTTP_ERROR_CODES.internal, `response for "${contract.id}" is not valid JSON`, {
-      cause: error,
-    });
+    return InvalidEnvelope({ reason: 'invalid_json' }, { cause: error });
   }
-  const error = await parseAsync(decoderOf(output), body);
-  if (!InvalidInput.is(error)) return orThrow(error);
-  throw new HttpError(
-    500,
-    HTTP_ERROR_CODES.internal,
-    `response for "${contract.id}" violates the contract's output schema: ${messageOf(error)}`,
-    {
-      cause: error,
-      remediation: 'The client and server disagree on the contract. Deploy the same contract version to both.',
-    },
-  );
+  const parsed = await parseAsync(decoderOf(output), body);
+  if (InvalidInput.is(parsed)) return InvalidEnvelope({ reason: 'invalid_data' }, { cause: parsed });
+  return parsed;
 }
 
 const errorEnvelopeSchema = z.object({
   error: z.object({
+    version: z.unknown().optional(),
     code: z.string(),
     message: z.string(),
-    remediation: z.string().optional(),
-    docsUrl: z.string().optional(),
     data: z.unknown().optional(),
   }),
 });
 
-/**
- * A non-2xx response as the failure it stands for, when its code is one the
- * contract lists. Anything else throws {@link HttpError}, keeping the
- * server's code when it sent the envelope.
- */
+/** Remote metadata is never trusted; revive through the contract and canonical boundary definitions. */
 async function toListedFailure(contract: AnyRoute, response: Response): Promise<unknown> {
   let body: unknown;
   try {
     body = await response.json();
-  } catch {
-    body = undefined;
+  } catch (error) {
+    return InvalidEnvelope({ reason: 'invalid_json' }, { cause: error });
   }
   const envelope = errorEnvelopeSchema.safeParse(body);
-  if (envelope.success) {
-    const failure = reviveListed(contract, envelope.data.error);
-    if (failure !== undefined) return failure;
-    const { code, message, remediation, docsUrl } = envelope.data.error;
-    throw new HttpError(response.status, code, message, {
-      ...(remediation === undefined ? {} : { remediation }),
-      ...(docsUrl === undefined ? {} : { docsUrl }),
-    });
-  }
-  throw new HttpError(
-    response.status,
-    codeForStatus(response.status),
-    `${contract.method} ${contract.path} answered ${response.status} without an error envelope`,
-  );
-}
-
-/** The listed failure the envelope's code names, its data checked by `revive`; `undefined` when not listed. */
-function reviveListed(contract: AnyRoute, error: { readonly code: string; readonly data?: unknown }): unknown {
-  if (contract.failures === undefined) return undefined;
-  return revive(error, contract.failures, {
-    onInvalid(failure) {
-      if (InvalidEnvelope.is(failure) && failure.data.reason === 'unknown_code') return;
-      throw new HttpError(
-        500,
-        HTTP_ERROR_CODES.internal,
-        `failure "${error.code}" from "${contract.id}" carries data its definition rejects: ${failure.message}`,
-        {
-          cause: failure,
-          remediation:
-            'The client and server disagree on the failure definition. Deploy the same contract version to both.',
-        },
-      );
-    },
-  });
-}
-
-/** The wire code a status maps to when the response carried no envelope (a proxy, a gateway). */
-function codeForStatus(status: number): string {
-  if (status === 400) return HTTP_ERROR_CODES.badRequest;
-  if (status === 401) return HTTP_ERROR_CODES.unauthorized;
-  if (status === 403) return HTTP_ERROR_CODES.forbidden;
-  if (status === 404) return HTTP_ERROR_CODES.notFound;
-  return HTTP_ERROR_CODES.internal;
-}
-
-function messageOf(error: unknown): string {
-  if (InvalidInput.is(error)) return formatIssues(error.data.issues);
-  return error instanceof Error ? error.message : String(error);
+  if (!envelope.success) return InvalidEnvelope({ reason: 'malformed' });
+  return revive(envelope.data.error, [InvalidInput, ...REVIVAL_FAILURES, ...(contract.failures ?? [])]);
 }

@@ -9,8 +9,9 @@
 
 import { Hono } from 'hono';
 
+import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { InvalidInput, isFailure } from '@arki/failure';
+import { InvalidInput, isFailure, serialize } from '@arki/failure';
 import { formatIssues } from '@arki/schema';
 
 import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
@@ -131,9 +132,11 @@ async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): P
   return runWithRequestContext(base, async () => {
     try {
       let ctx: BaseRequestCtx & Record<string, unknown> = base;
-      for (const deriver of bundle.derivers) {
+      for (const deriver of rpc.derivers ?? bundle.derivers) {
         // Same erasure boundary as executeBinding.
         const value = await deriver.derive(req, ctx as never);
+        if (isFailure(value))
+          return failureResponse(value, rpc.contract?.failures ?? [], deriver.failureHeaders?.(value));
         ctx = { ...ctx, [deriver.key]: value };
       }
       const rpcCtx = await rpc.context(req, ctx as never);
@@ -180,7 +183,7 @@ function executeBinding(
   params: Record<string, string>,
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
-  if (bundle.derivers.length > 0 || binding.contract.body !== undefined) {
+  if ((binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined) {
     return runWithRequestContext(base, () => executeBindingAsync(bundle, binding, req, base, params));
   }
   return runWithRequestContext(base, () => {
@@ -202,11 +205,13 @@ async function executeBindingAsync(
 ): Promise<Response> {
   try {
     let ctx: BaseRequestCtx & Record<string, unknown> = base;
-    for (const deriver of bundle.derivers) {
+    for (const deriver of binding.derivers ?? bundle.derivers) {
       // Erasure boundary: derivers were stored with `never` context (see
       // ErasedDeriver); the accumulated ctx is the value they were typed
       // against at composition time.
       const value = await deriver.derive(req, ctx as never);
+      if (isFailure(value))
+        return failureResponse(value, binding.contract.failures ?? [], deriver.failureHeaders?.(value));
       ctx = { ...ctx, [deriver.key]: value };
     }
 
@@ -231,27 +236,44 @@ function respond(binding: RouteBinding, input: ErasedInput, ctx: BaseRequestCtx)
   }
 
   const returned = binding.handler(input as never, ctx as never);
-  if (isPromiseLike(returned)) return settle(binding.contract, returned);
-  return toResponse(binding.contract, returned);
+  if (isPromiseLike(returned)) return settle(binding, returned);
+  return toResponse(binding.contract, returned, binding.failureHeaders);
 }
 
-async function settle(contract: ContractLike, pending: PromiseLike<unknown>): Promise<Response> {
+async function settle(binding: RouteBinding, pending: PromiseLike<unknown>): Promise<Response> {
   try {
-    return await toResponse(contract, await pending);
+    return await toResponse(binding.contract, await pending, binding.failureHeaders);
   } catch (error) {
     return toErrorResponse(error);
   }
 }
 
-function toResponse(contract: ContractLike, result: unknown): Response | Promise<Response> {
-  // A returned failure is an expected outcome, not output: it answers with
-  // its own status in the error envelope, and the output schema never sees it.
-  if (isFailure(result)) {
-    return errorResponse(result.status, result.code, result.message, {
-      ...(result.remediation === undefined ? {} : { remediation: result.remediation }),
-      ...(result.data === undefined ? {} : { data: result.data }),
-    });
-  }
+function failureResponse(
+  failure: Failure,
+  definitions: NonNullable<ContractLike['failures']>,
+  headers?: Readonly<Record<string, string>>,
+): Response {
+  const wire = serialize(failure, definitions);
+  const outcome = isFailure(wire) ? wire : failure;
+  return errorResponse(outcome.status, outcome.code, outcome.message, {
+    ...(outcome.remediation === undefined ? {} : { remediation: outcome.remediation }),
+    ...(headers === undefined ? {} : { headers }),
+    ...(isFailure(wire)
+      ? wire.data === undefined
+        ? {}
+        : { data: wire.data }
+      : 'data' in wire
+        ? { data: wire.data }
+        : {}),
+  });
+}
+
+function toResponse(
+  contract: ContractLike,
+  result: unknown,
+  failureHeaders?: RouteBinding['failureHeaders'],
+): Response | Promise<Response> {
+  if (isFailure(result)) return failureResponse(result, contract.failures ?? [], failureHeaders?.(result));
   // `raw()` is the only way to send a Response, and the only way to skip the
   // schemas: in raw mode the handler owns the bytes, so nothing is checked.
   const rawMode = isRawOutput(contract.output);
@@ -310,6 +332,7 @@ async function readJson(req: Request): Promise<unknown> {
   } catch {
     throw new HttpError(400, HTTP_ERROR_CODES.badRequest, 'request body is not valid JSON', {
       remediation: 'Send a JSON body with content-type: application/json.',
+      cause: InvalidInput({ issues: [{ path: ['body'], message: 'must be valid JSON' }] }),
     });
   }
 }

@@ -132,3 +132,6 @@ export { hookSignals } from './signals.js';
 export type { HookSignalsOptions, SignalTarget } from './signals.js';
 
 // #endregion
+
+export { telemetryFor } from './telemetry.js';
+export type { DotTelemetry } from './telemetry.js';

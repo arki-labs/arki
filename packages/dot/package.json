@@ -1,7 +1,7 @@
 {
   "name": "@arki/dot",
   "version": "0.6.1",
-  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
+  "description": "TypeScript-first application composition framework for the ARKI package family \u2014 lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "keywords": [
     "arki",
     "typescript",
@@ -67,6 +67,21 @@
       "types": "./dist/test-harness.d.ts",
       "import": "./dist/test-harness.js",
       "default": "./dist/test-harness.js"
+    },
+    "./action": {
+      "types": "./dist/action.d.ts",
+      "import": "./dist/action.js",
+      "default": "./dist/action.js"
+    },
+    "./execute": {
+      "types": "./dist/execute.d.ts",
+      "import": "./dist/execute.js",
+      "default": "./dist/execute.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js",
+      "default": "./dist/telemetry.js"
     }
   },
   "bin": {

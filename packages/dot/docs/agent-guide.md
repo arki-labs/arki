@@ -329,6 +329,9 @@ with `.error.data.underlyingCode`.
 
 | Code                                                                        | Meaning                                                                                                                                                 | What to do                                                                              |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `dot.action_not_exposed`                                                    | The adapter is not exposed by the action.                                                                                                               | Use a declared binding.                                                                 |
+| `dot.action_principal_required`                                             | No authenticated principal attestation.                                                                                                                 | Authenticate credentials and expiry at the adapter.                                     |
+| `dot.action_approval_required`                                              | No invocation approval attestation.                                                                                                                     | Verify caller, action and input approval at the adapter.                                |
 | `cli.unknown_command` (exit 2)                                              | Unknown command. `.error.data.suggestions` holds close names.                                                                                           | Use `explain`, `doctor` or `new`; `dot --help` lists them.                              |
 | `cli.invalid_input` (exit 2)                                                | Bad flags, for example an unknown `--template`, an invalid app name, or `--as` with `--graph`.                                                          | Fix the flags named in `.error.issues[]`; `dot <command> --help` lists them.            |
 | `dot.app_not_found` (exit 3)                                                | No app file found and no `--app`.                                                                                                                       | Pass `--app <path>`, or create `dot.config.ts`.                                         |
@@ -404,3 +407,8 @@ checks that every `jq` path in this guide exists in the real CLI output.
 - [The `dot` command](cli.md): every command and its side effects.
 - [Testing plugins](testing.md) and [Logging, shutdown and timeouts](operations.md).
 - Recipes: [Deploy an app](recipes/deploy.md), [Upgrade Dot](recipes/upgrade.md).
+
+## Author action boundaries
+
+Use [actions](actions.md) for `action`, `bindAction`, native validation ownership and
+canonical failures. Use [upgrade-actions](upgrade-actions.md) when migrating callers.

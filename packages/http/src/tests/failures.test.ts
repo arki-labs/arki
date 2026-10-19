@@ -14,11 +14,11 @@ import {
   defineFailure,
   InvalidEnvelope,
   isFailure,
-  match,
   UnexpectedDefect,
   ValidatorDefect,
 } from '@arki/failure';
 
+import type { HttpClientFailure } from '../client.js';
 import type { RouteFailure } from '../contract.js';
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
@@ -113,35 +113,30 @@ describe('the client', () => {
       message: 'no post nope',
       data: { id: 'nope' },
     });
-    const label = match(result, {
-      ok: post => post.title,
-      'post.not_found': failure => `missing ${failure.data.id}`,
-      'post.locked': () => 'locked',
-    });
-    expect(label).toBe('missing nope');
+    if (!PostNotFound.is(result)) throw new Error('Expected missing post');
+    expect(`missing ${result.data.id}`).toBe('missing nope');
     expect(PostLocked.is(await client.getPost({ params: { id: 'locked' } }))).toBe(true);
     expect(await client.getPost({ params: { id: 'p1' } })).toEqual({ id: 'p1', title: 'Hello' });
   });
 
   it('types the call as the output or one of the listed failures, written once on the contract', () => {
     type Listed = ReturnType<typeof PostNotFound> | ReturnType<typeof PostLocked>;
-    expectTypeOf(client.getPost).returns.resolves.toEqualTypeOf<Post | Listed>();
+    expectTypeOf(client.getPost).returns.resolves.toEqualTypeOf<Post | Listed | HttpClientFailure>();
     expectTypeOf<RouteFailure<typeof getPost>>().toEqualTypeOf<Listed>();
-    // A contract without failures resolves to its output only.
-    expectTypeOf(client.plainPost).returns.resolves.toEqualTypeOf<Post>();
+    // A contract without domain failures still includes client-owned outcomes.
+    expectTypeOf(client.plainPost).returns.resolves.toEqualTypeOf<Post | HttpClientFailure>();
     expectTypeOf<RouteFailure<typeof plainPost>>().toBeNever();
   });
 
-  it('still throws HttpError for a failure the contract does not list, so unexpected errors stay loud', async () => {
+  it('returns a typed unknown-code protocol failure for an undeclared server failure', async () => {
     // A server on a newer contract version sends a failure this client does not know.
     const newer = createClient(getPost, {
       baseUrl: BASE,
       fetch: answering(403, { code: 'post.unlisted', message: 'x' }),
     });
-    await expect(newer({ params: { id: 'p1' } })).rejects.toMatchObject({
-      name: 'HttpError',
-      status: 403,
-      code: 'post.unlisted',
+    await expect(newer({ params: { id: 'p1' } })).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'unknown_code' },
     });
   });
 
@@ -150,10 +145,9 @@ describe('the client', () => {
       baseUrl: BASE,
       fetch: answering(404, { code: 'post.not_found', message: 'x', data: { id: 42 } }),
     });
-    await expect(drifted({ params: { id: 'x' } })).rejects.toMatchObject({
-      name: 'HttpError',
-      status: 500,
-      code: HTTP_ERROR_CODES.internal,
+    await expect(drifted({ params: { id: 'x' } })).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'invalid_data' },
     });
   });
 
@@ -164,7 +158,7 @@ describe('the client', () => {
       baseUrl: BASE,
       fetch: answering(400, { code: AsyncFailure.code, message: 'remote', data: 'x' }),
     });
-    await expect(call()).rejects.toMatchObject({ name: 'HttpError', status: 500, cause: { code: AsyncSchema.code } });
+    await expect(call()).resolves.toMatchObject({ code: AsyncSchema.code });
   });
 
   it('rejects broken failure-message construction rather than leaking an undeclared defect as domain output', async () => {
@@ -178,10 +172,8 @@ describe('the client', () => {
       baseUrl: BASE,
       fetch: answering(400, { code: BrokenMessage.code, message: 'remote' }),
     });
-    await expect(call()).rejects.toMatchObject({
-      name: 'HttpError',
-      status: 500,
-      cause: { code: UnexpectedDefect.code },
+    await expect(call()).resolves.toMatchObject({
+      code: UnexpectedDefect.code,
     });
   });
 
@@ -200,10 +192,9 @@ describe('the client', () => {
       baseUrl: BASE,
       fetch: answering(400, { code: InvalidEnvelope.code, message: 'remote', data: { reason: 'invented' } }),
     });
-    await expect(call()).rejects.toMatchObject({
-      name: 'HttpError',
-      status: 500,
-      cause: { code: InvalidEnvelope.code },
+    await expect(call()).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'invalid_data' },
     });
   });
 });

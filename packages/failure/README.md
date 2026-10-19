@@ -61,7 +61,7 @@ Node, Bun, Deno, browsers and React Native (Hermes). The core uses no runtime bu
 ## Public imports
 
 - `@arki/failure`: `defineFailure`, `isFailure`, `match`, `recover`, `orThrow`, `attempt`, `revive`, `findCause`, `partition`, `collect`, `stoppable`, `assertNever`, `FailureError` and the types.
-- `@arki/failure/orpc`: `errorMap`, `orThrowRpc`, `reviveRpcError`.
+- `@arki/failure/orpc`: `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcFailureDefinitions`, `RPC_FAILURE_DEFINITION`.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules, and `configs.recommended`.
 
 ## Define
@@ -385,6 +385,7 @@ export const procedures = {
 ```
 
 - `errorMap(...definitions)` builds the contract's error map. Two definitions with one code throw `ARKI_FAILURE_E005`.
+- `rpcFailureDefinitions(contract['~orpc'].errorMap)` recovers those same canonical definitions for another adapter. `errorMap` retains each reference under `RPC_FAILURE_DEFINITION`, an enumerable symbol preserved by native contract copies and omitted by JSON. Adapters can pass the inferred list to `reviveRpcError` without redeclaring failures.
 - `orThrowRpc(value, errors)` returns the value, or throws the failure through the handler's `errors`: the typed `ORPCError` the contract declares, with the failure's message and data. The client gets it as `defined: true`.
 - `orThrowRpc(value, errors, success)` throws the failure the same way, or returns `success`. It is for a usecase that returns nothing or a failure: `return orThrowRpc(await disconnect(id), errors, { success: true })`.
 - A failure the usecase can return but the contract does not list is a compile error: `Property '"post.locked"' is missing in type …`. Add its definition to `errorMap(...)`. If the types are bypassed anyway, the failure arrives as undeclared (`defined: false`).

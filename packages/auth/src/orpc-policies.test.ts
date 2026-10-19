@@ -9,6 +9,7 @@ import { call, ORPCError, os } from '@orpc/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { errorMap } from '@arki/failure/orpc';
 import { fakeLog } from '@arki/log/testing';
 
 import type { Order } from './__fixtures__/orders.js';
@@ -16,9 +17,10 @@ import type { PrincipalFor } from './pg/types.js';
 import type { TestAuth } from './testing/index.js';
 import { orderPolicies, ordersOf } from './__fixtures__/orders.js';
 import { authTables } from './__fixtures__/tables.js';
+import { AUTH_FAILURES } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
 import { AUTH_ERROR_CODES, isAuthError } from './errors.js';
-import { guards } from './orpc.js';
+import { assertOwnedOrNotFound, guards } from './orpc.js';
 import { actingAs, testAuth } from './testing/index.js';
 
 const definition = defineAuth({
@@ -33,7 +35,10 @@ type Context = {
 
 const { can } = guards<Context>();
 const orderInput = z.object({ id: z.string() });
-const base = os.$context<Context>().$meta<{ policy?: string }>({});
+const base = os
+  .$context<Context>()
+  .errors(errorMap(...AUTH_FAILURES))
+  .$meta<{ policy?: string }>({});
 const load = vi.fn(({ id }: { id: string }, { orders }: Context) => orders.get(id) ?? null);
 const refund = base
   .meta({ policy: 'order.refund' })
@@ -81,8 +86,8 @@ describe('can', () => {
   it('guest → UNAUTHORIZED with E401, and the loader is not called', async () => {
     load.mockClear();
     expect(await failureOf(() => call(refund, { id: 'ord_open' }, { context: { principal: null, orders } }))).toEqual({
-      code: 'UNAUTHORIZED',
-      data: { code: AUTH_ERROR_CODES.unauthenticated },
+      code: 'auth.unauthenticated',
+      data: undefined,
       message: 'Sign in to continue.',
     });
     expect(load).not.toHaveBeenCalled();
@@ -92,7 +97,7 @@ describe('can', () => {
     const eve = await principalFor('eve@shop.test');
     const notYours = await failureOf(() => call(refund, { id: 'ord_open' }, { context: { principal: eve, orders } }));
     const missing = await failureOf(() => call(refund, { id: 'ord_none' }, { context: { principal: eve, orders } }));
-    expect(notYours).toEqual({ code: 'NOT_FOUND', data: undefined, message: 'order not found' });
+    expect(notYours).toEqual({ code: 'auth.not_found', data: undefined, message: 'Resource not found.' });
     expect(missing).toEqual(notYours);
   });
 
@@ -111,7 +116,7 @@ describe('can', () => {
   it('shipped → FORBIDDEN with E403', async () => {
     expect(
       await failureOf(() => call(refund, { id: 'ord_shipped' }, { context: { principal: ada, orders } })),
-    ).toMatchObject({ code: 'FORBIDDEN', data: { code: AUTH_ERROR_CODES.forbidden } });
+    ).toMatchObject({ code: 'auth.forbidden', data: undefined });
   });
 
   it('a denial logs the policy name, the principal id and the outcome at debug', async () => {
@@ -135,4 +140,20 @@ describe('can', () => {
     }
     expect(load).not.toHaveBeenCalled();
   });
+});
+
+it('ownership assertions mask a real PGlite user’s session exactly like a missing row', async () => {
+  const eve = await principalFor('ownership-stranger@shop.test');
+  const sessions = await harness.db.select().from(authTables.Session);
+  const session = sessions.find(row => row.userId === ada.user.id);
+  if (session === undefined) throw new Error('The PGlite owner session must exist.');
+  const procedure = base.input(orderInput).handler(({ input, context, errors }) => {
+    const row = input.id === session.id ? session : undefined;
+    assertOwnedOrNotFound(row, context.principal?.user.id ?? '', errors);
+    return row.id;
+  });
+  const hidden = await failureOf(() => call(procedure, { id: session.id }, { context: { principal: eve, orders } }));
+  const missing = await failureOf(() => call(procedure, { id: 'missing' }, { context: { principal: eve, orders } }));
+  expect(hidden).toEqual(missing);
+  expect(hidden).toEqual({ code: 'auth.not_found', data: undefined, message: 'Resource not found.' });
 });

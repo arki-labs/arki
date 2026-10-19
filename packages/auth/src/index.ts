@@ -1,6 +1,6 @@
 /**
  * `@arki/auth` — the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the
- * constants and the principal and definition types. No engine, no Drizzle, no Zod: a client bundle
+ * constants and the principal and definition types. No engine or Drizzle: a client bundle
  * can import it. The server builds the auth with `createAuth` from `@arki/auth/pg`.
  */
 export { defineAuth } from './definition.js';
@@ -35,3 +35,20 @@ export { AUTH_ERROR_CODES, AuthError, isAuthError } from './errors.js';
 export type { AuthErrorCode } from './errors.js';
 export { AUTH_SECRET_MIN_LENGTH, PASSWORD_MIN_LENGTH } from './constants.js';
 export type { UserId } from '@arki/contracts';
+
+export {
+  AUTH_FAILURES,
+  AUTH_PRINCIPAL_FAILURES,
+  AUTH_POLICY_FAILURES,
+  isAuthBoundaryFailure,
+  AuthenticationRequired,
+  AccessDenied,
+  ResourceMissing,
+  AuthenticationRateLimited,
+  AuthenticationUnavailable,
+  resolvePrincipal,
+  requirePrincipal,
+  checkPrincipal,
+} from './boundary-failures.js';
+export type { PrincipalSource, PrincipalChecks } from './boundary-failures.js';
+export { authorizePolicy } from './policies.js';

@@ -8,12 +8,13 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { Policy } from '@arki/resilience';
+import { InvalidEnvelope, UnexpectedDefect } from '@arki/failure';
 import { backoff, createRetryPolicy, withFallback } from '@arki/resilience';
 
 import type { ClientPolicy } from '../client.js';
 import { createClient, retryTransient } from '../client.js';
 import { route } from '../contract.js';
-import { HTTP_ERROR_CODES, HttpError } from '../error.js';
+import { RequestCancelled, RequestTimeout } from '../failures.js';
 
 const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
@@ -64,8 +65,9 @@ describe('retries through a policy', () => {
   it('never retries a POST without an idempotency key: the first try may have charged the card', async () => {
     const { calls, fetch } = scripted(unavailable, () => json(200, { paid: true }));
     const orders = createClient({ payOrder }, { baseUrl: 'https://api.test', fetch, policy });
-    await expect(orders.payOrder({ params: { id: 'o1' }, body: { amount: 5 } })).rejects.toMatchObject({
-      status: 503,
+    await expect(orders.payOrder({ params: { id: 'o1' }, body: { amount: 5 } })).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'unknown_code' },
     });
     expect(calls).toHaveLength(1);
   });
@@ -85,8 +87,7 @@ describe('retries through a policy', () => {
     const { calls, fetch } = scripted(unavailable);
     const orders = createClient({ getOrder }, { baseUrl: 'https://api.test', fetch, policy });
     const failure = orders.getOrder({ params: { id: 'o1' } });
-    await expect(failure).rejects.toBeInstanceOf(HttpError);
-    await expect(failure).rejects.toMatchObject({ status: 503, code: 'ARKI_HTTP_E500', message: 'busy' });
+    await expect(failure).resolves.toMatchObject({ code: InvalidEnvelope.code, data: { reason: 'unknown_code' } });
     expect(calls).toHaveLength(3);
   });
 
@@ -101,7 +102,7 @@ describe('retries through a policy', () => {
 
     const refused = scripted(() => Promise.reject(new Error('Private network addresses are not allowed.')));
     const guarded = createClient({ getOrder }, { baseUrl: 'https://api.test', fetch: refused.fetch, policy });
-    await expect(guarded.getOrder({ params: { id: 'o1' } })).rejects.toThrow('Private network');
+    await expect(guarded.getOrder({ params: { id: 'o1' } })).resolves.toMatchObject({ code: UnexpectedDefect.code });
     expect(refused.calls).toHaveLength(1);
   });
 
@@ -126,38 +127,39 @@ describe('retries through a policy', () => {
   it('without a policy, nothing is retried', async () => {
     const { calls, fetch } = scripted(unavailable, () => json(200, { id: 'o1' }));
     const orders = createClient({ getOrder }, { baseUrl: 'https://api.test', fetch });
-    await expect(orders.getOrder({ params: { id: 'o1' } })).rejects.toMatchObject({ status: 503 });
+    await expect(orders.getOrder({ params: { id: 'o1' } })).resolves.toMatchObject({
+      code: InvalidEnvelope.code,
+      data: { reason: 'unknown_code' },
+    });
     expect(calls).toHaveLength(1);
   });
 });
 
 describe('timeouts and aborts', () => {
-  it('timeoutMs throws 408 ARKI_HTTP_E408, with or without a policy', async () => {
+  it('timeoutMs returns the canonical timeout with or without a policy', async () => {
     for (const options of [{}, { policy }]) {
       const orders = createClient(
         { getOrder },
         { baseUrl: 'https://api.test', fetch: hanging, timeoutMs: 20, ...options },
       );
-      await expect(orders.getOrder({ params: { id: 'o1' } })).rejects.toMatchObject({
+      await expect(orders.getOrder({ params: { id: 'o1' } })).resolves.toMatchObject({
         status: 408,
-        code: HTTP_ERROR_CODES.requestTimeout,
+        code: RequestTimeout.code,
       });
     }
   });
 
-  it('the timeout names the route, never the URL: query tokens must not reach a log or the wire', async () => {
+  it('the public timeout never exposes the URL or private query tokens', async () => {
     const orders = createClient(
       { getOrder },
       { baseUrl: 'https://user:pw@partner.test/v1?api_key=secret', fetch: hanging, timeoutMs: 10 },
     );
     const error: unknown = await orders.getOrder({ params: { id: 'o1' } }).catch((error_: unknown) => error_);
-    if (!(error instanceof HttpError)) throw new Error(`expected an HttpError, got ${String(error)}`);
-    expect(error.code).toBe(HTTP_ERROR_CODES.requestTimeout);
-    expect(error.message).toContain('GET /orders/:id');
-    expect(error.message).not.toMatch(/partner\.test|secret|pw/);
+    expect(RequestTimeout.is(error)).toBe(true);
+    expect(JSON.stringify(error)).not.toMatch(/partner\.test|secret|pw/);
   });
 
-  it('a caller abort rejects with the caller reason and is not retried', async () => {
+  it('a caller abort returns the canonical cancellation and is not retried', async () => {
     let calls = 0;
     const fetch = (input: string, init: RequestInit): Promise<Response> => {
       calls += 1;
@@ -167,7 +169,7 @@ describe('timeouts and aborts', () => {
     const controller = new AbortController();
     const pending = orders.getOrder({ params: { id: 'o1' } }, { signal: controller.signal });
     controller.abort(new Error('user left the page'));
-    await expect(pending).rejects.toThrow('user left the page');
+    await expect(pending).resolves.toMatchObject({ code: RequestCancelled.code });
     expect(calls).toBe(1);
   });
 });

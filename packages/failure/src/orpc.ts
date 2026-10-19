@@ -33,17 +33,21 @@ type DefinitionShape = {
   readonly dataSchema: StandardSchemaV1 | undefined;
 };
 
+/** Canonical definition retained across contract adapters; symbols never enter JSON error envelopes. */
+export const RPC_FAILURE_DEFINITION = Symbol.for('@arki/failure/orpc/definition');
+
 /** The oRPC error map for a list of definitions: one entry per code, with its status and data schema. */
 export type ErrorMapOf<Definitions extends readonly DefinitionShape[]> = {
   readonly [Definition in Definitions[number] as Definition['code']]: Definition['dataSchema'] extends StandardSchemaV1
     ? {
         readonly status: number;
+        readonly [RPC_FAILURE_DEFINITION]: Definition;
         readonly data: StandardSchemaV1<
           StandardSchemaV1.InferOutput<Definition['dataSchema']>,
           StandardSchemaV1.InferOutput<Definition['dataSchema']>
         >;
       }
-    : { readonly status: number };
+    : { readonly status: number; readonly [RPC_FAILURE_DEFINITION]: Definition };
 };
 
 /**
@@ -55,8 +59,10 @@ export function errorMap<const Definitions extends readonly DefinitionShape[]>(
 ): ErrorMapOf<Definitions>;
 export function errorMap(...definitions: readonly DefinitionShape[]): unknown {
   const seen = new Set<string>();
-  const entries: [string, { status: number; data?: StandardSchemaV1 }][] = [];
-  for (const { code, status, dataSchema } of definitions) {
+  const entries: [string, { status: number; data?: StandardSchemaV1; [RPC_FAILURE_DEFINITION]: DefinitionShape }][] =
+    [];
+  for (const definition of definitions) {
+    const { code, status, dataSchema } = definition;
     if (seen.has(code)) {
       throw new FailureError(
         FAILURE_ERROR_CODES.duplicateCode,
@@ -65,7 +71,14 @@ export function errorMap(...definitions: readonly DefinitionShape[]): unknown {
       );
     }
     seen.add(code);
-    entries.push([code, dataSchema === undefined ? { status } : { status, data: wireSchema(dataSchema) }]);
+    entries.push([
+      code,
+      {
+        status,
+        ...(dataSchema === undefined ? {} : { data: wireSchema(dataSchema) }),
+        [RPC_FAILURE_DEFINITION]: definition,
+      },
+    ]);
   }
   return Object.fromEntries(entries);
 }
@@ -135,6 +148,30 @@ type RevivableDefinition = {
   readonly dataSchema: StandardSchemaV1 | undefined;
   (...args: never[]): Failure;
 };
+
+type RpcFailureSource = {
+  readonly status?: number;
+  readonly data?: StandardSchemaV1;
+  readonly message?: string;
+  readonly [RPC_FAILURE_DEFINITION]?: RevivableDefinition;
+};
+
+type RetainedDefinition<Entry> = Entry extends unknown
+  ? typeof RPC_FAILURE_DEFINITION extends keyof Entry
+    ? Extract<Entry[typeof RPC_FAILURE_DEFINITION], RevivableDefinition>
+    : never
+  : never;
+
+/** Read the original definitions from a native contract without rebuilding failure types or schemas. */
+export function rpcFailureDefinitions<const Map extends Readonly<Record<string, RpcFailureSource>>>(
+  map: Map,
+): RetainedDefinition<Map[keyof Map]>[];
+export function rpcFailureDefinitions(map: Readonly<Record<string, RpcFailureSource>>) {
+  return Object.values(map).flatMap(entry => {
+    const definition = entry[RPC_FAILURE_DEFINITION];
+    return definition === undefined ? [] : [definition];
+  });
+}
 
 /**
  * The live failure a caught `ORPCError` stands for, when its code is one of

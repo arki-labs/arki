@@ -8,8 +8,8 @@ import { RedisContainer } from '@testcontainers/redis';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { composeMiddleware } from '@arki/http';
-import { idempotent } from '@arki/http/idempotency';
+import { composeMiddleware, route } from '@arki/http';
+import { IDEMPOTENCY_FAILURES, idempotent } from '@arki/http/idempotency';
 
 import { redisResponseCache } from './idempotency.js';
 
@@ -83,7 +83,7 @@ describe('redisResponseCache', () => {
       idempotent({
         cache: redisResponseCache(redis),
         scope: () => 'u1',
-        routes: ['POST /orders'],
+        routes: [route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES })],
         ttl: 5000,
       }),
     ]);

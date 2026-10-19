@@ -7,10 +7,12 @@ import { os } from '@orpc/server';
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { errorMap } from '@arki/failure/orpc';
 import { route, routes } from '@arki/http';
 
 import type { AnyPrincipal } from './principal.js';
-import { authorize, withOptionalPrincipal } from './http.js';
+import { AUTH_FAILURES, AuthenticationRequired } from './boundary-failures.js';
+import { authFailureHeaders, authorize, withOptionalPrincipal, withPrincipal } from './http.js';
 import { guards } from './orpc.js';
 import { definePolicies } from './policies.js';
 
@@ -31,13 +33,18 @@ const orderPolicies = definePolicies<{ order: Order }>()({
 const { can } = guards<Context>();
 const refund = os
   .$context<Context>()
+  .errors(errorMap(...AUTH_FAILURES))
   .$meta<{ policy?: string }>({})
   .meta({ policy: 'order.refund' })
   .input(z.object({ id: z.string() }));
 
 const source = { principal: () => Promise.resolve(null) };
 const refundHandler = () => ({ id: '1' });
-const refundRoute = route.post('/orders/:id/refund', { id: 'refund', output: z.object({ id: z.string() }) });
+const refundRoute = route.post('/orders/:id/refund', {
+  id: 'refund',
+  failures: AUTH_FAILURES,
+  output: z.object({ id: z.string() }),
+});
 
 describe('policy typing', () => {
   it('unknown policy name does not compile', () => {
@@ -77,6 +84,7 @@ describe('policy typing', () => {
 
   it('the loader sees context keys added before can() by other middleware', () => {
     os.$context<Context>()
+      .errors(errorMap(...AUTH_FAILURES))
       .use(({ next }) =>
         next({ context: { usecases: { byId: (_id: string) => Promise.resolve<Order | null>(null) } } }),
       )
@@ -101,6 +109,30 @@ describe('policy typing', () => {
             return { id: ctx.order.id };
           },
         ),
+        { failureHeaders: authFailureHeaders },
       );
   });
+});
+
+it('HTTP auth derivers require their inferred failures on the selected route', () => {
+  const privateRoute = route.get('/private', { id: 'private', output: z.string() });
+  routes()
+    .derive(withPrincipal(source))
+    // @ts-expect-error the required principal deriver emits undeclared auth failures.
+    .bind(privateRoute, () => 'unreachable');
+  routes()
+    .derive(withOptionalPrincipal(source))
+    // @ts-expect-error optional principal resolution can still refuse invalid credentials.
+    .bind(privateRoute, () => 'unreachable');
+  const partial = route.get('/partial', { id: 'partial', failures: [AuthenticationRequired], output: z.string() });
+  routes()
+    .derive(withPrincipal(source))
+    // @ts-expect-error resolving the principal can also return limiter/store/defect failures.
+    .bind(partial, () => 'unreachable');
+  const declared = route.get('/declared', { id: 'declared', failures: AUTH_FAILURES });
+  routes()
+    .derive(withPrincipal(source))
+    .bind(declared, (_input, context) => {
+      expectTypeOf(context.principal).toEqualTypeOf<AnyPrincipal>();
+    });
 });

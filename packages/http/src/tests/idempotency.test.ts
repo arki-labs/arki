@@ -6,9 +6,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { BeginResult, ResponseCache, StoredResponse } from '../idempotency.js';
+import type { BeginResult, IdempotentOptions, ResponseCache, StoredResponse } from '../idempotency.js';
+import { route } from '../contract.js';
 import { composeMiddleware } from '../engine.js';
-import { idempotent } from '../idempotency.js';
+import { IDEMPOTENCY_FAILURES, idempotent } from '../idempotency.js';
 
 type Entry = { fingerprint: string; owner: string; expiresAt: number; response?: StoredResponse };
 
@@ -46,7 +47,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 
 function setup(
   handler: (req: Request, calls: number) => Response | Promise<Response>,
-  overrides: Partial<Parameters<typeof idempotent>[0]> = {},
+  overrides: Partial<Omit<IdempotentOptions, 'routes'>> = {},
 ) {
   const cache = memoryCache();
   let calls = 0;
@@ -59,7 +60,10 @@ function setup(
       idempotent({
         cache,
         scope: req => req.headers.get('x-user') ?? undefined,
-        routes: ['POST /orders', 'POST /orders/:id/pay'],
+        routes: [
+          route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES }),
+          route.post('/orders/:id/pay', { id: 'orders.pay', failures: IDEMPOTENCY_FAILURES }),
+        ],
         ttl: 60_000,
         ...overrides,
       }),
@@ -114,7 +118,7 @@ describe('idempotent', () => {
     await fetch(post('/orders', { sku: 1 }, keyed));
     const res = await fetch(post('/orders', { sku: 2 }, keyed));
     expect(res.status).toBe(422);
-    expect(await res.json()).toMatchObject({ error: { code: 'ARKI_HTTP_E411' } });
+    expect(await res.json()).toMatchObject({ error: { code: 'http.idempotency_key_reused' } });
     expect(calls()).toBe(1);
   });
 
@@ -162,7 +166,7 @@ describe('idempotent', () => {
     const { fetch, calls } = setup(created);
     const missing = await fetch(post('/orders', { sku: 1 }, { 'x-user': 'u1' }));
     expect(missing.status).toBe(400);
-    expect(await missing.json()).toMatchObject({ error: { code: 'ARKI_HTTP_E410' } });
+    expect(await missing.json()).toMatchObject({ error: { code: 'http.idempotency_key_required' } });
     expect(calls()).toBe(0);
     const unlisted = await fetch(post('/other', {}, { 'x-user': 'u1' }));
     const otherMethod = await fetch(new Request('http://x/orders', { headers: { 'x-user': 'u1' } }));

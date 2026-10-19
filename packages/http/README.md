@@ -362,21 +362,28 @@ later derivers) see typed. A deriver that throws `HttpError` is the whole
 "guard" story:
 
 ```ts run
-import { buildEngine, derive, HttpError, HTTP_ERROR_CODES, routes } from '@arki/http';
+import { buildEngine, derive, route, routes } from '@arki/http';
+import { defineFailure } from '@arki/failure';
 
 import { auth, dbForTenant, listOrders } from './fixture.ts';
+
+const SignIn = defineFailure('orders.sign_in', { status: 401 });
+const securedOrders = route.get(listOrders.path, {
+  id: 'orders.secured', query: listOrders.query, output: listOrders.output,
+  failures: [...listOrders.failures, SignIn],
+});
 
 // inside a `provides` factory — `auth` is an injected singleton
 const withPrincipal = derive('principal', async req => {
   const p = await auth.verify(req.headers.get('authorization'));
-  if (!p) throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');
+  if (!p) return SignIn();
   return p;
-});
+}, { failureHeaders: () => ({ 'www-authenticate': 'Bearer' }) });
 
 const orderRoutes = routes()
   .derive(withPrincipal)
   .derive('db', (_req, ctx) => dbForTenant(ctx.principal.tenantId))
-  .bind(listOrders, async (_input, ctx) => ctx.db.orders.list());
+  .bind(securedOrders, async (_input, ctx) => ctx.db.orders.list());
 ```
 
 A request with no credentials never reaches the handler:
@@ -416,7 +423,8 @@ users compose the same way with `composeMiddleware(engine.fetch, [...])`.
 `idempotent(...)` from `@arki/http/idempotency` is an `HttpMiddleware`. It runs each listed request once per `Idempotency-Key` and answers a repeat with the stored response. It is portable (Web Crypto only). The store is a `ResponseCache`: `@arki/journal/http` (Postgres) or `@arki/kv/redis/idempotency` (Redis).
 
 ```ts skip="needs a Postgres journal (the @arki/journal package), which this package does not depend on"
-import { idempotent } from '@arki/http/idempotency';
+import { idempotent, IDEMPOTENCY_FAILURES } from '@arki/http/idempotency';
+import { route } from '@arki/http';
 import { responseCache } from '@arki/journal/http';
 
 http({
@@ -425,7 +433,10 @@ http({
     idempotent({
       cache: responseCache(db, tables),
       scope: req => principalOf(req)?.id, // undefined = unauthenticated: never cached, never replayed
-      routes: ['POST /orders', 'POST /orders/:id/pay'], // include any mount prefix
+      routes: [
+        route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES }),
+        route.post('/orders/:id/pay', { id: 'orders.pay', failures: IDEMPOTENCY_FAILURES }),
+      ], // use the same descriptors the server binds; include any mount prefix
       ttl: 24 * 60 * 60 * 1000, // milliseconds, counted from the first request
       replayHeaders: ['content-type', 'location'], // a replay carries only these
     }),
@@ -434,7 +445,7 @@ http({
 ```
 
 - The fingerprint is method + path + sorted query + a SHA-256 of the body. The cache key is the scope plus the header value.
-- No header on a listed route: 400 (`ARKI_HTTP_E410`). Same key, different request: 422 (`E411`). Same key while the first is running: 409 with `Retry-After` (`E412`). A replay has the stored status and body, the allowlisted headers, and `Idempotent-Replayed: true`.
+- No header on a listed route: 400 (`http.idempotency_key_required`). Same key, different request: 422 (`http.idempotency_key_reused`). Same key while the first is running: 409 with `Retry-After` (`http.idempotency_in_progress`). A replay has the stored status and body, the allowlisted headers, and `Idempotent-Replayed: true`.
 - **What is stored.** Every 2xx, 3xx and 4xx answer, except 409 and 429. A 5xx, a 409, a 429, a handler that throws, and an event stream free the key (`abandon`), so a retry runs the handler again. A 4xx is stored because the same request would fail the same way.
 - **Size.** A response body over `maxBodyBytes` (default 1 MiB) is not stored: the key is freed. A request body over it cannot be fingerprinted cheaply, so that request runs with no idempotency at all. Raise the limit for routes that take big uploads, or keep them off `routes`.
 - A failing cache fails the request. Running unprotected could do the work twice.
@@ -559,18 +570,17 @@ const order = await orders.getOrder({ params: { id: 'o42' } }, { headers: { auth
   contract. A wrong input does not compile.
 - Params, headers, query and body are encoded with their schemas (`encode` of a
   `codec()`) and the output is decoded, exactly mirroring the server, so
-  codecs round-trip. A field that fails answers `E400` before anything is sent.
+  codecs round-trip. A field that fails returns `InvalidInput` before anything is sent.
   A missing `optional(...)` field, and a missing optional path segment, are
   left out of the URL.
 - A status listed in `responses` resolves to that schema's decoded body.
 - A non-2xx answer whose code is one of the contract's `failures` resolves to
   that failure, revived with `revive` from `@arki/failure`, so the call's type
-  is `Output | the listed failures` and you can `match` on it. Data its
-  definition rejects throws `E500`.
-- Any other non-2xx answer throws `HttpError` with the server's `code`. An answer
-  without the envelope gets a code by status (`E400`, `E401`, `E403`, `E404`,
-  else `E500`). A body that breaks the output schema throws `E500`.
-- A path param that is empty, `.` or `..` throws `E400` before sending: it
+  is `Output | the listed failures | HttpClientFailure`. Data its definition
+  rejects returns `InvalidEnvelope` with reason `invalid_data`.
+- Unknown codes and malformed envelopes return `InvalidEnvelope`. A body that
+  breaks the output schema returns `InvalidEnvelope` with reason `invalid_data`.
+- A path param that is empty, `.` or `..` returns `InvalidInput` before sending: it
   would change which endpoint the URL points at.
 - A contract with no `output` resolves `undefined` (it answers 204). One with `output: raw()` resolves the `Response`.
 - It only needs `fetch`, so it runs in browsers, React Native, Deno, Bun and
@@ -598,15 +608,15 @@ const partner = createClient(partnerRoutes, {
   policy, decides what is retried: only an outcome `retryOn` accepts goes back
   into the policy. Anything else leaves it at once, even if the policy would
   retry every error. When the policy gives up, the last answer is decoded as
-  usual, so the server's error code still reaches you.
+  usual: declared codes revive, and unknown codes return a protocol failure.
 - **`retryOn`** defaults to `retryTransient`: a network failure (`fetch` throws a
   `TypeError`) or a 408, 429, 502, 503 or 504, and only on a request that is
   safe to send twice: GET, HEAD, OPTIONS, PUT, DELETE, or any request with an
   `idempotency-key` header. A POST without one is never retried, because the
   first try may have done the work before its answer was lost.
 - **`timeoutMs`** covers the whole call, retries included, until the response
-  arrives (reading the body is not timed). It throws `HttpError` 408
-  (`E408`). A caller's `signal` still aborts with its own reason. It needs
+  arrives (reading the body is not timed). It returns `RequestTimeout` (408).
+  A caller's `signal` returns `RequestCancelled` with its reason kept private. It needs
   `AbortController`, which React Native provides and bare Hermes does not.
 - **`publicFetch()`** (Node and Bun) is the SSRF guard as a `fetch`: each hop
   resolves the host, refuses a private answer, pins the connection to the
@@ -660,7 +670,7 @@ Handlers and derivers fail with an `HttpError` or return a failure. The engine t
 Rules:
 
 - Match on `error.code`, never on the message.
-- Validation failures answer 400 with `ARKI_HTTP_E400` and the failing fields in `data`.
+- Schema validation failures answer 400 with `schema.invalid_input` and public issues in `data`.
 - A handler that throws something else answers 500 with `ARKI_HTTP_E500`. In production the message is redacted.
 - Boot and shutdown problems (`E0NN`) do not reach the wire. They surface in `app.diagnostics`.
 - `listen` and `stop` reject with a coded error you can catch.
@@ -685,8 +695,11 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |
-| `ARKI_HTTP_E408` | a client call got no response within `timeoutMs` (thrown by `@arki/http/client`, never sent on the wire) |
-| `ARKI_HTTP_E410` / `E411` / `E412` | idempotency: key missing (400), key reused for another request (422), request with this key still running (409) |
+| `http.request_timeout` | client request deadline exceeded (408); replaces the client exception E408 |
+| `http.network_failure` / `http.request_cancelled` | client network failure (503) / caller cancellation (499) |
+| `schema.invalid_input` | local or server input validation failed (400) |
+| `failure.invalid_envelope` | unknown wire code, malformed envelope or invalid payload |
+| `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |
 | `ARKI_HTTP_E420` / `E421` / `E422` | webhook: signature headers missing or malformed, no signature matches, signed time outside the window (all 401) |
@@ -772,3 +785,29 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 ## License
 
 MIT
+
+Client calls return success, exactly the failures in `route.failures`, or `HttpClientFailure`
+(inferred from `HTTP_CLIENT_FAILURES`). They resolve canonical failures for network errors,
+deadlines, cancellation, local validation and protocol drift. Unknown remote codes and invalid
+known payloads return `InvalidEnvelope`; inspect its `data.reason`. Remote presentation fields
+are ignored during revival.
+
+List middleware-owned definitions explicitly on the route, for example
+`failures: [...IDEMPOTENCY_FAILURES, OrderNotFound]`. Auth definitions belong on the
+same boundary only when that route uses them. A handler or middleware adapter can call
+`orThrowHttp(value, definitions, { headers })` when its framework requires an exception;
+the bridge validates JSON data and preserves status and headers. Returned handler failures
+also pass through `serialize` before crossing the wire. Private causes remain local.
+
+Deriver callbacks may return canonical failures alongside their successful value. The builder
+accumulates these inferred failures and requires every later bound HTTP, SSE or typed RPC
+contract to declare them. Successful context fields exclude failures. A returned failure stops
+later derivers and the handler; the matched contract validates its serialized data.
+`derive(key, callback, { failureHeaders })` preserves challenge or retry headers.
+Handler-owned refusals use `bind(contract, handler, { failureHeaders })`.
+
+Bindings snapshot their derivers: adding a guard later in a chain cannot change a route bound
+earlier. Typed RPC mounts declare their guard failures with `rpcMount(path, { id, failures })`.
+Idempotency `routes` accepts canonical descriptors, not method/path strings, and checks all
+three `IDEMPOTENCY_FAILURES` on every descriptor. Foreign fetch middleware remains an untyped
+transport edge.

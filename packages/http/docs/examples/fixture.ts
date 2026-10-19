@@ -4,12 +4,13 @@
  * declaration; the README blocks that import it show how the package is used
  * with them.
  */
-import { defineFailure } from '@arki/failure';
+import { z } from 'zod';
+
+import type { HttpMiddleware, RouteBundle } from '@arki/http';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
 import { endpoints, optional, route, routes } from '@arki/http';
-import type { HttpMiddleware, RouteBundle } from '@arki/http';
-import { z } from 'zod';
 
 export const OrderId = z.string();
 export const Order = z.object({ id: OrderId, status: z.enum(['open', 'shipped']) });
@@ -47,6 +48,7 @@ export const auth = {
 export const authorization = 'Bearer secret';
 
 export const listOrders = route.get('/orders', {
+  failures: [UnexpectedDefect],
   id: 'orders.list',
   query: { status: optional(z.enum(['open', 'shipped'])) },
   output: z.array(Order),
@@ -70,7 +72,10 @@ export const progress = route.sse('/orders/:id/progress', {
 });
 
 export const tracker = {
-  watch: async function* (_id: string, _signal: AbortSignal): AsyncGenerator<z.output<typeof Queued> | z.output<typeof Shipped>> {
+  watch: async function* (
+    _id: string,
+    _signal: AbortSignal,
+  ): AsyncGenerator<z.output<typeof Queued> | z.output<typeof Shipped>> {
     yield { type: 'queued' };
     yield { type: 'shipped' };
   },
@@ -107,8 +112,14 @@ export const bundle: RouteBundle = routes().bind(listOrders, ({ query }) => db.o
 
 export const logger = { info: (_message: string): void => undefined };
 export const origins = ['https://app.example.com'];
-export const requestLog = (_log: typeof logger): HttpMiddleware => (req, next) => next(req);
-export const cors = (_allowed: readonly string[]): HttpMiddleware => (req, next) => next(req);
+export const requestLog =
+  (_log: typeof logger): HttpMiddleware =>
+  (req, next) =>
+    next(req);
+export const cors =
+  (_allowed: readonly string[]): HttpMiddleware =>
+  (req, next) =>
+    next(req);
 
 export const rpcHandler = async (_req: Request): Promise<Response> => new Response('ok');
 

@@ -35,6 +35,16 @@ test("a contract lists its failures with @arki/failure/orpc's errorMap (browser-
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { orThrow } from '@arki/failure';`), [RESTRICT]);
 });
 
+test('contracts may annotate browser-safe actions, auth failures and MCP policy without importing executors', () => {
+  const contractFile = 'src/features/demo/entrypoints/rpc.ts';
+  for (const source of ['@arki/dot/action', '@arki/auth', '@arki/mcp/contract']) {
+    assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), []);
+  }
+  for (const source of ['@arki/dot/execute', '@arki/auth/http', '@arki/mcp']) {
+    assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), [RESTRICT]);
+  }
+});
+
 test('model is the inside layer: it never imports usecases', () => {
   assert.deepEqual(ruleIds('src/features/demo/model/x.ts', `import { y } from '../usecases/y';`), [RESTRICT]);
 });

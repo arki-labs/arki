@@ -11,7 +11,7 @@ import { FAILURE_ERROR_CODES } from './errors.js';
 import { defineFailure, isFailure } from './failure.js';
 import { InvalidEnvelope } from './foundations.js';
 import { match } from './handle.js';
-import { errorMap, orThrowRpc, reviveRpcError } from './orpc.js';
+import { errorMap, orThrowRpc, reviveRpcError, RPC_FAILURE_DEFINITION, rpcFailureDefinitions } from './orpc.js';
 
 const PostNotFound = defineFailure('post.not_found', {
   status: 404,
@@ -46,10 +46,35 @@ describe('errorMap', () => {
     expect(errorMap(PostNotFound, PostLocked)).toEqual({
       'post.not_found': {
         status: 404,
+        [RPC_FAILURE_DEFINITION]: PostNotFound,
         data: expect.objectContaining({ '~standard': expect.objectContaining({ vendor: 'arki/failure' }) }),
       },
-      'post.locked': { status: 409 },
+      'post.locked': { status: 409, [RPC_FAILURE_DEFINITION]: PostLocked },
     });
+  });
+
+  it('preserves canonical definitions through native contracts without exposing them in JSON', () => {
+    const definitions = rpcFailureDefinitions(byId['~orpc'].errorMap);
+    expect(definitions).toEqual([PostNotFound, PostLocked]);
+    expectTypeOf(definitions).toEqualTypeOf<(typeof PostNotFound | typeof PostLocked)[]>();
+    const copied = { ...byId['~orpc'].errorMap['post.not_found'] };
+    expect(copied[RPC_FAILURE_DEFINITION]).toBe(PostNotFound);
+    const wire = JSON.stringify(copied);
+    expect(JSON.parse(wire)).not.toHaveProperty(String(RPC_FAILURE_DEFINITION));
+    expect(reviveRpcError(new ORPCError(PostNotFound.code, { data: { id: 'p2' } }), definitions)).toEqual(
+      PostNotFound({ id: 'p2' }),
+    );
+    expect(rpcFailureDefinitions({ external: { status: 500 } })).toEqual([]);
+    const mixed = oc.errors({ ...errorMap(PostNotFound), external: { status: 500 } });
+    const mixedDefinitions = rpcFailureDefinitions(mixed['~orpc'].errorMap);
+    expect(mixedDefinitions).toEqual([PostNotFound]);
+    expectTypeOf(mixedDefinitions).toEqualTypeOf<(typeof PostNotFound)[]>();
+    const optional: Record<string, { status: number; [RPC_FAILURE_DEFINITION]?: typeof PostNotFound }> =
+      errorMap(PostNotFound);
+    const optionalDefinitions = rpcFailureDefinitions(optional);
+    expect(optionalDefinitions).toEqual([PostNotFound]);
+    expectTypeOf(optionalDefinitions).toEqualTypeOf<(typeof PostNotFound)[]>();
+    expectTypeOf(rpcFailureDefinitions({ external: { data: z.string() } })).toEqualTypeOf<never[]>();
   });
 
   it('refuses two definitions with one code, which would make one of them unreachable', () => {

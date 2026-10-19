@@ -28,14 +28,15 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 ### Add a deriver
 
-1. Write `derive(...)` that reads the request and returns the scope keys.
-2. Throw `new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'message')` to reject.
-3. Keys must be unique (`ARKI_HTTP_E007`).
+1. Write `derive(key, callback, { failureHeaders })`; return the success value or an inferred canonical failure.
+2. List every accumulated deriver failure in each contract's `failures`; `bind` and typed `rpc` mounts reject omitted or partial lists. Failure values never enter successful context fields.
+3. Use `failureHeaders` for challenges and retry headers. Handler-owned failures can supply the same callback as the third `bind` argument.
+4. Keys must be unique (`ARKI_HTTP_E007`). Each binding runs only the derivers present when it was bound.
 
 ### Make a write safe to repeat
 
-1. Wrap the route with `idempotent(...)` from `@arki/http/idempotency` and give it a store.
-2. The client sends the same `Idempotency-Key` for every retry of one action.
+1. Pass the same canonical route descriptors to `idempotent({ routes: [writeRoute], ... })`. Each must list all `IDEMPOTENCY_FAILURES`; omitted or partial declarations fail typechecking and configure-time validation.
+2. The client sends the same `Idempotency-Key` for every retry of one action. List `IDEMPOTENCY_FAILURES` on that route to infer its refusals.
 
 ### Receive a signed webhook
 
@@ -50,7 +51,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 ### Call a route from a client
 
 1. Build the client from the same contracts with `@arki/http/client`.
-2. Set `timeoutMs`. A timeout throws `ARKI_HTTP_E408`.
+2. Set `timeoutMs`. A timeout returns `RequestTimeout`; client calls also return exact canonical input/network/cancellation/protocol failures.
 
 ## Rules that bite
 
@@ -73,7 +74,7 @@ The full table is in `README.md` under "Error codes", and every code has `@fix` 
 | `ARKI_HTTP_E011` | The route contract disagrees with itself.          | Make params match the path.            |
 | `ARKI_HTTP_E013` | A schema has no JSON Schema form.                  | Use `withJsonSchema`.                  |
 | `ARKI_HTTP_E400` | Request validation failed.                         | Send a request that fits the contract. |
-| `ARKI_HTTP_E411` | An idempotency key was reused for another request. | Use a new key.                         |
+| `http.idempotency_key_reused` | An idempotency key was reused for another request. | Use a new key.                         |
 | `ARKI_HTTP_E510` | A `Response` without `output: raw()`.              | Declare `raw()`.                       |
 
 ## Verify
@@ -93,3 +94,7 @@ dot doctor --json | jq '.data'
 ```
 
 `dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it.
+
+For shared action execution and the validation owner, see Dot’s
+[action migration guide](../../dot/docs/upgrade-actions.md). Native adapters retain
+their own authorization, response headers and declared failures.

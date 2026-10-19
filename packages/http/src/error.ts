@@ -19,6 +19,11 @@
  * Every code is stable API. Match on codes, never parse messages.
  */
 
+import type { Failure } from '@arki/failure';
+import { InvalidInput, isFailure, serialize } from '@arki/failure';
+
+import type { FailureDefinitionLike } from './contract.js';
+
 /**
  * Stable error codes for `@arki/http`. `E0NN` codes surface through the
  * DOT lifecycle (boot/start/stop failures); `E4xx`/`E5xx` codes surface
@@ -221,6 +226,7 @@ export class HttpError extends Error {
   readonly docsUrl: string | undefined;
   /** Extra response headers — e.g. `www-authenticate` on a 401, `retry-after` on a 429. */
   readonly headers: Readonly<Record<string, string>> | undefined;
+  readonly data: unknown;
 
   constructor(
     status: number,
@@ -231,6 +237,7 @@ export class HttpError extends Error {
       readonly docsUrl?: string;
       readonly headers?: Readonly<Record<string, string>>;
       readonly cause?: unknown;
+      readonly data?: unknown;
     } = {},
   ) {
     super(message, options.cause === undefined ? {} : { cause: options.cause });
@@ -240,6 +247,7 @@ export class HttpError extends Error {
     this.remediation = options.remediation;
     this.docsUrl = options.docsUrl ?? docsUrlFor(code);
     this.headers = options.headers;
+    this.data = options.data;
   }
 }
 
@@ -316,10 +324,19 @@ export function describeInternalError(error: unknown): string {
  */
 export function toErrorResponse(error: unknown): Response {
   if (error instanceof HttpError) {
+    if (error.status === 400 && InvalidInput.is(error.cause)) {
+      const wire = serialize(error.cause, [InvalidInput]);
+      if (!isFailure(wire))
+        return errorResponse(400, InvalidInput.code, error.message, {
+          ...('data' in wire ? { data: wire.data } : {}),
+          ...(error.headers === undefined ? {} : { headers: error.headers }),
+        });
+    }
     return errorResponse(error.status, error.code, error.message, {
       ...(error.remediation === undefined ? {} : { remediation: error.remediation }),
       ...(error.docsUrl === undefined ? {} : { docsUrl: error.docsUrl }),
       ...(error.headers === undefined ? {} : { headers: error.headers }),
+      ...(error.data === undefined ? {} : { data: error.data }),
     });
   }
   return errorResponse(500, HTTP_ERROR_CODES.internal, describeInternalError(error));
@@ -347,4 +364,32 @@ export function errorResponse(
     },
   };
   return Response.json(envelope, { status, ...(options.headers === undefined ? {} : { headers: options.headers }) });
+}
+
+/** Exception bridge for framework adapters; validate the boundary's exact declared definitions first. */
+export function orThrowHttp<Value, const Definitions extends readonly FailureDefinitionLike[]>(
+  value: Value & (Extract<Value, Failure> extends ReturnType<Definitions[number]> ? unknown : never),
+  definitions: Definitions,
+  options?: { readonly headers?: Readonly<Record<string, string>> },
+): Exclude<Value, Failure>;
+export function orThrowHttp(
+  value: unknown,
+  definitions: readonly FailureDefinitionLike[],
+  options: { readonly headers?: Readonly<Record<string, string>> } = {},
+): unknown {
+  if (!isFailure(value)) return value;
+  const wire = serialize(value, definitions);
+  const outcome = isFailure(wire) ? wire : value;
+  throw new HttpError(outcome.status, outcome.code, outcome.message, {
+    ...options,
+    ...(outcome.remediation === undefined ? {} : { remediation: outcome.remediation }),
+    ...(isFailure(wire)
+      ? wire.data === undefined
+        ? {}
+        : { data: wire.data }
+      : 'data' in wire
+        ? { data: wire.data }
+        : {}),
+    cause: value.cause,
+  });
 }

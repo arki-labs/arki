@@ -6,15 +6,15 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { buildEngine, HTTP_ERROR_CODES, route, routes } from '@arki/http';
+import { buildEngine, route, routes } from '@arki/http';
 
 import type { Order } from './__fixtures__/orders.js';
 import type { TestAuth } from './testing/index.js';
 import { orderPolicies, ordersOf } from './__fixtures__/orders.js';
 import { authTables } from './__fixtures__/tables.js';
+import { AccessDenied, AUTH_FAILURES, AuthenticationRequired, ResourceMissing } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
-import { AUTH_ERROR_CODES } from './errors.js';
-import { authorize, withOptionalPrincipal } from './http.js';
+import { authFailureHeaders, authorize, withOptionalPrincipal } from './http.js';
 import { actingAs, testAuth } from './testing/index.js';
 
 const definition = defineAuth({
@@ -24,6 +24,7 @@ const definition = defineAuth({
 });
 
 const refundOrder = route.post('/orders/:id/refund', {
+  failures: AUTH_FAILURES,
   id: 'orders.refund',
   output: z.object({ refunded: z.string() }),
 });
@@ -50,6 +51,7 @@ beforeAll(async () => {
           ({ params }) => load(params.id),
           (_input, { order }) => ({ refunded: order.id }),
         ),
+        { failureHeaders: authFailureHeaders },
       ),
   ]);
   fetchHttp = request => Promise.resolve(engine.fetch(request));
@@ -65,7 +67,7 @@ describe('authorize', () => {
     const response = await refund('ord_open');
     expect(response.status).toBe(401);
     expect(response.headers.get('www-authenticate')).toBe('Bearer');
-    expect(await response.json()).toMatchObject({ error: { code: AUTH_ERROR_CODES.unauthenticated } });
+    expect(await response.json()).toMatchObject({ error: { code: AuthenticationRequired.code } });
     expect(load).not.toHaveBeenCalled();
   });
 
@@ -76,7 +78,7 @@ describe('authorize', () => {
     expect(notYours.status).toBe(404);
     expect(missing.status).toBe(404);
     const [notYoursBody, missingBody] = [await notYours.json(), await missing.json()];
-    expect(notYoursBody).toMatchObject({ error: { code: HTTP_ERROR_CODES.notFound } });
+    expect(notYoursBody).toMatchObject({ error: { code: ResourceMissing.code } });
     expect(notYoursBody).toEqual(missingBody);
   });
 
@@ -91,6 +93,6 @@ describe('authorize', () => {
   it('shipped → 403 with E403', async () => {
     const response = await refund('ord_shipped', ada);
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: { code: AUTH_ERROR_CODES.forbidden } });
+    expect(await response.json()).toMatchObject({ error: { code: AccessDenied.code } });
   });
 });

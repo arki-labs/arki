@@ -58,7 +58,7 @@ export type {
 } from './bundle.js';
 
 export { BASE_CTX_KEYS, derive } from './derive.js';
-export type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
+export type { BaseRequestCtx, Deriver, ErasedDeriver, FailureHeaders } from './derive.js';
 
 export {
   describeInternalError,
@@ -66,6 +66,7 @@ export {
   HTTP_ERROR_CODES,
   HttpConfigError,
   HttpError,
+  orThrowHttp,
   toErrorResponse,
   UnsafeUrlError,
 } from './error.js';
@@ -79,3 +80,15 @@ export type { Engine, HttpMiddleware } from './engine.js';
 
 export { listen } from './listen.js';
 export type { ListenHandle, ListenOptions } from './listen.js';
+
+export {
+  IDEMPOTENCY_FAILURES,
+  HTTP_CLIENT_FAILURES,
+  NetworkFailure,
+  RequestCancelled,
+  RequestTimeout,
+  IdempotencyKeyRequired,
+  IdempotencyKeyReused,
+  IdempotencyInProgress,
+} from './failures.js';
+export type { HttpClientFailure } from './failures.js';

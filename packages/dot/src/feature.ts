@@ -805,3 +805,6 @@ export function sliceOf(ctx: object, f: MountedFeature): Readonly<Record<string,
   }
   return record as Readonly<Record<string, unknown>>;
 }
+
+export { telemetryFor } from './telemetry.js';
+export type { DotTelemetry } from './telemetry.js';

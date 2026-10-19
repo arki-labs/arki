@@ -32,7 +32,17 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js",
+      "default": "./dist/contract.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    }
   },
   "files": [
     "dist/**",
@@ -42,6 +52,7 @@
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",
+    "docs/**",
     "README.md",
     "LICENSE",
     "package.json"
@@ -62,10 +73,19 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@modelcontextprotocol/client": "catalog:ai",
+    "@orpc/server": "catalog:backend",
     "@types/node": "catalog:node",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
   },
-  "prettier": "@arki/prettier-config"
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/auth": "workspace:*",
+    "@arki/failure": "workspace:*",
+    "@modelcontextprotocol/server": "catalog:ai",
+    "@orpc/client": "catalog:backend",
+    "@orpc/contract": "catalog:backend"
+  }
 }
