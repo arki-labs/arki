@@ -4,9 +4,10 @@
  * A run's stored state is one of six values. `stuck`, `stranded` and `residual` are derived
  * from the step rows, so no event names them.
  */
-import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
+
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
@@ -22,6 +23,8 @@ const shapeSchema: z.ZodType<WorkflowShape> = z.object({
       name: z.string().min(1),
       kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map']),
       undo: z.boolean(),
+      onCancel: z.enum(['cancel', 'detach']).optional(),
+      signal: z.string().min(1).optional(),
     }),
   ),
 });
@@ -128,13 +131,13 @@ export function workflowMachine<
   );
   const SignalReceived = j.event(
     'SignalReceived',
-    z.object({ name: z.string().min(1), deliveryId: z.string().min(1), at }),
+    z.object({ name: z.string().min(1), deliveryId: z.string().min(1), at, ...byOperator }),
   );
   const TimerFired = j.event('TimerFired', z.object({ node: nodePath, at }));
   const DeadlineReached = j.event('DeadlineReached', z.object({ at }));
   const CancelRequested = j.event(
     'CancelRequested',
-    z.object({ reason: z.string().min(1), actorId: z.string().nullable(), at }),
+    z.object({ reason: z.string().min(1), actorId: z.string().nullable(), executionId: byOperator.executionId, at }),
   );
   const CompensationStarted = j.event('CompensationStarted', z.object({ at }));
   const RunCompleted = j.event('RunCompleted', z.object({ output: z.unknown(), at, keepUntil }));

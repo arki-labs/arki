@@ -435,6 +435,17 @@ function createJournal<
         journal.wake();
         return done;
       },
+      signal: async (source, args, op) => {
+        const done = await run(source, verbCommands().signal, { ...args, op }, verbMeta());
+        journal.wake();
+        return done;
+      },
+      cancel: async (source, args, op) => {
+        const done = await run(source, verbCommands().cancel, { ...args, op }, verbMeta());
+        journal.wake();
+        return done;
+      },
+      checkResult: (db, args) => verbCommands().checkResult(db, args),
     },
     wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point },

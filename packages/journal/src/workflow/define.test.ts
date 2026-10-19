@@ -34,7 +34,7 @@ describe('the shape manifest', () => {
       nodes: [
         { name: 'hold', kind: 'step', undo: true },
         { name: 'payBack', kind: 'step', undo: false },
-        { name: 'settled', kind: 'waitFor', undo: false },
+        { name: 'settled', kind: 'waitFor', undo: false, signal: 'provider.refund.settled' },
         { name: 'coolOff', kind: 'sleep', undo: false },
       ],
     });
@@ -53,6 +53,8 @@ describe('the shape manifest', () => {
       ['one', 'child'],
       ['many', 'map'],
     ]);
+    // Foreman plans a cancel from the manifest alone, so a child's onCancel is in it: a run whose code is gone still shows it.
+    expect(def.shape.nodes[0]).toEqual({ name: 'one', kind: 'child', undo: false, onCancel: 'cancel' });
   });
 
   it('the definition is frozen all the way down, so a run cannot drift from its shape', () => {

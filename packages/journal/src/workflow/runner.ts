@@ -20,7 +20,7 @@ import { parseAsync, SchemaError } from '@arki/schema';
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { JobRetention, RetentionAge } from '../retention.js';
-import type { EffectContext, Needed, Needs, RecordedOf, RootDb, TransactionSource } from '../types.js';
+import type { DbHandle, EffectContext, Needed, Needs, RecordedOf, RootDb, TransactionSource } from '../types.js';
 import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
@@ -54,6 +54,8 @@ const startChildSchema = z.object({
 const RETRY_STEP_COMMAND = 'workflow.retryStep';
 const RESOLVE_STEP_COMMAND = 'workflow.resolveStep';
 const SKIP_UNDO_COMMAND = 'workflow.skipUndo';
+const SIGNAL_COMMAND = 'workflow.signal';
+const CANCEL_COMMAND = 'workflow.cancel';
 /** Who asked, why, and from which Foreman execution: the `op` of every operator verb, as the job verbs take it. */
 const operationSchema = z.object({
   actor: z.string(),
@@ -69,6 +71,15 @@ const nodeVerbSchema = z.object({ runId: z.string().min(1), path: z.string().min
 const retryStepSchema = nodeVerbSchema.extend({ phase: z.enum(['do', 'undo']) });
 const resolveStepSchema = nodeVerbSchema.extend({ result: z.unknown() });
 const skipUndoSchema = nodeVerbSchema;
+/** The operator's signal: the payload is unknown here and checked by the run's own version. */
+const operatorSignalSchema = z.object({
+  runId: z.string().min(1),
+  name: z.string().min(1),
+  deliveryId: z.string().min(1),
+  payload: z.unknown(),
+  op: operationSchema,
+});
+const operatorCancelSchema = z.object({ runId: z.string().min(1), reason: z.string().min(1), op: operationSchema });
 /** The text before a retried child's `~n`: `run/fan[2]~3` came from `run/fan[2]`. */
 const RETRIED_CHILD = /^(.*)~(\d+)$/;
 
@@ -1498,6 +1509,93 @@ export function createWorkflows<
     },
   );
 
+  /** What `def.signal(name)` and `journal.workflows.signal` run with. */
+  type DoorContext = Pick<CommandContext<MetaOut, Tx>, 'write' | 'run' | 'accept' | 'tx' | 'meta'>;
+
+  /**
+   * Delivers signal `name` to a run: the body of `def.signal(name)` and of the operator verb `journal.workflows.signal`.
+   * `workflowName` is the name of the caller's definition, so a run of another workflow is a conflict; the operator
+   * door passes null. Either way the run's own version checks the payload.
+   */
+  async function deliverSignal(
+    context: DoorContext,
+    args: { readonly runId: string; readonly deliveryId: string; readonly payload: unknown },
+    name: string,
+    workflowName: string | null,
+    operator: OperationInput | null,
+  ): Promise<SignalOutcome> {
+    const { write } = context;
+    const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
+    const before = { parked: false };
+    const written = await write(run, args.runId, async (row, inside) => {
+      if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
+      if (workflowName !== null && row.name !== workflowName) {
+        return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
+      }
+      // A signal for a finished run is dropped: a late webhook is not an error the sender should retry.
+      if (row.finishedAt !== null) {
+        result.status = 'finished';
+        return [];
+      }
+      // The run's own version handles the signal, whichever version's `signal` command the caller used.
+      const own = definitionOf(row);
+      const ownWait = own.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
+      if (ownWait === undefined || ownWait.kind !== 'waitFor') {
+        return CommandConflict({
+          detail: `run "${args.runId}" is v${row.workflowVersion}, which has no wait for signal '${name}'`,
+        });
+      }
+      // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
+      const stored = storable(args.payload, own.limits.payload, `the payload of signal '${name}'`, args.runId);
+      if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
+      try {
+        await parseAsync(ownWait.schema, stored.value);
+      } catch (error) {
+        if (error instanceof SchemaError) {
+          return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(error)}` });
+        }
+        throw error;
+      }
+      const [inserted] = await inside.tx
+        .insert(workflowSignals)
+        .values({
+          id: workflowSignalId(),
+          runId: row.id,
+          name,
+          deliveryId: args.deliveryId,
+          payload: stored.value,
+        })
+        .onConflictDoNothing()
+        .returning({ id: workflowSignals.id });
+      if (inserted === undefined) {
+        result.status = 'duplicate';
+        return [];
+      }
+      before.parked = row.state === 'parked';
+      const at = nowIso();
+      const received = events.SignalReceived({
+        name,
+        deliveryId: args.deliveryId,
+        at,
+        ...(operator === null ? {} : operatorOf(operator)),
+      });
+      if (pastDeadline(row) && row.state !== 'compensating') {
+        return [received, ...(await deadlineEvents(inside.tx, own, row, at))];
+      }
+      const index =
+        row.state === 'parked' && row.waitingFor === name ? own.nodes.findIndex(n => n.name === row.node) : -1;
+      const node = own.nodes[index];
+      if (node === undefined || node.kind !== 'waitFor' || node.signal !== name) return [received];
+      // The run waits for this signal: it is taken now, and the run moves on in this same commit.
+      await takeSignal(inside.tx, row.id, name, node.name);
+      result.status = 'woke';
+      return [received, ...(await wakeOnSignal(inside.tx, own, index, row, stored.value, at))];
+    });
+    if (isFailure(written)) return written;
+    await settle(context, args.runId, written, before.parked);
+    return result;
+  }
+
   /** `def.signal(name)`: the command that delivers one of the definition's signals. */
   const signalCommandFor = <Signals extends AnySignals>(def: WorkflowDef<StandardSchemaV1, unknown, Signals>) =>
     function signal<Name extends keyof Signals & string>(name: Name) {
@@ -1506,114 +1604,65 @@ export function createWorkflows<
       if (waiting === undefined || waiting.kind !== 'waitFor') {
         throw new JournalError('BAD_DEFINITION', 'workflow', def.name, `no waitFor node waits for signal '${name}'`);
       }
-      return j.command(
-        `${def.name}.signal.${name}`,
-        signalSchemaFor<Signals[Name]>(),
-        async (args, context): Promise<SignalOutcome> => {
-          const { write } = context;
-          const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
-          const before = { parked: false };
-          const written = await write(run, args.runId, async (row, inside) => {
-            if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
-            if (row.name !== def.name) {
-              return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
-            }
-            // A signal for a finished run is dropped: a late webhook is not an error the sender should retry.
-            if (row.finishedAt !== null) {
-              result.status = 'finished';
-              return [];
-            }
-            // The run's own version handles the signal, whichever version's `signal` command the caller used.
-            const own = definitionOf(row);
-            const ownWait = own.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
-            if (ownWait === undefined || ownWait.kind !== 'waitFor') {
-              return CommandConflict({
-                detail: `run "${args.runId}" is v${row.workflowVersion}, which has no wait for signal '${name}'`,
-              });
-            }
-            // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
-            const stored = storable(args.payload, own.limits.payload, `the payload of signal '${name}'`, args.runId);
-            if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
-            try {
-              await parseAsync(ownWait.schema, stored.value);
-            } catch (error) {
-              if (error instanceof SchemaError) {
-                return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(error)}` });
-              }
-              throw error;
-            }
-            const [inserted] = await inside.tx
-              .insert(workflowSignals)
-              .values({
-                id: workflowSignalId(),
-                runId: row.id,
-                name,
-                deliveryId: args.deliveryId,
-                payload: stored.value,
-              })
-              .onConflictDoNothing()
-              .returning({ id: workflowSignals.id });
-            if (inserted === undefined) {
-              result.status = 'duplicate';
-              return [];
-            }
-            before.parked = row.state === 'parked';
-            const at = nowIso();
-            const received = events.SignalReceived({ name, deliveryId: args.deliveryId, at });
-            if (pastDeadline(row) && row.state !== 'compensating') {
-              return [received, ...(await deadlineEvents(inside.tx, own, row, at))];
-            }
-            const index =
-              row.state === 'parked' && row.waitingFor === name ? own.nodes.findIndex(n => n.name === row.node) : -1;
-            const node = own.nodes[index];
-            if (node === undefined || node.kind !== 'waitFor' || node.signal !== name) return [received];
-            // The run waits for this signal: it is taken now, and the run moves on in this same commit.
-            await takeSignal(inside.tx, row.id, name, node.name);
-            result.status = 'woke';
-            return [received, ...(await wakeOnSignal(inside.tx, own, index, row, stored.value, at))];
-          });
-          if (isFailure(written)) return written;
-          await settle(context, args.runId, written, before.parked);
-          return result;
-        },
+      return j.command(`${def.name}.signal.${name}`, signalSchemaFor<Signals[Name]>(), (args, context) =>
+        deliverSignal(context, args, name, def.name, null),
       );
     };
 
+  /**
+   * Cancels a run: the body of `def.cancel` and of the operator verb `journal.workflows.cancel`. `workflowName` as for
+   * `deliverSignal`; `actorId` is who asked (the meta's `actorId` for `def.cancel`, `op.actor` for the verb).
+   */
+  async function cancelRun(
+    context: DoorContext,
+    args: CancelArgs,
+    workflowName: string | null,
+    actorId: string | null,
+  ): Promise<CancelOutcome> {
+    const { write } = context;
+    const before = { parked: false };
+    const written = await write(run, args.runId, async (row, inside) => {
+      if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
+      if (workflowName !== null && row.name !== workflowName) {
+        return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
+      }
+      if (row.finishedAt !== null) {
+        return CommandConflict({ detail: `run "${args.runId}" is already ${row.state}` });
+      }
+      if (row.state === 'compensating') {
+        return CommandConflict({ detail: `run "${args.runId}" is already compensating` });
+      }
+      // The run's own version undoes its work. A stranded run has no code to do that: the cancel is refused, not half done.
+      const own = definitionOf(row);
+      before.parked = row.state === 'parked';
+      const at = nowIso();
+      return beginCompensation(
+        inside.tx,
+        own,
+        row,
+        at,
+        [
+          events.CancelRequested({
+            reason: args.reason,
+            actorId,
+            ...(args.executionId === undefined ? {} : { executionId: args.executionId }),
+            at,
+          }),
+        ],
+        { closed: false, cause: null, cancelling: true, executionId: args.executionId },
+      );
+    });
+    if (isFailure(written)) return written;
+    await settle(context, args.runId, written, before.parked);
+    debugWorkflow.debug('run {runId} cancel requested', { runId: args.runId });
+    return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
+  }
+
   /** `def.cancel`: stops a run, undoes what it completed, newest first, and ends it `cancelled`. */
   const cancelCommandFor = (def: WorkflowDef) =>
-    j.command(`${def.name}.cancel`, cancelSchema, async (args, context): Promise<CancelOutcome> => {
-      const { write, meta } = context;
-      const before = { parked: false };
-      const written = await write(run, args.runId, async (row, inside) => {
-        if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
-        if (row.name !== def.name) {
-          return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
-        }
-        if (row.finishedAt !== null) {
-          return CommandConflict({ detail: `run "${args.runId}" is already ${row.state}` });
-        }
-        if (row.state === 'compensating') {
-          return CommandConflict({ detail: `run "${args.runId}" is already compensating` });
-        }
-        // The run's own version undoes its work. A stranded run has no code to do that: the cancel is refused, not half done.
-        const own = definitionOf(row);
-        before.parked = row.state === 'parked';
-        const at = nowIso();
-        const actorId = typeof meta['actorId'] === 'string' ? meta['actorId'] : null;
-        return beginCompensation(
-          inside.tx,
-          own,
-          row,
-          at,
-          [events.CancelRequested({ reason: args.reason, actorId, at })],
-          { closed: false, cause: null, cancelling: true, executionId: args.executionId },
-        );
-      });
-      if (isFailure(written)) return written;
-      await settle(context, args.runId, written, before.parked);
-      debugWorkflow.debug('{name}: run {runId} cancel requested', { name: def.name, runId: args.runId });
-      return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
-    });
+    j.command(`${def.name}.cancel`, cancelSchema, (args, context) =>
+      cancelRun(context, args, def.name, typeof context.meta['actorId'] === 'string' ? context.meta['actorId'] : null),
+    );
 
   // ---- operator verbs -----------------------------------------------------------------------------------------
 
@@ -1879,6 +1928,55 @@ export function createWorkflows<
       return { runId: args.runId };
     },
   );
+
+  /** `journal.workflows.signal`: the operator's door to `deliverSignal`, for a run of any workflow. */
+  const operatorSignal = j.command(SIGNAL_COMMAND, operatorSignalSchema, (args, context) => {
+    assertOperator(args.op);
+    return deliverSignal(context, args, args.name, null, args.op);
+  });
+
+  /** `journal.workflows.cancel`: the operator's door to `cancelRun`, for a run of any workflow. */
+  const operatorCancel = j.command(CANCEL_COMMAND, operatorCancelSchema, (args, context) => {
+    assertOperator(args.op);
+    const cancel = {
+      runId: args.runId,
+      reason: args.reason,
+      ...(args.op.executionId === undefined ? {} : { executionId: args.op.executionId }),
+    };
+    return cancelRun(context, cancel, null, args.op.actor);
+  });
+
+  /**
+   * Whether `resolveStep` would take `result` for step `path` of the run: the step's `output` schema of the run's own
+   * version checks it. Writes nothing. The refusals `resolveStep` would give for the step itself are thrown the same.
+   */
+  const checkResult = async (
+    db: DbHandle,
+    args: { readonly runId: string; readonly path: string; readonly result: unknown },
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly issues: string }> => {
+    const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, args.runId));
+    if (row === undefined) throw new JournalError('WORKFLOW_NOT_FOUND', 'workflow', args.runId);
+    const node = definitionOf(row).nodes.find(candidate => candidate.name === args.path);
+    if (node?.kind !== 'step') {
+      throw new JournalError('STEP_NOT_RESOLVABLE', 'workflow', row.id, `step '${args.path}' is not a step`);
+    }
+    const { output } = node.options;
+    if (output === undefined) {
+      throw new JournalError(
+        'STEP_NOT_RESOLVABLE',
+        'workflow',
+        row.id,
+        `step '${args.path}' declares no output schema to check a result with`,
+      );
+    }
+    try {
+      await parseAsync(output, args.result);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof SchemaError) return { ok: false, issues: reasonText(error) };
+      throw error;
+    }
+  };
 
   /** `j.workflow`: the step-2 builder, with `start` and `signal` on the finished definition. */
   const workflow: JournalDefinitions<Meta, Tx, AppDb>['workflow'] = (name, options) =>
@@ -2439,7 +2537,12 @@ export function createWorkflows<
     return { effects: [effect, timer], steps: machine.steps };
   }
 
-  return { workflow, register, started, operate: { retryStep, resolveStep, skipUndo } };
+  return {
+    workflow,
+    register,
+    started,
+    operate: { retryStep, resolveStep, skipUndo, signal: operatorSignal, cancel: operatorCancel, checkResult },
+  };
 }
 
 const dueSchema = z.object({ at: isoTime });

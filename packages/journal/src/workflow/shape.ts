@@ -8,5 +8,9 @@ export type WorkflowShape = {
     readonly name: string;
     readonly kind: 'step' | 'waitFor' | 'sleep' | 'child' | 'map';
     readonly undo: boolean;
+    /** A child node's choice when its parent cancels or compensates; only on `child` nodes. */
+    readonly onCancel?: 'cancel' | 'detach';
+    /** The signal a `waitFor` node waits for; only on `waitFor` nodes. */
+    readonly signal?: string;
   }[];
 };

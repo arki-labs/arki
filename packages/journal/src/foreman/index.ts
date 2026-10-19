@@ -43,6 +43,11 @@ export {
   type ForemanReceiptTables,
   type JournalReceiptStoreOptions,
 } from './receipts.js';
+export {
+  JOURNAL_WORKFLOWS_ERROR_CODES,
+  journalWorkflowsModule,
+  type JournalWorkflowsModuleOptions,
+} from './workflows.js';
 
 /**
  * The coded refusals of the job actions. They are `ARKI_ADMIN_E0xx` codes of `@arki/admin`, so the
@@ -795,7 +800,7 @@ export function journalJobsModule<
           willDo === 'archive'
             ? 'They are archived as "dead" and kept per the retention policy.'
             : 'The retention policy keeps no dead jobs, so they are deleted for good.'
-        } An effect with its own retention may differ. Dead jobs that belong to a workflow run are counted above but left alone.`,
+        } An effect with its own retention may differ.`,
       };
     },
     execute: async ({ olderThanDays, limit, reason }, _ctx: Record<string, never>, permit) => {
@@ -830,19 +835,29 @@ export function journalJobsModule<
     if (olderThanDays * DAY_MS < journal.retention.retryableForMs) throw boundTooShort(olderThanDays);
   }
 
-  /** The dead backlog as one revision: how many jobs, and how old the oldest is. A retry or a new death changes it. */
+  /**
+   * The dead backlog purge can touch, as one revision: how many jobs, and how old the oldest is. A retry or a new death
+   * changes it. A job a workflow run owns is the run's to move, so it is not counted.
+   */
   async function deadState() {
-    const counts = await journal.jobCounts(db);
-    const deadJobs = counts.reduce((sum, count) => sum + count.dead, 0);
-    const oldest = counts
-      .map(count => count.oldestDeadAt)
-      .filter(at => at !== null)
-      .toSorted((a, b) => a.getTime() - b.getTime())[0];
-    return {
-      deadJobs,
-      oldestDeadAt: oldest ?? null,
-      revision: `${deadJobs}:${oldest?.getTime() ?? 0}`,
-    };
+    let deadJobs = 0;
+    let oldest: Date | null = null;
+    let after: string | undefined;
+    for (;;) {
+      const page = await journal.jobs(db, {
+        status: 'dead',
+        limit: MAX_PAGE,
+        ...(after === undefined ? {} : { after }),
+      });
+      for (const row of page.jobs) {
+        if (row.runId !== null) continue;
+        deadJobs += 1;
+        if (row.deadAt !== null && (oldest === null || row.deadAt.getTime() < oldest.getTime())) oldest = row.deadAt;
+      }
+      if (page.next === null) break;
+      after = page.next;
+    }
+    return { deadJobs, oldestDeadAt: oldest, revision: `${deadJobs}:${oldest?.getTime() ?? 0}` };
   }
 
   // ---- replay -------------------------------------------------------------------------------------------------

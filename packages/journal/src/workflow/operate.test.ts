@@ -415,3 +415,60 @@ describe('cancel of a stuck run', () => {
     expect(after?.run.stuck).toBe(false);
   });
 });
+
+const startRefunding = async (prefix: string) => {
+  const id = newId(prefix);
+  expectOk(await journal.run(db, refunding.start, { input: {}, id }, caller));
+  await settle();
+  return id;
+};
+
+describe('operator signal and cancel', () => {
+  it("journal.workflows.signal checks the payload with the run's own version", async () => {
+    const id = await startRefunding('op-signal');
+    // An operator holds only JSON: the run's own wait refuses what it would not take, and nothing is stored.
+    const bad = await journal.workflows.signal(
+      db,
+      { runId: id, name: 'confirm', deliveryId: 'd1', payload: 'not an object' },
+      operator,
+    );
+    expect(isFailure(bad)).toBe(true);
+    const unknown = await journal.workflows.signal(
+      db,
+      { runId: id, name: 'nobody.waits', deliveryId: 'd2', payload: {} },
+      operator,
+    );
+    expect(isFailure(unknown)).toBe(true);
+    expect(await runRow(id)).toMatchObject({ state: 'parked' });
+
+    const woke = await journal.workflows.signal(
+      db,
+      { runId: id, name: 'confirm', deliveryId: 'd3', payload: {} },
+      operator,
+    );
+    expect(woke).toEqual({ status: 'woke' });
+    await settle();
+    expect(await runRow(id)).toMatchObject({ state: 'completed' });
+    expect(await dataOf(id, 'SignalReceived')).toEqual([
+      expect.objectContaining({ deliveryId: 'd3', actorId: 'usr_ops', executionId: 'exe_1' }),
+    ]);
+  });
+
+  it('journal.workflows.cancel is the same transition as def.cancel', async () => {
+    const id = await startRefunding('op-cancel');
+    const cancelled = await journal.workflows.cancel(db, { runId: id, reason: 'customer withdrew' }, operator);
+    expect(cancelled).toEqual({ state: 'compensating' });
+    await settle();
+    expect(await runRow(id)).toMatchObject({ state: 'cancelled' });
+    // The same undo plan `def.cancel` runs: newest first.
+    expect(log.filter(entry => entry.startsWith('undo'))).toEqual([
+      expect.stringMatching(/^undo charge /),
+      'undo reserve',
+    ]);
+    expect(await dataOf(id, 'CancelRequested')).toEqual([
+      expect.objectContaining({ reason: 'customer withdrew', actorId: 'usr_ops', executionId: 'exe_1' }),
+    ]);
+    // A finished run cannot be cancelled again.
+    expect(isFailure(await journal.workflows.cancel(db, { runId: id, reason: 'again' }, operator))).toBe(true);
+  });
+});

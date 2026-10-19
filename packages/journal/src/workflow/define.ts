@@ -351,7 +351,15 @@ function hashText(text: string): string {
 }
 
 function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
-  return { nodes: nodes.map(node => ({ name: node.name, kind: node.kind, undo: node.undo })) };
+  return {
+    nodes: nodes.map(node => ({
+      name: node.name,
+      kind: node.kind,
+      undo: node.undo,
+      ...(node.kind === 'child' ? { onCancel: node.onCancel } : {}),
+      ...(node.kind === 'waitFor' ? { signal: node.signal } : {}),
+    })),
+  };
 }
 
 const isPositiveInt = (value: number) => Number.isInteger(value) && value > 0;

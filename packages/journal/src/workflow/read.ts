@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { JobOperationInput, PageOptions } from '../outbox.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
+import type { CancelOutcome, SignalOutcome } from './runner.js';
 import { JournalError } from '../errors.js';
 import { bounded, cursorText, LIST_LIMIT, pageOf, pastCursor } from '../outbox.js';
 import { stepStatusSql } from './machine.js';
@@ -141,6 +142,30 @@ export type WorkflowVerbs<Tx> = {
     args: { readonly runId: string; readonly path: string },
     op: JobOperationInput,
   ): Promise<{ readonly runId: string }>;
+  /**
+   * Delivers signal `name` to a run, for an operator who holds only JSON: the run's own version checks the payload
+   * (`def.signal(name)` is the typed door for app code; both are one transition). A repeated `deliveryId` is a
+   * `duplicate`. `SignalReceived` carries the operator.
+   */
+  signal(
+    source: TransactionSource<Tx>,
+    args: { readonly runId: string; readonly name: string; readonly deliveryId: string; readonly payload: unknown },
+    op: JobOperationInput,
+  ): Promise<SignalOutcome>;
+  /** Cancels a run of any workflow, for an operator: the same transition as `def.cancel`. `CancelRequested` carries the operator. */
+  cancel(
+    source: TransactionSource<Tx>,
+    args: { readonly runId: string; readonly reason: string },
+    op: JobOperationInput,
+  ): Promise<CancelOutcome>;
+  /**
+   * Whether `resolveStep` would take `result` for step `path`: the step's `output` schema of the run's own version
+   * checks it, and nothing is written. A step `resolveStep` could never resolve throws `STEP_NOT_RESOLVABLE`.
+   */
+  checkResult(
+    db: DbHandle,
+    args: { readonly runId: string; readonly path: string; readonly result: unknown },
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly issues: string }>;
 };
 
 export type WorkflowOps<Tx> = WorkflowReads & WorkflowVerbs<Tx>;
