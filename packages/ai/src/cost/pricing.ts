@@ -34,6 +34,18 @@ export const LLM_PRICING: Record<string, ModelPricing> = {
   // ----------------------------------------
   // Anthropic Models
   // ----------------------------------------
+  'claude-sonnet-5-5': {
+    inputPer1k: 0.002,
+    outputPer1k: 0.01,
+  },
+  'claude-haiku-5-5': {
+    inputPer1k: 0.0001,
+    outputPer1k: 0.0005,
+  },
+  'claude-opus-5-5': {
+    inputPer1k: 0.004,
+    outputPer1k: 0.02,
+  },
   'claude-sonnet-4-20250514': {
     inputPer1k: 0.003,
     outputPer1k: 0.015,
