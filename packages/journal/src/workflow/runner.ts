@@ -50,6 +50,65 @@ const startChildSchema = z.object({
   parent: z.object({ id: z.string().min(1), path: z.string().min(1) }),
 });
 
+/** The operator verbs. Internal: `journal.workflows` runs them. */
+const RETRY_STEP_COMMAND = 'workflow.retryStep';
+const RESOLVE_STEP_COMMAND = 'workflow.resolveStep';
+const SKIP_UNDO_COMMAND = 'workflow.skipUndo';
+/** Who asked, why, and from which Foreman execution: the `op` of every operator verb, as the job verbs take it. */
+const operationSchema = z.object({
+  actor: z.string(),
+  reason: z.string().optional(),
+  executionId: z.string().optional(),
+});
+type OperationInput = z.infer<typeof operationSchema>;
+/** The node a job's event names: `path` on a step, `node` on a park, neither on the deadline. */
+const jobNodeSchema = z
+  .object({ path: z.string().optional(), node: z.string().optional() })
+  .transform(data => data.path ?? data.node ?? null);
+const nodeVerbSchema = z.object({ runId: z.string().min(1), path: z.string().min(1), op: operationSchema });
+const retryStepSchema = nodeVerbSchema.extend({ phase: z.enum(['do', 'undo']) });
+const resolveStepSchema = nodeVerbSchema.extend({ result: z.unknown() });
+const skipUndoSchema = nodeVerbSchema;
+/** The text before a retried child's `~n`: `run/fan[2]~3` came from `run/fan[2]`. */
+const RETRIED_CHILD = /^(.*)~(\d+)$/;
+
+const assertOperator = (op: OperationInput) => {
+  if (op.actor.trim() === '') {
+    throw new JournalError(
+      'BAD_ARGUMENT',
+      'workflow',
+      'actor',
+      'every operation names who did it; `actor` must not be empty',
+    );
+  }
+};
+/** The fields an event written for an operator carries. */
+const operatorOf = (op: OperationInput) => ({
+  actorId: op.actor,
+  ...(op.reason === undefined ? {} : { reason: op.reason }),
+  ...(op.executionId === undefined ? {} : { executionId: op.executionId }),
+});
+/** The same operator, as the job verbs take it. */
+const jobOperatorOf = (op: OperationInput) => ({
+  actor: op.actor,
+  ...(op.reason === undefined ? {} : { reason: op.reason }),
+  ...(op.executionId === undefined ? {} : { executionId: op.executionId }),
+});
+/** The id a failed child run is started again under: the old id with `~2`, then `~3`. A repeat of the same retry computes the same id. */
+const retriedChildId = (runId: string, id: string) => {
+  const was = RETRIED_CHILD.exec(id);
+  const next = `${was?.[1] ?? id}~${Number(was?.[2] ?? 1) + 1}`;
+  if (next.length > MAX_RUN_ID_LENGTH) {
+    throw new JournalError(
+      'WORKFLOW_LIMIT',
+      'workflow',
+      runId,
+      `the child run id "${next}" is longer than ${MAX_RUN_ID_LENGTH} characters`,
+    );
+  }
+  return next;
+};
+
 /** What a step's last attempt returns to the worker when the step is dead: the job dies at once and an operator can revive it. */
 const StepDead = defineFailure('journal.workflow.step_dead', {
   status: 500,
@@ -152,7 +211,15 @@ const nodeCheckpointSchema = z.object({
   /** The attempt of the node this checkpoint answers. A checkpoint for any other attempt is stale. */
   attempt: z.int().positive(),
   outcome: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('completed'), result: z.unknown(), route: routeSchema }),
+    z.object({
+      kind: z.literal('completed'),
+      result: z.unknown(),
+      route: routeSchema,
+      /** Set when an operator gave the result (`resolveStep`): the worker only routed it. */
+      by: z
+        .object({ actorId: z.string(), reason: z.string().optional(), executionId: z.string().optional() })
+        .optional(),
+    }),
     z.object({ kind: z.literal('skipped'), reason: z.string().min(1), route: routeSchema }),
     /** The attempt failed and the step retries: the same key, the next attempt, due at `at`. */
     z.object({ kind: z.literal('retry'), error: z.string().min(1), key: z.string().min(1), at: isoTime }),
@@ -202,7 +269,12 @@ export type SignalOutcome =
 type Verdict =
   | { readonly kind: 'park'; readonly waitingFor: string | null; readonly wakeAt: string | null }
   | { readonly kind: 'skipped'; readonly reason: string; readonly route: Route }
-  | { readonly kind: 'completed'; readonly result: unknown; readonly route: Route }
+  | {
+      readonly kind: 'completed';
+      readonly result: unknown;
+      readonly route: Route;
+      readonly by?: { readonly actorId: string; readonly reason?: string; readonly executionId?: string };
+    }
   | { readonly kind: 'undone'; readonly result: unknown }
   | { readonly kind: 'children'; readonly plan: ChildrenPlan }
   | { readonly kind: 'failed'; readonly reason: unknown; readonly retryable: boolean };
@@ -986,7 +1058,9 @@ export function createWorkflows<
     if (pastDeadline(parent)) return deadlineEvents(tx, def, parent, at);
 
     const allKids = await kidsOf(tx, parent.id);
-    const kids = allKids.filter(kid => kid.parentPath === plan.base);
+    // The kids of the plan, not of the base: a retried child (`retryStep`) leaves its failed predecessor under the same base.
+    const planned = new Set(plan.children.map(child => child.id));
+    const kids = allKids.filter(kid => planned.has(kid.id));
     const known = new Set(kids.map(kid => kid.id));
     const unfinished = kids.filter(kid => kid.finishedAt === null);
     const ended = kids.filter(kid => kid.finishedAt !== null);
@@ -1200,20 +1274,26 @@ export function createWorkflows<
         };
         switch (outcome.kind) {
           case 'completed': {
+            const completed = events.NodeCompleted({
+              path,
+              phase,
+              result: outcome.result,
+              resolvedBy: outcome.by?.actorId ?? null,
+              at,
+              ...(outcome.by?.reason === undefined ? {} : { reason: outcome.by.reason }),
+              ...(outcome.by?.executionId === undefined ? {} : { executionId: outcome.by.executionId }),
+            });
             if (compensating) {
               // A step in flight when the run began compensating: it did its work, so it is undone like the rest.
               return [
-                events.NodeCompleted({ path, phase, result: outcome.result, resolvedBy: null, at }),
+                completed,
                 ...(await compensate(inside.tx, def, row, at, {
                   cause: null,
                   doneNow: { path, result: outcome.result },
                 })),
               ];
             }
-            return [
-              events.NodeCompleted({ path, phase, result: outcome.result, resolvedBy: null, at }),
-              ...(await eventsAfter(inside.tx, input.runId, outcome.route, at)),
-            ];
+            return [completed, ...(await eventsAfter(inside.tx, input.runId, outcome.route, at))];
           }
           case 'skipped': {
             if (compensating) {
@@ -1535,6 +1615,271 @@ export function createWorkflows<
       return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
     });
 
+  // ---- operator verbs -----------------------------------------------------------------------------------------
+
+  /** The locked run row, or the refusal that says why no verb applies: it does not exist, or it is over. */
+  const openRun = (row: Row | null, runId: string): Row => {
+    if (row === null) throw new JournalError('WORKFLOW_NOT_FOUND', 'workflow', runId);
+    if (row.finishedAt !== null) {
+      throw new JournalError('WORKFLOW_FINISHED', 'workflow', runId, `the run is ${row.state}`);
+    }
+    return row;
+  };
+  const stepRowOf = async (tx: Tx, runId: string, path: string, phase: 'do' | 'undo') => {
+    const [step] = await tx
+      .select()
+      .from(workflowSteps)
+      .where(and(eq(workflowSteps.runId, runId), eq(workflowSteps.path, path), eq(workflowSteps.phase, phase)));
+    return step;
+  };
+  /**
+   * Every dead job of a run, with the node it belongs to (a step, a park, or none for the deadline). A stranded run's
+   * jobs die at once, so this is how an operator finds what to retry.
+   */
+  const deadJobsOf = async (tx: Tx, runId: string) => {
+    const rows = await tx
+      .select({ id: tables.jobs.id, data: tables.events.data })
+      .from(tables.jobs)
+      .leftJoin(tables.events, eq(tables.events.seq, tables.jobs.eventSeq))
+      .where(and(eq(tables.jobs.runId, runId), sql`${tables.jobs.deadAt} IS NOT NULL`))
+      .orderBy(asc(tables.jobs.deadAt), asc(tables.jobs.id));
+    return rows.map(row => ({ id: row.id, node: jobNodeSchema.parse(row.data ?? {}) }));
+  };
+  /**
+   * `retryStep`: a dead step runs again. A failed `do` or `undo` row gets its next attempt with the same key. A failed
+   * child or map node starts its failed children again under new ids (`<id>~2`); the old runs stay as history. A step
+   * whose job died because the run is stranded gets that job back, once the code is registered again.
+   */
+  const retryStep = j.command(
+    RETRY_STEP_COMMAND,
+    retryStepSchema,
+    async (args, context): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' }> => {
+      assertOperator(args.op);
+      const before = { parked: false };
+      const moved: { how: 'rescheduled' | 'childrenRestarted' | 'jobRetried'; base: string | undefined } = {
+        how: 'rescheduled',
+        base: undefined,
+      };
+      const written = await context.write(run, args.runId, async (locked, inside) => {
+        const row = openRun(locked, args.runId);
+        before.parked = row.state === 'parked';
+        const at = nowIso();
+        const by = operatorOf(args.op);
+        const step = await stepRowOf(inside.tx, row.id, args.path, args.phase);
+        if (step === undefined) {
+          throw new JournalError(
+            'STEP_NOT_DEAD',
+            'workflow',
+            row.id,
+            `step '${args.path}' (${args.phase}) has not run`,
+          );
+        }
+        const code = codeOf(row, started);
+        if (step.status === 'scheduled') {
+          const dead = await deadJobsOf(inside.tx, row.id);
+          if (dead.length === 0) {
+            throw new JournalError(
+              'STEP_NOT_DEAD',
+              'workflow',
+              row.id,
+              `step '${args.path}' (${args.phase}) is scheduled and the run has no dead job`,
+            );
+          }
+          if (code instanceof JournalError) throw code;
+          // The code is back: every job that died with the run (steps, parks, deadline, undos) goes again.
+          for (const job of dead) await jobOps.retry(inside.tx, job.id, jobOperatorOf(args.op));
+          moved.how = 'jobRetried';
+          return dead.map(job => events.JobRetried({ jobId: job.id, node: job.node, at, ...by }));
+        }
+        if (step.status !== 'failed') {
+          throw new JournalError(
+            'STEP_NOT_DEAD',
+            'workflow',
+            row.id,
+            `step '${args.path}' (${args.phase}) is ${step.status}`,
+          );
+        }
+        if (code instanceof JournalError) throw code;
+        if (args.phase === 'do' && row.state === 'compensating') {
+          throw new JournalError(
+            'WORKFLOW_COMPENSATING',
+            'workflow',
+            row.id,
+            `step '${args.path}' failed while the run undoes its work`,
+          );
+        }
+        if (args.phase === 'undo' && row.state !== 'compensating') {
+          throw new JournalError('STEP_NOT_DEAD', 'workflow', row.id, `the run is ${row.state}, so no undo is waiting`);
+        }
+        const node = code.nodes.find(candidate => candidate.name === args.path);
+        const plan = node?.kind === 'child' || node?.kind === 'map' ? await plannedOf(inside.tx, row.id) : undefined;
+        // A child or map node that failed after its children were planned: the failed children start again.
+        if (args.phase === 'do' && row.state === 'parked' && plan !== undefined && plan.path === args.path) {
+          const known = await kidsOf(inside.tx, row.id);
+          const kids = new Map(known.map(kid => [kid.id, kid]));
+          const children = plan.children.map(child => {
+            const kid = kids.get(child.id);
+            const failed = kid !== undefined && kid.finishedAt !== null && kid.state !== 'completed';
+            return failed ? { id: retriedChildId(row.id, child.id), input: child.input } : child;
+          });
+          moved.how = 'childrenRestarted';
+          moved.base = plan.base;
+          return [events.ChildrenPlanned({ path: args.path, base: plan.base, def: plan.def, children, at, ...by })];
+        }
+        if (step.key === null) {
+          throw new JournalError(
+            'STEP_NOT_DEAD',
+            'workflow',
+            row.id,
+            `step '${args.path}' (${args.phase}) was never scheduled`,
+          );
+        }
+        return [
+          events.NodeScheduled({
+            path: args.path,
+            phase: args.phase,
+            attempt: step.attempt + 1,
+            key: step.key,
+            jobId: null,
+            at,
+            ...by,
+          }),
+        ];
+      });
+      if (isFailure(written)) throw new Error(`journal: retryStep was refused: ${JSON.stringify(written)}`);
+      await settle(context, args.runId, written, before.parked);
+      if (moved.base !== undefined) await wakeParent(context, args.runId, moved.base);
+      return { how: moved.how };
+    },
+  );
+
+  /**
+   * `resolveStep`: an operator gives the result of a failed `do` step, and the run carries on as if the step had
+   * returned it. The result is checked with the step's `output` schema, so a step without one cannot be resolved.
+   * It schedules the step once more with the result in the event; the worker routes it and sends the usual
+   * completed checkpoint, without running the body.
+   * A step that routes with a function cannot be resolved either: the function needs the worker's services.
+   */
+  const resolveStep = j.command(
+    RESOLVE_STEP_COMMAND,
+    resolveStepSchema,
+    async (args, context): Promise<{ readonly runId: string }> => {
+      assertOperator(args.op);
+      const before = { parked: false };
+      const written = await context.write(run, args.runId, async (locked, inside) => {
+        const row = openRun(locked, args.runId);
+        before.parked = row.state === 'parked';
+        if (row.state === 'compensating') {
+          throw new JournalError(
+            'WORKFLOW_COMPENSATING',
+            'workflow',
+            row.id,
+            'a result cannot be given while the run undoes its work',
+          );
+        }
+        const step = await stepRowOf(inside.tx, row.id, args.path, 'do');
+        if (step?.status !== 'failed') {
+          throw new JournalError(
+            'STEP_NOT_DEAD',
+            'workflow',
+            row.id,
+            `step '${args.path}' is ${step?.status ?? 'not run yet'}, not failed`,
+          );
+        }
+        const def = definitionOf(row);
+        const index = def.nodes.findIndex(candidate => candidate.name === args.path);
+        const node = def.nodes[index];
+        const notResolvable = (why: string) =>
+          new JournalError('STEP_NOT_RESOLVABLE', 'workflow', row.id, `step '${args.path}' ${why}`);
+        if (node?.kind !== 'step') throw notResolvable('is not a step');
+        const { output } = node.options;
+        if (output === undefined) throw notResolvable('declares no output schema to check a result with');
+        if (row.state !== 'running') throw notResolvable(`cannot be resolved while the run is ${row.state}`);
+        let parsed: unknown;
+        try {
+          parsed = await parseAsync(output, args.result);
+        } catch (error) {
+          if (!(error instanceof SchemaError)) throw error;
+          throw new JournalError(
+            'BAD_ARGUMENT',
+            'workflow',
+            row.id,
+            `the result does not match the output of step '${args.path}'`,
+            { cause: error },
+          );
+        }
+        const kept = storable(parsed, def.limits.payload, `the result of step '${args.path}'`, row.id);
+        if (kept instanceof JournalError) throw kept;
+        const at = nowIso();
+        // The worker routes: `next` may need services only it has. The result is checkpointed as a normal completion.
+        if (step.key === null) throw notResolvable('was never scheduled');
+        return [
+          events.NodeScheduled({
+            path: args.path,
+            phase: 'do',
+            attempt: step.attempt + 1,
+            key: step.key,
+            jobId: null,
+            at,
+            resolution: { result: kept.value },
+            ...operatorOf(args.op),
+          }),
+        ];
+      });
+      if (isFailure(written)) throw new Error(`journal: resolveStep was refused: ${JSON.stringify(written)}`);
+      await settle(context, args.runId, written, before.parked);
+      return { runId: args.runId };
+    },
+  );
+
+  /** `skipUndo`: a failed undo is given up, with the reason. The run goes on with the next undo, and the step is `residual`. */
+  const skipUndo = j.command(
+    SKIP_UNDO_COMMAND,
+    skipUndoSchema,
+    async (args, context): Promise<{ readonly runId: string }> => {
+      assertOperator(args.op);
+      const reason = args.op.reason?.trim() ?? '';
+      if (reason === '') {
+        throw new JournalError(
+          'BAD_ARGUMENT',
+          'workflow',
+          'reason',
+          'giving up an undo needs a `reason`: it is written on the run',
+        );
+      }
+      const before = { parked: false };
+      const written = await context.write(run, args.runId, async (locked, inside) => {
+        const row = openRun(locked, args.runId);
+        before.parked = row.state === 'parked';
+        const step = await stepRowOf(inside.tx, row.id, args.path, 'undo');
+        if (row.state !== 'compensating' || step?.status !== 'failed') {
+          throw new JournalError(
+            'STEP_NOT_DEAD',
+            'workflow',
+            row.id,
+            `no failed undo of '${args.path}' is waiting on this run`,
+          );
+        }
+        const def = definitionOf(row);
+        const at = nowIso();
+        return [
+          events.NodeSkipped({
+            path: args.path,
+            phase: 'undo',
+            reason,
+            actorId: args.op.actor,
+            at,
+            ...(args.op.executionId === undefined ? {} : { executionId: args.op.executionId }),
+          }),
+          ...(await compensate(inside.tx, def, row, at, { cause: null, undoneNow: 1 })),
+        ];
+      });
+      if (isFailure(written)) throw new Error(`journal: skipUndo was refused: ${JSON.stringify(written)}`);
+      await settle(context, args.runId, written, before.parked);
+      return { runId: args.runId };
+    },
+  );
+
   /** `j.workflow`: the step-2 builder, with `start` and `signal` on the finished definition. */
   const workflow: JournalDefinitions<Meta, Tx, AppDb>['workflow'] = (name, options) =>
     workflowWith(name, options, def => ({
@@ -1719,6 +2064,48 @@ export function createWorkflows<
       } catch (error) {
         // A router, a `finish` or an output schema that fails will fail again: no retry, the definition needs a fix.
         return failed(error, !(error instanceof JournalError && error.code === 'BAD_DEFINITION'));
+      }
+    }
+
+    /**
+     * The route of a step an operator resolved (`resolveStep`): `next` runs here, with the worker's services, on the
+     * operator's result, and the body does not run. A router that fails is not retried: a retry would run the body.
+     */
+    async function routeResolved(
+      def: WorkflowDef,
+      index: number,
+      node: StepNode,
+      row: Row,
+      event: NodeScheduledEvent,
+      ctx: StepEffectContext,
+      result: unknown,
+    ): Promise<Verdict> {
+      const { data } = event;
+      const build = (signal: AbortSignal): ErasedContext => ({
+        ...ctx,
+        runId: row.id,
+        path: data.path,
+        attempt: data.attempt,
+        input: row.input,
+        results: row.results,
+        key: data.key,
+        signal,
+      });
+      try {
+        const route = await routeFrom(def, index, node, row, result, build, ctx.signal);
+        const by =
+          data.actorId === undefined
+            ? {}
+            : {
+                by: {
+                  actorId: data.actorId,
+                  ...(data.reason === undefined ? {} : { reason: data.reason }),
+                  ...(data.executionId === undefined ? {} : { executionId: data.executionId }),
+                },
+              };
+        return { kind: 'completed', result, route, ...by };
+      } catch (error) {
+        return failed(error, false);
       }
     }
 
@@ -1949,8 +2336,12 @@ export function createWorkflows<
         }
         verdict = await attemptUndo(def, node, row, event, ctx, done);
       } else {
-        if (node.kind === 'step') verdict = await attemptNode(def, index, node, row, event, ctx);
-        else if (node.kind === 'child' || node.kind === 'map') {
+        if (node.kind === 'step') {
+          verdict =
+            data.resolution === undefined
+              ? await attemptNode(def, index, node, row, event, ctx)
+              : await routeResolved(def, index, node, row, event, ctx, data.resolution.result);
+        } else if (node.kind === 'child' || node.kind === 'map') {
           verdict = await attemptChildren(def, index, node, row, event, ctx);
         } else verdict = attemptWait(node, row, event, ctx);
       }
@@ -2048,7 +2439,7 @@ export function createWorkflows<
     return { effects: [effect, timer], steps: machine.steps };
   }
 
-  return { workflow, register };
+  return { workflow, register, started, operate: { retryStep, resolveStep, skipUndo } };
 }
 
 const dueSchema = z.object({ at: isoTime });

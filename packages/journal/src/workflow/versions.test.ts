@@ -13,19 +13,12 @@ import { isFailure } from '@arki/failure';
 
 import type { j as sharedJournal } from '../test-support.js';
 import { initJournal } from '../journal.js';
-import { createManagedJobOps } from '../outbox.js';
-import { resolveRetention } from '../retention.js';
 import { tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
 
 const caller = { actorId: 'usr_test' };
 const workflowMeta = { actorId: 'system:workflow' };
 const operator = { actor: 'usr_ops' };
-const noWake = (): void => {
-  // No worker to wake in this test.
-};
-/** The runner's own path to a run's jobs, until `workflow.retryStep` gives operators one. */
-const runOps = createManagedJobOps({ tables, retention: resolveRetention({}), wake: noWake });
 type Init = typeof sharedJournal;
 /** A journal setup of its own: its commands only know what its `compose` registered. */
 const fresh = (): Init => initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
@@ -72,6 +65,15 @@ beforeEach(async () => {
   ({ db, client } = await openJournalDb(tables));
 });
 afterEach(() => client.close());
+
+const eventTypesOf = async (id: string) => {
+  const rows = await db
+    .select({ type: tables.events.type })
+    .from(tables.events)
+    .where(eq(tables.events.entityId, id))
+    .orderBy(asc(tables.events.seq));
+  return rows.map(row => row.type);
+};
 
 type Draining = { readonly drain: (db: PgliteDatabase) => Promise<number> };
 async function settle(journal: Draining, limit = 40) {
@@ -268,7 +270,7 @@ describe('stranded runs', () => {
     expect(dead[0]?.lastError).toContain('no registered workflow "refund" v1');
   });
 
-  it('a stranded run resumes when its code returns and the dead job is retried', async () => {
+  it('retryStep resumes a stranded run once its code is back', async () => {
     const original = fresh();
     const log: string[] = [];
     const v1 = refundV1(original, log);
@@ -281,9 +283,19 @@ describe('stranded runs', () => {
     const [dead] = await deadJobs();
     expect(dead).toBeDefined();
 
+    // Still stranded: the retry says why and leaves the job dead.
+    const retryCharge = (journal: typeof journalA) =>
+      journal.workflows.retryStep(db, { runId: id, path: 'charge', phase: 'do' }, operator);
+    await expect(retryCharge(journalB)).rejects.toMatchObject({ code: 'WORKFLOW_SHAPE_CHANGED' });
+    expect(await deadJobs()).toHaveLength(1);
+
     // The app deploys the old code again; the operator retries.
-    await runOps.retry(db, dead?.id ?? '', operator);
+    expect(await retryCharge(journalA)).toEqual({ how: 'jobRetried' });
     await settle(journalA);
+    expect(await eventTypesOf(id)).toContain('JobRetried');
+    // The job verb's own audit row is written too.
+    const operations = await journalA.jobOperations(db);
+    expect(operations.operations.map(operation => operation.actor)).toContain('usr_ops');
 
     expect(log).toEqual(['v1 charge']);
     expect(await rowOf(id)).toMatchObject({ state: 'parked', node: 'cool' });
@@ -309,9 +321,49 @@ describe('stranded runs', () => {
     const dead = await deadJobs();
     expect(dead.map(job => [job.effect, job.attempts])).toEqual([['workflow.timer', 1]]);
 
-    await runOps.retry(db, dead[0]?.id ?? '', operator);
+    // The timer's job belongs to the park of `cool`, so that is the step to retry.
+    await journalA.workflows.retryStep(db, { runId: id, path: 'cool', phase: 'do' }, operator);
     await settle(journalA);
     expect(await rowOf(id)).toMatchObject({ state: 'parked', node: 'approve' });
+  });
+
+  it('retryStep on a stranded run also revives its deadline timer', async () => {
+    const log: string[] = [];
+    const deadlined = (init: Init, extra: boolean) => {
+      const builder = init
+        .workflow('refund', { version: 1, input: z.object({ cents: z.int() }), deadline: '2h' })
+        .step('charge', () => void log.push('charge'), { undo: () => void log.push('undo charge') });
+      return (extra ? builder.step('extra', () => void log.push('extra')) : builder)
+        .waitFor('approve', { signal: 'approve', schema: ApprovalV1 })
+        .finish();
+    };
+    const original = fresh();
+    const v1 = deadlined(original, false);
+    const journalA = original.compose({ workflows: [v1], workflowMeta });
+    const id = newId('deadline');
+    expectOk(await journalA.run(db, v1.start, { input: { cents: 1 }, id }, caller));
+    await settle(journalA);
+    expect(await rowOf(id)).toMatchObject({ state: 'parked', node: 'approve' });
+
+    // The deadline comes while only the edited code is deployed: its timer dies at once.
+    await tick(id, 3 * 3600);
+    await db
+      .update(tables.workflowRuns)
+      .set({ deadlineAt: sql`${tables.workflowRuns.deadlineAt} - make_interval(secs => ${3 * 3600})` })
+      .where(eq(tables.workflowRuns.id, id));
+    const edited = fresh();
+    const journalB = edited.compose({ workflows: [deadlined(edited, true)], workflowMeta });
+    await settle(journalB);
+    expect(await rowOf(id)).toMatchObject({ state: 'parked' });
+    expect(await deadJobs()).toHaveLength(1);
+
+    await journalA.workflows.retryStep(db, { runId: id, path: 'approve', phase: 'do' }, operator);
+    await settle(journalA);
+
+    // The deadline fired: the run undid its charge and failed.
+    expect(await rowOf(id)).toMatchObject({ state: 'failed' });
+    expect(log).toEqual(['charge', 'undo charge']);
+    expect(await deadJobs()).toHaveLength(0);
   });
 
   it('a signal to a stranded run is refused, not applied with the wrong schema', async () => {

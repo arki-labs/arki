@@ -88,9 +88,9 @@ export type JobCount = {
 };
 
 /** `after` is the `next` of the previous page, passed back untouched. */
-type PageOptions = { readonly limit?: number; readonly after?: string };
+export type PageOptions = { readonly limit?: number; readonly after?: string };
 
-const LIST_LIMIT = { default: 100, max: 200 } as const;
+export const LIST_LIMIT = { default: 100, max: 200 } as const;
 const RETRY_DEAD_LIMIT = { default: 100, max: 500 } as const;
 const PURGE_LIMIT = { default: 1000, max: MAX_SWEEP_BATCH } as const;
 const OPERATION_HISTORY = 100;
@@ -119,7 +119,11 @@ const managedError = (id: string) =>
 
 const argument = (what: string, detail: string) => new JournalError('BAD_ARGUMENT', 'job', what, detail);
 
-function bounded(what: string, value: number | undefined, range: { readonly default: number; readonly max: number }) {
+export function bounded(
+  what: string,
+  value: number | undefined,
+  range: { readonly default: number; readonly max: number },
+) {
   const limit = value ?? range.default;
   if (!Number.isInteger(limit) || limit < 1 || limit > range.max) {
     throw argument(what, `limit ${String(limit)} must be a whole number from 1 to ${range.max}`);
@@ -143,7 +147,7 @@ const CURSOR_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}$/;
 const cursorShape = z.tuple([z.string().regex(CURSOR_TIME), z.string().min(1)]);
 
 /** The column as microsecond-exact UTC text, selected next to each paged row. */
-const cursorText = (column: SQL | { readonly name: string }) =>
+export const cursorText = (column: SQL | { readonly name: string }) =>
   sql<string>`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')`;
 
 // `btoa` rather than `Buffer`: the package runs in the browser and Hermes too. The payload is ASCII (a timestamp and a generated id).
@@ -163,7 +167,7 @@ function decodeCursor(after: string): { readonly at: string; readonly id: string
 }
 
 /** The row comparison for the page after `after`: `(column, id)` strictly past the cursor in the sort direction. */
-function pastCursor(
+export function pastCursor(
   after: string | undefined,
   column: SQL | { readonly name: string },
   id: SQL | { readonly name: string },
@@ -176,7 +180,10 @@ function pastCursor(
 }
 
 /** Cut a `limit + 1` fetch into a page and the cursor of its last row. */
-function pageOf<Row extends { readonly id: string; readonly cursorAt: string }>(rows: readonly Row[], limit: number) {
+export function pageOf<Row extends { readonly id: string; readonly cursorAt: string }>(
+  rows: readonly Row[],
+  limit: number,
+) {
   const items: Omit<Row, 'cursorAt'>[] = [];
   let next: string | null = null;
   for (const [index, row] of rows.slice(0, limit).entries()) {

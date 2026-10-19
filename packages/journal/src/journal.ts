@@ -7,10 +7,11 @@
 import { and, eq, getTableColumns, getTableName, is, isNull, lt } from 'drizzle-orm';
 import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
 
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
 import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
+import type { Fence } from './command.js';
 import type { EntityBuilder } from './entity.js';
 import type { JournalTables } from './pg.js';
 import type { JobRetention } from './retention.js';
@@ -31,7 +32,6 @@ import type {
   TransactionSource,
 } from './types.js';
 import type { EffectAttempt } from './worker.js';
-import type { Fence } from './command.js';
 import { createCommandRunner } from './command.js';
 import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
@@ -45,13 +45,8 @@ import { trackRefusals } from './refusals.js';
 import { assertRetention, effectOverrides, resolveRetention } from './retention.js';
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
-import {
-  createCatchUp,
-  createDrain,
-  createStrandedJobs,
-  createTapDispatch,
-  createWorkers,
-} from './worker.js';
+import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
+import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
 
@@ -123,11 +118,7 @@ function createInit<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(
-  metaSchema: Meta,
-  tables: JournalTables,
-  retention: JobRetention | undefined,
-): JournalDefinitions<Meta, Tx, AppDb> {
+>(metaSchema: Meta, tables: JournalTables, retention: JobRetention | undefined): JournalDefinitions<Meta, Tx, AppDb> {
   type MetaOut = SchemaOutput<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
@@ -165,7 +156,11 @@ function createInit<
   const projection: JournalDefinitions<Meta, Tx, AppDb>['projection'] = (name, entity, on, opts) =>
     defineProjection(name, entity, on, opts);
   const effect = effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>();
-  const workflows = createWorkflows<Meta, Tx, AppDb>({ event: defineEvent, entity, command, projection, effect }, tables, retention);
+  const workflows = createWorkflows<Meta, Tx, AppDb>(
+    { event: defineEvent, entity, command, projection, effect },
+    tables,
+    retention,
+  );
   return {
     event: defineEvent,
     entity,
@@ -195,7 +190,11 @@ function createInit<
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
-      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention);
+      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, {
+        commands: workflows.operate,
+        registry: workflows.started,
+        meta: config.workflowMeta,
+      });
     },
   };
 }
@@ -225,6 +224,12 @@ function createJournal<
   effects: readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
   taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = [],
   retentionOption?: JobRetention,
+  /** What `journal.workflows` needs: the operator verbs, the registered code, and the meta their events are recorded with. */
+  workflowWiring?: {
+    readonly commands: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['operate'];
+    readonly registry: ReadonlyMap<string, { readonly shapeHash: string }>;
+    readonly meta: SchemaInput<Meta> | undefined;
+  },
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
   const retention = resolveRetention(retentionOption);
@@ -291,7 +296,12 @@ function createJournal<
         .where(and(eq(attempts.jobId, held.jobId), eq(attempts.attempt, held.attempt), isNull(attempts.finishedAt)))
         .for('share');
       if (open.length === 0)
-        throw new JournalError('LEASE_LOST', 'job', held.jobId, `attempt ${held.attempt} of "${effect}" is no longer open`);
+        throw new JournalError(
+          'LEASE_LOST',
+          'job',
+          held.jobId,
+          `attempt ${held.attempt} of "${effect}" is no longer open`,
+        );
     };
     return {
       run: (command, input, meta, call) =>
@@ -332,7 +342,37 @@ function createJournal<
         : { everyMs: retention.sweep.everyMs, run: (db, signal) => sweepOnce(db, signal) },
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
-  const { sweepOnce, ...jobOps } = createJobOps({ tables, retention, wake: () => journal.wake(), overrideFor: effectOverride });
+  const { sweepOnce, ...jobOps } = createJobOps({
+    tables,
+    retention,
+    wake: () => journal.wake(),
+    overrideFor: effectOverride,
+  });
+
+  const workflowReads = createWorkflowReads({ tables, registry: workflowWiring?.registry ?? new Map() });
+  /** The meta of the events the verbs write: the one `compose` was given for the workflow runner. */
+  const verbMeta = (): SchemaInput<Meta> => {
+    if (workflowWiring?.meta === undefined) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'workflow',
+        'workflows',
+        'journal: the workflow verbs need compose({ workflows, workflowMeta }): the code that undoes and resumes runs, and the meta their events carry',
+      );
+    }
+    return workflowWiring.meta;
+  };
+  const verbCommands = () => {
+    if (workflowWiring === undefined) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'workflow',
+        'workflows',
+        'journal: the workflow verbs need compose({ workflows, workflowMeta })',
+      );
+    }
+    return workflowWiring.commands;
+  };
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
@@ -377,6 +417,25 @@ function createJournal<
     strandedJobs: (db, opts) => strandedJobs(db, opts),
     retention,
     ...jobOps,
+    workflows: {
+      ...workflowReads,
+      retryStep: async (source, args, op) => {
+        const done = await run(source, verbCommands().retryStep, { ...args, op }, verbMeta());
+        // A retried job, a new attempt and restarted children are all work for a worker.
+        journal.wake();
+        return done;
+      },
+      resolveStep: async (source, args, op) => {
+        const done = await run(source, verbCommands().resolveStep, { ...args, op }, verbMeta());
+        journal.wake();
+        return done;
+      },
+      skipUndo: async (source, args, op) => {
+        const done = await run(source, verbCommands().skipUndo, { ...args, op }, verbMeta());
+        journal.wake();
+        return done;
+      },
+    },
     wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point },
     catalog: {

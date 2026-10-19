@@ -5,7 +5,7 @@
  * from the step rows, so no event names them.
  */
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { JournalDefinitions } from '../api.js';
@@ -27,6 +27,12 @@ const shapeSchema: z.ZodType<WorkflowShape> = z.object({
 });
 /** When the run row is pruned; null keeps it. Resolved by the runner from `retention.workflows`. */
 const keepUntil = z.iso.datetime().nullable();
+/** Who asked, why, and from which Foreman execution, on an event an operator verb wrote. The run's events are the audit. */
+const byOperator = {
+  actorId: z.string().optional(),
+  reason: z.string().optional(),
+  executionId: z.string().optional(),
+};
 
 export function workflowMachine<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
@@ -62,6 +68,9 @@ export function workflowMachine<
       key: z.string().min(1),
       jobId: z.string().nullable(),
       at,
+      /** Set by `resolveStep`: the operator's result. The worker routes it and does not run the step body. */
+      resolution: z.object({ result: z.unknown() }).optional(),
+      ...byOperator,
     }),
   );
   const NodeCompleted = j.event(
@@ -73,6 +82,8 @@ export function workflowMachine<
       /** Set when an operator supplied the result (`resolveStep`). */
       resolvedBy: z.string().nullable(),
       at,
+      reason: byOperator.reason,
+      executionId: byOperator.executionId,
     }),
   );
   const NodeSkipped = j.event(
@@ -83,6 +94,7 @@ export function workflowMachine<
       reason: z.string().min(1),
       actorId: z.string().nullable(),
       at,
+      executionId: byOperator.executionId,
     }),
   );
   const NodeFailed = j.event(
@@ -106,7 +118,13 @@ export function workflowMachine<
       def: z.object({ name: z.string().min(1), version: z.int().positive() }),
       children: z.array(z.object({ id: z.string().min(1), input: z.unknown() })).min(1),
       at,
+      ...byOperator,
     }),
+  );
+  /** An operator retried the dead job of a stranded run (its code is back). The job is the one retried; `node` is the step or park it belongs to. */
+  const JobRetried = j.event(
+    'JobRetried',
+    z.object({ jobId: z.string().min(1), node: nodePath.nullable(), at, ...byOperator }),
   );
   const SignalReceived = j.event(
     'SignalReceived',
@@ -175,6 +193,8 @@ export function workflowMachine<
       waitingFor: null,
       wakeAt: null,
     }))
+    // Audit only: the retried job is back in the queue, and the step row has not changed.
+    .on(JobRetried, () => ({}))
     // The signal row is written by the signal command; the wake that follows is NodeCompleted.
     .on(SignalReceived, () => ({}))
     .on(TimerFired, row => ({
@@ -255,6 +275,19 @@ export function workflowMachine<
           target: [workflowSteps.runId, workflowSteps.path, workflowSteps.phase],
           set: { status: 'skipped', reason: e.data.reason, error: null, finishedAt: new Date(e.data.at) },
         }),
+    // A new plan puts a node whose children failed back to waiting for them (`retryStep`); a first plan finds it scheduled already.
+    ChildrenPlanned: (tx, e) =>
+      tx
+        .update(workflowSteps)
+        .set({ status: 'scheduled', error: null, finishedAt: null })
+        .where(
+          and(
+            eq(workflowSteps.runId, e.entityId),
+            eq(workflowSteps.path, e.data.path),
+            eq(workflowSteps.phase, 'do'),
+            eq(workflowSteps.status, 'failed'),
+          ),
+        ),
     NodeFailed: (tx, e) =>
       tx
         .insert(workflowSteps)
@@ -282,6 +315,7 @@ export function workflowMachine<
       NodeFailed,
       Parked,
       ChildrenPlanned,
+      JobRetried,
       SignalReceived,
       TimerFired,
       DeadlineReached,

@@ -108,6 +108,19 @@ export type {
   RunRetention,
 } from './retention.js';
 export { ndjsonArchiveSink } from './retention.js';
+export type {
+  HistoryEvent,
+  RunCount,
+  RunDetail,
+  RunState,
+  RunSummary,
+  StepView,
+  StrandedReason,
+  StrandedRun,
+  WorkflowOps,
+  WorkflowReads,
+  WorkflowVerbs,
+} from './workflow/read.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';

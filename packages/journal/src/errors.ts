@@ -28,7 +28,12 @@ export type JournalErrorCode =
   | 'WORKFLOW_LIMIT'
   | 'WORKFLOW_UNKNOWN'
   | 'WORKFLOW_SHAPE_CHANGED'
-  | 'WORKFLOW_VERSION_RETIRED';
+  | 'WORKFLOW_VERSION_RETIRED'
+  | 'WORKFLOW_NOT_FOUND'
+  | 'WORKFLOW_FINISHED'
+  | 'WORKFLOW_COMPENSATING'
+  | 'STEP_NOT_DEAD'
+  | 'STEP_NOT_RESOLVABLE';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -135,6 +140,26 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   WORKFLOW_VERSION_RETIRED: {
     what: 'a newer version of this workflow is registered, so this version no longer starts runs',
     next: 'Start the run with the newest version. The older version stays registered only to finish the runs it already has',
+  },
+  WORKFLOW_NOT_FOUND: {
+    what: 'no workflow run has this id',
+    next: 'Check the run id, and that the run was not pruned after it finished',
+  },
+  WORKFLOW_FINISHED: {
+    what: 'the workflow run is finished, so nothing can move it',
+    next: 'A completed, failed or cancelled run is history. Start a new run to do the work again',
+  },
+  WORKFLOW_COMPENSATING: {
+    what: 'the workflow run is undoing its work, so this action does not apply',
+    next: 'Wait for compensation to end, or fix the failed undo (`retryStep` or `skipUndo`)',
+  },
+  STEP_NOT_DEAD: {
+    what: 'this step is not dead, so there is nothing to retry or skip',
+    next: 'Only a failed step, or a step whose job died because the run is stranded, can be moved by an operator. Read the run to see the step status',
+  },
+  STEP_NOT_RESOLVABLE: {
+    what: 'an operator cannot supply the result of this step',
+    next: 'Only a failed `do` step of a running run that declares an `output` schema can be resolved. Use `retryStep` instead',
   },
 };
 

@@ -50,6 +50,7 @@ import type {
   WakeListener,
 } from './types.js';
 import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions } from './workflow/define.js';
+import type { WorkflowOps } from './workflow/read.js';
 import type { StarterOf } from './workflow/runner.js';
 
 /**
@@ -462,6 +463,11 @@ export type Journal<
   archivedJob: JobOps['archivedJob'];
   /** How many archive rows there are, how many wait for the sink, and how many are past `keepUntil`. */
   archiveStatus: JobOps['archiveStatus'];
+  /**
+   * Workflow runs, read and operated on: `runs`, `run`, `counts`, `stranded`, `history`, and the operator verbs
+   * `retryStep`, `resolveStep` and `skipUndo`. The verbs need `compose({ workflows, workflowMeta })`.
+   */
+  readonly workflows: WorkflowOps<Tx>;
   /** A dead job back to pending: attempts and lease cleared, due now, workers woken. `JOB_NOT_DEAD` otherwise. */
   retry: JobOps['retry'];
   /** A dead job leaves the hot table, archived as `discarded`. `JOB_NOT_DEAD` otherwise. */
