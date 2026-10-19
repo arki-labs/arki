@@ -28,7 +28,7 @@ Version 2.0 is a complete architectural rewrite inspired by tRPC. The new API fo
 pnpm add @arki/queue bullmq ioredis superjson
 ```
 
-Job and flow input accepts any Standard Schema validator (Zod, Valibot, ArkType, or your own); the examples use Zod. Bad input surfaces as `SchemaError` from `@arki/schema`.
+Job and flow input accepts any Standard Schema validator (Zod, Valibot, ArkType, or your own); the examples use Zod. Bad input returns `InvalidInput` from `@arki/failure`, with `data.issues`; a broken validator returns `ValidatorDefect`. Worker callbacks bridge these failures with `orThrow` because BullMQ and pg-boss report failures by throwing.
 
 Entry points: `@arki/queue` (the core), `/types`, `/runtime-local`, `/dot`, `/projection`, `/foreman` and `/outbox`. `/outbox` needs `@arki/journal` and `drizzle-orm`, not `bullmq` or `ioredis`.
 
@@ -355,13 +355,13 @@ A wrong field in `args` is a compile error. Passing the root `db` instead of `tx
 
 The three ways to start a job:
 
-| | `trigger()` | `enqueue()` (`queue()` client) | `schedule.runAfter(tx, ...)` |
-| --- | --- | --- | --- |
-| Stored in | Redis | Redis | your database, in your transaction |
-| Rolls back with your write | no | no | yes |
-| Needs a worker in the same process | yes | no | no |
-| Needs Redis | yes | yes | no |
-| Runs on | `queueWorker` | `queueWorker` | `journalWorker` or `journal.worker` |
+|                                    | `trigger()`   | `enqueue()` (`queue()` client) | `schedule.runAfter(tx, ...)`        |
+| ---------------------------------- | ------------- | ------------------------------ | ----------------------------------- |
+| Stored in                          | Redis         | Redis                          | your database, in your transaction  |
+| Rolls back with your write         | no            | no                             | yes                                 |
+| Needs a worker in the same process | yes           | no                             | no                                  |
+| Needs Redis                        | yes           | yes                            | no                                  |
+| Runs on                            | `queueWorker` | `queueWorker`                  | `journalWorker` or `journal.worker` |
 
 - **Atomic enqueue is not request idempotency.** The row is written once per awaited call in the committed transaction. Two HTTP retries that both commit schedule twice. Pass `key` to dedupe among unfinished rows of the same job, like `jobId`. Or cover the whole operation with a journal receipt.
 - **At-least-once.** The row stays until the worker acknowledges it. A crash between the handler and the ack runs the job again. Pass `ctx.job.id` to external systems as the idempotency key. It is the row id (`job_xxx`) and stays the same across retries. A handler that returns an `@arki/failure` failure fails the job, as on the BullMQ lane. Retry uses the job's own `.options({ retry })` backoff (3 tries by default). Bad stored args go dead at once, without running the handler.
@@ -400,6 +400,7 @@ defineApp('signup-worker')
 ```
 
 The worker manifest lists `<job>.consume` under the plugin `journal-worker`.
+
 - **No entities needed.** The outbox needs the journal tables and a journal worker, not entities or effects. Compose a journal with only `tables`, run `journal.worker(db, { jobs: outboxRunner(...) })`, and add the migration from the `@arki/journal` README (Tables) to your app.
 - **Private package.** `@arki/queue` is private. The typed API is private too. Public `@arki/journal` users get only the `JobRunner` port.
 

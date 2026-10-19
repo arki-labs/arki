@@ -1,4 +1,4 @@
-/** `@arki/failure`: typed expected failures returned as plain values, with no wrapper. */
+/** `@arki/failure`: typed failures returned as plain values, with no wrapper. */
 export { attempt } from './attempt.js';
 export { findCause } from './cause.js';
 export { collect, partition } from './collect.js';
@@ -20,4 +20,8 @@ export type {
 } from './failure.js';
 export { assertNever, match, recover } from './handle.js';
 export type { MatchHandlers, RecoverHandlers } from './handle.js';
-export { revive } from './revive.js';
+export { revive, reviveJson, serialize, REVIVAL_FAILURES } from './revive.js';
+export { InvalidInput, AsyncSchema, ValidatorDefect, InvalidEnvelope, UnexpectedDefect } from './foundations.js';
+export type { SchemaFailure, AsyncSchemaFailure } from './schema.js';
+export type { RevivalFailure } from './revive.js';
+export { isSchemaFailure, isAsyncSchemaFailure, SCHEMA_FAILURES } from './schema.js';

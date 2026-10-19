@@ -5,13 +5,13 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 ## Laws
 
 1. This package runs schemas. It never defines or replaces a validator.
-2. `parse` and `parseAsync` return the schema's output type, never its input type.
-3. Two errors, never mixed. `SchemaError` is bad data. `SchemaRunError` is a broken or misused schema and carries a code.
-4. Never map a `SchemaRunError` to an HTTP 400. The validator has a bug.
-5. Import the spec types (`StandardSchemaV1`, `StandardJSONSchemaV1`) from `@arki/schema`, never from `@standard-schema/spec`.
+2. `parse` and `parseAsync` return the schema output or exact canonical failures from `@arki/failure`.
+3. `InvalidInput` means bad data. `AsyncSchema` and `ValidatorDefect` mean schema misuse or defects; never map them to HTTP 400.
+4. `SchemaRunError` only covers unsupported JSON Schema conversion targets.
+5. Consumers import spec types from `@arki/schema`; the failure foundation imports the external spec directly.
 6. Nothing here may import a validator. Zod, Valibot and ArkType appear only in tests, examples and docs.
 7. No Node or Bun built-ins in `src/`. The package must run in browsers and Hermes.
-8. `parseAsync` rejects. It never throws before it returns a promise.
+8. `parseAsync` resolves to output or a canonical failure, including thrown/rejected validator defects.
 9. `withJsonSchema` answers `draft-2020-12` only. Any other target throws `ARKI_SCHEMA_E003`.
 10. Every error code has a JSDoc summary, `@fix` and `@verify`.
 

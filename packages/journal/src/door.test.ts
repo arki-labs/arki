@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { CommandRunner } from './api.js';
 import type { OrderId } from './test-support.js';
@@ -62,10 +62,12 @@ describe('an error thrown by app code', () => {
     // The first write succeeds. The app then throws inside the second write's
     // savepoint, so the error crosses a savepoint and the command's transaction.
     const placeThenThrow = j.command('placeThenThrow', z.object({ id: orderIdSchema }), async (input, { write }) => {
-      await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
-      await write(order, input.id, () => {
-        throw thrown;
-      });
+      orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
+      orThrow(
+        await write(order, input.id, () => {
+          throw thrown;
+        }),
+      );
     });
 
     const error: unknown = await journal.run(db, placeThenThrow, { id }, meta).catch((error_: unknown) => error_);
@@ -82,7 +84,7 @@ describe('journal.bind', () => {
     const wake = vi.spyOn(journal, 'wake');
     const run = journal.bind(db, { actorId: 'usr_door' });
 
-    const result = await run(placeOrder, { id });
+    const result = orThrow(await run(placeOrder, { id }));
 
     // The handler's result comes back, written with the bound meta.
     expect(result.row).toMatchObject({ id, status: 'placed', version: 1 });
@@ -98,8 +100,8 @@ describe('journal.bind', () => {
     const second = orderId(next++);
     const run = journal.bind(db, meta);
 
-    await run(placeOrder, { id: first });
-    await run(placeOrder, { id: second });
+    orThrow(await run(placeOrder, { id: first }));
+    orThrow(await run(placeOrder, { id: second }));
 
     expect(await rowsOf(first)).toHaveLength(1);
     expect(await rowsOf(second)).toHaveLength(1);
@@ -113,7 +115,7 @@ describe('journal.bind', () => {
     const error: unknown = await db
       .transaction(async tx => {
         const run = journal.bind(tx, meta);
-        await run(placeOrder, { id });
+        orThrow(await run(placeOrder, { id }));
         // Inside the caller's transaction the write is there.
         expect(await tx.select().from(orders).where(eq(orders.id, id))).toHaveLength(1);
         throw undo;
@@ -132,7 +134,7 @@ describe('journal.bind', () => {
     // Binding does not throw: the request context can always be built.
     const run = journal.bind(db, { actorId: '' });
 
-    await expect(run(placeOrder, { id })).rejects.toBeInstanceOf(SchemaError);
+    await expect(run(placeOrder, { id })).resolves.toMatchObject({ code: InvalidInput.code });
     expect(await rowsOf(id)).toHaveLength(0);
   });
 
@@ -154,8 +156,8 @@ describe('journal.bind', () => {
     const id = orderId(next++);
     const run = jd.compose({}).bind(db, { actorId: 'usr_door' });
 
-    const first = await run(touch, { id });
-    const second = await run(touch, { id });
+    const first = orThrow(await run(touch, { id }));
+    const second = orThrow(await run(touch, { id }));
 
     expect(first.events[0]?.meta.requestId).toBe('req_1');
     expect(second.events[0]?.meta.requestId).toBe('req_2');
@@ -169,19 +171,19 @@ describe('journal.bind', () => {
 
     // Type-level only: never called.
     const typeChecks = async () => {
-      const written = await writes(run);
+      const written = orThrow(await writes(run));
       expectTypeOf(written.row).toEqualTypeOf<typeof orders.$inferSelect | null>();
 
       const noteOrder = j.command('noteOrder', z.object({ id: orderIdSchema }), (input, { write }) =>
         write(order, input.id, () => [OrderNoted({ note: 'seen' })]),
       );
       // @ts-expect-error -- the input is checked against the command's schema
-      await run(noteOrder, { id: 7 });
+      orThrow(await run(noteOrder, { id: 7 }));
 
       const other = initJournal({ tables, meta: z.object({ tenantId: z.string() }) });
       const otherCommand = other.command('otherCommand', z.object({}), (_input, { meta: otherMeta }) => otherMeta);
       // @ts-expect-error -- a command of a journal with another meta shape would read a `tenantId` this door never gives
-      await run(otherCommand, {});
+      orThrow(await run(otherCommand, {}));
     };
     expectTypeOf(typeChecks).toBeFunction();
   });

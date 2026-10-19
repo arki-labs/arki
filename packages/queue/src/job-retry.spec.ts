@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, InvalidInput, isFailure, UnexpectedFailure, ValidatorDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { jobDefaultOptions } from './job-options.ts';
@@ -42,6 +42,14 @@ describe('job retry bridge to BullMQ', () => {
   it('keeps the old default: 3 tries, 1 s then 2 s apart, through the custom strategy', () => {
     expect(jobDefaultOptions({})).toMatchObject({ attempts: 3, backoff: customJobBackoff });
     expect([1, 2].map(attempt => defaultJobRetry.delay(attempt, new Error('flaky')))).toEqual([1000, 2000]);
+  });
+
+  it('stops invalid input and validator defects bridged by schema execution', () => {
+    const strategy = workerBackoffStrategy(defaultJobRetry);
+    expect(strategy(1, 'custom', new UnexpectedFailure(InvalidInput({ issues: [{ message: 'bad args' }] })))).toBe(-1);
+    expect(strategy(1, 'custom', new UnexpectedFailure(ValidatorDefect({ cause: new Error('private defect') })))).toBe(
+      -1,
+    );
   });
 
   it('lets bullmqOptions override what retry sets', () => {

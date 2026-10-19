@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
 import { buildEngine, route, routes } from '@arki/http';
 import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
 
@@ -43,7 +44,9 @@ const engine = buildEngine([
   routes()
     .derive('webhook', verifyWebhook({ scheme }))
     .bind(orderPlaced, async ({ body }, { webhook }) => {
-      await journal.run(db, placeOrder, body, { actorId: 'partner' }, { idempotencyKey: `hook:${webhook.id}` });
+      orThrow(
+        await journal.run(db, placeOrder, body, { actorId: 'partner' }, { idempotencyKey: `hook:${webhook.id}` }),
+      );
     }),
 ]);
 

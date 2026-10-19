@@ -1,12 +1,13 @@
 # @arki/failure
 
-> Typed expected failures for TypeScript with no wrapper. A function returns `Value | Failure<...>`, the compiler infers the union, and every caller must check. It is not an effect system and not for bugs.
+> Typed failures for TypeScript with no wrapper. A function returns `Value | Failure<...>`, the compiler infers the union, and every caller must check. Owned boundaries return typed defects with private causes.
 
 ## Import paths
 <!-- llms:start -->
-- `@arki/failure`: @arki/failure: typed expected failures returned as plain values, with no wrapper. `FAILURE_ERROR_CODES`, `FailureError`, `UnexpectedFailure`, `assertNever`, `attempt`, `collect`, `defineFailure`, `findCause`, `isFailure`, `match`, `orThrow`, `partition`; and 17 more.
+- `@arki/failure`: typed failures returned as plain values, with no wrapper. `AsyncSchema`, `FAILURE_ERROR_CODES`, `FailureError`, `InvalidEnvelope`, `InvalidInput`, `REVIVAL_FAILURES`, `SCHEMA_FAILURES`, `UnexpectedDefect`, `UnexpectedFailure`, `ValidatorDefect`, `assertNever`, `attempt`; and 31 more.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules. `default`, `mustUse`, `noBlindAccept`.
 - `@arki/failure/orpc`: failures at an oRPC boundary. `errorMap`, `orThrowRpc`, `reviveRpcError`; types `DeclaredErrors`, `ErrorMapOf`.
+- `@arki/failure/schema`: Minimal Standard Schema execution shared by schema parsing and failure revival. `SCHEMA_FAILURES`, `isAsyncSchemaFailure`, `isSchemaFailure`, `parse`, `parseAsync`; types `AsyncSchemaFailure`, `SchemaFailure`.
 <!-- llms:end -->
 
 ## Start here
@@ -27,5 +28,5 @@
 - A discarded call drops its failure. Turn on `failure/must-use`.
 - Check with `isFailure` or `Def.is`. Truthiness does not narrow.
 - Misuse throws `FailureError`. Do not catch it; fix the call.
-- Failure data schemas must be synchronous and accept their own output.
+- Wire schemas must synchronously accept their lossless JSON output unchanged.
 - A returned failure does not roll back a transaction.

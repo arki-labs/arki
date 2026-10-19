@@ -9,6 +9,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { j, meta, openDb, orderId, orders, tables } from './test-support.js';
 
 const Tagged = j.event('Tagged', z.object({ items: z.array(z.string()) }));
@@ -107,7 +109,7 @@ describe('read-only events', () => {
   it('a projection that sorts a copy works and the next projection still sees the original order', async () => {
     const journal = j.compose({ projections: [sortsCopy, readsOrder] });
     seen.length = 0;
-    await write(journal, tagged, orderId(++next), ['b', 'a']);
+    orThrow(await write(journal, tagged, orderId(++next), ['b', 'a']));
     expect(seen).toEqual([
       ['a', 'b'],
       ['b', 'a'],
@@ -125,9 +127,9 @@ describe('read-only events', () => {
   it('the events returned by write and by replay are frozen all the way down', async () => {
     const journal = j.compose({});
     const id = orderId(++next);
-    const written = await write(journal, tagged, id, ['b', 'a']);
+    const written = orThrow(await write(journal, tagged, id, ['b', 'a']));
     for (const e of written.events) expectFrozen(e);
-    const replayed = await journal.replay(db, tagged, id);
+    const replayed = orThrow(await journal.replay(db, tagged, id));
     expect(replayed.events).toHaveLength(1);
     for (const e of replayed.events) expectFrozen(e);
   });
@@ -135,7 +137,7 @@ describe('read-only events', () => {
   it('an effect receives a frozen event; one that mutates it fails and the job is retried like any handler failure', async () => {
     const journal = j.compose({ effects: [watcher] });
     const id = orderId(++next);
-    const written = await write(journal, tagged, id, ['a']);
+    const written = orThrow(await write(journal, tagged, id, ['a']));
     const [job] = await db
       .select()
       .from(tables.jobs)

@@ -6,9 +6,9 @@
  */
 import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { isFailure } from '@arki/failure';
+import { isFailure, InvalidInput as SchemaInvalidInput } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import { parseAsync, pathOf, SchemaError } from '@arki/schema';
+import { parseAsync, pathOf } from '@arki/schema';
 
 import type { AnyCommand, AnyRunContext, Mode } from './command.js';
 import type { Envelope, EnvelopeContext } from './envelope.js';
@@ -182,12 +182,10 @@ async function validated(
   specs: readonly FlagSpec[],
 ): Promise<{ readonly value: unknown } | Failure> {
   if (command.input === undefined) return { value: {} };
-  try {
-    return { value: await parseAsync(command.input, raw) };
-  } catch (error) {
-    if (error instanceof SchemaError) return invalid(...issuesFromSchema(error.issues, specs));
-    throw error;
-  }
+  const result = await parseAsync(command.input, raw);
+  if (SchemaInvalidInput.is(result)) return invalid(...issuesFromSchema(result.data.issues, specs));
+  if (isFailure(result)) return result;
+  return { value: result };
 }
 
 /**

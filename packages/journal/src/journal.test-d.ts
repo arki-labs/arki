@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { Failure } from '@arki/failure';
+import type { Failure, SchemaFailure } from '@arki/failure';
 import { defineFailure, isFailure } from '@arki/failure';
 
 import type {
@@ -109,7 +109,7 @@ describe('accept, as types', () => {
   it('the check the developer writes drops the accepted code from the inferred result; nothing is restated', async () => {
     const _result = await journal.run(db, placeOrder, { qty: 1 }, meta);
     expectTypeOf<Extract<typeof _result, OutOfStock>>().toBeNever();
-    expectTypeOf<Extract<typeof _result, Failure>>().toEqualTypeOf<CommandInvalid>();
+    expectTypeOf<Extract<typeof _result, Failure>>().toEqualTypeOf<CommandInvalid | SchemaFailure>();
     expectTypeOf<Exclude<typeof _result, Failure>['status']>().toEqualTypeOf<'backordered' | 'reserved'>();
   });
 

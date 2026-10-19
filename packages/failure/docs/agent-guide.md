@@ -7,7 +7,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 1. A failure is a frozen object `{ code, message, data, status, remediation }` with a hidden brand. A function returns it like any other value.
 2. `defineFailure(code, options)` makes a definition. Calling the definition makes a failure.
 3. Success has no wrapper. The return type is `Value | Failure<...>`, inferred.
-4. The data schema is any Standard Schema, read through `@arki/schema`.
+4. The data schema is any Standard Schema; the foundation imports spec types directly and never depends on `@arki/schema`.
 5. Misuse of the package throws `FailureError`. That is a bug in the caller, not a failure.
 6. The core has no runtime built-ins. It runs in Node, Bun, Deno, browsers and Hermes.
 
@@ -72,7 +72,7 @@ export async function titleOrDraft(id: string) {
 
 1. In the contract, add `.errors(errorMap(Def))`.
 2. In the procedure, return `orThrowRpc(usecaseResult, errors)`.
-3. On the client, call `reviveRpcError(error, [Def])` in a `catch`, and rethrow when it returns `undefined`.
+3. On the client, call `reviveRpcError(error, [Def])` in a `catch`, rethrow unrelated errors (`undefined`), and handle the domain and canonical `REVIVAL_FAILURES` branches.
 
 ### Turn a throwing call into a failure
 
@@ -89,7 +89,7 @@ export async function titleOrDraft(id: string) {
 - A discarded call drops its failure. Turn on `failure/must-use`.
 - Truthiness does not narrow. `if (post)` and `post ?? fallback` keep the failure.
 - `unknown`, `any` and `object` swallow failures from a return type.
-- A data schema must accept its own output, or `revive` throws `ARKI_FAILURE_E006`.
+- Wire data must be lossless JSON, accepted unchanged by its schema. `revive` returns typed protocol failures for invalid envelopes.
 - A returned failure does not roll back a transaction. Throw inside it.
 - `401` means "not signed in" only. Use `422` when an upstream refuses us.
 
@@ -102,8 +102,8 @@ export async function titleOrDraft(id: string) {
 | `ARKI_FAILURE_E003` | `match` met a code it has no handler for.     | Add the handler; fix the cast that hid it.          |
 | `ARKI_FAILURE_E004` | `assertNever` was reached.                    | Handle the new case; validate data at the boundary. |
 | `ARKI_FAILURE_E005` | `errorMap` got two definitions with one code. | Give each definition its own code.                  |
-| `ARKI_FAILURE_E006` | `revive` data does not match the schema.      | Check stored data; avoid transforming schemas.      |
-| `ARKI_FAILURE_E007` | `revive` got an asynchronous schema.          | Use a synchronous schema for failure data.          |
+| `ARKI_FAILURE_E006` | Retired; use `InvalidEnvelope`.               | Check stored data; avoid transforming schemas.      |
+| `ARKI_FAILURE_E007` | Retired; use `AsyncSchema`.                   | Use a synchronous schema for failure data.          |
 
 ## Verify
 
@@ -112,3 +112,5 @@ bun run typecheck
 bun run test
 bun run test:docs
 ```
+
+See [typed validation migration](upgrade-typed-validation.md) for canonical failures, parsing and versioned JSON transport.

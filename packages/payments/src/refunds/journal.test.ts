@@ -19,9 +19,10 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import type { CommandConflict, CommandInvalid, CommandRunner } from '@arki/journal';
 import { fromDate } from '@arki/date';
-import { isFailure, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { CommandNotFound } from '@arki/journal';
 
 import type { PaymentId } from '../core/types.js';
@@ -398,11 +399,12 @@ describe('approveRefund and rejectRefund', () => {
     const refundId = await seed('pending');
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(
-      journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: '  ' }, meta),
+    const refused = await journal.run(
+      db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: '  ' }, meta,
     );
 
-    expect(error).toBeDefined();
+    expect(InvalidInput.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ data: { issues: [{ path: ['rejectionReason'] }] } });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await rowOf(refundId)).toMatchObject({ status: 'pending' });
   });
@@ -635,6 +637,11 @@ describe('writes(run): what RefundService calls', () => {
 });
 
 describe('types', () => {
+  it('exposes schema failures instead of promising a refund for invalid journal input', () => {
+    expectTypeOf<FailureOf<RefundWrites['requestRefund']>>().extract<SchemaFailure>().toEqualTypeOf<SchemaFailure>();
+  });
+
+
   it('takes the journal definitions of an app (its own transaction and database types) and the untyped form', () => {
     // Both journals are built in `test-support.ts`; `tsc` checks that the factory accepts each `j`.
     expectTypeOf(typed.refunds.writes).parameter(0).toEqualTypeOf<CommandRunner<{ actorId: string }, AppTx>>();

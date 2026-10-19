@@ -15,6 +15,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { actorRun } from './orpc.js';
 import { j, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
 
@@ -63,7 +65,7 @@ const eventsOf = (id: string) => db.select().from(tables.events).where(eq(tables
 describe('actorRun(select)', () => {
   it('writes as the actor the app selected: the event meta carries it', async () => {
     const id = orderId(++next);
-    await call(place, { id }, { context: { session: { user: { id: 'usr_ana' } }, journal, db } });
+    orThrow(await call(place, { id }, { context: { session: { user: { id: 'usr_ana' } }, journal, db } }));
     const [event] = await eventsOf(id);
     expect(event?.meta).toEqual({ actorId: 'usr_ana' });
   });

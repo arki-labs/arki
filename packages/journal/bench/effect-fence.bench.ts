@@ -10,6 +10,7 @@ import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import { compare, defineSuite } from '@arki/bench';
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -41,7 +42,7 @@ const fencedJournal = j.compose({ effects: [fenced] });
 // Reads `unfencedJournal` only when the effect runs, after `compose` has returned it.
 const unfenced = j.effect('unfenced', noteEntity, {
   NoteSent: async (event, ctx) => {
-    await unfencedJournal.run(ctx.db, touch, { id: event.entityId }, meta);
+    return unfencedJournal.run(ctx.db, touch, { id: event.entityId }, meta);
   },
 });
 const unfencedJournal = j.compose({ effects: [unfenced] });
@@ -53,8 +54,10 @@ let counter = 0;
 async function viaEffect(effectJournal: typeof fencedJournal, note: string): Promise<string> {
   const db = await environment();
   const id = `note_${++counter}`;
-  await db.transaction(tx => effectJournal.write(tx, noteEntity, id, { meta, events: () => [NoteOpened({ note })] }));
-  await db.transaction(tx => effectJournal.write(tx, noteEntity, id, { meta, events: () => [NoteSent({})] }));
+  orThrow(
+    await db.transaction(tx => effectJournal.write(tx, noteEntity, id, { meta, events: () => [NoteOpened({ note })] })),
+  );
+  orThrow(await db.transaction(tx => effectJournal.write(tx, noteEntity, id, { meta, events: () => [NoteSent({})] })));
   const ran = await effectJournal.drain(db);
   return JSON.stringify({ ran, note });
 }

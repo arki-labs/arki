@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
 import { backoff } from './index.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
@@ -69,11 +69,13 @@ async function payOnce(
   journal: typeof slowJournal | typeof pickyJournal | typeof chargeJournal | typeof patientJournal,
 ) {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  const paid = await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  const paid = orThrow(
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
   );
   const [job] = await db
     .select()

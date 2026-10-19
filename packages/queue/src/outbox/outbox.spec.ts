@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ScheduledJob } from '@arki/journal';
 import { z } from '@arki/contracts';
+import { InvalidInput, orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -124,7 +125,7 @@ describe('runAfter in a transaction', () => {
     // Why: the row must commit with the business write or not at all; that is the whole lesson.
     await expect(
       db.transaction(async tx => {
-        await schedule.runAfter(tx, welcome, { userId: 'u1' });
+        orThrow(await schedule.runAfter(tx, welcome, { userId: 'u1' }));
         tx.rollback();
       }),
     ).rejects.toThrow();
@@ -132,7 +133,7 @@ describe('runAfter in a transaction', () => {
     expect(await rows()).toEqual([]);
     expect(notifies).toEqual([]);
 
-    const scheduled = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u1' }));
+    const scheduled = orThrow(await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u1' })));
     await settle();
     expect(scheduled.deduplicated).toBe(false);
     expect(scheduled.id).toMatch(/^job_/);
@@ -144,10 +145,10 @@ describe('runAfter in a transaction', () => {
 
   it('a savepoint rollback removes only the row scheduled inside it', async () => {
     await db.transaction(async tx => {
-      await schedule.runAfter(tx, welcome, { userId: 'kept' });
+      orThrow(await schedule.runAfter(tx, welcome, { userId: 'kept' }));
       await tx
         .transaction(async savepoint => {
-          await schedule.runAfter(savepoint, welcome, { userId: 'dropped' });
+          orThrow(await schedule.runAfter(savepoint, welcome, { userId: 'dropped' }));
           savepoint.rollback();
         })
         .catch(() => 'rolled back');
@@ -165,8 +166,8 @@ describe('runAfter in a transaction', () => {
 
   it('two calls without a key are two rows; the same key is one row, in one transaction or across two', async () => {
     await db.transaction(async tx => {
-      await schedule.runAfter(tx, welcome, { userId: 'a' });
-      await schedule.runAfter(tx, welcome, { userId: 'a' });
+      orThrow(await schedule.runAfter(tx, welcome, { userId: 'a' }));
+      orThrow(await schedule.runAfter(tx, welcome, { userId: 'a' }));
     });
     expect(await rows()).toHaveLength(2);
     await db.delete(tables.jobs).where(sql`true`);
@@ -176,12 +177,12 @@ describe('runAfter in a transaction', () => {
       await schedule.runAfter(tx, welcome, { userId: 'a' }, { key: 'welcome:a' }),
     ]);
     const later = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'a' }, { key: 'welcome:a' }));
-    expect(first).toEqual({ id: first?.id, deduplicated: false });
-    expect(again).toEqual({ id: first?.id, deduplicated: true });
-    expect(later).toEqual({ id: first?.id, deduplicated: true });
+    expect(first).toEqual({ id: orThrow(first).id, deduplicated: false });
+    expect(again).toEqual({ id: orThrow(first).id, deduplicated: true });
+    expect(later).toEqual({ id: orThrow(first).id, deduplicated: true });
     expect(await rows()).toHaveLength(1);
     // The key is scoped per job name.
-    await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 1 }, { key: 'welcome:a' }));
+    orThrow(await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 1 }, { key: 'welcome:a' })));
     expect(await rows()).toHaveLength(2);
   });
 
@@ -192,24 +193,24 @@ describe('runAfter in a transaction', () => {
         schedule.runAfter(tx, welcome, { userId: 1 }),
       )
       .catch((error_: unknown) => error_);
-    expect(error).toMatchObject({ code: OUTBOX_ERROR_CODES.badArgs });
-    expect(isOutboxError(error) && error.cause).toBeInstanceOf(Error);
+    expect(InvalidInput.is(error)).toBe(true);
+    expect(InvalidInput.is(error) && error.data.issues.length > 0).toBe(true);
     expect(await rows()).toEqual([]);
   });
 
   it('refuses args that are not plain JSON, and measures the cap in UTF-8 bytes, not characters', async () => {
-    await expect(
-      db.transaction(tx => schedule.runAfter(tx, dated, { when: new Date() })),
-    ).rejects.toMatchObject({ code: OUTBOX_ERROR_CODES.notJson });
+    await expect(db.transaction(tx => schedule.runAfter(tx, dated, { when: new Date() }))).rejects.toMatchObject({
+      code: OUTBOX_ERROR_CODES.notJson,
+    });
     // 160 000 two-byte characters: under the cap in characters, over it in bytes.
-    await expect(
-      db.transaction(tx => schedule.runAfter(tx, anything, 'é'.repeat(160_000))),
-    ).rejects.toMatchObject({ code: OUTBOX_ERROR_CODES.notJson });
+    await expect(db.transaction(tx => schedule.runAfter(tx, anything, 'é'.repeat(160_000)))).rejects.toMatchObject({
+      code: OUTBOX_ERROR_CODES.notJson,
+    });
     expect(await rows()).toEqual([]);
   });
 
   it('stores JSON null as a value', async () => {
-    await db.transaction(tx => schedule.runAfter(tx, anything, null));
+    orThrow(await db.transaction(tx => schedule.runAfter(tx, anything, null)));
     expect(await rows()).toMatchObject([{ args: null }]);
   });
 
@@ -220,10 +221,13 @@ describe('runAfter in a transaction', () => {
       if (now === undefined) throw new Error('no now()');
       return [now, await schedule.runAfter(tx, welcome, { userId: 'later' }, { delayMs: 60_000 })] as const;
     });
-    const [row] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, scheduled.id));
+    const [row] = await db
+      .select()
+      .from(tables.jobs)
+      .where(eq(tables.jobs.id, orThrow(scheduled).id));
     expect(row?.availableAt.getTime()).toBe(new Date(txNow).getTime() + 60_000);
 
-    const past = await db.transaction(tx => schedule.runAt(tx, welcome, { userId: 'past' }, new Date(0)));
+    const past = orThrow(await db.transaction(tx => schedule.runAt(tx, welcome, { userId: 'past' }, new Date(0))));
     expect(await journal.drain(db, { jobs: runner })).toBe(1);
     expect(handled.map(job => job.jobId)).toEqual([past.id]);
 
@@ -238,7 +242,9 @@ describe('runAfter in a transaction', () => {
   it('maps queue priorities onto the journal scale: NORMAL ties with effects, CRITICAL runs first', async () => {
     const stored: Record<string, number> = {};
     for (const [label, priority] of Object.entries(QUEUE_PRIORITIES)) {
-      const { id } = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: label }, { priority }));
+      const { id } = orThrow(
+        await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: label }, { priority })),
+      );
       const [row] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, id));
       stored[label] = row?.priority ?? Number.NaN;
     }
@@ -250,9 +256,9 @@ describe('runAfter in a transaction', () => {
   });
 
   it('cancel deletes a pending row so it never runs; a leased row is not cancelled and finishes', async () => {
-    const pending = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'p' }));
+    const pending = orThrow(await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'p' })));
     expect(await db.transaction(tx => schedule.cancel(tx, pending.id))).toBe(true);
-    const leased = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'l' }));
+    const leased = orThrow(await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'l' })));
     await db.update(tables.jobs).set({ leaseToken: 'worker-a' }).where(eq(tables.jobs.id, leased.id));
     expect(await db.transaction(tx => schedule.cancel(tx, leased.id))).toBe(false);
     expect(await db.transaction(tx => schedule.cancel(tx, 'job_missing'))).toBe(false);
@@ -269,7 +275,7 @@ describe('outboxRunner on the journal worker', () => {
       listen: onMessage => client.listen(journal.wakeChannel, onMessage),
     });
     await worker.start();
-    const { id } = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u9' }));
+    const { id } = orThrow(await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u9' })));
     for (let i = 0; i < 100 && handled.length === 0; i++) await settle();
     await worker.stop();
     // With a 60 s poll, only the commit's NOTIFY can have woken the worker this fast.
@@ -279,7 +285,7 @@ describe('outboxRunner on the journal worker', () => {
 
   it('runs the middleware chain in the same order and context as BullMQ, and retries with the job’s own backoff', async () => {
     failures = 1;
-    await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 7 }));
+    orThrow(await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 7 })));
     expect(await journal.drain(db, { jobs: runner })).toBe(2);
     // The first try throws through the chain, so the outer middleware's `after` runs only on the second.
     expect(order).toEqual([
@@ -297,7 +303,7 @@ describe('outboxRunner on the journal worker', () => {
 
   it('a job that keeps failing goes dead after its backoff; journal.retry runs it again under the same id', async () => {
     failures = 5;
-    const { id } = await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 1 }));
+    const { id } = orThrow(await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 1 })));
     await journal.drain(db, { jobs: runner });
     const [dead] = await rows();
     expect(dead).toMatchObject({ id, attempts: 2 });
@@ -310,19 +316,21 @@ describe('outboxRunner on the journal worker', () => {
   });
 
   it('runs a transform once, at the worker: the row keeps the raw input', async () => {
-    await db.transaction(tx => schedule.runAfter(tx, shout, 'hi'));
+    orThrow(await db.transaction(tx => schedule.runAfter(tx, shout, 'hi')));
     expect(await rows()).toMatchObject([{ args: 'hi' }]);
     await journal.drain(db, { jobs: runner });
     expect(handled).toMatchObject([{ name: 'shout', data: 'hi!' }]);
   });
 
   it('stored args that fail the schema go dead at once, without calling the handler', async () => {
-    await db.insert(tables.jobs).values({ id: 'job_bad', kind: 'queue', jobName: 'mail.welcome.v1', args: { nope: 1 } });
+    await db
+      .insert(tables.jobs)
+      .values({ id: 'job_bad', kind: 'queue', jobName: 'mail.welcome.v1', args: { nope: 1 } });
     expect(await journal.drain(db, { jobs: runner })).toBe(1);
     const [row] = await rows();
     expect(row).toMatchObject({ attempts: 1 });
     expect(row?.deadAt).toBeInstanceOf(Date);
-    expect(row?.lastError).toContain('fail the job');
+    expect(row?.lastError).toContain(InvalidInput.code);
     expect(handled).toEqual([]);
   });
 });
@@ -346,7 +354,13 @@ describe('pieces', () => {
   });
 
   it('flattens a nested registry by persisted name and refuses two jobs with one name', () => {
-    expect([...jobsByName(registry).keys()].toSorted()).toEqual(['anything', 'dated', 'mail.welcome.v1', 'shout', 'wrapped']);
+    expect([...jobsByName(registry).keys()].toSorted()).toEqual([
+      'anything',
+      'dated',
+      'mail.welcome.v1',
+      'shout',
+      'wrapped',
+    ]);
     expect(runner.names).toHaveLength(5);
     const twin = q.job
       .name('mail.welcome.v1')

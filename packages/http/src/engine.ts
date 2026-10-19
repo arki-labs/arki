@@ -9,26 +9,20 @@
 
 import { Hono } from 'hono';
 
-import { isFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { formatIssues, SchemaError } from '@arki/schema';
+import { InvalidInput, isFailure } from '@arki/failure';
+import { formatIssues } from '@arki/schema';
 
 import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
-import { isReply } from './bundle.js';
 import type { ContractLike, ErasedInput } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
+import type { Field, Job, Ran, Where, Wire } from './wire.js';
+import { isReply } from './bundle.js';
 import { runWithRequestContext } from './context.js';
-import {
-  errorResponse,
-  HTTP_ERROR_CODES,
-  HttpConfigError,
-  HttpError,
-  toErrorResponse,
-} from './error.js';
+import { errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
 import { openApiPaths } from './path.js';
 import { isRawOutput } from './raw.js';
 import { sseResponse } from './sse.js';
-import type { Field, Job, Ran, Where, Wire } from './wire.js';
 import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs, runSchema } from './wire.js';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -191,9 +185,7 @@ function executeBinding(
   }
   return runWithRequestContext(base, () => {
     try {
-      const response = andThen(decodeInput(binding.contract, params, base), input =>
-        respond(binding, input, base),
-      );
+      const response = andThen(decodeInput(binding.contract, params, base), input => respond(binding, input, base));
       return response instanceof Promise ? response.catch(toErrorResponse) : response;
     } catch (error) {
       return toErrorResponse(error);
@@ -323,7 +315,11 @@ async function readJson(req: Request): Promise<unknown> {
 }
 
 /** One decode job per declared field. A missing optional field gets no job: it stays `undefined`. */
-function fieldJobs(where: Where, fields: Readonly<Record<string, Field>>, read: (key: string) => string | undefined): Job[] {
+function fieldJobs(
+  where: Where,
+  fields: Readonly<Record<string, Field>>,
+  read: (key: string) => string | undefined,
+): Job[] {
   const jobs: Job[] = [];
   for (const [key, field] of Object.entries(fields)) {
     const { wire, optional } = fieldParts(field);
@@ -385,7 +381,7 @@ function assemble(contract: ContractLike, params: Record<string, string>, runs: 
 function rejectIssues(issues: readonly StandardSchemaV1.Issue[]): void {
   if (issues.length === 0) return;
   throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `request validation failed: ${formatIssues(issues)}`, {
-    cause: new SchemaError(issues),
+    cause: InvalidInput({ issues }),
   });
 }
 
@@ -400,7 +396,7 @@ function encodeOutput(contract: ContractLike, wire: Wire, result: unknown): Mayb
       500,
       HTTP_ERROR_CODES.internal,
       `handler output for "${contract.id}" violates the contract's output schema: ${formatIssues(outcome.issues)}`,
-      { cause: new SchemaError(outcome.issues) },
+      { cause: InvalidInput({ issues: outcome.issues }) },
     );
   });
 }
@@ -416,7 +412,10 @@ function jsonResponse(value: unknown, status = 200, headers?: Readonly<Record<st
   if (text === undefined) throw new TypeError('Value is not JSON serializable');
   return new Response(text, {
     status,
-    headers: headers === undefined ? { 'content-type': 'application/json' } : { ...headers, 'content-type': 'application/json' },
+    headers:
+      headers === undefined
+        ? { 'content-type': 'application/json' }
+        : { ...headers, 'content-type': 'application/json' },
   });
 }
 

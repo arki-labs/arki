@@ -44,14 +44,14 @@ export const FAILURE_ERROR_CODES = {
    */
   duplicateCode: 'ARKI_FAILURE_E005',
   /**
-   * `revive` found a failure whose data does not match its definition's schema.
+   * @deprecated Retired: revival now returns InvalidEnvelope with reason invalid_data.
    *
    * @fix Check the stored data against the schema. A schema that transforms its input cannot read its own output.
    * @verify bun run test -- src/revive.test.ts
    */
   invalidData: 'ARKI_FAILURE_E006',
   /**
-   * `revive` got a schema that validates asynchronously, and `revive` is synchronous.
+   * @deprecated Retired: revival now returns AsyncSchema.
    *
    * @fix Use a schema that validates synchronously for failure data.
    * @verify bun run test -- src/revive.test.ts

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { InvalidInput } from '@arki/failure';
+
 import type { StandardSchemaV1 } from './types.js';
 import { SCHEMA_ERROR_CODES, SchemaRunError } from './errors.js';
 import { hasJsonSchema, isStandardSchema, withJsonSchema } from './guards.js';
@@ -42,7 +44,10 @@ describe('withJsonSchema', () => {
 
   it('keeps validation working on the original object, so `this` and getters still resolve', () => {
     expect(parse(wrapped, 'abc')).toBe('abc');
-    expect(() => parse(wrapped, 'a')).toThrow('at least 2 characters');
+    expect(parse(wrapped, 'a')).toMatchObject({
+      code: InvalidInput.code,
+      data: { issues: [{ message: 'at least 2 characters' }] },
+    });
   });
 
   it('copies vendor and version, and answers draft-2020-12 with the given JSON Schema', () => {

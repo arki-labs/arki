@@ -1,12 +1,13 @@
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { generateText, Output } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { type } from 'arktype';
-import { describe, expect, it } from 'vitest';
 import * as v from 'valibot';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { hasJsonSchema, SchemaError, withJsonSchema } from '@arki/schema';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { InvalidInput, UnexpectedFailure } from '@arki/failure';
+import { hasJsonSchema, withJsonSchema } from '@arki/schema';
 
 import { ConfigurationError } from '../errors';
 import { modelSchema } from './model-schema';
@@ -27,7 +28,15 @@ const handWritten = withJsonSchema<{ n: string }, { n: number }>(
   lengthJson,
 );
 const zodSchema = z.object({ n: z.string().transform(s => s.length) });
-const valibotSchema = withJsonSchema(v.object({ n: v.pipe(v.string(), v.transform(s => s.length)) }), lengthJson);
+const valibotSchema = withJsonSchema(
+  v.object({
+    n: v.pipe(
+      v.string(),
+      v.transform(s => s.length),
+    ),
+  }),
+  lengthJson,
+);
 const arkSchema = type({ n: 'string' }).pipe(({ n }) => ({ n: n.length }));
 
 const finish = { unified: 'stop', raw: 'stop' } as const;
@@ -72,14 +81,15 @@ describe('modelSchema: the model writes the INPUT shape, the caller gets the OUT
     expect(out.n).toBe(2);
   });
 
-  it('reports bad model output as a SchemaError with the issue path', async () => {
+  it('reports bad model output with canonical input issues and the issue path', async () => {
     // WHY: the app needs `issues` to retry or show what the model got wrong.
     const failure = await generate(handWritten, '{"n":5}').catch((error: unknown) => error);
     // The SDK wraps our error (NoObjectGeneratedError > TypeValidationError); walk down to it.
     let found: unknown = failure;
-    while (found instanceof Error && !(found instanceof SchemaError)) found = found.cause;
-    const issues = found instanceof SchemaError ? found.issues : [];
-    expect(issues.map(issue => issue.path)).toEqual([[{ key: 'n' }]]);
+    while (found instanceof Error && !(found instanceof UnexpectedFailure)) found = found.cause;
+    const issues =
+      found instanceof UnexpectedFailure && InvalidInput.is(found.failure) ? found.failure.data.issues : [];
+    expect(issues.map(issue => issue.path)).toEqual([['n']]);
   });
 });
 

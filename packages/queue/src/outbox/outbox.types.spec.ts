@@ -6,8 +6,10 @@ import type { Job as BullMQJob } from 'bullmq';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { AsyncSchemaFailure } from '@arki/failure';
 import type { JobRunner } from '@arki/journal';
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { journalTables } from '@arki/journal/pg';
 
 import type { FlowDefinition } from '../types/builder.ts';
@@ -29,25 +31,29 @@ declare const flow: FlowDefinition;
 const compileOnly = async (db: PgliteDatabase) => {
   await db.transaction(async tx => {
     // args is the job's input
-    expectTypeOf(schedule.runAfter(tx, welcome, { userId: 'u1' })).resolves.toEqualTypeOf<Scheduled>();
-    await schedule.runAfter(tx, welcome, { userId: 'u1', locale: 'ro' }, { delayMs: 1000, key: 'k', priority: 1 });
-    await schedule.runAt(tx, welcome, { userId: 'u1' }, new Date(), { key: 'k' });
+    expectTypeOf(schedule.runAfter(tx, welcome, { userId: 'u1' })).resolves.toEqualTypeOf<
+      Scheduled | AsyncSchemaFailure
+    >();
+    orThrow(
+      await schedule.runAfter(tx, welcome, { userId: 'u1', locale: 'ro' }, { delayMs: 1000, key: 'k', priority: 1 }),
+    );
+    orThrow(await schedule.runAt(tx, welcome, { userId: 'u1' }, new Date(), { key: 'k' }));
     // @ts-expect-error -- a wrong field
-    await schedule.runAfter(tx, welcome, { user: 'u1' });
+    orThrow(await schedule.runAfter(tx, welcome, { user: 'u1' }));
     // @ts-expect-error -- a missing field
-    await schedule.runAfter(tx, welcome, {});
+    orThrow(await schedule.runAfter(tx, welcome, {}));
     // @ts-expect-error -- priority is a QueuePriority, not any number
-    await schedule.runAfter(tx, welcome, { userId: 'u1' }, { priority: 2 });
+    orThrow(await schedule.runAfter(tx, welcome, { userId: 'u1' }, { priority: 2 }));
     // @ts-expect-error -- runAt takes no delayMs
-    await schedule.runAt(tx, welcome, { userId: 'u1' }, new Date(), { delayMs: 5 });
+    orThrow(await schedule.runAt(tx, welcome, { userId: 'u1' }, new Date(), { delayMs: 5 }));
     // @ts-expect-error -- a flow is not a job: flows stay on the Redis lane
-    await schedule.runAfter(tx, flow, {});
+    orThrow(await schedule.runAfter(tx, flow, {}));
     // A savepoint fits too
-    await tx.transaction(savepoint => schedule.runAfter(savepoint, welcome, { userId: 'u1' }));
+    orThrow(await tx.transaction(savepoint => schedule.runAfter(savepoint, welcome, { userId: 'u1' })));
     await schedule.cancel(tx, 'job_1');
   });
   // @ts-expect-error -- a root database gives no atomicity, so it is refused
-  await schedule.runAfter(db, welcome, { userId: 'u1' });
+  orThrow(await schedule.runAfter(db, welcome, { userId: 'u1' }));
 };
 
 describe('outbox types', () => {

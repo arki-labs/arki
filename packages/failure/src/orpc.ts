@@ -18,14 +18,13 @@
  * // the frontend: the caught ORPCError back as the failure, ready for match()
  * const failure = reviveRpcError(error, [PostNotFound]);
  */
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { ORPCError } from '@orpc/client';
-
-import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { Failure } from './failure.js';
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 import { isFailure, isThenable } from './failure.js';
-import { revive } from './revive.js';
+import { revive, wireSchema } from './revive.js';
 
 /** The parts of a `FailureDefinition` an error map needs. */
 type DefinitionShape = {
@@ -37,7 +36,13 @@ type DefinitionShape = {
 /** The oRPC error map for a list of definitions: one entry per code, with its status and data schema. */
 export type ErrorMapOf<Definitions extends readonly DefinitionShape[]> = {
   readonly [Definition in Definitions[number] as Definition['code']]: Definition['dataSchema'] extends StandardSchemaV1
-    ? { readonly status: number; readonly data: Definition['dataSchema'] }
+    ? {
+        readonly status: number;
+        readonly data: StandardSchemaV1<
+          StandardSchemaV1.InferOutput<Definition['dataSchema']>,
+          StandardSchemaV1.InferOutput<Definition['dataSchema']>
+        >;
+      }
     : { readonly status: number };
 };
 
@@ -60,7 +65,7 @@ export function errorMap(...definitions: readonly DefinitionShape[]): unknown {
       );
     }
     seen.add(code);
-    entries.push([code, dataSchema === undefined ? { status } : { status, data: dataSchema }]);
+    entries.push([code, dataSchema === undefined ? { status } : { status, data: wireSchema(dataSchema) }]);
   }
   return Object.fromEntries(entries);
 }
@@ -128,14 +133,13 @@ function orThrowRpcNow(value: unknown, errors: LooseErrors, success: readonly []
 type RevivableDefinition = {
   readonly code: string;
   readonly dataSchema: StandardSchemaV1 | undefined;
-  (...args: never[]): unknown;
+  (...args: never[]): Failure;
 };
 
 /**
  * The live failure a caught `ORPCError` stands for, when its code is one of
  * `definitions`; `undefined` for any other error. Data is checked with the
- * definition's schema like `revive`, so data that does not match throws
- * `ARKI_FAILURE_E006`. Use it on the client to `match` on failures the
+ * definition's schema like `revive`, returning a typed protocol failure when it is malformed. Use it on the client to `match` on failures the
  * contract declares.
  *
  * @example
@@ -149,7 +153,7 @@ type RevivableDefinition = {
 export function reviveRpcError<const Definitions extends readonly RevivableDefinition[]>(
   error: unknown,
   definitions: Definitions,
-): ReturnType<Definitions[number]> | undefined {
-  if (!(error instanceof ORPCError)) return undefined;
+) {
+  if (!(error instanceof ORPCError)) return;
   return revive(error, definitions);
 }

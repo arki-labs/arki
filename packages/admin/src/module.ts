@@ -41,9 +41,9 @@
  * ```
  */
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-
 import { z } from '@arki/contracts';
-import { formatIssues, hasJsonSchema, parseAsync, SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { formatIssues, hasJsonSchema, parseAsync } from '@arki/schema';
 
 import type { JsonObject } from './json';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
@@ -170,7 +170,12 @@ export type AnyRead<TCtx> = ReadBase & {
 // ---------------------------------------------------------------------------
 
 /** What a module author writes for an action. */
-export type ActionDef<TIn extends StandardSchemaV1, TPreview extends StandardSchemaV1<unknown, Revisioned>, TOut extends StandardSchemaV1, TCtx> = {
+export type ActionDef<
+  TIn extends StandardSchemaV1,
+  TPreview extends StandardSchemaV1<unknown, Revisioned>,
+  TOut extends StandardSchemaV1,
+  TCtx,
+> = {
   /** Globally unique, e.g. `queue.retryJob`. */
   readonly id: string;
   readonly summary: string;
@@ -665,17 +670,14 @@ async function parseInput<TSchema extends StandardSchemaV1>(
   value: unknown,
   ownerId: string,
 ): Promise<SchemaOutput<TSchema>> {
-  try {
-    return await parseAsync<SchemaOutput<TSchema>>(schema, value);
-  } catch (error) {
-    if (!(error instanceof SchemaError)) throw error;
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidInput,
-      `Input for "${ownerId}" does not match its schema:\n${formatIssues(error.issues)}`,
-      'Send input that matches the published input JSON Schema.',
-      { cause: error },
-    );
-  }
+  const error = await parseAsync<SchemaOutput<TSchema>>(schema, value);
+  if (!InvalidInput.is(error)) return orThrow(error);
+  throw new AdminError(
+    ADMIN_ERROR_CODES.invalidInput,
+    `Input for "${ownerId}" does not match its schema:\n${formatIssues(error.data.issues)}`,
+    'Send input that matches the published input JSON Schema.',
+    { cause: error },
+  );
 }
 
 async function parseOutput<TSchema extends StandardSchemaV1>(
@@ -684,17 +686,14 @@ async function parseOutput<TSchema extends StandardSchemaV1>(
   ownerId: string,
   step: string,
 ): Promise<SchemaOutput<TSchema>> {
-  try {
-    return await parseAsync<SchemaOutput<TSchema>>(schema, value);
-  } catch (error) {
-    if (!(error instanceof SchemaError)) throw error;
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidOutput,
-      `"${ownerId}" ${step} returned data that does not match its schema:\n${formatIssues(error.issues)}`,
-      `Fix the ${step} implementation of "${ownerId}" so it returns what its schema declares.`,
-      { cause: error },
-    );
-  }
+  const error = await parseAsync<SchemaOutput<TSchema>>(schema, value);
+  if (!InvalidInput.is(error)) return orThrow(error);
+  throw new AdminError(
+    ADMIN_ERROR_CODES.invalidOutput,
+    `"${ownerId}" ${step} returned data that does not match its schema:\n${formatIssues(error.data.issues)}`,
+    `Fix the ${step} implementation of "${ownerId}" so it returns what its schema declares.`,
+    { cause: error },
+  );
 }
 
 export { redactSecrets } from './redact.ts';

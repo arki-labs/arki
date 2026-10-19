@@ -20,6 +20,7 @@ import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import { initJournal } from './journal.js';
 import { journalTables } from './pg.js';
@@ -72,7 +73,7 @@ const open = ({ repos }: Deps) => {
     z.object({ id: z.templateLiteral(['acc_', z.string()]), balance: z.int().nonnegative(), fail: z.boolean() }),
     async (input, { write, tx }) => {
       expectTypeOf(tx).toEqualTypeOf<Transaction>();
-      await write(account, input.id, () => [Opened({ balance: input.balance })]);
+      orThrow(await write(account, input.id, () => [Opened({ balance: input.balance })]));
       const seen = await repos.withTx(tx).accounts.balance(input.id);
       if (input.fail) throw new Error('rolled back after the read');
       return seen;

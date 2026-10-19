@@ -1,11 +1,11 @@
 import { inspect } from 'node:util';
-import { describe, expect, expectTypeOf, it } from 'vitest';
 import { type } from 'arktype';
 import * as v from 'valibot';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { SCHEMA_ERROR_CODES } from '@arki/schema';
+import { AsyncSchema } from '@arki/failure';
 
 import type { Redacted } from './secret.js';
 import { defineEnv } from './define-env.js';
@@ -111,9 +111,8 @@ describe('secret', () => {
         '~standard': { version: 1, vendor: 'async', validate: value => Promise.resolve({ value: String(value) }) },
       };
       const read = (schema: StandardSchemaV1) => () =>
-        defineEnv({ server: { TOKEN: schema }, runtimeEnv: { TOKEN: KEY }, options: { skipValidation: false } })
-          .TOKEN;
-      const asyncResult = expect.objectContaining({ code: SCHEMA_ERROR_CODES.asyncResult });
+        defineEnv({ server: { TOKEN: schema }, runtimeEnv: { TOKEN: KEY }, options: { skipValidation: false } }).TOKEN;
+      const asyncResult = expect.objectContaining({ code: AsyncSchema.code });
       expect(read(asyncSchema)).toThrow(asyncResult);
       expect(read(secret(asyncSchema))).toThrow(asyncResult);
     });

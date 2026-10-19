@@ -4,6 +4,8 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { OrderId } from './test-support.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
@@ -34,11 +36,13 @@ afterAll(async () => {
 
 const placeAndPay = async () => {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  const paid = await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  const paid = orThrow(
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
   );
   const seq = paid.events[0]?.seq ?? -1;
   const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.eventSeq, seq));
@@ -144,8 +148,8 @@ describe('drain', () => {
 
     // Lease of one second, renewed every 500 ms; the effect takes 1.3 s and finishes once.
     const first = orderId(++next);
-    await place(first);
-    await pay(first);
+    orThrow(await place(first));
+    orThrow(await pay(first));
     const draining = slowJournal.drain(db, { leaseSeconds: 1 });
     await new Promise(resolve => setTimeout(resolve, 700));
     const midway = await leaseOf('slow-mail');
@@ -158,8 +162,8 @@ describe('drain', () => {
 
     // Another worker took the job (the token changed): the next renewal aborts the effect.
     const second = orderId(++next);
-    await place(second);
-    await pay(second);
+    orThrow(await place(second));
+    orThrow(await pay(second));
     const draining2 = slowJournal.drain(db, { leaseSeconds: 1 });
     await new Promise(resolve => setTimeout(resolve, 200));
     await db.update(tables.jobs).set({ leaseToken: 'other-worker' }).where(eq(tables.jobs.effect, 'slow-mail'));
@@ -202,10 +206,14 @@ describe('drain', () => {
       .withSchedule({ runAt: e => new Date(e.recordedAt.getTime() + 1000) });
     const scheduled = j.compose({ effects: [lazy, urgent, later, at] });
     const id = orderId(++next);
-    await db.transaction(tx =>
-      scheduled.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        scheduled.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
-    await db.transaction(tx => scheduled.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    orThrow(
+      await db.transaction(tx => scheduled.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+    );
     const rows = await db
       .select()
       .from(tables.jobs)
@@ -232,22 +240,30 @@ describe('drain', () => {
   it('when: an event it refuses makes no job row, so a worker never claims a job that has nothing to do', async () => {
     // Why: a job per event is the default. An effect that acts on only some events (a timer with no wake time)
     // must not leave a row for the rest, or it has to delete them afterwards.
-    const big = j.effect('big-orders', order, {
-      OrderPaid: () => {
-        // The effect does nothing: only its schedule is under test.
-      },
-    }).withSchedule({
-      when: e => typeof e.data === 'object' && e.data !== null && 'amount' in e.data && Number(e.data.amount) >= 100,
-    });
+    const big = j
+      .effect('big-orders', order, {
+        OrderPaid: () => {
+          // The effect does nothing: only its schedule is under test.
+        },
+      })
+      .withSchedule({
+        when: e => typeof e.data === 'object' && e.data !== null && 'amount' in e.data && Number(e.data.amount) >= 100,
+      });
     const filtered = j.compose({ effects: [big] });
     const id = orderId(++next);
-    await db.transaction(tx =>
-      filtered.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        filtered.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
     const jobsOf = () => db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'big-orders'));
-    await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    orThrow(
+      await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+    );
     expect(await jobsOf()).toEqual([]);
-    await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 500 })] }));
+    orThrow(
+      await db.transaction(tx => filtered.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 500 })] })),
+    );
     expect(await jobsOf()).toHaveLength(1);
     await db.delete(tables.jobs).where(eq(tables.jobs.effect, 'big-orders'));
   });
@@ -369,10 +385,14 @@ describe('effect context', () => {
     // Its own journal: a job names its effect, so the tests above never see this one.
     const auditJournal = j.compose({ effects: [audit] });
     const id = orderId(++next);
-    await db.transaction(tx =>
-      auditJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        auditJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
-    await db.transaction(tx => auditJournal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    orThrow(
+      await db.transaction(tx => auditJournal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+    );
     expect(await auditJournal.drain(db)).toBe(1);
     expect(seen.db).toBe(db);
     expect(seen.status).toBe('paid');
@@ -385,7 +405,7 @@ describe('effect context: run', () => {
     'payOrder',
     z.object({ id: z.templateLiteral(['ord_', z.string()]), fail: z.boolean().default(false) }),
     async (input, { write }) => {
-      await write(order, input.id, () => [OrderPaid({ amount: 1 })]);
+      orThrow(await write(order, input.id, () => [OrderPaid({ amount: 1 })]));
       if (input.fail) throw new Error('refused after the write');
     },
   );
@@ -393,8 +413,10 @@ describe('effect context: run', () => {
   /** Places an order in a transaction of the test: a job is queued and no worker is woken. */
   const place = async (on: ReturnType<typeof j.compose>) => {
     const id = orderId(++next);
-    await db.transaction(tx =>
-      on.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        on.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
     return id;
   };
@@ -509,7 +531,7 @@ describe('effect context: run', () => {
       effects: [
         j.effect('run-pay-then-fail', order, {
           OrderPlaced: async (e, { run }) => {
-            await run(payOrder, { id: e.entityId }, system);
+            orThrow(await run(payOrder, { id: e.entityId }, system));
             throw new Error('mail down after the payment');
           },
         }),
@@ -526,8 +548,10 @@ describe('effect context: run', () => {
 
 const placeOn = async (target: typeof journal) => {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    target.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      target.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
 };
 const jobsOf = (effect: string) => db.select().from(tables.jobs).where(eq(tables.jobs.effect, effect));

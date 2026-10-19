@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { ValidatorDefect } from '@arki/failure';
 import { MailRejected } from '@arki/mail';
 
 import { PASSWORD, post } from '../__fixtures__/http.js';
@@ -11,8 +12,23 @@ import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES } from '../errors.js';
 import { testAuth } from '../testing/index.js';
+import { authMail } from './mail.js';
 
 describe('auth mail failures', () => {
+  it('throws validator defects at the auth callback instead of treating them as delivery refusals', async () => {
+    const failure = ValidatorDefect({ cause: new Error('validator crashed') });
+    const mail = authMail({
+      mail: { send: () => Promise.resolve(failure) },
+      templates: undefined,
+      appName: 'Notes',
+      brand: undefined,
+    });
+
+    await expect(mail.send('magicLink', 'ada@notes.test', 'https://notes.test/link')).rejects.toMatchObject({
+      code: failure.code,
+    });
+  });
+
   it('a failed magic-link mail answers E006 with a generic message', async () => {
     const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['magicLink'] });
     const { auth, mail, dispose } = await testAuth(definition, { tables: authTables });

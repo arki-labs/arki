@@ -22,9 +22,8 @@ import { isFailure } from '@arki/failure';
 import { jobId } from '@arki/journal';
 import { backoff } from '@arki/resilience';
 
-import type { MailInvalidInput } from '../failures.js';
 import type { Mailer } from '../mailer.js';
-import type { MailTemplate } from '../template.js';
+import type { MailTemplate, renderTemplate } from '../template.js';
 import type { SendOptions } from '../types.js';
 import type { QueuedArgs } from './args.js';
 import { isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
@@ -68,7 +67,7 @@ export type MailOutbox = {
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     options: EnqueueOptions,
-  ): Promise<{ readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof MailInvalidInput>>;
+  ): Promise<{ readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof renderTemplate>>;
   /** Runs queued mail: pass it to `journal.worker(db, { jobs })`, or combine it with `combineRunners`. */
   readonly runner: JobRunner;
 };

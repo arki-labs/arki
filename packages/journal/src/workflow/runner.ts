@@ -13,9 +13,18 @@
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
+import type { AsyncSchemaFailure, SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { defineFailure, isFailure } from '@arki/failure';
-import { parseAsync, SchemaError } from '@arki/schema';
+import {
+  defineFailure,
+  InvalidInput,
+  isAsyncSchemaFailure,
+  isFailure,
+  isSchemaFailure,
+  orThrow,
+  ValidatorDefect,
+} from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
 import type { JournalTables } from '../pg.js';
@@ -143,16 +152,16 @@ export type WorkflowStarter<
   Input extends StandardSchemaV1,
   Signals extends AnySignals,
 > = {
-  readonly start: Command<StartSchema<Input>, Promise<StartOutcome>, SchemaOutput<Meta>, Tx>;
+  readonly start: Command<StartSchema<Input>, Promise<StartOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
   /**
    * The command that delivers the signal `name` to a run. `name` is one of the signals the workflow's `waitFor`
    * nodes declare, and `payload` is the input of that signal's schema.
    */
   readonly signal: <Name extends keyof Signals & string>(
     name: Name,
-  ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome>, SchemaOutput<Meta>, Tx>;
+  ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
   /** The command that cancels a run: it stops, undoes its completed steps newest first, and ends `cancelled`. */
-  readonly cancel: Command<CancelSchema, Promise<CancelOutcome>, SchemaOutput<Meta>, Tx>;
+  readonly cancel: Command<CancelSchema, Promise<CancelOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
 };
 /** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
@@ -175,15 +184,13 @@ function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<
         if (id !== undefined && (typeof id !== 'string' || id === '')) {
           return { issues: [{ message: 'id must be a non-empty string', path: ['id'] }] };
         }
-        try {
-          const parsed = await parseAsync<SchemaOutput<Input>>(input, value.input);
-          return { value: id === undefined ? { input: parsed } : { input: parsed, id } };
-        } catch (error) {
-          if (error instanceof SchemaError) {
-            return { issues: error.issues.map(issue => ({ ...issue, path: ['input', ...(issue.path ?? [])] })) };
-          }
-          throw error;
+        const parsed = await parseAsync<SchemaOutput<Input>>(input, value.input);
+        if (InvalidInput.is(parsed)) {
+          return { issues: parsed.data.issues.map(issue => ({ ...issue, path: ['input', ...(issue.path ?? [])] })) };
         }
+        // Standard Schema's validate callback is an exception-based foreign contract.
+        if (ValidatorDefect.is(parsed)) orThrow(parsed);
+        return { value: id === undefined ? { input: parsed } : { input: parsed, id } };
       },
     },
   };
@@ -573,7 +580,7 @@ export function createWorkflows<
     row: Row,
     lastPath: string,
     lastResult: unknown,
-  ): Promise<Route> {
+  ): Promise<Route | AsyncSchemaFailure> {
     const target = def.nodes[targetIndex];
     if (target !== undefined) return { go: 'node', name: target.name };
     const results = { ...row.results, [lastPath]: lastResult };
@@ -588,6 +595,7 @@ export function createWorkflows<
       );
     }
     const parsed = def.output === undefined ? produced : await parseAsync(def.output, produced);
+    if (InvalidInput.is(parsed) || ValidatorDefect.is(parsed)) return parsed;
     const kept = storable(parsed, def.limits.payload, 'the output', row.id);
     if (kept instanceof JournalError) throw kept;
     return { go: 'finish', output: kept.value, keepUntil: keepUntilFor(def, 'completed') };
@@ -841,7 +849,9 @@ export function createWorkflows<
     const path = def.nodes[index]?.name ?? '';
     let route: Route;
     try {
-      route = await routeAt(def, index + 1, row, path, result);
+      const routed = await routeAt(def, index + 1, row, path, result);
+      if (isFailure(routed)) return failWait(tx, def, row, path, reasonText(routed), at);
+      route = routed;
     } catch (error) {
       // No step is left to retry: a finish or output that fails now would fail again.
       return failWait(tx, def, row, path, reasonText(error), at);
@@ -876,6 +886,7 @@ export function createWorkflows<
     }
     // The door checked this payload with the signal's one schema, so it parses here too.
     const parsed = await parseAsync(node.schema, payload);
+    if (isFailure(parsed)) return failWait(tx, def, row, node.name, reasonText(parsed), at);
     const stored = storable(parsed, def.limits.payload, `the payload of '${node.name}'`, row.id);
     if (stored instanceof JournalError) {
       return failWait(tx, def, row, node.name, `waitFor '${node.name}': ${reasonText(stored)}`, at);
@@ -1026,7 +1037,9 @@ export function createWorkflows<
       const checked: unknown[] = [];
       for (const id of ids) {
         const raw = outputOf.get(id);
-        checked.push(childDef?.output === undefined ? raw : await parseAsync(childDef.output, raw));
+        const parsed = childDef?.output === undefined ? raw : await parseAsync(childDef.output, raw);
+        if (isFailure(parsed)) return deadNode(tx, def, parent, plan.path, reasonText(parsed), at);
+        checked.push(parsed);
       }
       const kept = storable(list ? checked : checked[0], def.limits.payload, `the result of '${plan.path}'`, parent.id);
       if (kept instanceof JournalError) return deadNode(tx, def, parent, plan.path, reasonText(kept), at);
@@ -1120,7 +1133,12 @@ export function createWorkflows<
   };
 
   /** Moves a child run into compensation: a live one is cancelled, a completed one is reopened to undo its own work. */
-  const compensateChild = async (ctx: RunCtx, childId: string, reason: string, reopen: boolean) => {
+  const compensateChild = async (
+    ctx: RunCtx,
+    childId: string,
+    reason: string,
+    reopen: boolean,
+  ): Promise<void | SchemaFailure> => {
     const before = { parked: false };
     const written = await ctx.write(run, childId, async (row, inside) => {
       if (row === null) return [];
@@ -1137,8 +1155,8 @@ export function createWorkflows<
         { closed: false, cause: null, cancelling: true },
       );
     });
-    if (isFailure(written)) throw new Error(`journal: a child run could not be stopped: ${JSON.stringify(written)}`);
-    await settle(ctx, childId, written, before.parked);
+    if (isFailure(written)) return written;
+    return settle(ctx, childId, written, before.parked);
   };
 
   /**
@@ -1146,13 +1164,16 @@ export function createWorkflows<
    * step is in flight, the newest node to undo may be a child node: its completed children are reopened to undo
    * themselves. Both read the database, so a repeat finds the work done and does nothing.
    */
-  const driveChildren = async (ctx: RunCtx, row: Row) => {
+  const driveChildren = async (ctx: RunCtx, row: Row): Promise<void | SchemaFailure> => {
     const kids = await kidsOf(ctx.tx, row.id);
     if (kids.length === 0) return;
     const def = definitionOf(row);
     const waitedFor = kids.filter(kid => kid.finishedAt === null && !isDetached(nodeOfBase(def, kid.parentPath ?? '')));
     const live = waitedFor.filter(kid => kid.state === 'running' || kid.state === 'parked');
-    for (const kid of live) await compensateChild(ctx, kid.id, `its parent run ${row.id} is stopping`, false);
+    for (const kid of live) {
+      const moved = await compensateChild(ctx, kid.id, `its parent run ${row.id} is stopping`, false);
+      if (isFailure(moved)) return moved;
+    }
     if (waitedFor.length > 0 || (await hasScheduledStep(ctx.tx, row.id))) return;
     const settled = await ctx.tx
       .select({ type: tables.events.type, data: tables.events.data })
@@ -1165,25 +1186,36 @@ export function createWorkflows<
     if (node.kind === 'child' && node.undo) return;
     const base = childBase(top.path, top.visit);
     for (const kid of kids.filter(candidate => candidate.parentPath === base && candidate.state === 'completed')) {
-      await compensateChild(ctx, kid.id, `its parent run ${row.id} is undoing it`, true);
+      const moved = await compensateChild(ctx, kid.id, `its parent run ${row.id} is undoing it`, true);
+      if (isFailure(moved)) return moved;
     }
+    return;
   };
 
   /** After a write to a run: its jobs and timers, the children a compensating run must move, and the parent an ended run wakes. */
-  async function settle(ctx: RunCtx, runId: string, written: Written, wasParked: boolean) {
+  async function settle(
+    ctx: RunCtx,
+    runId: string,
+    written: Written,
+    wasParked: boolean,
+  ): Promise<void | SchemaFailure> {
     await queueJobs(ctx.tx, runId, written.events);
     const ended = endedBy(written.events);
     await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
     const { row } = written;
     if (row === null || written.events.length === 0) return;
-    if (row.state === 'compensating') await driveChildren(ctx, row);
-    if (row.parentId !== null && row.parentPath !== null && written.events.some(event => ENDS.has(event.type))) {
-      await wakeParent(ctx, row.parentId, row.parentPath);
+    if (row.state === 'compensating') {
+      const moved = await driveChildren(ctx, row);
+      if (isFailure(moved)) return moved;
     }
+    if (row.parentId !== null && row.parentPath !== null && written.events.some(event => ENDS.has(event.type))) {
+      return wakeParent(ctx, row.parentId, row.parentPath);
+    }
+    return;
   }
 
   /** The parent of an ended child looks at its node again, in the same transaction as the child's end. */
-  async function wakeParent(ctx: RunCtx, parentId: string, base: string) {
+  async function wakeParent(ctx: RunCtx, parentId: string, base: string): Promise<void | SchemaFailure> {
     const before = { parked: false };
     const moves: Moves = { starts: undefined, stops: [] };
     const written = await ctx.write(run, parentId, async (parent, inside) => {
@@ -1191,25 +1223,37 @@ export function createWorkflows<
       before.parked = parent.state === 'parked';
       return onChildEnded(inside.tx, parent, base, nowIso(), moves);
     });
-    if (isFailure(written))
-      throw new Error(`journal: a parent run refused its child's end: ${JSON.stringify(written)}`);
-    await settle(ctx, parentId, written, before.parked);
+    if (isFailure(written)) return written;
+    const settled = await settle(ctx, parentId, written, before.parked);
+    if (isFailure(settled)) return settled;
     for (const id of moves.stops) {
-      await compensateChild(ctx, id, `the join of its parent run ${parentId} was won by another child`, false);
+      const moved = await compensateChild(
+        ctx,
+        id,
+        `the join of its parent run ${parentId} was won by another child`,
+        false,
+      );
+      if (isFailure(moved)) return moved;
     }
-    if (moves.starts !== undefined) await startChildren(ctx, parentId, moves.starts.plan, moves.starts.children);
+    if (moves.starts !== undefined) return startChildren(ctx, parentId, moves.starts.plan, moves.starts.children);
+    return;
   }
 
   /** The node cannot go on after a child failed to start: it is dead, and `onDeadStep` decides. */
-  const failChildrenNode = async (ctx: RunCtx, parentId: string, path: string, error: string) => {
+  const failChildrenNode = async (
+    ctx: RunCtx,
+    parentId: string,
+    path: string,
+    error: string,
+  ): Promise<void | SchemaFailure> => {
     const before = { parked: false };
     const written = await ctx.write(run, parentId, async (parent, inside) => {
       if (parent === null || parent.finishedAt !== null || parent.state !== 'parked' || parent.node !== path) return [];
       before.parked = true;
       return deadNode(inside.tx, definitionOf(parent), parent, path, error, nowIso());
     });
-    if (isFailure(written)) throw new Error(`journal: a parent run refused its dead node: ${JSON.stringify(written)}`);
-    await settle(ctx, parentId, written, before.parked);
+    if (isFailure(written)) return written;
+    return settle(ctx, parentId, written, before.parked);
   };
 
   /**
@@ -1217,7 +1261,12 @@ export function createWorkflows<
    * A child that already exists (its id was started before) is attached, not started again; the parent then looks at
    * its node once, because that child may have ended already.
    */
-  async function startChildren(ctx: RunCtx, parentId: string, plan: Planned, children: Planned['children']) {
+  async function startChildren(
+    ctx: RunCtx,
+    parentId: string,
+    plan: Planned,
+    children: Planned['children'],
+  ): Promise<void | SchemaFailure> {
     let attached = false;
     for (const child of children) {
       const startedRun = await ctx.run(startChild, {
@@ -1226,25 +1275,26 @@ export function createWorkflows<
         input: child.input,
         parent: { id: parentId, path: plan.base },
       });
-      if (isFailure(startedRun)) {
+      if (isSchemaFailure(startedRun)) return startedRun;
+      if (CommandConflict.is(startedRun)) {
         ctx.accept(startedRun);
-        await failChildrenNode(
+        return failChildrenNode(
           ctx,
           parentId,
           plan.path,
           `child run ${child.id} could not start: ${JSON.stringify(startedRun)}`,
         );
-        return;
       }
       if (!startedRun.created) attached = true;
     }
-    if (attached) await wakeParent(ctx, parentId, plan.base);
+    if (attached) return wakeParent(ctx, parentId, plan.base);
+    return;
   }
 
   const checkpoint = j.command(
     CHECKPOINT_COMMAND,
     checkpointSchema,
-    async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' }> => {
+    async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' } | SchemaFailure> => {
       const { write } = context;
       const before = { parked: false };
       const settled = { value: false };
@@ -1392,12 +1442,13 @@ export function createWorkflows<
           }
         }
       });
-      if (isFailure(written))
-        throw new Error(`journal: the workflow checkpoint was refused: ${JSON.stringify(written)}`);
-      await settle(context, input.runId, written, before.parked);
+      if (isFailure(written)) return written;
+      const settlement = await settle(context, input.runId, written, before.parked);
+      if (isFailure(settlement)) return settlement;
       if (planned.value !== undefined) {
         const { plan, room } = planned.value;
-        await startChildren(context, input.runId, plan, plan.children.slice(0, room));
+        const started = await startChildren(context, input.runId, plan, plan.children.slice(0, room));
+        if (isFailure(started)) return started;
       }
       if (written.events.length === 0) return { status: 'already' };
       return { status: settled.value ? 'settled' : 'checkpointed' };
@@ -1414,7 +1465,7 @@ export function createWorkflows<
     { write, tx }: Pick<CommandContext<MetaOut, Tx>, 'write' | 'tx'>,
     args: { readonly input: unknown; readonly id?: string | undefined },
     parent?: { readonly id: string; readonly path: string },
-  ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict> => {
+  ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | SchemaFailure> => {
     if (!started.has(`${def.name}@${def.version}`)) {
       throw new JournalError(
         'WORKFLOW_UNKNOWN',
@@ -1486,16 +1537,23 @@ export function createWorkflows<
   };
 
   const startCommandFor = <Input extends StandardSchemaV1>(def: WorkflowDef<Input>) =>
-    j.command(`${def.name}.start`, startSchema(def.input), async (args, context): Promise<StartOutcome> => {
-      const outcome = await startRun(def, context, args);
-      return isFailure(outcome) ? outcome : { runId: outcome.runId };
-    });
+    j.command(
+      `${def.name}.start`,
+      startSchema(def.input),
+      async (args, context): Promise<StartOutcome | SchemaFailure> => {
+        const outcome = await startRun(def, context, args);
+        return isFailure(outcome) ? outcome : { runId: outcome.runId };
+      },
+    );
 
   /** The command a parent's checkpoint runs for each child: `start` with the parent recorded. Internal. */
   const startChild = j.command(
     START_CHILD_COMMAND,
     startChildSchema,
-    async (args, context): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict> => {
+    async (
+      args,
+      context,
+    ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | SchemaFailure> => {
       const def = started.get(`${args.def.name}@${args.def.version}`);
       if (def === undefined) {
         throw new JournalError(
@@ -1523,7 +1581,7 @@ export function createWorkflows<
     name: string,
     workflowName: string | null,
     operator: OperationInput | null,
-  ): Promise<SignalOutcome> {
+  ): Promise<SignalOutcome | SchemaFailure> {
     const { write } = context;
     const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
     const before = { parked: false };
@@ -1548,14 +1606,11 @@ export function createWorkflows<
       // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
       const stored = storable(args.payload, own.limits.payload, `the payload of signal '${name}'`, args.runId);
       if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
-      try {
-        await parseAsync(ownWait.schema, stored.value);
-      } catch (error) {
-        if (error instanceof SchemaError) {
-          return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(error)}` });
-        }
-        throw error;
+      const parsed = await parseAsync(ownWait.schema, stored.value);
+      if (InvalidInput.is(parsed)) {
+        return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(parsed)}` });
       }
+      if (ValidatorDefect.is(parsed)) return parsed;
       const [inserted] = await inside.tx
         .insert(workflowSignals)
         .values({
@@ -1592,7 +1647,8 @@ export function createWorkflows<
       return [received, ...(await wakeOnSignal(inside.tx, own, index, row, stored.value, at))];
     });
     if (isFailure(written)) return written;
-    await settle(context, args.runId, written, before.parked);
+    const settlement = await settle(context, args.runId, written, before.parked);
+    if (isFailure(settlement)) return settlement;
     return result;
   }
 
@@ -1618,7 +1674,7 @@ export function createWorkflows<
     args: CancelArgs,
     workflowName: string | null,
     actorId: string | null,
-  ): Promise<CancelOutcome> {
+  ): Promise<CancelOutcome | SchemaFailure> {
     const { write } = context;
     const before = { parked: false };
     const written = await write(run, args.runId, async (row, inside) => {
@@ -1653,7 +1709,8 @@ export function createWorkflows<
       );
     });
     if (isFailure(written)) return written;
-    await settle(context, args.runId, written, before.parked);
+    const settlement = await settle(context, args.runId, written, before.parked);
+    if (isFailure(settlement)) return settlement;
     debugWorkflow.debug('run {runId} cancel requested', { runId: args.runId });
     return { state: written.events.some(event => event.type === 'RunCancelled') ? 'cancelled' : 'compensating' };
   }
@@ -1702,7 +1759,10 @@ export function createWorkflows<
   const retryStep = j.command(
     RETRY_STEP_COMMAND,
     retryStepSchema,
-    async (args, context): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' }> => {
+    async (
+      args,
+      context,
+    ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | SchemaFailure> => {
       assertOperator(args.op);
       const before = { parked: false };
       const moved: { how: 'rescheduled' | 'childrenRestarted' | 'jobRetried'; base: string | undefined } = {
@@ -1795,9 +1855,13 @@ export function createWorkflows<
           }),
         ];
       });
-      if (isFailure(written)) throw new Error(`journal: retryStep was refused: ${JSON.stringify(written)}`);
-      await settle(context, args.runId, written, before.parked);
-      if (moved.base !== undefined) await wakeParent(context, args.runId, moved.base);
+      if (isFailure(written)) return written;
+      const settlement = await settle(context, args.runId, written, before.parked);
+      if (isFailure(settlement)) return settlement;
+      if (moved.base !== undefined) {
+        const woken = await wakeParent(context, args.runId, moved.base);
+        if (isFailure(woken)) return woken;
+      }
       return { how: moved.how };
     },
   );
@@ -1812,7 +1876,7 @@ export function createWorkflows<
   const resolveStep = j.command(
     RESOLVE_STEP_COMMAND,
     resolveStepSchema,
-    async (args, context): Promise<{ readonly runId: string }> => {
+    async (args, context): Promise<{ readonly runId: string } | SchemaFailure> => {
       assertOperator(args.op);
       const before = { parked: false };
       const written = await context.write(run, args.runId, async (locked, inside) => {
@@ -1844,19 +1908,8 @@ export function createWorkflows<
         const { output } = node.options;
         if (output === undefined) throw notResolvable('declares no output schema to check a result with');
         if (row.state !== 'running') throw notResolvable(`cannot be resolved while the run is ${row.state}`);
-        let parsed: unknown;
-        try {
-          parsed = await parseAsync(output, args.result);
-        } catch (error) {
-          if (!(error instanceof SchemaError)) throw error;
-          throw new JournalError(
-            'BAD_ARGUMENT',
-            'workflow',
-            row.id,
-            `the result does not match the output of step '${args.path}'`,
-            { cause: error },
-          );
-        }
+        const parsed = await parseAsync(output, args.result);
+        if (isAsyncSchemaFailure(parsed)) return parsed;
         const kept = storable(parsed, def.limits.payload, `the result of step '${args.path}'`, row.id);
         if (kept instanceof JournalError) throw kept;
         const at = nowIso();
@@ -1875,8 +1928,9 @@ export function createWorkflows<
           }),
         ];
       });
-      if (isFailure(written)) throw new Error(`journal: resolveStep was refused: ${JSON.stringify(written)}`);
-      await settle(context, args.runId, written, before.parked);
+      if (isFailure(written)) return written;
+      const settlement = await settle(context, args.runId, written, before.parked);
+      if (isFailure(settlement)) return settlement;
       return { runId: args.runId };
     },
   );
@@ -1885,7 +1939,7 @@ export function createWorkflows<
   const skipUndo = j.command(
     SKIP_UNDO_COMMAND,
     skipUndoSchema,
-    async (args, context): Promise<{ readonly runId: string }> => {
+    async (args, context): Promise<{ readonly runId: string } | SchemaFailure> => {
       assertOperator(args.op);
       const reason = args.op.reason?.trim() ?? '';
       if (reason === '') {
@@ -1923,8 +1977,9 @@ export function createWorkflows<
           ...(await compensate(inside.tx, def, row, at, { cause: null, undoneNow: 1 })),
         ];
       });
-      if (isFailure(written)) throw new Error(`journal: skipUndo was refused: ${JSON.stringify(written)}`);
-      await settle(context, args.runId, written, before.parked);
+      if (isFailure(written)) return written;
+      const settlement = await settle(context, args.runId, written, before.parked);
+      if (isFailure(settlement)) return settlement;
       return { runId: args.runId };
     },
   );
@@ -1953,7 +2008,7 @@ export function createWorkflows<
   const checkResult = async (
     db: DbHandle,
     args: { readonly runId: string; readonly path: string; readonly result: unknown },
-  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly issues: string }> => {
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly issues: string } | AsyncSchemaFailure> => {
     const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, args.runId));
     if (row === undefined) throw new JournalError('WORKFLOW_NOT_FOUND', 'workflow', args.runId);
     const node = definitionOf(row).nodes.find(candidate => candidate.name === args.path);
@@ -1969,13 +2024,10 @@ export function createWorkflows<
         `step '${args.path}' declares no output schema to check a result with`,
       );
     }
-    try {
-      await parseAsync(output, args.result);
-      return { ok: true };
-    } catch (error) {
-      if (error instanceof SchemaError) return { ok: false, issues: reasonText(error) };
-      throw error;
-    }
+    const parsed = await parseAsync(output, args.result);
+    if (InvalidInput.is(parsed)) return { ok: false, issues: reasonText(parsed) };
+    if (ValidatorDefect.is(parsed)) return parsed;
+    return { ok: true };
   };
 
   /** `j.workflow`: the step-2 builder, with `start` and `signal` on the finished definition. */
@@ -2082,7 +2134,7 @@ export function createWorkflows<
       result: unknown,
       build: (signal: AbortSignal) => ErasedContext,
       signal: AbortSignal,
-    ): Promise<Route> {
+    ): Promise<Route | AsyncSchemaFailure> {
       const { next } = node.options;
       const target = typeof next === 'function' ? next({ ...build(signal), result }) : (next ?? 'next');
       let targetIndex = index + 1;
@@ -2135,7 +2187,8 @@ export function createWorkflows<
 
       try {
         if (node.options.when !== undefined && !node.options.when(make(ctx.signal))) {
-          return { kind: 'skipped', reason: 'when', route: await routeAt(def, index + 1, row, node.name, null) };
+          const route = await routeAt(def, index + 1, row, node.name, null);
+          return isFailure(route) ? failed(route, false) : { kind: 'skipped', reason: 'when', route };
         }
       } catch (error) {
         return failed(error);
@@ -2152,13 +2205,12 @@ export function createWorkflows<
 
       try {
         const parsed = node.options.output === undefined ? result : await parseAsync(node.options.output, result);
+        if (isFailure(parsed)) return failed(parsed, false);
         const kept = storable(parsed, def.limits.payload, `the result of step '${node.name}'`, row.id);
         if (kept instanceof JournalError) return failed(kept);
-        return {
-          kind: 'completed',
-          result: kept.value,
-          route: await routeFrom(def, index, node, row, kept.value, make, ctx.signal),
-        };
+        const route = await routeFrom(def, index, node, row, kept.value, make, ctx.signal);
+        if (isFailure(route)) return failed(route, false);
+        return { kind: 'completed', result: kept.value, route };
       } catch (error) {
         // A router, a `finish` or an output schema that fails will fail again: no retry, the definition needs a fix.
         return failed(error, !(error instanceof JournalError && error.code === 'BAD_DEFINITION'));
@@ -2191,6 +2243,7 @@ export function createWorkflows<
       });
       try {
         const route = await routeFrom(def, index, node, row, result, build, ctx.signal);
+        if (isFailure(route)) return failed(route, false);
         const by =
           data.actorId === undefined
             ? {}
@@ -2351,7 +2404,8 @@ export function createWorkflows<
               `map '${node.name}' has no items, so no child can win`,
             );
           }
-          return { kind: 'completed', result: [], route: await routeAt(def, index + 1, row, node.name, []) };
+          const route = await routeAt(def, index + 1, row, node.name, []);
+          return isFailure(route) ? failed(route, false) : { kind: 'completed', result: [], route };
         }
         if ((await ancestorsOf(ctx.db, row)) >= MAX_CHILD_DEPTH) {
           throw new JournalError(
@@ -2375,6 +2429,7 @@ export function createWorkflows<
             );
           }
           const parsed = await parseAsync(childDef.input, input);
+          if (isFailure(parsed)) return failed(parsed, false);
           const kept = storable(parsed, childDef.limits.payload, `the input of child run ${id}`, row.id);
           if (kept instanceof JournalError) throw kept;
           children.push({ id, input: kept.value });
@@ -2382,7 +2437,7 @@ export function createWorkflows<
         return { kind: 'children', plan: { base, def: { name: childDef.name, version: childDef.version }, children } };
       } catch (error) {
         // A limit, a schema or a definition that is wrong will be wrong again: no retry.
-        return failed(error, !(error instanceof JournalError || error instanceof SchemaError));
+        return failed(error, !(error instanceof JournalError || InvalidInput.is(error)));
       }
     }
 
@@ -2447,6 +2502,7 @@ export function createWorkflows<
       const at = { runId, path: data.path, phase: data.phase, attempt: data.attempt };
       if (verdict.kind !== 'failed') {
         const checkpointed = await ctx.run(checkpoint, { ...at, outcome: verdict }, meta);
+        if (isSchemaFailure(checkpointed)) return checkpointed;
         debugWorkflow.debug('{runId} {path}: {kind}, checkpoint {status}', {
           runId,
           path: data.path,
@@ -2465,14 +2521,16 @@ export function createWorkflows<
       const policy = (node.kind === 'step' ? node.options.retry : undefined) ?? defaultEffectRetry;
       const wait = verdict.retryable ? policy.delay(data.attempt, verdict.reason) : undefined;
       if (wait !== undefined) {
-        await ctx.run(
+        const checkpointed = await ctx.run(
           checkpoint,
           { ...at, outcome: { kind: 'retry', error, key: step.key ?? data.key, at: inMs(wait) } },
           meta,
         );
+        if (isSchemaFailure(checkpointed)) return checkpointed;
         return undefined;
       }
       const checkpointed = await ctx.run(checkpoint, { ...at, outcome: { kind: 'dead', error } }, meta);
+      if (isSchemaFailure(checkpointed)) return checkpointed;
       // Settled: the run compensates (or already was), so no operator is needed and the job ends normally.
       if (checkpointed.status !== 'checkpointed') return undefined;
       debugWorkflow.warn('{runId} {path}: dead after {attempt} attempts, waiting for an operator', {
@@ -2516,7 +2574,7 @@ export function createWorkflows<
       .effect(TIMER_EFFECT, machine.run, {
         Parked: async (event, ctx) => {
           await refuseStranded(event.entityId, ctx.db);
-          await ctx.run(
+          return ctx.run(
             checkpoint,
             { runId: event.entityId, fired: { kind: 'wake', node: event.data.node, parkSeq: event.seq } },
             meta,
@@ -2524,7 +2582,7 @@ export function createWorkflows<
         },
         RunStarted: async (event, ctx) => {
           await refuseStranded(event.entityId, ctx.db);
-          await ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'deadline' } }, meta);
+          return ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'deadline' } }, meta);
         },
       })
       .withSchedule({

@@ -3,6 +3,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { OrderId } from './test-support.js';
 import {
   customerOrderCounts,
@@ -76,8 +78,8 @@ describe('async projections', () => {
     // Why: a slow read model must not slow the write, and progress must be stored with the
     // handler's own writes, so a crash between the two cannot apply a batch twice or skip one.
     const customer = `cus_async_${++next}`;
-    await place(orderId(++next), customer);
-    await place(orderId(++next), customer);
+    orThrow(await place(orderId(++next), customer));
+    orThrow(await place(orderId(++next), customer));
     expect(await placedFor(customer), 'not applied inside the write').toBe(0);
     const before = await cursorOf('async-counts');
     expect(before?.lag).toBeGreaterThan(0);
@@ -97,8 +99,8 @@ describe('async projections', () => {
   it('one projection failing does not hold the others, and its batch is retried next pass', async () => {
     const id = orderId(++next);
     const customer = `cus_iso_${next}`;
-    await place(id, customer);
-    await pay(id);
+    orThrow(await place(id, customer));
+    orThrow(await pay(id));
     failPaid = true;
     await journal.catchUp(db);
     expect(await placedFor(customer), 'the healthy projection advanced').toBe(1);
@@ -114,7 +116,7 @@ describe('async projections', () => {
 
   it('reset clears the read model and rewinds the cursor in one transaction; catchUp rebuilds it', async () => {
     const customer = `cus_reset_${++next}`;
-    await place(orderId(++next), customer);
+    orThrow(await place(orderId(++next), customer));
     await journal.catchUp(db);
     expect(await placedFor(customer)).toBe(1);
     await journal.reset(db, counts, async tx => {
@@ -133,13 +135,15 @@ describe('async projections', () => {
     const worker = journal.worker(db, { pollMs: 60_000 });
     await worker.start();
     try {
-      await journal.run(
-        db,
-        j.command('placeOne', OrderPlaced.schema, (input, { write }) =>
-          write(order, orderId(++next), () => [OrderPlaced(input)]),
+      orThrow(
+        await journal.run(
+          db,
+          j.command('placeOne', OrderPlaced.schema, (input, { write }) =>
+            write(order, orderId(++next), () => [OrderPlaced(input)]),
+          ),
+          { customerId: customer, total: 1 },
+          meta,
         ),
-        { customerId: customer, total: 1 },
-        meta,
       );
       const until = Date.now() + 3000;
       while ((await placedFor(customer)) === 0 && Date.now() < until) await new Promise(r => setTimeout(r, 50));

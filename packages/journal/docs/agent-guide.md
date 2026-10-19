@@ -243,7 +243,7 @@ Rules:
 
 ### Find out why a write failed
 
-1. Check the kind of error. `isJournalError(error)` is true: go to step 2. Not an error at all, but `isFailure(result)`: a rule returned a failure and the command rolled back; read its `code` and `message`, and find the `return` in the handler, `authorize` or `events`. A `SchemaError` (from `@arki/schema`): input, event data or `meta` failed its schema; read its `issues`. A `SchemaRunError`: a schema could not run (async where the journal parses sync, or its `validate` threw); fix the schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
+1. Check the kind of error. `isJournalError(error)` is true: go to step 2. Not an error at all, but `isFailure(result)`: a rule returned a failure and the command rolled back; read its `code` and `message`, and find the `return` in the handler, `authorize` or `events`. `InvalidInput` (from `@arki/failure`): input, event data or `meta` failed its schema; read `data.issues`. `AsyncSchema` or `ValidatorDefect`: a schema could not run; fix the schema. These are returned values and are included in the operation's inferred failure type. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
 2. Read `error.code`, `error.kind` and `error.entityId`. Match on the code, for example `isJournalError(error, 'CONFLICT')`. Never match on the message. The message reads `CODE: what happened (kind id): detail. What to do next.`
 3. Find the code in the [error table](#errors). To see the exact check, search for the code in the file the table names.
 4. Run again with `DEBUG=arki:journal:*`. It prints commands, writes, replays, drains and worker ticks.
@@ -372,10 +372,7 @@ export function billingJournal<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(
-  j: JournalDefinitions<Meta, Tx, AppDb>,
-  tables: ReturnType<typeof billingTables>,
-) {
+>(j: JournalDefinitions<Meta, Tx, AppDb>, tables: ReturnType<typeof billingTables>) {
   const InvoiceIssued = j.event('InvoiceIssued', z.object({ amount: z.int().positive() }));
   const invoice = j.entity('invoice', tables.invoices).create(InvoiceIssued, e => ({ amount: e.data.amount }));
   const issueInvoice = j.command(

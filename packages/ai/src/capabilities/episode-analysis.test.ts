@@ -1,6 +1,8 @@
-import type { StandardSchemaV1 } from '@arki/schema';
-import { parseAsync } from '@arki/schema';
 import { expect, test } from 'vitest';
+
+import type { StandardSchemaV1 } from '@arki/schema';
+import { orThrow } from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import type { StructuredLLMProvider } from '../ai-service/types';
 import type { TranscriptDocument } from './episode-analysis';
@@ -23,7 +25,7 @@ const output = {
 };
 const provider: StructuredLLMProvider = {
   async generateStructuredData<S extends StandardSchemaV1>(_prompt: string, schema: S) {
-    return parseAsync(schema, output);
+    return orThrow(parseAsync(schema, output));
   },
   async generateStructuredDataFromMessages() {
     throw new Error('Unexpected call');

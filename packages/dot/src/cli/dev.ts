@@ -24,7 +24,7 @@ import { z } from 'zod';
 
 import type { Mode, Ui } from '@arki/cli';
 import type { Failure } from '@arki/failure';
-import { isFailure, revive } from '@arki/failure';
+import { AsyncSchema, InvalidEnvelope, isFailure, revive, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
@@ -202,15 +202,19 @@ function preflightFailed(reason: string, exitCode: number | null, lines: readonl
 /** Turn the child's report into the supervisor's view. A report that does not check out is a failed preflight. */
 function fromMessage(message: z.infer<typeof preflightMessageSchema>, lines: readonly string[]): Preflight {
   const report = message.report === null ? null : parse(DoctorFailed.dataSchema, message.report);
+  if (isFailure(report)) return preflightFailed(report.message, null, lines);
   let failure: Failure | null = null;
   if (message.failure !== null) {
-    let revived: Failure | undefined;
-    try {
-      revived = revive(message.failure, PREFLIGHT_FAILURES);
-    } catch {
-      revived = undefined;
+    const revived = revive(message.failure, PREFLIGHT_FAILURES);
+    if (
+      revived === undefined ||
+      InvalidEnvelope.is(revived) ||
+      AsyncSchema.is(revived) ||
+      ValidatorDefect.is(revived) ||
+      UnexpectedDefect.is(revived)
+    ) {
+      return preflightFailed(`unexpected failure ${message.failure.code}`, null, lines);
     }
-    if (revived === undefined) return preflightFailed(`unexpected failure ${message.failure.code}`, null, lines);
     failure = revived;
   }
   const migrations: MigrationsEvent | null =

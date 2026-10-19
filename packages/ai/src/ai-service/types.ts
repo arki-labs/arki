@@ -15,7 +15,7 @@ import type { RateLimited } from '../failures.ts';
 export type Message = {
   role: 'user' | 'assistant' | 'system';
   content: string;
-}
+};
 
 /**
  * Common options for text generation
@@ -43,7 +43,7 @@ export type GenerateOptions = {
    * SDK proceeds normally.
    */
   signal?: AbortSignal;
-}
+};
 
 /**
  * Options specific to streaming generation
@@ -55,7 +55,7 @@ export type StreamOptions = {
   onComplete?: (fullText: string) => void;
   /** Callback on error */
   onError?: (error: Error) => void;
-} & GenerateOptions
+} & GenerateOptions;
 
 /**
  * Provider health status
@@ -71,7 +71,7 @@ export type ProviderHealth = {
   consecutiveFailures: number;
   /** Error message from last failure */
   lastError?: string;
-}
+};
 
 /**
  * Configuration for a provider in the rotation
@@ -87,7 +87,7 @@ export type ProviderConfig = {
   enabled?: boolean;
   /** Optional API key override — when set, used instead of the default env-based key */
   apiKey?: string;
-}
+};
 
 /**
  * Result from a provider operation
@@ -99,7 +99,7 @@ export type ProviderResult<T> = {
   provider: string;
   /** Time taken in milliseconds */
   durationMs: number;
-}
+};
 
 /**
  * Common interface for all LLM providers
@@ -130,10 +130,7 @@ export type LLMProvider = {
    * @param options - Generation options
    * @returns Generated response text, or `RateLimited` when the provider's local rate limiter refuses the call
    */
-  generateConversation(
-    messages: Message[],
-    options?: GenerateOptions,
-  ): Promise<string | RateLimited>;
+  generateConversation(messages: Message[], options?: GenerateOptions): Promise<string | RateLimited>;
 
   /**
    * Stream text generation from a single prompt
@@ -142,10 +139,7 @@ export type LLMProvider = {
    * @param options - Stream options
    * @yields Text chunks as they're generated
    */
-  streamText(
-    prompt: string,
-    options?: StreamOptions,
-  ): AsyncGenerator<string, void, unknown>;
+  streamText(prompt: string, options?: StreamOptions): AsyncGenerator<string, void, unknown>;
 
   /**
    * Stream text generation from a conversation history
@@ -154,10 +148,7 @@ export type LLMProvider = {
    * @param options - Stream options
    * @yields Text chunks as they're generated
    */
-  streamConversation(
-    messages: Message[],
-    options?: StreamOptions,
-  ): AsyncGenerator<string, void, unknown>;
+  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown>;
 
   /**
    * Check if the provider is available (has API key configured)
@@ -165,7 +156,7 @@ export type LLMProvider = {
    * @returns Whether the provider can be used
    */
   isAvailable(): boolean;
-}
+};
 
 /**
  * Factory function type for creating LLM providers
@@ -190,7 +181,7 @@ export type StructuredLLMProvider = {
    * Any Standard Schema works (zod, valibot, arktype, ...). The model is shown the schema's input
    * JSON Schema and writes raw JSON; the result is that JSON run through the schema, so it has
    * the schema's OUTPUT type (a transform has already run). Invalid output throws a
-   * `GenerationError` whose cause chain ends in a `SchemaError` carrying `issues`.
+   * `GenerationError` whose cause chain includes `UnexpectedFailure` carrying canonical `InvalidInput` issues.
    */
   generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
@@ -217,8 +208,5 @@ export type StructuredLLMProvider = {
    * Stream a conversational response, yielding text chunks as they arrive.
    * Used for real-time copilot streaming endpoints.
    */
-  streamConversation(
-    messages: Message[],
-    options?: StreamOptions,
-  ): AsyncGenerator<string, void, unknown>;
+  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown>;
 };

@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import type { TransactionalDb } from '@arki/db/transaction';
 import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+import { AsyncSchema, InvalidInput, orThrow, ValidatorDefect } from '@arki/failure';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
 import { CommandForbidden, initJournal } from './index.js';
@@ -58,8 +59,10 @@ const deposit = j.command(
   z.object({ id: accountIdSchema, amount: z.int().positive() }),
   async (input, { write }) => {
     runs += 1;
-    const { row } = await write(account, input.id, row =>
-      row ? [Deposited({ amount: input.amount })] : [Opened({ balance: input.amount })],
+    const { row } = orThrow(
+      await write(account, input.id, row =>
+        row ? [Deposited({ amount: input.amount })] : [Opened({ balance: input.amount })],
+      ),
     );
     return { balance: row?.balance ?? 0 };
   },
@@ -87,7 +90,7 @@ const contract = {
   deposit: oc
     .input(z.object({ id: accountIdSchema, amount: z.int().positive(), key: z.string() }))
     .output(z.object({ balance: z.number() }))
-    .errors(errorMap(CommandForbidden)),
+    .errors(errorMap(CommandForbidden, InvalidInput, AsyncSchema, ValidatorDefect)),
 };
 
 let client: PGlite;

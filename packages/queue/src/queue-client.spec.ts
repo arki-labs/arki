@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
+import { orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { jobs, queue, queueWorker } from './dot.ts';
@@ -129,7 +130,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
       .start();
 
     try {
-      const started = await api.services.queue.enqueue(orderFlow, { orderId: 'o-1' });
+      const started = orThrow(await api.services.queue.enqueue(orderFlow, { orderId: 'o-1' }));
       expect(started.flow).toBe('orders:process');
       expect(Object.keys(started.jobIds).toSorted()).toEqual(['notify', 'reserve']);
 

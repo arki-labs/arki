@@ -8,7 +8,6 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
 | Task                                                                                          | Read                                                                                                                       |
@@ -153,7 +152,7 @@ The core and `@arki/journal/errors` hold no driver. They load on Node, Bun, Deno
 - `write(entity, id, events)`: `journal.write` bound to `tx` and `meta`. `events` is `(row, { tx }) => pending events`, sync or async.
 - `run(child, input)`: run another command in a savepoint of the same transaction, with the same `meta`.
 
-`journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a `SchemaError` passes through) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
+`journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a schema failure returns before the handler runs) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
 
 `journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`, so a request context or a job fixes the database and the actor once, and every call site passes only the command and its input. The caller still gives `meta`: the library never picks an actor. `source` follows the rules of `run`: a root database commits and wakes, a transaction joins and leaves the commit to the caller. `meta` is parsed on every call, not once at bind time. A bound runner is then exactly `journal.run`: a default in the meta schema is new for each command, and a bad `meta` rejects the call. The runner has the type `CommandRunner`, the type of a command context's `run`, so it can be passed to code that takes one.
 
@@ -305,7 +304,7 @@ A reducer must produce each value in the form the database stores. If the databa
 
 Database defaults are not journal state. `write` folds from the stored row, where a default-filled column has its value. `replay` folds from nothing, where that column is `undefined`. That is why such columns are optional in the `.on` row type unless a create sets them. The rule: a reducer must set every column that any reducer later reads. In a `.create` result, a key set to `undefined` is stripped and the default applies. `verify` compares only the columns reducers set.
 
-Every schema the journal takes is a Standard Schema: zod, valibot, arktype or a hand-written `~standard` object. Command input and a command's `meta` are parsed async (`parseAsync`). Everything else is parsed sync (`parse`): the event constructor, `write`'s event data and `meta`, replay and upcasters; an async schema there is a `SchemaRunError`. `initJournal()` without `meta` accepts a plain object and records `{}`.
+Every schema the journal takes is a Standard Schema: zod, valibot, arktype or a hand-written `~standard` object. Command input and a command's `meta` are parsed async (`parseAsync`). Everything else is parsed sync (`parse`): the event constructor, `write`'s event data and `meta`, replay and upcasters; an async schema there returns `AsyncSchema`. `initJournal()` without `meta` accepts a plain object and records `{}`.
 
 `write` parses every event's data with its schema, even for a hand-built `{ type, data }`. The schema must accept its own stored output unchanged, because replay parses stored data again; otherwise `write` throws `UNSTABLE_SCHEMA`. The same rule applies to `meta`. An optional key holding `undefined` in event data is not stored: JSON drops it, so the stored event, the reducers and replay all see the key as absent. The check allows this, because absent and `undefined` read the same way. Leaving the key out is the same thing.
 
@@ -313,7 +312,7 @@ An error about one entity's row or history is a `JournalError` with a `code`. Ma
 
 The codes, the usual cause of each and what to do are in one table: [agent guide, Errors](docs/agent-guide.md#errors).
 
-Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `SchemaError` from `@arki/schema`, with the schema's `issues`. A schema that cannot run (async where the journal parses sync, or a `validate` that throws) is a `SchemaRunError`: a bug, not bad data. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
+Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema returns `InvalidInput` from `@arki/failure`, with `data.issues`. An async schema in a sync call returns `AsyncSchema`; a throwing validator returns `ValidatorDefect`. Event constructors return these failures too; `write` accepts them in its event array and rolls back before appending anything. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
 
 ### Rejected rules
 
@@ -508,7 +507,10 @@ A job is in one of four states. The state comes from the database clock.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const { jobs, next } = await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50 });
-const second = next === null ? undefined : await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50, after: next });
+const second =
+  next === null
+    ? undefined
+    : await journal.jobs(db, { status: 'dead', effect: 'sendWelcomeMail', limit: 50, after: next });
 
 const detail = await journal.job(db, 'job_abc'); // the row and its state, the event header, attemptLog, the latest operations; undefined if gone
 const counts = await journal.jobCounts(db); // per effect or job name: ready, delayed, running, dead, oldestDeadAt
@@ -532,13 +534,13 @@ const { jobId: replayedId } = await journal.replayJob(db, archivedId, op); // a 
 
 Each of `retry`, `discard`, `cancel` and `replayJob` returns `{ operationId }` (`replayJob` also returns the new `jobId`). They throw a `JournalError`:
 
-| Code | When |
-| --- | --- |
-| `JOB_NOT_DEAD` | `retry` or `discard` on a job that is not dead. Retrying a live job would run it twice. |
-| `JOB_NOT_PENDING` | `cancel` on a job that is dead or gone. |
-| `JOB_RUNNING` | `cancel` on a job a worker holds. Deleting it would not stop its work. |
-| `JOB_EXISTS` | `replayJob` while an unfinished job holds the same dedupe key. |
-| `BAD_ARGUMENT` | A bad `limit`, a bad cursor, an empty `actor`, or a `purgeDead` bound that is too short. |
+| Code              | When                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `JOB_NOT_DEAD`    | `retry` or `discard` on a job that is not dead. Retrying a live job would run it twice.  |
+| `JOB_NOT_PENDING` | `cancel` on a job that is dead or gone.                                                  |
+| `JOB_RUNNING`     | `cancel` on a job a worker holds. Deleting it would not stop its work.                   |
+| `JOB_EXISTS`      | `replayJob` while an unfinished job holds the same dedupe key.                           |
+| `BAD_ARGUMENT`    | A bad `limit`, a bad cursor, an empty `actor`, or a `purgeDead` bound that is too short. |
 
 Bounds on the batch verbs:
 
@@ -569,9 +571,14 @@ Move on success is one statement under the lease fence: the fenced `DELETE` feed
 import { ndjsonArchiveSink } from '@arki/journal';
 
 export const sendWelcomeMail = j
-  .effect('sendWelcomeMail', user, { mailer: need<Mailer>() }, {
-    UserSignedUp: (e, { jobId, mailer }) => mailer.send({ to: e.data.email, idempotencyKey: jobId }),
-  })
+  .effect(
+    'sendWelcomeMail',
+    user,
+    { mailer: need<Mailer>() },
+    {
+      UserSignedUp: (e, { jobId, mailer }) => mailer.send({ to: e.data.email, idempotencyKey: jobId }),
+    },
+  )
   .withSchedule({ retention: { completed: '1d' } }); // this effect keeps finished rows one day
 
 export const auditTrail = j
@@ -597,24 +604,24 @@ export const journal = j.compose({
 
 `journal.retention` is the policy after parsing, with the defaults filled in. The worker, the verbs and the Foreman module all read it.
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `retryableFor` | `'30d'` | How long a dead job stays in the hot table, retryable. Then the sweeper archives it. |
-| `archive.completed` | `'7d'` | How long a successful job is kept. |
-| `archive.dead` | `'90d'` | How long a dead, discarded or cancelled job is kept. |
-| `archive.sink` | none | Where archive rows go after the table. |
-| `operations` | `'forever'` | How long the operations audit is kept. |
-| `sweep` | `{ every: '1h', batch: 1000 }` | How often the sweeper runs, and how many rows each step takes. `false` turns it off. |
+| Setting             | Default                        | Meaning                                                                              |
+| ------------------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| `retryableFor`      | `'30d'`                        | How long a dead job stays in the hot table, retryable. Then the sweeper archives it. |
+| `archive.completed` | `'7d'`                         | How long a successful job is kept.                                                   |
+| `archive.dead`      | `'90d'`                        | How long a dead, discarded or cancelled job is kept.                                 |
+| `archive.sink`      | none                           | Where archive rows go after the table.                                               |
+| `operations`        | `'forever'`                    | How long the operations audit is kept.                                               |
+| `sweep`             | `{ every: '1h', batch: 1000 }` | How often the sweeper runs, and how many rows each step takes. `false` turns it off. |
 
 **`Keep` has these forms.** It is used for `completed`, `dead` and `operations`:
 
-| Value | Meaning |
-| --- | --- |
-| `false` | Never written. The job is deleted the moment it finishes, as before. |
-| `'forever'` | Kept until someone deletes it. |
-| `'untilExported'` | Kept only until the sink has it, then deleted. Needs `archive.sink`, or `compose` throws `BAD_DEFINITION` at boot and names the effect. Not allowed for `operations`. |
-| `'30d'`, `'12h'`, `'90m'`, or seconds as a number | Kept this long. |
-| `{ age: '90d', max: 50_000 }` | Kept this long, and at most `max` rows per outcome and per effect or job name. The oldest go first. `age` may be `'forever'`. |
+| Value                                             | Meaning                                                                                                                                                               |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `false`                                           | Never written. The job is deleted the moment it finishes, as before.                                                                                                  |
+| `'forever'`                                       | Kept until someone deletes it.                                                                                                                                        |
+| `'untilExported'`                                 | Kept only until the sink has it, then deleted. Needs `archive.sink`, or `compose` throws `BAD_DEFINITION` at boot and names the effect. Not allowed for `operations`. |
+| `'30d'`, `'12h'`, `'90m'`, or seconds as a number | Kept this long.                                                                                                                                                       |
+| `{ age: '90d', max: 50_000 }`                     | Kept this long, and at most `max` rows per outcome and per effect or job name. The oldest go first. `age` may be `'forever'`.                                         |
 
 A bad age is `BAD_DEFINITION`. `sweep.every` of `0` is too.
 
@@ -668,32 +675,32 @@ const worker = journal.worker(db, {
 
 The two lanes side by side:
 
-| | Effect row | Queue row |
-| --- | --- | --- |
-| `kind` | `effect` | `queue` |
-| Written by | a journal write | `runAfter(tx, job, args)` in any transaction |
-| Needs an event | yes (`event_seq`, `effect`) | no (`job_name`, `args`) |
-| Run by | the effect handler in the journal | the `jobs` runner |
-| Retry | the effect's `retry` | the runner's `retryDelay` |
-| Dedupe | one row per event and effect | optional `dedupe_key`, per job name |
+|                | Effect row                        | Queue row                                    |
+| -------------- | --------------------------------- | -------------------------------------------- |
+| `kind`         | `effect`                          | `queue`                                      |
+| Written by     | a journal write                   | `runAfter(tx, job, args)` in any transaction |
+| Needs an event | yes (`event_seq`, `effect`)       | no (`job_name`, `args`)                      |
+| Run by         | the effect handler in the journal | the `jobs` runner                            |
+| Retry          | the effect's `retry`              | the runner's `retryDelay`                    |
+| Dedupe         | one row per event and effect      | optional `dedupe_key`, per job name          |
 
 What a queue row promises:
 
-| Promise | Holds? | Boundary |
-| --- | --- | --- |
-| Atomic scheduling | Yes | The row and the business write share the transaction. A rollback removes both, savepoints included. |
-| Exactly-once enqueue | Yes | One row per awaited call in the committed transaction. With a key, one row per key among unfinished rows of that job. |
-| Request idempotency | No | Two committed HTTP retries schedule twice, unless a key or a journal receipt covers the whole operation. |
-| No early visibility | Yes | Other connections cannot claim an uncommitted row. |
-| At-least-once execution | Yes | The row stays until the fenced ack. A crash between handler and ack runs it again. Pass the job id on as an idempotency key. |
-| At-most-once execution | No | A job can run twice. |
-| Eventual success | No | When the retry policy stops, the row is dead. List it with `journal.jobs(db, { status: 'dead' })`. `journal.retry(db, id, op)` requeues it with the same id. |
-| Fenced state | Yes | Renew, ack and retry need the current lease token. A stale worker changes nothing. It cannot undo an external effect. |
-| Due time | Lower bound | `available_at` is the transaction's `now()` plus the delay. A long transaction uses part of the delay. A job can run late by up to `pollMs` without a listener, or under load. |
-| Order | None | Among due rows: higher priority first, then oldest due time. `SKIP LOCKED` is not FIFO. Strict priority can starve low rows. |
-| Lease | 60 s by default | Renewed every 30 s while the handler runs. A stalled worker loses the row after one full lease. |
-| Cross-process wake | Yes | `pg_notify` on `journal.wakeChannel`. It is lossy. Polling is the safety net. |
-| Cancel | Pending only | A running row finishes. |
+| Promise                 | Holds?          | Boundary                                                                                                                                                                       |
+| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Atomic scheduling       | Yes             | The row and the business write share the transaction. A rollback removes both, savepoints included.                                                                            |
+| Exactly-once enqueue    | Yes             | One row per awaited call in the committed transaction. With a key, one row per key among unfinished rows of that job.                                                          |
+| Request idempotency     | No              | Two committed HTTP retries schedule twice, unless a key or a journal receipt covers the whole operation.                                                                       |
+| No early visibility     | Yes             | Other connections cannot claim an uncommitted row.                                                                                                                             |
+| At-least-once execution | Yes             | The row stays until the fenced ack. A crash between handler and ack runs it again. Pass the job id on as an idempotency key.                                                   |
+| At-most-once execution  | No              | A job can run twice.                                                                                                                                                           |
+| Eventual success        | No              | When the retry policy stops, the row is dead. List it with `journal.jobs(db, { status: 'dead' })`. `journal.retry(db, id, op)` requeues it with the same id.                   |
+| Fenced state            | Yes             | Renew, ack and retry need the current lease token. A stale worker changes nothing. It cannot undo an external effect.                                                          |
+| Due time                | Lower bound     | `available_at` is the transaction's `now()` plus the delay. A long transaction uses part of the delay. A job can run late by up to `pollMs` without a listener, or under load. |
+| Order                   | None            | Among due rows: higher priority first, then oldest due time. `SKIP LOCKED` is not FIFO. Strict priority can starve low rows.                                                   |
+| Lease                   | 60 s by default | Renewed every 30 s while the handler runs. A stalled worker loses the row after one full lease.                                                                                |
+| Cross-process wake      | Yes             | `pg_notify` on `journal.wakeChannel`. It is lossy. Polling is the safety net.                                                                                                  |
+| Cancel                  | Pending only    | A running row finishes.                                                                                                                                                        |
 
 Rules:
 
@@ -766,9 +773,14 @@ To pass an event to a queue or a broker, write an effect. The effect runs after 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import type { Queue } from 'bullmq';
 
-export const relayOrderPaid = j.effect('relayOrderPaid', order, { queue: need<Queue>() }, {
-  OrderPaid: (e, { jobId, queue }) => queue.add('order.paid', { orderId: e.entityId }, { jobId }),
-});
+export const relayOrderPaid = j.effect(
+  'relayOrderPaid',
+  order,
+  { queue: need<Queue>() },
+  {
+    OrderPaid: (e, { jobId, queue }) => queue.add('order.paid', { orderId: e.entityId }, { jobId }),
+  },
+);
 ```
 
 For a broker that dedupes on a message id, use `jobId` the same way. `kv.publish` (Redis Pub/Sub) is a best-effort notification: nobody acknowledges it, and it does not take a job id. Use it for a live page or a cache poke, never for work that must happen. For work that must happen, relay a durable job as above. The journal has no generic broker framework on purpose.
@@ -786,27 +798,27 @@ const jobsModule = journalJobsModule({ journal, db, payload: 'hidden', jobs: que
 
 Options: `journal` and `db` (the root database) are required. `payload` is `'hidden'` (default) or `'redacted'`: what `journal.job` and `journal.archivedJob` show of a job's input. A list never carries a payload. `jobs` is the worker's runner; with it `journal.strandedJobs` also counts queue rows no handler knows. Error text goes through `redactSecrets`. Archive and purge rules come from `journal.retention`.
 
-| Id | Kind | Permission | Risk |
-| --- | --- | --- | --- |
-| `journal.jobs`, `journal.job`, `journal.jobCounts`, `journal.strandedJobs`, `journal.jobOperations`, `journal.archivedJobs`, `journal.archivedJob`, `journal.archiveStatus` | read | `journal:read` | read |
-| `journal.retryJob` | action | `journal:retry` | low |
-| `journal.retryDead` | action | `journal:retry` | medium |
-| `journal.discardJob` | action | `journal:delete` | medium |
-| `journal.purgeDead` | action | `journal:delete` | medium |
-| `journal.cancelJob` | action | `journal:delete` | high |
-| `journal.replayJob` | action | `journal:retry` | high |
+| Id                                                                                                                                                                          | Kind   | Permission       | Risk   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------------- | ------ |
+| `journal.jobs`, `journal.job`, `journal.jobCounts`, `journal.strandedJobs`, `journal.jobOperations`, `journal.archivedJobs`, `journal.archivedJob`, `journal.archiveStatus` | read   | `journal:read`   | read   |
+| `journal.retryJob`                                                                                                                                                          | action | `journal:retry`  | low    |
+| `journal.retryDead`                                                                                                                                                         | action | `journal:retry`  | medium |
+| `journal.discardJob`                                                                                                                                                        | action | `journal:delete` | medium |
+| `journal.purgeDead`                                                                                                                                                         | action | `journal:delete` | medium |
+| `journal.cancelJob`                                                                                                                                                         | action | `journal:delete` | high   |
+| `journal.replayJob`                                                                                                                                                         | action | `journal:retry`  | high   |
 
 Every action previews first. Execute re-checks the revision the approval pinned, runs the journal verb, and records the approver and the execution id in the operations audit. `retryDead` is all or nothing on the previewed set. `journal.replayJob` says in its preview that the new job has a new id.
 
 The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each with its own status. The codes are in `JOURNAL_JOBS_ERROR_CODES`:
 
-| Code | Name | Status | Meaning |
-| --- | --- | --- | --- |
-| `ARKI_JOURNAL_E001` | `staleRevision` | 409 | The job or set changed since the preview. |
-| `ARKI_JOURNAL_E002` | `notDead` | 409 | The action needs a dead job and it is not dead, or is gone. |
-| `ARKI_JOURNAL_E003` | `boundTooShort` | 400 | `purgeDead` `olderThanDays` is shorter than `retention.retryableFor`. |
-| `ARKI_JOURNAL_E004` | `notPending` | 409 | `cancelJob` needs a ready or delayed job. |
-| `ARKI_JOURNAL_E005` | `exists` | 409 | `replayJob` is blocked by a job with the same dedupe key. |
+| Code                | Name            | Status | Meaning                                                               |
+| ------------------- | --------------- | ------ | --------------------------------------------------------------------- |
+| `ARKI_JOURNAL_E001` | `staleRevision` | 409    | The job or set changed since the preview.                             |
+| `ARKI_JOURNAL_E002` | `notDead`       | 409    | The action needs a dead job and it is not dead, or is gone.           |
+| `ARKI_JOURNAL_E003` | `boundTooShort` | 400    | `purgeDead` `olderThanDays` is shorter than `retention.retryableFor`. |
+| `ARKI_JOURNAL_E004` | `notPending`    | 409    | `cancelJob` needs a ready or delayed job.                             |
+| `ARKI_JOURNAL_E005` | `exists`        | 409    | `replayJob` is blocked by a job with the same dedupe key.             |
 
 `journalReceiptStore` and `foremanReceiptTables` live here too. They used to be `@arki/admin/pg`. Import them from `@arki/journal/foreman`.
 
@@ -1038,18 +1050,18 @@ An entity table needs a string key column that is primary or unique (`id` by def
 
 ## Public imports
 
-| Import | What it holds |
-| --- | --- |
-| `@arki/journal` | the portable core: `initJournal`, `need`, `jobId`, the command failures |
-| `@arki/journal/pg` | `journalTables()`, the table definitions |
-| `@arki/journal/errors` | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
-| `@arki/journal/dot` | the optional `@arki/dot` plugin and feature slice (see Dot) |
-| `@arki/journal/orpc` | the optional oRPC error mapping (see Rejected rules) |
-| `@arki/journal/http` | `responseCache`, the Postgres cache for HTTP idempotency |
-| `@arki/journal/http/webhooks` | outgoing webhooks on the job table |
-| `@arki/journal/foreman` | the Foreman job console |
-| `@arki/journal/projection` | the projection entry for Dot tooling |
-| `@arki/journal/testing` | `openJournalDb(schema)`: in-memory PGlite with the schema pushed, for tests |
+| Import                        | What it holds                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `@arki/journal`               | the portable core: `initJournal`, `need`, `jobId`, the command failures                                           |
+| `@arki/journal/pg`            | `journalTables()`, the table definitions                                                                          |
+| `@arki/journal/errors`        | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
+| `@arki/journal/dot`           | the optional `@arki/dot` plugin and feature slice (see Dot)                                                       |
+| `@arki/journal/orpc`          | the optional oRPC error mapping (see Rejected rules)                                                              |
+| `@arki/journal/http`          | `responseCache`, the Postgres cache for HTTP idempotency                                                          |
+| `@arki/journal/http/webhooks` | outgoing webhooks on the job table                                                                                |
+| `@arki/journal/foreman`       | the Foreman job console                                                                                           |
+| `@arki/journal/projection`    | the projection entry for Dot tooling                                                                              |
+| `@arki/journal/testing`       | `openJournalDb(schema)`: in-memory PGlite with the schema pushed, for tests                                       |
 
 ## Failure behaviour
 

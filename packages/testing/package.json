@@ -136,7 +136,8 @@
     "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
     "drizzle-orm": "catalog:drizzle",
-    "pg": "catalog:drizzle"
+    "pg": "catalog:drizzle",
+    "@arki/failure": "workspace:*"
   },
   "devDependencies": {
     "@arki/auth": "workspace:*",

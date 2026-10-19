@@ -8,7 +8,7 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { History } from './history.js';
@@ -218,6 +218,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
       eventRow.entityId,
     );
+    if (isFailure(event)) return event;
     // Inside the lease: a hook that throws fails the job like a handler failure.
     return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () => {
       const { run, accept, settle } = deps.attemptOn(db, event, effect.name, { jobId: job.id, attempt: job.attempts });
@@ -498,7 +499,7 @@ export function createCatchUp<
         if (!kinds.has(row.kind) || !projection.types.has(row.type)) continue;
         await projection.run(
           tx,
-          decodeStoredEvent(row, findEventDefinition(projection.entities, row.kind, row.type), row.entityId),
+          orThrow(decodeStoredEvent(row, findEventDefinition(projection.entities, row.kind, row.type), row.entityId)),
         );
       }
       await tx
@@ -625,10 +626,8 @@ export function createTapDispatch<
       for (const tap of taps) {
         if (!tap.types.has(row.type) || !tap.entities.some(entity => entity.kind === row.kind)) continue;
         try {
-          const event = deps.history.decodeStoredEvent(
-            row,
-            findEventDefinition(tap.entities, row.kind, row.type),
-            row.entityId,
+          const event = orThrow(
+            deps.history.decodeStoredEvent(row, findEventDefinition(tap.entities, row.kind, row.type), row.entityId),
           );
           await tap.run(event, { db });
         } catch (error) {

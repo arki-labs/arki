@@ -10,6 +10,8 @@
 
 import { FlowProducer, Queue } from 'bullmq';
 
+import type { AsyncSchemaFailure } from '@arki/failure';
+
 import type { QueueConnection } from './redis-connection.ts';
 import type { FlowDefinition, FlowEnqueueResult, QueueEnqueue } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
@@ -62,15 +64,22 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
     data: TInput,
     options?: TriggerOptions,
   ): Promise<string>;
-  function enqueue<TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
+  function enqueue<TInput>(
+    flow: FlowDefinition<TInput>,
+    input: NoInfer<TInput>,
+  ): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
   async function enqueue(
     target: AnyJobDefinition | FlowDefinition,
     data: unknown,
     triggerOptions?: TriggerOptions,
-  ): Promise<string | FlowEnqueueResult> {
+  ): Promise<string | FlowEnqueueResult | AsyncSchemaFailure> {
     if (target._type === 'flow') {
       return addFlow(
-        () => (flowProducer ??= new FlowProducer({ connection: parseRedisConnection(options.connection), prefix: keyPrefix })),
+        () =>
+          (flowProducer ??= new FlowProducer({
+            connection: parseRedisConnection(options.connection),
+            prefix: keyPrefix,
+          })),
         target,
         data,
       );

@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { OrderId } from './test-support.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
@@ -50,7 +52,7 @@ describe('command hooks', () => {
       trail.push('inner:done');
     });
     const id = orderId(++next);
-    const result = await journal.run(db, placeOrder, { orderId: id }, meta, { correlationId: 'req_h' });
+    const result = orThrow(await journal.run(db, placeOrder, { orderId: id }, meta, { correlationId: 'req_h' }));
     expect(result.row).toMatchObject({ id, version: 1 });
     expect(trail).toEqual(['outer:placeOrder:cmd_:req_h', 'inner', 'inner:done', 'outer:done']);
   });
@@ -110,10 +112,10 @@ describe('command hooks', () => {
       await next();
     });
     const both = j.command('placeAndPay', z.object({ orderId: orderIdSchema }), async (input, { run }) => {
-      await run(placeOrder, input);
-      await run(payOrder, input);
+      orThrow(await run(placeOrder, input));
+      orThrow(await run(payOrder, input));
     });
-    await journal.run(db, both, { orderId: orderId(++next) }, meta, { correlationId: 'req_c' });
+    orThrow(await journal.run(db, both, { orderId: orderId(++next) }, meta, { correlationId: 'req_c' }));
     expect(seen).toEqual([
       ['placeAndPay', 'req_c'],
       ['placeOrder', 'req_c'],
@@ -123,7 +125,7 @@ describe('command hooks', () => {
 
   it('registration is frozen once the journal has run a command', async () => {
     const journal = j.compose({});
-    await journal.run(db, placeOrder, { orderId: orderId(++next) }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: orderId(++next) }, meta));
     expect(() => journal.hooks.command.around(async (_ctx, next) => next())).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );
@@ -147,8 +149,8 @@ describe('effect hooks', () => {
       await next();
     });
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id }, meta);
-    await journal.run(db, payOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
+    orThrow(await journal.run(db, payOrder, { orderId: id }, meta));
 
     expect(await journal.drain(db)).toBe(1);
     expect(ran).toEqual([]);

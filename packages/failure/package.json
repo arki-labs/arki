@@ -2,7 +2,7 @@
   "name": "@arki/failure",
   "version": "0.0.0",
   "private": false,
-  "description": "Typed expected failures for TypeScript without a wrapper: define a failure once, return it as a value, and the compiler makes every caller handle it. Early return, partial handling, cause chains, revival after JSON, a must-use lint rule and oRPC error maps.",
+  "description": "Typed failures for TypeScript without a wrapper: define a failure once, return it as a value, and the compiler makes every caller handle it. Early return, partial handling, cause chains, revival after JSON, a must-use lint rule and oRPC error maps.",
   "keywords": [
     "arki",
     "typescript",
@@ -43,7 +43,12 @@
       "import": "./dist/orpc.js",
       "default": "./dist/orpc.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    }
   },
   "files": [
     "dist/**",
@@ -77,7 +82,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/schema": "workspace:*"
+    "@standard-schema/spec": "^1.1.0"
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",

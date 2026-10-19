@@ -6,8 +6,10 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { Failure } from './failure.js';
+import type { RevivalFailure } from './revive.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
 import { defineFailure, isFailure } from './failure.js';
+import { InvalidEnvelope } from './foundations.js';
 import { match } from './handle.js';
 import { errorMap, orThrowRpc, reviveRpcError } from './orpc.js';
 
@@ -42,7 +44,10 @@ const procedure = implement(byId).handler(({ input, errors }) => orThrowRpc(find
 describe('errorMap', () => {
   it('builds the oRPC error map from the definitions', () => {
     expect(errorMap(PostNotFound, PostLocked)).toEqual({
-      'post.not_found': { status: 404, data: PostNotFound.dataSchema },
+      'post.not_found': {
+        status: 404,
+        data: expect.objectContaining({ '~standard': expect.objectContaining({ vendor: 'arki/failure' }) }),
+      },
       'post.locked': { status: 409 },
     });
   });
@@ -183,6 +188,7 @@ describe('reviveRpcError on the client', () => {
       data: { id: 'nope' },
     });
     const label = match(result, {
+      ...protocolHandlers,
       ok: post => post.title,
       'post.not_found': failure => `missing ${failure.data.id}`,
       'post.locked': () => 'locked',
@@ -190,6 +196,7 @@ describe('reviveRpcError on the client', () => {
     expect(label).toBe('missing nope');
     expect(
       match(await fetchPost('locked'), {
+        ...protocolHandlers,
         ok: () => 'ok',
         'post.not_found': () => 'missing',
         'post.locked': () => 'locked',
@@ -200,14 +207,14 @@ describe('reviveRpcError on the client', () => {
   it('types the result from the definitions passed, so a match must handle exactly those codes', async () => {
     const result = await fetchPost('p1');
     expectTypeOf(result).toEqualTypeOf<
-      Post | Failure<'post.not_found', { id: string }> | Failure<'post.locked', undefined>
+      Post | Failure<'post.not_found', { id: string }> | Failure<'post.locked', undefined> | RevivalFailure
     >();
     expect(result).toEqual({ id: 'p1', title: 'Hello' });
   });
 
   it('returns undefined for errors it was not told about, so unknown errors stay thrown as bugs', async () => {
     const locked = await call(procedure, { id: 'locked' }).catch((error_: unknown) => error_);
-    expect(reviveRpcError(locked, [PostNotFound])).toBeUndefined();
+    expect(reviveRpcError(locked, [PostNotFound])).toMatchObject({ data: { reason: 'unknown_code' } });
     expect(reviveRpcError(new TypeError('network down'), [PostNotFound])).toBeUndefined();
     // A plain object that only looks like the error is JSON, not a caught ORPCError: that is revive's job.
     expect(reviveRpcError({ code: 'post.not_found', data: { id: 'x' } }, [PostNotFound])).toBeUndefined();
@@ -215,9 +222,7 @@ describe('reviveRpcError on the client', () => {
 
   it('refuses data that does not match the schema, so a server and client on different definitions fail loudly', () => {
     const drifted = new ORPCError('post.not_found', { status: 404, data: { id: 42 } });
-    expect(() => reviveRpcError(drifted, [PostNotFound])).toThrow(
-      expect.objectContaining({ code: FAILURE_ERROR_CODES.invalidData }),
-    );
+    expect(InvalidEnvelope.is(reviveRpcError(drifted, [PostNotFound]))).toBe(true);
   });
 });
 
@@ -234,3 +239,10 @@ describe('browser safety', () => {
     expect(ClientORPCError).toBe(ORPCError);
   });
 });
+
+const protocolHandlers = {
+  'failure.invalid_envelope': () => 'invalid envelope',
+  'schema.async_required': () => 'async schema',
+  'schema.validator_defect': () => 'validator defect',
+  'failure.unexpected_defect': () => 'unexpected defect',
+};

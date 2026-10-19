@@ -17,11 +17,7 @@
  * (`CommandNotFound`, `CommandConflict`, `CommandInvalid`): nothing is written.
  */
 
-import type { Result } from '@arki/failure';
 import type {
-  CommandConflict,
-  CommandInvalid,
-  CommandNotFound,
   CommandRunner,
   JournalDefinitions,
   RootDb,
@@ -51,7 +47,6 @@ import type {
   SyncSubscriptionInput,
 } from './journal/subscription.js';
 import type { CoreTables } from './tables.js';
-import type { Payment, Subscription } from './types.js';
 import { createPaymentJournal } from './journal/payment.js';
 import { createSubscriptionJournal } from './journal/subscription.js';
 import { writtenRow } from './journal/support.js';
@@ -102,41 +97,7 @@ export type {
  * runs one command and returns the row as it is after the write, or the
  * failure the command returned when a rule said no (nothing was written).
  */
-export type CoreWrites = {
-  initiatePayment(input: InitiatePaymentInput): Promise<Result<Payment, CommandConflict>>;
-  completePayment(input: CompletePaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
-  failPayment(input: FailPaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
-  cancelPayment(input: CancelPaymentInput): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
-  /** The customer must act (for example 3-D Secure). A payment that already waits stays as it is. */
-  markPaymentRequiresAction(
-    input: MarkPaymentRequiresActionInput,
-  ): Promise<Result<Payment, CommandNotFound | CommandConflict>>;
-  /** The provider refunded the payment. Takes the total refunded so far; a total that is not higher writes nothing. */
-  recordPaymentRefund(
-    input: RecordPaymentRefundInput,
-  ): Promise<Result<Payment, CommandNotFound | CommandConflict | CommandInvalid>>;
-  /** A dispute opened or changed status. The same dispute and status again writes nothing. */
-  recordPaymentDispute(input: RecordPaymentDisputeInput): Promise<Result<Payment, CommandNotFound>>;
-  createSubscription(input: CreateSubscriptionInput): Promise<Result<Subscription, CommandConflict>>;
-  /** Create or update by the provider's subscription id. A delivery that changes nothing writes no event. */
-  syncSubscription(input: SyncSubscriptionInput): Promise<Subscription>;
-  cancelSubscription(input: CancelSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-  reactivateSubscription(
-    input: ReactivateSubscriptionInput,
-  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-  pauseSubscription(input: PauseSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-  resumeSubscription(input: ResumeSubscriptionInput): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-  /** The provider moved the subscription to another plan. The same plan again writes nothing. */
-  changeSubscriptionPlan(input: ChangeSubscriptionPlanInput): Promise<Result<Subscription, CommandNotFound>>;
-  /** Set or clear "ends at the period end", as the provider reports it. The status does not change. */
-  setSubscriptionCancelAtPeriodEnd(
-    input: SetSubscriptionCancelAtPeriodEndInput,
-  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-  markSubscriptionPastDue(input: MarkSubscriptionPastDueInput): Promise<Result<Subscription, CommandNotFound>>;
-  activateSubscription(
-    input: ActivateSubscriptionInput,
-  ): Promise<Result<Subscription, CommandNotFound | CommandConflict>>;
-};
+export type CoreWrites = ReturnType<ReturnType<typeof createCoreJournal>['writes']>;
 
 export function createCoreJournal<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
@@ -152,29 +113,45 @@ export function createCoreJournal<
     events: { ...payments.events, ...subscriptions.events },
     commands,
     /** `run` is the app's command runner: `context.runCommand` in a request, `ctx.run` inside a command. */
-    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>): CoreWrites => ({
-      initiatePayment: input => writtenRow(run(commands.initiatePayment, input), 'initiatePayment'),
-      completePayment: input => writtenRow(run(commands.completePayment, input), 'completePayment'),
-      failPayment: input => writtenRow(run(commands.failPayment, input), 'failPayment'),
-      cancelPayment: input => writtenRow(run(commands.cancelPayment, input), 'cancelPayment'),
-      markPaymentRequiresAction: input =>
+    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>) => ({
+      initiatePayment: (input: InitiatePaymentInput) =>
+        writtenRow(run(commands.initiatePayment, input), 'initiatePayment'),
+      completePayment: (input: CompletePaymentInput) =>
+        writtenRow(run(commands.completePayment, input), 'completePayment'),
+      failPayment: (input: FailPaymentInput) => writtenRow(run(commands.failPayment, input), 'failPayment'),
+      cancelPayment: (input: CancelPaymentInput) => writtenRow(run(commands.cancelPayment, input), 'cancelPayment'),
+      /** The customer must act (for example 3-D Secure). An already waiting payment stays as it is. */
+      markPaymentRequiresAction: (input: MarkPaymentRequiresActionInput) =>
         writtenRow(run(commands.markPaymentRequiresAction, input), 'markPaymentRequiresAction'),
-      recordPaymentRefund: input => writtenRow(run(commands.recordPaymentRefund, input), 'recordPaymentRefund'),
-      recordPaymentDispute: input => writtenRow(run(commands.recordPaymentDispute, input), 'recordPaymentDispute'),
-      createSubscription: input => writtenRow(run(commands.createSubscription, input), 'createSubscription'),
-      syncSubscription: input => writtenRow(run(commands.syncSubscription, input), 'syncSubscription'),
-      cancelSubscription: input => writtenRow(run(commands.cancelSubscription, input), 'cancelSubscription'),
-      reactivateSubscription: input =>
+      /** The provider refunded the payment. A total that is not higher writes nothing. */
+      recordPaymentRefund: (input: RecordPaymentRefundInput) =>
+        writtenRow(run(commands.recordPaymentRefund, input), 'recordPaymentRefund'),
+      /** The same dispute and status again writes nothing. */
+      recordPaymentDispute: (input: RecordPaymentDisputeInput) =>
+        writtenRow(run(commands.recordPaymentDispute, input), 'recordPaymentDispute'),
+      createSubscription: (input: CreateSubscriptionInput) =>
+        writtenRow(run(commands.createSubscription, input), 'createSubscription'),
+      /** Create or update by provider subscription id. An unchanged delivery writes no event. */
+      syncSubscription: (input: SyncSubscriptionInput) =>
+        writtenRow(run(commands.syncSubscription, input), 'syncSubscription'),
+      cancelSubscription: (input: CancelSubscriptionInput) =>
+        writtenRow(run(commands.cancelSubscription, input), 'cancelSubscription'),
+      reactivateSubscription: (input: ReactivateSubscriptionInput) =>
         writtenRow(run(commands.reactivateSubscription, input), 'reactivateSubscription'),
-      pauseSubscription: input => writtenRow(run(commands.pauseSubscription, input), 'pauseSubscription'),
-      resumeSubscription: input => writtenRow(run(commands.resumeSubscription, input), 'resumeSubscription'),
-      changeSubscriptionPlan: input =>
+      pauseSubscription: (input: PauseSubscriptionInput) =>
+        writtenRow(run(commands.pauseSubscription, input), 'pauseSubscription'),
+      resumeSubscription: (input: ResumeSubscriptionInput) =>
+        writtenRow(run(commands.resumeSubscription, input), 'resumeSubscription'),
+      /** The same provider plan again writes nothing. */
+      changeSubscriptionPlan: (input: ChangeSubscriptionPlanInput) =>
         writtenRow(run(commands.changeSubscriptionPlan, input), 'changeSubscriptionPlan'),
-      setSubscriptionCancelAtPeriodEnd: input =>
+      /** Set or clear ends at period end without changing the status. */
+      setSubscriptionCancelAtPeriodEnd: (input: SetSubscriptionCancelAtPeriodEndInput) =>
         writtenRow(run(commands.setSubscriptionCancelAtPeriodEnd, input), 'setSubscriptionCancelAtPeriodEnd'),
-      markSubscriptionPastDue: input =>
+      markSubscriptionPastDue: (input: MarkSubscriptionPastDueInput) =>
         writtenRow(run(commands.markSubscriptionPastDue, input), 'markSubscriptionPastDue'),
-      activateSubscription: input => writtenRow(run(commands.activateSubscription, input), 'activateSubscription'),
+      activateSubscription: (input: ActivateSubscriptionInput) =>
+        writtenRow(run(commands.activateSubscription, input), 'activateSubscription'),
     }),
   };
 }

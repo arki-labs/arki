@@ -10,13 +10,14 @@
 
 import type { FlowJob, FlowJobNode, FlowProducer, JobNode } from 'bullmq';
 
-import { parseAsync, SchemaError } from '@arki/schema';
+import type { AsyncSchemaFailure } from '@arki/failure';
+import { InvalidInput, ValidatorDefect } from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { FlowDefinition, FlowEnqueueResult } from './types/builder.ts';
 import type { AnyJobDefinition } from './types/job.ts';
 import { debugFlow } from './debug.ts';
-import { QUEUE_INPUT_ERROR_CODES, QueueInputError } from './errors.ts';
 import { jobDefaultOptions } from './job-options.ts';
 
 type BuiltFlow = InternalFlowDefinition<unknown, AnyJobDefinition>;
@@ -70,21 +71,11 @@ export function toFlowJobs(flow: FlowDefinition, input: unknown): FlowJob[] {
 
 /**
  * Validate `input` with the flow's schema (async: the enqueue call already awaits).
- * Throws `ARKI_QUEUE_E018` when the input does not match; a broken schema (`SchemaRunError`) propagates.
+ * Returns `InvalidInput` when the input does not match, or `ValidatorDefect` when the schema cannot run.
  */
 export async function parseFlowInput(flow: FlowDefinition, input: unknown): Promise<unknown> {
   const internal = flow._internal as BuiltFlow;
-  try {
-    return await parseAsync(internal.inputSchema, input);
-  } catch (error) {
-    if (!(error instanceof SchemaError)) throw error;
-    throw new QueueInputError({
-      code: QUEUE_INPUT_ERROR_CODES.invalidFlowInput,
-      message: `Input of flow "${internal.name}" does not match its schema: ${error.message}`,
-      remediation: 'Pass enqueue(flow, input) an input that matches the schema given to .input(); see `cause`.',
-      cause: error,
-    });
-  }
+  return parseAsync(internal.inputSchema, input);
 }
 
 function collectJobIds(trees: readonly StepTree[], nodes: readonly JobNode[], into: Record<string, string>): void {
@@ -105,9 +96,10 @@ export async function addFlow(
   openProducer: () => FlowProducer,
   flow: FlowDefinition,
   input: unknown,
-): Promise<FlowEnqueueResult> {
+): Promise<FlowEnqueueResult | AsyncSchemaFailure> {
   const internal = flow._internal as BuiltFlow;
   const validated = await parseFlowInput(flow, input);
+  if (InvalidInput.is(validated) || ValidatorDefect.is(validated)) return validated;
   const nodes = await openProducer().addBulk(toFlowJobs(flow, validated));
 
   const jobIds: Record<string, string> = {};

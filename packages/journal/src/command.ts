@@ -8,7 +8,9 @@
 import { eq, is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
+import type { SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, RunOptions } from './api.js';
@@ -128,16 +130,18 @@ export function createCommandRunner<
     source: TransactionSource<Tx>,
     command: Command<S, R, MetaOut, Tx>,
     input: SchemaInput<S>,
-    getValidatedMeta: () => Promise<MetaOut>,
+    getValidatedMeta: () => Promise<MetaOut | SchemaFailure>,
     onJobs: (count: number) => void,
     parent: Omit<Trace, 'commandId'>,
     key: string | undefined,
     fence?: Fence,
-  ): Promise<Awaited<R>> =>
-    oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R>> => {
+  ): Promise<Awaited<R> | SchemaFailure> =>
+    oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R> | SchemaFailure> => {
       hooks.freeze();
       const meta = await getValidatedMeta();
+      if (isSchemaFailure(meta)) return meta;
       const parsed = await parseAsync<SchemaOutput<S>>(command.input, input);
+      if (isSchemaFailure(parsed)) return parsed;
       const own = commandId();
       const trace: Trace = { ...parent, commandId: own };
       debugCommand.debug('{commandName}: input ok ({own}, {correlationId})', {
@@ -147,8 +151,8 @@ export function createCommandRunner<
       });
       // A failure the handler or `authorize` returns rolls the transaction back, like a throw,
       // and is what the run returns: a rule that says no never leaves half a change behind.
-      const refusal = rollbackOnFailure<Awaited<R>>();
-      const transaction = source.transaction(async (tx): Promise<Awaited<R>> => {
+      const refusal = rollbackOnFailure<Awaited<R> | SchemaFailure>();
+      const transaction = source.transaction(async (tx): Promise<Awaited<R> | SchemaFailure> => {
         // First statement of the transaction: a stale owner commits nothing, and a claim waits for this commit.
         await fence?.(tx);
         // Every operation the handler starts through this context. The transaction
@@ -169,7 +173,7 @@ export function createCommandRunner<
         const refusals = trackRefusals('command', command.name, 'write or run');
         const { watch } = refusals;
         /** The handler's result, unless it is a success after a failure it did not accept: then the run throws and rolls back. */
-        const handle = async (): Promise<Awaited<R>> => {
+        const handle = async (): Promise<Awaited<R> | SchemaFailure> => {
           let value: Awaited<R>;
           try {
             value = await command.handler(parsed, context);
@@ -210,7 +214,7 @@ export function createCommandRunner<
             ),
           accept: refusals.accept,
         };
-        let result: Awaited<R>;
+        let result: Awaited<R> | SchemaFailure;
         try {
           // Inside the transaction: a hook that throws rolls the command back cleanly.
           result = await hooks.run(
@@ -222,7 +226,7 @@ export function createCommandRunner<
               correlationId: trace.correlationId,
               idempotencyKey: key ?? null,
             },
-            async (): Promise<Awaited<R>> => {
+            async (): Promise<Awaited<R> | SchemaFailure> => {
               // Before the receipt: a receipt proves the command ran once, not that this caller
               // may have its result. A replay is authorized like a first run.
               if (command.authorize !== undefined) {
@@ -275,7 +279,7 @@ export function createCommandRunner<
     opts?: RunOptions,
     cause?: { readonly seq: number; readonly correlationId: string | null },
     fence?: Fence,
-  ): Promise<Awaited<R>> => {
+  ): Promise<Awaited<R> | SchemaFailure> => {
     let queued = 0;
     return runCommand(
       source,
@@ -283,8 +287,10 @@ export function createCommandRunner<
       input,
       async () => {
         const parsed = await parseAsync<SchemaOutput<Meta>>(metaSchema, meta);
+        if (isSchemaFailure(parsed)) return parsed;
         // No entity yet: the error names the command instead.
-        assertRoundTrips(metaSchema, parsed, 'command', command.name, 'meta');
+        const checked = assertRoundTrips(metaSchema, parsed, 'command', command.name, 'meta');
+        if (isFailure(checked)) return checked;
         return parsed;
       },
       count => {

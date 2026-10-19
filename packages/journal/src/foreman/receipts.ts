@@ -24,6 +24,7 @@ import type { ReceiptClaimResult, ReceiptStore, StoredReceipt } from '@arki/admi
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { ADMIN_ERROR_CODES, AdminError } from '@arki/admin/module';
 import { pendingReceiptSchema, settledReceiptSchema, storedReceiptSchema } from '@arki/admin/receipts';
+import { orThrow } from '@arki/failure';
 
 import type { Journal, JournalDefinitions, RootDb, TransactionSource } from '../index.js';
 import { isJournalError } from '../index.js';
@@ -80,8 +81,10 @@ export function journalReceiptStore<
     'foreman.receipts.claim',
     z.object({ receipt: pendingReceiptSchema }),
     async (input, { write }): Promise<ReceiptClaimResult> => {
-      const { row, events } = await write(receipt, input.receipt.executionId, held =>
-        held === null ? [ReceiptClaimed({ receipt: input.receipt })] : [],
+      const { row, events } = orThrow(
+        await write(receipt, input.receipt.executionId, held =>
+          held === null ? [ReceiptClaimed({ receipt: input.receipt })] : [],
+        ),
       );
       return events.length > 0 ? { claimed: true } : { claimed: false, receipt: parseStored(row?.receipt) };
     },
@@ -91,29 +94,31 @@ export function journalReceiptStore<
     'foreman.receipts.settle',
     z.object({ receipt: settledReceiptSchema }),
     async (input, { write }): Promise<void> => {
-      await write(receipt, input.receipt.executionId, held => {
-        // Only the claimer settles, once. Anything else is a bug worth seeing.
-        if (held?.receipt.status !== 'pending') {
-          throw new AdminError(
-            ADMIN_ERROR_CODES.handlerFailed,
-            `Execution ${input.receipt.executionId} has no pending receipt to settle.`,
-            'Receipts are settled only by the dispatcher that claimed them.',
-          );
-        }
-        return [ReceiptSettled({ receipt: input.receipt })];
-      });
+      orThrow(
+        await write(receipt, input.receipt.executionId, held => {
+          // Only the claimer settles, once. Anything else is a bug worth seeing.
+          if (held?.receipt.status !== 'pending') {
+            throw new AdminError(
+              ADMIN_ERROR_CODES.handlerFailed,
+              `Execution ${input.receipt.executionId} has no pending receipt to settle.`,
+              'Receipts are settled only by the dispatcher that claimed them.',
+            );
+          }
+          return [ReceiptSettled({ receipt: input.receipt })];
+        }),
+      );
     },
   );
 
   const get = async (executionId: string): Promise<StoredReceipt | undefined> => {
-    const { row } = await journal.replay(db, receipt, executionId);
+    const { row } = orThrow(await journal.replay(db, receipt, executionId));
     return parseStored(row?.receipt);
   };
 
   return {
     async claim(pending) {
       try {
-        return await journal.run(db, claimCommand, { receipt: pending }, meta);
+        return orThrow(await journal.run(db, claimCommand, { receipt: pending }, meta));
       } catch (error) {
         // Two claims raced to create the row: the loser sees the winner's receipt.
         if (isJournalError(error, 'CONFLICT')) return { claimed: false, receipt: await get(pending.executionId) };
@@ -121,7 +126,7 @@ export function journalReceiptStore<
       }
     },
     async settle(settled) {
-      await journal.run(db, settleCommand, { receipt: settled }, meta);
+      orThrow(await journal.run(db, settleCommand, { receipt: settled }, meta));
     },
     get,
   };

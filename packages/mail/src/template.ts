@@ -2,9 +2,9 @@
  * Templates are plain objects. One Standard Schema types both sides: callers pass its input,
  * renderers receive its output (defaults applied, values coerced).
  */
-import type { FailureOf } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { parseAsync, pathOf, SchemaError } from '@arki/schema';
+import { InvalidInput, ValidatorDefect } from '@arki/failure';
+import { parseAsync, pathOf } from '@arki/schema';
 
 import type { Address, Addresses, Awaitable, MailContent, RenderContext } from './types.js';
 import { MailInvalidInput } from './failures.js';
@@ -53,18 +53,18 @@ export async function renderTemplate<S extends StandardSchemaV1>(
   template: MailTemplate<S>,
   input: NoInfer<SchemaInput<S>>,
   context: RenderContext = {},
-): Promise<MailContent | FailureOf<typeof MailInvalidInput>> {
-  let data: SchemaOutput<S>;
-  try {
-    data = await parseAsync(template.input, input);
-  } catch (error) {
-    // Bad data is a result. A schema that cannot run (`SchemaRunError`) is a bug and is rethrown.
-    if (!(error instanceof SchemaError)) throw error;
+) {
+  const data = await parseAsync<SchemaOutput<S>>(template.input, input);
+  if (InvalidInput.is(data)) {
     return MailInvalidInput({
       template: template.name,
-      issues: error.issues.map(issue => ({ path: pathOf(issue).map(key => plainKey(key)), message: issue.message })),
+      issues: data.data.issues.map(issue => ({
+        path: pathOf(issue).map(key => plainKey(key)),
+        message: issue.message,
+      })),
     });
   }
+  if (ValidatorDefect.is(data)) return data;
   const [text, html] = await Promise.all([template.text(data, context), template.html?.(data, context)]);
   return {
     subject: template.subject(data, context),
@@ -72,5 +72,5 @@ export async function renderTemplate<S extends StandardSchemaV1>(
     ...(html === undefined ? {} : { html }),
     ...(template.defaults?.headers === undefined ? {} : { headers: template.defaults.headers }),
     ...(template.defaults?.tags === undefined ? {} : { tags: template.defaults.tags }),
-  };
+  } satisfies MailContent;
 }

@@ -30,14 +30,14 @@
 
 import { z } from 'zod';
 
-import { revive } from '@arki/failure';
-import { formatIssues, parseAsync, SchemaError } from '@arki/schema';
+import { InvalidEnvelope, InvalidInput, orThrow, revive } from '@arki/failure';
+import { formatIssues, parseAsync } from '@arki/schema';
 
 import type { PathParams, ResponseSchemas, RouteContract, RouteDef, RouteFailure, RouteInput } from './contract.js';
-import { HTTP_ERROR_CODES, HttpError } from './error.js';
 import type { RawOutput } from './raw.js';
-import { isRawOutput } from './raw.js';
 import type { Fields, Job, Ran, Where, Wire, WireValue } from './wire.js';
+import { HTTP_ERROR_CODES, HttpError } from './error.js';
+import { isRawOutput } from './raw.js';
 import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs } from './wire.js';
 
 /** Any JSON route contract — what {@link createClient} accepts. */
@@ -261,7 +261,11 @@ type EncodedInput = {
 };
 
 /** One encode job per field the caller gave (or a required one it left out, which then fails). */
-function fieldJobs(where: Exclude<Where, 'body'>, fields: Fields, values: Readonly<Record<string, unknown>> | undefined): Job[] {
+function fieldJobs(
+  where: Exclude<Where, 'body'>,
+  fields: Fields,
+  values: Readonly<Record<string, unknown>> | undefined,
+): Job[] {
   const jobs: Job[] = [];
   for (const [key, field] of Object.entries(fields)) {
     const { wire, optional } = fieldParts(field);
@@ -292,7 +296,7 @@ function collect(contract: AnyRoute, input: ErasedInput, runs: readonly Ran[]): 
   const issues = issuesOf(runs);
   if (issues.length > 0) {
     throw new HttpError(400, HTTP_ERROR_CODES.badRequest, `request validation failed: ${formatIssues(issues)}`, {
-      cause: new SchemaError(issues),
+      cause: InvalidInput({ issues }),
     });
   }
   const strings: Record<Exclude<Where, 'body'>, Record<string, string>> = { params: {}, query: {}, headers: {} };
@@ -307,7 +311,8 @@ function collect(contract: AnyRoute, input: ErasedInput, runs: readonly Ran[]): 
     const [where, key] = job.at;
     if (result.issues !== undefined) continue;
     if (where === 'body') body = result.value;
-    else if (key !== undefined && result.value !== undefined) strings[where][key] = scalarString(where, key, result.value);
+    else if (key !== undefined && result.value !== undefined)
+      strings[where][key] = scalarString(where, key, result.value);
   }
   return { ...strings, body };
 }
@@ -457,20 +462,17 @@ async function decodeBody(contract: AnyRoute, output: Wire, response: Response):
       cause: error,
     });
   }
-  try {
-    return await parseAsync(decoderOf(output), body);
-  } catch (error) {
-    if (!(error instanceof SchemaError)) throw error;
-    throw new HttpError(
-      500,
-      HTTP_ERROR_CODES.internal,
-      `response for "${contract.id}" violates the contract's output schema: ${messageOf(error)}`,
-      {
-        cause: error,
-        remediation: 'The client and server disagree on the contract. Deploy the same contract version to both.',
-      },
-    );
-  }
+  const error = await parseAsync(decoderOf(output), body);
+  if (!InvalidInput.is(error)) return orThrow(error);
+  throw new HttpError(
+    500,
+    HTTP_ERROR_CODES.internal,
+    `response for "${contract.id}" violates the contract's output schema: ${messageOf(error)}`,
+    {
+      cause: error,
+      remediation: 'The client and server disagree on the contract. Deploy the same contract version to both.',
+    },
+  );
 }
 
 const errorEnvelopeSchema = z.object({
@@ -515,20 +517,21 @@ async function toListedFailure(contract: AnyRoute, response: Response): Promise<
 /** The listed failure the envelope's code names, its data checked by `revive`; `undefined` when not listed. */
 function reviveListed(contract: AnyRoute, error: { readonly code: string; readonly data?: unknown }): unknown {
   if (contract.failures === undefined) return undefined;
-  try {
-    return revive(error, contract.failures);
-  } catch (error_) {
-    throw new HttpError(
-      500,
-      HTTP_ERROR_CODES.internal,
-      `failure "${error.code}" from "${contract.id}" carries data its definition rejects: ${messageOf(error_)}`,
-      {
-        cause: error_,
-        remediation:
-          'The client and server disagree on the failure definition. Deploy the same contract version to both.',
-      },
-    );
-  }
+  return revive(error, contract.failures, {
+    onInvalid(failure) {
+      if (InvalidEnvelope.is(failure) && failure.data.reason === 'unknown_code') return;
+      throw new HttpError(
+        500,
+        HTTP_ERROR_CODES.internal,
+        `failure "${error.code}" from "${contract.id}" carries data its definition rejects: ${failure.message}`,
+        {
+          cause: failure,
+          remediation:
+            'The client and server disagree on the failure definition. Deploy the same contract version to both.',
+        },
+      );
+    },
+  });
 }
 
 /** The wire code a status maps to when the response carried no envelope (a proxy, a gateway). */
@@ -541,6 +544,6 @@ function codeForStatus(status: number): string {
 }
 
 function messageOf(error: unknown): string {
-  if (error instanceof SchemaError) return formatIssues(error.issues);
+  if (InvalidInput.is(error)) return formatIssues(error.data.issues);
   return error instanceof Error ? error.message : String(error);
 }

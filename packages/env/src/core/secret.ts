@@ -67,7 +67,7 @@ const HIDDEN_ISSUE_MESSAGE = 'Invalid secret (details hidden so the value cannot
  * Validate with `schema` (any Standard Schema), then wrap the value in a {@link Redacted}. For an
  * optional secret, call `.optional()`: `secret(z.string()).optional()`. The inner result passes
  * straight through: an async inner schema yields a promise, so `defineEnv`'s synchronous check
- * fails with the same `SchemaRunError` it would give without `secret`, and a throwing validator
+ * fails with the same `UnexpectedFailure` it would give without `secret`, and a throwing validator
  * still throws.
  *
  * @example

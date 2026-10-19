@@ -9,7 +9,8 @@
  */
 
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { isStandardSchema, pathOf, SCHEMA_ERROR_CODES, SchemaRunError } from '@arki/schema';
+import { UnexpectedFailure, ValidatorDefect } from '@arki/failure';
+import { isStandardSchema, pathOf } from '@arki/schema';
 
 import type { RawOutput } from './raw.js';
 import { isRawOutput } from './raw.js';
@@ -157,21 +158,14 @@ export const missingField: StandardSchemaV1 = {
 /** A finished {@link Job}. */
 export type Ran = { readonly job: Job; readonly result: StandardSchemaV1.Result<unknown> };
 
-const THREW_REMEDIATION = 'Fix the schema: validate must return issues, never throw. The thrown value is the cause.';
-
-function threw(vendor: string, error: unknown): SchemaRunError {
-  return new SchemaRunError(
-    SCHEMA_ERROR_CODES.validatorThrew,
-    `the "${vendor}" schema threw or rejected instead of returning a result`,
-    THREW_REMEDIATION,
-    { cause: error },
-  );
+function threw(error: unknown) {
+  return new UnexpectedFailure(ValidatorDefect({ cause: error }));
 }
 
 /**
  * Run one schema. Synchronous when the schema answers synchronously, so a
  * route whose schemas are all sync never waits a microtask. A throw or a
- * rejection is a {@link SchemaRunError}, never issues: it answers 500.
+ * rejection is an explicit `UnexpectedFailure` carrying `ValidatorDefect`, never issues: it answers 500.
  */
 export function runSchema(schema: StandardSchemaV1, value: unknown): MaybePromise<StandardSchemaV1.Result<unknown>> {
   const standard = schema['~standard'];
@@ -179,11 +173,11 @@ export function runSchema(schema: StandardSchemaV1, value: unknown): MaybePromis
   try {
     result = standard.validate(value);
   } catch (error) {
-    throw threw(standard.vendor, error);
+    throw threw(error);
   }
   if (isThenable(result)) {
     return Promise.resolve(result).catch((error: unknown) => {
-      throw threw(standard.vendor, error);
+      throw threw(error);
     });
   }
   return result;

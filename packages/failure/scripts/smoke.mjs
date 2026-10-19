@@ -11,16 +11,20 @@ import {
   defineFailure,
   FailureError,
   findCause,
+  InvalidInput,
   isFailure,
   match,
   orThrow,
   partition,
   recover,
   revive,
+  serialize,
   stoppable,
   UnexpectedFailure,
+  ValidatorDefect,
 } from '../dist/index.js';
 import { orThrowRpc } from '../dist/orpc.js';
+import { parse, parseAsync } from '../dist/schema.js';
 
 /** A minimal Standard Schema object, so the smoke test needs no validator library. */
 function idSchema() {
@@ -83,6 +87,24 @@ async function main() {
   const finished = stoppable({ delivered: 3 });
 
   const checks = [
+    ['schema returns output', parse(idSchema(), { id: 1 }).id, 1],
+    ['schema returns invalid input', InvalidInput.is(parse(idSchema(), false)), true],
+    ['async schema returns output', (await parseAsync(idSchema(), { id: 2 })).id, 2],
+    [
+      'validator defects are typed',
+      ValidatorDefect.is(
+        parse(
+          {
+            get '~standard'() {
+              throw new Error('private');
+            },
+          },
+          null,
+        ),
+      ),
+      true,
+    ],
+    ['versioned wire envelope', serialize(NotFound({ id: 3 }), [NotFound]).version, 1],
     ['success is the plain value', isFailure(found) ? 'failure' : found.name, 'one'],
     ['failure is recognised', isFailure(missing) && missing.code, 'item.not_found'],
     ['message template', missing.message, 'no item 2'],

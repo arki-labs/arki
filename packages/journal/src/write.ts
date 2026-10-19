@@ -6,9 +6,10 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 
-import type { Failure } from '@arki/failure';
+import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isUniqueViolation } from '@arki/db/errors';
+import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
@@ -123,17 +124,17 @@ export function createWriter<
     Tbl extends EntityTable,
     E extends AnyEventDef,
     Key extends string,
-    Returned extends readonly PendingOf<E>[] | Failure,
+    Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure,
   >(
     tx: Tx,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-    getValidatedMeta: () => MetaOut,
+    getValidatedMeta: () => MetaOut | SchemaFailure,
     events: NextEvents<Tbl, E, Tx, Returned>,
     trace: Trace,
     onJobs?: (count: number) => void,
     opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>> => {
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure> => {
     const adopting = opts?.mode === 'adopt';
     const expectedVersion = opts?.expectedVersion;
     if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
@@ -141,8 +142,11 @@ export function createWriter<
     return oneAtATime(tx, `${adopting ? 'adopt' : 'write to'} ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
       const meta = getValidatedMeta();
+      if (isSchemaFailure(meta)) return meta;
       // A failure `events` returns rolls the savepoint back, like a throw, and is the write's result.
-      const refusal = rollbackOnFailure<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>>();
+      const refusal = rollbackOnFailure<
+        WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure
+      >();
       const savepoint = tx.transaction(async sp => {
         // Before the row lock, so every journal transaction takes its locks in the same
         // order (append lock, then rows) and two commands writing two entities cannot deadlock.
@@ -170,7 +174,11 @@ export function createWriter<
           throw new Error(
             `journal: events for ${entity.kind} ${id} returned ${typeof returned}; return an array of events, or a failure`,
           );
-        const pending = returned;
+        const pending: PendingOf<E>[] = [];
+        for (const event of returned) {
+          if (isSchemaFailure(event)) return refusal.settle(event);
+          pending.push(event);
+        }
         if (pending.length === 0) {
           debugWrite.debug('{kind} {id}: events returned nothing', { kind: entity.kind, id });
           return { row, events: [] };
@@ -203,13 +211,17 @@ export function createWriter<
         }
         // Adopt records the create as version 1, so the history is complete from then on.
         const baseVersion = adopting ? 0 : row === null ? latestLogVersion : stored === 0 ? 1 : stored;
-        if (row === null && latestLogVersion > 0) await assertLogSaysGone(sp, entity, id, latestLogVersion);
+        if (row === null && latestLogVersion > 0) {
+          const checked = await assertLogSaysGone(sp, entity, id, latestLogVersion);
+          if (isFailure(checked)) return refusal.settle(checked);
+        }
 
         // Cheap checks before touching the log. The fold below catches the rest
         // (for example a non-create event after a reducer returned null).
         // Data is parsed here too: a hand-built `{ type, data }` skips the constructor,
         // and a schema that changes its own output would replay to a different value.
-        const validated = pending.map((event, index) => {
+        const validated: { readonly data: unknown; readonly schemaVersion: number }[] = [];
+        for (const [index, event] of pending.entries()) {
           const def = entity.events.get(event.type);
           if (def === undefined)
             throw new JournalError(
@@ -219,9 +231,11 @@ export function createWriter<
               `event "${event.type}" at version ${baseVersion + index + 1}`,
             );
           const data: unknown = parse(def.schema, event.data);
-          assertRoundTrips(def.schema, data, entity.kind, id, `event "${event.type}"`);
-          return { data, schemaVersion: def.version };
-        });
+          if (isSchemaFailure(data)) return refusal.settle(data);
+          const checked = assertRoundTrips(def.schema, data, entity.kind, id, `event "${event.type}"`);
+          if (isFailure(checked)) return refusal.settle(checked);
+          validated.push({ data, schemaVersion: def.version });
+        }
         const firstType = pending[0]?.type ?? '';
         const firstAt = `event "${firstType}" at version ${baseVersion + 1}`;
         const first = entity.reducers.get(firstType);
@@ -282,9 +296,13 @@ export function createWriter<
         // way replay decodes them. A hand-built pending event may carry keys the schema
         // strips; those never reach a reducer, so write and replay fold the same data.
         // The filter only narrows the type and drops nothing: see `hasDeclaredEventType`.
-        const recorded = sortedByVersion(inserted)
-          .map(stored => decodeStoredEvent(stored, entity.events.get(stored.type), id))
-          .filter(event => hasDeclaredEventType(entity, event));
+        const decoded: Recorded<string, unknown, MetaOut, EntityId<Tbl, Key>>[] = [];
+        for (const stored of sortedByVersion(inserted)) {
+          const event = decodeStoredEvent(stored, entity.events.get(stored.type), id);
+          if (isFailure(event)) return refusal.settle(event);
+          decoded.push(event);
+        }
+        const recorded = decoded.filter(event => hasDeclaredEventType(entity, event));
         if (recorded.length !== pending.length) {
           throw new Error(`journal: insert returned ${recorded.length} of ${pending.length} events`);
         }
@@ -407,20 +425,22 @@ export function createWriter<
     Tbl extends EntityTable,
     E extends AnyEventDef,
     Key extends string,
-    Returned extends readonly PendingOf<E>[] | Failure,
+    Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure,
   >(
     tx: Tx,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx, Returned>,
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>> =>
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure> =>
     writeWithValidatedMeta(
       tx,
       entity,
       id,
       () => {
         const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
-        assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
+        if (isSchemaFailure(meta)) return meta;
+        const checked = assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
+        if (isFailure(checked)) return checked;
         return meta;
       },
       input.events,
@@ -436,14 +456,16 @@ export function createWriter<
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key>> =>
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | SchemaFailure> =>
     writeWithValidatedMeta(
       tx,
       entity,
       id,
       () => {
         const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
-        assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
+        if (isSchemaFailure(meta)) return meta;
+        const checked = assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
+        if (isFailure(checked)) return checked;
         return meta;
       },
       input.events,

@@ -15,9 +15,10 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import type { CommandConflict, CommandInvalid, CommandRunner } from '@arki/journal';
 import { instant } from '@arki/date';
-import { isFailure, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { CommandNotFound } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../test-support.js';
@@ -236,7 +237,12 @@ describe('money with its currency', () => {
   it('rejects a negative amount and writes nothing: a payment never moves money backwards', async () => {
     const paymentId = createPaymentId();
 
-    await expect(journal.run(db, commands.initiatePayment, { paymentId, ...intent('-1') }, meta)).rejects.toThrow();
+    const refused = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('-1') }, meta);
+
+    expect(InvalidInput.is(refused)).toBe(true);
+    expect(refused).toMatchObject({
+      data: { issues: [{ message: 'Amount must not be negative', path: ['amount'] }] },
+    });
     expect(await rowOf(paymentId)).toBeUndefined();
   });
 });
@@ -499,6 +505,12 @@ describe('writes(run): what the services call', () => {
 });
 
 describe('types', () => {
+  it('exposes schema failures so callers cannot treat a refused sync as a stored subscription', () => {
+    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<SchemaFailure>();
+    expectTypeOf<FailureOf<CoreWrites['initiatePayment']>>().extract<SchemaFailure>().toEqualTypeOf<SchemaFailure>();
+  });
+
+
   it('takes the journal definitions of an app (its own transaction and database types) and the untyped form', () => {
     // Both journals are built in `test-support.ts`; `tsc` checks that the factory accepts each `j`.
     expectTypeOf(typed.core.writes).parameter(0).toEqualTypeOf<CommandRunner<{ actorId: string }, AppTx>>();

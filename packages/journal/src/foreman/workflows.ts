@@ -17,7 +17,7 @@ import {
   moduleError,
   redactSecrets,
 } from '@arki/admin/module';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
@@ -669,7 +669,7 @@ export function journalWorkflowsModule<
       const done = await guarded(runId, () =>
         journal.workflows.retryStep(db, { runId, path, phase }, operationOf(permit, reason)),
       );
-      return { runId, how: done.how };
+      return { runId, how: orThrow(done).how };
     },
   });
 
@@ -689,7 +689,7 @@ export function journalWorkflowsModule<
     }
     // The run's own version checks the result: a step that declares no output schema is refused here too.
     const checked = await guarded(runId, () => journal.workflows.checkResult(db, { runId, path, result }));
-    if (!checked.ok) throw notResolvable(runId, `the result does not match the output of "${path}"`, 400);
+    if (!orThrow(checked).ok) throw notResolvable(runId, `the result does not match the output of "${path}"`, 400);
     return detail;
   }
 
@@ -723,8 +723,10 @@ export function journalWorkflowsModule<
     },
     execute: async ({ runId, path, result, reason }, _ctx: Record<string, never>, permit) => {
       await assertUnchanged(runId, permit);
-      return guarded(runId, () =>
-        journal.workflows.resolveStep(db, { runId, path, result }, operationOf(permit, reason)),
+      return orThrow(
+        await guarded(runId, () =>
+          journal.workflows.resolveStep(db, { runId, path, result }, operationOf(permit, reason)),
+        ),
       );
     },
   });
@@ -764,7 +766,9 @@ export function journalWorkflowsModule<
     },
     execute: async ({ runId, path, reason }, _ctx: Record<string, never>, permit) => {
       await assertUnchanged(runId, permit);
-      return guarded(runId, () => journal.workflows.skipUndo(db, { runId, path }, operationOf(permit, reason)));
+      return orThrow(
+        await guarded(runId, () => journal.workflows.skipUndo(db, { runId, path }, operationOf(permit, reason))),
+      );
     },
   });
 

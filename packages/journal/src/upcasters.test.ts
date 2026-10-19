@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { j, meta, openDb, orderId, orders, tables } from './test-support.js';
 
 // One stored event type, `MemoNoteSet`, as three releases of an app declared it.
@@ -78,11 +80,13 @@ const history = (id: string) =>
 /** A memo whose note was written by release 1, at schema version 1. */
 async function releaseOneMemo(text = 'buy milk') {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, memoV1, id, {
-      meta,
-      events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSetV1({ text })],
-    }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, memoV1, id, {
+        meta,
+        events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSetV1({ text })],
+      }),
+    ),
   );
   return id;
 }
@@ -95,11 +99,13 @@ describe('upcasters', () => {
     expect(NoteSet.version).toBe(3);
 
     const id = orderId(++next);
-    await db.transaction(tx =>
-      journal.write(tx, memo, id, {
-        meta,
-        events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSet({ note: 'hi', by: 'ana', pinned: true })],
-      }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, memo, id, {
+          meta,
+          events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSet({ note: 'hi', by: 'ana', pinned: true })],
+        }),
+      ),
     );
     const rows = await history(id);
     expect(rows.map(row => [row.type, row.schemaVersion])).toEqual([
@@ -113,7 +119,7 @@ describe('upcasters', () => {
     // and reading them must not rewrite history behind the app's back.
     const id = await releaseOneMemo();
 
-    const { row, events } = await journal.replay(db, memo, id);
+    const { row, events } = orThrow(await journal.replay(db, memo, id));
     expect(events.map(e => e.data)).toEqual([
       { customerId: 'cus_memo' },
       { note: 'buy milk', by: 'unknown', pinned: false },
@@ -135,7 +141,7 @@ describe('upcasters', () => {
       .set({ data: { note: 'from release 2', by: 'ana' }, schemaVersion: 2 })
       .where(eq(tables.events.seq, noteRow?.seq ?? 0));
 
-    const { events } = await journal.replay(db, memo, id);
+    const { events } = orThrow(await journal.replay(db, memo, id));
     expect(events[1]?.data).toEqual({ note: 'from release 2', by: 'ana', pinned: false });
   });
 
@@ -151,7 +157,7 @@ describe('upcasters', () => {
     const id = await releaseOneMemo('rerun me');
     const [opening] = await history(id);
 
-    await journal.rerun(db, notes, { afterSeq: (opening?.seq ?? 1) - 1 });
+    orThrow(await journal.rerun(db, notes, { afterSeq: (opening?.seq ?? 1) - 1 }));
     expect(seen).toEqual([{ note: 'rerun me', by: 'unknown', pinned: false }]);
   });
 
@@ -171,11 +177,13 @@ describe('upcasters', () => {
     // Why: during a rolling deploy, old code reads rows new code wrote. Guessing at their
     // shape would rebuild a wrong row silently. Each failure names the row and the version.
     const fresh = orderId(++next);
-    await db.transaction(tx =>
-      journal.write(tx, memo, fresh, {
-        meta,
-        events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSet({ note: 'new', by: 'ana', pinned: false })],
-      }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, memo, fresh, {
+          meta,
+          events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSet({ note: 'new', by: 'ana', pinned: false })],
+        }),
+      ),
     );
     await expect(journal.replay(db, memoV1, fresh)).rejects.toMatchObject({
       code: 'REPLAY_FAILED',

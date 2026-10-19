@@ -82,7 +82,8 @@
     "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@arki/failure": "workspace:*"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*"

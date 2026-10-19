@@ -12,7 +12,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { SchemaRunError } from '@arki/schema';
+import { UnexpectedFailure } from '@arki/failure';
 
 import { assertMatchesSchema, assertPaginationValid } from './assertions';
 
@@ -20,7 +20,7 @@ const handWritten: StandardSchemaV1<{ id: number }, { id: string }> = {
   '~standard': {
     version: 1,
     vendor: 'hand',
-    validate: (value) =>
+    validate: value =>
       typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'number'
         ? { value: { id: String(value.id) } }
         : { issues: [{ message: 'id must be a number', path: [{ key: 'id' }] }] },
@@ -28,7 +28,7 @@ const handWritten: StandardSchemaV1<{ id: number }, { id: string }> = {
 };
 
 const asyncSchema: StandardSchemaV1<unknown> = {
-  '~standard': { version: 1, vendor: 'hand', validate: async (value) => ({ value }) },
+  '~standard': { version: 1, vendor: 'hand', validate: async value => ({ value }) },
 };
 
 const kinds = [
@@ -54,7 +54,7 @@ describe('assertMatchesSchema', () => {
   });
 
   it('fails clearly on an async schema instead of passing', () => {
-    expect(() => assertMatchesSchema({}, asyncSchema)).toThrow(SchemaRunError);
+    expect(() => assertMatchesSchema({}, asyncSchema)).toThrow(UnexpectedFailure);
   });
 });
 

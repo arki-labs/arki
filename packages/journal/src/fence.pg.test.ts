@@ -13,6 +13,8 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { isJournalError } from './errors.js';
 import { j, meta, order, OrderNoted, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
@@ -96,7 +98,7 @@ const racer = j.effect('racer', order, {
       await mine.hold.opened;
     }
     try {
-      await ctx.run(noteOrder, { orderId: event.entityId, note }, meta);
+      orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note }, meta));
       mine.outcome.push('committed');
     } catch (error) {
       mine.outcome.push(isJournalError(error, 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
@@ -108,10 +110,14 @@ const journal = j.compose({ effects: [racer] });
 
 async function payOrder() {
   const id: `ord_${number}` = `ord_${++next}`;
-  await dbA.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await dbA.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  await dbA.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+  orThrow(
+    await dbA.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+  );
   return id;
 }
 

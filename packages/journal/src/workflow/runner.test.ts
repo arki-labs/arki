@@ -8,7 +8,7 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { isJournalError } from '../errors.js';
@@ -219,7 +219,7 @@ describe('start and the step effect', () => {
 
   it('every step job carries its run id and the step row names its job, so the sweeper and Foreman can tie them together', async () => {
     const id = newId('sum');
-    await journal.run(db, sum.start, { input: { n: 1 }, id }, caller);
+    orThrow(await journal.run(db, sum.start, { input: { n: 1 }, id }, caller));
     const queued = await jobsOf(id);
     expect(queued).toHaveLength(1);
     expect(queued[0]?.effect).toBe('workflow.step');
@@ -230,7 +230,7 @@ describe('start and the step effect', () => {
 
   it('a step is running while its body runs, derived from the lease of its job: the row still says scheduled', async () => {
     const id = newId('running');
-    await journal.run(db, running.start, { input: {}, id }, caller);
+    orThrow(await journal.run(db, running.start, { input: {}, id }, caller));
     await settle();
     expect((await runRow(id))?.results).toEqual({ look: { status: 'running', stored: 'scheduled', hasJob: true } });
     expect((await stepRow(id, 'look'))?.status).toBe('done');
@@ -269,7 +269,7 @@ describe('start and the step effect', () => {
 describe('when and next', () => {
   it('a step whose when is false is skipped and its result is null, so a later step sees null and the body never ran', async () => {
     const skipped = newId('guarded');
-    await journal.run(db, guarded.start, { input: { vip: false }, id: skipped }, caller);
+    orThrow(await journal.run(db, guarded.start, { input: { vip: false }, id: skipped }, caller));
     await settle();
     expect(await runRow(skipped)).toMatchObject({
       state: 'completed',
@@ -280,14 +280,14 @@ describe('when and next', () => {
     expect(ranOf('bonus')).toHaveLength(0);
 
     const taken = newId('guarded');
-    await journal.run(db, guarded.start, { input: { vip: true }, id: taken }, caller);
+    orThrow(await journal.run(db, guarded.start, { input: { vip: true }, id: taken }, caller));
     await settle();
     expect(await runRow(taken)).toMatchObject({ results: { bonus: { points: 10 }, total: 11 } });
   });
 
   it('a next that names an earlier step loops back, gives each visit its own key, and stops when it says next', async () => {
     const id = newId('hunt');
-    await journal.run(db, hunt.start, { input: { rounds: 3 }, id }, caller);
+    orThrow(await journal.run(db, hunt.start, { input: { rounds: 3 }, id }, caller));
     await settle();
     const mine = (name: string) => ranOf(name).filter(entry => entry.key.startsWith(id));
     expect(mine('generate').map(entry => entry.key)).toEqual([
@@ -302,7 +302,7 @@ describe('when and next', () => {
 
   it('a next that names a node that is not earlier fails the step as a bad definition, without a retry of the body', async () => {
     const id = newId('routed');
-    await journal.run(db, routed.start, { input: {}, id }, caller);
+    orThrow(await journal.run(db, routed.start, { input: {}, id }, caller));
     await settle();
     expect(ranOf('b').filter(entry => entry.key.startsWith(id))).toHaveLength(1);
     const step = await stepRow(id, 'b');
@@ -315,7 +315,7 @@ describe('when and next', () => {
 describe('failure, retry and the key', () => {
   it('a failing step retries on its own backoff with one key, then waits dead for an operator while the run stays running', async () => {
     const id = newId('flaky');
-    await journal.run(db, flaky.start, { input: {}, id }, caller);
+    orThrow(await journal.run(db, flaky.start, { input: {}, id }, caller));
     await settle();
     const tries = ranOf('provider').filter(entry => entry.key.startsWith(id));
     expect(tries.map(entry => entry.attempt)).toEqual([1, 2, 3]);
@@ -331,7 +331,7 @@ describe('failure, retry and the key', () => {
 
   it('a custom key reaches the body and the step row, so the provider and the operator see the same key', async () => {
     const id = newId('charge');
-    await journal.run(db, charge.start, { input: { paymentId: 'pay_7' }, id }, caller);
+    orThrow(await journal.run(db, charge.start, { input: { paymentId: 'pay_7' }, id }, caller));
     await settle();
     expect(ranOf('charge').filter(entry => entry.key === 'charge:pay_7')).toHaveLength(1);
     expect((await stepRow(id, 'charge'))?.key).toBe('charge:pay_7');
@@ -339,7 +339,7 @@ describe('failure, retry and the key', () => {
 
   it('a step that runs past its timeout is aborted and fails with STEP_TIMEOUT', async () => {
     const id = newId('hanging');
-    await journal.run(db, hanging.start, { input: {}, id }, caller);
+    orThrow(await journal.run(db, hanging.start, { input: {}, id }, caller));
     await settle();
     expect(sawAbort).toBe(true);
     const step = await stepRow(id, 'hang');
@@ -351,7 +351,7 @@ describe('failure, retry and the key', () => {
 describe('payload limit', () => {
   it('a step result over limits.payload fails the step with WORKFLOW_LIMIT and stores nothing', async () => {
     const id = newId('small');
-    await journal.run(db, small.start, { input: { text: 'ok' }, id }, caller);
+    orThrow(await journal.run(db, small.start, { input: { text: 'ok' }, id }, caller));
     await settle();
     const step = await stepRow(id, 'big');
     expect(step?.status).toBe('failed');
@@ -400,7 +400,7 @@ describe('the checkpoint fence', () => {
   it('a stale owner checkpoint is rejected with LEASE_LOST, so a superseded worker writes nothing', async () => {
     const id = newId('stale');
     supersedeFirst.id = id;
-    await staleJournal.run(db, stale.start, { input: {}, id }, caller);
+    orThrow(await staleJournal.run(db, stale.start, { input: {}, id }, caller));
     await staleJournal.drain(db);
     expect(ranOf('slow').filter(entry => entry.key.startsWith(id))).toHaveLength(1);
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
@@ -432,7 +432,7 @@ describe('a crash between the body and the checkpoint', () => {
 
   it('crash after external success before checkpoint re-runs the step with the same key, and the committed checkpoint never runs it again', async () => {
     const id = newId('crashing');
-    await crashJournal.run(db, crashing.start, { input: {}, id }, caller);
+    orThrow(await crashJournal.run(db, crashing.start, { input: {}, id }, caller));
     await crashJournal.drain(db);
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
     // The job failed; its retry is due.

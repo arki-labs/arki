@@ -11,6 +11,9 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { SchemaFailure } from '@arki/failure';
+import { InvalidInput, orThrow } from '@arki/failure';
+
 import type { RootCommandRunner, WriteResult } from './api.js';
 import type { AccountId, order } from './test-support.js';
 import type {
@@ -178,10 +181,10 @@ const keyedProjection = j.projection('keyed-ids', profile, {
 void keyedProjection;
 async function keyedIds(db: DbHandle) {
   const journal = j.compose({});
-  await journal.write(db, profile, 'acc_1', { meta, events: () => [] });
-  await journal.replay(db, profile, 'acc_1');
+  orThrow(await journal.write(db, profile, 'acc_1', { meta, events: () => [] }));
+  orThrow(await journal.replay(db, profile, 'acc_1'));
   // @ts-expect-error -- the id must be an AccountId, not any string
-  await journal.write(db, profile, 'ord_1', { meta, events: () => [] });
+  orThrow(await journal.write(db, profile, 'ord_1', { meta, events: () => [] }));
 }
 void keyedIds;
 
@@ -200,21 +203,23 @@ const txProjection = jt.projection('tx-typed', txOrder, {
 });
 async function typedTx(db: PgliteDatabase, tx: AppTx) {
   const journal = jt.compose({ projections: [txProjection] });
-  await journal.write(tx, txOrder, 'ord_1', {
-    meta: { actorId: 'a' },
-    events: (row, ctx) => {
-      expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
-      expectTypeOf(ctx.tx).toEqualTypeOf<AppTx>();
-      return [];
-    },
-  });
+  orThrow(
+    await journal.write(tx, txOrder, 'ord_1', {
+      meta: { actorId: 'a' },
+      events: (row, ctx) => {
+        expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
+        expectTypeOf(ctx.tx).toEqualTypeOf<AppTx>();
+        return [];
+      },
+    }),
+  );
   // `rerun` opens app transactions from the root database.
-  await journal.rerun(db, txProjection);
+  orThrow(await journal.rerun(db, txProjection));
   // @ts-expect-error -- the root database is not the app's transaction type
-  await journal.write(db, txOrder, 'ord_1', { meta: { actorId: 'a' }, events: () => [] });
+  orThrow(await journal.write(db, txOrder, 'ord_1', { meta: { actorId: 'a' }, events: () => [] }));
   // A plain `initJournal` keeps the structural `DbHandle`, so a one-argument `events` still fits.
   const plain = j.compose({});
-  await plain.write(db, typed, 'ord_1', { meta, events: () => [] });
+  orThrow(await plain.write(db, typed, 'ord_1', { meta, events: () => [] }));
 }
 void typedTx;
 
@@ -350,23 +355,23 @@ const tenantPay = tenants.command('pay', z.object({ id: z.string() }), input => 
 const dbRuns = jd.effect('db-runs', dbOrder, {
   OrderPaid: async (e, { run }) => {
     expectTypeOf(run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
-    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number>();
-    await run(plainPay, { id: e.entityId }, { actorId: 'system' });
+    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number | SchemaFailure>();
+    orThrow(await run(plainPay, { id: e.entityId }, { actorId: 'system' }));
     // @ts-expect-error -- `meta` is required: the library never invents an actor
-    await run(dbPay, { id: e.entityId });
+    orThrow(await run(dbPay, { id: e.entityId }));
     // @ts-expect-error -- not the meta of this journal
-    await run(dbPay, { id: e.entityId }, { tenantId: 't' });
+    orThrow(await run(dbPay, { id: e.entityId }, { tenantId: 't' }));
     // @ts-expect-error -- the input is checked against the command's schema
-    await run(dbPay, { id: 1 }, { actorId: 'system' });
+    orThrow(await run(dbPay, { id: 1 }, { actorId: 'system' }));
     // @ts-expect-error -- a command for another meta shape: its handler would read `meta.tenantId`
-    await run(tenantPay, { id: e.entityId }, { actorId: 'system' });
+    orThrow(await run(tenantPay, { id: e.entityId }, { actorId: 'system' }));
   },
 });
 const plainRuns = j.effect('plain-runs', typed, {
   OrderPaid: async (e, { run }) => {
-    await run(plainPay, { id: e.entityId }, meta);
+    orThrow(await run(plainPay, { id: e.entityId }, meta));
     // @ts-expect-error -- a command for the app's transaction type: this journal would hand it a plain `DbHandle`
-    await run(dbPay, { id: e.entityId }, meta);
+    orThrow(await run(dbPay, { id: e.entityId }, meta));
   },
 });
 // The same journal that types `run` composes these effects.
@@ -471,8 +476,8 @@ expectTypeOf<Recorded<'OrderPaid', z.output<PaidSchema>, { actorId: string }>['d
 
 it('calling an event definition validates and returns a pending event', () => {
   expectTypeOf(orders).toMatchTypeOf<EntityTable>();
-  const paid = OrderPaid({ amount: 5 });
+  const paid = orThrow(OrderPaid({ amount: 5 }));
   expectTypeOf(paid.data).toEqualTypeOf<{ amount: number }>();
   expect(paid).toEqual({ type: 'OrderPaid', data: { amount: 5 } });
-  expect(() => OrderPaid({ amount: -1 })).toThrow();
+  expect(InvalidInput.is(OrderPaid({ amount: -1 }))).toBe(true);
 });

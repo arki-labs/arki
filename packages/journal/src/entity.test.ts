@@ -23,6 +23,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { DbHandle } from './types.js';
 import { isJournalError } from './errors.js';
 import {
@@ -63,13 +65,15 @@ const eventsFor = (id: string) => db.select().from(tables.events).where(eq(table
 describe('a named key column', () => {
   it('writes, updates, deletes and replays a row under its own key column, so a table needs no `id`', async () => {
     const id = accountId(++next);
-    const opened = await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'ann' })] });
+    const opened = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'ann' })] }),
+    );
     expect(opened.row).toEqual({ accountId: id, nick: 'ann', moveCount: 0, version: 1 });
 
-    const moved = await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] });
+    const moved = orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] }));
     expect(moved.row).toMatchObject({ accountId: id, moveCount: 1, version: 2 });
 
-    const replayed = await journal.replay(db, profile, id);
+    const replayed = orThrow(await journal.replay(db, profile, id));
     expect(replayed.row).toEqual({ accountId: id, nick: 'ann', moveCount: 1, version: 2 });
     expect(await journal.verify(db, profile, id)).toEqual({ ok: true });
 
@@ -77,14 +81,16 @@ describe('a named key column', () => {
     expect(await journal.verify(db, profile, id)).toMatchObject({ ok: false });
     expect(await journal.repair(db, profile, id)).toMatchObject({ accountId: id, nick: 'ann' });
 
-    const closed = await journal.write(db, profile, id, { meta, events: () => [ProfileClosed({})] });
+    const closed = orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileClosed({})] }));
     expect(closed.row).toBeNull();
     expect(await db.select().from(profiles).where(eq(profiles.accountId, id))).toEqual([]);
   });
 
   it('stores the key value as the event entity id and stamps it on recorded events', async () => {
     const id = accountId(++next);
-    const { events } = await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'bo' })] });
+    const { events } = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'bo' })] }),
+    );
     expect(events.map(e => e.entityId)).toEqual([id]);
     const stored = await db.select().from(tables.events).where(eq(tables.events.entityId, id));
     expect(stored).toHaveLength(1);
@@ -169,10 +175,12 @@ describe('rows that existed before the journal', () => {
     // Version 1 is reserved for a real create, so a history that starts at 2 is known to be partial.
     const id = accountId(++next);
     await db.insert(profiles).values({ accountId: id, nick: 'old', moveCount: 9 });
-    const flagged = await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'flagged' })] });
+    const flagged = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'flagged' })] }),
+    );
     expect(flagged.row).toEqual({ accountId: id, nick: 'flagged', moveCount: 9, version: 2 });
     expect(flagged.events.map(e => e.version)).toEqual([2]);
-    const moved = await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] });
+    const moved = orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] }));
     expect(moved.row).toEqual({ accountId: id, nick: 'flagged', moveCount: 10, version: 3 });
     const stored = await db
       .select({ version: tables.events.version })
@@ -191,10 +199,14 @@ describe('rows that existed before the journal', () => {
 
   it('a row the journal creates still starts at version 1, and a create after a delete continues the sequence', async () => {
     const id = accountId(++next);
-    const opened = await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'one' })] });
+    const opened = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'one' })] }),
+    );
     expect(opened.row?.version).toBe(1);
-    await journal.write(db, profile, id, { meta, events: () => [ProfileClosed({})] });
-    const again = await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'two' })] });
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileClosed({})] }));
+    const again = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'two' })] }),
+    );
     expect(again.row).toEqual({ accountId: id, nick: 'two', moveCount: 0, version: 3 });
     expect(await journal.verify(db, profile, id)).toEqual({ ok: true });
   });
@@ -204,8 +216,8 @@ describe('rows that existed before the journal', () => {
     // history and applies `.on` (moveCount 1). The two would disagree, and repair would then
     // overwrite the write. The log is the truth: the row must come back from it first.
     const id = accountId(++next);
-    await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'one' })] });
-    await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] });
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'one' })] }));
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] }));
     await db.delete(profiles).where(eq(profiles.accountId, id));
 
     await expect(
@@ -215,11 +227,13 @@ describe('rows that existed before the journal', () => {
       message: expect.stringContaining('removed outside the journal') as string,
     });
     expect(await db.select().from(profiles).where(eq(profiles.accountId, id))).toEqual([]);
-    const replayed = await journal.replay(db, profile, id);
+    const replayed = orThrow(await journal.replay(db, profile, id));
     expect(replayed.events.map(e => e.version)).toEqual([1, 2]);
 
     expect(await journal.repair(db, profile, id)).toEqual({ accountId: id, nick: 'one', moveCount: 1, version: 2 });
-    const flagged = await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'two' })] });
+    const flagged = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'two' })] }),
+    );
     expect(flagged.row).toEqual({ accountId: id, nick: 'two', moveCount: 1, version: 3 });
     expect(await journal.verify(db, profile, id)).toEqual({ ok: true });
   });
@@ -243,16 +257,18 @@ describe('events receives the write transaction', () => {
     const id = orderId(++next);
     await db.transaction(async tx => {
       await tx.insert(customerOrderCounts).values({ customerId: 'vip', placed: 3 });
-      const { row } = await journal.write(tx, order, id, {
-        meta,
-        events: async (_row, ctx) => {
-          const [count] = await ctx.tx
-            .select()
-            .from(customerOrderCounts)
-            .where(eq(customerOrderCounts.customerId, 'vip'));
-          return [OrderPlaced({ customerId: 'vip', total: (count?.placed ?? 0) * 10 })];
-        },
-      });
+      const { row } = orThrow(
+        await journal.write(tx, order, id, {
+          meta,
+          events: async (_row, ctx) => {
+            const [count] = await ctx.tx
+              .select()
+              .from(customerOrderCounts)
+              .where(eq(customerOrderCounts.customerId, 'vip'));
+            return [OrderPlaced({ customerId: 'vip', total: (count?.placed ?? 0) * 10 })];
+          },
+        }),
+      );
       expect(row?.total).toBe(30);
     });
   });
@@ -261,9 +277,13 @@ describe('events receives the write transaction', () => {
 describe('one event with a create and an on reducer', () => {
   it('creates the row when there is none and patches it when there is one, so no extra "opened" event is needed', async () => {
     const id = accountId(++next);
-    const first = await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'new' })] });
+    const first = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'new' })] }),
+    );
     expect(first.row).toEqual({ accountId: id, nick: 'new', moveCount: 0, version: 1 });
-    const second = await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'renamed' })] });
+    const second = orThrow(
+      await journal.write(db, profile, id, { meta, events: () => [ProfileFlagged({ nick: 'renamed' })] }),
+    );
     expect(second.row).toEqual({ accountId: id, nick: 'renamed', moveCount: 0, version: 2 });
     expect(await journal.verify(db, profile, id)).toEqual({ ok: true });
   });
@@ -273,7 +293,7 @@ describe('one event with a create and an on reducer', () => {
     await expect(journal.write(db, profile, id, { meta, events: () => [ProfileMoved({})] }).catch(code)).resolves.toBe(
       'NO_ROW',
     );
-    await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'cy' })] });
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'cy' })] }));
     await expect(
       journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'again' })] }).catch(code),
     ).resolves.toBe('ROW_EXISTS');
@@ -293,9 +313,9 @@ describe('one event with a create and an on reducer', () => {
 describe('columns the create reducer sets', () => {
   it('reach the on reducer on write and on replay, so it needs no default fallback', async () => {
     const id = accountId(++next);
-    await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'dee' })] });
-    await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({}), ProfileMoved({})] });
-    const { row } = await journal.replay(db, profile, id);
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileOpened({ nick: 'dee' })] }));
+    orThrow(await journal.write(db, profile, id, { meta, events: () => [ProfileMoved({}), ProfileMoved({})] }));
+    const { row } = orThrow(await journal.replay(db, profile, id));
     expect(row?.moveCount).toBe(2);
     expect(await journal.verify(db, profile, id)).toEqual({ ok: true });
   });
@@ -336,7 +356,7 @@ describe('a uuid key column', () => {
   });
 
   it('a write with another spelling of an existing key is refused and writes nothing, so one entity never has two logs', async () => {
-    await open(lower);
+    orThrow(await open(lower));
     await expect(add(upper).catch(code)).resolves.toBe('ID_MISMATCH');
     expect(await eventsFor(upper)).toEqual([]);
     const logged = await eventsFor(lower);
@@ -345,15 +365,15 @@ describe('a uuid key column', () => {
   });
 
   it('repair and verify with another spelling are refused and leave the row untouched, so repair cannot overwrite it', async () => {
-    await add(lower);
+    orThrow(await add(lower));
     await expect(journal.repair(db, wallet, upper).catch(code)).resolves.toBe('ID_MISMATCH');
     await expect(journal.verify(db, wallet, upper).catch(code)).resolves.toBe('ID_MISMATCH');
     expect(await rows()).toEqual([{ id: lower, count: 1, version: 2 }]);
   });
 
   it('the same spelling throughout still writes, replays and verifies', async () => {
-    await add(lower);
-    const replayed = await journal.replay(db, wallet, lower);
+    orThrow(await add(lower));
+    const replayed = orThrow(await journal.replay(db, wallet, lower));
     expect(replayed.events.map(e => e.version)).toEqual([1, 2, 3]);
     expect(await journal.verify(db, wallet, lower)).toEqual({ ok: true });
     expect(await journal.repair(db, wallet, lower)).toEqual({ id: lower, count: 2, version: 3 });
@@ -382,11 +402,11 @@ describe('a uuid key column', () => {
   });
 
   it('a lower-case id creates, deletes and creates again with the version continuing, so the log stays one history', async () => {
-    await journal.write(db, closable, lowerTwo, { meta, events: () => [Opened({})] });
-    await journal.write(db, closable, lowerTwo, { meta, events: () => [Closed({})] });
-    const again = await journal.write(db, closable, lowerTwo, { meta, events: () => [Opened({})] });
+    orThrow(await journal.write(db, closable, lowerTwo, { meta, events: () => [Opened({})] }));
+    orThrow(await journal.write(db, closable, lowerTwo, { meta, events: () => [Closed({})] }));
+    const again = orThrow(await journal.write(db, closable, lowerTwo, { meta, events: () => [Opened({})] }));
     expect(again.row).toEqual({ id: lowerTwo, count: 0, version: 3 });
-    const replayed = await journal.replay(db, closable, lowerTwo);
+    const replayed = orThrow(await journal.replay(db, closable, lowerTwo));
     expect(replayed.events.map(e => e.version)).toEqual([1, 2, 3]);
     expect(await journal.verify(db, closable, lowerTwo)).toEqual({ ok: true });
   });
@@ -545,8 +565,8 @@ describe('the length of an id', () => {
 
   it('a 256-character text id writes, replays and verifies end to end', async () => {
     const id = 'b'.repeat(256);
-    await journal.write(db, long, id, { meta, events: () => [Opened({})] });
-    const replayed = await journal.replay(db, long, id);
+    orThrow(await journal.write(db, long, id, { meta, events: () => [Opened({})] }));
+    const replayed = orThrow(await journal.replay(db, long, id));
     expect(replayed.events.map(e => e.version)).toEqual([1]);
     expect(await journal.verify(db, long, id)).toEqual({ ok: true });
   });
@@ -559,7 +579,7 @@ describe('the length of an id', () => {
   it('an id with an unpaired surrogate is refused by write, replay, verify and repair, because the driver would store it as U+FFFD and reach the history of another id', async () => {
     const broken = 'x\uD800';
     const lookalike = 'x\uFFFD';
-    await journal.write(db, long, lookalike, { meta, events: () => [Opened({})] });
+    orThrow(await journal.write(db, long, lookalike, { meta, events: () => [Opened({})] }));
     await expect(cycle(broken).catch(code)).resolves.toBe('ID_MISMATCH');
     await expect(journal.replay(db, long, broken).catch(code)).resolves.toBe('ID_MISMATCH');
     await expect(journal.verify(db, long, broken).catch(code)).resolves.toBe('ID_MISMATCH');
@@ -572,8 +592,8 @@ describe('the length of an id', () => {
 
   it('a well-formed astral character (an emoji, two UTF-16 units) in an id still writes, replays and verifies', async () => {
     const id = 'smile-😀';
-    await journal.write(db, long, id, { meta, events: () => [Opened({})] });
-    const replayed = await journal.replay(db, long, id);
+    orThrow(await journal.write(db, long, id, { meta, events: () => [Opened({})] }));
+    const replayed = orThrow(await journal.replay(db, long, id));
     expect(replayed.events.map(e => e.version)).toEqual([1]);
     expect(await journal.verify(db, long, id)).toEqual({ ok: true });
   });
@@ -675,17 +695,17 @@ describe('values the database stores', () => {
 
   it('a create with "1.23" and a later doubling to "2.46" write, and replay and verify agree with the table', async () => {
     const id = 'p-ok';
-    await open(id, '1.23');
-    const doubled = await apply(id, Doubled({}));
+    orThrow(await open(id, '1.23'));
+    const doubled = orThrow(await apply(id, Doubled({})));
     expect(doubled.row).toMatchObject({ amount: '2.46', version: 2 });
-    const replayed = await journal.replay(db, purse, id);
+    const replayed = orThrow(await journal.replay(db, purse, id));
     expect(replayed.row).toMatchObject({ amount: '2.46', version: 2 });
     expect(await journal.verify(db, purse, id)).toEqual({ ok: true });
   });
 
   it('an update whose patch sets a rounded column is refused and rolls back, because that patch is what replay will fold', async () => {
     const id = 'p-update';
-    await open(id, '1.23');
+    orThrow(await open(id, '1.23'));
     const error = await journal
       .write(db, purse, id, { meta, events: () => [Scaled({ amount: '5.678' })] })
       .catch((error_: unknown) => error_);
@@ -698,31 +718,31 @@ describe('values the database stores', () => {
 
   it('an update that sets another column succeeds, because only columns set in this write are compared', async () => {
     const id = 'p-untouched';
-    await open(id, '1.23');
-    const noted = await apply(id, Noted({ note: 'rent' }));
+    orThrow(await open(id, '1.23'));
+    const noted = orThrow(await apply(id, Noted({ note: 'rent' })));
     expect(noted.row).toMatchObject({ amount: '1.23', note: 'rent', version: 2 });
     expect(await journal.verify(db, purse, id)).toEqual({ ok: true });
   });
 
   it('a jsonb object that comes back with its keys in another order is not a mismatch, because the database does not keep key order', async () => {
     const id = 'p-json';
-    await open(id, '1.00');
-    const tagged = await journal.write(db, purse, id, { meta, events: () => [Tagged({})] });
+    orThrow(await open(id, '1.00'));
+    const tagged = orThrow(await journal.write(db, purse, id, { meta, events: () => [Tagged({})] }));
     expect(tagged.row?.tags).toEqual({ a: 2, bb: 1 });
     expect(await journal.verify(db, purse, id)).toEqual({ ok: true });
   });
 
   it('a timestamp given a Date with milliseconds is not a mismatch, because the default precision keeps them', async () => {
     const id = 'p-stamp';
-    await open(id, '1.00');
-    const stamped = await journal.write(db, purse, id, { meta, events: () => [Stamped({})] });
+    orThrow(await open(id, '1.00'));
+    const stamped = orThrow(await journal.write(db, purse, id, { meta, events: () => [Stamped({})] }));
     expect(stamped.row?.stampedAt?.getTime()).toBe(stampedAt.getTime());
     expect(await journal.verify(db, purse, id)).toEqual({ ok: true });
   });
 
   it('repair refuses a replay the database would round and leaves the row as it was, so it cannot change a correct balance', async () => {
     const id = 'p-repair';
-    await open(id, '1.23');
+    orThrow(await open(id, '1.23'));
     const error = await journal.repair(db, sloppy, id).catch((error_: unknown) => error_);
     expect(code(error)).toBe('VALUE_MISMATCH');
     expect(error instanceof Error ? error.message : '').toContain('"1.234"');
@@ -763,13 +783,13 @@ describe('values the database stores', () => {
 
     it.each(['dense', 'nested'])('a %s value still passes, and verify returns ok', async kind => {
       const id = `b-${kind}`;
-      await store(id, kind);
+      orThrow(await store(id, kind));
       expect(await journal.verify(db, blob, id)).toEqual({ ok: true });
     });
 
     it('an event built with z.unknown() that holds an array with a hole is refused with UNSTABLE_SCHEMA', async () => {
       const id = 'b-event-hole';
-      await store(id, 'dense');
+      orThrow(await store(id, 'dense'));
       const error = await journal
         .write(db, blob, id, { meta, events: () => [Loose(arrayWithHole())] })
         .catch((error_: unknown) => error_);
@@ -851,7 +871,7 @@ describe('value objects in custom columns', () => {
 
   it('a value the column keeps exactly writes, and replay and verify agree, because equal instances compare by equals', async () => {
     const id = 't-exact';
-    const written = await fund(id, '1.23');
+    const written = orThrow(await fund(id, '1.23'));
     expect(written.row?.balance).toEqual(new Amount('1.23'));
     expect(await journal.verify(db, till, id)).toEqual({ ok: true });
   });

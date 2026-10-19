@@ -2,6 +2,8 @@ import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { OrderId } from './test-support.js';
 import { need } from './handlers.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced } from './test-support.js';
@@ -39,11 +41,15 @@ function outbox() {
 
 async function placeAndPay(journal: Pick<ReturnType<typeof j.compose>, 'write'>) {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, order, `ord_needs_${id}`, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, `ord_needs_${id}`, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  await db.transaction(tx =>
-    journal.write(tx, order, `ord_needs_${id}`, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, `ord_needs_${id}`, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+    ),
   );
   return `ord_needs_${id}` as const;
 }

@@ -21,11 +21,10 @@ export function attempt<Value, Mapped>(
 ): Promise<Value | Mapped>;
 export function attempt<Value, Mapped>(run: () => Value, onThrow: (cause: unknown) => Mapped): Value | Mapped;
 export function attempt(run: () => unknown, onThrow: (cause: unknown) => unknown): unknown {
-  let value: unknown;
   try {
-    value = run();
+    const value = run();
+    return isThenable(value) ? Promise.resolve(value).then(undefined, onThrow) : value;
   } catch (error) {
     return onThrow(error);
   }
-  return isThenable(value) ? Promise.resolve(value).then(undefined, onThrow) : value;
 }

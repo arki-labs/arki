@@ -9,7 +9,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { j, tables } from '../test-support.js';
@@ -213,7 +213,7 @@ describe('retryStep', () => {
     expect(log).toEqual([`undo charge ${id}:charge:undo`]);
 
     broken.undoCharge = false;
-    await journal.workflows.retryStep(db, { runId: id, path: 'charge', phase: 'undo' }, operator);
+    orThrow(await journal.workflows.retryStep(db, { runId: id, path: 'charge', phase: 'undo' }, operator));
     await settle();
 
     expect(await runRow(id)).toMatchObject({ state: 'cancelled' });
@@ -274,7 +274,7 @@ describe('resolveStep', () => {
     const id = await startPayout('resolve-bad');
     await expect(
       journal.workflows.resolveStep(db, { runId: id, path: 'ship', result: { tracking: 7 } }, operator),
-    ).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+    ).resolves.toMatchObject({ code: InvalidInput.code });
     // Nothing moved: the step is still dead and waits for someone.
     expect(await stepRow(id, 'ship', 'do')).toMatchObject({ status: 'failed' });
 
@@ -294,7 +294,7 @@ describe('resolveStep', () => {
   it('resolveStep continues the run as if the step had completed', async () => {
     broken.ship = true;
     const id = await startPayout('resolve');
-    await journal.workflows.resolveStep(db, { runId: id, path: 'ship', result: { tracking: 't9' } }, operator);
+    orThrow(await journal.workflows.resolveStep(db, { runId: id, path: 'ship', result: { tracking: 't9' } }, operator));
     await settle();
 
     expect(shipKeys).toHaveLength(1);
@@ -311,7 +311,9 @@ describe('resolveStep with a next function', () => {
     expectOk(await journal.run(db, routed.start, { input: {}, id: forward }, caller));
     await settle();
     expect(bodies).toEqual({ first: 1, pick: 1 });
-    await journal.workflows.resolveStep(db, { runId: forward, path: 'pick', result: { again: false } }, operator);
+    orThrow(
+      await journal.workflows.resolveStep(db, { runId: forward, path: 'pick', result: { again: false } }, operator),
+    );
     await settle();
     // `next` said carry on: the run finished, and the failed body ran once and never again.
     expect(bodies).toEqual({ first: 1, pick: 1 });
@@ -322,7 +324,7 @@ describe('resolveStep with a next function', () => {
     const back = newId('routed-back');
     expectOk(await journal.run(db, routed.start, { input: {}, id: back }, caller));
     await settle();
-    await journal.workflows.resolveStep(db, { runId: back, path: 'pick', result: { again: true } }, operator);
+    orThrow(await journal.workflows.resolveStep(db, { runId: back, path: 'pick', result: { again: true } }, operator));
     await settle();
     // `next` jumped back: `first` ran a second visit. `pick` ran once more only because the loop reached it again.
     expect(bodies).toEqual({ first: 3, pick: 3 });
@@ -348,7 +350,7 @@ describe('skipUndo', () => {
     await expect(
       journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, { actor: 'usr_ops' }),
     ).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
-    await journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator);
+    orThrow(await journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator));
     await settle();
 
     expect(await runRow(id)).toMatchObject({ state: 'cancelled' });
@@ -366,7 +368,7 @@ describe('what the events say', () => {
   it("the operator's actor, reason and executionId are on the run's events", async () => {
     broken.ship = true;
     const retried = await startPayout('audit-retry');
-    await retryShip(retried);
+    orThrow(await retryShip(retried));
     const [, scheduled] = await dataOf(retried, 'NodeScheduled').then(rows => rows.slice(-2));
     expect(scheduled).toMatchObject({
       path: 'ship',
@@ -377,7 +379,9 @@ describe('what the events say', () => {
     });
 
     const resolved = await startPayout('audit-resolve');
-    await journal.workflows.resolveStep(db, { runId: resolved, path: 'ship', result: { tracking: 'r' } }, operator);
+    orThrow(
+      await journal.workflows.resolveStep(db, { runId: resolved, path: 'ship', result: { tracking: 'r' } }, operator),
+    );
     await settle();
     const completedEvents = await dataOf(resolved, 'NodeCompleted');
     const completed = completedEvents.find(data => data['path'] === 'ship');
@@ -389,7 +393,7 @@ describe('what the events say', () => {
     await settle();
     expectOk(await journal.run(db, refunding.cancel, { runId: skipped, reason: 'stop' }, caller));
     await settle();
-    await journal.workflows.skipUndo(db, { runId: skipped, path: 'charge' }, operator);
+    orThrow(await journal.workflows.skipUndo(db, { runId: skipped, path: 'charge' }, operator));
     await settle();
     const skippedEvents = await dataOf(skipped, 'NodeSkipped');
     const undone = skippedEvents.find(data => data['path'] === 'charge');

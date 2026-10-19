@@ -8,6 +8,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { JobRunner, ScheduledJob } from './types.js';
 import { jobId } from './id.js';
 import { j, meta, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
@@ -190,8 +192,10 @@ describe('drain with a job runner', () => {
     await queueRow('demo', 'background', { priority: -5 });
     await queueRow('demo', 'critical', { priority: 4 });
     const id = orderId(++next);
-    await db.transaction(tx =>
-      lanes.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        lanes.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
     await queueRow('demo', 'normal', { priority: 0 });
     const jobs = runner(['demo'], job => void ran.push(String(job.args)));

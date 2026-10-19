@@ -7,7 +7,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 1. A **provider** (`BasePaymentProvider`, with `StripeProvider`) talks to the payment service. It takes keys and an `environment`.
 2. **Tables and repositories** come from factories. The app passes its `pgSchema` and its user id column.
 3. **Services** hold the rules: `RefundService`, `SubscriptionManager`, `DunningService`. They return failures for expected refusals.
-4. **Journal commands** write through `@arki/journal` and return its failures when a rule says no.
+4. **Journal commands** write through `@arki/journal` and return its failures when a rule says no. Schema failures (`InvalidInput`, `AsyncSchema`, `ValidatorDefect` from `@arki/failure`) also return without writing.
 5. **Routers** are not here. The app builds them from the services.
 6. An expected answer is a returned `payments.*` failure. A bug, bad input or provider fault throws.
 

@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { Failure } from '@arki/failure';
+import type { Failure, SchemaFailure } from '@arki/failure';
 import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
 import type { AccountId, OrderId } from './test-support.js';
@@ -58,18 +58,20 @@ const keep = <F extends Failure>(failure: F): F => {
 
 /** Opens a profile, places and pays an order (a job row), then refuses when the nick is taken. */
 const signUp = j.command('signUp', ids.extend({ nick: z.string().min(1) }), async (input, { write }) => {
-  await write(profile, input.accountId, () => [ProfileOpened({ nick: input.nick })]);
-  await write(order, input.orderId, () => [
-    OrderPlaced({ customerId: input.accountId, total: 1 }),
-    OrderPaid({ amount: 1 }),
-  ]);
+  orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: input.nick })]));
+  orThrow(
+    await write(order, input.orderId, () => [
+      OrderPlaced({ customerId: input.accountId, total: 1 }),
+      OrderPaid({ amount: 1 }),
+    ]),
+  );
   if (input.nick === 'taken') return keep(CommandConflict({ detail: 'That nick is taken' }));
   return { nick: input.nick };
 });
 
 /** Opens the payer's profile first, then pays: the `events` function refuses a missing or paid order. */
 const payOrder = j.command('payOrder', ids, async (input, { write }) => {
-  await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+  orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]));
   const paid = await write(order, input.orderId, row => {
     if (!row) return keep(CommandNotFound({ detail: 'Order not found' }));
     if (row.status !== 'placed') return keep(CommandConflict({ detail: `Order is already ${row.status}` }));
@@ -142,17 +144,17 @@ describe('a failure the handler returns', () => {
       { orderId: orderId(++next), accountId: accountId(++next), nick: 'x' },
       meta,
     );
-    expectTypeOf(result).toEqualTypeOf<{ nick: string } | CommandConflict>();
+    expectTypeOf(result).toEqualTypeOf<{ nick: string } | CommandConflict | SchemaFailure>();
     const _pay = () => journal.run(db, payOrder, { orderId: orderId(1), accountId: accountId(1) }, meta);
     expectTypeOf<Awaited<ReturnType<typeof _pay>>>().toEqualTypeOf<
-      { version: number } | CommandNotFound | CommandConflict
+      { version: number } | CommandNotFound | CommandConflict | SchemaFailure
     >();
   });
 
   it("rolls back for the app's own failure too, not only the journal's four", async () => {
     const NickBanned = defineFailure('profile.nick_banned', { status: 422 });
     const open = j.command('openBanned', z.object({ accountId: accountIdSchema }), async (input, { write }) => {
-      await write(profile, input.accountId, () => [ProfileOpened({ nick: 'banned' })]);
+      orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: 'banned' })]));
       return NickBanned();
     });
     const acc = accountId(++next);
@@ -171,7 +173,7 @@ describe('a failure the handler returns', () => {
     const acc = accountId(++next);
 
     const result = await db.transaction(async tx => {
-      await journal.write(tx, profile, before, { meta, events: () => [ProfileOpened({ nick: 'caller' })] });
+      orThrow(await journal.write(tx, profile, before, { meta, events: () => [ProfileOpened({ nick: 'caller' })] }));
       return journal.run(tx, signUp, { orderId: id, accountId: acc, nick: 'taken' }, meta);
     });
 
@@ -196,7 +198,7 @@ describe('a failure an events function returns', () => {
 
   it('refuses on the current state: paying twice leaves one payment and no second job', async () => {
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
     expect(await journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta)).toEqual({
       version: 2,
     });
@@ -220,7 +222,7 @@ describe('a failure an events function returns', () => {
         await tx.insert(customerOrderCounts).values({ customerId: customer, placed: 1 });
         return CommandConflict({ detail: 'Not now' });
       });
-      await write(order, input.orderId, () => [OrderPlaced({ customerId: 'fallback', total: 1 })]);
+      orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'fallback', total: 1 })]));
       return isFailure(noted) ? CommandInvalid({ detail: 'Try a note later' }) : 'noted';
     });
 
@@ -239,7 +241,7 @@ describe('a failure an events function returns', () => {
       events: row => (row ? [OrderNoted({ note: 'x' })] : CommandNotFound({ detail: 'Order not found' })),
     });
 
-    expectTypeOf(written).toExtend<CommandNotFound | { readonly row: unknown }>();
+    expectTypeOf(written).toExtend<CommandNotFound | { readonly row: unknown } | SchemaFailure>();
     expect(CommandNotFound.is(written)).toBe(true);
     expect(await eventsOf(id)).toEqual([]);
   });
@@ -254,7 +256,7 @@ describe('a failure authorize returns', () => {
     z.object({ orderId: orderIdSchema }),
     async (input, { write }) => {
       runs += 1;
-      const { row } = await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]);
+      const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]));
       return { version: row?.version ?? 0 };
     },
     {
@@ -265,12 +267,12 @@ describe('a failure authorize returns', () => {
 
   it('stops the command before the handler, and the caller gets it typed', async () => {
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
     const before = runs;
 
     const refused = await journal.run(db, approve, { orderId: id }, { actorId: 'usr_intruder' });
 
-    expectTypeOf(refused).toEqualTypeOf<{ version: number } | CommandForbidden>();
+    expectTypeOf(refused).toEqualTypeOf<{ version: number } | CommandForbidden | SchemaFailure>();
     expect(refused).toMatchObject({ code: 'journal.forbidden', status: 403, message: 'Not allowed to approve' });
     expect(runs, 'the handler never ran').toBe(before);
     expect(await typesOf(id)).toEqual(['OrderPlaced']);
@@ -278,7 +280,7 @@ describe('a failure authorize returns', () => {
 
   it('refuses a replay too: a receipt proves the command ran, not that this caller may have its result', async () => {
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
     const key = `k_refused_${next}`;
     const owner = { actorId: 'usr_owner' };
     expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toEqual({ version: 2 });
@@ -309,7 +311,7 @@ describe('a failure and an idempotency key', () => {
     expect(CommandNotFound.is(await journal.run(db, payOrder, input, meta, { idempotencyKey: key }))).toBe(true);
     expect(await receiptOf(key)).toEqual([]);
 
-    await journal.run(db, placeOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
     expect(await journal.run(db, payOrder, input, meta, { idempotencyKey: key })).toEqual({ version: 2 });
     expect(await receiptOf(key)).toHaveLength(1);
   });
@@ -320,7 +322,7 @@ const parent = j.command(
   'parentOfSignUp',
   ids.extend({ parentOrderId: orderIdSchema, returnChild: z.boolean() }),
   async (input, { write, run }) => {
-    await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'parent', total: 1 })]);
+    orThrow(await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'parent', total: 1 })]));
     const child = await run(signUp, { orderId: input.orderId, accountId: input.accountId, nick: 'taken' });
     if (isFailure(child) && input.returnChild) return child;
     return 'went on';
@@ -364,7 +366,7 @@ describe('a command that ignores a failure it was handed', () => {
     const id = orderId(++next);
     const acc = accountId(++next);
     const payAnyway = j.command('payAnyway', ids, async (input, { write }) => {
-      await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+      orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]));
       // eslint-disable-next-line failure/must-use -- the test proves an ignored write refusal dooms the command
       await write(order, input.orderId, row =>
         row ? [OrderPaid({ amount: 1 })] : CommandNotFound({ detail: 'No order' }),
@@ -408,7 +410,7 @@ describe('a command that ignores a failure it was handed', () => {
       'grandparentOfSignUp',
       ids.extend({ parentOrderId: orderIdSchema, own: orderIdSchema }),
       async (input, { write, run }) => {
-        await write(order, input.own, () => [OrderPlaced({ customerId: 'grandparent', total: 1 })]);
+        orThrow(await write(order, input.own, () => [OrderPlaced({ customerId: 'grandparent', total: 1 })]));
         return run(parent, { ...input, returnChild: false });
       },
     );
@@ -429,7 +431,7 @@ describe('a command that ignores a failure it was handed', () => {
       'translateRefusal',
       ids.extend({ parentOrderId: orderIdSchema }),
       async (input, { write, run }) => {
-        await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'translator', total: 1 })]);
+        orThrow(await write(order, input.parentOrderId, () => [OrderPlaced({ customerId: 'translator', total: 1 })]));
         const child = await run(signUp, { orderId: input.orderId, accountId: input.accountId, nick: 'taken' });
         return isFailure(child) ? CommandInvalid({ detail: 'Pick another nick' }) : child;
       },
@@ -462,7 +464,7 @@ describe("an effect that ignores its command's failure", () => {
   });
   const passes = j.effect('relay-passes', order, {
     OrderNoted: async (event, { run }) => {
-      await run(placeOrder, { orderId: `${event.entityId}_copy` }, meta);
+      orThrow(await run(placeOrder, { orderId: `${event.entityId}_copy` }, meta));
     },
   });
   const relays = j.compose({ effects: [ignores, passes] });
@@ -477,8 +479,8 @@ describe("an effect that ignores its command's failure", () => {
 
   it('fails the job with the refusal, while an effect whose commands succeeded is done', async () => {
     const id = orderId(++next);
-    await relays.run(effectDb, placeOrder, { orderId: id }, meta);
-    await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] });
+    orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
+    orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
 
     await relays.drain(effectDb);
 
@@ -539,10 +541,12 @@ describe('a refusal the command accepts', () => {
   /** Writes the reservation (a placed and paid order, so an effect job too), then refuses when stock is short. */
   const reserveStock = j.command('reserveStock', line, async (input, { write }) => {
     if (input.qty <= 0) return CommandInvalid({ detail: 'Reserve at least one' });
-    await write(order, input.reservationId, () => [
-      OrderPlaced({ customerId: input.sku, total: input.qty }),
-      OrderPaid({ amount: input.qty }),
-    ]);
+    orThrow(
+      await write(order, input.reservationId, () => [
+        OrderPlaced({ customerId: input.sku, total: input.qty }),
+        OrderPaid({ amount: input.qty }),
+      ]),
+    );
     if (input.qty > input.inStock) return keep(OutOfStock({ sku: input.sku, short: input.qty - input.inStock }));
     return { reservationId: input.reservationId };
   });
@@ -566,7 +570,7 @@ describe('a refusal the command accepts', () => {
   let backorderRuns = 0;
   /** The backorder example of the docs. `acceptIt: false` forgets the `accept` call. */
   const placeWithBackorder = j.command('placeWithBackorder', orderLine, async (input, { write, run, accept }) => {
-    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'buyer', total: input.qty })]);
+    orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'buyer', total: input.qty })]));
     const stock = await run(
       reserveStock,
       { reservationId: input.reservationId, sku: input.sku, qty: input.qty, inStock: input.inStock },
@@ -616,10 +620,10 @@ describe('a refusal the command accepts', () => {
   it("accepts a write's own refusal: the other writes commit and the refused row is unchanged", async () => {
     const id = orderId(++next);
     const acc = accountId(++next);
-    await journal.run(db, placeOrder, { orderId: id }, meta);
-    await orThrow(journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta));
+    orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
+    orThrow(await journal.run(db, payOrder, { orderId: id, accountId: accountId(++next) }, meta));
     const ensurePaid = j.command('ensurePaid', ids, async (input, { write, accept }) => {
-      await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]);
+      orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: 'payer' })]));
       const paid = await write(order, input.orderId, row => {
         if (!row) return CommandNotFound({ detail: 'Order not found' });
         if (row.status === 'paid') return CommandConflict({ detail: 'Already paid' });
@@ -694,7 +698,7 @@ describe('a refusal the command accepts', () => {
         const first = await write(order, input.a, () => soldOut);
         // eslint-disable-next-line failure/must-use -- the same refusal again; ignoring it is the point of the test
         await write(order, input.b, () => soldOut);
-        if (isFailure(first)) for (let n = 0; n < input.accepts; n += 1) accept(first);
+        if (OutOfStock.is(first)) for (let n = 0; n < input.accepts; n += 1) accept(first);
         return 'went on';
       },
     );
@@ -757,9 +761,9 @@ describe('a refusal the command accepts', () => {
       'acceptsThenRefuses',
       ids.extend({ other: z.boolean() }),
       async (input, { write, accept }) => {
-        await write(profile, input.accountId, () => [ProfileOpened({ nick: 'x' })]);
+        orThrow(await write(profile, input.accountId, () => [ProfileOpened({ nick: 'x' })]));
         const missing = await write(order, input.orderId, () => keep(CommandNotFound({ detail: 'No order' })));
-        if (!isFailure(missing)) return 'paid';
+        if (!CommandNotFound.is(missing)) return 'paid';
         accept(missing);
         return input.other ? keep(CommandInvalid({ detail: 'Changed my mind' })) : missing;
       },
@@ -778,9 +782,9 @@ describe('a refusal the command accepts', () => {
   it('a failed recovery commits nothing: an ignored fallback refusal dooms the command, and a throw rolls it back', async () => {
     const input = lineFor(true);
     // The backorder exists already, so the fallback refuses.
-    await journal.run(db, placeOrder, { orderId: input.backorderId }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: input.backorderId }, meta));
     const ignoresFallback = j.command('ignoresFallback', orderLine, async (args, { write, run, accept }) => {
-      await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]);
+      orThrow(await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]));
       const stock = await run(reserveStock, {
         reservationId: args.reservationId,
         sku: args.sku,
@@ -794,7 +798,7 @@ describe('a refusal the command accepts', () => {
       return 'backordered';
     });
     const throwsInFallback = j.command('throwsInFallback', orderLine, async (args, { write, run, accept }) => {
-      await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]);
+      orThrow(await write(order, args.orderId, () => [OrderPlaced({ customerId: 'buyer', total: args.qty })]));
       const stock = await run(reserveStock, {
         reservationId: args.reservationId,
         sku: args.sku,
@@ -819,7 +823,7 @@ describe('a refusal the command accepts', () => {
     const childLine = line.extend({ childOrderId: orderIdSchema, passUp: z.boolean() });
     /** Writes its own row, then runs `reserveStock`; it either accepts the refusal or passes it up. */
     const reserveOrPass = j.command('reserveOrPass', childLine, async (input, { write, run, accept }) => {
-      await write(order, input.childOrderId, () => [OrderPlaced({ customerId: 'child', total: 1 })]);
+      orThrow(await write(order, input.childOrderId, () => [OrderPlaced({ customerId: 'child', total: 1 })]));
       const stock = await run(reserveStock, input);
       if (OutOfStock.is(stock) && !input.passUp) {
         accept(stock);
@@ -831,7 +835,7 @@ describe('a refusal the command accepts', () => {
       'topOfThree',
       childLine.extend({ topOrderId: orderIdSchema }),
       async (input, { write, run, accept }) => {
-        await write(order, input.topOrderId, () => [OrderPlaced({ customerId: 'top', total: 1 })]);
+        orThrow(await write(order, input.topOrderId, () => [OrderPlaced({ customerId: 'top', total: 1 })]));
         const child = await run(reserveOrPass, input);
         if (OutOfStock.is(child)) {
           accept(child);
@@ -869,7 +873,7 @@ describe('a refusal the command accepts', () => {
       async (input, { write, run }) => {
         const missing = await write(order, input.id, () => CommandNotFound({ detail: 'No order' }));
         if (isFailure(missing)) theirs.push(missing);
-        await run(meddles, {});
+        orThrow(await run(meddles, {}));
         return missing;
       },
     );
@@ -888,7 +892,7 @@ describe('a refusal the command accepts', () => {
       'toleratesForbidden',
       z.object({ id: orderIdSchema }),
       async (input, { write, run, accept }) => {
-        await write(order, input.id, () => [OrderPlaced({ customerId: 'tolerant', total: 1 })]);
+        orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'tolerant', total: 1 })]));
         const child = await run(guarded, {});
         if (CommandForbidden.is(child)) {
           accept(child);
@@ -965,7 +969,7 @@ describe('a refusal the effect accepts', () => {
   });
   const misuses = j.effect('relay-misuses', order, {
     OrderNoted: async (event, { run, accept }) => {
-      await run(placeOrder, { orderId: `${event.entityId}_side` }, meta);
+      orThrow(await run(placeOrder, { orderId: `${event.entityId}_side` }, meta));
       accept(CommandConflict({ detail: 'never returned' }));
     },
   });
@@ -981,8 +985,8 @@ describe('a refusal the effect accepts', () => {
 
   it('an accepted refusal ends the job done; an unaccepted one dies after one try; misuse throws and is retried', async () => {
     const id = orderId(++next);
-    await relays.run(effectDb, placeOrder, { orderId: id }, meta);
-    await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] });
+    orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
+    orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
 
     await relays.drain(effectDb);
 

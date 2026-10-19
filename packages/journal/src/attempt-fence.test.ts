@@ -9,6 +9,8 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { isJournalError } from './errors.js';
 import { j, meta, openDb, order, OrderNoted, OrderPaid, OrderPlaced, tables } from './test-support.js';
 
@@ -33,10 +35,12 @@ const noteOrder = j.command(
 /** Places and pays an order, which queues one job for the effects of the journal under test. */
 async function payOrder(journal: { write: typeof countingJournal.write }) {
   const id: `ord_${number}` = `ord_${++next}`;
-  await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+  orThrow(await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })));
   return id;
 }
 
@@ -58,7 +62,7 @@ const fenced = j.effect('fenced-writer', order, {
       .set({ finishedAt: new Date(), outcome: 'superseded' })
       .where(and(eq(tables.jobAttempts.jobId, ctx.jobId), isNull(tables.jobAttempts.finishedAt)));
     try {
-      await ctx.run(noteOrder, { orderId: event.entityId, note: 'from a stale worker' }, meta);
+      orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note: 'from a stale worker' }, meta));
       outcomes.push('committed');
     } catch (error) {
       outcomes.push(isJournalError(error, 'LEASE_LOST') ? 'LEASE_LOST' : 'other');

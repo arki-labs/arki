@@ -5,11 +5,11 @@
 // Every group states a contract that is checked before timing; a library that
 // returns a different answer is marked `differs` and shown without a ratio.
 
-import { getDotPath, SchemaError as UtilsSchemaError } from '@standard-schema/utils';
+import { getDotPath } from '@standard-schema/utils';
 
 import type { StandardSchemaV1 } from '@arki/schema';
 import { compare, defineSuite } from '@arki/bench';
-import { pathOf, SchemaError } from '@arki/schema';
+import { pathOf } from '@arki/schema';
 
 const SIZES = [1, 100, 10_000];
 
@@ -32,16 +32,10 @@ function dotPathsOf(n: number): string {
   return paths.join('|');
 }
 
-/** The issues one validation failure reports, reused for every construction in the error group. */
-const ERROR_ISSUES = issuesOf(3);
-
 export default defineSuite({
   id: '@arki/schema',
   intro:
     'Speed of the `@arki/schema` issue helpers against `@standard-schema/utils`. Each table only ranks libraries that returned the same answer on every checked input.',
-  notes: [
-    '`@arki/schema`’s `SchemaError` message lists every issue with its path; the `@standard-schema/utils` one uses the first issue’s message only.',
-  ],
   groups: [
     compare<number>({
       id: 'dot-path',
@@ -67,37 +61,6 @@ export default defineSuite({
           setup: issuesOf,
           run: issues => issues.map(issue => getDotPath(issue)),
           normalize: paths => paths.join('|'),
-        }),
-      }),
-    }),
-    compare<number>({
-      id: 'error',
-      title: 'Construct a SchemaError from three issues',
-      contract: {
-        id: 'schema-error/v1',
-        description: 'for n constructions, the total of error.issues.length',
-      },
-      inputs: SIZES,
-      expected: n => n * ERROR_ISSUES.length,
-      baseline: 'arki',
-      cases: c => ({
-        arki: c({
-          label: '@arki/schema',
-          package: '@arki/schema',
-          run: n => {
-            let total = 0;
-            for (let index = 0; index < n; index++) total += new SchemaError(ERROR_ISSUES).issues.length;
-            return total;
-          },
-        }),
-        utils: c({
-          label: '@standard-schema/utils',
-          package: '@standard-schema/utils',
-          run: n => {
-            let total = 0;
-            for (let index = 0; index < n; index++) total += new UtilsSchemaError(ERROR_ISSUES).issues.length;
-            return total;
-          },
         }),
       }),
     }),

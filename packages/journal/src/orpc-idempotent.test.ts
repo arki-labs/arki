@@ -12,6 +12,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { actorRun, idempotent } from './orpc.js';
 import { j, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
 
@@ -57,7 +59,7 @@ const keyed = (required = false) =>
 const placeAndPay = keyed()
   .input(idInput)
   .handler(async ({ context, input }) => {
-    await context.run(placeOrder, input);
+    orThrow(await context.run(placeOrder, input));
     return context.run(payOrder, input);
   });
 
@@ -87,8 +89,14 @@ describe('idempotent() with actorRun', () => {
   it('scopes the key to the caller: another user with the same header runs on their own', async () => {
     const a = orderId(++next);
     const b = orderId(++next);
-    await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'same' }) });
-    await call(placeAndPay, { id: b }, { context: context({ 'idempotency-key': 'same' }, { user: { id: 'usr_bo' } }) });
+    orThrow(await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'same' }) }));
+    orThrow(
+      await call(
+        placeAndPay,
+        { id: b },
+        { context: context({ 'idempotency-key': 'same' }, { user: { id: 'usr_bo' } }) },
+      ),
+    );
     expect(await events(a)).toHaveLength(2);
     expect(await events(b)).toHaveLength(2);
   });
@@ -96,17 +104,21 @@ describe('idempotent() with actorRun', () => {
   it('a key with colons cannot reach another scope: user "a" + key "b:x" and user "a:b" + key "x" stay apart', async () => {
     const a = orderId(++next);
     const b = orderId(++next);
-    await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'b:x' }, { user: { id: 'a' } }) });
+    orThrow(
+      await call(placeAndPay, { id: a }, { context: context({ 'idempotency-key': 'b:x' }, { user: { id: 'a' } }) }),
+    );
     // Joined without the length, both would be "a:b:x:…" and the second call, with another input,
     // would hit the first one's receipt.
-    await call(placeAndPay, { id: b }, { context: context({ 'idempotency-key': 'x' }, { user: { id: 'a:b' } }) });
+    orThrow(
+      await call(placeAndPay, { id: b }, { context: context({ 'idempotency-key': 'x' }, { user: { id: 'a:b' } }) }),
+    );
     expect(await events(a)).toHaveLength(2);
     expect(await events(b)).toHaveLength(2);
   });
 
   it('without the header it runs as before, and with required it is refused', async () => {
     const id = orderId(++next);
-    await call(placeAndPay, { id }, { context: context({}) });
+    orThrow(await call(placeAndPay, { id }, { context: context({}) }));
     expect(await events(id)).toHaveLength(2);
     const strict = keyed(true)
       .input(idInput)
@@ -118,7 +130,7 @@ describe('idempotent() with actorRun', () => {
 
   it('the same key with another input is a conflict, not a second write', async () => {
     const ctx = context({ 'idempotency-key': 'req-2' });
-    await call(placeAndPay, { id: orderId(++next) }, { context: ctx });
+    orThrow(await call(placeAndPay, { id: orderId(++next) }, { context: ctx }));
     await expect(call(placeAndPay, { id: orderId(++next) }, { context: ctx })).rejects.toThrow();
   });
 });

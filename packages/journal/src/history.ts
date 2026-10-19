@@ -6,7 +6,9 @@
  */
 import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 
+import type { SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { InvalidInput, isFailure, isSchemaFailure } from '@arki/failure';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
 import type { JournalTables } from './pg.js';
@@ -24,6 +26,7 @@ import type {
 import { debugReplay } from './debug.js';
 import { JournalError } from './errors.js';
 import { findEventDefinition, fold, hasDeclaredEventType } from './fold.js';
+import { rollbackOnFailure } from './rollback.js';
 import {
   assertExactId,
   assertStoredId,
@@ -108,6 +111,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
       const step = def.upcasters[version - 1];
       if (step === undefined) return fail(`no upcaster for schema version ${version}`);
       const old = safeParse(step.from, value);
+      if (!old.success && !InvalidInput.is(old.error)) return old.error;
       if (!old.success) return fail(`the data does not fit schema version ${version}: ${old.error.message}`);
       try {
         value = step.up(old.data);
@@ -124,7 +128,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     row: typeof eventsTable.$inferSelect,
     def: AnyEventDef | undefined,
     id: Id,
-  ): Recorded<string, unknown, MetaOut, Id> => {
+  ): Recorded<string, unknown, MetaOut, Id> | SchemaFailure => {
     const at = `event ${row.id} ("${row.type}" at version ${row.version})`;
     if (def === undefined) {
       throw new JournalError(
@@ -134,7 +138,10 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
         `${at}: the entity declares no event of this type`,
       );
     }
-    const data = safeParse(def.schema, upcast(row, def, at));
+    const lifted = upcast(row, def, at);
+    if (isSchemaFailure(lifted)) return lifted;
+    const data = safeParse(def.schema, lifted);
+    if (!data.success && !InvalidInput.is(data.error)) return data.error;
     if (!data.success) {
       const after = row.schemaVersion < def.version ? ` after upcasting from version ${row.schemaVersion}` : '';
       throw new JournalError(
@@ -145,6 +152,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
       );
     }
     const meta = safeParse<SchemaOutput<Meta>>(metaSchema, row.meta);
+    if (!meta.success && !InvalidInput.is(meta.error)) return meta.error;
     if (!meta.success) {
       throw new JournalError(
         'REPLAY_FAILED',
@@ -207,6 +215,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     }
     assertNoHoles(entity.kind, id, rows);
     const all = decodeHistory(entity, id, rows);
+    if (isFailure(all)) return all;
     // The whole history decides whether the entity is alive, whatever `throughVersion` says.
     const full = fold(entity, null, id, all, 'replay').row;
     assertRowNotAhead(entity.kind, id, full, rows.at(-1)?.version ?? 0, current);
@@ -220,10 +229,15 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     rows: Awaited<ReturnType<typeof loadHistory>>,
-  ) =>
-    rows
-      .map(row => decodeStoredEvent(row, entity.events.get(row.type), id))
-      .filter(event => hasDeclaredEventType(entity, event));
+  ) => {
+    const events: Recorded<string, unknown, MetaOut, EntityId<Tbl, Key>>[] = [];
+    for (const row of rows) {
+      const event = decodeStoredEvent(row, entity.events.get(row.type), id);
+      if (isFailure(event)) return event;
+      events.push(event);
+    }
+    return events.filter(event => hasDeclaredEventType(entity, event));
+  };
 
   /**
    * No row, but a log. Either a create follows a delete, or the row was removed
@@ -237,10 +251,12 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     latestLogVersion: number,
-  ): Promise<void> => {
+  ): Promise<void | SchemaFailure> => {
     const rows = await loadHistory(db, entity.kind, id);
     if (rows[0]?.version !== 1) return;
-    if (fold(entity, null, id, decodeHistory(entity, id, rows), 'replay').row !== null) {
+    const events = decodeHistory(entity, id, rows);
+    if (isFailure(events)) return events;
+    if (fold(entity, null, id, events, 'replay').row !== null) {
       throw new JournalError(
         'CONFLICT',
         entity.kind,
@@ -255,7 +271,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     opts?: { readonly throughVersion?: number },
-  ): Promise<ReplayResult<Tbl, E, MetaOut, Key>> => {
+  ): Promise<ReplayResult<Tbl, E, MetaOut, Key> | SchemaFailure> => {
     assertExactId(entity, id);
     const current = await loadRow(db, entity, id, false);
     return replayFrom(db, entity, id, current, opts?.throughVersion);
@@ -265,7 +281,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     db: DbHandle,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<VerifyResult<Tbl, Key>> => {
+  ): Promise<VerifyResult<Tbl, Key> | SchemaFailure> => {
     assertExactId(entity, id);
     const loaded = await loadRow(db, entity, id, false);
     assertStoredId(entity, loaded, id);
@@ -273,7 +289,9 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
       throw new Error(`journal: ${entity.kind} ${id} row is missing columns`);
     }
     const actual = loaded;
-    const { row: expected } = await replayFrom(db, entity, id, actual);
+    const replayed = await replayFrom(db, entity, id, actual);
+    if (isFailure(replayed)) return replayed;
+    const { row: expected } = replayed;
     if (expected === null && actual === null) return { ok: true };
     if (expected === null || actual === null) return { ok: false, expected, actual };
     const want = toRecord(expected);
@@ -286,12 +304,14 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     db: DbHandle,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<Row<Tbl> | null> => {
+  ): Promise<Row<Tbl> | null | SchemaFailure> => {
     assertExactId(entity, id);
     return db.transaction(async tx => {
       const current = await loadRow(tx, entity, id, true);
       assertStoredId(entity, current, id);
-      const { row: expected } = await replayFrom(tx, entity, id, current);
+      const replayed = await replayFrom(tx, entity, id, current);
+      if (isFailure(replayed)) return replayed;
+      const { row: expected } = replayed;
       debugReplay.debug('{kind} {id}: repair -> {value3}', {
         kind: entity.kind,
         id,
@@ -308,51 +328,57 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     db: DbHandle,
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<ForgetResult<Tbl>> => {
+  ): Promise<ForgetResult<Tbl> | SchemaFailure> => {
     assertExactId(entity, id);
-    return db.transaction(async tx => {
-      // The row lock first, so no write lands between the rewrite and the repair. Then every
-      // async cursor, so no projection batch in flight commits the data after it was erased.
-      await loadRow(tx, entity, id, true);
-      await tx.select({ name: deps.tables.cursors.name }).from(deps.tables.cursors).for('update');
-      const rows = await loadHistory(tx, entity.kind, id);
-      let erased = 0;
-      for (const row of rows) {
-        const def = entity.events.get(row.type);
-        if (def?.erased === undefined) continue;
-        // Decode as replay does, so the erased form starts from data the schema accepts.
-        const event = decodeStoredEvent(row, def, id);
-        const form = safeParse(def.schema, def.erased(event.data));
-        if (!form.success) {
-          throw new JournalError(
-            'BAD_DEFINITION',
-            entity.kind,
-            id,
-            `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
-          );
+    const refusal = rollbackOnFailure<ForgetResult<Tbl> | SchemaFailure>();
+    return db
+      .transaction(async tx => {
+        // The row lock first, so no write lands between the rewrite and the repair. Then every
+        // async cursor, so no projection batch in flight commits the data after it was erased.
+        await loadRow(tx, entity, id, true);
+        await tx.select({ name: deps.tables.cursors.name }).from(deps.tables.cursors).for('update');
+        const rows = await loadHistory(tx, entity.kind, id);
+        let erased = 0;
+        for (const row of rows) {
+          const def = entity.events.get(row.type);
+          if (def?.erased === undefined) continue;
+          // Decode as replay does, so the erased form starts from data the schema accepts.
+          const event = decodeStoredEvent(row, def, id);
+          if (isFailure(event)) return refusal.settle(event);
+          const form = safeParse(def.schema, def.erased(event.data));
+          if (!form.success && !InvalidInput.is(form.error)) return refusal.settle(form.error);
+          if (!form.success) {
+            throw new JournalError(
+              'BAD_DEFINITION',
+              entity.kind,
+              id,
+              `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
+            );
+          }
+          await tx
+            .update(eventsTable)
+            .set({
+              data: form.data,
+              schemaVersion: def.version,
+              erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())`,
+            })
+            .where(eq(eventsTable.seq, row.seq));
+          erased += 1;
         }
-        await tx
-          .update(eventsTable)
-          .set({
-            data: form.data,
-            schemaVersion: def.version,
-            erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())`,
-          })
-          .where(eq(eventsTable.seq, row.seq));
-        erased += 1;
-      }
-      // The row must match the history it now has. Repair on `tx` is a savepoint.
-      const row = await repair(tx, entity, id);
-      debugReplay.debug('{kind} {id}: forget -> {erased} events erased', { kind: entity.kind, id, erased });
-      return { erased, row };
-    });
+        // The row must match the history it now has. Repair on `tx` is a savepoint.
+        const row = await repair(tx, entity, id);
+        if (isSchemaFailure(row)) return refusal.settle(row);
+        debugReplay.debug('{kind} {id}: forget -> {erased} events erased', { kind: entity.kind, id, erased });
+        return { erased, row };
+      })
+      .catch(refusal.recover);
   };
 
   const rerun = async <Tx extends TransactionSource<Tx>>(
     db: TransactionSource<Tx>,
     projection: Projection<MetaOut, Tx>,
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
-  ): Promise<{ readonly events: number }> => {
+  ): Promise<{ readonly events: number } | SchemaFailure> => {
     const batchSize = opts?.batchSize ?? 100;
     const kinds = projection.entities.map(entity => entity.kind);
     let cursor = opts?.afterSeq ?? 0;
@@ -372,14 +398,21 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
         .orderBy(asc(eventsTable.seq))
         .limit(batchSize);
       if (rows.length === 0) break;
-      await db.transaction(async tx => {
-        for (const row of rows) {
-          await projection.run(
-            tx,
-            decodeStoredEvent(row, findEventDefinition(projection.entities, row.kind, row.type), row.entityId),
-          );
-        }
-      });
+      const refusal = rollbackOnFailure<void | SchemaFailure>();
+      const result = await db
+        .transaction(async tx => {
+          for (const row of rows) {
+            const event = decodeStoredEvent(
+              row,
+              findEventDefinition(projection.entities, row.kind, row.type),
+              row.entityId,
+            );
+            if (isFailure(event)) return refusal.settle(event);
+            await projection.run(tx, event);
+          }
+        })
+        .catch(refusal.recover);
+      if (isFailure(result)) return result;
       count += rows.length;
       cursor = rows.at(-1)?.seq ?? cursor;
       if (rows.length < batchSize) break;

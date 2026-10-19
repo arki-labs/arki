@@ -4,6 +4,7 @@
  * refuses to be the model under test.
  */
 import type { SchemaWithJson } from '@arki/schema';
+import { orThrow } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { Verdict } from './schemas.js';
@@ -121,7 +122,7 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
         { cause: error },
       );
     }
-    return parse(input.schema, json);
+    return orThrow(parse(input.schema, json));
   }
 
   return {

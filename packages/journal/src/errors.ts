@@ -174,9 +174,9 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   operations at once on one transaction, `drain` inside a transaction).
  * - A misused `accept` (a value the handler never received, accepted twice, called late,
  *   or not a failure) is a `JournalError` with code `INVALID_ACCEPT`.
- * - Command input, event data or `meta` that fails its schema is a `SchemaError` from
- *   `@arki/schema`, with the schema's `issues`. A schema that cannot run (async where
- *   the journal parses sync, or a `validate` that throws) is a `SchemaRunError`.
+ * - Command input, event data or `meta` that fails its schema returns `InvalidInput`
+ *   from `@arki/failure`, with `data.issues`. An async schema in a sync call returns
+ *   `AsyncSchema`; a throwing validator returns `ValidatorDefect`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
  *   projection passes through unchanged. A rejected business rule is not thrown:
  *   it is returned as a failure (`CommandNotFound` and the others below), and

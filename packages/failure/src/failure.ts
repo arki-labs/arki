@@ -1,5 +1,5 @@
 /**
- * Expected failures as values.
+ * Typed failures as values.
  *
  * A failure is something the caller should handle: "post not found", "email
  * taken", "card declined". `defineFailure` names one kind of failure once;
@@ -7,9 +7,10 @@
  * any other value. The return type is inferred as `Post | Failure<'post.not_found', …>`,
  * so the compiler makes every caller check before using the post.
  *
- * Bugs are not failures. A bug still throws.
+ * Owned operation boundaries can return typed defects. Invalid static declarations
+ * still throw so a definition is always a definition.
  */
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 
@@ -21,7 +22,7 @@ import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
  */
 const BRAND = '~failure';
 
-/** An expected failure, returned as a value. Made by calling a {@link FailureDefinition}. */
+/** A typed failure, returned as a value. Made by calling a {@link FailureDefinition}. */
 export type Failure<Code extends string = string, Data = unknown> = {
   /** Stable, unique code, such as `post.not_found`. Match on it, never on the message. */
   readonly code: Code;
@@ -42,7 +43,7 @@ export type Failure<Code extends string = string, Data = unknown> = {
  * The data a definition's failures carry: the schema's output type, the live
  * value the failure carries; `undefined` without a schema.
  */
-export type DataOf<Schema> = Schema extends StandardSchemaV1 ? SchemaOutput<Schema> : undefined;
+export type DataOf<Schema> = Schema extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<Schema> : undefined;
 
 /** What making one failure may take besides its data. */
 export type MakeOptions = {
@@ -204,6 +205,7 @@ type LooseOptions = {
 
 /** Fill `{key}` placeholders from the data; a placeholder with no value stays as written. */
 function fill(template: string, data: unknown): string {
+  if (!template.includes('{')) return template;
   if (typeof data !== 'object' || data === null) return template;
   const values: Readonly<Record<string, unknown>> = { ...data };
   return template.replaceAll(/\{([^{}]+)\}/g, (placeholder, key: string) =>

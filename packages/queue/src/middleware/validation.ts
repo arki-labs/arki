@@ -3,8 +3,10 @@
  * Validates job input data with any Standard Schema validator
  */
 
+import type { FailureOf } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { SchemaError, parseAsync } from '@arki/schema';
+import { InvalidInput, orThrow, ValidatorDefect } from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import type { MiddlewareFunction } from '../types/middleware.ts';
 import type { QueueMeta } from '../types/queue.ts';
@@ -60,23 +62,16 @@ export function validationMiddleware<TContext>(): MiddlewareFunction<TContext, T
  */
 export function customValidationMiddleware<TContext, TInput>(options: {
   schema: StandardSchemaV1<unknown, TInput>;
-  onError?: (error: SchemaError, jobName: string) => void;
+  onError?: (error: FailureOf<typeof InvalidInput>, jobName: string) => void;
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
   return async ({ next, data, job }) => {
-    try {
-      // Async: the middleware already awaits. A SchemaRunError (broken schema) is a bug and propagates.
-      await parseAsync(options.schema, data);
-    } catch (error) {
-      if (!(error instanceof SchemaError)) throw error;
-
-      // Custom error handler
-      if (options.onError) {
-        options.onError(error, job.name);
-      }
-
-      // Throw validation error
-      throw new JobValidationError(`Validation failed for job ${job.name}`, job.name, error.issues);
+    const parsed = await parseAsync(options.schema, data);
+    if (InvalidInput.is(parsed)) {
+      options.onError?.(parsed, job.name);
+      orThrow(parsed);
     }
+    // Middleware executes inside BullMQ/pg-boss, whose callbacks fail by throwing.
+    if (ValidatorDefect.is(parsed)) orThrow(parsed);
     return await next();
   };
 }
@@ -99,7 +94,7 @@ export function customValidationMiddleware<TContext, TInput>(options: {
  */
 export function outputValidationMiddleware<TContext, TOutput>(_options: {
   schema: StandardSchemaV1<unknown, TOutput>;
-  onError?: (error: SchemaError, jobName: string, output: unknown) => void;
+  onError?: (error: FailureOf<typeof InvalidInput>, jobName: string, output: unknown) => void;
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
   return async ({ next }) => {
     const result = await next();

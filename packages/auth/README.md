@@ -356,6 +356,7 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 ## Limits
 
 - **Origin and CSRF checks are forced on.** The engine skips its origin check when it thinks it runs under test. This package sets both checks on explicitly, so tests see the same checks as production.
+- **A template validator defect throws.** `schema.validator_defect` remains a defect at the auth callback boundary; it is not converted to a delivery refusal.
 - **A failed verify mail at sign-up is not E006.** The engine sends that mail in the background and only logs a failure. Asking for the mail again (`/send-verification-email`) and every magic-link request do return E006.
 - **A magic link to an unknown email is a sign-up.** The request answers the same for known and unknown emails. With `magicLink: { signUp: false }` the link is refused when it is used, and no user is made.
 - **The limiter store.** The rate limiter keeps its counts in your `@arki/kv` store, through the engine's `customStorage` hook, using only `getRateLimiter`. A store error answers 503. But when Redis is not ready at the moment `@arki/kv` creates a limiter, `@arki/kv` hands back an in-memory limiter, and this package cannot see that. Until `@arki/kv` can refuse instead, make sure Redis is up before the first request.

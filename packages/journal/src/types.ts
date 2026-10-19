@@ -1,7 +1,7 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { AnyPgColumn, PgAsyncDatabase, PgQueryResultHKT, PgTableWithColumns } from 'drizzle-orm/pg-core';
 
-import type { Failure } from '@arki/failure';
+import type { Failure, SchemaFailure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
@@ -163,7 +163,7 @@ export type Recorded<T extends string = string, Data = unknown, Meta = unknown, 
  */
 export type EventDef<T extends string, S extends StandardSchemaV1> = BivariantFn<
   [data: SchemaInput<S>],
-  Pending<T, SchemaOutput<S>>
+  Pending<T, SchemaOutput<S>> | SchemaFailure
 > & {
   readonly type: T;
   readonly schema: S;

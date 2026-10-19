@@ -8,6 +8,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { OrderId } from './test-support.js';
 import { j, meta, openDb, order, orderId, OrderNoted, OrderPlaced } from './test-support.js';
 
@@ -40,7 +42,7 @@ const placeOrder = j.command(
   'placeOrder',
   z.object({ id: orderIdSchema, fail: z.boolean().default(false) }),
   async (input, { write }) => {
-    await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
+    orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
     if (input.fail) throw new Error('refused after the write');
   },
 );
@@ -117,7 +119,7 @@ describe('wake', () => {
     try {
       const id = orderId(++next);
       const done = whenHandled(id);
-      await journal.run(db, placeOrder, { id }, meta);
+      orThrow(await journal.run(db, placeOrder, { id }, meta));
       await done;
       expect(handled).toContain(id);
     } finally {
@@ -153,7 +155,7 @@ describe('wake', () => {
     try {
       const id = orderId(++next);
       const done = whenHandled(id);
-      await db.transaction(tx => journal.run(tx, placeOrder, { id }, meta));
+      orThrow(await db.transaction(tx => journal.run(tx, placeOrder, { id }, meta)));
       await tick();
       expect(drain).toHaveBeenCalledTimes(1);
       expect(handled).not.toContain(id);
@@ -181,11 +183,11 @@ describe('wake', () => {
 
   it('a committed run that queued no job does not wake: there is nothing for a pass to find', async () => {
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { id }, meta);
+    orThrow(await journal.run(db, placeOrder, { id }, meta));
     await journal.drain(db);
     const { drain, worker } = await sleepingWorker();
     try {
-      await journal.run(db, noteOrder, { id }, meta);
+      orThrow(await journal.run(db, noteOrder, { id }, meta));
       await tick();
       expect(drain).toHaveBeenCalledTimes(1);
     } finally {

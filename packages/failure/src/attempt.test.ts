@@ -9,6 +9,22 @@ const InvalidJson = defineFailure('request.invalid_json', { data: z.object({ rea
 const toInvalidJson = (cause: unknown) => InvalidJson({ reason: cause instanceof Error ? cause.name : 'unknown' });
 
 describe('attempt', () => {
+  it('preserves an original returned failure, including its private cause', async () => {
+    const original = InvalidJson({ reason: 'known' }, { cause: new Error('private') });
+    expect(attempt(() => original, toInvalidJson)).toBe(original);
+    expect(await attempt(() => Promise.resolve(original), toInvalidJson)).toBe(original);
+  });
+
+  it('maps a throwing then accessor at the same boundary as invocation failures', () => {
+    // eslint-disable-next-line unicorn/no-thenable -- exercise an untrusted then accessor at the boundary
+    const value = Object.defineProperty({}, 'then', {
+      get() {
+        throw new TypeError('private');
+      },
+    });
+    expect(attempt(() => value, toInvalidJson)).toEqual(toInvalidJson(new TypeError('private')));
+  });
+
   it('returns the value when nothing throws', () => {
     expect(attempt(() => JSON.parse('{"a":1}') as unknown, toInvalidJson)).toEqual({ a: 1 });
   });

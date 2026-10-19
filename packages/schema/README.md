@@ -1,61 +1,112 @@
 # @arki/schema
 
-Standard Schema for every validator. It holds the [Standard Schema](https://standardschema.dev) types, a sync `parse` and an async `parseAsync` that return the schema's output or throw a coded error, helpers that read issue paths the same way for every validator, and a bridge that gives any schema a JSON Schema. It works with Zod, Valibot, ArkType or a hand-written schema, and has one dependency: the spec's types.
-
-Two errors, kept apart on purpose: `SchemaError` means the **data** is wrong. `SchemaRunError` means the **schema** could not be run (it is async, it threw, or it was asked for a JSON Schema target it does not have). Never answer a `SchemaRunError` with a 400.
+Standard Schema types, validation execution, issue helpers and a JSON Schema bridge. Bring Zod, Valibot, ArkType or your own validator. Execution is shared with `@arki/failure/schema`; the dependency graph is schema → failure → Standard Schema spec types.
 
 ## Install
 
 ```sh
-bun add @arki/schema
+bun add @arki/schema @arki/failure
 ```
 
 ## Quick start
 
-`parse` returns the schema's output type, not its input type.
+`parse` returns the schema output or a canonical failure. Narrow the result before using its value.
 
 ```ts run
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-const Age = z.string().transform(text => Number(text));
-const age: number = parse(Age, '42');
-if (age !== 42) throw new Error(`unexpected age: ${age}`);
+const age = parse(z.string().transform(Number), '42');
+if (isFailure(age)) throw new Error(age.message);
+const output: number = age;
+if (output !== 42) throw new Error('unexpected output');
 ```
 
-For bad form input, turn the error into one message per field:
+For a form adapter that reports field errors:
 
 ```ts from="examples/signup.ts#field-errors"
 import * as v from 'valibot';
 
-import { parse, pathOf, SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { parse, pathOf } from '@arki/schema';
 
 const Signup = v.object({ name: v.string(), age: v.number() });
 
-/** Turn bad form input into one message per field. A broken schema is not bad data, so it passes through. */
+/** Turn invalid form input into field messages; schema defects cross this throwing form adapter explicitly. */
 export function fieldErrors(input: unknown): Record<string, string> {
-  try {
-    parse(Signup, input);
+  const result = parse(Signup, input);
+  if (!InvalidInput.is(result)) {
+    orThrow(result);
     return {};
-  } catch (error) {
-    if (!(error instanceof SchemaError)) throw error;
-    const errors: Record<string, string> = {};
-    for (const issue of error.issues) errors[pathOf(issue).map(String).join('.')] = issue.message;
-    return errors;
   }
+  const errors: Record<string, string> = {};
+  for (const issue of result.data.issues) errors[pathOf(issue).map(String).join('.')] = issue.message;
+  return errors;
 }
 ```
 
-## When not to use this
+## Async validation
 
-- **To validate.** This package runs a schema; it does not define one. Bring Zod, Valibot, ArkType or your own.
-- **When one validator is enough.** If your code only ever uses Zod, `schema.parse` is shorter. This package pays off when a library must accept any validator.
-- **For JSON Schema other than draft 2020-12.** The bridge answers that one target only.
+`parseAsync` resolves to output or `InvalidInput` / `ValidatorDefect`. `parse` additionally returns `AsyncSchema` when a validator requires awaiting. Rejected promises received by sync parsing are observed.
+
+```ts run
+import { z } from 'zod';
+
+import { AsyncSchema, isFailure } from '@arki/failure';
+import { parse, parseAsync } from '@arki/schema';
+
+const Handle = z.string().refine(value => Promise.resolve(value.length > 2));
+if (!AsyncSchema.is(parse(Handle, 'ada'))) throw new Error('expected async mismatch');
+const handle = await parseAsync(Handle, 'ada');
+if (isFailure(handle)) throw new Error(handle.message);
+if (handle !== 'ada') throw new Error('unexpected handle');
+```
+
+## Failure behavior
+
+| Result                    | Meaning                                       | Handle with                                          |
+| ------------------------- | --------------------------------------------- | ---------------------------------------------------- |
+| Output                    | Validated, possibly transformed value         | Use after narrowing                                  |
+| `schema.invalid_input`    | Invalid data                                  | `InvalidInput.is(result)`; read `result.data.issues` |
+| `schema.async_required`   | Sync parse received async validation          | Use `parseAsync`                                     |
+| `schema.validator_defect` | Schema access, invocation or rejection failed | Fix the validator; never map to HTTP 400             |
+
+Definitions are exported from `@arki/failure`. Their `.is` guards work across package copies. `orThrow(result)` explicitly bridges into a foreign throwing API through `UnexpectedFailure`; parsing itself returns failures.
+
+## JSON Schema
+
+`withJsonSchema(schema, input, output?)` wraps a schema with JSON Schema converters. The output description defaults to input. The wrapper preserves validation receiver binding and answers only `draft-2020-12`; another target throws `SchemaRunError` with `ARKI_SCHEMA_E003`. This converter error is separate from validation failures.
+
+```ts run
+import * as v from 'valibot';
+
+import { hasJsonSchema, parse, withJsonSchema } from '@arki/schema';
+
+const Name = withJsonSchema(v.string(), { type: 'string' });
+if (!hasJsonSchema(Name)) throw new Error('expected JSON Schema');
+if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
+```
+
+## API
+
+| Export                                                       | Purpose                                  |
+| ------------------------------------------------------------ | ---------------------------------------- |
+| `StandardSchemaV1`, `StandardJSONSchemaV1`                   | Canonical spec types                     |
+| `SchemaInput<S>`, `SchemaOutput<S>`                          | Infer input and output                   |
+| `SchemaWithJson<I, O>`                                       | Validation and JSON Schema in one schema |
+| `parse`, `parseAsync`                                        | Output or exact canonical failures       |
+| `pathOf(issue)`                                              | Path as plain keys                       |
+| `formatIssues(issues)`                                       | All issue messages with paths            |
+| `isStandardSchema(value)`                                    | Recognize object and callable schemas    |
+| `hasJsonSchema(schema)`                                      | Narrow to a schema with converters       |
+| `withJsonSchema`                                             | Add draft-2020-12 converters             |
+| `SchemaRunError`, `SCHEMA_ERROR_CODES`, `SchemaRunErrorCode` | Unsupported JSON Schema target error     |
 
 ## Runtime support
 
-The package uses no Node or Bun built-ins. It runs in Node, Bun, Deno and browsers, checked by `test:runtimes`. Hermes needs `HERMES_BIN` and has no row until a run records one.
+No Node or Bun built-ins are used. The table records the previous smoke run; rerun `test:runtimes` after building to verify the current tree.
 
 <!-- runtimes:start -->
 
@@ -69,134 +120,16 @@ The package uses no Node or Bun built-ins. It runs in Node, Bun, Deno and browse
 
 <!-- runtimes:end -->
 
-## Public imports
-
-- `@arki/schema`: the only entry. Everything in the API table below.
-
-## Parse with an async schema
-
-A schema with an async check makes `parse` throw `ARKI_SCHEMA_E001`. Use `parseAsync`, which awaits it. `parseAsync` always rejects and never throws.
-
-```ts run
-import { z } from 'zod';
-
-import { parse, parseAsync, SCHEMA_ERROR_CODES, SchemaRunError } from '@arki/schema';
-
-const Handle = z.string().refine(handle => Promise.resolve(handle.length > 2));
-
-try {
-  parse(Handle, 'ada');
-  throw new Error('expected parse to refuse an async schema');
-} catch (error) {
-  if (!(error instanceof SchemaRunError) || error.code !== SCHEMA_ERROR_CODES.asyncResult) throw error;
-}
-
-const handle = await parseAsync(Handle, 'ada');
-if (handle !== 'ada') throw new Error(`unexpected handle: ${handle}`);
-```
-
-## Read what is wrong
-
-Bad data throws `SchemaError`. Its `issues` are the schema's own issues; its message is `formatIssues(issues)`. `pathOf` gives an issue's path as plain keys, whatever form the validator used.
-
-```ts run
-import * as v from 'valibot';
-
-import { formatIssues, parse, pathOf, SchemaError } from '@arki/schema';
-
-const User = v.object({ user: v.object({ age: v.number() }) });
-
-try {
-  parse(User, { user: { age: 'old' } });
-  throw new Error('expected a SchemaError');
-} catch (error) {
-  if (!(error instanceof SchemaError)) throw error;
-  const [issue] = error.issues;
-  if (issue === undefined || pathOf(issue).join('.') !== 'user.age') throw new Error('unexpected path');
-  if (error.message !== formatIssues(error.issues)) throw new Error('unexpected message');
-}
-```
-
-## Give a schema a JSON Schema
-
-Some validators cannot describe themselves as JSON Schema. `withJsonSchema` returns a new schema that validates like the original and answers the `draft-2020-12` target (the one OpenAPI 3.1 uses) with the JSON Schema you give. Any other target throws `ARKI_SCHEMA_E003`.
-
-```ts run
-import * as v from 'valibot';
-
-import { hasJsonSchema, parse, withJsonSchema } from '@arki/schema';
-
-const Name = withJsonSchema(v.pipe(v.string(), v.minLength(1)), { type: 'string', minLength: 1 });
-
-if (!hasJsonSchema(Name)) throw new Error('expected a JSON Schema');
-const json = Name['~standard'].jsonSchema.input({ target: 'draft-2020-12' });
-if (json['type'] !== 'string') throw new Error('unexpected JSON Schema');
-if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
-```
-
-## API
-
-| Export                                                       | What it does                                                                                            |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `StandardSchemaV1`, `StandardJSONSchemaV1`                   | The spec types, re-exported with their namespaces (`StandardSchemaV1.Issue`, …). Import them from here. |
-| `SchemaInput<S>`, `SchemaOutput<S>`                          | The type a schema accepts, and the type it returns.                                                     |
-| `SchemaWithJson<I, O>`                                       | A Standard Schema that also has `~standard.jsonSchema`.                                                 |
-| `parse(schema, value)`                                       | The output, or throws `SchemaError` / `SchemaRunError`. Sync schemas only.                              |
-| `parseAsync(schema, value)`                                  | The output as a promise. Sync and async schemas. Never throws synchronously.                            |
-| `SchemaError`                                                | Bad data. `issues` holds the schema's issues.                                                           |
-| `SchemaRunError`, `SCHEMA_ERROR_CODES`, `SchemaRunErrorCode` | The schema could not be run. Coded, with a `remediation`.                                               |
-| `pathOf(issue)`                                              | The issue's path as plain keys; `[]` for the whole value.                                               |
-| `formatIssues(issues)`                                       | `"a.0.b: message; message"`.                                                                            |
-| `isStandardSchema(value)`                                    | True for a Standard Schema v1, callable ones included.                                                  |
-| `hasJsonSchema(schema)`                                      | True when the schema can describe itself as JSON Schema.                                                |
-| `withJsonSchema(schema, input, output?)`                     | A new schema with a draft-2020-12 JSON Schema.                                                          |
-
-## Failure behaviour
-
-The package never returns a failure value. It returns the schema's output or throws one of two errors.
-
-- **`SchemaError`**: the data is wrong. It has no code. `issues` says what is wrong, and the message is `formatIssues(issues)`. Handle it: show the user the message.
-- **`SchemaRunError`**: the schema could not be run. It has a stable `code` and a `remediation`. Do not handle it as bad data. Fix the schema or the call.
-- **`parseAsync` rejects** with the same two errors. It never throws before it returns the promise.
-
-| Code               | Meaning                                                                         | What to do                                   |
-| ------------------ | ------------------------------------------------------------------------------- | -------------------------------------------- |
-| `ARKI_SCHEMA_E001` | `parse` got an async result from `validate`.                                    | Use `parseAsync`.                            |
-| `ARKI_SCHEMA_E002` | The schema's `validate` threw or rejected. The thrown value is the `cause`.     | Fix the schema. This is a bug, not bad data. |
-| `ARKI_SCHEMA_E003` | A `withJsonSchema` converter was asked for a target other than `draft-2020-12`. | Ask for `draft-2020-12`.                     |
-
 ## Limits
 
-- **`parse` takes sync schemas only.** An async check makes it throw `ARKI_SCHEMA_E001`. Use `parseAsync`.
-- **One JSON Schema target.** `withJsonSchema` answers `draft-2020-12`. Any other target throws `ARKI_SCHEMA_E003`.
-- **The wrapper is a new object.** The result of `withJsonSchema` validates like the original but does not have its other methods, such as Zod's `.parse`.
-- **Two copies break `instanceof`.** `error instanceof SchemaError` fails across two installed copies of the package. Keep one copy.
-- **Paths are keys, not strings.** `pathOf` returns plain keys, so a key with a dot in it stays one segment.
-
-The `parse` limit as code:
-
-```ts run
-import { z } from 'zod';
-
-import { parse, SCHEMA_ERROR_CODES, SchemaRunError } from '@arki/schema';
-
-try {
-  parse(
-    z.string().refine(value => Promise.resolve(value.length > 0)),
-    'a',
-  );
-  throw new Error('expected an async schema to be refused');
-} catch (error) {
-  if (!(error instanceof SchemaRunError) || error.code !== SCHEMA_ERROR_CODES.asyncResult) throw error;
-}
-```
+- This package executes validators; it does not define one.
+- Sync `parse` cannot await async checks.
+- JSON Schema converters only support draft-2020-12.
+- The wrapper keeps Standard Schema behavior, not the original validator's extra methods.
+- `pathOf` returns keys, so a field name containing a dot remains one segment.
 
 ## Documentation
 
-- [Agent guide](docs/agent-guide.md): tasks, step by step.
-- [llms.txt](llms.txt): the map for agents.
-- [CHANGELOG](CHANGELOG.md).
-
-## Support
-
-Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
+- [Agent guide](docs/agent-guide.md)
+- [llms.txt](llms.txt)
+- [Changelog](CHANGELOG.md)

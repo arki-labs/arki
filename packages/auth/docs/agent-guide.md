@@ -209,6 +209,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - Production refuses `rateLimit: false` and a missing `rateLimit`. Tests get `rateLimit: false` from `testAuth`.
 - The origin and CSRF checks are always on, also under `NODE_ENV=test`. Requests a test sends to `auth.handler` carry an `origin` header equal to the app URL, as a browser's do.
 - A magic link to an unknown email signs that person up. Set `magicLink: { signUp: false }` for sign-in-only links; the request still answers 200 and the link is refused when it is used.
+- A template validator defect throws `schema.validator_defect` at the auth callback boundary. It is not converted to a delivery refusal.
 - A failed verify mail at password sign-up is logged by the engine, not returned as `ARKI_AUTH_E006`. Asking for the mail again returns `E006`.
 - `workspaces` needs `Session.activeOrganizationId` and `Session.activeTeamId` columns (`ARKI_AUTH_E007`). `principal.workspace` is the selection, not proof of membership.
 - `expo` is `false` by default. Native apps set `expo: true`.

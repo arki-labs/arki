@@ -1,7 +1,6 @@
 /**
- * The Standard Schema types (https://standardschema.dev). This is the only
- * file in the monorepo that imports `@standard-schema/spec`; everything else
- * imports these types from `@arki/schema`.
+ * The Standard Schema types (https://standardschema.dev). Application-facing spec types live here; the failure foundation also imports
+ * the canonical spec directly to keep the dependency graph acyclic.
  */
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 

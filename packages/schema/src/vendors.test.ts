@@ -8,8 +8,9 @@ import * as v from 'valibot';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { AsyncSchema, InvalidInput, orThrow } from '@arki/failure';
+
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from './types.js';
-import { SCHEMA_ERROR_CODES, SchemaError } from './errors.js';
 import { hasJsonSchema, isStandardSchema, withJsonSchema } from './guards.js';
 import { pathOf } from './issues.js';
 import { parse, parseAsync } from './parse.js';
@@ -81,10 +82,10 @@ describe('types are inferred the same for every vendor', () => {
     expectTypeOf<SchemaInput<typeof arktype>>().toEqualTypeOf<string>();
     expectTypeOf<SchemaOutput<typeof arktype>>().toEqualTypeOf<number>();
 
-    expectTypeOf(parse(hand, 'abc')).toEqualTypeOf<number>();
-    expectTypeOf(parse(zod, 'abc')).toEqualTypeOf<number>();
-    expectTypeOf(parse(valibot, 'abc')).toEqualTypeOf<number>();
-    expectTypeOf(parse(arktype, 'abc')).toEqualTypeOf<number>();
+    expectTypeOf(orThrow(parse(hand, 'abc'))).toEqualTypeOf<number>();
+    expectTypeOf(orThrow(parse(zod, 'abc'))).toEqualTypeOf<number>();
+    expectTypeOf(orThrow(parse(valibot, 'abc'))).toEqualTypeOf<number>();
+    expectTypeOf(orThrow(parse(arktype, 'abc'))).toEqualTypeOf<number>();
   });
 });
 
@@ -93,8 +94,8 @@ describe.each(kinds)('$vendor', ({ length: schema, user }) => {
     expect(parse(schema, 'abc')).toBe(3);
   });
 
-  it('throws SchemaError for bad input', () => {
-    expect(() => parse(schema, 42)).toThrow(SchemaError);
+  it('returns canonical invalid input for bad data', () => {
+    expect(InvalidInput.is(parse(schema, 42))).toBe(true);
   });
 
   it('is recognised as a Standard Schema', () => {
@@ -103,24 +104,15 @@ describe.each(kinds)('$vendor', ({ length: schema, user }) => {
   });
 
   it('reports a nested bad field at ["user", "age"]', () => {
-    try {
-      parse(user, { user: { age: 'old' } });
-      expect.unreachable('parse should have thrown');
-    } catch (error) {
-      if (!(error instanceof SchemaError)) throw error;
-      expect(error.issues.map(issue => pathOf(issue))).toEqual([['user', 'age']]);
-    }
+    const result = parse(user, { user: { age: 'old' } });
+    if (!InvalidInput.is(result)) expect.unreachable('expected invalid input');
+    expect(result.data.issues.map(issue => pathOf(issue))).toEqual([['user', 'age']]);
   });
 });
 
 describe.each(Object.entries(asyncSchemas))('%s async', (vendor, schema) => {
-  it('makes sync parse throw E001 naming the vendor, while parseAsync resolves', async () => {
-    expect(() => parse(schema, 'abc')).toThrow(
-      expect.objectContaining({
-        code: SCHEMA_ERROR_CODES.asyncResult,
-        message: expect.stringContaining(schema['~standard'].vendor),
-      }),
-    );
+  it('returns AsyncSchema for sync parse while async parse resolves', async () => {
+    expect(AsyncSchema.is(parse(schema, 'abc'))).toBe(true);
     if (vendor !== 'arktype') expect(schema['~standard'].vendor).toBe(vendor);
     await expect(parseAsync(schema, 'abc')).resolves.toBeDefined();
   });

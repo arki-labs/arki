@@ -1,3 +1,4 @@
+import { orThrow } from '@arki/failure';
 /**
  * Server-sent-events serialization for {@link SseContract} bindings.
  *
@@ -80,7 +81,7 @@ export function sseResponse(iterable: AsyncIterable<unknown>, contract: Contract
           return;
         }
         const value =
-          contract.event === undefined ? next.value : await parseAsync(encoderOf(contract.event), next.value);
+          contract.event === undefined ? next.value : await orThrow(parseAsync(encoderOf(contract.event), next.value));
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
       } catch (error) {
         if (finished) return;

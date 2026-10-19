@@ -72,8 +72,7 @@ async function enqueued(outbox: ReturnType<typeof outboxWith>, options: { readon
   const job = await db.transaction(tx =>
     outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, ...options }),
   );
-  if (MailInvalidInput.is(job)) throw new Error(job.message);
-  return job;
+  return orThrow(job);
 }
 
 /** Two retries after the first try, no wait. */
@@ -191,9 +190,8 @@ describe('what is accepted into the queue', () => {
       db.transaction(tx =>
         outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, idempotencyKey: 'signin-42' }),
       );
-    const first = await enqueue();
+    const first = await orThrow(enqueue());
     const second = await enqueue();
-    if (MailInvalidInput.is(first)) throw new Error(first.message);
     expect(second).toEqual({ jobId: first.jobId, deduped: true });
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(1);

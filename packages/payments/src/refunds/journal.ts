@@ -24,7 +24,6 @@
  */
 
 import type { Instant } from '@arki/date';
-import type { Result } from '@arki/failure';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../core/user-id.js';
@@ -39,7 +38,6 @@ import { anyMoneySchema } from '@arki/money/zod';
 
 import type { CoreTables } from '../core/tables.js';
 import type { RefundsTables } from './tables.js';
-import type { Refund } from './types.js';
 import { writtenRow } from '../core/journal/support.js';
 import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money.js';
 import { paymentIdSchema } from '../core/primitives.js';
@@ -101,14 +99,7 @@ export type FailRefundInput = z.input<typeof failRefundInputSchema>;
  * command and returns the row as it is after the write, or the failure the
  * command returned when a rule said no (nothing was written).
  */
-export type RefundWrites = {
-  requestRefund(input: RequestRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict | CommandInvalid>>;
-  approveRefund(input: ApproveRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
-  rejectRefund(input: RejectRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
-  processRefund(input: ProcessRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
-  completeRefund(input: CompleteRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
-  failRefund(input: FailRefundInput): Promise<Result<Refund, CommandNotFound | CommandConflict>>;
-};
+export type RefundWrites = ReturnType<ReturnType<typeof createRefundsJournal>['writes']>;
 
 function requireRefund(row: RefundRow | null, refundId: string): RefundRow | CommandNotFound {
   if (!row) {
@@ -402,13 +393,13 @@ export function createRefundsJournal<
     events: { RefundRequested, RefundRequestedV2, RefundApproved, RefundRejected, RefundProcessed, RefundCompleted, RefundFailed },
     commands,
     /** `run` is the app's command runner: `context.runCommand` in a request, `ctx.run` inside a command. */
-    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>): RefundWrites => ({
-      requestRefund: input => writtenRow(run(commands.requestRefund, input), 'requestRefund'),
-      approveRefund: input => writtenRow(run(commands.approveRefund, input), 'approveRefund'),
-      rejectRefund: input => writtenRow(run(commands.rejectRefund, input), 'rejectRefund'),
-      processRefund: input => writtenRow(run(commands.processRefund, input), 'processRefund'),
-      completeRefund: input => writtenRow(run(commands.completeRefund, input), 'completeRefund'),
-      failRefund: input => writtenRow(run(commands.failRefund, input), 'failRefund'),
+    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>) => ({
+      requestRefund: (input: RequestRefundInput) => writtenRow(run(commands.requestRefund, input), 'requestRefund'),
+      approveRefund: (input: ApproveRefundInput) => writtenRow(run(commands.approveRefund, input), 'approveRefund'),
+      rejectRefund: (input: RejectRefundInput) => writtenRow(run(commands.rejectRefund, input), 'rejectRefund'),
+      processRefund: (input: ProcessRefundInput) => writtenRow(run(commands.processRefund, input), 'processRefund'),
+      completeRefund: (input: CompleteRefundInput) => writtenRow(run(commands.completeRefund, input), 'completeRefund'),
+      failRefund: (input: FailRefundInput) => writtenRow(run(commands.failRefund, input), 'failRefund'),
     }),
   };
 }

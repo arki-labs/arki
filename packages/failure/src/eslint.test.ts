@@ -52,6 +52,11 @@ ruleTester.run('must-use', mustUse, {
   ],
   invalid: [
     {
+      // Schema failures now require the same check as domain failures.
+      code: `import { parse } from '../schema.js'; import { z } from 'zod'; parse(z.string(), 42);`,
+      errors: [{ messageId: 'mustUse' }],
+    },
+    {
       // The headline bug: an awaited usecase whose failure is silently dropped.
       code: `${declarations} async function f() { await remove('a'); }`,
       errors: [{ messageId: 'mustUse', data: { codes: '"post.not_found", "post.locked"' } }],

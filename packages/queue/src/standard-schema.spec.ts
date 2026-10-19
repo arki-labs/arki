@@ -2,7 +2,7 @@
  * The queue accepts any Standard Schema validator for job input, not only Zod.
  * Why it matters: a job's input schema is the caller's choice; the queue must
  * infer the handler's data from the schema OUTPUT and report bad data as a
- * `SchemaError` with `issues`, whatever library built the schema.
+ * `InvalidInput` with `issues`, whatever library built the schema.
  * Each schema takes a string and returns its length, so input and output types
  * differ and a mix-up shows in the types. No Redis needed.
  */
@@ -11,8 +11,10 @@ import * as v from 'valibot';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { FailureOf } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { parseAsync, SCHEMA_ERROR_CODES, SchemaError, SchemaRunError } from '@arki/schema';
+import { InvalidInput, UnexpectedFailure, ValidatorDefect } from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import { initQueue } from './init.ts';
 import { customValidationMiddleware, JobValidationError } from './middleware/validation.ts';
@@ -70,13 +72,13 @@ describe.each(Object.entries(schemas))('job input from a %s schema', (_vendor, s
       .handler((data: string) => Promise.resolve(data.length));
   });
 
-  it('reports bad data as a SchemaError with issues', async () => {
+  it('reports bad data as InvalidInput with issues', async () => {
     const error = await parseAsync(schema, 42).catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(SchemaError);
+    expect(InvalidInput.is(error)).toBe(true);
   });
 
-  it('validation middleware turns bad data into JobValidationError carrying the issues', async () => {
-    const failures: SchemaError[] = [];
+  it('validation middleware bridges InvalidInput through the worker exception contract', async () => {
+    const failures: FailureOf<typeof InvalidInput>[] = [];
     const middleware = customValidationMiddleware<undefined, number>({
       schema,
       onError: error => failures.push(error),
@@ -99,8 +101,8 @@ describe.each(Object.entries(schemas))('job input from a %s schema', (_vendor, s
 
     nextCalled = false;
     const error = await run(42).catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(JobValidationError);
-    expect(error instanceof JobValidationError && Array.isArray(error.errors) && error.errors.length > 0).toBe(true);
+    expect(error).toBeInstanceOf(UnexpectedFailure);
+    expect(error instanceof UnexpectedFailure && InvalidInput.is(error.failure)).toBe(true);
     expect(failures).toHaveLength(1);
     expect(nextCalled).toBe(false);
   });
@@ -127,12 +129,13 @@ describe('validation middleware', () => {
       next: () => Promise.resolve({ ctx: undefined }),
     }).catch((error_: unknown) => error_);
     expect(error).not.toBeInstanceOf(JobValidationError);
-    expect(error).toBeInstanceOf(SchemaRunError);
-    expect(error).toMatchObject({ code: SCHEMA_ERROR_CODES.validatorThrew, cause: thrown });
+    expect(error).toBeInstanceOf(UnexpectedFailure);
+    expect(error instanceof UnexpectedFailure && ValidatorDefect.is(error.failure)).toBe(true);
+    expect(error instanceof UnexpectedFailure && error.failure.cause).toBe(thrown);
   });
 
-  it('keeps the {key} path segments of a hand-written schema in the issues', async () => {
+  it('normalizes {key} path segments into JSON-safe issue paths', async () => {
     const error = await parseAsync(hand, 1).catch((error_: unknown) => error_);
-    expect(error instanceof SchemaError && error.issues[0]?.path).toEqual([{ key: 'name' }]);
+    expect(InvalidInput.is(error) && error.data.issues[0]?.path).toEqual(['name']);
   });
 });

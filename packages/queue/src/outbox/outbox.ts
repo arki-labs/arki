@@ -3,16 +3,18 @@
  * lands in the journal's `journal_jobs` table and commits with the business write or not
  * at all. The journal worker runs it (with `outboxRunner`). No Redis on this path.
  */
-import type { DbHandle, JournalTables } from '@arki/journal';
 import { and, eq, is, isNull, sql } from 'drizzle-orm';
 import { getTableConfig, PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
+import type { AsyncSchemaFailure } from '@arki/failure';
+import type { DbHandle, JournalTables } from '@arki/journal';
+import { InvalidInput, ValidatorDefect } from '@arki/failure';
 import { jobId } from '@arki/journal';
-import { parseAsync, SchemaError } from '@arki/schema';
+import { parseAsync } from '@arki/schema';
 
 import type { AnyJobDefinition, JobDefinition, QueuePriority } from '../types/job.ts';
 import { QUEUE_PRIORITIES } from '../types/job.ts';
-import { outboxError, OUTBOX_ERROR_CODES } from './errors.ts';
+import { OUTBOX_ERROR_CODES, outboxError } from './errors.ts';
 
 /** A Drizzle transaction or savepoint. A root database has no `rollback`, so it does not fit. */
 export type OutboxTx = DbHandle & { rollback(): never };
@@ -42,14 +44,14 @@ export type Outbox = {
     job: JobDefinition<TInput, TOutput, TContext>,
     args: NoInfer<TInput>,
     options?: ScheduleOptions,
-  ): Promise<Scheduled>;
+  ): Promise<Scheduled | AsyncSchemaFailure>;
   runAt<TInput, TOutput, TContext>(
     tx: OutboxTx,
     job: JobDefinition<TInput, TOutput, TContext>,
     args: NoInfer<TInput>,
     at: Date,
     options?: Omit<ScheduleOptions, 'delayMs'>,
-  ): Promise<Scheduled>;
+  ): Promise<Scheduled | AsyncSchemaFailure>;
   /** Delete a row no worker holds. `false` when it is running, finished, or never existed. */
   cancel(tx: DbHandle, id: string): Promise<boolean>;
 };
@@ -114,7 +116,7 @@ export function outbox(options: OutboxOptions): Outbox {
     args: unknown,
     when: When,
     scheduleOptions: Omit<ScheduleOptions, 'delayMs'> | undefined,
-  ): Promise<Scheduled> => {
+  ): Promise<Scheduled | AsyncSchemaFailure> => {
     const name = job._internal.name;
     // Catches callers that skip the types. Not a security boundary.
     if (!is(tx, PgAsyncTransaction))
@@ -137,12 +139,8 @@ export function outbox(options: OutboxOptions): Outbox {
       );
     // Validated now, so a bad call rolls back the business write. The parsed value is dropped:
     // the raw args are stored and the worker parses them, so a transform runs once.
-    try {
-      await parseAsync(job._internal.inputSchema, args);
-    } catch (error) {
-      if (!(error instanceof SchemaError)) throw error;
-      throw outboxError(OUTBOX_ERROR_CODES.badArgs, `outbox: "${name}" args fail the job's input schema`, error);
-    }
+    const parsed = await parseAsync(job._internal.inputSchema, args);
+    if (InvalidInput.is(parsed) || ValidatorDefect.is(parsed)) return parsed;
     assertJsonArgs(args, maxArgsBytes, name);
 
     const key = scheduleOptions?.key;
@@ -172,7 +170,8 @@ export function outbox(options: OutboxOptions): Outbox {
         .select({ id: jobs.id })
         .from(jobs)
         .where(and(eq(jobs.jobName, name), eq(jobs.dedupeKey, key ?? '')));
-      if (existing === undefined) throw new Error(`outbox: "${name}" key ${JSON.stringify(key)} conflicted but no row holds it`);
+      if (existing === undefined)
+        throw new Error(`outbox: "${name}" key ${JSON.stringify(key)} conflicted but no row holds it`);
       return { id: existing.id, deduplicated: true };
     }
     // Delivered at commit, dropped on rollback; identical payloads in one transaction coalesce.

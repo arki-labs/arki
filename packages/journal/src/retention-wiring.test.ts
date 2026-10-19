@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { ArchiveSink, JobRetention } from './retention.js';
 import { initJournal } from './journal.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
@@ -44,11 +46,13 @@ beforeEach(async () => {
 /** One paid order: one job row per effect. */
 const payOrder = async () => {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  const paid = await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  const paid = orThrow(
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
   );
   const rows = await db
     .select()
@@ -101,11 +105,13 @@ describe('per-effect retention wins over the journal', () => {
       .withSchedule({ retention: { retryableFor: '90d' } });
     const own = j.compose({ effects: [patient] });
     const id = orderId(++next);
-    await db.transaction(tx =>
-      own.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        own.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
-    const paid = await db.transaction(tx =>
-      own.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+    const paid = orThrow(
+      await db.transaction(tx => own.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
     );
     const [row] = await db
       .select()

@@ -6,7 +6,8 @@
  */
 
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
-import { parse, SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { formatIssues, parse } from '@arki/schema';
 
 import type { Timestamp } from './timestamps';
 import { describeKind, epochNanoseconds, isTimestamp } from './timestamps';
@@ -73,16 +74,15 @@ export function assertPaginationValid(
 
   const itemSchema = options?.itemSchema;
   if (itemSchema) {
-    items.forEach((item, index) => {
-      try {
-        parse(itemSchema, item);
-      } catch (error) {
-        if (error instanceof SchemaError) {
-          throw new Error(`Item at index ${index} failed validation: ${error.message}`, { cause: error });
-        }
-        throw error;
+    for (const [index, item] of items.entries()) {
+      const result = parse(itemSchema, item);
+      if (InvalidInput.is(result)) {
+        throw new Error(`Item at index ${index} failed validation: ${formatIssues(result.data.issues)}`, {
+          cause: result,
+        });
       }
-    });
+      orThrow(result);
+    }
   }
 }
 
@@ -411,8 +411,8 @@ export function assertOneOf<T>(value: T, expectedValues: T[], label = 'value'): 
 /**
  * Assert value matches a Standard Schema (zod, valibot, arktype, ...)
  *
- * Assertions are synchronous: an async schema throws a `SchemaRunError`
- * (ARKI_SCHEMA_E001) instead of being awaited. A validator that throws is
+ * Assertions are synchronous: an async schema throws `UnexpectedFailure`
+ * carrying `AsyncSchema` instead of being awaited. A validator that throws is
  * rethrown as is, never reported as invalid data.
  *
  * @param value - Value to validate
@@ -430,12 +430,9 @@ export function assertMatchesSchema<Schema extends StandardSchemaV1>(
   schema: Schema,
   label = 'value',
 ): asserts value is SchemaInput<Schema> {
-  try {
-    parse(schema, value);
-  } catch (error) {
-    if (error instanceof SchemaError) {
-      throw new Error(`${label} failed schema validation: ${error.message}`, { cause: error });
-    }
-    throw error;
+  const result = parse(schema, value);
+  if (InvalidInput.is(result)) {
+    throw new Error(`${label} failed schema validation: ${formatIssues(result.data.issues)}`, { cause: result });
   }
+  orThrow(result);
 }

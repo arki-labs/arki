@@ -6,7 +6,7 @@
 import { APIError } from 'better-auth/api';
 
 import type { Mailer } from '@arki/mail';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow, ValidatorDefect } from '@arki/failure';
 import { magicLink, resetPassword, verifyEmail } from '@arki/mail/templates/auth';
 
 import type {
@@ -97,6 +97,10 @@ export function authMail(options: {
         },
         { to, ...(brand.from !== undefined && { from: brand.from }) },
       );
+      if (ValidatorDefect.is(sent)) {
+        orThrow(sent);
+        return;
+      }
       if (!isFailure(sent)) {
         log.debug('Sent the {kind} mail', { kind });
         return;

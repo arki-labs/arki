@@ -471,12 +471,14 @@ export class WebhookHandler extends EventEmitter {
       throw new Error(`No local subscription for provider subscription ${snapshot.providerSubscriptionId}`);
     }
 
-    await this.writes.syncSubscription({
-      userId: row.userId,
-      planId: row.planId,
-      customerId: row.customerId,
-      ...snapshot,
-    });
+    await orThrow(
+      this.writes.syncSubscription({
+        userId: row.userId,
+        planId: row.planId,
+        customerId: row.customerId,
+        ...snapshot,
+      }),
+    );
   }
 
   /**

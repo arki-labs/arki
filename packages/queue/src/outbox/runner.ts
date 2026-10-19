@@ -4,14 +4,15 @@
  * once, run the middleware chain around the handler. A job keeps one retry policy on both lanes.
  */
 import type { JobRunner, ScheduledJob } from '@arki/journal';
+import { orThrow, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import { parseAsync, SchemaError } from '@arki/schema';
+import { parseAsync } from '@arki/schema';
 
 import type { JobLike } from '../types/job.ts';
 import type { QueueRegistry } from './registry.ts';
 import { defaultJobRetry, ReturnedFailureError, throwIfReturnedFailure } from '../job-retry.ts';
 import { createJobContext, executeMiddlewareChain, withFeatureServices } from '../middleware.ts';
-import { isOutboxError, outboxError, OUTBOX_ERROR_CODES } from './errors.ts';
+import { isOutboxError, OUTBOX_ERROR_CODES, outboxError } from './errors.ts';
 import { jobsByName } from './registry.ts';
 
 const debugOutbox = getLogger('arki:queue:outbox');
@@ -72,14 +73,8 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
       if (definition === undefined)
         throw outboxError(OUTBOX_ERROR_CODES.unknownJob, `outbox: no job named "${job.name}" in the registry`);
       const internal = definition._internal;
-      const parsed = await parseAsync(internal.inputSchema, job.args).catch((error: unknown) => {
-        if (!(error instanceof SchemaError)) throw error;
-        throw outboxError(
-          OUTBOX_ERROR_CODES.badStoredArgs,
-          `outbox: the stored args of ${job.id} ("${job.name}") fail the job's input schema`,
-          error,
-        );
-      });
+      // JobRunner reports failed work through its exception-based worker contract.
+      const parsed = orThrow(await parseAsync(internal.inputSchema, job.args));
       const jobLike = jobLikeOf(job);
       const jobContext = createJobContext(
         withFeatureServices(await contextOnce(), servicesByName.get(job.name)),
@@ -101,7 +96,10 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
       // Stored args that fail the schema fail every time: dead at once, no handler ran.
       if (isOutboxError(error) && error.code === OUTBOX_ERROR_CODES.badStoredArgs) return;
       const retry = byName.get(job.name)?._internal.options?.retry ?? defaultJobRetry;
-      return retry.delay(job.attempt, error instanceof ReturnedFailureError ? error.failure : error);
+      return retry.delay(
+        job.attempt,
+        error instanceof ReturnedFailureError || error instanceof UnexpectedFailure ? error.failure : error,
+      );
     },
   };
 }

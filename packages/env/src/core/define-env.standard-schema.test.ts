@@ -5,12 +5,13 @@
  * segments, the way Valibot does.
  */
 
-import type { StandardSchemaV1 } from '@arki/schema';
-import { SCHEMA_ERROR_CODES, SchemaRunError } from '@arki/schema';
 import { type } from 'arktype';
 import * as v from 'valibot';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
+
+import type { StandardSchemaV1 } from '@arki/schema';
+import { AsyncSchema, UnexpectedFailure, ValidatorDefect } from '@arki/failure';
 
 import { defineEnv } from './define-env.js';
 
@@ -55,11 +56,7 @@ describe('defineEnv() with Standard Schema validators', () => {
   });
 
   it('names the failing variable and its nested key when the schema reports `{ key }` segments', () => {
-    const database = v.pipe(
-      v.string(),
-      v.parseJson(),
-      v.object({ host: v.string() }),
-    );
+    const database = v.pipe(v.string(), v.parseJson(), v.object({ host: v.string() }));
     const env = defineEnv({
       name: '@test/env',
       server: { DATABASE: database },
@@ -79,7 +76,7 @@ describe('defineEnv() with Standard Schema validators', () => {
     expect(() => env.HAND_PORT).toThrow('[["HAND_PORT"]]');
   });
 
-  it('fails an async validator as SchemaRunError E001, not as a bad variable, and leaves no unhandled rejection', async () => {
+  it('fails an async validator as UnexpectedFailure carrying AsyncSchema, not as a bad variable, and leaves no unhandled rejection', async () => {
     const asyncSchema: StandardSchemaV1<string, string> = {
       '~standard': { version: 1, vendor: 'slow-vendor', validate: () => Promise.reject(new Error('network down')) },
     };
@@ -109,14 +106,13 @@ describe('defineEnv() with Standard Schema validators', () => {
     await new Promise(resolve => setTimeout(resolve, 10));
     process.off('unhandledRejection', onUnhandled);
 
-    expect(thrown).toBeInstanceOf(SchemaRunError);
-    expect(thrown).toMatchObject({ code: SCHEMA_ERROR_CODES.asyncResult });
-    expect(String(thrown)).toContain('slow-vendor');
+    expect(thrown).toBeInstanceOf(UnexpectedFailure);
+    expect(thrown).toMatchObject({ code: AsyncSchema.code });
     expect(reported).toBe(false);
     expect(unhandled).toEqual([]);
   });
 
-  it('fails a throwing validator as SchemaRunError E002 that keeps the thrown cause, not as a bad variable', () => {
+  it('fails a throwing validator as UnexpectedFailure carrying ValidatorDefect that keeps the thrown cause, not as a bad variable', () => {
     const bug = new Error('validator bug');
     const throwing: StandardSchemaV1<string, string> = {
       '~standard': {
@@ -140,7 +136,7 @@ describe('defineEnv() with Standard Schema validators', () => {
       thrown = error;
     }
 
-    expect(thrown).toBeInstanceOf(SchemaRunError);
-    expect(thrown).toMatchObject({ code: SCHEMA_ERROR_CODES.validatorThrew, cause: bug });
+    expect(thrown).toBeInstanceOf(UnexpectedFailure);
+    expect(thrown).toMatchObject({ code: ValidatorDefect.code, cause: bug });
   });
 });

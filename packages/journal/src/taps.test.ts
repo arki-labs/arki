@@ -3,6 +3,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { WakeListener } from './index.js';
 import type { OrderId } from './test-support.js';
 import { need } from './index.js';
@@ -41,14 +43,16 @@ describe('the wake channel', () => {
     });
     try {
       const id = orderId(++next);
-      const placed = await db.transaction(tx =>
-        journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      const placed = orThrow(
+        await db.transaction(tx =>
+          journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
       );
       await waitFor(() => heard.length === 1);
       const seq = placed.events[0]?.seq;
       expect(heard).toEqual([JSON.stringify({ from: seq, to: seq })]);
       // A write that records nothing says nothing.
-      await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [] }));
+      orThrow(await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [] })));
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(heard).toHaveLength(1);
     } finally {
@@ -71,8 +75,10 @@ describe('the wake channel', () => {
     try {
       const id = orderId(++next);
       await db.transaction(async tx => {
-        await journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] });
-        await journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] });
+        orThrow(
+          await journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        );
+        orThrow(await journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
       });
       await waitFor(() => ran.length === 1);
       expect(ran).toEqual([id]);
@@ -105,14 +111,16 @@ describe('taps', () => {
     await worker.start();
     try {
       const id = orderId(++next);
-      await journal.run(
-        db,
-        j.command('placeAndPay', OrderPlaced.schema, async (input, { write }) => {
-          await write(order, id, () => [OrderPlaced(input)]);
-          await write(order, id, () => [OrderPaid({ amount: 1 })]);
-        }),
-        { customerId: 'tapped', total: 1 },
-        meta,
+      orThrow(
+        await journal.run(
+          db,
+          j.command('placeAndPay', OrderPlaced.schema, async (input, { write }) => {
+            orThrow(await write(order, id, () => [OrderPlaced(input)]));
+            orThrow(await write(order, id, () => [OrderPaid({ amount: 1 })]));
+          }),
+          { customerId: 'tapped', total: 1 },
+          meta,
+        ),
       );
       await waitFor(() => seen.length === 1);
       expect(seen).toEqual([`placed:${id}:tapped`]);
@@ -144,8 +152,10 @@ describe('taps', () => {
     await worker.start();
     try {
       const id = orderId(++next);
-      await db.transaction(tx =>
-        journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      orThrow(
+        await db.transaction(tx =>
+          journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
       );
       await waitFor(() => hub.length === 1);
       expect(hub).toEqual([id]);
@@ -175,8 +185,10 @@ describe('taps', () => {
     await worker.start();
     try {
       const id = orderId(++next);
-      await db.transaction(tx =>
-        journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      orThrow(
+        await db.transaction(tx =>
+          journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
       );
       await waitFor(() => hub.length === 1);
       expect(hub).toEqual([id]);

@@ -14,8 +14,10 @@
  * - Interval schedules are not supported; use cron patterns.
  */
 import type { PGlite } from '@electric-sql/pglite';
-import { parseAsync } from '@arki/schema';
 import { getConstructionPlans, PgBoss } from 'pg-boss';
+
+import { orThrow } from '@arki/failure';
+import { parseAsync } from '@arki/schema';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { QueueInstance, RegisterOptions, ScheduleDefinition } from '../types/builder.ts';
@@ -157,7 +159,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
     pgBossJob: { id: string; name: string; data: unknown; retrycount?: number },
   ): Promise<void> {
     const internal = def._internal;
-    const validatedData = await parseAsync(internal.inputSchema, pgBossJob.data);
+    const validatedData = orThrow(await parseAsync(internal.inputSchema, pgBossJob.data));
     const baseContext = withFeatureServices(await createContext(), jobServices.get(internal.name));
 
     const shim = makeJobShim(pgBossJob.id, pgBossJob.name, pgBossJob.data, pgBossJob.retrycount ?? 0);

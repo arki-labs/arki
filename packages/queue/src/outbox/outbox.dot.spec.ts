@@ -13,6 +13,7 @@ import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin, rename, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journal, journalWorker } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
@@ -101,7 +102,10 @@ describe('outboxPlugin + outboxJobs', () => {
       .infra(database, scheduling, journal({ j }))
       .features([signup])
       .entrypoints(
-        journalWorker({ pollMs: 20, jobs: outboxJobs({ needs: {}, context: ({ db: root }) => ({ tag: typeof root }) }) }),
+        journalWorker({
+          pollMs: 20,
+          jobs: outboxJobs({ needs: {}, context: ({ db: root }) => ({ tag: typeof root }) }),
+        }),
       )
       .boot();
     await app.start();
@@ -109,7 +113,7 @@ describe('outboxPlugin + outboxJobs', () => {
       const ran = new Promise<void>(resolve => {
         delivered = resolve;
       });
-      const { id } = await app.services.signups.register('u1');
+      const { id } = orThrow(await app.services.signups.register('u1'));
       await ran;
       expect(mailed).toEqual([{ userId: 'u1', jobId: id, tag: 'object' }]);
     } finally {
@@ -153,7 +157,10 @@ describe('outboxPlugin + outboxJobs', () => {
 
   it('an outboxJobs need the app does not provide is a compile error and fails boot', async () => {
     type Mailer = { readonly send: (to: string) => void };
-    const source = outboxJobs({ needs: { mailer: service<Mailer>() }, context: ({ mailer }) => ({ tag: typeof mailer }) });
+    const source = outboxJobs({
+      needs: { mailer: service<Mailer>() },
+      context: ({ mailer }) => ({ tag: typeof mailer }),
+    });
     const configured = defineApp('outbox-missing').infra(database, scheduling, journal({ j })).features([signup]);
     // @ts-expect-error -- the app provides no `mailer`
     await expect(configured.entrypoints(journalWorker({ jobs: source })).boot()).rejects.toThrow(/mailer/);

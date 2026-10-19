@@ -6,7 +6,6 @@ import type { FailureOf, Result } from '@arki/failure';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
-import type { MailInvalidInput } from './failures.js';
 import type { MailTemplate } from './template.js';
 import type {
   Address,
@@ -65,13 +64,13 @@ export type Mailer = {
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     options: Omit<SendOptions, 'signal' | 'idempotencyKey'>,
-  ): Promise<Result<MailMessage, FailureOf<typeof MailInvalidInput>>>;
+  ): Promise<Result<MailMessage, FailureOf<typeof renderTemplate>>>;
   /** Renders without sending: previews and content tests. */
   render<S extends StandardSchemaV1>(
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     context?: RenderContext,
-  ): Promise<Result<MailContent, FailureOf<typeof MailInvalidInput>>>;
+  ): Promise<Result<MailContent, FailureOf<typeof renderTemplate>>>;
 };
 
 /**

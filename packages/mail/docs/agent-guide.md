@@ -125,3 +125,5 @@ cd packages/mail && bun run test:runtimes
 dot explain --json | jq .data.services   # in an app using @arki/mail/dot: lists mail and mailOutbox
 dot doctor --json | jq .data             # in that app: no missing mail service
 ```
+
+Template validator exceptions return canonical `ValidatorDefect` from `@arki/failure` through render, compose, send and enqueue; handle it as a fatal defect, not invalid user input.

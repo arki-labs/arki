@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
 import { type } from 'arktype';
 import * as v from 'valibot';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { SchemaRunError } from '@arki/schema';
+
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { UnexpectedFailure } from '@arki/failure';
+
 import { ValidationError } from './errors';
 import { validateInput, validateInputAsync } from './validation';
 
@@ -19,7 +21,12 @@ const handWritten: StandardSchemaV1<string, number> = {
   },
 };
 const zodSchema = z.object({ n: z.string().transform(s => s.length) });
-const valibotSchema = v.object({ n: v.pipe(v.string(), v.transform(s => s.length)) });
+const valibotSchema = v.object({
+  n: v.pipe(
+    v.string(),
+    v.transform(s => s.length),
+  ),
+});
 const arkSchema = type({ n: 'string' });
 
 describe('validateInput accepts every Standard Schema and maps output types', () => {
@@ -48,7 +55,9 @@ describe('invalid input becomes ValidationError with plain field paths', () => {
       validateInput(handWritten, 1);
     } catch (error) {
       expect(error).toBeInstanceOf(ValidationError);
-      expect(error instanceof ValidationError && error.validationErrors).toEqual([{ field: 'name', message: 'not a string' }]);
+      expect(error instanceof ValidationError && error.validationErrors).toEqual([
+        { field: 'name', message: 'not a string' },
+      ]);
     }
     try {
       validateInput(valibotSchema, { n: 1 });
@@ -69,7 +78,7 @@ describe('invalid input becomes ValidationError with plain field paths', () => {
         },
       },
     };
-    expect(() => validateInput(broken, 1)).toThrow(SchemaRunError);
+    expect(() => validateInput(broken, 1)).toThrow(UnexpectedFailure);
     expect(() => validateInput(broken, 1)).not.toThrow(ValidationError);
   });
 });

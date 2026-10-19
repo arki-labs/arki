@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { AsyncSchema, InvalidInput, isFailure, ValidatorDefect } from '@arki/failure';
+
 import type { StandardSchemaV1 } from './types.js';
-import { SCHEMA_ERROR_CODES, SchemaError, SchemaRunError } from './errors.js';
-import { formatIssues } from './issues.js';
 import { parse, parseAsync } from './parse.js';
 
 /** Accepts a string, returns its length: the output type differs from the input type. */
@@ -41,52 +41,38 @@ function withThen(result: StandardSchemaV1.Result<number>): StandardSchemaV1<unk
   return { '~standard': { version: 1, vendor: 'hand', validate: () => sync } };
 }
 
-/** The value `fn` throws, so a test can check its class and fields. */
-function thrownBy(fn: () => unknown): unknown {
-  try {
-    fn();
-  } catch (error) {
-    return error;
-  }
-  throw new Error('expected a throw');
-}
-
 describe('parse', () => {
-  it('returns the schema output, not the input, because callers use the validated value', () => {
+  it('returns transformed output after narrowing canonical failures', () => {
     const length = parse(lengthOf, 'abcd');
+    if (isFailure(length)) expect.unreachable(length.message);
     expectTypeOf(length).toEqualTypeOf<number>();
     expect(length).toBe(4);
   });
 
-  it('treats a result with a non-function `then` field as sync, because only a callable `then` makes a thenable', () => {
+  it('treats a non-callable then as synchronous', () => {
     expect(parse(withThen({ value: 123 }), 'x')).toBe(123);
-    expect(thrownBy(() => parse(withThen({ issues: [{ message: 'bad' }] }), 'x'))).toBeInstanceOf(SchemaError);
+    expect(InvalidInput.is(parse(withThen({ issues: [{ message: 'bad' }] }), 'x'))).toBe(true);
   });
 
-  it('throws SchemaError with the exact issues for bad data, so a boundary can answer with them', () => {
-    const error = thrownBy(() => parse(lengthOf, 42));
-    expect(error).toBeInstanceOf(SchemaError);
-    expect(error).not.toBeInstanceOf(SchemaRunError);
-    const issues = [{ message: 'expected a string', path: ['name'] }];
-    expect(error).toMatchObject({ name: 'SchemaError', issues, message: formatIssues(issues) });
+  it('returns issues as bad input without throwing', () => {
+    const result = parse(lengthOf, 42);
+    expect(InvalidInput.is(result)).toBe(true);
+    if (!InvalidInput.is(result)) expect.unreachable('expected invalid input');
+    expect(result.data.issues).toEqual([{ message: 'expected a string', path: ['name'] }]);
   });
 
-  it('refuses an async schema with E001 naming the vendor, since a sync caller cannot wait', () => {
-    const error = thrownBy(() => parse(asyncSchema('zod'), 1));
-    expect(error).toBeInstanceOf(SchemaRunError);
-    expect(error).toMatchObject({ code: SCHEMA_ERROR_CODES.asyncResult, name: 'SchemaRunError' });
-    expect(String(error)).toContain('zod');
-    expect(error).toHaveProperty('remediation', expect.stringContaining('parseAsync()'));
+  it('returns AsyncSchema when a synchronous caller cannot await validation', () => {
+    expect(AsyncSchema.is(parse(asyncSchema('zod'), 1))).toBe(true);
   });
 
-  it('never leaks the async result as an unhandled rejection when it gives up on it', async () => {
+  it('observes discarded promise rejection so sync parsing never leaks it', async () => {
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
     try {
       const rejecting: StandardSchemaV1<unknown, string> = {
         '~standard': { version: 1, vendor: 'late', validate: () => Promise.reject(new Error('late failure')) },
       };
-      expect(() => parse(rejecting, 1)).toThrow(SchemaRunError);
+      expect(AsyncSchema.is(parse(rejecting, 1))).toBe(true);
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
@@ -94,46 +80,57 @@ describe('parse', () => {
     }
   });
 
-  it('reports a throwing validator as E002 with the cause, never as bad data', () => {
-    // A validator bug must not read as "the input is invalid" to an http 400 or a revive.
-    const error = thrownBy(() => parse(throwing, 'x'));
-    expect(error).toBeInstanceOf(SchemaRunError);
-    expect(error).not.toBeInstanceOf(SchemaError);
-    expect(error).toMatchObject({ code: SCHEMA_ERROR_CODES.validatorThrew });
-    expect(error).toHaveProperty('cause', bug);
+  it('keeps validator defects distinct from invalid input with the original cause', () => {
+    const result = parse(throwing, 'x');
+    expect(ValidatorDefect.is(result)).toBe(true);
+    expect(InvalidInput.is(result)).toBe(false);
+    expect(result).toHaveProperty('cause', bug);
+  });
+
+  it('preserves the schema receiver when validating', () => {
+    const schema: StandardSchemaV1<unknown, string> = {
+      '~standard': {
+        version: 1,
+        vendor: 'receiver',
+        validate() {
+          return { value: this.vendor };
+        },
+      },
+    };
+    expect(parse(schema, 1)).toBe('receiver');
+  });
+
+  it('normalizes malicious schema accessor defects', () => {
+    const schema: StandardSchemaV1<unknown, string> = {
+      get '~standard'(): StandardSchemaV1.Props<unknown, string> {
+        throw bug;
+      },
+    };
+    expect(ValidatorDefect.is(parse(schema, 1))).toBe(true);
   });
 });
 
 describe('parseAsync', () => {
-  it('awaits an async schema and returns its output', async () => {
+  it('awaits a schema and preserves its transformed output type', async () => {
     const value = await parseAsync(asyncSchema('valibot'), 1);
+    if (isFailure(value)) expect.unreachable(value.message);
     expectTypeOf(value).toEqualTypeOf<string>();
     expect(value).toBe('late');
   });
 
-  it('works for a sync schema too', async () => {
+  it('accepts synchronous schemas too', async () => {
     await expect(parseAsync(lengthOf, 'abc')).resolves.toBe(3);
   });
 
-  it('rejects with SchemaError for bad data', async () => {
-    await expect(parseAsync(lengthOf, 1)).rejects.toBeInstanceOf(SchemaError);
+  it('resolves invalid input as a canonical failure', async () => {
+    expect(InvalidInput.is(await parseAsync(lengthOf, 1))).toBe(true);
   });
 
-  it('turns a sync throw into a rejection, so `await` callers need only one error path', async () => {
-    let pending: Promise<string> | undefined;
-    expect(() => {
-      pending = parseAsync(throwing, 'x');
-    }).not.toThrow();
-    await expect(pending).rejects.toMatchObject({ code: SCHEMA_ERROR_CODES.validatorThrew, cause: bug });
-  });
-
-  it('reports a rejecting validator as E002, not bad data', async () => {
-    const reason = new Error('db down');
+  it('resolves sync throws and async rejections as validator defects', async () => {
+    expect(ValidatorDefect.is(await parseAsync(throwing, 1))).toBe(true);
     const rejecting: StandardSchemaV1<unknown, string> = {
-      '~standard': { version: 1, vendor: 'remote', validate: () => Promise.reject(reason) },
+      '~standard': { version: 1, vendor: 'remote', validate: () => Promise.reject(bug) },
     };
-    const error: unknown = await parseAsync(rejecting, 1).catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(SchemaRunError);
-    expect(error).toMatchObject({ code: SCHEMA_ERROR_CODES.validatorThrew, cause: reason });
+    expect(await parseAsync(rejecting, 1)).toMatchObject({ code: 'schema.validator_defect', cause: bug });
   });
 });

@@ -7,6 +7,8 @@
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
+import { InvalidInput } from '@arki/failure';
+
 import { CommandNotFound, initJournal, isJournalError, JournalError, need } from '../dist/index.js';
 import { journalTables } from '../dist/pg.js';
 
@@ -43,12 +45,7 @@ const journal = j.compose({
   services: { push: id => pushed.push(id) },
 });
 
-let rejected = false;
-try {
-  OrderPaid({ amount: -1 });
-} catch {
-  rejected = true;
-}
+const rejected = InvalidInput.is(OrderPaid({ amount: -1 }));
 
 const checks = [
   ['event validates', JSON.stringify(OrderPlaced({ total: 5 })), '{"type":"OrderPlaced","data":{"total":5}}'],

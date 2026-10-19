@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { plugin, rename, service } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
@@ -133,7 +134,7 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
 
     const id = orderId(++next);
     const mailed = new Promise<void>(resolve => delivered.set(id, resolve));
-    await app.services.journal.run(db, placeOrder, { id, customerId: 'mixed' }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id, customerId: 'mixed' }, meta));
     // Inline projections ran inside the write, from the infra unit and the legacy slice alike.
     expect(await placedCount('chain:mixed')).toBe(1);
     expect(await placedCount('legacy:mixed')).toBe(1);
@@ -152,14 +153,12 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
       .features(audit)
       .usecases({})
       .entrypoints();
-    const app = track(
-      await defineApp('nested-journal').infra(dbPlugin(), journal({ j })).features([orders]).boot(),
-    );
+    const app = track(await defineApp('nested-journal').infra(dbPlugin(), journal({ j })).features([orders]).boot());
     await app.start();
     // Without `ownUnits`, the parent's `plugins()` would list the child's unit too and `audit` would be a duplicate owner.
     expect(app.services.journal.catalog.projections).toEqual(['parent-orders-count', 'child-audit-count']);
     const id = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id, customerId: 'nested' }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id, customerId: 'nested' }, meta));
     expect(await placedCount('parent:nested')).toBe(1);
     expect(await placedCount('child:nested')).toBe(1);
   });
@@ -170,9 +169,9 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
       .entrypoints();
     const legacy = feature('legacy', { use: [journalHandlers({ projections: [countPlaced('twice-count', 'b')] })] });
 
-    await expect(
-      defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot(),
-    ).rejects.toThrow('duplicate projection name "twice-count" (features "chain" and "legacy")');
+    await expect(defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot()).rejects.toThrow(
+      'duplicate projection name "twice-count" (features "chain" and "legacy")',
+    );
   });
 
   it("checks an effect's needs against the core where it is listed, at compile time", () => {
@@ -324,7 +323,7 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
     expect(app.services.journal.catalog.effects).toEqual(['send-on-request#eu', 'send-on-request#us']);
 
     const id = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id, customerId: 'instances' }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id, customerId: 'instances' }, meta));
     await vi.waitFor(() => expect(sent.toSorted()).toEqual([`eu:${id}`, `us:${id}`]));
   });
 

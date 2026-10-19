@@ -11,14 +11,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { InvalidInput } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
-import {
-  QUEUE_DEFINITION_ERROR_CODES,
-  QUEUE_INPUT_ERROR_CODES,
-  QueueDefinitionError,
-  QueueInputError,
-} from './errors.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import { toFlowJobs } from './flow-jobs.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
@@ -139,8 +135,7 @@ describe('enqueue(flow, input)', () => {
     try {
       // @ts-expect-error the input type is inferred from the flow: orderId is a string
       const started = handle.client.enqueue(orderFlow, { orderId: 42 });
-      await expect(started).rejects.toBeInstanceOf(QueueInputError);
-      await expect(started).rejects.toMatchObject({ code: QUEUE_INPUT_ERROR_CODES.invalidFlowInput });
+      await expect(started).resolves.toMatchObject({ code: InvalidInput.code });
     } finally {
       await handle.close();
     }

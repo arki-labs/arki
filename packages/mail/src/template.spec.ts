@@ -9,7 +9,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { SchemaRunError } from '@arki/schema';
+import { ValidatorDefect } from '@arki/failure';
 
 import { MailInvalidInput } from './failures.js';
 import { defineTemplate, renderTemplate } from './template.js';
@@ -92,7 +92,7 @@ describe('validation', () => {
     expect(result.data.issues[0]?.path).toEqual(['user', 'email']);
   });
 
-  it('a schema that throws is a bug and is thrown, not returned as bad input', async () => {
+  it('a schema that throws returns a validator defect, distinct from invalid input', async () => {
     const broken: StandardSchemaV1<{ id: string }> = {
       '~standard': {
         version: 1,
@@ -103,6 +103,6 @@ describe('validation', () => {
       },
     };
     const template = defineTemplate({ name: 'broken', input: broken, subject: () => 's', text: () => 't' });
-    await expect(renderTemplate(template, { id: 'x' })).rejects.toBeInstanceOf(SchemaRunError);
+    expect(ValidatorDefect.is(await renderTemplate(template, { id: 'x' }))).toBe(true);
   });
 });

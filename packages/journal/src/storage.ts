@@ -7,8 +7,10 @@
 import { eq, getTableColumns, is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
+import type { SchemaFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
-import { parse, SchemaError } from '@arki/schema';
+import { InvalidInput, isSchemaFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type {
   AnyEntity,
@@ -245,19 +247,15 @@ function sameJson(a: unknown, b: unknown): boolean {
 
 /**
  * Sync parse that reports bad data instead of throwing it: replay and the round-trip
- * check branch on the result. Only a `SchemaError` is caught. A schema that cannot run
- * (an async schema, or a `validate` that throws) is a bug, so its `SchemaRunError` propagates.
+ * check branch on the result. Invalid input carries issues; async schemas and validator
+ * defects remain canonical schema failures for the caller to propagate.
  */
 export function safeParse<Output>(
   schema: StandardSchemaV1<unknown, Output>,
   value: unknown,
-): { readonly success: true; readonly data: Output } | { readonly success: false; readonly error: SchemaError } {
-  try {
-    return { success: true, data: parse(schema, value) };
-  } catch (error) {
-    if (error instanceof SchemaError) return { success: false, error };
-    throw error;
-  }
+): { readonly success: true; readonly data: Output } | { readonly success: false; readonly error: SchemaFailure } {
+  const parsed = parse(schema, value);
+  return isSchemaFailure(parsed) ? { success: false, error: parsed } : { success: true, data: parsed };
 }
 
 /**
@@ -271,7 +269,7 @@ export function assertRoundTrips(
   kind: string,
   id: string,
   what: string,
-): void {
+): void | SchemaFailure {
   let stored: unknown;
   try {
     // Not structuredClone: the point is what JSON storage does to the value (Dates become strings).
@@ -283,6 +281,7 @@ export function assertRoundTrips(
     });
   }
   const again = safeParse(schema, stored);
+  if (!again.success && !InvalidInput.is(again.error)) return again.error;
   if (!(again.success && sameJson(again.data, value)))
     throw new JournalError(
       'UNSTABLE_SCHEMA',

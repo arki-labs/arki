@@ -5,6 +5,7 @@
 
 import type { JobsOptions, Queue } from 'bullmq';
 
+import type { AsyncSchemaFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { QueueConnection } from '../redis-connection.ts';
@@ -101,7 +102,9 @@ export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta>
   /**
    * Set input schema (unlocks `.handler()`)
    */
-  input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
+  input<TNewInput>(
+    schema: StandardSchemaV1<unknown, TNewInput>,
+  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 
   /**
    * Set job options
@@ -122,7 +125,9 @@ export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInp
   /**
    * Set input schema
    */
-  input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
+  input<TNewInput>(
+    schema: StandardSchemaV1<unknown, TNewInput>,
+  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
 
   /**
    * Set job options
@@ -497,7 +502,7 @@ export type QueueEnqueue = {
     data: TInput,
     options?: TriggerOptions,
   ): Promise<string>;
-  <TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
+  <TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
 };
 
 /**

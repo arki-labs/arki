@@ -9,7 +9,7 @@ import { asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { j as sharedJournal } from '../test-support.js';
 import { initJournal } from '../journal.js';
@@ -322,7 +322,7 @@ describe('stranded runs', () => {
     expect(dead.map(job => [job.effect, job.attempts])).toEqual([['workflow.timer', 1]]);
 
     // The timer's job belongs to the park of `cool`, so that is the step to retry.
-    await journalA.workflows.retryStep(db, { runId: id, path: 'cool', phase: 'do' }, operator);
+    orThrow(await journalA.workflows.retryStep(db, { runId: id, path: 'cool', phase: 'do' }, operator));
     await settle(journalA);
     expect(await rowOf(id)).toMatchObject({ state: 'parked', node: 'approve' });
   });
@@ -357,7 +357,7 @@ describe('stranded runs', () => {
     expect(await rowOf(id)).toMatchObject({ state: 'parked' });
     expect(await deadJobs()).toHaveLength(1);
 
-    await journalA.workflows.retryStep(db, { runId: id, path: 'approve', phase: 'do' }, operator);
+    orThrow(await journalA.workflows.retryStep(db, { runId: id, path: 'approve', phase: 'do' }, operator));
     await settle(journalA);
 
     // The deadline fired: the run undid its charge and failed.

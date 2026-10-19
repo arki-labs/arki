@@ -11,6 +11,8 @@
 import type { Job as BullMQJob, QueueOptions, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
 
+import type { AsyncSchemaFailure } from '@arki/failure';
+import { orThrow } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
@@ -138,7 +140,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
         // Validate input
         debugJob.debug('[{internalName}] Job {jobId} validating input', { internalName: internal.name, jobId: job.id });
-        const validatedData = await parseAsync(internal.inputSchema, job.data);
+        const validatedData = orThrow(await parseAsync(internal.inputSchema, job.data));
         debugJob.debug('[{internalName}] Job {jobId} input validated', { internalName: internal.name, jobId: job.id });
 
         // Create base context: the worker's, plus the services of the feature that registered the job
@@ -471,12 +473,15 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     data: TInput,
     options?: TriggerOptions,
   ): Promise<string>;
-  function enqueue<TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
+  function enqueue<TInput>(
+    flow: FlowDefinition<TInput>,
+    input: NoInfer<TInput>,
+  ): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
   async function enqueue(
     target: AnyJobDefinition | FlowDefinition,
     data: unknown,
     options?: TriggerOptions,
-  ): Promise<string | FlowEnqueueResult> {
+  ): Promise<string | FlowEnqueueResult | AsyncSchemaFailure> {
     if (target._type === 'flow') {
       return addFlow(
         () => (flowProducer ??= new FlowProducer({ connection: connectionConfig, prefix: keyPrefix })),

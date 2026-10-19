@@ -5,7 +5,7 @@ Typed expected failures for TypeScript, with no wrapper and no runtime. Define a
 - **No wrapper on success.** A function returns the post itself, or a failure. There is no `ok(…)` to add and no `.value` to unwrap, and existing code gains failures one `return` at a time.
 - **Errors in the type, inferred.** A function's return type lists every failure it can produce, including the ones it passes on with `if (isFailure(x)) return x`. Nobody writes the union down.
 - **Written once.** Code, status, data schema, message template and remediation live in `defineFailure`. Failure values, `match` and `recover` handlers, oRPC error maps and `revive` all take their types from it.
-- **Any schema.** The data schema is any [Standard Schema](https://standardschema.dev): Zod 4, Valibot, ArkType. The core depends only on `@arki/schema`.
+- **Any schema.** The data schema is any [Standard Schema](https://standardschema.dev): Zod 4, Valibot, ArkType. The core depends only on the canonical Standard Schema types; it has no runtime dependency on a validator or `@arki/schema`.
 - **Caught when ignored.** The `must-use` lint rule reports a call whose failure is thrown away. `no-blind-accept` reports `accept(r)` of a failure not checked by kind.
 - **Bugs still throw.** A failure is something the caller should handle ("not found", "email taken", "card declined"). A bug is not; keep throwing those.
 - **Every runtime.** Node, Bun, Deno, browsers and React Native (Hermes), checked by `test:runtimes`.
@@ -258,8 +258,11 @@ if (page !== 'page body' || typeof body !== 'object') throw new Error('expected 
 
 ### `revive(value, definitions)`
 
-A failure that went through JSON (a queue, a journal row, a worker message) is a plain object again. `revive` returns the live failure for one of the definitions you expect, matched by code, and checks its data with that definition's schema. It returns `undefined` for anything else. Data that does not match throws `ARKI_FAILURE_E006`, and an asynchronous schema throws `ARKI_FAILURE_E007`; each keeps the `@arki/schema` error as its `cause`. A validator that throws is a bug, not bad data: its `SchemaRunError` (`ARKI_SCHEMA_E002`) passes through unwrapped.
+A failure that went through JSON is a plain object again. `revive` validates the envelope and reconstructs a known failure using local definitions. It returns `undefined` for unrelated values, `InvalidEnvelope` for unknown codes, malformed data or unsupported versions, `AsyncSchema` for an async validator, and `ValidatorDefect` or `UnexpectedDefect` for broken validators or constructors. `REVIVAL_FAILURES` is the runtime list of these boundary failures; `RevivalFailure` is inferred from it.
 
+`serialize(failure, definitions)` produces a version 1 envelope with only `version`, `code` and optional validated `data`. `revive` also reads legacy versionless `{code, data}` records. Remote status, message, brand and cause are ignored. `reviveJson(text, definitions)` additionally handles malformed JSON as `InvalidEnvelope`.
+
+Wire data must be lossless JSON and its schema must accept that data unchanged. Dates, bigints, cycles, getters, `toJSON` hooks and transforms that change the output are rejected. Use a separate JSON-safe wire definition for those domain values; no implicit codec or double transformation occurs.
 ```ts run
 import { revive } from '@arki/failure';
 
@@ -386,7 +389,7 @@ export const procedures = {
 - `orThrowRpc(value, errors, success)` throws the failure the same way, or returns `success`. It is for a usecase that returns nothing or a failure: `return orThrowRpc(await disconnect(id), errors, { success: true })`.
 - A failure the usecase can return but the contract does not list is a compile error: `Property '"post.locked"' is missing in type …`. Add its definition to `errorMap(...)`. If the types are bypassed anyway, the failure arrives as undeclared (`defined: false`).
 - Forgetting `orThrowRpc` is a compile error: `Post | Failure` is not the procedure's output.
-- `reviveRpcError(error, definitions)` is the client side: a caught `ORPCError` whose code is one of the definitions becomes the live failure, its data checked like `revive`. Anything else returns `undefined`, so rethrow it. Then `match` on the failure as the backend does.
+- `reviveRpcError(error, definitions)` is the client side: a caught `ORPCError` whose code is one of the definitions becomes the live failure, its data checked like `revive`. Non-oRPC errors return `undefined`; unknown codes or invalid data return typed protocol failures. Then `match` on the failure as the backend does.
 
 ```ts run
 import { isFailure } from '@arki/failure';
@@ -415,12 +418,12 @@ An app that adopts the package meets three gates:
 
 ## Failure behaviour
 
-The package returns expected failures and throws only for mistakes in how it is used.
+The package returns typed domain, validation and protocol failures. Owned boundaries return distinct defects with private causes. Invalid static definitions and explicit exception bridges still throw.
 
 - **Expected failures are values.** `defineFailure(...)(data)` makes one. Your functions return it. Check with `isFailure` or `Def.is`, then use `match` or `recover`.
 - **Misuse throws `FailureError`.** A bad status, a missing handler or a duplicate code is a bug in the calling code. Do not catch it. Fix the call. Match on `error.code`, never on the message.
 - **`orThrow` and `orThrowRpc` throw on purpose.** `orThrow` throws an `UnexpectedFailure` that keeps `failure`, `code`, `status`, `remediation` and the `cause`. Use it only where a failure would be a bug.
-- **`revive` throws on bad stored data.** It returns `undefined` for a code it does not know.
+- **`revive` returns typed protocol failures.** Unknown codes are distinct from unrelated values.
 
 A `FailureError` has a stable `code` and a one-sentence `remediation`. Each code has a page at `https://arki.dev/errors/<code>`.
 
@@ -431,8 +434,8 @@ A `FailureError` has a stable `code` and a one-sentence `remediation`. Each code
 | `ARKI_FAILURE_E003` | `match` met a failure code it has no handler for (types were bypassed).                          |
 | `ARKI_FAILURE_E004` | `assertNever` was reached.                                                                       |
 | `ARKI_FAILURE_E005` | `errorMap` got two definitions with the same code.                                               |
-| `ARKI_FAILURE_E006` | `revive` got data that does not match the definition's schema. The `cause` is the `SchemaError`. |
-| `ARKI_FAILURE_E007` | `revive` got a schema that validates asynchronously. The `cause` is the `SchemaRunError`.        |
+| `ARKI_FAILURE_E006` | Retired: revival now returns `InvalidEnvelope` with reason `invalid_data`. |
+| `ARKI_FAILURE_E007` | Retired: revival now returns `AsyncSchema`.        |
 
 ## Limits
 
@@ -440,7 +443,7 @@ A `FailureError` has a stable `code` and a one-sentence `remediation`. Each code
 - **A returned failure does not roll back.** A database transaction callback that returns a failure commits. Throw inside the transaction, or use a helper that rolls back on a returned failure.
 - **Codes are unique per app.** The package cannot see another definition with the same code until `errorMap` receives both.
 - **Status is 400 to 599.** `defineFailure` throws `ARKI_FAILURE_E002` for anything else.
-- **Failure data must pass its own schema.** The schema is synchronous and must accept its own output. A schema that transforms its input makes `revive` throw on a failure it made itself.
+- **Failure data must pass its own schema.** Wire validation is synchronous and must accept its own JSON output unchanged; otherwise the boundary returns a typed failure.
 - **The compiler only sees what the return type shows.** A function that returns `unknown` or `any` hides its failures. The lint rule `must-use` only checks calls it can type.
 
 The status boundary, as code:
@@ -467,7 +470,7 @@ ARKI_FAILURE_E002
 - **`accept` after `isFailure` accepts every refusal.** Check the kind with `Def.is` first; the `no-blind-accept` rule reports it.
 - **`unknown`, `any` and `object` swallow failures.** A function whose return type widens to one of them loses its failures from the type. Parse with a schema instead of casting to `unknown`, and assert `FailureOf<typeof fn>` in a test when it matters.
 - **Truthiness does not narrow.** A failure is an object, so `if (post)` and `post ?? fallback` do not remove it. Use `isFailure`.
-- **A data schema must accept its own output.** `revive` validates the JSON of the live value, so a schema such as `z.string().transform(Number)` makes `revive` throw `ARKI_FAILURE_E006` on its own failures.
+- **A data schema must accept its own output.** `revive` rejects a wire value when validation changes it; represent transformed domain data with a separate JSON-safe definition.
 - **Data that is itself a failure is ambiguous.** Do not return stored failures as success data; wrap them (`{ failure }`).
 
 ## Why no wrapper?
@@ -486,3 +489,9 @@ Research behind the design: `docs/arki/research/07-result/` in the Arki monorepo
 ## Support
 
 Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
+
+## Validation foundation: `@arki/failure/schema`
+
+`parse(schema, input)` returns the schema output or `InvalidInput`, `AsyncSchema`, or `ValidatorDefect`. `parseAsync` returns output or `InvalidInput`/`ValidatorDefect`. Their exact failure types are `SchemaFailure` and `AsyncSchemaFailure`. `InvalidInput.data.issues` contains normalized issue messages and paths. Defect messages are safe; their caught causes are private.
+
+`@arki/schema` reexports these functions and provides issue formatting and JSON Schema helpers. There is one executor and no dependency cycle. Use `orThrow` only at an explicit foreign API that requires exceptions. See [the migration guide](docs/upgrade-typed-validation.md).

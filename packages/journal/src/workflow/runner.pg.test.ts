@@ -12,6 +12,8 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { j, tables } from '../test-support.js';
 
 const workflowMeta = { actorId: 'system:workflow' };
@@ -123,7 +125,7 @@ const expireLease = () =>
 describe('two workers race one run', () => {
   it('a worker that was taken over gets its checkpoint refused, so exactly one checkpoint of the node commits', async () => {
     const id = `racing_${++next}`;
-    await journal.run(dbA, racing.start, { input: {}, id }, caller);
+    orThrow(await journal.run(dbA, racing.start, { input: {}, id }, caller));
     const stale = journal.drain(dbA, { leaseSeconds: 1 });
     await first.started.opened;
     await expireLease();
@@ -145,7 +147,7 @@ describe('two workers race one run', () => {
   it('a claim waits for a checkpoint in flight, so the new owner finds the node done and does not run its body again', async () => {
     const id = `racing_${++next}`;
     holdAt = 'checkpoint';
-    await journal.run(dbA, racing.start, { input: {}, id }, caller);
+    orThrow(await journal.run(dbA, racing.start, { input: {}, id }, caller));
     const stale = journal.drain(dbA, { leaseSeconds: 1 });
     await first.started.opened;
     await expireLease();

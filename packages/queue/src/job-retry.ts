@@ -12,7 +12,7 @@ import type { BackoffOptions } from 'bullmq';
 
 import type { Failure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 /** The retry of a job that sets none: 2 retries (3 tries in all), 1 s and then 2 s apart. */
@@ -52,5 +52,8 @@ export function throwIfReturnedFailure(result: unknown): void {
  */
 export function workerBackoffStrategy(retry: Backoff): (attemptsMade: number, type?: string, error?: Error) => number {
   return (attemptsMade, _type, error) =>
-    retry.delay(attemptsMade, error instanceof ReturnedFailureError ? error.failure : error) ?? -1;
+    retry.delay(
+      attemptsMade,
+      error instanceof ReturnedFailureError || error instanceof UnexpectedFailure ? error.failure : error,
+    ) ?? -1;
 }

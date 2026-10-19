@@ -1,5 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { DbHandle } from '../types.js';
 import type { RunDetail, RunState, RunSummary, StepView, StrandedReason } from './read.js';
 import { j } from '../test-support.js';
@@ -29,8 +31,8 @@ describe('journal.workflows, as types', () => {
 
   it('the verbs take the T13 operator and say how they moved the run', async () => {
     const done = await journal.workflows.retryStep(db, { runId: 'r', path: 'p', phase: 'do' }, { actor: 'usr' });
-    expectTypeOf(done.how).toEqualTypeOf<'rescheduled' | 'childrenRestarted' | 'jobRetried'>();
+    expectTypeOf(orThrow(done).how).toEqualTypeOf<'rescheduled' | 'childrenRestarted' | 'jobRetried'>();
     // @ts-expect-error every operation names who did it
-    await journal.workflows.skipUndo(db, { runId: 'r', path: 'p' }, {});
+    orThrow(await journal.workflows.skipUndo(db, { runId: 'r', path: 'p' }, {}));
   });
 });

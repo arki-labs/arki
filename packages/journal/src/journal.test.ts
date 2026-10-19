@@ -6,7 +6,7 @@ import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { DbHandle, PendingOf } from './types.js';
 import { isJournalError, JournalError } from './errors.js';
@@ -104,7 +104,7 @@ const rowOf = async (id: ReturnType<typeof orderId>) => {
 describe('write', () => {
   it('create: the row and the event land together, and the row carries the DB default', async () => {
     const id = orderId(++next);
-    const result = await place(id);
+    const result = orThrow(await place(id));
     expect(result.row).toMatchObject({ id, status: 'placed', total: 100, version: 1, note: 'none' });
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({ type: 'OrderPlaced', version: 1, entityId: id, kind: 'order', meta });
@@ -122,8 +122,8 @@ describe('write', () => {
     // Why: a client that edited a copy at version 1 must not overwrite a version 2 it never saw.
     // The check is the library's, so no command has to compare versions by hand.
     const id = orderId(++next);
-    await place(id);
-    await pay(id);
+    orThrow(await place(id));
+    orThrow(await pay(id));
     let rulesRan = false;
     const stale = db.transaction(tx =>
       journal.write(tx, order, id, {
@@ -138,8 +138,10 @@ describe('write', () => {
     await expect(stale).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(stale).rejects.toThrow('expected version 1 but the row is at version 2');
     expect(rulesRan).toBe(false);
-    const current = await db.transaction(tx =>
-      journal.write(tx, order, id, { meta, expectedVersion: 2, events: () => [OrderNoted({ note: 'on time' })] }),
+    const current = orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, id, { meta, expectedVersion: 2, events: () => [OrderNoted({ note: 'on time' })] }),
+      ),
     );
     expect(current.row).toMatchObject({ note: 'on time', version: 3 });
     // No row is version 0: a create that expects nothing there.
@@ -151,16 +153,16 @@ describe('write', () => {
 
   it('update: the reducer sees the stored row and the version moves to 2', async () => {
     const id = orderId(++next);
-    await place(id);
-    const result = await pay(id);
+    orThrow(await place(id));
+    const result = orThrow(await pay(id));
     expect(result.row).toMatchObject({ status: 'paid', version: 2, customerId: 'cus_1' });
     expect(await versions(id)).toEqual([1, 2]);
   });
 
   it('delete: a null reducer removes the row but the events stay', async () => {
     const id = orderId(++next);
-    await place(id);
-    const result = await cancel(id);
+    orThrow(await place(id));
+    const result = orThrow(await cancel(id));
     expect(result.row).toBeNull();
     expect(await rowOf(id)).toBeNull();
     expect(await history(id)).toHaveLength(2);
@@ -168,11 +170,13 @@ describe('write', () => {
 
   it('several events in one write produce one row save at the final version', async () => {
     const id = orderId(++next);
-    const result = await db.transaction(tx =>
-      journal.write(tx, order, id, {
-        meta,
-        events: () => [OrderPlaced({ customerId: 'cus_2', total: 5 }), OrderPaid({ amount: 5 })],
-      }),
+    const result = orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, id, {
+          meta,
+          events: () => [OrderPlaced({ customerId: 'cus_2', total: 5 }), OrderPaid({ amount: 5 })],
+        }),
+      ),
     );
     expect(result.row).toMatchObject({ status: 'paid', version: 2 });
     expect(result.events.map(e => e.version)).toEqual([1, 2]);
@@ -180,9 +184,11 @@ describe('write', () => {
 
   it('events returning [] writes nothing and returns the current row', async () => {
     const id = orderId(++next);
-    await place(id);
-    const result = await db.transaction(tx =>
-      journal.write(tx, order, id, { meta, events: row => (row?.status === 'placed' ? [] : []) }),
+    orThrow(await place(id));
+    const result = orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, id, { meta, events: row => (row?.status === 'placed' ? [] : []) }),
+      ),
     );
     expect(result.events).toEqual([]);
     expect(result.row).toMatchObject({ version: 1 });
@@ -206,7 +212,7 @@ describe('write', () => {
 
   it('rejects a create on an existing row and an update on a missing row', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     await expect(place(id)).rejects.toMatchObject({ code: 'ROW_EXISTS' });
     await expect(pay(orderId(++next))).rejects.toMatchObject({ code: 'NO_ROW' });
   });
@@ -215,24 +221,24 @@ describe('write', () => {
     const id = orderId(++next);
     await expect(
       db.transaction(tx => journal.write(tx, order, id, { meta: { actorId: '' }, events: () => [] })),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({ code: InvalidInput.code });
   });
 
   it('create after delete continues the version sequence and replays to the new row', async () => {
     const id = orderId(++next);
-    await place(id);
-    await cancel(id);
-    const again = await place(id, 'cus_again');
+    orThrow(await place(id));
+    orThrow(await cancel(id));
+    const again = orThrow(await place(id, 'cus_again'));
     expect(again.row).toMatchObject({ version: 3, customerId: 'cus_again' });
     expect(await versions(id)).toEqual([1, 2, 3]);
-    const replayed = await journal.replay(db, order, id);
+    const replayed = orThrow(await journal.replay(db, order, id));
     expect(replayed.row).toMatchObject({ id, version: 3, customerId: 'cus_again', status: 'placed' });
     expect(await journal.verify(db, order, id)).toEqual({ ok: true });
   });
 
   it('a throwing projection rolls back events, row and jobs', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     failProjection = true;
     try {
       await expect(pay(id)).rejects.toThrow('projection boom');
@@ -249,12 +255,19 @@ describe('write', () => {
   it('a caught error inside the caller transaction leaves no partial write (savepoint)', async () => {
     const id = orderId(++next);
     const other = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     failProjection = true;
     try {
       await db.transaction(async tx => {
-        await journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 100 })] }).catch(() => null);
-        await journal.write(tx, order, other, { meta, events: () => [OrderPlaced({ customerId: 'cus_3', total: 1 })] });
+        orThrow(
+          await journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 100 })] }).catch(() => null),
+        );
+        orThrow(
+          await journal.write(tx, order, other, {
+            meta,
+            events: () => [OrderPlaced({ customerId: 'cus_3', total: 1 })],
+          }),
+        );
       });
     } finally {
       failProjection = false;
@@ -266,16 +279,16 @@ describe('write', () => {
 
   it('projections run in the same transaction and see exact counts', async () => {
     const customerId = `cus_${orderId(++next)}`;
-    await place(orderId(++next), customerId);
-    await place(orderId(++next), customerId);
+    orThrow(await place(orderId(++next), customerId));
+    orThrow(await place(orderId(++next), customerId));
     const [count] = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customerId));
     expect(count?.placed).toBe(2);
   });
 
   it('job rows are created only for effects that declare the event type', async () => {
     const id = orderId(++next);
-    const placed = await place(id);
-    const paid = await pay(id);
+    const placed = orThrow(await place(id));
+    const paid = orThrow(await pay(id));
     const forPlaced = await db
       .select()
       .from(tables.jobs)
@@ -294,10 +307,12 @@ describe('write', () => {
     // Replay is the source of truth for repair. If the saved row and the replayed row
     // differ, repair would silently rewrite data. The OrderNoted reducer sets only `note`.
     const id = orderId(++next);
-    await place(id, 'cus_same');
-    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] }));
-    const written = await pay(id);
-    const replayed = await journal.replay(db, order, id);
+    orThrow(await place(id, 'cus_same'));
+    orThrow(
+      await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] })),
+    );
+    const written = orThrow(await pay(id));
+    const replayed = orThrow(await journal.replay(db, order, id));
     expect(written.row).toMatchObject({ customerId: 'cus_same', total: 100, status: 'paid', note: 'gift', version: 3 });
     expect(replayed.row).toEqual({ id, version: 3, customerId: 'cus_same', total: 100, status: 'paid', note: 'gift' });
     expect(await journal.verify(db, order, id)).toEqual({ ok: true });
@@ -312,10 +327,12 @@ describe('write', () => {
       .on(Touched, () => ({ status: undefined, note: 'touched' }));
     const bare = j.compose({});
     const id = orderId(++next);
-    await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Opened({})] }));
-    const result = await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Touched({})] }));
+    orThrow(await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Opened({})] })));
+    const result = orThrow(
+      await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Touched({})] })),
+    );
     expect(result.row).toMatchObject({ status: 'placed', note: 'touched' });
-    const replayed = await bare.replay(db, touchy, id);
+    const replayed = orThrow(await bare.replay(db, touchy, id));
     expect(replayed.row).toEqual({ id, version: 2, customerId: 'c', total: 1, status: 'placed', note: 'touched' });
   });
 
@@ -325,16 +342,22 @@ describe('write', () => {
     const twoStepId = orderId(++next);
     const oneStepId = orderId(++next);
     for (const id of [twoStepId, oneStepId]) {
-      await place(id);
-      await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] }));
+      orThrow(await place(id));
+      orThrow(
+        await db.transaction(tx =>
+          journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] }),
+        ),
+      );
     }
-    await cancel(twoStepId);
-    const twoStep = await place(twoStepId, 'cus_again');
-    const oneStep = await db.transaction(tx =>
-      journal.write(tx, order, oneStepId, {
-        meta,
-        events: () => [OrderCancelled({ reason: 'x' }), OrderPlaced({ customerId: 'cus_again', total: 100 })],
-      }),
+    orThrow(await cancel(twoStepId));
+    const twoStep = orThrow(await place(twoStepId, 'cus_again'));
+    const oneStep = orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, oneStepId, {
+          meta,
+          events: () => [OrderCancelled({ reason: 'x' }), OrderPlaced({ customerId: 'cus_again', total: 100 })],
+        }),
+      ),
     );
     expect(twoStep.row).toMatchObject({ note: 'none', customerId: 'cus_again', version: 4 });
     if (twoStep.row === null) throw new Error('two-step row missing');
@@ -345,11 +368,11 @@ describe('write', () => {
 
   it('a hand-built event skips the constructor, so write validates its data before anything lands', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     const handBuilt: PendingOf<typeof OrderPaid> = { type: 'OrderPaid', data: { amount: -1 } };
     await expect(
       db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [handBuilt] })),
-    ).rejects.toBeInstanceOf(SchemaError);
+    ).resolves.toMatchObject({ code: InvalidInput.code });
     expect(await versions(id)).toEqual([1]);
   });
 
@@ -425,7 +448,9 @@ describe('write', () => {
     const bare = j.compose({ projections: [keyCount] });
     const data = { n: 1, bonus: 10 };
     const handBuilt: PendingOf<typeof Counted> = { type: 'Counted', data };
-    const written = await db.transaction(tx => bare.write(tx, counted, id, { meta, events: () => [handBuilt] }));
+    const written = orThrow(
+      await db.transaction(tx => bare.write(tx, counted, id, { meta, events: () => [handBuilt] })),
+    );
     expect(written.row?.total).toBe(1);
     expect(written.events.map(e => e.data)).toStrictEqual([{ n: 1 }]);
     const [count] = await db
@@ -433,7 +458,7 @@ describe('write', () => {
       .from(customerOrderCounts)
       .where(eq(customerOrderCounts.customerId, `keys_${id}`));
     expect(count?.placed).toBe(1);
-    const replayedCount = await bare.replay(db, counted, id);
+    const replayedCount = orThrow(await bare.replay(db, counted, id));
     expect(replayedCount.row?.total).toBe(1);
     expect(await bare.verify(db, counted, id)).toEqual({ ok: true });
   });
@@ -445,9 +470,11 @@ describe('write', () => {
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed', note: undefined }));
     const bare = j.compose({});
     const id = orderId(++next);
-    const written = await db.transaction(tx => bare.write(tx, blank, id, { meta, events: () => [Opened({})] }));
+    const written = orThrow(
+      await db.transaction(tx => bare.write(tx, blank, id, { meta, events: () => [Opened({})] })),
+    );
     expect(written.row?.note).toBe('none');
-    const replayed = await bare.replay(db, blank, id);
+    const replayed = orThrow(await bare.replay(db, blank, id));
     expect(replayed.row).toStrictEqual({ id, version: 1, customerId: 'c', total: 1, status: 'placed' });
     expect(await bare.verify(db, blank, id)).toEqual({ ok: true });
   });
@@ -464,10 +491,12 @@ describe('write', () => {
       .on(Copied, row => ({ customerId: row.note ?? 'absent' }));
     const bare = j.compose({});
     const id = orderId(++next);
-    await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Opened({})] }));
-    const written = await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Copied({})] }));
+    orThrow(await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Opened({})] })));
+    const written = orThrow(
+      await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Copied({})] })),
+    );
     expect(written.row?.customerId).toBe('none');
-    const replayedLeaky = await bare.replay(db, leaky, id);
+    const replayedLeaky = orThrow(await bare.replay(db, leaky, id));
     expect(replayedLeaky.row?.customerId).toBe('absent');
     expect(await bare.verify(db, leaky, id)).toMatchObject({ ok: false });
   });
@@ -536,20 +565,20 @@ const legacyEvent = (customerId: string, total: number) => () => [OrderPlaced({ 
 describe('replay, verify, repair', () => {
   it('replay folds the log; throughVersion gives an earlier state', async () => {
     const id = orderId(++next);
-    await place(id);
-    await pay(id);
-    const full = await journal.replay(db, order, id);
+    orThrow(await place(id));
+    orThrow(await pay(id));
+    const full = orThrow(await journal.replay(db, order, id));
     expect(full.row).toMatchObject({ status: 'paid', version: 2 });
     expect(full.events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderPaid']);
-    const early = await journal.replay(db, order, id, { throughVersion: 1 });
+    const early = orThrow(await journal.replay(db, order, id, { throughVersion: 1 }));
     expect(early.row).toMatchObject({ status: 'placed', version: 1 });
   });
 
   it('verify reports a drifted row and repair fixes it from the log', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     await db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, id));
-    const bad = await journal.verify(db, order, id);
+    const bad = orThrow(await journal.verify(db, order, id));
     expect(bad.ok).toBe(false);
     if (!bad.ok) {
       expect(bad.expected).toMatchObject({ status: 'placed' });
@@ -565,10 +594,10 @@ describe('replay, verify, repair', () => {
 
   it('repair recreates a row that was deleted by hand and deletes one the log says is gone', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     await db.delete(orders).where(eq(orders.id, id));
     expect(await journal.repair(db, order, id)).toMatchObject({ status: 'placed', version: 1 });
-    await cancel(id);
+    orThrow(await cancel(id));
     await db.insert(orders).values({ id, customerId: 'ghost', total: 1, status: 'placed', version: 9 });
     expect(await journal.repair(db, order, id)).toBeNull();
     expect(await rowOf(id)).toBeNull();
@@ -581,7 +610,7 @@ describe('replay, verify, repair', () => {
     await expect(journal.verify(db, order, id)).rejects.toMatchObject({ code: 'NO_HISTORY' });
     await expect(journal.repair(db, order, id)).rejects.toSatisfy((e: unknown) => isJournalError(e, 'NO_HISTORY'));
     // Its history starts at version 2: version 1 is reserved for a real create.
-    const paid = await pay(id);
+    const paid = orThrow(await pay(id));
     expect(paid.row).toMatchObject({ status: 'paid', version: 2 });
     expect(await versions(id)).toEqual([2]);
   });
@@ -593,11 +622,13 @@ describe('replay, verify, repair', () => {
     const id = orderId(++next);
     const customerId = `cus_adopt_${next}`;
     await db.insert(orders).values({ id, customerId, total: 7, status: 'placed' });
-    const adopted = await db.transaction(tx =>
-      journal.adopt(tx, order, id, {
-        meta,
-        events: row => [OrderPlaced({ customerId: row?.customerId ?? '', total: row?.total ?? 0 })],
-      }),
+    const adopted = orThrow(
+      await db.transaction(tx =>
+        journal.adopt(tx, order, id, {
+          meta,
+          events: row => [OrderPlaced({ customerId: row?.customerId ?? '', total: row?.total ?? 0 })],
+        }),
+      ),
     );
     expect(adopted.row).toMatchObject({ customerId, total: 7, status: 'placed', version: 1, note: 'none' });
     expect(adopted.events.map(e => [e.type, e.version])).toEqual([['OrderPlaced', 1]]);
@@ -606,7 +637,7 @@ describe('replay, verify, repair', () => {
     const counts = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customerId));
     expect(counts.map(c => c.placed)).toEqual([1]);
     // Ordinary writes continue from 1, and repair rebuilds the whole row from the log.
-    await pay(id);
+    orThrow(await pay(id));
     expect(await versions(id)).toEqual([1, 2]);
     await db.update(orders).set({ total: 999 }).where(eq(orders.id, id));
     expect(await journal.repair(db, order, id)).toMatchObject({ total: 7, status: 'paid', version: 2 });
@@ -614,7 +645,7 @@ describe('replay, verify, repair', () => {
 
   it('adopt refuses a row the journal already knows, a missing row, and a legacy row that was written to', async () => {
     const known = orderId(++next);
-    await place(known);
+    orThrow(await place(known));
     await expect(
       db.transaction(tx => journal.adopt(tx, order, known, { meta, events: legacyEvent('cus_1', 100) })),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -623,7 +654,7 @@ describe('replay, verify, repair', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT' });
     const written = orderId(++next);
     await db.insert(orders).values({ id: written, customerId: 'legacy', total: 7, status: 'placed' });
-    await pay(written);
+    orThrow(await pay(written));
     await expect(
       db.transaction(tx => journal.adopt(tx, order, written, { meta, events: legacyEvent('legacy', 7) })),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -653,13 +684,15 @@ describe('replay, verify, repair', () => {
     // The log must be able to forget while staying replayable, so the erased form must fit the
     // schema and the row must be rebuilt from it.
     const id = orderId(++next);
-    await place(id);
-    await db.transaction(tx =>
-      journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'call me at 555-0100' })] }),
+    orThrow(await place(id));
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'call me at 555-0100' })] }),
+      ),
     );
-    await pay(id);
+    orThrow(await pay(id));
     const before = await history(id);
-    const result = await journal.forget(db, order, id);
+    const result = orThrow(await journal.forget(db, order, id));
     expect(result.erased).toBe(1);
     expect(result.row).toMatchObject({ status: 'paid', note: '[erased]', version: 3 });
     const after = await history(id);
@@ -687,11 +720,15 @@ describe('replay, verify, repair', () => {
       .on(leaky, (_row, e) => ({ note: e.data.note }));
     const leakyJournal = j.compose({});
     const id = orderId(++next);
-    await db.transaction(tx =>
-      leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leakyPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await db.transaction(tx =>
+        leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leakyPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
-    await db.transaction(tx =>
-      leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leaky({ note: 'secret' })] }),
+    orThrow(
+      await db.transaction(tx =>
+        leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leaky({ note: 'secret' })] }),
+      ),
     );
     await expect(leakyJournal.forget(db, leakyOrder, id)).rejects.toMatchObject({ code: 'BAD_DEFINITION' });
     const kept = await history(id);
@@ -703,8 +740,10 @@ describe('replay, verify, repair', () => {
     // A legacy row that was never adopted cannot be repaired, so it cannot be forgotten either.
     const legacy = orderId(++next);
     await db.insert(orders).values({ id: legacy, customerId: 'legacy', total: 7, status: 'placed' });
-    await db.transaction(tx =>
-      journal.write(tx, order, legacy, { meta, events: () => [OrderNoted({ note: 'private' })] }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, legacy, { meta, events: () => [OrderNoted({ note: 'private' })] }),
+      ),
     );
     await expect(journal.forget(db, order, legacy)).rejects.toMatchObject({ code: 'NO_HISTORY' });
     const legacyEvents = await history(legacy);
@@ -717,7 +756,7 @@ describe('replay, verify, repair', () => {
     // through the journal so that no stored row gives the game away.
     const id = orderId(++next);
     await db.insert(orders).values({ id, customerId: 'legacy', total: 7, status: 'placed' });
-    await cancel(id);
+    orThrow(await cancel(id));
     expect(await versions(id)).toEqual([2]);
     await expect(journal.replay(db, order, id, { throughVersion: 1 })).rejects.toMatchObject({ code: 'NO_HISTORY' });
   });
@@ -726,9 +765,11 @@ describe('replay, verify, repair', () => {
     // Why: version 1 alone does not prove the log is complete. With version 2 gone, folding [1, 3]
     // would build a row the real history never produced, and repair would save it over a correct row.
     const id = orderId(++next);
-    await place(id);
-    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gap' })] }));
-    await pay(id);
+    orThrow(await place(id));
+    orThrow(
+      await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gap' })] })),
+    );
+    orThrow(await pay(id));
     await db.delete(tables.events).where(and(eq(tables.events.entityId, id), eq(tables.events.version, 2)));
     expect(await versions(id)).toEqual([1, 3]);
     await expect(journal.replay(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
@@ -741,9 +782,9 @@ describe('replay, verify, repair', () => {
     // Why: the log [1, 2] folds cleanly, but the row says version 3. The last event was lost, not never
     // written. Repair would quietly undo it; refusing makes the loss visible.
     const id = orderId(++next);
-    await place(id);
-    await pay(id);
-    await cancel(id);
+    orThrow(await place(id));
+    orThrow(await pay(id));
+    orThrow(await cancel(id));
     await db.insert(orders).values({ id, customerId: 'cus_1', total: 100, status: 'cancelled', version: 3 });
     await db.delete(tables.events).where(and(eq(tables.events.entityId, id), eq(tables.events.version, 3)));
     await expect(journal.replay(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
@@ -758,12 +799,12 @@ describe('replay, verify, repair', () => {
 
   it('rerun replays one projection over the log in batches', async () => {
     const customerId = `cus_rerun_${next}`;
-    await place(orderId(++next), customerId);
-    await place(orderId(++next), customerId);
-    await place(orderId(++next), customerId);
+    orThrow(await place(orderId(++next), customerId));
+    orThrow(await place(orderId(++next), customerId));
+    orThrow(await place(orderId(++next), customerId));
     await db.delete(customerOrderCounts).where(sql`true`);
     const total = await countRows(db.select().from(tables.events).where(eq(tables.events.type, 'OrderPlaced')));
-    const result = await journal.rerun(db, customerStats, { batchSize: 2 });
+    const result = orThrow(await journal.rerun(db, customerStats, { batchSize: 2 }));
     expect(result.events).toBe(total);
     const [count] = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customerId));
     expect(count?.placed).toBe(3);
@@ -818,13 +859,15 @@ describe('rows returned by the events insert', () => {
     // Why: Postgres does not promise the order of RETURNING. OrderNoted keeps the last note,
     // so a fold in returned order would keep the first one and disagree with replay.
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     noted.length = 0;
-    const result = await db.transaction(tx =>
-      journal.write(reversing(tx), order, id, {
-        meta,
-        events: () => [OrderNoted({ note: 'a' }), OrderNoted({ note: 'b' }), OrderNoted({ note: 'c' })],
-      }),
+    const result = orThrow(
+      await db.transaction(tx =>
+        journal.write(reversing(tx), order, id, {
+          meta,
+          events: () => [OrderNoted({ note: 'a' }), OrderNoted({ note: 'b' }), OrderNoted({ note: 'c' })],
+        }),
+      ),
     );
     expect(result.row).toMatchObject({ note: 'c', version: 4 });
     expect(result.events.map(e => [e.version, e.data])).toEqual([
@@ -889,7 +932,7 @@ describe('verify on JSON columns', () => {
     );
     const bare = j.compose({});
     const id = `doc_${++next}`;
-    await db.transaction(tx => bare.write(tx, doc, id, { meta, events: () => [Opened({})] }));
+    orThrow(await db.transaction(tx => bare.write(tx, doc, id, { meta, events: () => [Opened({})] })));
     expect(await bare.verify(db, doc, id)).toEqual({ ok: true });
     await db.update(docs).set({ payload: [] }).where(eq(docs.id, id));
     expect(await bare.verify(db, doc, id)).toMatchObject({ ok: false });

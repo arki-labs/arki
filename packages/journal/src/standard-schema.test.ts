@@ -1,7 +1,7 @@
 /**
  * Journal schemas are Standard Schemas. Event data, upcaster steps and meta take any
- * validator that implements the spec, not only zod. Bad data is a `SchemaError`; a
- * schema that cannot run is a `SchemaRunError` and is never mistaken for bad data.
+ * validator that implements the spec, not only zod. Bad data returns `InvalidInput`;
+ * a schema that cannot run returns a distinct canonical failure.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { SchemaError, SchemaRunError } from '@arki/schema';
+import { AsyncSchema, InvalidInput, isFailure, orThrow, ValidatorDefect } from '@arki/failure';
 
 import type { PendingOf } from './types.js';
 import { initJournal } from './journal.js';
@@ -127,13 +127,15 @@ describe('Standard Schema event and meta schemas', () => {
     // Why: the journal must not depend on zod for persistence: replay re-validates every
     // stored row with the same schema that wrote it.
     const id = orderId(++next);
-    await db.transaction(tx =>
-      journal.write(tx, account, id, {
-        meta: { actorId: 'usr_standard' },
-        events: () => [Opened({ customerId: 'cus_std' }), Paid({ amount: '5' })],
-      }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, account, id, {
+          meta: { actorId: 'usr_standard' },
+          events: () => [Opened({ customerId: 'cus_std' }), Paid({ amount: '5' })],
+        }),
+      ),
     );
-    const replayed = await journal.replay(db, account, id);
+    const replayed = orThrow(await journal.replay(db, account, id));
     expect(replayed.row?.total).toBe(5);
     expect(replayed.events.map(event => [event.data, event.meta])).toEqual([
       [{ customerId: 'cus_std' }, meta],
@@ -141,54 +143,86 @@ describe('Standard Schema event and meta schemas', () => {
     ]);
   });
 
-  it('reports bad event data and bad meta as SchemaError with the issue path', async () => {
+  it('returns invalid event data and invalid meta with canonical issue paths', async () => {
     // Why: callers branch on one error type whatever validator the app picked.
-    let thrown: unknown;
-    try {
-      Paid({ amount: 'x' });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(SchemaError);
-    expect(thrown instanceof SchemaError && thrown.issues[0]?.path).toEqual([{ key: 'amount' }]);
+    const failed = Paid({ amount: 'x' });
+    expect(InvalidInput.is(failed)).toBe(true);
+    expect(InvalidInput.is(failed) && failed.data.issues[0]?.path).toEqual(['amount']);
 
     const id = orderId(++next);
     await expect(
       db.transaction(tx =>
         journal.write(tx, account, id, { meta: { actorId: '' }, events: () => [Opened({ customerId: 'cus_std' })] }),
       ),
-    ).rejects.toBeInstanceOf(SchemaError);
+    ).resolves.toMatchObject({ code: InvalidInput.code });
     expect(await db.select().from(orders).where(eq(orders.id, id))).toEqual([]);
+  });
+
+  it('rolls back earlier command writes when an event constructor returns a schema failure', async () => {
+    const id = orderId(++next);
+    const command = j.command('stdSchemaRefusal', z.object({}), async (_input, { write }) => {
+      const opened = await write(account, id, () => [Opened({ customerId: 'cus_std' })]);
+      if (isFailure(opened)) return opened;
+      return write(account, id, () => [Paid({ amount: 'invalid' })]);
+    });
+    const result = await journal.run(db, command, {}, meta);
+    expect(InvalidInput.is(result)).toBe(true);
+    expect(await db.select().from(orders).where(eq(orders.id, id))).toEqual([]);
+    expect(await db.select().from(tables.events).where(eq(tables.events.entityId, id))).toEqual([]);
+  });
+
+  it('returns a validator defect before invoking a command handler', async () => {
+    let handled = false;
+    const broken: StandardSchemaV1<string> = {
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: () => {
+          throw new Error('private validator defect');
+        },
+      },
+    };
+    const command = j.command('stdBrokenCommand', broken, () => {
+      handled = true;
+    });
+    const result = await journal.run(db, command, 'input', meta);
+    expect(ValidatorDefect.is(result)).toBe(true);
+    expect(handled).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private validator defect');
   });
 
   it('lifts a row stored under a hand-written old schema through a mixed-vendor upcaster chain', async () => {
     // Why: rows from older releases stay in the log forever; their schemas may come from any vendor.
     const id = orderId(++next);
-    await db.transaction(tx =>
-      journal.write(tx, accountV1, id, {
-        meta,
-        events: () => [Opened({ customerId: 'cus_std' }), TipV1({ cents: 250 })],
-      }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, accountV1, id, {
+          meta,
+          events: () => [Opened({ customerId: 'cus_std' }), TipV1({ cents: 250 })],
+        }),
+      ),
     );
-    const replayed = await journal.replay(db, account, id);
+    const replayed = orThrow(await journal.replay(db, account, id));
     expect(replayed.events[1]?.data).toEqual({ amount: 3 });
     expect(replayed.row?.total).toBe(3);
   });
 
-  it('lets a schema that cannot run surface as SchemaRunError, not as bad data', async () => {
+  it('returns async-schema and validator-defect failures separately from invalid input', async () => {
     // Why: an async or throwing validator is a bug in the app. Reporting it as a replay
     // failure or as invalid input would hide it behind a "your data is wrong" message.
     const asyncSchema: StandardSchemaV1<{ amount: number }> = {
       '~standard': { version: 1, vendor: 'test', validate: () => Promise.resolve({ value: { amount: 1 } }) },
     };
-    expect(() => j.event('StdAsync', asyncSchema)({ amount: 1 })).toThrow(SchemaRunError);
+    expect(AsyncSchema.is(j.event('StdAsync', asyncSchema)({ amount: 1 }))).toBe(true);
 
     const id = orderId(++next);
-    await db.transaction(tx =>
-      journal.write(tx, account, id, {
-        meta,
-        events: () => [Opened({ customerId: 'cus_std' }), Paid({ amount: 1 })],
-      }),
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, account, id, {
+          meta,
+          events: () => [Opened({ customerId: 'cus_std' }), Paid({ amount: 1 })],
+        }),
+      ),
     );
     const throwing: StandardSchemaV1<{ amount: number }> = {
       '~standard': {
@@ -204,7 +238,7 @@ describe('Standard Schema event and meta schemas', () => {
       .entity('std_account', orders)
       .create(Opened, opened)
       .on(PaidThrowing, (row, e) => ({ total: row.total + e.data.amount }));
-    await expect(journal.replay(db, broken, id)).rejects.toBeInstanceOf(SchemaRunError);
+    await expect(journal.replay(db, broken, id)).resolves.toMatchObject({ code: ValidatorDefect.code });
   });
 
   it('records `{}` as the meta of a journal declared without a meta schema', async () => {
@@ -215,10 +249,12 @@ describe('Standard Schema event and meta schemas', () => {
     const bareAccount = bare.entity('std_account', orders).create(BareOpened, opened);
     const bareJournal = bare.compose({});
     const id = orderId(++next);
-    await db.transaction(tx =>
-      bareJournal.write(tx, bareAccount, id, { meta: {}, events: () => [BareOpened({ customerId: 'cus_std' })] }),
+    orThrow(
+      await db.transaction(tx =>
+        bareJournal.write(tx, bareAccount, id, { meta: {}, events: () => [BareOpened({ customerId: 'cus_std' })] }),
+      ),
     );
-    const replayed = await bareJournal.replay(db, bareAccount, id);
+    const replayed = orThrow(await bareJournal.replay(db, bareAccount, id));
     expect(replayed.events[0]?.meta).toEqual({});
   });
 });

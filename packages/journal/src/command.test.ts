@@ -11,7 +11,7 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { SchemaError } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
 import type { DbHandle, Row } from './types.js';
@@ -94,7 +94,7 @@ const openBoth = j.command(
   'openBoth',
   z.object({ orderId: orderIdSchema, accountId: accountIdSchema, nick: z.string().min(1) }),
   async (input, { write }) => {
-    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'both', total: 1 })]);
+    orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'both', total: 1 })]));
     return write(profile, input.accountId, () => {
       if (input.nick === 'boom') throw new Error('second write boom');
       return [ProfileOpened({ nick: input.nick })];
@@ -120,11 +120,13 @@ const noteOrder = j.command(
   'noteOrder',
   z.object({ orderId: orderIdSchema, childOrderId: orderIdSchema, note: z.string().min(1) }),
   async (input, { write }) => {
-    await write(order, input.orderId, () => [OrderNoted({ note: input.note })]);
-    await write(order, input.childOrderId, () => [
-      OrderPlaced({ customerId: `child-of-${input.orderId}`, total: 1 }),
-      OrderPaid({ amount: 1 }),
-    ]);
+    orThrow(await write(order, input.orderId, () => [OrderNoted({ note: input.note })]));
+    orThrow(
+      await write(order, input.childOrderId, () => [
+        OrderPlaced({ customerId: `child-of-${input.orderId}`, total: 1 }),
+        OrderPaid({ amount: 1 }),
+      ]),
+    );
     if (input.note === 'boom') throw new Error('child boom');
   },
 );
@@ -139,10 +141,10 @@ const placeThenNote = j.command(
     catchChild: z.boolean(),
   }),
   async (input, { write, run }) => {
-    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'nested', total: 1 })]);
+    orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'nested', total: 1 })]));
     const child = run(noteOrder, { orderId: input.orderId, childOrderId: input.childOrderId, note: input.note });
-    if (input.catchChild) await child.catch(() => 'child rolled back');
-    else await child;
+    if (input.catchChild) orThrow(await child.catch(() => 'child rolled back'));
+    else orThrow(await child);
     return 'done' as const;
   },
 );
@@ -161,27 +163,29 @@ const placeBoth = (a: OrderId, b: OrderId, run: HandlerArgs<typeof placeOrder>[1
 ];
 /** Two children started without awaiting each in turn. */
 const twoAtOnce = j.command('twoAtOnce', twoIds, async (input, { run }) => {
-  await Promise.all(placeBoth(input.a, input.b, run));
+  const results = await Promise.all(placeBoth(input.a, input.b, run));
+  for (const result of results) orThrow(result);
 });
 const placePair = () => [OrderPlaced({ customerId: 'pair', total: 1 })];
 /** Two writes started without awaiting each in turn. */
 const twoWritesAtOnce = j.command('twoWritesAtOnce', twoIds, async (input, { write }) => {
-  await Promise.all([write(order, input.a, placePair), write(order, input.b, placePair)]);
+  const results = await Promise.all([write(order, input.a, placePair), write(order, input.b, placePair)]);
+  for (const result of results) orThrow(result);
 });
 /** Starts a write, does not await it, and throws. The write is still running when the handler leaves. */
 const throwsWithWriteRunning = j.command('throwsWithWriteRunning', twoIds, (input, { write }) => {
-  void write(order, input.a, placePair);
+  void write(order, input.a, placePair).then(result => orThrow(result));
   throw new Error('handler boom');
 });
 /** Starts a write, does not await it, and returns. */
 const returnsWithWriteRunning = j.command('returnsWithWriteRunning', twoIds, (input, { write }) => {
-  void write(order, input.a, placePair);
+  void write(order, input.a, placePair).then(result => orThrow(result));
   return Promise.resolve();
 });
 /** The same two children, awaited one at a time. */
 const twoInTurn = j.command('twoInTurn', twoIds, async (input, { run }) => {
-  await run(placeOrder, { orderId: input.a, customerId: 'pair', total: 1 });
-  await run(placeOrder, { orderId: input.b, customerId: 'pair', total: 1 });
+  orThrow(await run(placeOrder, { orderId: input.a, customerId: 'pair', total: 1 }));
+  orThrow(await run(placeOrder, { orderId: input.b, customerId: 'pair', total: 1 }));
 });
 
 // --- Types ------------------------------------------------------------------
@@ -205,15 +209,15 @@ const foreignEvents = () => [ProfileOpened({ nick: 'a' })];
 const otherJ = initJournal({ tables, meta: z.object({ tenant: z.string() }) });
 const foreignCommand = otherJ.command('foreign', z.object({}), () => 1);
 function typeChecks(): void {
-  void journal.run(db, dated, { at: '2026-01-01' }, meta);
+  void journal.run(db, dated, { at: '2026-01-01' }, meta).then(result => orThrow(result));
   // @ts-expect-error `run` takes the schema input, not the output.
-  void journal.run(db, dated, { at: new Date() }, meta);
+  void journal.run(db, dated, { at: new Date() }, meta).then(result => orThrow(result));
   // @ts-expect-error wrong input to `run`.
-  void journal.run(db, placeOrder, { orderId: 'ord_1', customerId: 1, total: 1 }, meta);
+  void journal.run(db, placeOrder, { orderId: 'ord_1', customerId: 1, total: 1 }, meta).then(result => orThrow(result));
   // @ts-expect-error meta must match the journal's meta schema.
-  void journal.run(db, countOrders, { customerId: 'c' }, { actorId: 1 });
+  void journal.run(db, countOrders, { customerId: 'c' }, { actorId: 1 }).then(result => orThrow(result));
   // @ts-expect-error a command defined for another meta schema cannot run on this journal.
-  void journal.run(db, foreignCommand, {}, meta);
+  void journal.run(db, foreignCommand, {}, meta).then(result => orThrow(result));
   void j.command('nested', z.object({}), (_input, { run }) =>
     run(placeOrder, { orderId: 'ord_1', customerId: 'c', total: 1 }),
   );
@@ -268,9 +272,9 @@ describe('journal.run', () => {
   it('parses the input before anything runs: bad input writes nothing', async () => {
     // Why: jobs, webhooks and scripts rely on `run` as the one validation gate.
     const id = orderId(++next);
-    await expect(journal.run(db, placeOrder, { orderId: id, customerId: '', total: 1 }, meta)).rejects.toBeInstanceOf(
-      SchemaError,
-    );
+    await expect(journal.run(db, placeOrder, { orderId: id, customerId: '', total: 1 }, meta)).resolves.toMatchObject({
+      code: InvalidInput.code,
+    });
     expect(await rowsOf(id)).toEqual([]);
     expect(await eventsOf(id)).toEqual([]);
   });
@@ -290,8 +294,8 @@ describe('journal.run', () => {
       }),
     });
     const twice = loud.command('twice', z.object({ orderId: orderIdSchema }), async (input, { write, meta }) => {
-      await write(order, input.orderId, () => [OrderPlaced({ customerId: 'twice', total: 1 })]);
-      await write(order, input.orderId, () => [OrderPaid({ amount: 1 })]);
+      orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'twice', total: 1 })]));
+      orThrow(await write(order, input.orderId, () => [OrderPaid({ amount: 1 })]));
       return meta;
     });
     const id = orderId(++next);
@@ -320,7 +324,7 @@ describe('journal.run', () => {
     const id = orderId(++next);
     await db
       .transaction(async tx => {
-        await journal.run(tx, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+        orThrow(await journal.run(tx, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
         expect(await tx.select().from(orders).where(eq(orders.id, id))).toHaveLength(1);
         tx.rollback();
       })
@@ -332,7 +336,14 @@ describe('journal.run', () => {
   it('nested run: a child that succeeds leaves its projection row and job row, so the rollback tests below can fail', async () => {
     const id = orderId(++next);
     const childId = orderId(++next);
-    await journal.run(db, placeThenNote, { orderId: id, childOrderId: childId, note: 'fine', catchChild: false }, meta);
+    orThrow(
+      await journal.run(
+        db,
+        placeThenNote,
+        { orderId: id, childOrderId: childId, note: 'fine', catchChild: false },
+        meta,
+      ),
+    );
     expect(await childTraces(id, childId)).toEqual({ rows: 1, events: 2, counts: 1, jobs: 1 });
   });
 
@@ -370,7 +381,7 @@ describe('journal.run', () => {
   it('nested run: a child inside a child runs on its own savepoint and commits with the rest', async () => {
     const id = orderId(++next);
     const childId = orderId(++next);
-    await journal.run(db, placeViaChildren, { orderId: id, childOrderId: childId }, meta);
+    orThrow(await journal.run(db, placeViaChildren, { orderId: id, childOrderId: childId }, meta));
     const [deep] = await rowsOf(id);
     expect(deep).toMatchObject({ note: 'deep', version: 2 });
     expect(await childTraces(id, childId)).toEqual({ rows: 1, events: 2, counts: 1, jobs: 1 });
@@ -471,17 +482,17 @@ describe('journal.run', () => {
   it('two children awaited one at a time both commit', async () => {
     const a = orderId(++next);
     const b = orderId(++next);
-    await journal.run(db, twoInTurn, { a, b }, meta);
+    orThrow(await journal.run(db, twoInTurn, { a, b }, meta));
     expect(await rowsOf(a)).toHaveLength(1);
     expect(await rowsOf(b)).toHaveLength(1);
   });
 
   it('a command with no entity returns its value', async () => {
     // Why: a command is the unit of validated, transactional work, even when no entity is involved.
-    await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 1 }, meta);
-    await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 2 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 1 }, meta));
+    orThrow(await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 2 }, meta));
     const count = await journal.run(db, countOrders, { customerId: 'counted' }, meta);
-    expectTypeOf(count).toEqualTypeOf<number>();
+    expectTypeOf(orThrow(count)).toEqualTypeOf<number>();
     expect(count).toBe(2);
   });
 
@@ -489,13 +500,17 @@ describe('journal.run', () => {
     // Why: commands are a binding over `write`, not a second write path that could drift.
     const viaCommand = orderId(++next);
     const viaWrite = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: viaCommand, customerId: 'cmp_a', total: 7 }, meta);
-    const paidByCommand = await journal.run(db, payOrder, { orderId: viaCommand, amount: 7 }, meta);
-    await db.transaction(tx =>
-      journal.write(tx, order, viaWrite, { meta, events: () => [OrderPlaced({ customerId: 'cmp_b', total: 7 })] }),
+    orThrow(await journal.run(db, placeOrder, { orderId: viaCommand, customerId: 'cmp_a', total: 7 }, meta));
+    const paidByCommand = orThrow(await journal.run(db, payOrder, { orderId: viaCommand, amount: 7 }, meta));
+    orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, viaWrite, { meta, events: () => [OrderPlaced({ customerId: 'cmp_b', total: 7 })] }),
+      ),
     );
-    const paidByWrite = await db.transaction(tx =>
-      journal.write(tx, order, viaWrite, { meta, events: () => [OrderPaid({ amount: 7 })] }),
+    const paidByWrite = orThrow(
+      await db.transaction(tx =>
+        journal.write(tx, order, viaWrite, { meta, events: () => [OrderPaid({ amount: 7 })] }),
+      ),
     );
 
     const { id: _a, customerId: _ca, ...rowA } = paidByCommand.row ?? {};
@@ -522,8 +537,8 @@ describe('journal.run', () => {
     const id = orderId(++next);
     const first = await journal.run(db, inspectOrder, { orderId: id }, meta);
     expect(first).toEqual({ row: null, events: [] });
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
-    const second = await journal.run(db, inspectOrder, { orderId: id }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
+    const second = orThrow(await journal.run(db, inspectOrder, { orderId: id }, meta));
     expect(second.row?.note).toBe('row v1, tx saw 1');
   });
 });
@@ -547,8 +562,8 @@ describe('expectedVersion from a command', () => {
         write(order, input.orderId, () => [OrderNoted({ note: input.note })], { expectedVersion: input.version }),
     );
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
-    await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
+    orThrow(await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta));
     await expect(journal.run(db, noteAt, { orderId: id, version: 1, note: 'stale' }, meta)).rejects.toMatchObject({
       code: 'CONFLICT',
     });
@@ -567,12 +582,14 @@ const justNote = j.command(
   'justNote',
   z.object({ orderId: orderIdSchema, note: z.string().min(1) }),
   async (input, { write }) => {
-    const { row } = await write(order, input.orderId, () => [OrderNoted({ note: input.note })]);
+    const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: input.note })]));
     return { version: row?.version ?? 0 };
   },
 );
 const placePlain = j.command('placePlain', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
-  const { row } = await write(order, input.orderId, row => (row ? [] : [OrderPlaced({ customerId: 'c', total: 1 })]));
+  const { row } = orThrow(
+    await write(order, input.orderId, row => (row ? [] : [OrderPlaced({ customerId: 'c', total: 1 })])),
+  );
   return { version: row?.version ?? 0 };
 });
 
@@ -583,15 +600,15 @@ describe('idempotency receipts', () => {
     let runs = 0;
     const settle = j.command('settle', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
       runs += 1;
-      const { row } = await write(order, input.orderId, row => (row ? [OrderPaid({ amount: 1 })] : []));
+      const { row } = orThrow(await write(order, input.orderId, row => (row ? [OrderPaid({ amount: 1 })] : [])));
       return { paidVersion: row?.version ?? 0 };
     });
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const key = `stripe:evt_${next}`;
     const first = await journal.run(db, settle, { orderId: id }, meta, { idempotencyKey: key });
     expect(first).toEqual({ paidVersion: 2 });
-    await journal.run(db, justNote, { orderId: id, note: 'in between' }, meta);
+    orThrow(await journal.run(db, justNote, { orderId: id, note: 'in between' }, meta));
     const again = await journal.run(db, settle, { orderId: id }, meta, { idempotencyKey: key });
     expect(again).toEqual({ paidVersion: 2 });
     expect(runs).toBe(1);
@@ -606,9 +623,9 @@ describe('idempotency receipts', () => {
 
   it('the same key with another input or another command is CONFLICT; a result that cannot be stored fails the first run', async () => {
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const key = `k_${next}`;
-    await journal.run(db, justNote, { orderId: id, note: 'one' }, meta, { idempotencyKey: key });
+    orThrow(await journal.run(db, justNote, { orderId: id, note: 'one' }, meta, { idempotencyKey: key }));
     await expect(
       journal.run(db, justNote, { orderId: id, note: 'two' }, meta, { idempotencyKey: key }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -617,7 +634,7 @@ describe('idempotency receipts', () => {
     });
     // A Date does not survive JSON, so the replay could not return what the first call returned.
     const datedResult = j.command('datedResult', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
-      await write(order, input.orderId, () => [OrderNoted({ note: 'dated' })]);
+      orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'dated' })]));
       return { at: new Date() };
     });
     const unstable = `k_unstable_${next}`;
@@ -681,7 +698,7 @@ describe('authorize', () => {
       z.object({ orderId: orderIdSchema }),
       async (input, { write }) => {
         runs += 1;
-        const { row } = await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]);
+        const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]));
         return { version: row?.version ?? 0 };
       },
       {
@@ -692,7 +709,7 @@ describe('authorize', () => {
       },
     );
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const key = `k_authorize_${next}`;
     const owner = { actorId: 'usr_owner' };
     expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toEqual({ version: 2 });
@@ -724,7 +741,7 @@ describe('authorize', () => {
       z.object({ orderId: orderIdSchema }),
       async (input, { write }) => {
         runs += 1;
-        await write(order, input.orderId, () => [OrderNoted({ note: 'guarded' })]);
+        orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'guarded' })]));
       },
       {
         authorize: (_input, { meta: who }) =>
@@ -735,7 +752,7 @@ describe('authorize', () => {
       run(guarded, input),
     );
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     expect(await journal.run(db, guarded, { orderId: id }, { actorId: 'usr_other' })).toMatchObject({
       code: 'journal.forbidden',
     });
@@ -753,12 +770,12 @@ describe('trace', () => {
     // Why: a reader of the log must be able to answer "which command wrote this?" without the app
     // threading ids by hand. The library knows, so the library stamps.
     const id = orderId(++next);
-    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const [placed] = await stamps(id);
     expect(placed?.commandId).toMatch(/^cmd_/);
     expect(placed?.correlationId).toMatch(/^cor_/);
     expect(placed?.causeSeq).toBeNull();
-    await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta);
+    orThrow(await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta));
     const [, paid] = await stamps(id);
     // A second root run is a second chain with its own command.
     expect(paid?.commandId).not.toBe(placed?.commandId);
@@ -769,14 +786,14 @@ describe('trace', () => {
     const seen: { commandId: string; correlationId: string }[] = [];
     const outer = j.command('traceOuter', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
       seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
-      await ctx.run(inner, input);
+      orThrow(await ctx.run(inner, input));
     });
     const inner = j.command('traceInner', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
       seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
-      await ctx.write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
+      orThrow(await ctx.write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
     });
     const id = orderId(++next);
-    await journal.run(db, outer, { orderId: id }, meta, { correlationId: 'req_123' });
+    orThrow(await journal.run(db, outer, { orderId: id }, meta, { correlationId: 'req_123' }));
     const [placed] = await stamps(id);
     expect(seen).toHaveLength(2);
     expect(seen[0]?.commandId).not.toBe(seen[1]?.commandId);
@@ -793,8 +810,8 @@ describe('trace', () => {
   it('bind passes the seed on, so a request context can tie every command of one request together', async () => {
     const id = orderId(++next);
     const runAs = journal.bind(db, meta, { correlationId: 'req_bound' });
-    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 });
-    await runAs(payOrder, { orderId: id, amount: 1 });
+    orThrow(await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 }));
+    orThrow(await runAs(payOrder, { orderId: id, amount: 1 }));
     const bound = await stamps(id);
     expect(bound.map(s => s.correlationId)).toEqual(['req_bound', 'req_bound']);
   });

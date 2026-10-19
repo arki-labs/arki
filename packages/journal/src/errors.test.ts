@@ -10,6 +10,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { JournalError } from './errors.js';
 import type { OrderId } from './test-support.js';
 import type { DbHandle } from './types.js';
@@ -67,7 +69,7 @@ describe('JournalError detail', () => {
 
   it('ROW_EXISTS names the event and its version, so the reader knows which event lacks `.on`', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     const error = await refusal(place(id));
     expect(error.code).toBe('ROW_EXISTS');
     expect(error.message).toMatch(/"OrderPlaced" at version 2\b/);
@@ -99,7 +101,7 @@ describe('JournalError detail', () => {
     async ({ direct }) => {
       // Why: the message tells the reader to look for exactly this cause. This test proves the cause is real.
       const id = orderId(++next);
-      await place(id);
+      orThrow(await place(id));
       const error = await refusal(
         db.transaction(tx =>
           journal.write(tx, order, id, {
@@ -129,7 +131,7 @@ describe('JournalError detail', () => {
   it('NO_HISTORY names the first stored version when the history does not start at 1', async () => {
     const id = orderId(++next);
     await db.insert(orders).values({ id, customerId: 'legacy', total: 7, status: 'placed' });
-    await pay(id);
+    orThrow(await pay(id));
     const error = await refusal(journal.replay(db, order, id));
     expect(error.code).toBe('NO_HISTORY');
     expect(error.message).toContain('first stored version is 2');
@@ -137,7 +139,7 @@ describe('JournalError detail', () => {
 
   it('REPLAY_FAILED names the stored event and its version when its data no longer fits the schema', async () => {
     const id = orderId(++next);
-    await place(id);
+    orThrow(await place(id));
     await db
       .update(tables.events)
       .set({ data: { customerId: '', total: -1 } })

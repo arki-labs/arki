@@ -1,10 +1,12 @@
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 /**
  * Input validation schemas for @arki/ai
  */
 
 import { z } from '@arki/contracts';
-import { SchemaError, pathOf, parse, parseAsync } from '@arki/schema';
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { formatIssues, parse, parseAsync, pathOf } from '@arki/schema';
+
 import { ValidationError } from './errors';
 
 /**
@@ -184,40 +186,31 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 /**
  * Validate input with detailed error messages.
  * Takes any Standard Schema (zod, valibot, arktype, ...). A schema that
- * cannot run synchronously throws `SchemaRunError`; that is a bug, not bad input.
+ * cannot run synchronously crosses this throwing adapter through `orThrow`.
  */
 export function validateInput<S extends StandardSchemaV1>(
   schema: S,
   input: unknown,
-  errorMessage?: string
+  errorMessage?: string,
 ): SchemaOutput<S> {
-  try {
-    return parse(schema, input);
-  } catch (error) {
-    throw toValidationError(error, errorMessage);
-  }
+  const result = parse(schema, input);
+  if (!InvalidInput.is(result)) return orThrow(result);
+  throw new ValidationError(
+    errorMessage || `Input validation failed: ${formatIssues(result.data.issues)}`,
+    result.data.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message })),
+  );
 }
 
-/**
- * Async validation wrapper
- */
+/** Async validation for the existing throwing AI validation API. */
 export async function validateInputAsync<S extends StandardSchemaV1>(
   schema: S,
   input: unknown,
-  errorMessage?: string
+  errorMessage?: string,
 ): Promise<SchemaOutput<S>> {
-  try {
-    return await parseAsync(schema, input);
-  } catch (error) {
-    throw toValidationError(error, errorMessage);
-  }
-}
-
-/** Turns invalid-input errors into `ValidationError`; anything else is rethrown as is. */
-function toValidationError(error: unknown, errorMessage?: string): unknown {
-  if (!(error instanceof SchemaError)) return error;
-  return new ValidationError(
-    errorMessage || `Input validation failed: ${error.message}`,
-    error.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message }))
+  const result = await parseAsync(schema, input);
+  if (!InvalidInput.is(result)) return orThrow(result);
+  throw new ValidationError(
+    errorMessage || `Input validation failed: ${formatIssues(result.data.issues)}`,
+    result.data.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message })),
   );
 }

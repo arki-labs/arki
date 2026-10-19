@@ -36,7 +36,7 @@ if (isFailure(sent)) console.error(sent.code, sent.message);
 else console.info(sent.id);
 ```
 
-`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](https://www.npmjs.com/package/@arki/failure): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected` or `MailUncertain` (see [Failure behaviour](#failure-behaviour)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
+`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](https://www.npmjs.com/package/@arki/failure): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected`, `MailUncertain` or canonical `ValidatorDefect` (see [Failure behaviour](#failure-behaviour)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
 
 The sender comes from the call, then the template's `defaults.from`, then the mailer's `from`.
 
@@ -71,6 +71,8 @@ Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
 - `@arki/mail/testing`: `mailSink`, `transportContract`.
 
 ## Failure behaviour
+
+A template validator that throws or rejects returns canonical `schema.validator_defect` (`ValidatorDefect` from `@arki/failure`). Rendering, composing, sending and enqueueing preserve this defect; it must not be retried as ordinary bad input.
 
 `send` does not throw for a mail that was not sent. It returns a failure value, defined with `@arki/failure` and exported from `@arki/mail`. A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
 

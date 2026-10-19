@@ -13,6 +13,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { listenOnPool } from '@arki/db/pg';
+import { orThrow } from '@arki/failure';
 
 import {
   customerOrderCounts,
@@ -44,11 +45,13 @@ const withJobs = j.compose({ effects: [mail] });
 
 const placeAndPay = async () => {
   const id = orderId(++next);
-  await dbA.transaction(tx =>
-    withJobs.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await dbA.transaction(tx =>
+      withJobs.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  const paid = await dbA.transaction(tx =>
-    withJobs.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  const paid = orThrow(
+    await dbA.transaction(tx => withJobs.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
   );
   const [job] = await dbA
     .select()
@@ -157,8 +160,8 @@ describe('two writers on real Postgres', () => {
       expect(settledB, 'B must wait for the append lock while A holds it').toBe(false);
 
       release.resolve();
-      const resultA = await writerA;
-      const resultB = await writerB;
+      const resultA = orThrow(await writerA);
+      const resultB = orThrow(await writerB);
       const seqA = resultA.events[0]?.seq;
       const seqB = resultB.events[0]?.seq;
       if (seqA === undefined || seqB === undefined) throw new Error('no events');
@@ -171,8 +174,10 @@ describe('two writers on real Postgres', () => {
 
   it("the second writer waits on the row lock, then sees the first writer's row", async () => {
     const id = orderId(1);
-    await dbA.transaction(tx =>
-      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    orThrow(
+      await dbA.transaction(tx =>
+        journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
     );
 
     const release = deferred();
@@ -180,13 +185,15 @@ describe('two writers on real Postgres', () => {
 
     // Writer A locks the row, pays, and keeps the transaction open until released.
     const writerA = dbA.transaction(async tx => {
-      await journal.write(tx, order, id, {
-        meta,
-        events: () => {
-          locked.resolve();
-          return [OrderPaid({ amount: 1 })];
-        },
-      });
+      orThrow(
+        await journal.write(tx, order, id, {
+          meta,
+          events: () => {
+            locked.resolve();
+            return [OrderPaid({ amount: 1 })];
+          },
+        }),
+      );
       await release.promise;
     });
     // A failed assertion must still release A and let B finish, or both connections hang.
@@ -211,17 +218,17 @@ describe('two writers on real Postgres', () => {
 
       release.resolve();
       await writerA;
-      const resultB = await writerB;
+      const resultB = orThrow(await writerB);
 
       expect(seen).toEqual({ status: 'paid', version: 2 });
       expect(resultB.row).toBeNull();
       expect(resultB.events.map(e => e.version)).toEqual([3]);
 
       // Replay on real Postgres folds the same three events to the same end state.
-      const replayed = await journal.replay(dbB, order, id);
+      const replayed = orThrow(await journal.replay(dbB, order, id));
       expect(replayed.row).toBeNull();
       expect(replayed.events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderPaid', 'OrderCancelled']);
-      const early = await journal.replay(dbB, order, id, { throughVersion: 2 });
+      const early = orThrow(await journal.replay(dbB, order, id, { throughVersion: 2 }));
       expect(early.row).toMatchObject({ id, status: 'paid', version: 2 });
     } finally {
       release.resolve();
@@ -252,7 +259,7 @@ describe('two writers on real Postgres', () => {
     expect(won, 'one writer must win').toHaveLength(1);
     expect(lost, 'one writer must lose').toHaveLength(1);
     expect(lost[0]?.reason).toMatchObject({ code: 'ROW_EXISTS' });
-    const winner = won[0]?.value.row?.customerId;
+    const winner = orThrow(won[0]?.value)?.row?.customerId;
     expect(seen.toSorted(), "the loser loaded the winner's row").toEqual([null, winner].toSorted());
     const events = await dbA.select().from(tables.events).where(eq(tables.events.entityId, id));
     expect(events.map(e => e.version)).toEqual([1]);
@@ -383,8 +390,10 @@ describe('listenOnPool on real Postgres', () => {
     };
     const placeOnB = async () => {
       const id = orderId(++next);
-      await dbB.transaction(tx =>
-        tapped.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      orThrow(
+        await dbB.transaction(tx =>
+          tapped.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
       );
       return id;
     };

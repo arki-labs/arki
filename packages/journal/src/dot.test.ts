@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { defineApp, rename } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
 import { plugin, service, token } from '@arki/dot/plugin';
+import { orThrow } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
 import { journal, journalHandlers, journalWorker } from './dot.js';
@@ -197,11 +198,11 @@ describe('journal(...) in direct mode', () => {
     await app.start();
 
     const first = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id: first }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id: first }, meta));
     await mail.seen(first);
 
     await app.stop();
-    await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta));
     await pause(QUIET_MS);
 
     expect(mail.handled).toEqual([first]);
@@ -219,7 +220,7 @@ describe('journal(...) in direct mode', () => {
     );
     await app.start();
 
-    await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id: orderId(++next) }, meta));
     await pause(QUIET_MS);
 
     expect(mail.handled).toEqual([]);
@@ -283,7 +284,7 @@ describe('journal({ j }) with features', () => {
     ]);
 
     const id = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id, customerId: 'feature-mode' }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id, customerId: 'feature-mode' }, meta));
     expect(await placedCount('orders:feature-mode')).toBe(1);
     expect(await placedCount('billing:feature-mode')).toBe(1);
     await Promise.all([ordersMail.seen(id), billingMail.seen(id)]);
@@ -300,13 +301,11 @@ describe('journal({ j }) with features', () => {
     const writer = feature('writer', {
       needs: { journal: service<TestJournal>(), db: service<PgliteDatabase>() },
       boot: async ctx => {
-        await ctx.journal.run(ctx.db, placeOrder, { id, customerId: 'at-boot' }, meta);
+        orThrow(await ctx.journal.run(ctx.db, placeOrder, { id, customerId: 'at-boot' }, meta));
       },
     });
 
-    track(
-      await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot(),
-    );
+    track(await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot());
 
     expect(await placedCount('boot:at-boot')).toBe(1);
   });
@@ -344,7 +343,7 @@ describe('journal({ j }) with features', () => {
     await app.start();
 
     const id = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id }, meta));
     await paid.opened;
     const [row] = await db.select().from(ordersTable).where(eq(ordersTable.id, id));
     expect(row?.status).toBe('paid');
@@ -422,7 +421,7 @@ describe('journal({ j }) with features', () => {
     await app.start();
 
     const id = orderId(++next);
-    await app.services.journal.run(db, placeOrder, { id }, meta);
+    orThrow(await app.services.journal.run(db, placeOrder, { id }, meta));
     await Promise.all([told.orders.opened, told.billing.opened]);
     expect(heard).toEqual({ orders: [id], billing: [id] });
   });
@@ -493,8 +492,8 @@ describe('journal({ j }) with features', () => {
   it('refuses a `journal` slice that `journalHandlers` did not make, so a wiring mistake fails at boot and not inside a write', async () => {
     const broken = feature('broken', { use: [{ key: 'journal', actions: [], resolve: () => ({}) }] });
 
-    await expect(
-      defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot(),
-    ).rejects.toThrow(/feature "broken"/);
+    await expect(defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot()).rejects.toThrow(
+      /feature "broken"/,
+    );
   });
 });

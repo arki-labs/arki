@@ -1,7 +1,9 @@
-import type { StandardSchemaV1 } from '@arki/schema';
 import type { CreateEnv, DefaultCombinedSchema } from '@t3-oss/env-core';
-import { parse, pathOf, SchemaError } from '@arki/schema';
 import { createEnv } from '@t3-oss/env-core';
+
+import type { StandardSchemaV1 } from '@arki/schema';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { parse, pathOf } from '@arki/schema';
 
 /**
  * The process environment, or `undefined` on engines with no `process` (Hermes, browsers, Deno without
@@ -40,7 +42,7 @@ export function formatIssues(name: string | undefined, issues: ValidationIssues)
  * Every schema is a Standard Schema (Zod, Valibot, ArkType, or a hand-written `~standard` object); each
  * value's type is the schema's OUTPUT, so defaults and coercions in the caller's schemas still apply.
  * Validation is synchronous: a schema whose `validate` returns a Promise or throws makes the first read
- * throw `SchemaRunError` (`ARKI_SCHEMA_E001` / `ARKI_SCHEMA_E002`), never a validation error.
+ * throw `UnexpectedFailure` with the canonical schema failure, never a validation error.
  *
  * `TPrefix` is kept as a string-literal generic on purpose: `createEnv` uses it to enforce that
  * client keys (and only client keys) carry the prefix. Widening it to `string` would make every
@@ -173,7 +175,7 @@ export function defineEnv<
 /**
  * The caller's schemas, each run through `parse` before t3 sees it. t3 would let a throwing validator's
  * raw error escape and report an async one with its own error (leaving a rejection unhandled). Here both
- * fail as `SchemaRunError` (E002 with the thrown `cause`, E001), and bad values still reach t3 as issues.
+ * fail as `UnexpectedFailure` (canonical validator defect with its private cause, or async mismatch), and bad values still reach t3 as issues.
  */
 function syncSchemas(schemas: Record<string, StandardSchemaV1> | undefined): Record<string, StandardSchemaV1> {
   const wrapped: Record<string, StandardSchemaV1> = {};
@@ -187,12 +189,10 @@ function syncSchema<Input, Output>(schema: StandardSchemaV1<Input, Output>): Sta
     '~standard': {
       ...schema['~standard'],
       validate: value => {
-        try {
-          return { value: parse(schema, value) };
-        } catch (error) {
-          if (error instanceof SchemaError) return { issues: error.issues };
-          throw error;
-        }
+        const result = parse(schema, value);
+        if (InvalidInput.is(result)) return { issues: result.data.issues };
+        // env-core expects validator defects to throw; bridge that foreign contract explicitly.
+        return { value: orThrow(result) };
       },
     },
   };

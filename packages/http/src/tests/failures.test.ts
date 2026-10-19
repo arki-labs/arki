@@ -9,7 +9,15 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure, match } from '@arki/failure';
+import {
+  AsyncSchema,
+  defineFailure,
+  InvalidEnvelope,
+  isFailure,
+  match,
+  UnexpectedDefect,
+  ValidatorDefect,
+} from '@arki/failure';
 
 import type { RouteFailure } from '../contract.js';
 import { routes } from '../bundle.js';
@@ -146,6 +154,56 @@ describe('the client', () => {
       name: 'HttpError',
       status: 500,
       code: HTTP_ERROR_CODES.internal,
+    });
+  });
+
+  it('rejects async failure-data validation as a protocol defect rather than a listed domain failure', async () => {
+    const AsyncFailure = defineFailure('post.async', { data: z.string().refine(() => Promise.resolve(true)) });
+    const contract = route.get('/async-failure', { id: 'post.async', failures: [AsyncFailure] });
+    const call = createClient(contract, {
+      baseUrl: BASE,
+      fetch: answering(400, { code: AsyncFailure.code, message: 'remote', data: 'x' }),
+    });
+    await expect(call()).rejects.toMatchObject({ name: 'HttpError', status: 500, cause: { code: AsyncSchema.code } });
+  });
+
+  it('rejects broken failure-message construction rather than leaking an undeclared defect as domain output', async () => {
+    const BrokenMessage = defineFailure('post.broken_message', {
+      message: () => {
+        throw new Error('broken message');
+      },
+    });
+    const contract = route.get('/broken-message', { id: 'post.broken_message', failures: [BrokenMessage] });
+    const call = createClient(contract, {
+      baseUrl: BASE,
+      fetch: answering(400, { code: BrokenMessage.code, message: 'remote' }),
+    });
+    await expect(call()).rejects.toMatchObject({
+      name: 'HttpError',
+      status: 500,
+      cause: { code: UnexpectedDefect.code },
+    });
+  });
+
+  it('returns an explicitly declared canonical failure rather than confusing it with a decoder defect', async () => {
+    const contract = route.get('/validator-defect', { id: 'post.validator_defect', failures: [ValidatorDefect] });
+    const call = createClient(contract, {
+      baseUrl: BASE,
+      fetch: answering(500, { code: ValidatorDefect.code, message: 'remote' }),
+    });
+    expect(ValidatorDefect.is(await call())).toBe(true);
+  });
+
+  it('rejects invalid canonical failure data even when the same canonical definition is declared', async () => {
+    const contract = route.get('/invalid-envelope', { id: 'post.invalid_envelope', failures: [InvalidEnvelope] });
+    const call = createClient(contract, {
+      baseUrl: BASE,
+      fetch: answering(400, { code: InvalidEnvelope.code, message: 'remote', data: { reason: 'invented' } }),
+    });
+    await expect(call()).rejects.toMatchObject({
+      name: 'HttpError',
+      status: 500,
+      cause: { code: InvalidEnvelope.code },
     });
   });
 });

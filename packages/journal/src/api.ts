@@ -3,7 +3,7 @@
  * definition helpers `initJournal` returns, and the input, option and result types.
  * Types only, no runtime code. May import `entity`, `types`, `pg`, `outbox` and `retention` (types); nothing else.
  */
-import type { Failure } from '@arki/failure';
+import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
@@ -64,7 +64,7 @@ export type NextEvents<
   Tbl extends EntityTable,
   E extends AnyEventDef,
   Tx = DbHandle,
-  Returned extends readonly PendingOf<E>[] | Failure = readonly PendingOf<E>[],
+  Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure = readonly (PendingOf<E> | SchemaFailure)[],
 > = (row: Row<Tbl> | null, ctx: { readonly tx: Tx }) => Returned | Promise<Returned>;
 /** Options of a write, from `journal.write` or a command's `write`. */
 export type WriteOptions = {
@@ -80,7 +80,7 @@ export type WriteInput<
   E extends AnyEventDef,
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx = DbHandle,
-  Returned extends readonly PendingOf<E>[] | Failure = readonly PendingOf<E>[],
+  Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure = readonly (PendingOf<E> | SchemaFailure)[],
 > = WriteOptions & {
   readonly meta: SchemaInput<Meta>;
   readonly events: NextEvents<Tbl, E, Tx, Returned>;
@@ -174,19 +174,19 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     Tbl extends EntityTable,
     E extends AnyEventDef,
     Key extends string,
-    Returned extends readonly PendingOf<E>[] | Failure,
+    Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure,
   >(
     entity: EntityDef<K, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     events: NextEvents<Tbl, E, Tx, Returned>,
     opts?: WriteOptions,
-  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure>>;
+  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
   readonly run: <S extends StandardSchemaV1, R>(
     command: Command<S, R, MetaOut, Tx>,
     input: NoInfer<SchemaInput<S>>,
     opts?: CallOptions,
-  ) => Promise<Awaited<R>>;
+  ) => Promise<Awaited<R> | SchemaFailure>;
   /**
    * Marks a refusal that `write` or `run` returned as handled, so the handler may still return a
    * success: `if (OutOfStock.is(r)) { accept(r); ... }`. Without it, a success after a refusal
@@ -213,7 +213,7 @@ export type RootCommandRunner<
   input: NoInfer<SchemaInput<S>>,
   meta: SchemaInput<Meta>,
   opts?: CallOptions,
-) => Promise<Awaited<R>>;
+) => Promise<Awaited<R> | SchemaFailure>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -246,13 +246,13 @@ export type Journal<
     Tbl extends EntityTable,
     E extends AnyEventDef,
     Key extends string,
-    Returned extends readonly PendingOf<E>[] | Failure,
+    Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure,
   >(
     tx: Tx,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx, Returned>,
-  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | Extract<Returned, Failure>>;
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | Extract<Returned, Failure> | SchemaFailure>;
   /**
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
@@ -267,7 +267,7 @@ export type Journal<
     input: NoInfer<SchemaInput<S>>,
     meta: SchemaInput<Meta>,
     opts?: RunOptions,
-  ): Promise<Awaited<R>>;
+  ): Promise<Awaited<R> | SchemaFailure>;
   /**
    * The command door: `run` with `source` and `meta` fixed. It returns
    * `(command, input) => journal.run(source, command, input, meta)`. A request
@@ -298,20 +298,20 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key>>;
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | SchemaFailure>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     opts?: { readonly throughVersion?: number },
-  ): Promise<ReplayResult<Tbl, E, SchemaOutput<Meta>, Key>>;
+  ): Promise<ReplayResult<Tbl, E, SchemaOutput<Meta>, Key> | SchemaFailure>;
   /** Replay and compare with the stored row on the columns the reducers produce. */
   verify<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<VerifyResult<Tbl, Key>>;
+  ): Promise<VerifyResult<Tbl, Key> | SchemaFailure>;
   /**
    * Remove personal data from one entity's history. Every stored event whose definition
    * has an `erased` form gets its `data` rewritten to that form and `erased_at` set; events
@@ -325,7 +325,7 @@ export type Journal<
     db: DbHandle,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<ForgetResult<Tbl>>;
+  ): Promise<ForgetResult<Tbl> | SchemaFailure>;
   /**
    * Delete receipts recorded before `before`. Receipts hold inputs and results, which may
    * carry personal data; `forget` does not touch them, so an app that keys personal flows
@@ -337,7 +337,7 @@ export type Journal<
     db: DbHandle,
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
-  ): Promise<Row<Tbl> | null>;
+  ): Promise<Row<Tbl> | null | SchemaFailure>;
   /**
    * The async lane of projections: one batch per async projection. Each batch locks the
    * projection's cursor, scans the next `batchSize` events in commit order, applies the
@@ -367,7 +367,7 @@ export type Journal<
     db: TransactionSource<Tx>,
     projection: Projection<SchemaOutput<Meta>, Tx>,
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
-  ): Promise<{ readonly events: number }>;
+  ): Promise<{ readonly events: number } | SchemaFailure>;
   /**
    * Run up to `batchSize` due jobs. Returns how many jobs were claimed. Root database only.
    * It must open the journal's transaction type: an effect runs commands on it.

@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
+import { orThrow } from '@arki/failure';
 
 import { attemptId, jobId } from '../id.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from '../test-support.js';
@@ -58,11 +59,13 @@ const permit = (expectedRevision: string): Permit => ({
 /** One paid order: one `sendWelcomeMail` job row. */
 async function welcomeMailJob(): Promise<string> {
   const id = orderId(++next);
-  await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  orThrow(
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    ),
   );
-  const paid = await db.transaction(tx =>
-    journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  const paid = orThrow(
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
   );
   const [row] = await db
     .select()
