@@ -483,6 +483,11 @@ export type Journal<
    * `op` defaults to the actor `system:retention`.
    */
   pruneArchive: JobOps['pruneArchive'];
+  /**
+   * Delete finished workflow runs past their `keep_until`, with their steps and signals. The events stay. A run is never
+   * pruned while it or an ancestor is unfinished. `op` defaults to the actor `system:retention`.
+   */
+  pruneWorkflows: JobOps['pruneWorkflows'];
   /** Delete operation rows past the `operations` keep. Writes no operation row of its own. */
   pruneOperations: JobOps['pruneOperations'];
   /** A new job from an archived one. Not a retry: it gets a new id. `JOB_EXISTS` when a live job holds the dedupe key. Not `replay`, which rebuilds an entity from its events. */

@@ -114,6 +114,9 @@ const rowIds = (result: unknown): string[] => {
   return (Array.isArray(parsed) ? parsed : parsed.rows).map(row => row.id);
 };
 
+const managedError = (id: string) =>
+  new JournalError('JOB_MANAGED', 'job', id, "a workflow run owns this job; use the workflow's own actions");
+
 const argument = (what: string, detail: string) => new JournalError('BAD_ARGUMENT', 'job', what, detail);
 
 function bounded(what: string, value: number | undefined, range: { readonly default: number; readonly max: number }) {
@@ -186,7 +189,22 @@ function pageOf<Row extends { readonly id: string; readonly cursorAt: string }>(
 
 const noOverride = (): EffectRetention | undefined => void 0;
 
+/**
+ * The job verbs the app and Foreman call. A job a workflow run owns (`run_id` set) is the run's to move: `retry`,
+ * `discard`, `cancel` and `replayJob` refuse it with `JOB_MANAGED`, and `retryDead` and `purgeDead` skip it.
+ */
 export function createJobOps(deps: JobOpsDeps) {
+  return buildJobOps(deps, 'refuse');
+}
+
+/**
+ * The same verbs for the workflow runner alone: they act on a run's own jobs. Not exported from the package.
+ */
+export function createManagedJobOps(deps: JobOpsDeps) {
+  return buildJobOps(deps, 'allow');
+}
+
+function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   const { events: eventsTable, jobs: jobsTable, jobAttempts, jobArchive, jobOperations } = deps.tables;
   const policy = deps.retention;
 
@@ -206,6 +224,20 @@ export function createJobOps(deps: JobOpsDeps) {
   } as const;
   const jobName = sql<string>`coalesce(${jobsTable.effect}, ${jobsTable.jobName})`;
   const withState = { ...getTableColumns(jobsTable), state: stateOf };
+
+  /** Refuse a job a workflow run owns. A `run_id` is set when the job is written and never changes. */
+  const assertUnmanaged = async (tx: DbHandle, from: typeof jobsTable | typeof jobArchive, id: string) => {
+    if (managed === 'allow') return;
+    const [row] = await tx.select({ runId: from.runId }).from(from).where(eq(from.id, id)).limit(1);
+    if (row !== undefined && row.runId !== null) throw managedError(id);
+  };
+
+  /** Jobs the bulk verbs may touch: not a run's own. */
+  const unmanaged = managed === 'allow' ? undefined : isNull(jobsTable.runId);
+  /** Jobs the sweeper may archive: not a run's own, or the run is over (or its row is gone). */
+  const { workflowRuns } = deps.tables;
+  const liveRun = sql`SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${jobsTable.runId} AND ${workflowRuns.finishedAt} IS NULL`;
+  const outsideLiveRuns = sql`(${jobsTable.runId} IS NULL OR NOT EXISTS (${liveRun}))`;
 
   const nameFilter = (filter: { readonly effect?: string; readonly job?: string }) => [
     filter.effect === undefined ? undefined : eq(jobsTable.effect, filter.effect),
@@ -459,11 +491,11 @@ export function createJobOps(deps: JobOpsDeps) {
         )
         INSERT INTO ${jobArchive} (
           id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
-          last_error, outcome, attempt_log, replay_of, finished_at, keep_until
+          last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id
         )
         SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
           g.last_error, ${args.outcome}::varchar, coalesce(log.entries, '[]'::jsonb), g.replay_of, ${args.finishedAt},
-          ${until}::timestamptz
+          ${until}::timestamptz, g.run_id
         FROM gone g LEFT JOIN log ON log.job_id = g.id
         RETURNING id
       `);
@@ -487,6 +519,7 @@ export function createJobOps(deps: JobOpsDeps) {
     return inTransaction(
       db,
       async tx => {
+        await assertUnmanaged(tx, jobsTable, id);
         const rows = await tx
           .update(jobsTable)
           .set(retryPatch)
@@ -508,6 +541,7 @@ export function createJobOps(deps: JobOpsDeps) {
     return inTransaction(
       db,
       async tx => {
+        await assertUnmanaged(tx, jobsTable, id);
         const removed = await removeJobs(tx, {
           where: and(eq(jobsTable.id, id), isNotNull(jobsTable.deadAt)),
           outcome: 'discarded',
@@ -535,6 +569,7 @@ export function createJobOps(deps: JobOpsDeps) {
     return inTransaction(
       db,
       async tx => {
+        await assertUnmanaged(tx, jobsTable, id);
         const removed = await removeJobs(tx, {
           where: and(
             eq(jobsTable.id, id),
@@ -587,24 +622,37 @@ export function createJobOps(deps: JobOpsDeps) {
     return inTransaction(
       db,
       async tx => {
-        const guard =
+        // A filter picks and locks its rows first, then updates exactly those. `UPDATE … WHERE id IN (SELECT … LIMIT
+        // … SKIP LOCKED)` may re-run the subquery and update more than `limit` rows.
+        const pickedRows =
           ids !== undefined || filter === undefined
-            ? and(inArray(jobsTable.id, [...(ids ?? [])]), isNotNull(jobsTable.deadAt))
-            : and(
-                isNotNull(jobsTable.deadAt),
-                inArray(
-                  jobsTable.id,
-                  sql`(SELECT ${jobsTable.id} FROM ${jobsTable} WHERE ${and(
+            ? (ids ?? []).map(id => ({ id }))
+            : await tx
+                .select({ id: jobsTable.id })
+                .from(jobsTable)
+                .where(
+                  and(
                     isNotNull(jobsTable.deadAt),
+                    unmanaged,
                     ...nameFilter(filter),
                     filter.deadBefore === undefined ? undefined : sql`${jobsTable.deadAt} < ${iso(filter.deadBefore)}`,
-                  )} ORDER BY ${jobsTable.deadAt}, ${jobsTable.id} LIMIT ${limit} FOR UPDATE SKIP LOCKED)`,
-                ),
-              );
+                  ),
+                )
+                .orderBy(jobsTable.deadAt, jobsTable.id)
+                .limit(limit)
+                .for('update', { skipLocked: true });
+        const picked = pickedRows.map(row => row.id);
+        const guard = and(inArray(jobsTable.id, picked), isNotNull(jobsTable.deadAt), unmanaged);
         const rows = await tx.update(jobsTable).set(retryPatch).where(guard).returning({ id: jobsTable.id });
         const changed = rows.map(row => row.id);
         if (ids !== undefined && changed.length !== ids.length) {
           const missing = ids.filter(id => !changed.includes(id));
+          const owned = await tx
+            .select({ id: jobsTable.id })
+            .from(jobsTable)
+            .where(and(inArray(jobsTable.id, missing), isNotNull(jobsTable.runId)));
+          const first = owned[0];
+          if (first !== undefined) throw managedError(first.id);
           throw new JournalError('JOB_NOT_DEAD', 'job', missing.join(','), 'not dead jobs; nothing was retried');
         }
         if (changed.length === 0) return { ids: changed, operationId: null };
@@ -620,12 +668,23 @@ export function createJobOps(deps: JobOpsDeps) {
    * Dead jobs that died before `olderThan` leave the hot table: archived as `dead`, or deleted when the policy keeps
    * nothing. The oldest go first, up to `limit` (default 1000, at most 5000). A bound shorter than `retryableFor`
    * is refused with `BAD_ARGUMENT`: that would take away jobs an operator may still retry. Nothing purged writes no
-   * operation row (`operationId: null`).
+   * operation row (`operationId: null`). A job a workflow run owns is left alone.
    */
-  const purgeDead = async (
+  const purgeDead = (
     db: DbHandle,
     opts: { readonly olderThan: Date; readonly limit?: number },
     op: JobOperationInput,
+  ) => purgeDeadWhere(db, opts, op, unmanaged);
+
+  /**
+   * `purgeDead` over the dead jobs `scope` allows. The sweeper's scope adds the jobs of runs that are over: a dead
+   * step of a live run waits for the run's own actions, and an ended run leaves its dead jobs to the sweeper.
+   */
+  const purgeDeadWhere = async (
+    db: DbHandle,
+    opts: { readonly olderThan: Date; readonly limit?: number },
+    op: JobOperationInput,
+    scope: SQL | undefined,
   ): Promise<{ archived: number; deleted: number; operationId: string | null }> => {
     assertOperation(op);
     const limit = bounded('purgeDead', opts.limit, PURGE_LIMIT);
@@ -640,7 +699,7 @@ export function createJobOps(deps: JobOpsDeps) {
       async tx => {
         // A per-effect `retryableFor` longer than the journal's keeps its dead jobs retryable past `olderThan`.
         const removed = await removeJobs(tx, {
-          where: and(isNotNull(jobsTable.deadAt), sql`${jobsTable.deadAt} < ${iso(opts.olderThan)}`),
+          where: and(isNotNull(jobsTable.deadAt), sql`${jobsTable.deadAt} < ${iso(opts.olderThan)}`, scope),
           limit,
           eligible: row =>
             row.deadAt !== null && row.deadAt.getTime() <= Date.now() - retryableForMs(policy, overrideOf(row)),
@@ -678,6 +737,7 @@ export function createJobOps(deps: JobOpsDeps) {
       async tx => {
         const [source] = await tx.select().from(jobArchive).where(eq(jobArchive.id, archivedId)).limit(1);
         if (source === undefined) throw argument(archivedId, 'no archived job with this id');
+        if (managed === 'refuse' && source.runId !== null) throw managedError(archivedId);
         const id = newJobId();
         const rows = await tx
           .insert(jobsTable)
@@ -849,6 +909,53 @@ export function createJobOps(deps: JobOpsDeps) {
   };
 
   /**
+   * Delete the rows of finished workflow runs whose `keep_until` has passed; their steps and signals go with them.
+   * The run's events stay: they are the record, and `replay` rebuilds the run from them. A run is never pruned while
+   * it is unfinished or while any ancestor is unfinished: a parent may still compensate a completed child. At most
+   * `limit` runs per call (default 1000, at most 5000); rows another transaction holds are skipped. The operation
+   * row lists the run ids. Nothing deleted writes no operation row. `op` defaults to the actor `system:retention`.
+   */
+  const pruneWorkflows = async (
+    db: DbHandle,
+    opts?: { readonly limit?: number },
+    op: JobOperationInput = retentionOp,
+  ): Promise<{ pruned: number; operationId: string | null }> => {
+    assertOperation(op);
+    const limit = bounded('pruneWorkflows', opts?.limit, PURGE_LIMIT);
+    return inTransaction(
+      db,
+      async tx => {
+        // The rows are picked and locked once, in a materialized CTE: `DELETE … WHERE id IN (SELECT … LIMIT … SKIP
+        // LOCKED)` may re-run the subquery and delete more than `limit` rows.
+        const result: unknown = await tx.execute(sql`
+          WITH picked AS MATERIALIZED (
+            SELECT r.id FROM ${workflowRuns} r
+            WHERE r.finished_at IS NOT NULL AND r.keep_until <= now()
+              AND NOT EXISTS (
+                WITH RECURSIVE up AS (
+                  SELECT p.id, p.parent_id, p.finished_at FROM ${workflowRuns} p WHERE p.id = r.parent_id
+                  UNION
+                  SELECT p.id, p.parent_id, p.finished_at FROM ${workflowRuns} p JOIN up ON p.id = up.parent_id
+                )
+                SELECT 1 FROM up WHERE finished_at IS NULL
+              )
+            ORDER BY r.keep_until, r.id
+            LIMIT ${limit}
+            FOR UPDATE OF r SKIP LOCKED
+          )
+          DELETE FROM ${workflowRuns} WHERE id IN (SELECT id FROM picked) RETURNING id
+        `);
+        const ids = rowIds(result);
+        if (ids.length === 0) return { pruned: 0, operationId: null };
+        const operationId = await record(tx, 'pruneWorkflows', op, ids);
+        debug.debug('pruneWorkflows: {count} runs, {operationId}', { count: ids.length, operationId });
+        return { pruned: ids.length, operationId };
+      },
+      false,
+    );
+  };
+
+  /**
    * Delete operation rows past the `operations` keep: older than its age, then the oldest beyond its `max`. 'forever'
    * deletes nothing. Writes no operation row of its own: recording its own deletion would never end.
    */
@@ -927,10 +1034,11 @@ export function createJobOps(deps: JobOpsDeps) {
       }
     };
     await step('purgeDead', async () => {
-      const done = await purgeDead(
+      const done = await purgeDeadWhere(
         db,
         { olderThan: new Date(Date.now() - policy.retryableForMs), limit: batch },
         retentionOp,
+        outsideLiveRuns,
       );
       return done.archived + done.deleted;
     });
@@ -942,6 +1050,10 @@ export function createJobOps(deps: JobOpsDeps) {
     }
     await step('pruneArchive', async () => {
       const done = await pruneArchive(db, { limit: batch }, retentionOp);
+      return done.pruned;
+    });
+    await step('pruneWorkflows', async () => {
+      const done = await pruneWorkflows(db, { limit: batch }, retentionOp);
       return done.pruned;
     });
     await step('pruneOperations', async () => {
@@ -966,6 +1078,7 @@ export function createJobOps(deps: JobOpsDeps) {
     replayJob: replay,
     exportArchive,
     pruneArchive,
+    pruneWorkflows,
     pruneOperations,
     sweepOnce,
   };

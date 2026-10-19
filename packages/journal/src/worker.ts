@@ -259,10 +259,10 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       )
       INSERT INTO ${archiveTable} (
         id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
-        last_error, outcome, attempt_log, replay_of, finished_at, keep_until
+        last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id
       )
       SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
-        g.last_error, 'completed', log.entries, g.replay_of, now(), ${until}::timestamptz
+        g.last_error, 'completed', log.entries, g.replay_of, now(), ${until}::timestamptz, g.run_id
       FROM gone g CROSS JOIN log
     `);
   };

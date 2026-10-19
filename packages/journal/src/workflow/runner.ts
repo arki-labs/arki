@@ -25,8 +25,8 @@ import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
 import { workflowRunId, workflowSignalId } from '../id.js';
-import { createJobOps } from '../outbox.js';
-import { parseAge, resolveRetention } from '../retention.js';
+import { createManagedJobOps } from '../outbox.js';
+import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retention.js';
 import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
 import { workflowWith } from './define.js';
@@ -325,8 +325,6 @@ function nodeOfBase(def: WorkflowDef, base: string): WorkflowNode | undefined {
 const isDetached = (node: WorkflowNode | undefined) => node?.kind === 'child' && node.onCancel === 'detach';
 
 const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
-const keepUntilFor = (age: WorkflowDef['retention']['completed']): string | null =>
-  age === undefined || age === 'forever' ? null : inMs(parseAge(age));
 
 type Definitions<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
@@ -379,6 +377,7 @@ export function createWorkflows<
   AppDb extends RootDb,
 >(j: Definitions<Meta, Tx, AppDb>, tables: JournalTables, retention: JobRetention | undefined) {
   type MetaOut = SchemaOutput<Meta>;
+  const policy = resolveRetention(retention);
   const machine = workflowMachine<Meta, Tx>(j, tables);
   const { run, events } = machine;
   const { workflowRuns, workflowSteps, workflowSignals } = tables;
@@ -476,9 +475,9 @@ export function createWorkflows<
    * The job verbs, for the one thing the runner cancels: the timer of a park the run has left. They write
    * the operation row and archive the job under the retention given to `initJournal`.
    */
-  const jobOps = createJobOps({
+  const jobOps = createManagedJobOps({
     tables,
-    retention: resolveRetention(retention),
+    retention: policy,
     wake: () => {
       // No worker to wake here; the caller polls.
     },
@@ -508,13 +507,17 @@ export function createWorkflows<
     const parsed = def.output === undefined ? produced : await parseAsync(def.output, produced);
     const kept = storable(parsed, def.limits.payload, 'the output', row.id);
     if (kept instanceof JournalError) throw kept;
-    return { go: 'finish', output: kept.value, keepUntil: keepUntilFor(def.retention.completed) };
+    return { go: 'finish', output: kept.value, keepUntil: keepUntilFor(def, 'completed') };
   }
+
+  /** When the row of a run that just ended as `outcome` may be pruned: the workflow's own retention, else the journal's. */
+  const keepUntilFor = (def: WorkflowDef, outcome: 'completed' | 'failed' | 'cancelled'): string | null =>
+    runKeepUntil(runKeepFor(policy, def.retention, outcome, def.name), new Date())?.toISOString() ?? null;
 
   /** The run's deadline has passed, whether or not its timer has fired yet: a late signal or park cannot defeat it. */
   const pastDeadline = (row: Row) => row.deadlineAt !== null && row.deadlineAt.getTime() <= Date.now();
   const runFailed = (def: WorkflowDef, error: string, at: string) =>
-    events.RunFailed({ error, at, keepUntil: keepUntilFor(def.retention.failed) });
+    events.RunFailed({ error, at, keepUntil: keepUntilFor(def, 'failed') });
 
   /** The completed events of a run and its undo events, oldest first: what `remainingUndos` reads. */
   const settledOf = (runId: string) =>
@@ -636,7 +639,7 @@ export function createWorkflows<
       );
     }
     if (row.cancelledAt !== null || options.cancelling === true) {
-      out.push(events.RunCancelled({ at, keepUntil: keepUntilFor(def.retention.failed) }));
+      out.push(events.RunCancelled({ at, keepUntil: keepUntilFor(def, 'cancelled') }));
     } else {
       out.push(runFailed(def, options.cause ?? (await causeOf(tx, row.id)), at));
     }

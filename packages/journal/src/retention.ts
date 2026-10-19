@@ -28,6 +28,20 @@ export type ArchiveSink = {
   write(rows: readonly ArchivedJob[], ctx: { readonly signal: AbortSignal }): Promise<void>;
 };
 
+/**
+ * How long a finished workflow run's row is kept, by how it ended. Values are {@link Keep}s, with two limits that
+ * `BAD_DEFINITION` enforces: `'untilExported'` (a run has no sink) and `max` (there is no per-name row cap for runs).
+ * `false` deletes the run row at the next sweep. A run's events are never pruned.
+ */
+export type RunRetention = {
+  /** Default `'7d'`. */
+  readonly completed?: Keep;
+  /** Default `'90d'`. */
+  readonly failed?: Keep;
+  /** Default: the `failed` value. */
+  readonly cancelled?: Keep;
+};
+
 /** The journal-wide policy. Every field is optional; the defaults are in {@link defaultRetention}. */
 export type JobRetention = {
   /** A dead job stays in the hot table, retryable, this long; then the sweeper archives it. Default `'30d'`. */
@@ -41,6 +55,8 @@ export type JobRetention = {
   };
   /** The operations audit. Default `'forever'`. */
   readonly operations?: Keep;
+  /** Finished workflow runs: how long each kind of ending keeps its run row. */
+  readonly workflows?: RunRetention;
   /** Default `{ every: '1h', batch: 1000 }`. `false`: the app schedules the sweep verbs itself. */
   readonly sweep?: false | { readonly every?: RetentionAge; readonly batch?: number };
 };
@@ -75,6 +91,11 @@ export type ResolvedRetention = {
   readonly dead: ResolvedKeep;
   readonly sink: ArchiveSink | undefined;
   readonly operations: ResolvedKeep;
+  readonly workflows: {
+    readonly completed: ResolvedKeep;
+    readonly failed: ResolvedKeep;
+    readonly cancelled: ResolvedKeep;
+  };
   readonly sweep: false | { readonly everyMs: number; readonly batch: number };
 };
 
@@ -131,14 +152,28 @@ export const defaultRetention = {
   completed: '7d',
   dead: '90d',
   operations: 'forever',
+  workflows: { completed: '7d', failed: '90d' },
   sweep: { every: '1h', batch: DEFAULT_SWEEP_BATCH },
 } as const satisfies {
   readonly retryableFor: RetentionAge;
   readonly completed: Keep;
   readonly dead: Keep;
   readonly operations: Keep;
+  readonly workflows: { readonly completed: Keep; readonly failed: Keep };
   readonly sweep: { readonly every: RetentionAge; readonly batch: number };
 };
+
+/**
+ * Parse one {@link RunRetention} value. Throws `BAD_DEFINITION` for `'untilExported'` and for `max`: neither means
+ * anything for a run row. `where` names the setting in the message.
+ */
+export function parseRunKeep(keep: Keep, where: string): ResolvedKeep {
+  if (keep === 'untilExported')
+    throw badRetention("'untilExported'", `${where} cannot be 'untilExported': a run has no archive sink`);
+  if (typeof keep === 'object' && keep.max !== undefined)
+    throw badRetention(String(keep.max), `${where} cannot set \`max\`: runs have no row cap`);
+  return parseKeep(keep);
+}
 
 /** Parse the journal-wide policy and fill the defaults. Throws `BAD_DEFINITION` on a bad value. */
 export function resolveRetention(retention: JobRetention | undefined): ResolvedRetention {
@@ -158,7 +193,17 @@ export function resolveRetention(retention: JobRetention | undefined): ResolvedR
     dead: parseKeep(retention?.archive?.dead ?? defaultRetention.dead),
     sink: retention?.archive?.sink,
     operations: parseKeep(retention?.operations ?? defaultRetention.operations),
+    workflows: resolveRunRetention(retention?.workflows),
     sweep: resolved,
+  };
+}
+
+function resolveRunRetention(runs: RunRetention | undefined): ResolvedRetention['workflows'] {
+  const failed = parseRunKeep(runs?.failed ?? defaultRetention.workflows.failed, 'retention.workflows.failed');
+  return {
+    completed: parseRunKeep(runs?.completed ?? defaultRetention.workflows.completed, 'retention.workflows.completed'),
+    failed,
+    cancelled: runs?.cancelled === undefined ? failed : parseRunKeep(runs.cancelled, 'retention.workflows.cancelled'),
   };
 }
 
@@ -183,6 +228,26 @@ export function keepFor(
     return override?.completed === undefined ? policy.completed : parseKeep(override.completed);
   }
   return override?.dead === undefined ? policy.dead : parseKeep(override.dead);
+}
+
+/**
+ * The keep rule for a run that ended as `outcome`. The workflow's own setting wins over the journal's. A workflow
+ * that sets `failed` but not `cancelled` gives both the same time, as the journal's default does.
+ */
+export function runKeepFor(
+  policy: ResolvedRetention,
+  own: RunRetention,
+  outcome: keyof ResolvedRetention['workflows'],
+  workflow: string,
+): ResolvedKeep {
+  const setting = outcome === 'cancelled' ? (own.cancelled ?? own.failed) : own[outcome];
+  if (setting === undefined) return policy.workflows[outcome];
+  return parseRunKeep(setting, `workflow "${workflow}": retention.${outcome}`);
+}
+
+/** The `keep_until` of a run that ended at `now`. `false` is `now`: the next sweep deletes the row. Null keeps it. */
+export function runKeepUntil(keep: ResolvedKeep, now: Date): Date | null {
+  return keep.store ? keepUntil(keep, now) : now;
 }
 
 /** How long a dead job stays retryable in the hot table, in milliseconds. */

@@ -188,7 +188,15 @@ export function journalTables(schema?: PgSchema) {
       action: varchar('action', { length: 32 })
         .notNull()
         .$type<
-          'retry' | 'retryDead' | 'discard' | 'cancel' | 'replay' | 'purgeDead' | 'exportArchive' | 'pruneArchive'
+          | 'retry'
+          | 'retryDead'
+          | 'discard'
+          | 'cancel'
+          | 'replay'
+          | 'purgeDead'
+          | 'exportArchive'
+          | 'pruneArchive'
+          | 'pruneWorkflows'
         >(),
       /** Who did it: a free string. The retention sweeper writes `system:retention`. */
       actor: varchar('actor', { length: 256 }).notNull(),
@@ -291,9 +299,7 @@ export function journalTables(schema?: PgSchema) {
       path: varchar('path', { length: 256 }).notNull(),
       /** `undo` rows are compensation: their own key, attempts and retry. */
       phase: varchar('phase', { length: 4 }).notNull().$type<'do' | 'undo'>(),
-      status: varchar('status', { length: 16 })
-        .notNull()
-        .$type<'scheduled' | 'done' | 'skipped' | 'failed'>(),
+      status: varchar('status', { length: 16 }).notNull().$type<'scheduled' | 'done' | 'skipped' | 'failed'>(),
       attempt: integer('attempt').notNull().default(0),
       /** The step's idempotency key. Null on a step that was skipped before it was ever scheduled. */
       key: varchar('key', { length: 512 }),

@@ -210,6 +210,35 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
   });
 });
 
+describe('T(journal-foreman) a workflow run owns its jobs', () => {
+  it("a job action on a run's dead step is E006 over the wire, HTTP 409, never a 500, and bulk retry leaves it out", async () => {
+    const owned = await queueRow({ runId: 'wfr_owned' });
+    await kill(owned);
+    const { client: foreman, lastStatus, permit: claim } = await foremanHarness(hidden());
+    const preview = await foreman.preview('journal.retryJob', { jobId: owned }, ['journal:retry']);
+    const revision = typeof preview === 'object' && preview !== null && 'revision' in preview ? preview.revision : '';
+
+    await expect(
+      foreman.execute(
+        'journal.retryJob',
+        { jobId: owned },
+        {
+          scopes: ['journal:retry'],
+          permit: claim('exe_owned', 'journal.retryJob', typeof revision === 'string' ? revision : ''),
+        },
+      ),
+    ).rejects.toMatchObject({ code: JOURNAL_JOBS_ERROR_CODES.managed });
+    expect(lastStatus()).toBe(409);
+    expect(JOURNAL_JOBS_ERROR_CODES.managed).toBe('ARKI_JOURNAL_E006');
+
+    const loose = await queueRow();
+    await kill(loose);
+    const module = hidden();
+    const bulk = await module.actions.retryDead.runPreview({ limit: 10 }, NO_CTX);
+    expect(bulk.jobs.map(job => job.id)).toEqual([loose]);
+  });
+});
+
 describe('T(journal-foreman) a job must be in the state the action needs', () => {
   it('retryJob and discardJob on a live job are refused with E002 at preview, before anything is approved', async () => {
     const module = hidden();

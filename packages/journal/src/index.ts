@@ -105,6 +105,7 @@ export type {
   JobRetention,
   Keep,
   RetentionAge,
+  RunRetention,
 } from './retention.js';
 export { ndjsonArchiveSink } from './retention.js';
 export { jobId } from './id.js';

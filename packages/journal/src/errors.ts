@@ -21,6 +21,7 @@ export type JournalErrorCode =
   | 'JOB_NOT_PENDING'
   | 'JOB_RUNNING'
   | 'JOB_EXISTS'
+  | 'JOB_MANAGED'
   | 'BAD_ARGUMENT'
   | 'LEASE_LOST'
   | 'STEP_TIMEOUT'
@@ -98,6 +99,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   JOB_RUNNING: {
     what: 'a worker holds the job right now',
     next: 'Wait for it to finish, or for its lease to expire, then try again',
+  },
+  JOB_MANAGED: {
+    what: 'a workflow run owns this job',
+    next: "A step or timer of a workflow run is moved by the workflow's own actions, not by the raw job verbs. Use the workflow's actions",
   },
   JOB_EXISTS: {
     what: 'an unfinished job already holds this dedupe key',

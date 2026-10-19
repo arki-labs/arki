@@ -10,10 +10,11 @@ import type { Failure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { RetentionAge } from '../retention.js';
+import type { RetentionAge, RunRetention } from '../retention.js';
 import type { AcceptFailure, BivariantFn, Needed, Needs, NoNeeds, RootDb } from '../types.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
+import { parseRunKeep } from '../retention.js';
 
 /** What a node body sees. `results` has one key per earlier node. */
 export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootDb, Run = unknown> = Needed<N> & {
@@ -126,7 +127,8 @@ export type WorkflowDef<
       }
     | undefined;
   readonly onDeadStep: 'wait' | 'compensate';
-  readonly retention: { readonly completed?: RetentionAge | 'forever'; readonly failed?: RetentionAge | 'forever' };
+  /** The workflow's own run retention; a field left out takes the journal's (`retention.workflows`). */
+  readonly retention: RunRetention;
   readonly limits: WorkflowLimits;
   readonly needs: Needs;
   readonly nodes: readonly WorkflowNode[];
@@ -150,7 +152,8 @@ export type WorkflowOptions<
     readonly onBusy: 'refuse' | 'join';
   };
   readonly onDeadStep?: 'wait' | 'compensate';
-  readonly retention?: { readonly completed?: RetentionAge | 'forever'; readonly failed?: RetentionAge | 'forever' };
+  /** How long the run row stays after it ends, by how it ended. Overrides `retention.workflows` of `initJournal`. */
+  readonly retention?: RunRetention;
   readonly limits?: Partial<WorkflowLimits>;
   readonly needs?: N;
 };
@@ -527,6 +530,9 @@ export function workflowWith<
   const { concurrency } = options;
   if (concurrency !== undefined && !isPositiveInt(concurrency.limit)) {
     refuse(name, `concurrency.limit must be a positive whole number, got ${concurrency.limit}`);
+  }
+  for (const [outcome, keep] of Object.entries(options.retention ?? {})) {
+    parseRunKeep(keep, `workflow "${name}": retention.${outcome}`);
   }
   return makeBuilder({
     attach,

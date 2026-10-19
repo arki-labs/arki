@@ -59,6 +59,8 @@ export const JOURNAL_JOBS_ERROR_CODES = {
   notPending: 'ARKI_JOURNAL_E004',
   /** Replay is blocked by an unfinished job that holds the same dedupe key. HTTP 409. */
   exists: 'ARKI_JOURNAL_E005',
+  /** The job belongs to a workflow run, so the raw job actions refuse it. HTTP 409. */
+  managed: 'ARKI_JOURNAL_E006',
 } as const;
 
 const MAX_PAGE = 200;
@@ -293,8 +295,17 @@ const notWaiting = (id: string) =>
     'A running job finishes or loses its lease on its own. Reload the jobs list and try again later.',
   );
 
+const managed = (id: string) =>
+  moduleError(
+    JOURNAL_JOBS_ERROR_CODES.managed,
+    409,
+    `Job ${id} belongs to a workflow run, so a job action cannot change it.`,
+    "Use the workflow's own actions on the run.",
+  );
+
 /** A journal refusal as the coded admin error an operator sees. Anything else passes through as an app failure. */
 function asAdminError(error: unknown, id: string): unknown {
+  if (isJournalError(error, 'JOB_MANAGED')) return managed(id);
   if (isJournalError(error, 'JOB_NOT_DEAD')) return notDead(id);
   if (isJournalError(error, 'JOB_NOT_PENDING') || isJournalError(error, 'JOB_RUNNING')) return notWaiting(id);
   if (isJournalError(error, 'JOB_EXISTS')) {
@@ -674,7 +685,8 @@ export function journalJobsModule<
         ...(input.job === undefined ? {} : { job: input.job }),
         ...(after === undefined ? {} : { after }),
       });
-      picked.push(...page.jobs);
+      // A run's own dead step is not the operator's to retry in bulk: the run's actions move it.
+      picked.push(...page.jobs.filter(job => job.runId === null));
       if (page.next === null) break;
       after = page.next;
     }
@@ -783,7 +795,7 @@ export function journalJobsModule<
           willDo === 'archive'
             ? 'They are archived as "dead" and kept per the retention policy.'
             : 'The retention policy keeps no dead jobs, so they are deleted for good.'
-        } An effect with its own retention may differ.`,
+        } An effect with its own retention may differ. Dead jobs that belong to a workflow run are counted above but left alone.`,
       };
     },
     execute: async ({ olderThanDays, limit, reason }, _ctx: Record<string, never>, permit) => {

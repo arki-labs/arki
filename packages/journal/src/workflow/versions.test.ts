@@ -13,12 +13,19 @@ import { isFailure } from '@arki/failure';
 
 import type { j as sharedJournal } from '../test-support.js';
 import { initJournal } from '../journal.js';
+import { createManagedJobOps } from '../outbox.js';
+import { resolveRetention } from '../retention.js';
 import { tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
 
 const caller = { actorId: 'usr_test' };
 const workflowMeta = { actorId: 'system:workflow' };
 const operator = { actor: 'usr_ops' };
+const noWake = (): void => {
+  // No worker to wake in this test.
+};
+/** The runner's own path to a run's jobs, until `workflow.retryStep` gives operators one. */
+const runOps = createManagedJobOps({ tables, retention: resolveRetention({}), wake: noWake });
 type Init = typeof sharedJournal;
 /** A journal setup of its own: its commands only know what its `compose` registered. */
 const fresh = (): Init => initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
@@ -275,7 +282,7 @@ describe('stranded runs', () => {
     expect(dead).toBeDefined();
 
     // The app deploys the old code again; the operator retries.
-    await journalA.retry(db, dead?.id ?? '', operator);
+    await runOps.retry(db, dead?.id ?? '', operator);
     await settle(journalA);
 
     expect(log).toEqual(['v1 charge']);
@@ -302,7 +309,7 @@ describe('stranded runs', () => {
     const dead = await deadJobs();
     expect(dead.map(job => [job.effect, job.attempts])).toEqual([['workflow.timer', 1]]);
 
-    await journalA.retry(db, dead[0]?.id ?? '', operator);
+    await runOps.retry(db, dead[0]?.id ?? '', operator);
     await settle(journalA);
     expect(await rowOf(id)).toMatchObject({ state: 'parked', node: 'approve' });
   });
