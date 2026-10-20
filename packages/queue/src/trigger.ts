@@ -8,11 +8,19 @@ import type { QueueJobId } from './job-id.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
 import { queueJobId } from './job-id.ts';
 
+/**
+ * @fix Register and start the queue before triggering this job.
+ * @verify bun run test -- src/trigger.spec.ts
+ */
 export const QueueUnavailable = defineFailure('queue.unavailable', {
   status: 503,
   message: 'The job has no active queue transport.',
   remediation: 'Register and start the queue before triggering this job.',
 });
+/**
+ * @fix Inspect the job by its idempotency key before enqueueing it again.
+ * @verify bun run test -- src/trigger.spec.ts
+ */
 export const QueueAcceptanceUnknown = defineFailure('queue.acceptance_unknown', {
   status: 503,
   message: 'The queue could not confirm whether the job was accepted.',

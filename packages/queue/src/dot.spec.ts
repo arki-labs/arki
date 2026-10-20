@@ -30,6 +30,7 @@ import {
   queueProducerActions,
   queueWorker,
 } from './dot.ts';
+import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
 import { initQueue } from './init.ts';
 import { project } from './projection.ts';
 
@@ -427,5 +428,13 @@ describe('queueWorker() — the driving adapter', () => {
     await orThrow(app.dispose());
 
     expect(app.state).toBe('disposed');
+  });
+});
+
+// Error URLs need one meaning per code; preserve the older builder diagnostic.
+describe('queue diagnostic identities', () => {
+  it('keeps missing clients distinct from missing declaration names', () => {
+    expect(QUEUE_DEFINITION_ERROR_CODES.missingName).toBe('ARKI_QUEUE_E006');
+    expect(QUEUE_PLUGIN_ERROR_CODES.clientMissing).toBe('ARKI_QUEUE_E019');
   });
 });

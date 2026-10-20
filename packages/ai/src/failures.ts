@@ -5,7 +5,10 @@
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
-/** The local rate limiter has no free slot, even after its own waits and retries. */
+/** The local rate limiter has no free slot, even after its own waits and retries.
+ * @fix Wait retryAfterMs milliseconds, then try again.
+ * @verify bun run test -- src/utils/rate-limiter.test.ts src/cost/budget-manager.test.ts
+ */
 export const RateLimited = defineFailure('ai.rate_limited', {
   status: 429,
   data: z.object({ retryAfterMs: z.number() }),
@@ -14,7 +17,10 @@ export const RateLimited = defineFailure('ai.rate_limited', {
 });
 export type RateLimited = ReturnType<typeof RateLimited>;
 
-/** The operation's estimated cost would take the user over the limit of one budget period. */
+/** The operation's estimated cost would take the user over the limit of one budget period.
+ * @fix Wait for the budget period to reset, or raise its limit.
+ * @verify bun run test -- src/utils/rate-limiter.test.ts src/cost/budget-manager.test.ts
+ */
 export const BudgetExceeded = defineFailure('ai.budget_exceeded', {
   status: 402,
   data: z.object({ period: z.string(), currentSpendUsd: z.number(), remainingUsd: z.number() }),

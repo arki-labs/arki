@@ -1,6 +1,6 @@
 # @arki/string
 
-A string toolkit with no dependencies. Positions count what a reader sees (graphemes), not UTF-16 units. Use plain functions by concern, or one immutable fluent wrapper.
+A string toolkit with canonical encoding failures from `@arki/failure`. Positions count what a reader sees (graphemes), not UTF-16 units. Use plain functions by concern, or one immutable fluent wrapper.
 
 ## Install
 
@@ -117,31 +117,26 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 
 ## Failure behaviour
 
-Every failure on purpose is a `StringError` with a stable `code` and a `remediation` sentence. Match on `error.code`, never on the message. `import { StringError, STRING_ERROR_CODES } from '@arki/string'` (or `@arki/string/errors`). Wrong runtime types, such as a number where a string is required, are not checked and have no code.
+UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent codecs return `StringValue` or the same failures. No submitted input is included in failures.
 
-The functions throw synchronously. Nothing returns a result object. `tryFromBase64` is the one function that returns `null` instead of throwing.
+Breaking: `tryFromBase64` now aliases `fromBase64` and never returns `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Other static misuse still throws `StringError` from `@arki/string/errors`; the legacy E002/E003 diagnostic exports remain available.
 
-| Code               | Raised by                                                                                                                        | Meaning                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `ARKI_STRING_E001` | `padStart`, `mask`, `truncate`, `wrapText`, `indexOf`, `keywords`, `chunk`, `slugify`, `readingTime`, search helpers, and others | An argument is out of range: empty needle, negative or non-integer length, bad glyph. |
-| `ARKI_STRING_E002` | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
-| `ARKI_STRING_E003` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
-| `ARKI_STRING_E004` | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
-| `ARKI_STRING_E005` | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
+| Code                    | Raised by                                                                                                                        | Meaning                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `ARKI_STRING_E001`      | `padStart`, `mask`, `truncate`, `wrapText`, `indexOf`, `keywords`, `chunk`, `slugify`, `readingTime`, search helpers, and others | An argument is out of range: empty needle, negative or non-integer length, bad glyph. |
+| `string.invalid_utf8`   | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
+| `string.invalid_base64` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
+| `ARKI_STRING_E004`      | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
+| `ARKI_STRING_E005`      | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
 
 Handle bad user input without a try block:
 
 ```ts run
-import { STRING_ERROR_CODES, StringError } from '@arki/string';
-import { fromBase64, tryFromBase64 } from '@arki/string/base64';
+import { isFailure } from '@arki/failure';
+import { fromBase64, InvalidBase64 } from '@arki/string/base64';
 
-if (tryFromBase64('not base64!') !== null) throw new Error('expected null');
-try {
-  fromBase64('not base64!');
-  throw new Error('fromBase64 should have thrown');
-} catch (error) {
-  if (!(error instanceof StringError) || error.code !== STRING_ERROR_CODES.invalidBase64) throw error;
-}
+const decoded = fromBase64('not base64!');
+if (!isFailure(decoded) || !InvalidBase64.is(decoded)) throw new Error('expected base64 failure');
 ```
 
 ## Limits
@@ -150,7 +145,7 @@ try {
 - `slugify('ä ö')` gives `ae-oe` (German rules). `slugify('ä ö', { locale: 'sv' })` gives `a-o`. Pass `locale` when the language is not German.
 - Chinese and Korean transliteration is opt-in through `@arki/string/slug-cjk`, because the tables are large. Without it, those characters are dropped from a slug.
 - `interpolate` takes flat identifier keys. `{{ user.name }}` is a `StringError` (`ARKI_STRING_E004`).
-- Base64 decoding is strict. A string with a newline, a mixed alphabet or bad padding throws `ARKI_STRING_E003`. Trim and normalize it first, or use `tryFromBase64`.
+- Base64 decoding is strict. A string with a newline, a mixed alphabet or bad padding returns `InvalidBase64`. Handle the failure before using decoded text.
 - `escapeHtml` is not a sanitizer. It makes text safe inside HTML text and attribute values and does nothing for URLs, scripts or styles.
 - `syllableCount` and the readability scores use a heuristic for English, Spanish and German. They suit grades and reading time. They do not suit hyphenation.
 
@@ -337,8 +332,8 @@ textMetrics(article); // every count, score, and statistic in one object
 
 No `Buffer`, `atob`, or `btoa`. Text functions are UTF-8; byte functions take
 and return `Uint8Array`. Decoding is strict: whitespace, mixed alphabets, bad
-padding, impossible lengths, and nonzero unused bits throw `StringError` (`ARKI_STRING_E003`);
-invalid UTF-8 throws `StringError` (`ARKI_STRING_E002`). `tryFromBase64` returns `null` instead.
+padding, impossible lengths, and nonzero unused bits return `InvalidBase64`;
+invalid UTF-8 returns `InvalidUtf8`. `tryFromBase64` is an alias of `fromBase64`.
 
 ```ts
 import { base64ToBytes, fromBase64, toBase64 } from '@arki/string/base64';
@@ -346,7 +341,7 @@ import { base64ToBytes, fromBase64, toBase64 } from '@arki/string/base64';
 toBase64('f'); // 'Zg=='
 toBase64('f', { alphabet: 'url' }); // 'Zg'  (url defaults to no padding)
 base64ToBytes('/w=='); // Uint8Array [255]
-fromBase64('/w=='); // throws StringError ARKI_STRING_E002: not UTF-8
+fromBase64('/w=='); // InvalidUtf8 failure: not UTF-8
 ```
 
 ### Slugs

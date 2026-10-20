@@ -1,5 +1,5 @@
 /**
- * Every failure this package raises on purpose is a {@link StringError} with a
+ * Static misuse outside UTF-8/base64 raises a {@link StringError} with a
  * stable `code`. Match on the code, never on the message. Wrong runtime types
  * (a number where a string was required) are not checked and have no code.
  */
@@ -16,14 +16,14 @@ export const STRING_ERROR_CODES = {
   /**
    * Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte.
    *
-   * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Use `tryFromBase64` to get `null` instead of a throw.
+   * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Encoding APIs return canonical failures; narrow with `isFailure`.
    * @verify bun run test
    */
   invalidUtf8: 'ARKI_STRING_E002',
   /**
    * An input is not valid strict base64: whitespace, a mixed alphabet, bad padding or an impossible length.
    *
-   * @fix Pass strict base64 of the chosen alphabet with correct padding. Use `tryFromBase64` to get `null` instead of a throw.
+   * @fix Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures; narrow with `isFailure`.
    * @verify bun run test
    */
   invalidBase64: 'ARKI_STRING_E003',
@@ -49,14 +49,14 @@ export type StringErrorCode = (typeof STRING_ERROR_CODES)[keyof typeof STRING_ER
 const REMEDIATIONS: Record<StringErrorCode, string> = {
   ARKI_STRING_E001: 'Check the argument against the range in the function reference.',
   ARKI_STRING_E002:
-    'Pass well-formed text (no lone surrogates) or valid UTF-8 bytes. Use tryFromBase64 to get null instead.',
+    'Pass well-formed text (no lone surrogates) or valid UTF-8 bytes. Encoding APIs return canonical failures.',
   ARKI_STRING_E003:
-    'Pass strict base64 of the chosen alphabet with correct padding. Use tryFromBase64 to get null instead.',
+    'Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures.',
   ARKI_STRING_E004: 'Write placeholders as {{ name }} with an identifier inside, and close every {{ with }}.',
   ARKI_STRING_E005: "Pass a value for the placeholder, or set missing to 'keep' or 'empty'.",
 };
 
-/** A coded failure of an `@arki/string` function. */
+/** Legacy diagnostic for static misuse; encoding APIs return canonical failures. */
 export class StringError extends Error {
   readonly code: StringErrorCode;
   /** What to do about it, in one sentence. */

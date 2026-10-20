@@ -8,14 +8,50 @@
  */
 
 export const QUEUE_DEFINITION_ERROR_CODES = {
+  /**
+   * @fix Give the job, schedule or flow a non-empty name before building its definition.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   missingName: 'ARKI_QUEUE_E006',
+  /**
+   * @fix Call .input(schema) before defining the handler or building the declaration.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   missingInput: 'ARKI_QUEUE_E007',
+  /**
+   * @fix Add at least one .step(...) before building a flow.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   missingSteps: 'ARKI_QUEUE_E008',
+  /**
+   * @fix Reference only step ids declared in the same flow.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   unknownStepDependency: 'ARKI_QUEUE_E009',
+  /**
+   * @fix Remove dependency cycles so the flow steps form a directed acyclic graph.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   circularStepDependency: 'ARKI_QUEUE_E010',
+  /**
+   * @fix Pass cron intervals and times within the helper limits stated by the error.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   invalidCronValue: 'ARKI_QUEUE_E011',
+  /**
+   * @fix Remove schedule-level .use() when wrapping a job; put middleware on the job instead.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   scheduleMiddlewareWithJob: 'ARKI_QUEUE_E012',
+  /**
+   * @fix Give each schedule a distinct .name(...), including schedules wrapping the same job.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   duplicateScheduleName: 'ARKI_QUEUE_E013',
+  /**
+   * @fix Reshape the flow so a step has at most one dependent; use a supported dependency tree.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   stepWithManyDependents: 'ARKI_QUEUE_E017',
 } as const;
 
@@ -45,6 +81,10 @@ export function duplicateScheduleError(name: string): QueueDefinitionError {
 }
 
 export const QUEUE_INPUT_ERROR_CODES = {
+  /**
+   * @fix Pass enqueue input accepted by the declared flow input schema.
+   * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
+   */
   invalidFlowInput: 'ARKI_QUEUE_E018',
 } as const;
 

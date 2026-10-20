@@ -7,11 +7,20 @@
 
 /** Stable error codes of `@arki/fs/files` and `@arki/fs/pg`. E002–E005 are retired: those outcomes are returned failures now. */
 export const FILE_ERROR_CODES = {
-  /** Bad input or config: TTL over the cap, size over the limit, mime not allowed. */
+  /** Bad input or config: TTL over the cap, size over the limit, mime not allowed.
+   * @fix Correct the requested TTL, file size, MIME type or storage configuration to match the configured limits.
+   * @verify bun run test -- src/files/files.test.ts
+   */
   invalid: 'ARKI_FS_E001',
-  /** The adapter cannot sign uploads (the local adapter). */
+  /** The adapter cannot sign uploads (the local adapter).
+   * @fix Use an adapter supporting signed uploads, or upload through the local adapter supported path.
+   * @verify bun run test -- src/files/files.test.ts
+   */
   unsupported: 'ARKI_FS_E006',
-  /** The object store failed. */
+  /** The object store failed.
+   * @fix Inspect the private object-store error and restore storage connectivity or credentials before retrying.
+   * @verify bun run test -- src/files/files.test.ts
+   */
   storage: 'ARKI_FS_E007',
 } as const;
 

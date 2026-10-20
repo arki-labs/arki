@@ -30,9 +30,9 @@ describe('StringError codes', () => {
   });
 
   it('keeps UTF-8 failures (E002) apart from base64 failures (E003), so callers can report the right one', () => {
-    expect(caught(() => toBase64('\uD83D'))).toMatchObject({ code: 'ARKI_STRING_E002' });
-    expect(caught(() => fromBase64('/w=='))).toMatchObject({ code: 'ARKI_STRING_E002' });
-    expect(caught(() => fromBase64('abc'))).toMatchObject({ code: 'ARKI_STRING_E003' });
+    expect(toBase64('\uD83D')).toMatchObject({ code: 'string.invalid_utf8' });
+    expect(fromBase64('/w==')).toMatchObject({ code: 'string.invalid_utf8' });
+    expect(fromBase64('abc')).toMatchObject({ code: 'string.invalid_base64' });
   });
 
   it('separates a bad template (E004) from a missing value (E005), so callers can fix the data or the template', () => {

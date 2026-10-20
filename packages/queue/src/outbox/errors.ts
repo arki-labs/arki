@@ -4,12 +4,40 @@
  */
 
 export const OUTBOX_ERROR_CODES = {
+  /**
+   * @fix Call runAfter or runAt inside db.transaction and pass the business transaction handle.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   notInTransaction: 'OUTBOX_E001',
+  /**
+   * @fix Pass args accepted by the job input schema; inspect the private schema issues.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   badArgs: 'OUTBOX_E002',
+  /**
+   * @fix Store plain JSON args within maxArgsBytes; use identifiers instead of large documents or non-JSON instances.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   notJson: 'OUTBOX_E003',
+  /**
+   * @fix Use a non-negative safe-integer delay, a valid runAt Date and a supported QUEUE_PRIORITIES value.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   badTiming: 'OUTBOX_E004',
+  /**
+   * @fix Repair the stored args or restore the matching job schema before retrying the dead row; version job names when inputs change.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   badStoredArgs: 'OUTBOX_E005',
+  /**
+   * @fix Register the job in the registry used to construct the outbox runner.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   unknownJob: 'OUTBOX_E006',
+  /**
+   * @fix Give each job in the outbox registry a unique name.
+   * @verify bun run test -- src/outbox/outbox.spec.ts
+   */
   duplicateName: 'OUTBOX_E007',
 } as const;
 

@@ -48,17 +48,35 @@ const webhookMessageId = defineId('msg_');
 
 /** Stable codes for {@link WebhookError}. Match on codes, never parse messages. */
 export const WEBHOOK_ERROR_CODES = {
-  /** An input failed its schema, a payload is not JSON, or a URL is not public https. */
+  /** An input failed its schema, a payload is not JSON, or a URL is not public https.
+   * @fix Validate the webhook input and JSON payload; use a public HTTPS destination.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   badInput: 'ARKI_JOURNAL_WEBHOOK_E001',
-  /** `dispatch` got the root database. It needs the business transaction. */
+  /** `dispatch` got the root database. It needs the business transaction.
+   * @fix Dispatch inside the business database transaction and pass its transaction handle.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   notInTransaction: 'ARKI_JOURNAL_WEBHOOK_E002',
-  /** No subscription or message has this id. */
+  /** No subscription or message has this id.
+   * @fix Check the subscription or message id and use an existing record.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   notFound: 'ARKI_JOURNAL_WEBHOOK_E003',
-  /** `replay` named a message and a subscription of different partners. */
+  /** `replay` named a message and a subscription of different partners.
+   * @fix Replay only to a subscription owned by the same partner as the message.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   otherPartner: 'ARKI_JOURNAL_WEBHOOK_E004',
-  /** `encryptionKey` is not 32 bytes of base64. */
+  /** `encryptionKey` is not 32 bytes of base64.
+   * @fix Configure encryptionKey as a base64-encoded 32-byte key.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   badEncryptionKey: 'ARKI_JOURNAL_WEBHOOK_E005',
-  /** The subscriber answered with a status other than 2xx. The worker retries it. */
+  /** The subscriber answered with a status other than 2xx. The worker retries it.
+   * @fix Inspect the subscriber response and restore its successful 2xx handling; let the worker retry delivery.
+   * @verify bun run test -- src/http/webhooks.test.ts
+   */
   deliveryFailed: 'ARKI_JOURNAL_WEBHOOK_E006',
 } as const;
 

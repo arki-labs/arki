@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 import { Deadline } from '@arki/async';
 import { TransactionDefect } from '@arki/db/transaction';
-import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { JournalError } from '../errors.js';
@@ -90,6 +90,12 @@ const flaky = j
   .step('after', () => 'never')
   .finish();
 
+const ProviderRefused = defineFailure('test.provider_refused', { message: 'provider-private-reference' });
+const refused = j
+  .workflow('test.refused', { version: 1, input: z.object({}) })
+  .step('provider', () => ProviderRefused(), { retry: noRetry })
+  .finish();
+
 const charge = j
   .workflow('test.charge', { version: 1, input: z.object({ paymentId: z.string() }) })
   .step(
@@ -150,7 +156,7 @@ const misrouted = {
 };
 
 const journal = j.compose({
-  workflows: [sum, guarded, hunt, flaky, charge, running, hanging, small, misrouted],
+  workflows: [sum, guarded, hunt, flaky, refused, charge, running, hanging, small, misrouted],
   workflowMeta,
 });
 
@@ -321,6 +327,21 @@ describe('when and next', () => {
 });
 
 describe('failure, retry and the key', () => {
+  it('keeps provider diagnostics in the operator checkpoint, outside the dead-job public failure', async () => {
+    const id = newId('refused');
+    orThrow(await journal.run(db, refused.start, { input: {}, id }, caller));
+    await settle();
+
+    const [dead] = await jobsOf(id);
+    expect(dead?.deadAt).toBeInstanceOf(Date);
+    expect(dead?.lastError).toContain('journal.workflow.step_dead');
+    expect(dead?.lastError).not.toContain('provider-private-reference');
+    expect(dead?.lastError).not.toContain(id);
+    const checkpoint = await stepRow(id, 'provider');
+    expect(checkpoint?.error).toContain('provider-private-reference');
+    expect(await runRow(id)).toMatchObject({ state: 'running', node: 'provider' });
+  });
+
   it('a failing step retries on its own backoff with one key, then waits dead for an operator while the run stays running', async () => {
     const id = newId('flaky');
     orThrow(await journal.run(db, flaky.start, { input: {}, id }, caller));

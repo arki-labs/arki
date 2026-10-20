@@ -42,10 +42,26 @@ export { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 export type { QueueClient, QueueClientOptions } from './queue-client.ts';
 
 export const QUEUE_PLUGIN_ERROR_CODES = {
+  /**
+   * @fix Check Redis connectivity and worker context creation; raise startupTimeoutMs only when startup legitimately needs longer.
+   * @verify bun run test -- src/dot.spec.ts
+   */
   startupTimeout: 'ARKI_QUEUE_E001',
+  /**
+   * @fix Start the app once, or stop the queue worker before starting it again.
+   * @verify bun run test -- src/dot.spec.ts
+   */
   doubleStart: 'ARKI_QUEUE_E002',
+  /**
+   * @fix Stop only after successful startup or let the Dot lifecycle manage shutdown.
+   * @verify bun run test -- src/dot.spec.ts
+   */
   stopBeforeStart: 'ARKI_QUEUE_E003',
-  clientMissing: 'ARKI_QUEUE_E006',
+  /**
+   * @fix Mount queue({ connection }) before feature registration and queueWorker startup.
+   * @verify bun run test -- src/dot.spec.ts
+   */
+  clientMissing: 'ARKI_QUEUE_E019',
 } as const;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
@@ -477,7 +493,7 @@ function queueClientOf(ctx: object, pluginName: string): QueueClient {
     code: QUEUE_PLUGIN_ERROR_CODES.clientMissing,
     message: `[queue] worker "${pluginName}" found no queue client under "queue".`,
     remediation: 'Mount queue({ connection }) with .use(...) before .features(...) and .serve(queueWorker(...)).',
-    docsSlug: 'arki-queue-e006',
+    docsSlug: 'arki-queue-e019',
   });
 }
 

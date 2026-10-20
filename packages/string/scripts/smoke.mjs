@@ -37,7 +37,9 @@ check('escape regexp', s.escapeRegExp('.b'), String.raw`\.b`); // a leading alph
 check('interpolate', s.interpolate('Hi {{ name }}', { name: 'Ada' }), 'Hi Ada');
 check('slug', s.slugify('Привет мир & fooBar'), 'privet-mir-and-foo-bar');
 check('base64 roundtrip', s.fromBase64(s.toBase64('crème brûlée 👋')), 'crème brûlée 👋');
-check('base64 strict', s.tryFromBase64('Zg='), null);
+check('base64 strict', s.InvalidBase64.is(s.tryFromBase64('Zg=')), true);
+check('utf8 strict', s.InvalidUtf8.is(s.fromBase64('/w==')), true);
+check('surrogate strict', s.InvalidUtf8.is(s.toBase64('\uD800')), true);
 check('readability level', s.fleschReadingEaseLevel(95), 'Very Easy');
 check('readability syllables', s.syllableCount('justification table'), 7);
 check('keywords', s.keywords('deep learning, deep learning', { length: 2 })[0]?.keyword, 'deep learning');

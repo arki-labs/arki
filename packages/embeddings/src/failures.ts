@@ -10,6 +10,10 @@ import type { EmbeddingSpace, TokenCount } from './types.js';
 
 const isObject = (value: unknown): boolean => typeof value === 'object' && value !== null;
 
+/**
+ * @fix Wait retryAfterMs (when set) and try again, or wrap the embedder in withResilience.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const RateLimited = defineFailure('embeddings.rate_limited', {
   status: 429,
   data: z.object({ retryAfterMs: z.number().optional() }),
@@ -17,6 +21,10 @@ export const RateLimited = defineFailure('embeddings.rate_limited', {
   remediation: 'Wait retryAfterMs (when set) and try again, or wrap the embedder in withResilience.',
 });
 
+/**
+ * @fix Split the text into smaller chunks before embedding it.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const InputTooLong = defineFailure('embeddings.input_too_long', {
   status: 400,
   data: z.object({ index: z.number(), tokens: z.custom<TokenCount>(isObject), max: z.number() }),
@@ -24,6 +32,10 @@ export const InputTooLong = defineFailure('embeddings.input_too_long', {
   remediation: 'Split the text into smaller chunks before embedding it.',
 });
 
+/**
+ * @fix not-pulled: run `ollama pull <model>`; unreachable: start the server or fix the base URL; peer-missing: install the provider SDK peer.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const ModelUnavailable = defineFailure('embeddings.model_unavailable', {
   status: 503,
   data: z.object({
@@ -35,6 +47,10 @@ export const ModelUnavailable = defineFailure('embeddings.model_unavailable', {
     'not-pulled: run `ollama pull <model>`; unreachable: start the server or fix the base URL; peer-missing: install the provider SDK peer.',
 });
 
+/**
+ * @fix Remove the unsupported input part or option, or select a model that supports it.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const UnsupportedInput = defineFailure('embeddings.unsupported_input', {
   status: 400,
   data: z.object({
@@ -43,14 +59,24 @@ export const UnsupportedInput = defineFailure('embeddings.unsupported_input', {
     part: z.enum(['text', 'image', 'batch', 'dimensions', 'quantization', 'truncate']),
   }),
   message: 'the model does not support this {part} (input {index})',
+  remediation: 'Remove the unsupported input part or option, or select a model that supports it.',
 });
 
+/**
+ * @fix Inspect the provider response and adapter validation; use a provider and model returning the required finite embedding vector shape.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const InvalidOutput = defineFailure('embeddings.invalid_output', {
   status: 502,
   data: z.object({ reason: z.string() }),
   message: 'the provider answered an unusable embedding: {reason}',
+  remediation: 'Inspect the provider response and adapter validation; use a provider and model returning the required finite embedding vector shape.',
 });
 
+/**
+ * @fix Re-embed the corpus in the new space, or configure the model the index was built with.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const SpaceMismatch = defineFailure('embeddings.space_mismatch', {
   status: 409,
   data: z.object({ expected: z.custom<EmbeddingSpace>(isObject), actual: z.custom<EmbeddingSpace>(isObject) }),
@@ -58,15 +84,25 @@ export const SpaceMismatch = defineFailure('embeddings.space_mismatch', {
   remediation: 'Re-embed the corpus in the new space, or configure the model the index was built with.',
 });
 
+/**
+ * @fix Start a new request with an active AbortSignal if the embedding is still needed.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const Cancelled = defineFailure('embeddings.cancelled', {
   status: 499,
   message: 'the embedding call was cancelled',
+  remediation: 'Start a new request with an active AbortSignal if the embedding is still needed.',
 });
 
+/**
+ * @fix Correct the configured provider, model and connection settings identified by the configuration failure.
+ * @verify bun run test -- src/failures.test.ts src/embed.test.ts
+ */
 export const ConfigurationFailure = defineFailure('embeddings.configuration', {
   status: 500,
   data: z.object({ message: z.string() }),
   message: 'embeddings are misconfigured: {message}',
+  remediation: 'Correct the configured provider, model and connection settings identified by the configuration failure.',
 });
 
 export type RateLimited = ReturnType<typeof RateLimited>;

@@ -57,17 +57,35 @@ export {
  * dispatcher answers them with the right HTTP status (409, or 400 for the purge bound).
  */
 export const JOURNAL_JOBS_ERROR_CODES = {
-  /** The job (or the set of jobs) changed since the preview the approval pinned. HTTP 409. */
+  /** The job (or the set of jobs) changed since the preview the approval pinned. HTTP 409.
+   * @fix Refresh the job preview and obtain approval for its current revision before executing.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   staleRevision: 'ARKI_JOURNAL_E001',
-  /** The action needs a dead job and the job is not dead, or is gone. HTTP 409. */
+  /** The action needs a dead job and the job is not dead, or is gone. HTTP 409.
+   * @fix Select an existing dead job; refresh its state before retrying or discarding it.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   notDead: 'ARKI_JOURNAL_E002',
-  /** The purge bound is shorter than `journal.retention.retryableFor`. HTTP 400. */
+  /** The purge bound is shorter than `journal.retention.retryableFor`. HTTP 400.
+   * @fix Set the purge age at least as long as journal.retention.retryableFor.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   boundTooShort: 'ARKI_JOURNAL_E003',
-  /** Cancel needs a ready or delayed job and the job is running, dead or gone. HTTP 409. */
+  /** Cancel needs a ready or delayed job and the job is running, dead or gone. HTTP 409.
+   * @fix Cancel only a ready or delayed job; refresh the job state first.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   notPending: 'ARKI_JOURNAL_E004',
-  /** Replay is blocked by an unfinished job that holds the same dedupe key. HTTP 409. */
+  /** Replay is blocked by an unfinished job that holds the same dedupe key. HTTP 409.
+   * @fix Wait for or reconcile the unfinished job holding the dedupe key before replaying.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   exists: 'ARKI_JOURNAL_E005',
-  /** The job belongs to a workflow run, so the raw job actions refuse it. HTTP 409. */
+  /** The job belongs to a workflow run, so the raw job actions refuse it. HTTP 409.
+   * @fix Use the workflow operations for this job instead of raw job actions.
+   * @verify bun run test -- src/foreman/index.test.ts
+   */
   managed: 'ARKI_JOURNAL_E006',
 } as const;
 

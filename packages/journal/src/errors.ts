@@ -217,43 +217,61 @@ const CommandRefusal = z.object({ detail: z.string() });
  * transaction rolls back, exactly as for a throw, and `journal.run` returns the same
  * failure to the caller. `detail` is the message, written for the client. An app may
  * return its own `defineFailure` values too; any failure rolls the command back.
+ * @fix Check the resource identifier and use an existing resource visible to this command.
+ * @verify bun run test -- src/returned-failure.test.ts
  */
 export const CommandNotFound = defineFailure('journal.not_found', {
   status: 404,
   data: CommandRefusal,
   message: '{detail}',
+  remediation: 'Check the resource identifier and use an existing resource visible to this command.',
 });
 /** A {@link CommandNotFound} failure value. */
 export type CommandNotFound = ReturnType<typeof CommandNotFound>;
 
-/** The request is wrong in a way the input schema cannot see. See {@link CommandNotFound}. */
+/** The request is wrong in a way the input schema cannot see. See {@link CommandNotFound}.
+ * @fix Correct the domain request described by the client-facing detail before submitting again.
+ * @verify bun run test -- src/returned-failure.test.ts
+ */
 export const CommandInvalid = defineFailure('journal.invalid', {
   status: 400,
   data: CommandRefusal,
   message: '{detail}',
+  remediation: 'Correct the domain request described by the client-facing detail before submitting again.',
 });
 /** A {@link CommandInvalid} failure value. */
 export type CommandInvalid = ReturnType<typeof CommandInvalid>;
 
-/** The caller may not do this. See {@link CommandNotFound}. */
+/** The caller may not do this. See {@link CommandNotFound}.
+ * @fix Use a caller authorized for this command; do not retry the same unauthorized request.
+ * @verify bun run test -- src/returned-failure.test.ts
+ */
 export const CommandForbidden = defineFailure('journal.forbidden', {
   status: 403,
   data: CommandRefusal,
   message: '{detail}',
+  remediation: 'Use a caller authorized for this command; do not retry the same unauthorized request.',
 });
 /** A {@link CommandForbidden} failure value. */
 export type CommandForbidden = ReturnType<typeof CommandForbidden>;
 
-/** The current state does not allow it, such as an order that is already paid. See {@link CommandNotFound}. */
+/** The current state does not allow it, such as an order that is already paid. See {@link CommandNotFound}.
+ * @fix Refresh the resource state and choose an operation permitted by its current state.
+ * @verify bun run test -- src/returned-failure.test.ts
+ */
 export const CommandConflict = defineFailure('journal.conflict', {
   status: 409,
   data: CommandRefusal,
   message: '{detail}',
+  remediation: 'Refresh the resource state and choose an operation permitted by its current state.',
 });
 /** A {@link CommandConflict} failure value. */
 export type CommandConflict = ReturnType<typeof CommandConflict>;
 
-/** The pinned workflow code is unavailable or incompatible; keep the run unchanged until an operator restores it. */
+/** The pinned workflow code is unavailable or incompatible; keep the run unchanged until an operator restores it.
+ * @fix Restore the pinned workflow version and original node shape before resuming the run.
+ * @verify bun run test -- src/returned-failure.test.ts
+ */
 export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
   status: 409,
   data: z.object({
@@ -264,6 +282,7 @@ export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
     detail: z.string(),
   }),
   message: '{detail}',
+  remediation: 'Restore the pinned workflow version and original node shape before resuming the run.',
 });
 export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
 

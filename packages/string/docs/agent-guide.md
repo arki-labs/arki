@@ -7,8 +7,8 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 1. Each concern has its own subpath: `/case`, `/format`, `/slug`, `/base64`, `/readability`, and more. The root `@arki/string` re-exports all of them.
 2. Functions are plain and pure. `str(value)` from `/fluent` wraps the same functions in an immutable chain.
 3. Lengths and positions count graphemes (what a reader sees). Native `.length` counts UTF-16 units.
-4. Failures are `StringError` with a code. Wrong types are not checked.
-5. The package has no dependencies and runs on Node, Bun, Deno, browsers and Hermes.
+4. Encoding failures are canonical values from `@arki/failure`; narrow with `isFailure`. Other static misuse uses `StringError`. Wrong types are not checked.
+5. The package depends on `@arki/failure` and runs on Node, Bun, Deno, browsers and Hermes.
 
 ## Task map
 
@@ -39,8 +39,9 @@ if (cut !== 'The quick…') throw new Error(cut);
 
 ### Decode base64 from a user
 
-1. Use `tryFromBase64` when bad input is normal. It returns `null`.
-2. Use `fromBase64` when bad input is a bug. It throws `ARKI_STRING_E003`, or `ARKI_STRING_E002` when the bytes are not UTF-8.
+1. Call `fromBase64` and narrow with `isFailure` before using the text.
+2. `InvalidBase64` (`string.invalid_base64`) identifies malformed base64; `InvalidUtf8` (`string.invalid_utf8`) identifies invalid text bytes.
+3. Breaking: `tryFromBase64` aliases `fromBase64`; replace null checks and catches with failure narrowing. Fluent codecs also return failures or `StringValue`.
 
 ### Fill a template
 
@@ -61,17 +62,17 @@ if (cut !== 'The quick…') throw new Error(cut);
 - `interpolate` keys are flat identifiers. `{{ a.b }}` is `ARKI_STRING_E004`.
 - `Boolean(str(''))` is `true`. Use `.isEmpty()`.
 - Chinese and Korean slugs need `@arki/string/slug-cjk`.
-- The functions throw. Wrap user input in `tryFromBase64` or catch `StringError`.
+- Encoding functions return failures. Static misuse in other APIs still throws `StringError`.
 
 ## Errors
 
-| Code               | Meaning                                                                | What to do                                        |
-| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| `ARKI_STRING_E001` | An argument is out of range: empty needle, negative length, bad glyph. | Check the argument against the reference.         |
-| `ARKI_STRING_E002` | Text or bytes are not valid UTF-8.                                     | Pass well-formed text, or use `tryFromBase64`.    |
-| `ARKI_STRING_E003` | Input is not strict base64.                                            | Fix padding and alphabet, or use `tryFromBase64`. |
-| `ARKI_STRING_E004` | A placeholder is malformed.                                            | Write `{{ name }}` and close every `{{`.          |
-| `ARKI_STRING_E005` | A placeholder has no value and `missing` is `'throw'`.                 | Pass the value, or set `missing`.                 |
+| Code                    | Meaning                                                                | What to do                                                 |
+| ----------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `ARKI_STRING_E001`      | An argument is out of range: empty needle, negative length, bad glyph. | Check the argument against the reference.                  |
+| `string.invalid_utf8`   | Text or bytes are not valid UTF-8.                                     | Pass well-formed text, and handle the returned failure.    |
+| `string.invalid_base64` | Input is not strict base64.                                            | Fix padding and alphabet, and handle the returned failure. |
+| `ARKI_STRING_E004`      | A placeholder is malformed.                                            | Write `{{ name }}` and close every `{{`.                   |
+| `ARKI_STRING_E005`      | A placeholder has no value and `missing` is `'throw'`.                 | Pass the value, or set `missing`.                          |
 
 ## Verify
 

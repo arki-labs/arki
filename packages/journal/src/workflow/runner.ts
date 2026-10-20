@@ -134,11 +134,15 @@ const retriedChildId = (runId: string, id: string) => {
   return next;
 };
 
-/** What a step's last attempt returns to the worker when the step is dead: the job dies at once and an operator can revive it. */
+/** What a step's last attempt returns to the worker when the step is dead: the job dies at once and an operator can revive it.
+ * @fix Inspect the dead step and its private failure, repair the cause, then retry or resolve the step through workflow operations.
+ * @verify bun run test -- src/workflow/runner.test.ts
+ */
 const StepDead = defineFailure('journal.workflow.step_dead', {
   status: 500,
   data: z.object({ detail: z.string() }),
   message: '{detail}',
+  remediation: 'Inspect the workflow checkpoint, repair the cause, then retry or resolve the step.',
 });
 
 /** The arguments of `def.start`. */
@@ -2573,7 +2577,10 @@ export function createWorkflows<
         path: data.path,
         attempt: data.attempt,
       });
-      return StepDead({ detail: `step '${data.path}' of run ${runId} is dead: ${error}` });
+      return StepDead(
+        { detail: 'A workflow step exhausted its retry policy and needs operator attention.' },
+        { cause: verdict.reason },
+      );
     }
 
     /**

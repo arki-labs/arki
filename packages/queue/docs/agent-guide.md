@@ -98,3 +98,7 @@ Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 Use `timeoutMs` and honor `ctx.signal`. Deadline/cancellation waits for settlement; external effects still require idempotency after a crash. Telemetry configuration belongs in the app; the worker restores producer context and records an execution span by default.
 
 A middleware can return a defined failure directly: `q.middleware(async () => AccessRefused())`. `.use()` adds that exact failure to the job output union; returning it stops before the handler. `next()` retains its `{ ctx, output }` protocol and may be called once. A malformed middleware result becomes `UnexpectedDefect`. Retry keys `attempts`/`backoff` belong to the shared `retry` option and cannot be overridden through native BullMQ options. Flow data mappers declare job input only; mapper defects/refusals fail submission before opening Redis.
+
+## Queue client diagnostic
+
+A worker without its queue client raises `ARKI_QUEUE_E019` (`QUEUE_PLUGIN_ERROR_CODES.clientMissing`). Mount `queue({ connection })` before features and worker startup. `ARKI_QUEUE_E006` remains the missing-name builder diagnostic; older releases used it for both conditions.

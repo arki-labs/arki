@@ -17,6 +17,8 @@ import { fileId } from './schemas.js';
  * the call. One failure for all three on purpose, so a caller cannot probe which
  * files exist; the debug log says which it was. `fileId` is the id the caller
  * asked for, and is absent when the policy refused a new upload.
+ * @fix Check the file id and that this user may use the file.
+ * @verify bun run test -- src/files/files.test.ts
  */
 export const FileUnavailable = defineFailure('fs.file_unavailable', {
   status: 404,
@@ -28,7 +30,10 @@ export const FileUnavailable = defineFailure('fs.file_unavailable', {
 /** Declared refusals of upload creation, including failure before an object key or row exists. */
 export const CREATE_UPLOAD_FAILURES = [FileUnavailable, ...ID_GENERATION_FAILURES] as const;
 
-/** Confirm came before the PUT finished. The row stays pending, so confirming again later is fine. */
+/** Confirm came before the PUT finished. The row stays pending, so confirming again later is fine.
+ * @fix Finish the PUT to the ticket URL, then confirm again.
+ * @verify bun run test -- src/files/files.test.ts
+ */
 export const UploadPending = defineFailure('fs.upload_pending', {
   status: 409,
   data: z.object({ fileId: fileId.schema }),
@@ -40,6 +45,8 @@ export const UploadPending = defineFailure('fs.upload_pending', {
  * The file is not in the state the call needs: a URL for a file that is not
  * ready, a confirm on a file being deleted, or a confirm after the window passed.
  * The debug log says which.
+ * @fix Confirm a pending upload before you ask for its URL; a deleted or expired upload needs a new upload.
+ * @verify bun run test -- src/files/files.test.ts
  */
 export const FileWrongState = defineFailure('fs.file_wrong_state', {
   status: 409,
@@ -48,7 +55,10 @@ export const FileWrongState = defineFailure('fs.file_wrong_state', {
   remediation: 'Confirm a pending upload before you ask for its URL; a deleted or expired upload needs a new upload.',
 });
 
-/** The stored size, type or hash differs from the upload request. The row is now deleting. */
+/** The stored size, type or hash differs from the upload request. The row is now deleting.
+ * @fix Upload the file again, with the size and type the upload request declared.
+ * @verify bun run test -- src/files/files.test.ts
+ */
 export const UploadMismatch = defineFailure('fs.upload_mismatch', {
   status: 422,
   data: z.object({ fileId: fileId.schema, reason: z.string() }),

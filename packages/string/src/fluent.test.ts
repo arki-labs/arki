@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import { isFailure, orThrow } from '@arki/failure';
+
+import { InvalidBase64, InvalidUtf8 } from './base64.js';
 import { str, StringValue } from './fluent.js';
 
 describe('str()', () => {
@@ -90,7 +93,7 @@ describe('str()', () => {
     expect(str('x').padBoth(4, '.').value()).toBe('.x..');
     expect(str('<b>').escapeHtml().value()).toBe('&lt;b&gt;');
     expect(str('Hi {{ n }}').interpolate({ n: 'Ada' }).value()).toBe('Hi Ada');
-    expect(str('hi').toBase64().fromBase64().value()).toBe('hi');
+    expect(orThrow(orThrow(str('hi').toBase64()).fromBase64()).value()).toBe('hi');
     expect(str('Ada Lovelace').initials().value()).toBe('AL');
     expect(str('a b c').words()).toEqual(['a', 'b', 'c']);
     expect(str('taylor@example.com').mask({ start: 3, end: -4 }).value()).toBe('tay***********.com');
@@ -117,4 +120,17 @@ describe('literal searches are grapheme-aligned', () => {
     expect(value.length).toBe(4);
     expect(value.length).toBe(4);
   });
+});
+
+it('fluent codecs preserve canonical failures and require narrowing before chaining', () => {
+  expectTypeOf<ReturnType<StringValue['toBase64']>>().toEqualTypeOf<StringValue | ReturnType<typeof InvalidUtf8>>();
+  expectTypeOf<ReturnType<StringValue['fromBase64']>>().toEqualTypeOf<
+    StringValue | ReturnType<typeof InvalidUtf8> | ReturnType<typeof InvalidBase64>
+  >();
+  expect(InvalidUtf8.is(str('\uD800').toBase64())).toBe(true);
+  expect(InvalidBase64.is(str('bad!').fromBase64())).toBe(true);
+  expect(InvalidUtf8.is(str('/w==').fromBase64())).toBe(true);
+  const value = str('aGk=').fromBase64();
+  if (isFailure(value)) throw new Error(value.code);
+  expect(value.upper().value()).toBe('HI');
 });

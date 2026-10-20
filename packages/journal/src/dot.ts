@@ -55,7 +55,13 @@ import { givenServices } from './handlers.js';
 
 export { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 
-export const JOURNAL_PLUGIN_ERROR_CODES = { badSlice: 'ARKI_JOURNAL_PLUGIN_E001' } as const;
+export const JOURNAL_PLUGIN_ERROR_CODES = {
+  /**
+   * @fix Declare the feature slice with journalHandlers, journalEffects, journalWorkflows or journalProjections from @arki/journal/dot.
+   * @verify bun run test -- src/dot-feature.test.ts
+   */
+  badSlice: 'ARKI_JOURNAL_PLUGIN_E001',
+} as const;
 
 /** One effect in the app manifest: async work that the journal's job table feeds in. */
 export type JournalDotAction = {
