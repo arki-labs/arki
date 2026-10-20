@@ -1,7 +1,6 @@
 ---
-"@arki/http": minor
-"@arki/payments": patch
-"@arki/journal": patch
+'@arki/http': minor
+'@arki/journal': patch
 ---
 
 Return exact canonical webhook signing, verification and request-preparation

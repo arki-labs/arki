@@ -1,6 +1,5 @@
 ---
 '@arki/contracts': minor
-'@arki/offline': minor
 ---
 
 Declare custom secure ID alphabets and lengths through `defineId`, retaining exact generation failures and canonical nominal types.

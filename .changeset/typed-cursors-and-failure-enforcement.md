@@ -1,10 +1,6 @@
 ---
 '@arki/contracts': minor
-'@arki/db': minor
 '@arki/failure': minor
-'@arki/dot': patch
-'@arki/eslint-config': patch
-'@arki/lock': minor
 ---
 
 Cursor encoding and decoding return canonical failures. Database pagination

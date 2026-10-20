@@ -87,8 +87,12 @@ export const config: ReleaseConfig = {
       // they ship dist+docs / drop `private: true`. `@arki/journal` joined
       // 2026-10-13 (Drizzle entity journal; depends on `@arki/log`, optional
       // `@arki/dot` peer). `@arki/live` joined 2026-10-17 (A-31: live queries;
-      // peers `@arki/db`, `@arki/http`, `@arki/dot`).
-      packages: ['@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live'],
+      // peers `@arki/db`, `@arki/http`, `@arki/dot`). `@arki/lock`,
+      // `@arki/mail` and `@arki/auth` joined 2026-10-20 (founder decision).
+      packages: [
+        '@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live',
+        '@arki/lock', '@arki/mail', '@arki/auth',
+      ],
     },
     {
       id: 'frontend',
@@ -150,9 +154,10 @@ export const config: ReleaseConfig = {
   // scorecard dimension fails a public package that is in no wave and not
   // listed here (ADMIT_E001), or in both (ADMIT_E002).
   notYet: [
-    { name: '@arki/auth', reason: 'awaiting security tests W2-02' },
-    { name: '@arki/lock', reason: 'admitted (A-28); joins a wave after its docs batch passes' },
-    { name: '@arki/mail', reason: 'Tier 1; joins a wave after its docs batch (B3) passes' },
+    {
+      name: '@arki/admin',
+      reason: 'public so @arki/journal can peer on it; first publish is Foreman F5-02 (0.1.0)',
+    },
   ],
 };
 

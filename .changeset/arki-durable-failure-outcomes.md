@@ -1,8 +1,5 @@
 ---
-"@arki/queue": minor
-"@arki/schedule": minor
-"@arki/journal": minor
-"@arki/payments": patch
+'@arki/journal': minor
 ---
 
 Preserve typed business failures across job execution, scheduled runs and durable

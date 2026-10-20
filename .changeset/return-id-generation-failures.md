@@ -1,10 +1,6 @@
 ---
-'@arki/contracts': minor
 '@arki/db': minor
 '@arki/auth': minor
-'@arki/fs': minor
-'@arki/testing': patch
-'@arki/waitlist': minor
 ---
 
 Return exact ID generation failures from `defineId` and Auth generators, preserving

@@ -1,6 +1,5 @@
 ---
 '@arki/contracts': minor
-'@arki/queue': minor
 ---
 
 Add UUID generation to canonical ID declarations and use one nominal Queue job

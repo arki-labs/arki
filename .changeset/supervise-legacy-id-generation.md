@@ -1,8 +1,5 @@
 ---
 '@arki/contracts': minor
-'@arki/db': minor
-'@arki/payments': minor
-'@arki/ai': minor
 ---
 
 Share bounded Web Crypto generation across modern and legacy IDs. Legacy

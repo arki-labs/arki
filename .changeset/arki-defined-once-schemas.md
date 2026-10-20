@@ -1,8 +1,5 @@
 ---
 '@arki/contracts': minor
-'@arki/db': minor
-'@arki/ai': minor
-'@arki/payments': minor
 ---
 
 Repair schema/type agreement across Drizzle validators, ID factories and AI configuration.

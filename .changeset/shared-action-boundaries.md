@@ -1,9 +1,6 @@
 ---
-'@arki/dot': minor
 '@arki/http': minor
 '@arki/auth': minor
-'@arki/mcp': minor
-'@arki/failure': minor
 ---
 
 RPC error maps retain their original failure definitions for exact revival by another contract adapter. Use `rpcFailureDefinitions` to read these references; wire JSON remains unchanged.

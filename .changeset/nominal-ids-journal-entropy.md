@@ -1,10 +1,7 @@
 ---
-"@arki/contracts": minor
-"@arki/db": minor
-"@arki/journal": minor
-"@arki/admin": minor
-"@arki/queue": minor
-"@arki/mail": minor
+'@arki/db': minor
+'@arki/journal': minor
+'@arki/mail': minor
 ---
 
 Add nominal domain kinds to `defineId(prefix, { kind })`, preserving canonical

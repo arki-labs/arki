@@ -1,11 +1,7 @@
 ---
-'@arki/dot': minor
 '@arki/db': minor
 '@arki/journal': minor
 '@arki/mail': minor
-'@arki/queue': minor
-'@arki/resilience': minor
-'@arki/schedule': minor
 ---
 
 Carry inferred failures through configure, boot, start, stop and dispose, with atomic service publication, rollback aggregation and supervised usecase invocation even without tracing. Configure now returns a typed outcome and remains synchronous with no I/O; logging activates during boot. Detached lifecycle callbacks must prove an undefined or concrete failure return rather than void.

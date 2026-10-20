@@ -1,6 +1,5 @@
 ---
 '@arki/auth': patch
-'@arki/queue': patch
 '@arki/journal': patch
 ---
 
