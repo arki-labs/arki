@@ -88,14 +88,21 @@ export async function parseFlowInput(flow: FlowDefinition, input: unknown): Prom
   return parseAsync(internal.inputSchema, input);
 }
 
-function collectJobIds(trees: readonly StepTree[], nodes: readonly JobNode[], into: Record<string, string>): void {
-  // BullMQ returns each node's children in the order they were given
+function collectJobIds(trees: readonly StepTree[], nodes: readonly JobNode[], into: Map<string, string>): boolean {
+  // A transport acknowledgement must cover the submitted tree exactly. Missing IDs
+  // cannot prove refusal: Redis may already have accepted every application job.
+  if (!Array.isArray(nodes) || nodes.length !== trees.length) return false;
   for (const [index, tree] of trees.entries()) {
     const node = nodes[index];
-    if (node === undefined) continue;
-    into[tree.step.id] = node.job.id ?? '';
-    collectJobIds(tree.children, node.children ?? [], into);
+    const id = node?.job?.id;
+    if (typeof id !== 'string' || id.length === 0) return false;
+    if (node.job.name !== tree.step.job._internal.name || node.job.queueName !== tree.step.job._internal.name) {
+      return false;
+    }
+    into.set(tree.step.id, id);
+    if (!collectJobIds(tree.children, node.children === undefined ? [] : node.children, into)) return false;
   }
+  return true;
 }
 
 /**
@@ -144,17 +151,16 @@ async function addFlowOwned(
   } catch (error) {
     return UnexpectedDefect({ cause: error });
   }
-  let nodes: JobNode[];
   try {
-    nodes = await openProducer().addBulk(jobs);
+    const nodes = await openProducer().addBulk(jobs);
+    const jobIds = new Map<string, string>();
+    if (!collectJobIds(stepTrees(internal), nodes, jobIds)) return QueueAcceptanceUnknown();
+    observeQueue(() =>
+      debugFlow.debug('[{flow}] Started flow with {roots} root job(s)', { flow: internal.name, roots: nodes.length }),
+    );
+    return { flow: internal.name, jobIds: Object.fromEntries(jobIds) };
   } catch (error) {
+    // Includes malformed acknowledgements with throwing accessors, after dispatch.
     return QueueAcceptanceUnknown({ cause: error });
   }
-
-  const jobIds: Record<string, string> = {};
-  collectJobIds(stepTrees(internal), nodes, jobIds);
-  observeQueue(() =>
-    debugFlow.debug('[{flow}] Started flow with {roots} root job(s)', { flow: internal.name, roots: nodes.length }),
-  );
-  return { flow: internal.name, jobIds };
 }

@@ -10,6 +10,7 @@
     "src/standard-schema.spec.ts",
     "src/dot.spec.ts",
     "src/flow-jobs.spec.ts",
+    "src/flow-acknowledgement.spec.ts",
     "src/queue-client.spec.ts",
     "src/real-jobs.spec.ts",
     "src/job-retry.spec.ts",

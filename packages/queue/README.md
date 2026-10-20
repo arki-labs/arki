@@ -899,3 +899,8 @@ Automatic keys remain UUID v4. Explicit `jobId` keys bypass secure randomness; B
 Handle `RandomSourceUnavailable` and `UnexpectedDefect` before retrying: these failures happen before
 submission. `QueueAcceptanceUnknown` still means a provider acknowledgement could not be confirmed;
 inspect the existing key before replaying. Native worker IDs and flow IDs retain their existing types.
+
+Flow enqueue returns `QueueAcceptanceUnknown` if its acknowledgement lacks any submitted node or
+nonempty job ID, contains extra nodes, or names a different job/queue. Accessor defects after
+submission return the same uncertainty. It never resubmits automatically: reconcile accepted jobs
+before retrying application effects. Confirmed IDs retain their provider bytes and every step key.
