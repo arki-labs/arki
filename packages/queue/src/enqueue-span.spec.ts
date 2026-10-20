@@ -13,6 +13,8 @@ import { InvalidInput, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 
 import type { QueueJobId } from './job-id.ts';
 import type { JobTriggerResult } from './trigger.ts';
+import type { FlowEnqueueFailure } from './flow-jobs.ts';
+import type { FlowEnqueueResult } from './types/builder.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
@@ -27,6 +29,7 @@ const transport = vi.hoisted(() => ({
       options: { jobId: string; telemetry?: { metadata?: string } },
     ) => Promise<{ id: string }>
   >(),
+  addBulk: vi.fn<BullMQ.FlowProducer['addBulk']>(),
 }));
 vi.mock('bullmq', async original => {
   const module = await original<typeof BullMQ>();
@@ -42,6 +45,12 @@ vi.mock('bullmq', async original => {
       on() {
         return this;
       }
+      close() {
+        return Promise.resolve();
+      }
+    },
+    FlowProducer: class {
+      addBulk = transport.addBulk;
       close() {
         return Promise.resolve();
       }
@@ -102,6 +111,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   transport.add.mockReset();
+  transport.addBulk.mockReset();
   context.disable();
   propagation.disable();
   trace.disable();
@@ -117,6 +127,93 @@ function job() {
     .input(schema)
     .handler(() => Promise.resolve('done'));
 }
+
+it('traces flow validation refusals before transport with the exact public result type', async () => {
+  const exporter = installTelemetry();
+  const flow = q.flow.name('declared-flow').input(schema).step('one', { job: job(), data: value => value }).build();
+  const handle = createQueueClient({ connection: 'redis://localhost:6379' });
+  try {
+    const _enqueue = () => handle.client.enqueue(flow, { n: 1 });
+    expectTypeOf<ReturnType<typeof _enqueue>>().toEqualTypeOf<Promise<FlowEnqueueResult | FlowEnqueueFailure>>();
+    // @ts-expect-error Untyped callers must fail before opening the transport.
+    const result = handle.client.enqueue(flow, { n: 'private input' });
+    expect(await result).toMatchObject({ code: InvalidInput.code });
+    expect(transport.addBulk).not.toHaveBeenCalled();
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.name).toBe('queue.flow.enqueue');
+    expect(spans[0]?.kind).toBe(SpanKind.PRODUCER);
+    expect(spans[0]?.attributes).toEqual({
+      'messaging.destination.name': 'declared-flow',
+      'failure.code': InvalidInput.code,
+    });
+    expect(spans[0]?.status).toEqual({ code: SpanStatusCode.ERROR });
+    expect(spans[0]?.events).toEqual([]);
+  } finally {
+    await handle.close();
+  }
+});
+
+it('propagates one flow producer context through the tree while preserving explicit telemetry', async () => {
+  const exporter = installTelemetry();
+  const parent = trace.getTracer('test').startSpan('caller');
+  const mapper = vi.fn((value: z.output<typeof schema>) => value);
+  const flow = q.flow
+    .name('declared-flow')
+    .input(schema)
+    .step('child', { job: job(), data: mapper })
+    .step('root', { job: job(), data: mapper, dependsOn: ['child'] })
+    .step('explicit', { job: job(), data: mapper, opts: { telemetry: { metadata: 'explicit' } } })
+    .build();
+  transport.addBulk.mockRejectedValue(new Error('private transport defect'));
+  const handle = createQueueClient({ connection: 'redis://localhost:6379' });
+  try {
+    const result = await context.with(trace.setSpan(context.active(), parent), () =>
+      handle.client.enqueue(flow, { n: 1 }),
+    );
+    expect(result).toMatchObject({ code: QueueAcceptanceUnknown.code });
+    expect(transport.addBulk).toHaveBeenCalledTimes(1);
+    expect(mapper).toHaveBeenCalledTimes(3);
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span?.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
+    const roots = transport.addBulk.mock.calls[0]?.[0];
+    const metadata = JSON.stringify({ 'span-id': span?.spanContext().spanId, 'trace-id': parent.spanContext().traceId });
+    expect(roots?.[0]?.opts?.telemetry?.metadata).toBe(metadata);
+    expect(roots?.[0]?.children?.[0]?.opts?.telemetry?.metadata).toBe(metadata);
+    expect(roots?.[1]?.opts?.telemetry?.metadata).toBe('explicit');
+    expect(span?.attributes).toEqual({
+      'messaging.destination.name': 'declared-flow',
+      'failure.code': QueueAcceptanceUnknown.code,
+    });
+    expect(span?.events).toEqual([]);
+  } finally {
+    parent.end();
+    await handle.close();
+  }
+});
+
+it('never repeats flow mapping or submission when context callbacks repeat and reporters reject', async () => {
+  installTelemetry();
+  vi.spyOn(context, 'with').mockImplementation((_current, callback) => {
+    callback();
+    callback();
+    return Promise.reject(new Error('private reporter'));
+  });
+  const mapper = vi.fn((value: z.output<typeof schema>) => value);
+  const flow = q.flow.name('declared-flow').input(schema).step('one', { job: job(), data: mapper }).build();
+  transport.addBulk.mockRejectedValue(new Error('private acceptance'));
+  const handle = createQueueClient({ connection: 'redis://localhost:6379' });
+  try {
+    expect(await handle.client.enqueue(flow, { n: 1 })).toMatchObject({ code: QueueAcceptanceUnknown.code });
+    expect(mapper).toHaveBeenCalledTimes(1);
+    expect(transport.addBulk).toHaveBeenCalledTimes(1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  } finally {
+    await handle.close();
+  }
+});
 
 it('keeps generic results and public enqueue success/failure inference exact', async () => {
   const value = { accepted: true };
@@ -407,8 +504,9 @@ it('keeps flow enqueue outside the single-job span boundary', async () => {
   try {
     expect(await handle.client.enqueue(flow, { n: Number.NaN })).toMatchObject({ code: InvalidInput.code });
     expect(await instance.enqueue(flow, { n: Number.NaN })).toMatchObject({ code: InvalidInput.code });
-    expect(exporter.getFinishedSpans()).toEqual([]);
+    expect(exporter.getFinishedSpans().map(span => span.name)).toEqual(['queue.flow.enqueue', 'queue.flow.enqueue']);
     expect(transport.add).not.toHaveBeenCalled();
+    expect(transport.addBulk).not.toHaveBeenCalled();
   } finally {
     await handle.close();
     await instance.stop();

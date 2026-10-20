@@ -20,12 +20,13 @@ function observe<Report>(report: () => Report): Report | undefined {
 export async function withEnqueueSpan<Value>(
   run: () => Value | Promise<Value>,
   jobName?: string,
+  spanName = 'queue.enqueue',
 ): Promise<Value | ReturnType<typeof UnexpectedDefect>> {
   const active = observe(() => context.active());
   const tracer = observe(() => trace.getTracer('@arki/queue'));
   const span = observe(() =>
     tracer?.startSpan(
-      'queue.enqueue',
+      spanName,
       {
         kind: SpanKind.PRODUCER,
         attributes: jobName === undefined ? {} : { 'messaging.destination.name': jobName },

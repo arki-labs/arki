@@ -17,6 +17,7 @@ import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { FlowDefinition, FlowEnqueueResult } from './types/builder.ts';
 import type { AnyJobDefinition } from './types/job.ts';
 import { debugFlow, observeQueue } from './debug.ts';
+import { withEnqueueSpan } from './enqueue-span.ts';
 import { jobDefaultOptions, jobRetryOptions } from './job-options.ts';
 import { jobTraceOptions } from './job-trace.ts';
 import { QueueAcceptanceUnknown } from './trigger.ts';
@@ -107,6 +108,15 @@ export async function addFlow(
   input: unknown,
 ): Promise<FlowEnqueueResult | FlowEnqueueFailure> {
   const internal = flow._internal as BuiltFlow;
+  return withEnqueueSpan(() => addFlowOwned(openProducer, flow, input, internal), internal.name, 'queue.flow.enqueue');
+}
+
+async function addFlowOwned(
+  openProducer: () => FlowProducer,
+  flow: FlowDefinition,
+  input: unknown,
+  internal: BuiltFlow,
+): Promise<FlowEnqueueResult | FlowEnqueueFailure> {
   const validated = await parseFlowInput(flow, input);
   if (InvalidInput.is(validated) || ValidatorDefect.is(validated)) return validated;
   let jobs: FlowJob[];
