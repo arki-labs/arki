@@ -7,6 +7,7 @@ They are accepted design requirements. The [execution record](../features/arki-f
 tracks implementation; acceptance does not imply that every package already complies.
 The six additions and broader application verification were accepted on
 2026-10-20 in [A-37](decisions.md#framework-consolidation-2026-10-19).
+Typed identities and branded domain values were added in A-38 on the same date.
 
 ## Define once, infer everywhere
 
@@ -16,6 +17,38 @@ and ordinary success values. See [A-33 and A-34](decisions.md#framework-consolid
 
 Verification must catch lost inference, widened failure unions and drift between
 runtime schemas and their source types through real consumer compositions.
+
+## Give identities and domain values distinct types
+
+Every kind of ID has a distinct domain type throughout the application, including
+internal IDs, external provider IDs, UUIDs and numeric IDs. Different ID kinds must
+not be interchangeable just because their underlying values share a format.
+The same domain identity keeps one type across layers.
+Use nominal brands where the representation alone cannot distinguish them; a
+renamed `string` alias does not establish identity.
+
+Prefer branded types for other strings with domain meaning or validation rules:
+email addresses, URLs, slugs, paths, tenant keys and external references. Choose
+brands for semantic distinctions that prevent mistakes. Ordinary free text can
+remain `string`; closed sets use their source-defined literal union when that
+already captures the distinction.
+
+Define each domain type once at its owning schema or definition. Infer it in
+tables, services, actions, RPC, jobs, AI tools and UI. Generators and validated
+constructors produce that type; external values pass through its canonical
+parser, with typed failures for invalid input. Do not manufacture brands with
+unchecked casts or repeat their declarations at each layer.
+
+Preserve domain types across composition and persistence adapters. Wire and
+database values retain their existing representation; the receiving codec or
+validated storage contract restores the domain type from its source definition.
+A compile-time brand does not replace runtime validation or authorization.
+
+Verification rejects cross-kind ID assignment, including IDs with identical
+formats, and raw values passed to branded APIs. Exact inference tests and real
+storage/transport round trips prove that brands survive composition and are
+restored at boundaries. Existing prefix-only IDs and plain-string domain values
+remain migration work until those checks pass.
 
 ## Own failures and execution
 

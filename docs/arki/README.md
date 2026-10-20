@@ -8,10 +8,11 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 
 ## Where things are
 
-The ten [core principles](principles.md) apply across all Arki packages and Dot
-plugins and features: precise inferred types, owned execution, proven portability,
-OpenTelemetry, composition, explicit authority, application inspection, durable
-business truth, reproducible behavior and bounded resource costs.
+The eleven [core principles](principles.md) apply across all Arki packages and Dot
+plugins and features: precise inferred types, distinct typed identities and branded
+domain values, owned execution, proven portability, OpenTelemetry, composition,
+explicit authority, application inspection, durable business truth, reproducible
+behavior and bounded resource costs.
 
 | File | What it holds |
 | --- | --- |
