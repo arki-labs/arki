@@ -94,6 +94,7 @@ describe('createIdbPersister', () => {
           {
             queryKey: ['story'],
             queryHash: '["story"]',
+            dehydratedAt: 4,
             state: {
               data: { createdAt, day, legacy },
               dataUpdateCount: 1,

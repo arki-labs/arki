@@ -151,7 +151,13 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
   with a private cause. `ID_GENERATION_FAILURES` declares these for adapters.
   This small synchronous entropy operation needs no separate OTel span; its
   calling operation observes and reports the returned failure.
-- **The generator uses Web Crypto.** Default bodies use `crypto.getRandomValues`;
+- **Stored generator formats are explicit.** Use `format: { alphabet, length }`
+  for existing nanoid-style bodies. The alphabet has 2–256 distinct, non-surrogate
+  UTF-16 characters; length is an integer from 1 to 256. Every position samples
+  the same alphabet uniformly, including the first. Definition copies and freezes
+  the format, so later caller mutations cannot change generation. Schemas still
+  validate only the stored prefix.
+- **The generator uses Web Crypto.** Default and custom bodies use `crypto.getRandomValues`;
   UUID-v4 declarations prefer `crypto.randomUUID`, falling back to 16 secure
   random bytes only when that method is not callable. Applications own any
   platform-backed provider initialization and must ensure it fails closed in
@@ -302,6 +308,7 @@ Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input f
 | --------------------- | ------------------------------- | ------------------------------------------------------ |
 | `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not a string.              |
 | `ARKI_CONTRACTS_E009` | `defineId`                      | The domain kind is missing, empty or not a string. |
+| `ARKI_CONTRACTS_E010` | `defineId` | Invalid generation format; use `uuid`, omit format, or provide a valid alphabet/length object. |
 | `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
 | `ARKI_CONTRACTS_E003` | legacy reserved exception code  | ID generation now returns `RandomSourceUnavailable`. |
 | `ARKI_CONTRACTS_E004` | `keyset`                        | No keys in the static declaration.               |
@@ -331,7 +338,7 @@ Cursor codecs return `contracts.invalid_cursor` or `contracts.invalid_cursor_val
 - **Key values.** A keyset key may not be NULL in a row. Order by NOT NULL columns, and end on a unique one.
 - **Cursors.** A cursor works only with the keyset that made it. Changing the order invalidates cursors already handed out.
 - **Prefixes.** Letters, digits and `_`. No two prefixes in one app may be equal or start one another (`sub` and `sub_`).
-- **Ids need secure randomness.** Default `create()` uses `crypto.getRandomValues`; UUID generation prefers `crypto.randomUUID`, with secure random bytes as its fallback. Default rejection sampling stops after 32 batches of 48 bytes; a provider that never supplies accepted bytes returns `UnexpectedDefect`. Missing providers return `RandomSourceUnavailable`; thrown faults and malformed output return `UnexpectedDefect`. There is no `Math.random` fallback.
+- **Ids need secure randomness.** Default `create()` uses `crypto.getRandomValues`; UUID generation prefers `crypto.randomUUID`, with secure random bytes as its fallback. Rejection sampling stops after 32 batches of twice the body length (48 bytes for default bodies); a provider that never supplies accepted bytes returns `UnexpectedDefect`. Missing providers return `RandomSourceUnavailable`; thrown faults and malformed output return `UnexpectedDefect`. There is no `Math.random` fallback.
 - **Operations.** A contract key may not contain `.` or use a name the query utils reserve.
 
 ## Documentation

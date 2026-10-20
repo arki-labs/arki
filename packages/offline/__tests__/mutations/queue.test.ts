@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { OPERATION, operations } from '@arki/contracts/orpc';
 
-import type { QueuedMutation, AnyRpcClient } from '../../src/mutations/queue.ts';
+import type { AnyRpcClient } from '../../src/mutations/queue.ts';
 import { offlineSafe } from '../../src/orpc/offline-safe-marker.ts';
 import * as idbKeyval from 'idb-keyval';
 

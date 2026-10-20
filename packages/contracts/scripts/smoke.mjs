@@ -78,6 +78,23 @@ if (typeof globalThis.crypto?.randomUUID === 'function' || typeof globalThis.cry
 
 // Controlled foreign-provider fixtures exercise the fallback even on native UUID engines.
 const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+const customFormat = { alphabet: '_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', length: 21 };
+const recordId = defineId('record_', { kind: 'offline.idempotency-record', format: customFormat });
+const lowerId = defineId('', {
+  kind: 'legacy.lower-id',
+  format: { alphabet: '0123456789abcdefghijklmnopqrstuvwxyz', length: 21 },
+});
+const generatedRecord = recordId.create();
+if (typeof globalThis.crypto?.getRandomValues === 'function') {
+  check(
+    /^record_[_\-\da-zA-Z]{21}$/.test(orThrow(generatedRecord)),
+    'custom generation retains the nanoid stored format',
+  );
+} else {
+  check(RandomSourceUnavailable.is(generatedRecord), 'custom generation without crypto is unavailable');
+}
+customFormat.alphabet = 'ab';
+customFormat.length = 1;
 const fallbackCrypto = {
   getRandomValues(bytes) {
     check(this === fallbackCrypto, 'UUID fallback retains the provider receiver');
@@ -86,6 +103,41 @@ const fallbackCrypto = {
   },
 };
 try {
+  let customCalls = 0;
+  const customCrypto = {
+    getRandomValues(bytes) {
+      check(this === customCrypto, 'custom generation retains the receiver');
+      check(bytes.byteLength === 42, 'custom batches scale with the configured length');
+      customCalls++;
+      bytes.fill(0);
+      bytes.set([255, 252, 251, 35, 36]);
+      return bytes;
+    },
+  };
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: customCrypto });
+  check(
+    recordId.create() === `record_ZWVxy${'_'.repeat(16)}`,
+    'nanoid alphabet mapping and frozen snapshot preserve stored bytes',
+  );
+  check(lowerId.create() === `zz0${'0'.repeat(18)}`, 'custom lower-alphanumeric format rejects biased byte ranges');
+  check(customCalls === 2, 'custom generation reads one batch for accepted samples');
+  const rejectedCrypto = {
+    getRandomValues: bytes => {
+      customCalls++;
+      return bytes.fill(255);
+    },
+  };
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: rejectedCrypto });
+  check(UnexpectedDefect.is(lowerId.create()), 'custom sampling fails closed on exhausted rejection budget');
+  check(customCalls === 34, 'custom rejection sampling stops after exactly 32 batches');
+  let invalidCustomFormat = false;
+  try {
+    defineId('', { kind: 'invalid', format: { alphabet: 'aa', length: 21 } });
+  } catch (error) {
+    invalidCustomFormat = error.code === 'ARKI_CONTRACTS_E010';
+  }
+  check(invalidCustomFormat, 'duplicate alphabet characters fail at definition time');
+
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: fallbackCrypto });
   check(jobId.create() === 'ffffffff-ffff-4fff-bfff-ffffffffffff', 'UUID fallback sets version and variant bits');
   check(jobId.schema.parse('legacy:job') === 'legacy:job', 'fallback preserves prefix-only stored schemas');
@@ -115,16 +167,19 @@ try {
 
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {} });
   check(RandomSourceUnavailable.is(jobId.create()), 'UUID without either provider is unavailable');
+  check(RandomSourceUnavailable.is(recordId.create()), 'custom format has canonical unavailability');
   Object.defineProperty(globalThis, 'crypto', {
     configurable: true,
     value: { getRandomValues: () => new Uint8Array(16) },
   });
   check(UnexpectedDefect.is(jobId.create()), 'UUID fallback rejects a different returned buffer');
+  check(UnexpectedDefect.is(recordId.create()), 'custom format rejects a different returned buffer');
   Object.defineProperty(globalThis, 'crypto', {
     configurable: true,
     value: { getRandomValues: () => Promise.reject(cause) },
   });
   check(UnexpectedDefect.is(jobId.create()), 'asynchronous fallback returns a synchronous defect');
+  check(UnexpectedDefect.is(recordId.create()), 'custom asynchronous output returns a supervised synchronous defect');
   // Let a rejected foreign provider surface if the library forgot to observe it.
   await Promise.resolve();
   await Promise.resolve();

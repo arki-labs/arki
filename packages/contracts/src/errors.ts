@@ -74,7 +74,7 @@ export const CONTRACTS_ERROR_CODES = {
   /**
    * `defineId` received an unsupported generation format.
    *
-   * @fix Use `format: 'uuid'` or omit format for the default 24-character body.
+   * @fix Use 'uuid', omit format, or supply 2–256 distinct non-surrogate UTF-16 alphabet characters and an integer length of 1–256.
    * @verify bun run test -- src/ids.test.ts
    */
   invalidIdFormat: 'ARKI_CONTRACTS_E010',
@@ -94,7 +94,8 @@ const REMEDIATIONS: Record<ContractsErrorCode, string> = {
   ARKI_CONTRACTS_E008: 'Use a supported Drizzle column builder and matching Drizzle version.',
   ARKI_CONTRACTS_E007: 'Pass a leaf of createOrpcUtils, or an object built by operations().',
   ARKI_CONTRACTS_E009: 'Supply a non-empty literal domain name, such as billing.refund.',
-  ARKI_CONTRACTS_E010: "Use format: 'uuid' or omit format for the default 24-character body.",
+  ARKI_CONTRACTS_E010:
+    "Use format: 'uuid', omit format, or supply { alphabet, length } with 2–256 distinct non-surrogate UTF-16 characters and an integer length of 1–256.",
 };
 
 /** A coded failure of an `@arki/contracts` function. */

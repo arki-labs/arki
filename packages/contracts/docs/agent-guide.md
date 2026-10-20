@@ -31,6 +31,29 @@ An available native provider that throws or returns invalid output produces
 `UnexpectedDefect`; it never triggers the fallback. Missing both secure providers
 returns `RandomSourceUnavailable`. Both paths preserve the exact failure union.
 
+For existing nanoid-style stored bodies, declare the format on the identity:
+
+```ts run
+import { defineId } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
+
+const recordId = defineId('', {
+  kind: 'offline.idempotency-record',
+  format: { alphabet: '_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', length: 21 },
+});
+const value = orThrow(recordId.create());
+if (!/^[_\-\da-zA-Z]{21}$/.test(value)) throw new Error('Stored format changed');
+```
+
+Custom formats require 2–256 distinct non-surrogate UTF-16 alphabet characters
+and an integer length of 1–256. Every position uses that alphabet uniformly;
+there is no letter-first rule. Parsing copies and freezes the format at definition
+time. The schema continues to validate only the prefix. Extra fields, generator
+hooks, duplicate characters, surrogate pairs and out-of-range values raise
+`ARKI_CONTRACTS_E010`. Rejection sampling uses at most 32 batches of twice the
+configured length, up to 16,384 total bytes; a broken provider returns the same
+exact `IdGenerationFailure` union. No weak source or global polyfill is installed.
+
 When the runtime lacks Web Crypto, initialize an application-owned provider
 backed by secure platform entropy before calling `create()`. It must fail closed
 when secure entropy is unavailable in every supported mode, including debugging.
@@ -86,7 +109,7 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 
 ## Errors
 
-Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `InvalidCursor`, `InvalidCursorValue`, `ValidatorDefect` or `UnexpectedDefect`; derive their exact per-operation unions from `CURSOR_DECODE_FAILURES` / `CURSOR_ENCODE_FAILURES`. ID generation returns `RandomSourceUnavailable` for missing/malformed providers and `UnexpectedDefect` for thrown access/provider faults, invalid output or exhausted rejection sampling (32 batches of 48 bytes). Causes are private. Match on canonical definitions.
+Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `InvalidCursor`, `InvalidCursorValue`, `ValidatorDefect` or `UnexpectedDefect`; derive their exact per-operation unions from `CURSOR_DECODE_FAILURES` / `CURSOR_ENCODE_FAILURES`. ID generation returns `RandomSourceUnavailable` for missing/malformed providers and `UnexpectedDefect` for thrown access/provider faults, invalid output or exhausted rejection sampling (32 batches of twice the body length; 48 bytes per default batch). Causes are private. Match on canonical definitions.
 
 | Code                  | Meaning                                                     | What to do                                                 |
 | --- | --- | --- |
@@ -98,7 +121,7 @@ Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `Inv
 | `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
 | `ARKI_CONTRACTS_E008` | A Drizzle builder has no runtime metadata config.           | Use a supported Drizzle builder and matching version.      |
 | `ARKI_CONTRACTS_E009` | `defineId` got a missing, empty or non-string domain kind. | Supply one non-empty literal domain name. |
-| `ARKI_CONTRACTS_E010` | `defineId` got an unsupported generation format. | Use `format: 'uuid'` or omit format. |
+| `ARKI_CONTRACTS_E010` | `defineId` got an unsupported generation format. | Use `'uuid'`, omit format, or supply `{ alphabet, length }`: 2–256 distinct non-surrogate UTF-16 characters and integer length 1–256. |
 | `ARKI_CONTRACTS_E007` | The value carries no operation.                             | Pass a `createOrpcUtils` leaf or an `operations()` result. |
 
 | Definition | Meaning | What to do |

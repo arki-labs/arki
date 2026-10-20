@@ -2,7 +2,10 @@ import { oc } from '@orpc/contract';
 import { createRouterClient, implement } from '@orpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { fakeLog } from '@arki/log/testing';
 
+import { IdempotencyStoreUnconfirmed } from '../../src/orpc/idempotency-failures';
 import type { IdempotencyStore, IdempotentContext } from '../../src/orpc/idempotency';
 import { idempotency } from '../../src/orpc/idempotency';
 import { offlineSafe } from '../../src/orpc/offline-safe-marker';
@@ -127,4 +130,25 @@ describe('idempotency middleware', () => {
 
     await expect(client.posts.create({ title: 'A' })).resolves.toEqual({ id: 'post_1' });
   });
+
+  it.each([RandomSourceUnavailable(), IdempotencyStoreUnconfirmed({ cause: new Error('private failure') })])(
+    'reports returned $code without losing the completed handler response',
+    async failure => {
+      const logs = fakeLog();
+      try {
+        const store = memoryStore();
+        vi.mocked(store.store).mockResolvedValueOnce(failure);
+        const { client, runs } = serve(store, signedIn({ 'Idempotency-Key': 'private key' }));
+        await expect(client.posts.create({ title: 'private input' })).resolves.toEqual({ id: 'post_1' });
+        expect(runs()).toBe(1);
+        expect(store.store).toHaveBeenCalledTimes(1);
+        expect(logs.records).toContainEqual(expect.objectContaining({
+          category: 'arki:offline:orpc', fields: { code: failure.code },
+        }));
+        expect(JSON.stringify(logs.records)).not.toMatch(/private (failure|key|input)/);
+      } finally {
+        logs.restore();
+      }
+    },
+  );
 });

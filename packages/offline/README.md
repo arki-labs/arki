@@ -135,7 +135,9 @@ It acts only on procedures whose contract meta says `offlineSafe: true`; every o
 2. Looks up `(idempotency_key, procedure_path, user_id)` in `offline_idempotency_keys`.
 3. Found within the 7-day TTL → returns the stored response **without re-running the handler**.
 4. Not found → runs the handler and stores its output on success.
-5. On error → stores nothing (the client can safely retry).
+5. A handler exception stores nothing. A cache-write failure is reported while the completed handler response is preserved; it never authorizes repeating that operation.
+
+`IdempotencyRepository.store()` returns exact canonical failures. Direct table inserts now require an explicit `idempotencyKeyId.create()` result, narrowed with `isFailure` before SQL. Stored IDs keep their `idk_` prefix and 21-character URL-safe body. Cache writes emit an `offline.idempotency.store` OTel span under the active application context. See [typed cache-write migration](docs/upgrades/idempotency-writes.md).
 
 On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@fleet/tanstack-start/orpc/client`), so it carries the procedure's identity:
 
@@ -291,7 +293,7 @@ await queue.deadLetter.discard(entries[0].id);
 
 ### Idempotency key collision
 
-Each queued mutation gets a ULID as its idempotency key. ULIDs are 128-bit random — collision probability is negligible in practice. Keys are also scoped by `(userId, procedurePath)` so cross-user collisions are impossible.
+Each queued mutation gets a 21-character URL-safe Nano ID as its idempotency key. Cache records have a separate nominal `idempotencyKeyId`, with the same random-body format and an `idk_` prefix. Cache lookup is scoped by `(userId, procedurePath, idempotencyKey)`; tokens from different users or procedures address different records.
 
 ### How to write an idempotent handler
 

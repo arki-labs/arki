@@ -14,16 +14,21 @@ import { sql } from 'drizzle-orm';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import pg from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
 import { startPostgresContainer } from '@arki/testing/containers';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
+import { idempotencyKeyId } from '../../src/orpc/idempotency-id';
+import { IdempotencyStoreUnconfirmed } from '../../src/orpc/idempotency-failures';
 import type { IdempotencyStore, IdempotentContext } from '../../src/orpc/idempotency';
 import type { IdempotencyDatabase } from '../../src/orpc/idempotency-repository';
 import { idempotency } from '../../src/orpc/idempotency';
 import { IdempotencyRepository } from '../../src/orpc/idempotency-repository';
-import { idempotencyKeys } from '../../src/orpc/idempotency-table';
+import { createIdempotencyTable, idempotencyKeys } from '../../src/orpc/idempotency-table';
 import { offlineSafe } from '../../src/orpc/offline-safe-marker';
 
 const contract = {
@@ -83,6 +88,7 @@ describe.each(legs)('idempotency on $name', leg => {
   }, 120_000);
 
   afterAll(() => close());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   beforeEach(async () => {
     await db.delete(idempotencyKeys);
@@ -124,6 +130,59 @@ describe.each(legs)('idempotency on $name', leg => {
     expect(runs()).toBe(1);
     const rows = await db.select().from(idempotencyKeys);
     expect(rows.map(row => row.procedurePath)).toEqual(['highlights.create']);
+    expect(rows[0]?.id).toMatch(/^idk_[\w-]{21}$/);
+  });
+
+  it('returns the original entropy refusal before attempting an insert', async () => {
+    const refusal = RandomSourceUnavailable();
+    vi.spyOn(idempotencyKeyId, 'create').mockReturnValueOnce(refusal);
+    const insert = vi.spyOn(db, 'insert');
+    const repo = new IdempotencyRepository(db, idempotencyKeys);
+    expect(await repo.store('key', 'posts.create', 'usr_1', { id: 'post_1' })).toBe(refusal);
+    expect(insert).not.toHaveBeenCalled();
+    expect(await db.select().from(idempotencyKeys)).toEqual([]);
+  });
+
+  it('fails closed without entropy and supervises a throwing provider before SQL', async () => {
+    vi.stubGlobal('crypto', {});
+    const insert = vi.spyOn(db, 'insert');
+    const repo = new IdempotencyRepository(db, idempotencyKeys);
+    expect(RandomSourceUnavailable.is(await repo.store('key', 'path', 'user', null))).toBe(true);
+    const cause = new Error('private entropy detail');
+    vi.stubGlobal('crypto', { getRandomValues() { throw cause; } });
+    const result = await repo.store('key', 'path', 'user', null);
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    expect(isFailure(result) && result.cause).toBe(cause);
+    expect(JSON.stringify(result)).not.toContain('private entropy detail');
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it('returns an unconfirmed write when the database rejects the statement', async () => {
+    const repo = new IdempotencyRepository(db, idempotencyKeys);
+    const result = await repo.store('x'.repeat(129), 'path', 'usr_1', { secret: 'private response' });
+    expect(IdempotencyStoreUnconfirmed.is(result)).toBe(true);
+    expect(isFailure(result) && result.cause).toBeDefined();
+    expect(JSON.stringify(result)).not.toContain('private response');
+    expect(await db.select().from(idempotencyKeys)).toEqual([]);
+  });
+
+  it('uses the same nominal definition in namespaced tables without an implicit default', async () => {
+    const namespaced = createIdempotencyTable(pgSchema('id09'));
+    await db.execute(sql`create schema if not exists id09`);
+    await db.execute(sql`create table id09.offline_idempotency_keys (like public.offline_idempotency_keys including all)`);
+    try {
+      const repo = new IdempotencyRepository(db, namespaced);
+      expect(await repo.store('key', 'path', 'usr_1', { id: 'response' })).toBeUndefined();
+      const rows = await db.select().from(namespaced);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toMatch(/^idk_[\w-]{21}$/);
+      expect(await repo.find('key', 'path', 'usr_1')).toEqual({ id: 'response' });
+      expect(namespaced.id.hasDefault).toBe(false);
+      expect(idempotencyKeys.id.hasDefault).toBe(false);
+      expect(idempotencyKeyId.schema.parse('idk_historical')).toBe('idk_historical');
+    } finally {
+      await db.execute(sql`drop schema id09 cascade`);
+    }
   });
 
   it('an unmarked procedure with the same key runs every time', async () => {
@@ -135,6 +194,7 @@ describe.each(legs)('idempotency on $name', leg => {
 
   it('an expired row does not answer: the replay runs again', async () => {
     await db.insert(idempotencyKeys).values({
+      id: orThrow(idempotencyKeyId.create()),
       idempotencyKey: 'k1',
       procedurePath: 'highlights.create',
       userId: 'usr_1',

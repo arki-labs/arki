@@ -49,6 +49,20 @@ type SingleKind<Kind extends string, All = Kind> = Kind extends ''
       : never
     : never;
 
+// Parse once at definition time: generation closes over a frozen copy, never caller state.
+const customIdFormatSchema = z
+  .strictObject({
+    alphabet: z
+      .string()
+      .min(2)
+      .max(256)
+      .refine(alphabet => !/[\uD800-\uDFFF]/u.test(alphabet) && new Set(alphabet).size === alphabet.length),
+    length: z.number().int().min(1).max(256),
+  })
+  .readonly();
+
+type IdFormat = 'uuid' | z.output<typeof customIdFormatSchema>;
+
 /**
  * Declare a prefixed id. The prefix is kept exactly as given, so a table
  * that already stores `hlgt_…` ids keeps working: switching a feature to
@@ -67,14 +81,16 @@ type SingleKind<Kind extends string, All = Kind> = Kind extends ''
 export function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>;
 /**
  * Give same-format IDs distinct domain types without changing their stored values.
- * `format: 'uuid'` generates UUID v4 with Web Crypto; omitting it keeps
- * the default 24-character body. Schemas still validate only the stored prefix.
+ * `format: 'uuid'` generates UUID v4; `{ alphabet, length }` uniformly samples
+ * 1–256 characters from 2–256 distinct, non-surrogate UTF-16 characters.
+ * The format is copied and frozen at definition time. Omitting it keeps the
+ * default 24-character body. Schemas still validate only the stored prefix.
  */
 export function defineId<const P extends string, const Kind extends string>(
   prefix: P,
   options: {
     readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>);
-    readonly format?: 'uuid';
+    readonly format?: IdFormat;
   },
 ): ReturnType<typeof brandedId<P, Kind>>;
 export function defineId(prefix: string, options?: unknown) {
@@ -93,13 +109,18 @@ export function defineId(prefix: string, options?: unknown) {
     );
   }
   const format: unknown = typeof options === 'object' && options !== null ? Reflect.get(options, 'format') : undefined;
-  if (format !== undefined && format !== 'uuid') {
-    throw new ContractsError(
-      CONTRACTS_ERROR_CODES.invalidIdFormat,
-      "defineId: format must be 'uuid' or omitted for the default 24-character body.",
-    );
+  if (format === undefined || format === 'uuid') return brandedId(prefix, kind, format);
+  return brandedId(prefix, kind, snapshotIdFormat(format));
+}
+
+function snapshotIdFormat(format: unknown) {
+  try {
+    return customIdFormatSchema.parse(format);
+  } catch (error) {
+    throw new ContractsError(CONTRACTS_ERROR_CODES.invalidIdFormat, 'defineId: invalid generation format.', {
+      cause: error,
+    });
   }
-  return brandedId(prefix, kind, format);
 }
 
 function prefixedIdSchema<const P extends string>(prefix: P) {
@@ -112,14 +133,14 @@ function prefixedId<const P extends string>(prefix: P) {
   return idDeclaration(prefix, prefixedIdSchema(prefix));
 }
 
-function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind, format?: 'uuid') {
+function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind, format?: IdFormat) {
   return idDeclaration(prefix, prefixedIdSchema(prefix).brand<Kind>(), format);
 }
 
 function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${string}`>>(
   prefix: P,
   schema: TSchema,
-  format?: 'uuid',
+  format?: IdFormat,
 ) {
   return {
     /** The stored prefix, unchanged. */
@@ -128,7 +149,12 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
     schema,
     /** A new prefixed ID, or a canonical failure when secure generation cannot finish. */
     create: (): z.output<typeof schema> | IdGenerationFailure => {
-      const body = format === 'uuid' ? createUuidBody() : createIdBody();
+      const body =
+        format === 'uuid'
+          ? createUuidBody()
+          : format === undefined
+            ? createIdBody()
+            : createRandomBody(format.length, format.alphabet, format.alphabet);
       if (isFailure(body)) return body;
       try {
         const result = schema.safeParse(`${prefix}${body}`);
@@ -148,8 +174,7 @@ const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const ALPHABET = `${LETTERS}0123456789`;
 const BODY_LENGTH = 24;
 
-const RANDOM_BATCH_SIZE = BODY_LENGTH * 2;
-// 1536 samples give rejection sampling ample room, while broken providers cannot loop forever.
+// Each batch samples twice the target length; 32 batches bound broken providers.
 const MAX_RANDOM_BATCHES = 32;
 
 /**
@@ -162,14 +187,19 @@ const MAX_RANDOM_BATCHES = 32;
  * buffer is read, by index, so provider-owned iterators cannot control the loop.
  */
 export function createIdBody(): string | IdGenerationFailure {
+  return createRandomBody(BODY_LENGTH, LETTERS, ALPHABET);
+}
+
+function createRandomBody(length: number, firstAlphabet: string, alphabet: string): string | IdGenerationFailure {
   try {
     const source: unknown = Reflect.get(globalThis, 'crypto');
     if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
     const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
     if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
     let out = '';
+    const batchSize = length * 2;
     for (let batch = 0; batch < MAX_RANDOM_BATCHES; batch++) {
-      const bytes = new Uint8Array(RANDOM_BATCH_SIZE);
+      const bytes = new Uint8Array(batchSize);
       // Web Crypto requires its receiver and returns the exact buffer passed in.
       const result: unknown = Reflect.apply(getRandomValues, source, [bytes]);
       if (result !== bytes) {
@@ -180,15 +210,15 @@ export function createIdBody(): string | IdGenerationFailure {
         });
         return UnexpectedDefect({ cause: new TypeError('Random provider returned a different buffer.') });
       }
-      for (let index = 0; index < RANDOM_BATCH_SIZE; index++) {
+      for (let index = 0; index < batchSize; index++) {
         const byte = bytes[index];
         if (byte === undefined)
           return UnexpectedDefect({ cause: new TypeError('Random provider detached its buffer.') });
-        const alphabet = out.length === 0 ? LETTERS : ALPHABET;
-        const limit = 256 - (256 % alphabet.length);
+        const characters = out.length === 0 ? firstAlphabet : alphabet;
+        const limit = 256 - (256 % characters.length);
         if (byte >= limit) continue;
-        out += alphabet[byte % alphabet.length];
-        if (out.length === BODY_LENGTH) return out;
+        out += characters[byte % characters.length];
+        if (out.length === length) return out;
       }
     }
     return UnexpectedDefect({ cause: new Error('Random provider exhausted the rejection sampling budget.') });

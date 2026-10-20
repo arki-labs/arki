@@ -1,10 +1,8 @@
-import { nanoid } from 'nanoid';
 import { jsonb, pgTable, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 import type { PgSchema } from 'drizzle-orm/pg-core';
 
-export type IdempotencyKeyId = `idk_${string}`;
-
-const createIdempotencyKeyId = (): IdempotencyKeyId => `idk_${nanoid()}`;
+import type { IdempotencyKeyId } from './idempotency-id';
+export type { IdempotencyKeyId } from './idempotency-id';
 
 const TABLE_NAME = 'offline_idempotency_keys';
 const UNIQUE_INDEX_NAME = 'offline_idk_key_path_user_idx';
@@ -14,8 +12,7 @@ function buildColumns() {
     id: varchar('id', { length: 128 })
       .notNull()
       .primaryKey()
-      .$type<IdempotencyKeyId>()
-      .$defaultFn(createIdempotencyKeyId),
+      .$type<IdempotencyKeyId>(),
     idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
     procedurePath: varchar('procedure_path', { length: 255 }).notNull(),
     userId: text('user_id').notNull(),

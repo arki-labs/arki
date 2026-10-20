@@ -5,6 +5,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen } from '@testing-library/react';
 
 import { OfflineBanner } from '../../src/status/OfflineBanner.tsx';
+import type { OfflineBannerProps } from '../../src/status/OfflineBanner.tsx';
 import { OfflineQueueProvider } from '../../src/mutations/OfflineQueueProvider.tsx';
 import type { OfflineMutationQueue, QueueEvent } from '../../src/mutations/queue.ts';
 
@@ -30,7 +31,7 @@ function makeQueueStub(overrides: Partial<Status> = {}): OfflineMutationQueue {
     },
     status: () => ({ queued: 0, sending: false, deadLettered: 0, ...overrides }),
     dispose: vi.fn(),
-  } as OfflineMutationQueue;
+  } satisfies OfflineMutationQueue;
 }
 
 describe('OfflineBanner — useSyncExternalStore snapshot contract', () => {
@@ -49,7 +50,7 @@ describe('OfflineBanner — useSyncExternalStore snapshot contract', () => {
     // If getSnapshot returns a fresh object on every call, React will throw
     // "Maximum update depth exceeded" during render. We assert the render
     // completes and the headless render-prop receives the expected defaults.
-    const childSpy = vi.fn(({ online, queued, deadLettered }) =>
+    const childSpy = vi.fn<OfflineBannerProps['children']>(({ online, queued, deadLettered }) =>
       createElement(
         'div',
         { 'data-testid': 'banner' },
@@ -57,7 +58,7 @@ describe('OfflineBanner — useSyncExternalStore snapshot contract', () => {
       ),
     );
 
-    render(createElement(OfflineBanner, null, childSpy));
+    render(createElement(OfflineBanner, { children: childSpy }));
 
     expect(screen.getByTestId('banner').textContent).toBe('online=true queued=0 dead=0');
     expect(childSpy).toHaveBeenCalled();
@@ -69,14 +70,17 @@ describe('OfflineBanner — useSyncExternalStore snapshot contract', () => {
     render(
       createElement(
         OfflineQueueProvider,
-        { queue },
-        createElement(OfflineBanner, null, ({ online, queued, deadLettered }) =>
-          createElement(
-            'div',
-            { 'data-testid': 'banner' },
-            `online=${online} queued=${queued} dead=${deadLettered}`,
-          ),
-        ),
+        {
+          queue,
+          children: createElement(OfflineBanner, {
+            children: ({ online, queued, deadLettered }) =>
+              createElement(
+                'div',
+                { 'data-testid': 'banner' },
+                `online=${online} queued=${queued} dead=${deadLettered}`,
+              ),
+          }),
+        },
       ),
     );
 

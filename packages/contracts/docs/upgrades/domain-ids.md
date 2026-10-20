@@ -80,6 +80,41 @@ faults, invalid output and asynchronous protocol violations return
 never triggers a fallback. `create()` retains its exact canonical failure union.
 Omitting format preserves the existing 24-character generation algorithm.
 
+Existing nanoid-style values can retain their exact stored alphabet and length:
+
+```ts run
+import { defineId } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
+
+const recordId = defineId('', {
+  kind: 'offline.idempotency-record',
+  format: { alphabet: '_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', length: 21 },
+});
+const lowerId = defineId('', {
+  kind: 'legacy.lower-id',
+  format: { alphabet: '0123456789abcdefghijklmnopqrstuvwxyz', length: 21 },
+});
+if (!/^[_\-\da-zA-Z]{21}$/.test(orThrow(recordId.create()))) throw new Error('Nanoid format changed');
+if (!/^[\da-z]{21}$/.test(orThrow(lowerId.create()))) throw new Error('Lowercase format changed');
+```
+
+Choose the alphabet order and length used by the existing generator. Each output
+position is uniformly sampled from that alphabet, including the first; this
+preserves the distribution of a uniform nanoid generator without a generator hook.
+Formats require 2–256 distinct non-surrogate UTF-16 characters and an integer
+length of 1–256. Characters outside the BMP are rejected because each output
+position must occupy one UTF-16 code unit. Invalid formats (including extra keys)
+throw `ContractsError` with `ARKI_CONTRACTS_E010` at definition time. The format
+is copied and frozen; mutating the supplied object later cannot change output.
+
+Custom generation uses the same supervised Web Crypto byte provider and exact
+`IdGenerationFailure` union. Rejection sampling runs at most 32 batches of twice
+the requested length (up to 16,384 bytes total). Missing providers return
+`RandomSourceUnavailable`; thrown faults, different/detached buffers,
+asynchronous output or an exhausted budget return `UnexpectedDefect`. Stored
+schema validation stays prefix-only; formatting generation does not invalidate
+older or externally assigned keys.
+
 An application on a runtime without Web Crypto must initialize its own provider
 backed by secure platform entropy before generation. It must fail closed when
 secure entropy is unavailable in every supported mode, including debugging. A

@@ -3,6 +3,7 @@ import type { Middleware, ORPCErrorConstructorMap } from '@orpc/server';
 import { ORPCError } from '@orpc/server';
 
 import { getLogger } from '@arki/log';
+import { isFailure } from '@arki/failure';
 
 import type { IdempotencyRepository } from './idempotency-repository';
 
@@ -69,11 +70,15 @@ export function idempotency(
 
     const result = await next();
     try {
-      await repo.store(idempotencyKey, procedurePath, userId, result.output);
+      const stored = await repo.store(idempotencyKey, procedurePath, userId, result.output);
+      if (isFailure(stored)) {
+        log.warn('could not cache the completed response: {code}', { code: stored.code });
+        return result;
+      }
       log.debug('stored the response of {procedurePath} for replays', { procedurePath });
-    } catch (error) {
-      // The handler already ran and the caller gets its answer; only a later replay loses the dedupe.
-      log.warn('could not store the response of {procedurePath} for replays: {error}', { procedurePath, error: error instanceof Error ? error : String(error) });
+    } catch {
+      // Custom stores/reporters may still throw. Neither can replace the completed response.
+      try { log.warn('could not cache the completed response'); } catch { /* Best-effort reporting. */ }
     }
     return result;
   };

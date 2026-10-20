@@ -55,7 +55,7 @@ describe('useQueueStatus', () => {
   it('renders with a fresh-object queue.status implementation without looping', () => {
     const queue = makeQueueStub({ queued: 2, sending: true, deadLettered: 1 });
 
-    render(createElement(OfflineQueueProvider, { queue }, createElement(QueueStatusView)));
+    render(createElement(OfflineQueueProvider, { queue, children: createElement(QueueStatusView) }));
 
     expect(screen.getByTestId('queue-status').textContent).toBe('queued=2 sending=true dead=1');
   });
@@ -69,7 +69,7 @@ describe('useOfflineMutation', () => {
     vi.mocked(queue.enqueue).mockResolvedValue({ idempotencyKey: 'k1', status: 'queued' });
 
     const { result } = renderHook(() => useOfflineMutation(carrier), {
-      wrapper: ({ children }) => createElement(OfflineQueueProvider, { queue }, children),
+      wrapper: ({ children }) => createElement(OfflineQueueProvider, { queue, children }),
     });
     const sent = await act(() => result.current.mutate({ text: 'hi' }));
 

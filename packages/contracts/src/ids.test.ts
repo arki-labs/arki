@@ -282,6 +282,204 @@ describe('ID generation failures', () => {
   });
 });
 
+describe('custom generation format', () => {
+  const nanoidAlphabet = '_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [nanoidAlphabet, /^record_[\w-]{21}$/],
+    ['0123456789abcdefghijklmnopqrstuvwxyz', /^record_[\da-z]{21}$/],
+  ] as const)('preserves the stored alphabet and length for %s', (alphabet, pattern) => {
+    const recordId = defineId('record_', { kind: 'offline.record', format: { alphabet, length: 21 } });
+    const values = Array.from({ length: 500 }, () => orThrow(recordId.create()));
+    for (const value of values) expect(value).toMatch(pattern);
+    expect(new Set(values).size).toBe(values.length);
+    expect(recordId.schema.parse('record_legacy:/')).toBe('record_legacy:/');
+  });
+
+  it.each([1, 21, 256])('uses the configured length %i for every position, including the first', length => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(0));
+    vi.stubGlobal('crypto', { getRandomValues });
+    const recordId = defineId('', { kind: 'offline.record', format: { alphabet: '0a', length } });
+    expect(recordId.create()).toBe('0'.repeat(length));
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(getRandomValues.mock.calls[0]?.[0].byteLength).toBe(length * 2);
+  });
+
+  it.each([
+    [nanoidAlphabet, nanoidAlphabet.repeat(4)],
+    ['0123456789abcdefghijklmnopqrstuvwxyz', `${'0123456789abcdefghijklmnopqrstuvwxyz'.repeat(7)}0123`],
+    ['abc', `${'abc'.repeat(85)}a`],
+    [
+      Array.from({ length: 256 }, (_, index) => String.fromCodePoint(index)).join(''),
+      Array.from({ length: 256 }, (_, index) => String.fromCodePoint(index)).join(''),
+    ],
+  ])('maps each accepted byte uniformly for alphabet %j', (alphabet, expected) => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        for (let index = 0; index < bytes.byteLength; index++) bytes[index] = index % 256;
+        return bytes;
+      },
+    });
+    expect(defineId('', { kind: 'uniform', format: { alphabet, length: 256 } }).create()).toBe(expected);
+  });
+
+  it.each([1, 21, 256])('bounds rejected custom sampling at 32 batches for length %i', length => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(255));
+    vi.stubGlobal('crypto', { getRandomValues });
+    expect(UnexpectedDefect.is(defineId('', { kind: 'bounded', format: { alphabet: 'abc', length } }).create())).toBe(
+      true,
+    );
+    expect(getRandomValues).toHaveBeenCalledTimes(32);
+    for (const [bytes] of getRandomValues.mock.calls) expect(bytes.byteLength).toBe(length * 2);
+  });
+
+  it('snapshots caller-owned options before later mutation can change stored formats', () => {
+    const format = { alphabet: '0a', length: 21 };
+    const options = { kind: 'offline.record', format } as const;
+    const recordId = defineId('record_', options);
+    format.alphabet = 'xy';
+    format.length = 1;
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0) });
+    expect(recordId.create()).toBe(`record_${'0'.repeat(21)}`);
+    expect(Object.isFrozen(format)).toBe(false);
+  });
+
+  it('reads custom configuration getters once, before generation', () => {
+    const alphabet = vi.fn(() => '0a');
+    const length = vi.fn(() => 21);
+    const format = {
+      get alphabet() {
+        return alphabet();
+      },
+      get length() {
+        return length();
+      },
+    };
+    const recordId = defineId('', { kind: 'offline.record', format });
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0) });
+    expect(recordId.create()).toBe('0'.repeat(21));
+    expect(recordId.create()).toBe('0'.repeat(21));
+    expect(alphabet).toHaveBeenCalledTimes(1);
+    expect(length).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports thrown static format access as coded definition misuse', () => {
+    const cause = new Error('private format configuration');
+    const format = {
+      get alphabet(): string {
+        throw cause;
+      },
+      length: 21,
+    };
+    expect(() => defineId('', { kind: 'offline.record', format })).toThrow('ARKI_CONTRACTS_E010');
+    try {
+      defineId('', { kind: 'offline.record', format });
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'ARKI_CONTRACTS_E010', cause });
+    }
+  });
+
+  it('preserves the receiver, rejection boundary and one method read for custom formats', () => {
+    const getRandomValues = vi.fn(function (this: unknown, bytes: Uint8Array) {
+      expect(this).toBe(provider);
+      bytes.fill(0);
+      bytes.set([255, 252, 251, 35, 36]);
+      return bytes;
+    });
+    const readMethod = vi.fn(() => getRandomValues);
+    const provider = Object.defineProperty({}, 'getRandomValues', { get: readMethod });
+    vi.stubGlobal('crypto', provider);
+    const recordId = defineId('', {
+      kind: 'offline.record',
+      format: { alphabet: '0123456789abcdefghijklmnopqrstuvwxyz', length: 21 },
+    });
+    expect(recordId.create()).toBe(`zz0${'0'.repeat(18)}`);
+    expect(readMethod).toHaveBeenCalledTimes(1);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns exact canonical failures for unavailable and broken custom entropy providers', () => {
+    const recordId = defineId('', { kind: 'offline.record', format: { alphabet: nanoidAlphabet, length: 21 } });
+    const cause = new Error('private custom entropy');
+    const fail = () => {
+      throw cause;
+    };
+    for (const provider of [undefined, null, {}, { getRandomValues: 42 }]) {
+      vi.stubGlobal('crypto', provider);
+      expect(RandomSourceUnavailable.is(recordId.create())).toBe(true);
+    }
+    for (const provider of [
+      Object.defineProperty({}, 'getRandomValues', { get: fail }),
+      { getRandomValues: fail },
+      { getRandomValues: () => new Uint8Array(42) },
+      {
+        getRandomValues(bytes: Uint8Array) {
+          const buffer = bytes.buffer;
+          if (!(buffer instanceof ArrayBuffer)) throw new Error('Expected a transferable array buffer');
+          structuredClone(buffer, { transfer: [buffer] });
+          return bytes;
+        },
+      },
+    ]) {
+      vi.stubGlobal('crypto', provider);
+      const result = recordId.create();
+      expect(UnexpectedDefect.is(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('private custom');
+    }
+  });
+
+  it('supervises rejected asynchronous custom providers and hostile thenables', async () => {
+    const recordId = defineId('', { kind: 'offline.record', format: { alphabet: nanoidAlphabet, length: 21 } });
+    const readThen = vi.fn(() => {
+      throw new Error('private custom then');
+    });
+    for (const output of [
+      Promise.reject(new Error('private custom rejection')),
+      // eslint-disable-next-line unicorn/no-thenable -- Intentional malformed foreign protocol fixture.
+      Object.defineProperty({}, 'then', { get: readThen }),
+    ]) {
+      const getRandomValues = vi.fn(() => output);
+      vi.stubGlobal('crypto', { getRandomValues });
+      const result = recordId.create();
+      expect(UnexpectedDefect.is(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('private custom');
+      expect(getRandomValues).toHaveBeenCalledTimes(1);
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(readThen).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {},
+    [],
+    { alphabet: 'ab' },
+    { length: 21 },
+    { alphabet: 42, length: 21 },
+    { alphabet: '', length: 21 },
+    { alphabet: 'a', length: 21 },
+    { alphabet: 'aa', length: 21 },
+    { alphabet: 'abca', length: 21 },
+    { alphabet: '😀a', length: 21 },
+    { alphabet: '\uD800a', length: 21 },
+    { alphabet: Array.from({ length: 257 }, (_, index) => String.fromCodePoint(index)).join(''), length: 21 },
+    ...[0, -1, 1.5, 257, Infinity, Number.NaN, '21', null].map(length => ({ alphabet: 'ab', length })),
+    { alphabet: 'ab', length: 21, generate: () => 'unsafe' },
+  ])('rejects invalid static custom format %j with remediation', format => {
+    expect(() => Reflect.apply(defineId, null, ['', { kind: 'offline.record', format }])).toThrow(
+      'ARKI_CONTRACTS_E010',
+    );
+    try {
+      Reflect.apply(defineId, null, ['', { kind: 'offline.record', format }]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'ARKI_CONTRACTS_E010', remediation: expect.stringContaining('alphabet') });
+    }
+  });
+});
+
 describe('UUID generation format', () => {
   const jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
   const uuid = '01234567-89ab-4cde-8f01-23456789abcd';

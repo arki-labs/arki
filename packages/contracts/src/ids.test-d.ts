@@ -108,3 +108,31 @@ it('UUID generation retains exact domain types and literal kind guards', () => {
   // @ts-expect-error Empty kinds cannot establish a UUID domain.
   defineId('', { kind: '', format: 'uuid' });
 });
+
+it('custom formats preserve schema brands, exact failures and finite literal kind guards', () => {
+  const format = { alphabet: '_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', length: 21 } as const;
+  const _recordId = defineId('', { kind: 'offline.idempotency-record', format });
+  const _otherId = defineId('', { kind: 'offline.other', format });
+  type RecordId = IdOf<typeof _recordId>;
+  expectTypeOf<RecordId>().toEqualTypeOf<z.output<typeof _recordId.schema>>();
+  expectTypeOf<ReturnType<typeof _recordId.create>>().toEqualTypeOf<RecordId | IdGenerationFailure>();
+  expectTypeOf<FailureOf<typeof _recordId.create>>().toEqualTypeOf<
+    FailureOf<typeof RandomSourceUnavailable> | FailureOf<typeof UnexpectedDefect>
+  >();
+  expectTypeOf<RecordId>().not.toExtend<IdOf<typeof _otherId>>();
+  expectTypeOf<string>().not.toExtend<RecordId>();
+  expectTypeOf<typeof _recordId>().toExtend<IdDeclaration<''>>();
+  // @ts-expect-error Custom formats do not erase the finite literal kind guard.
+  defineId('', { kind: String('offline.record'), format });
+  const multipleKinds: 'offline.record' | 'offline.other' = Math.random() ? 'offline.record' : 'offline.other';
+  // @ts-expect-error A declaration cannot claim multiple custom identity kinds.
+  defineId('', { kind: multipleKinds, format });
+  // @ts-expect-error Custom formats require a domain name.
+  defineId('', { kind: '', format });
+  // @ts-expect-error A generator hook cannot replace Web Crypto.
+  defineId('', { kind: 'offline.record', format: { ...format, generate: () => 'unsafe' } });
+  // @ts-expect-error Alphabet is required.
+  defineId('', { kind: 'offline.record', format: { length: 21 } });
+  // @ts-expect-error Length must be numeric.
+  defineId('', { kind: 'offline.record', format: { alphabet: 'ab', length: '21' } });
+});

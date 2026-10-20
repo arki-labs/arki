@@ -4,6 +4,6 @@
     "lib": ["ES2023", "ES2022", "dom", "dom.iterable"],
     "jsx": "preserve"
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts"]
+  "include": ["src", "__tests__", "vitest.config.ts"],
+  "exclude": ["node_modules"]
 }
