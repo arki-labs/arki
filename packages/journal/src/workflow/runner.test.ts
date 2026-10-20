@@ -8,8 +8,8 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { TransactionDefect } from '@arki/db/transaction';
 import { Deadline } from '@arki/async';
+import { TransactionDefect } from '@arki/db/transaction';
 import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
@@ -80,7 +80,12 @@ const flaky = j
       note('provider', ctx);
       throw new Error('provider down');
     },
-    { retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) },
+    {
+      retry: backoff
+        .constant(0)
+        .upTo(2)
+        .while(reason => UnexpectedDefect.is(reason)),
+    },
   )
   .step('after', () => 'never')
   .finish();
@@ -157,7 +162,7 @@ afterAll(() => client.close());
 /** Runs every due job until none is left, as a worker would. */
 async function settle(limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }
@@ -262,7 +267,10 @@ describe('start and the step effect', () => {
       .step('a', () => 1)
       .finish();
     const loneJournal = lone.compose({});
-    await expect(loneJournal.run(db, orphan.start, { input: {} }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_UNKNOWN' } });
+    await expect(loneJournal.run(db, orphan.start, { input: {} }, caller)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_UNKNOWN' },
+    });
   });
 });
 
@@ -401,7 +409,7 @@ describe('the checkpoint fence', () => {
     const id = newId('stale');
     supersedeFirst.id = id;
     orThrow(await staleJournal.run(db, stale.start, { input: {}, id }, caller));
-    await staleJournal.drain(db);
+    await staleJournal.drain(db).then(result => orThrow(result));
     expect(ranOf('slow').filter(entry => entry.key.startsWith(id))).toHaveLength(1);
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
     expect((await stepRow(id, 'slow'))?.status).toBe('scheduled');
@@ -433,22 +441,24 @@ describe('a crash between the body and the checkpoint', () => {
   it('crash after external success before checkpoint re-runs the step with the same key, and the committed checkpoint never runs it again', async () => {
     const id = newId('crashing');
     orThrow(await crashJournal.run(db, crashing.start, { input: {}, id }, caller));
-    await crashJournal.drain(db);
+    await crashJournal.drain(db).then(result => orThrow(result));
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
     // The simulated interruption is a typed defect: an operator explicitly resumes it.
-    orThrow(await crashJournal.workflows.retryStep(db, { runId: id, path: 'chargeCard', phase: 'do' }, { actor: 'test' }));
+    orThrow(
+      await crashJournal.workflows.retryStep(db, { runId: id, path: 'chargeCard', phase: 'do' }, { actor: 'test' }),
+    );
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.runId, id));
-    await crashJournal.drain(db);
-    await crashJournal.drain(db);
+    await crashJournal.drain(db).then(result => orThrow(result));
+    await crashJournal.drain(db).then(result => orThrow(result));
     const tries = ranOf('chargeCard').filter(entry => entry.key.startsWith(id));
     expect(tries).toHaveLength(2);
     expect(tries[0]?.key).toBe(tries[1]?.key);
     expect(await runRow(id)).toMatchObject({ state: 'completed', results: { chargeCard: { chargeId: 'ch_1' } } });
     expect((await eventTypes(id)).filter(type => type === 'NodeCompleted')).toHaveLength(1);
-    await crashJournal.drain(db);
+    await crashJournal.drain(db).then(result => orThrow(result));
     expect(ranOf('chargeCard').filter(entry => entry.key.startsWith(id))).toHaveLength(2);
   });
 });

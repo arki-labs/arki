@@ -126,4 +126,6 @@ dot explain --json | jq .data.services   # in an app using @arki/mail/dot: lists
 dot doctor --json | jq .data             # in that app: no missing mail service
 ```
 
+Queued mail also returns the journal's exact canonical ID generation failures when secure entropy is unavailable or fails; no job is inserted.
+
 Template validator exceptions return canonical `ValidatorDefect` from `@arki/failure` through render, compose, send and enqueue; handle it as a fatal defect, not invalid user input.

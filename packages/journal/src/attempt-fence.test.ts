@@ -11,8 +11,8 @@ import { z } from 'zod';
 
 import { findCause, orThrow, UnexpectedDefect } from '@arki/failure';
 
-import { backoff } from './index.js';
 import { isJournalError, JournalError } from './errors.js';
+import { backoff } from './index.js';
 import { j, meta, openDb, order, OrderNoted, OrderPaid, OrderPlaced, tables } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -46,12 +46,19 @@ async function payOrder(journal: { write: typeof countingJournal.write }) {
 }
 
 const attemptsSeen: number[] = [];
-const counting = j.effect('count-attempts', order, {
-  OrderPaid: (_event, ctx) => {
-    attemptsSeen.push(ctx.attempt);
-    if (ctx.attempt < 3) throw new Error('not yet');
-  },
-}).withSchedule({ retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) });
+const counting = j
+  .effect('count-attempts', order, {
+    OrderPaid: (_event, ctx) => {
+      attemptsSeen.push(ctx.attempt);
+      if (ctx.attempt < 3) throw new Error('not yet');
+    },
+  })
+  .withSchedule({
+    retry: backoff
+      .constant(0)
+      .upTo(2)
+      .while(reason => UnexpectedDefect.is(reason)),
+  });
 const countingJournal = j.compose({ effects: [counting] });
 
 const outcomes: string[] = [];
@@ -94,7 +101,7 @@ describe('ctx.attempt', () => {
         .update(tables.jobs)
         .set({ availableAt: new Date(0) })
         .where(sql`true`);
-      await countingJournal.drain(db);
+      await countingJournal.drain(db).then(result => orThrow(result));
     }
     expect(attemptsSeen).toEqual([1, 2, 3]);
   });
@@ -103,13 +110,13 @@ describe('ctx.attempt', () => {
 describe('the lease fence of ctx.run', () => {
   it('a command from a handler whose attempt is still open commits, so the fence costs a healthy job nothing', async () => {
     const id = await payOrder(healthyJournal);
-    expect(await healthyJournal.drain(db)).toBe(1);
+    expect(await healthyJournal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(await noteOf(id)).toHaveLength(1);
   });
 
   it('a handler whose attempt was taken over gets LEASE_LOST and its command commits nothing', async () => {
     const id = await payOrder(fencedJournal);
-    expect(await fencedJournal.drain(db)).toBe(1);
+    expect(await fencedJournal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(outcomes).toEqual(['LEASE_LOST']);
     expect(await noteOf(id)).toHaveLength(0);
   });

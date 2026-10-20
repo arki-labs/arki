@@ -67,7 +67,9 @@ export type MailOutbox = {
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     options: EnqueueOptions,
-  ): Promise<{ readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof renderTemplate>>;
+  ): Promise<
+    { readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof renderTemplate> | FailureOf<typeof jobId>
+  >;
   /** Runs queued mail: pass it to `journal.worker(db, { jobs })`, or combine it with `combineRunners`. */
   readonly runner: JobRunner;
 };
@@ -128,9 +130,11 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
     }
 
     const dedupeKey = enqueueOptions.idempotencyKey ?? null;
+    const id = jobId();
+    if (isFailure(id)) return id;
     const inserted = await tx
       .insert(tables.jobs)
-      .values({ id: jobId(), kind: 'queue', jobName: MAIL_JOB, args, dedupeKey })
+      .values({ id, kind: 'queue', jobName: MAIL_JOB, args, dedupeKey })
       .onConflictDoNothing()
       .returning({ id: tables.jobs.id });
     const [row] = inserted;

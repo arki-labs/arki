@@ -6,9 +6,10 @@
 import { and, eq, is, isNull, sql } from 'drizzle-orm';
 import { getTableConfig, PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { AsyncSchemaFailure } from '@arki/failure';
 import type { DbHandle, JournalTables } from '@arki/journal';
-import { InvalidInput, ValidatorDefect } from '@arki/failure';
+import { InvalidInput, isFailure, ValidatorDefect } from '@arki/failure';
 import { jobId } from '@arki/journal';
 import { parseAsync } from '@arki/schema';
 
@@ -44,14 +45,14 @@ export type Outbox = {
     job: JobDefinition<TInput, TOutput, TContext>,
     args: NoInfer<TInput>,
     options?: ScheduleOptions,
-  ): Promise<Scheduled | AsyncSchemaFailure>;
+  ): Promise<Scheduled | AsyncSchemaFailure | IdGenerationFailure>;
   runAt<TInput, TOutput, TContext>(
     tx: OutboxTx,
     job: JobDefinition<TInput, TOutput, TContext>,
     args: NoInfer<TInput>,
     at: Date,
     options?: Omit<ScheduleOptions, 'delayMs'>,
-  ): Promise<Scheduled | AsyncSchemaFailure>;
+  ): Promise<Scheduled | AsyncSchemaFailure | IdGenerationFailure>;
   /** Delete a row no worker holds. `false` when it is running, finished, or never existed. */
   cancel(tx: DbHandle, id: string): Promise<boolean>;
 };
@@ -116,7 +117,7 @@ export function outbox(options: OutboxOptions): Outbox {
     args: unknown,
     when: When,
     scheduleOptions: Omit<ScheduleOptions, 'delayMs'> | undefined,
-  ): Promise<Scheduled | AsyncSchemaFailure> => {
+  ): Promise<Scheduled | AsyncSchemaFailure | IdGenerationFailure> => {
     const name = job._internal.name;
     // Catches callers that skip the types. Not a security boundary.
     if (!is(tx, PgAsyncTransaction))
@@ -144,8 +145,10 @@ export function outbox(options: OutboxOptions): Outbox {
     assertJsonArgs(args, maxArgsBytes, name);
 
     const key = scheduleOptions?.key;
+    const id = jobId();
+    if (isFailure(id)) return id;
     const insert = tx.insert(jobs).values({
-      id: jobId(),
+      id,
       kind: 'queue',
       jobName: name,
       // Drizzle sends JS null as SQL NULL; the column needs the JSON value null.

@@ -1,10 +1,10 @@
-import type { CommandFailure } from './errors.js';
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
+import type { CommandFailure } from './errors.js';
 import type {
   AcceptFailure,
   CommandContext,
@@ -37,19 +37,19 @@ describe('the job surface, as types', () => {
   });
 
   it('op is required on every verb that changes jobs', () => {
-    void journal.retry(db, 'job_1', op);
+    void journal.retry(db, 'job_1', op).then(result => orThrow(result));
     // @ts-expect-error a mutating verb names who did it
-    void journal.retry(db, 'job_1');
+    void journal.retry(db, 'job_1').then(result => orThrow(result));
     // @ts-expect-error a mutating verb names who did it
-    void journal.discard(db, 'job_1');
+    void journal.discard(db, 'job_1').then(result => orThrow(result));
     // @ts-expect-error a mutating verb names who did it
-    void journal.cancel(db, 'job_1');
+    void journal.cancel(db, 'job_1').then(result => orThrow(result));
     // @ts-expect-error a mutating verb names who did it
-    void journal.retryDead(db, { ids: ['job_1'] });
+    void journal.retryDead(db, { ids: ['job_1'] }).then(result => orThrow(result));
     // @ts-expect-error a mutating verb names who did it
-    void journal.purgeDead(db, { olderThan: new Date() });
+    void journal.purgeDead(db, { olderThan: new Date() }).then(result => orThrow(result));
     // @ts-expect-error an actor is required
-    void journal.retry(db, 'job_1', {});
+    void journal.retry(db, 'job_1', {}).then(result => orThrow(result));
   });
 
   it('withSchedule takes a retention', () => {
@@ -80,11 +80,11 @@ describe('the job surface, as types', () => {
   });
 
   it('retryDead and purgeDead may report that nothing changed', async () => {
-    const retried = await journal.retryDead(db, { ids: ['job_1'] }, op);
+    const retried = orThrow(await journal.retryDead(db, { ids: ['job_1'] }, op));
     expectTypeOf(retried.operationId).toEqualTypeOf<string | null>();
-    const purged = await journal.purgeDead(db, { olderThan: new Date() }, op);
+    const purged = orThrow(await journal.purgeDead(db, { olderThan: new Date() }, op));
     expectTypeOf(purged.operationId).toEqualTypeOf<string | null>();
-    const single = await journal.retry(db, 'job_1', op);
+    const single = orThrow(await journal.retry(db, 'job_1', op));
     expectTypeOf(single.operationId).toEqualTypeOf<string>();
   });
 });

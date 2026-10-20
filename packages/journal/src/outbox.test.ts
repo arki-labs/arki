@@ -7,6 +7,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { attemptId, jobId } from './id.js';
 import { createJobOps } from './outbox.js';
 import { resolveRetention } from './retention.js';
@@ -42,7 +44,7 @@ const DAY = 86_400_000;
 type Insert = typeof tables.jobs.$inferInsert;
 
 const queueRow = async (extra?: Partial<Insert>): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await db.insert(tables.jobs).values({ id, kind: 'queue', jobName: 'demo', args: { n: 1 }, ...extra });
   return id;
 };
@@ -55,7 +57,7 @@ const operations = () => db.select().from(tables.jobOperations);
 const attemptsOf = (id: string) => db.select().from(tables.jobAttempts).where(eq(tables.jobAttempts.jobId, id));
 const addAttempt = (id: string, attempt: number, startedAt: Date, outcome: 'retry' | 'dead', error: string) =>
   db.insert(tables.jobAttempts).values({
-    id: attemptId(),
+    id: orThrow(attemptId()),
     jobId: id,
     attempt,
     startedAt,
@@ -107,8 +109,8 @@ describe('job states and reads', () => {
   it('job returns the row, its attempts oldest first and the operations that touched it', async () => {
     const id = await deadRow();
     await addAttempt(id, 2, new Date('2026-01-02T00:00:00Z'), 'dead', 'second');
-    await addAttempt(id, 1, new Date('2026-01-01T00:00:00Z'), 'retry', 'first');
-    await ops.retry(db, id, alice);
+    orThrow(await addAttempt(id, 1, new Date('2026-01-01T00:00:00Z'), 'retry', 'first'));
+    orThrow(await ops.retry(db, id, alice));
     const detail = await ops.job(db, id);
     expect(detail).toMatchObject({ id, state: 'ready', event: null });
     expect(detail?.attemptLog.map(a => a.error)).toEqual(['first', 'second']);
@@ -180,7 +182,7 @@ describe('retry', () => {
     const id = await deadRow();
     await addAttempt(id, 1, new Date('2026-01-01T00:00:00Z'), 'dead', 'boom');
     wake.mockClear();
-    const { operationId } = await ops.retry(db, id, alice);
+    const { operationId } = orThrow(await ops.retry(db, id, alice));
     expect(await rowOf(id)).toMatchObject({ deadAt: null, attempts: 0, lastError: null, leaseToken: null });
     expect(await attemptsOf(id)).toHaveLength(1);
     expect(await operations()).toMatchObject([
@@ -208,8 +210,8 @@ describe('discard and cancel', () => {
     const dead = await deadRow({ dedupeKey: 'k1' });
     await addAttempt(dead, 1, new Date('2026-01-01T00:00:00Z'), 'dead', 'boom');
     const waiting = await queueRow();
-    const discarded = await ops.discard(db, dead, alice);
-    const cancelled = await ops.cancel(db, waiting, { actor: 'bob' });
+    const discarded = orThrow(await ops.discard(db, dead, alice));
+    const cancelled = orThrow(await ops.cancel(db, waiting, { actor: 'bob' }));
 
     expect(await rowOf(dead)).toBeUndefined();
     expect(await rowOf(waiting)).toBeUndefined();
@@ -234,7 +236,7 @@ describe('discard and cancel', () => {
 
   it('discard deletes without an archive row when the policy keeps no dead jobs, and still records the operation', async () => {
     const id = await deadRow();
-    await noArchive.discard(db, id, alice);
+    orThrow(await noArchive.discard(db, id, alice));
     expect(await rowOf(id)).toBeUndefined();
     expect(await ops.archivedJob(db, id)).toBeUndefined();
     expect(await operations()).toHaveLength(1);
@@ -260,8 +262,8 @@ describe('discard and cancel', () => {
 
   it('cancel takes a job whose lease expired (its worker is gone) and folds the open attempt as superseded', async () => {
     const id = await queueRow({ leaseToken: 'old', leaseUntil: new Date(Date.now() - 60_000), attempts: 1 });
-    await db.insert(tables.jobAttempts).values({ id: attemptId(), jobId: id, attempt: 1 });
-    await ops.cancel(db, id, alice);
+    orThrow(await db.insert(tables.jobAttempts).values({ id: orThrow(attemptId()), jobId: id, attempt: 1 }));
+    orThrow(await ops.cancel(db, id, alice));
     const archived = await ops.archivedJob(db, id);
     expect(archived?.attemptLog).toMatchObject([{ attempt: 1, outcome: 'superseded' }]);
   });
@@ -271,7 +273,7 @@ describe('retryDead', () => {
   it('retries the selected ids in one transaction with one operation row', async () => {
     const a = await deadRow();
     const b = await deadRow();
-    const result = await ops.retryDead(db, { ids: [a, b, a] }, alice);
+    const result = orThrow(await ops.retryDead(db, { ids: [a, b, a] }, alice));
     expect([...result.ids].sort()).toEqual([a, b].sort());
     expect((await rowOf(a))?.deadAt).toBeNull();
     expect((await rowOf(b))?.deadAt).toBeNull();
@@ -291,11 +293,13 @@ describe('retryDead', () => {
     const older = await deadRow({ deadAt: new Date(Date.now() - 50 * DAY) });
     const newer = await deadRow({ deadAt: new Date(Date.now() - 40 * DAY) });
     const other = await deadRow({ jobName: 'other', deadAt: new Date(Date.now() - 70 * DAY) });
-    const result = await ops.retryDead(db, { job: 'demo', limit: 2 }, alice);
+    const result = orThrow(await ops.retryDead(db, { job: 'demo', limit: 2 }, alice));
     expect([...result.ids].sort()).toEqual([oldest, older].sort());
     expect((await rowOf(newer))?.deadAt).toBeInstanceOf(Date);
     expect((await rowOf(other))?.deadAt).toBeInstanceOf(Date);
-    const before = await ops.retryDead(db, { job: 'demo', deadBefore: new Date(Date.now() - 100 * DAY) }, alice);
+    const before = orThrow(
+      await ops.retryDead(db, { job: 'demo', deadBefore: new Date(Date.now() - 100 * DAY) }, alice),
+    );
     expect(before).toEqual({ ids: [], operationId: null });
     expect(await operations()).toHaveLength(1);
   });
@@ -316,7 +320,7 @@ describe('purgeDead', () => {
     const live = await queueRow();
     const bound = new Date(Date.now() - 31 * DAY);
 
-    const kept = await ops.purgeDead(db, { olderThan: bound }, { actor: 'system:retention' });
+    const kept = orThrow(await ops.purgeDead(db, { olderThan: bound }, { actor: 'system:retention' }));
     expect(kept).toMatchObject({ archived: 2, deleted: 0 });
     expect(await ops.archivedJob(db, a)).toMatchObject({ outcome: 'dead' });
     expect((await ops.archivedJob(db, b))?.finishedAt.getTime()).toBeLessThan(Date.now() - 49 * DAY);
@@ -324,7 +328,7 @@ describe('purgeDead', () => {
     expect(await rowOf(live)).toBeDefined();
 
     const c = await deadRow({ deadAt: new Date(Date.now() - 60 * DAY) });
-    const dropped = await noArchive.purgeDead(db, { olderThan: bound }, alice);
+    const dropped = orThrow(await noArchive.purgeDead(db, { olderThan: bound }, alice));
     expect(dropped).toMatchObject({ archived: 0, deleted: 1 });
     expect(await ops.archivedJob(db, c)).toBeUndefined();
 
@@ -365,9 +369,11 @@ describe('purgeDead', () => {
 describe('replay', () => {
   it('replay creates a new job with replay_of and a new id, and refuses when the dedupe key is live', async () => {
     const original = await deadRow({ dedupeKey: 'k1', priority: 3, args: { n: 9 } });
-    await ops.discard(db, original, alice);
+    orThrow(await ops.discard(db, original, alice));
 
-    const { jobId: replayId, operationId } = await ops.replayJob(db, original, { actor: 'carol', reason: 'again' });
+    const { jobId: replayId, operationId } = orThrow(
+      await ops.replayJob(db, original, { actor: 'carol', reason: 'again' }),
+    );
     expect(replayId).not.toBe(original);
     expect(await rowOf(replayId)).toMatchObject({
       kind: 'queue',
@@ -401,7 +407,7 @@ describe('the archive reads', () => {
       const id = await deadRow({ jobName: n === 1 ? 'other' : 'demo' });
       await addAttempt(id, 1, new Date('2026-01-01T00:00:00Z'), 'retry', `try-1-${n}`);
       await addAttempt(id, 2, new Date('2026-01-01T00:05:00Z'), 'dead', `try-2-${n}`);
-      await ops.discard(db, id, alice);
+      orThrow(await ops.discard(db, id, alice));
       ids.push(id);
     }
     const first = await ops.archivedJobs(db, { limit: 2 });
@@ -421,7 +427,7 @@ describe('the archive reads', () => {
 
   it('archiveStatus counts rows and the ones past keep_until; with no sink nothing is waiting to export', async () => {
     const id = await deadRow();
-    await ops.discard(db, id, alice);
+    orThrow(await ops.discard(db, id, alice));
     expect(await ops.archiveStatus(db)).toEqual({ rows: 1, unexported: 0, oldestUnexportedAt: null, pastKeepUntil: 0 });
     await db.update(tables.jobArchive).set({ keepUntil: new Date(Date.now() - 1000) });
     expect(await ops.archiveStatus(db)).toMatchObject({ rows: 1, pastKeepUntil: 1 });
@@ -430,8 +436,8 @@ describe('the archive reads', () => {
   it('jobOperations lists newest first and filters by job', async () => {
     const a = await deadRow();
     const b = await deadRow();
-    await ops.retry(db, a, alice);
-    await ops.discard(db, b, alice);
+    orThrow(await ops.retry(db, a, alice));
+    orThrow(await ops.discard(db, b, alice));
     const all = (await ops.jobOperations(db)).operations;
     expect(all.map(o => o.action)).toEqual(['discard', 'retry']);
     expect((await ops.jobOperations(db, { jobId: a })).operations.map(o => o.action)).toEqual(['retry']);
@@ -472,7 +478,7 @@ describe('operation rows', () => {
     const id = await deadRow();
     await expect(
       db.transaction(async tx => {
-        await ops.retry(tx, id, alice);
+        orThrow(await ops.retry(tx, id, alice));
         throw new Error('later step failed');
       }),
     ).rejects.toThrow('later step failed');
@@ -483,7 +489,7 @@ describe('operation rows', () => {
   it('inside a caller transaction the verb does not wake: the caller wakes after its own commit', async () => {
     const id = await deadRow();
     wake.mockClear();
-    await db.transaction(tx => ops.retry(tx, id, alice));
+    orThrow(await db.transaction(tx => ops.retry(tx, id, alice)));
     expect(wake).not.toHaveBeenCalled();
   });
 });

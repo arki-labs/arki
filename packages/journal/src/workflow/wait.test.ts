@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { initJournal } from '../journal.js';
 import { j, tables } from '../test-support.js';
@@ -82,7 +82,7 @@ afterAll(() => client.close());
 /** Runs every due job until none is left, as a worker would. */
 async function settle(limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }
@@ -291,7 +291,7 @@ describe('retention of a cancelled timer', () => {
     const keptJournal = kept.compose({ workflows: [retained], workflowMeta });
     const id = newId('retained');
     expectOk(await keptJournal.run(db, retained.start, { input: {}, id }, caller));
-    for (let pass = 0; pass < 40 && (await keptJournal.drain(db)) > 0; pass++);
+    for (let pass = 0; pass < 40 && (await keptJournal.drain(db).then(result => orThrow(result))) > 0; pass++);
     expect(await timersOf(id)).toHaveLength(1);
     expectOk(
       await keptJournal.run(

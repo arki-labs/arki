@@ -277,7 +277,7 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
     );
     await orThrow(app.start());
     expect(seen.features).toEqual(['orders']);
-    await db.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'welcome', args: 42 });
+    await db.insert(tables.jobs).values({ id: orThrow(jobId()), kind: 'queue', jobName: 'welcome', args: 42 });
     await ran;
     expect(sent).toEqual([orderId(42)]);
   });

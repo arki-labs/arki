@@ -3,11 +3,12 @@
  * definition helpers `initJournal` returns, and the input, option and result types.
  * Types only, no runtime code. May import `entity`, `types`, `pg`, `outbox` and `retention` (types); nothing else.
  */
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { CommandFailure } from './errors.js';
 import type { EntityBuilder } from './entity.js';
+import type { CommandFailure } from './errors.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
 import type { ResolvedRetention } from './retention.js';
@@ -181,7 +182,7 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     id: EntityId<Tbl, Key>,
     events: NextEvents<Tbl, E, Tx, Returned>,
     opts?: WriteOptions,
-  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure>;
+  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
   readonly run: <S extends StandardSchemaV1, R>(
     command: Command<S, R, MetaOut, Tx>,
@@ -253,7 +254,9 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx, Returned>,
-  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | Extract<Returned, Failure> | SchemaFailure>;
+  ): Promise<
+    WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure
+  >;
   /**
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
@@ -300,7 +303,7 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | SchemaFailure>;
+  ): Promise<WriteResult<Tbl, E, SchemaOutput<Meta>, Key> | SchemaFailure | IdGenerationFailure>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -333,7 +336,7 @@ export type Journal<
    * carry personal data; `forget` does not touch them, so an app that keys personal flows
    * prunes on a schedule. Returns how many were deleted.
    */
-  pruneReceipts(db: DbHandle, opts: { readonly before: Date }): Promise<number>;
+  pruneReceipts(db: DbHandle, opts: { readonly before: Date }): Promise<number | IdGenerationFailure>;
   /** Lock the row, replay, save the result. Writes no event, runs no projection, creates no job. */
   repair<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -388,7 +391,7 @@ export type Journal<
       readonly services?: HandlerServices;
       readonly jobs?: JobRunner<AppDb>;
     },
-  ): Promise<number>;
+  ): Promise<number | IdGenerationFailure>;
   /**
    * A loop around `drain`. The same database as `drain`. `stop()` aborts the running
    * effect's `ctx.signal`, claims nothing more, and resolves when that effect returns.

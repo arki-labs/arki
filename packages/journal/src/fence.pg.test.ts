@@ -147,10 +147,10 @@ beforeEach(() => {
 describe('the lease fence on real Postgres', () => {
   it('a worker whose lease expired and whose job was reclaimed gets LEASE_LOST and writes nothing, while the new owner commits', async () => {
     const id = await payOrder();
-    const stale = journal.drain(dbA, { leaseSeconds: 1 });
+    const stale = journal.drain(dbA, { leaseSeconds: 1 }).then(result => orThrow(result));
     await first.started.opened;
     await expireLease();
-    const owner = journal.drain(dbB, { leaseSeconds: 1 });
+    const owner = journal.drain(dbB, { leaseSeconds: 1 }).then(result => orThrow(result));
     await second.started.opened;
     // The stale worker wakes up after the takeover and tries to write.
     first.hold.open();
@@ -166,15 +166,18 @@ describe('the lease fence on real Postgres', () => {
   it('a claim waits for a command already in flight, so a stale write is either whole before the takeover or refused', async () => {
     const id = await payOrder();
     holdAt = 'command';
-    const stale = journal.drain(dbA, { leaseSeconds: 1 });
+    const stale = journal.drain(dbA, { leaseSeconds: 1 }).then(result => orThrow(result));
     // The first worker is now inside the command's transaction, holding its fence lock on the open attempt.
     await first.started.opened;
     await expireLease();
     let claimed = false;
-    const owner = journal.drain(dbB, { leaseSeconds: 1 }).then(count => {
-      claimed = true;
-      return count;
-    });
+    const owner = journal
+      .drain(dbB, { leaseSeconds: 1 })
+      .then(result => orThrow(result))
+      .then(count => {
+        claimed = true;
+        return count;
+      });
     await sleep(500);
     expect(claimed).toBe(false);
     first.hold.open();

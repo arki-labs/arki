@@ -99,7 +99,7 @@ export const failedReceiptSchema = z.object({
     code: z.string().min(1).max(64),
     message: z.string().max(2000),
     /** Set for a module's own error, so a repeat answers the same status. */
-    status: z.number().int().min(400).max(499).optional(),
+    status: z.number().int().min(400).max(599).optional(),
   }),
 });
 

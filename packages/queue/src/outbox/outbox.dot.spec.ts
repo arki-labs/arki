@@ -7,7 +7,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
@@ -19,7 +19,7 @@ import { journal, journalWorker } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 
-import type { FeatureJobContext } from '../dot.ts';
+import type { FeatureJobContext, OutboxProducer } from '../dot.ts';
 import type { Outbox } from './outbox.ts';
 import { jobs, outboxJobs, outboxPlugin, outboxProducers } from '../dot.ts';
 import { initQueue } from '../init.ts';
@@ -104,6 +104,31 @@ const reminders = defineFeature('reminders')
   .entrypoints(jobs(rq.registry({ remind })));
 
 describe('outboxPlugin + outboxJobs', () => {
+  it('keeps the full outbox outcome through a feature producer when entropy is unavailable', async () => {
+    expectTypeOf<ReturnType<OutboxProducer<{ userId: string }>['runAfter']>>().toEqualTypeOf<
+      ReturnType<Outbox['runAfter']>
+    >();
+    expectTypeOf<ReturnType<OutboxProducer<{ userId: string }>['runAt']>>().toEqualTypeOf<
+      ReturnType<Outbox['runAt']>
+    >();
+    const app = await orThrow(
+      defineApp('outbox-entropy').infra(database, scheduling, regionUs).features([reminders]).boot(),
+    );
+    expectTypeOf<Awaited<ReturnType<typeof app.services.reminder.remind>>>().toEqualTypeOf<
+      Awaited<ReturnType<Outbox['runAfter']>>
+    >();
+    const before = await db.select({ id: tables.jobs.id }).from(tables.jobs);
+    let result: unknown;
+    vi.stubGlobal('crypto', null);
+    try {
+      result = await app.services.reminder.remind('u-no-entropy');
+    } finally {
+      vi.unstubAllGlobals();
+      await orThrow(app.dispose());
+    }
+    expect(result).toMatchObject({ code: 'contracts.random_source_unavailable', status: 500 });
+    expect(await db.select({ id: tables.jobs.id }).from(tables.jobs)).toEqual(before);
+  });
   it('a feature schedules in its transaction and the journal worker runs its jobs slice', async () => {
     const app = await orThrow(
       defineApp('outbox-worker')

@@ -128,10 +128,10 @@ describe('two workers race one run', () => {
   it('a worker that was taken over gets its checkpoint refused, so exactly one checkpoint of the node commits', async () => {
     const id = `racing_${++next}`;
     orThrow(await journal.run(dbA, racing.start, { input: {}, id }, caller));
-    const stale = journal.drain(dbA, { leaseSeconds: 1 });
+    const stale = journal.drain(dbA, { leaseSeconds: 1 }).then(result => orThrow(result));
     await first.started.opened;
     await expireLease();
-    const owner = journal.drain(dbB, { leaseSeconds: 1 });
+    const owner = journal.drain(dbB, { leaseSeconds: 1 }).then(result => orThrow(result));
     await second.started.opened;
     // The stale worker wakes up after the takeover; its body answered, and its checkpoint is refused.
     first.hold.open();
@@ -150,14 +150,17 @@ describe('two workers race one run', () => {
     const id = `racing_${++next}`;
     holdAt = 'checkpoint';
     orThrow(await journal.run(dbA, racing.start, { input: {}, id }, caller));
-    const stale = journal.drain(dbA, { leaseSeconds: 1 });
+    const stale = journal.drain(dbA, { leaseSeconds: 1 }).then(result => orThrow(result));
     await first.started.opened;
     await expireLease();
     let claimed = false;
-    const owner = journal.drain(dbB, { leaseSeconds: 1 }).then(count => {
-      claimed = true;
-      return count;
-    });
+    const owner = journal
+      .drain(dbB, { leaseSeconds: 1 })
+      .then(result => orThrow(result))
+      .then(count => {
+        claimed = true;
+        return count;
+      });
     await sleep(500);
     expect(claimed).toBe(false);
     first.hold.open();

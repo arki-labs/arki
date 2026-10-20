@@ -1,3 +1,4 @@
+import { orThrow } from '@arki/failure';
 // Speed of the journal worker on queue rows (`kind = 'queue'`, the rows `@arki/queue/outbox`
 // schedules): one row committed with its wake, claimed under a lease, run and acknowledged.
 // Run: `bun run bench` (explore) or `bun run bench --profile publish --write-readme`.
@@ -71,7 +72,7 @@ async function viaDrain(db: Db, args: unknown): Promise<string> {
     retryDelay: () => undefined,
   };
   await schedule(db, args);
-  await journal.drain(db, { jobs: runner, batchSize: 1 });
+  orThrow(await journal.drain(db, { jobs: runner, batchSize: 1 }));
   return JSON.stringify({ seen, left: await leftOver(db) });
 }
 

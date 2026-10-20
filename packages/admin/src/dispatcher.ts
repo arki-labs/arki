@@ -28,6 +28,7 @@
 import type { Clock } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import { isFailure, revive, serialize, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { AdminErrorCode } from './errors';
@@ -378,14 +379,33 @@ export function createForemanHandler<TCtx>(
     try {
       result = await action.runExecute(input, ctx, permit);
     } catch (error) {
+      const caught = isFailure(error) ? UnexpectedDefect({ cause: error }) : error;
       const at = clock.now().toISOString();
       // The action ran and returned, but broke its own output schema: it did apply.
       const receipt: SettledReceipt =
-        error instanceof AdminError && error.code === ADMIN_ERROR_CODES.invalidOutput
+        caught instanceof AdminError && caught.code === ADMIN_ERROR_CODES.invalidOutput
           ? { ...pending, status: 'applied', appliedAt: at, result: null }
-          : { ...pending, status: 'failed', failedAt: at, error: publicError(error) };
+          : { ...pending, status: 'failed', failedAt: at, error: publicError(caught) };
       await settle(store, receipt, url);
-      throw error;
+      if (isFailure(caught)) return caught;
+      throw caught;
+    }
+
+    if (isFailure(result)) {
+      const envelope = serialize(result, action.failures);
+      const decoded = isFailure(envelope) ? undefined : revive(envelope, action.failures);
+      const failure = decoded ?? UnexpectedDefect({ cause: result });
+      await settle(
+        store,
+        {
+          ...pending,
+          status: 'failed',
+          failedAt: clock.now().toISOString(),
+          error: publicError(failure),
+        },
+        url,
+      );
+      return failure;
     }
 
     // The receipt holds exactly what the response carries: the result after JSON.
@@ -457,9 +477,11 @@ export function createForemanHandler<TCtx>(
       const route = matchRoute(url.pathname, request.method, basePath);
       if (route === undefined) throw unknownCapability(url);
       const data = await dispatch(request, url, route);
+      if (isFailure(data)) return respond(...errorResponse(data, url), nonce);
       return await respond(200, { data }, nonce);
     } catch (error) {
-      return respond(...errorResponse(error, url), nonce);
+      const caught = isFailure(error) ? UnexpectedDefect({ cause: error }) : error;
+      return respond(...errorResponse(caught, url), nonce);
     }
   };
 }
@@ -587,9 +609,21 @@ function unknownCapability(url: URL): AdminError {
 
 /** The code and message a failure shows on the wire. 5xx messages never carry the app's internal message. */
 function publicError(error: unknown): { code: string; message: string; status?: number } {
+  if (isFailure(error)) {
+    return {
+      code: error.code,
+      message: error.status >= 500 ? 'The app failed to handle the request.' : error.message,
+      status: error.status,
+    };
+  }
   if (isModuleError(error)) {
     const prefix = `${error.code}: `;
-    const message = error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+    const message =
+      error.status >= 500
+        ? 'The app failed to handle the request.'
+        : error.message.startsWith(prefix)
+          ? error.message.slice(prefix.length)
+          : error.message;
     return { code: error.code, message, status: error.status };
   }
   if (!(error instanceof AdminError)) {
@@ -610,6 +644,12 @@ function publicError(error: unknown): { code: string; message: string; status?: 
 /** Status and wire body for a failure. 5xx bodies never carry the app's internal message. */
 function errorResponse(error: unknown, url: URL): [number, ErrorBody] {
   const { code, message } = publicError(error);
+  if (isFailure(error)) {
+    return [
+      error.status,
+      { error: { code, message, remediation: error.remediation ?? "Check the app's log for this request." } },
+    ];
+  }
   if (isModuleError(error)) {
     return [error.status, { error: { code, message, remediation: error.remediation } }];
   }

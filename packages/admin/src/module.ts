@@ -40,9 +40,10 @@
  * }
  * ```
  */
+import type { Failure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
-import { InvalidInput, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow, serialize } from '@arki/failure';
 import { formatIssues, hasJsonSchema, parseAsync } from '@arki/schema';
 
 import type { JsonObject } from './json';
@@ -175,6 +176,8 @@ export type ActionDef<
   TPreview extends StandardSchemaV1<unknown, Revisioned>,
   TOut extends StandardSchemaV1,
   TCtx,
+  TFailures extends Parameters<typeof serialize>[1] = readonly [],
+  TResult extends SchemaInput<TOut> | ReturnType<TFailures[number]> = SchemaInput<TOut>,
 > = {
   /** Globally unique, e.g. `queue.retryJob`. */
   readonly id: string;
@@ -187,9 +190,11 @@ export type ActionDef<
   /** Must carry the app-computed `revision` the execute step is conditional on. */
   readonly previewOutput: TPreview;
   readonly output: TOut;
+  /** Canonical definitions of the failures execute may return; the wire boundary validates their data. */
+  readonly failures?: TFailures;
   readonly preview: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TPreview>>;
   /** Write only if the resource still has `permit.expectedRevision`. */
-  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<SchemaInput<TOut>>;
+  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<TResult>;
 };
 
 type ActionBase = {
@@ -214,16 +219,23 @@ export type Action<
   TPreview extends StandardSchemaV1<unknown, Revisioned>,
   TOut extends StandardSchemaV1,
   TCtx,
+  TFailures extends Parameters<typeof serialize>[1] = readonly [],
+  TResult extends SchemaInput<TOut> | ReturnType<TFailures[number]> = SchemaInput<TOut>,
 > = ActionBase & {
   readonly input: TIn;
   readonly previewOutput: TPreview;
   readonly output: TOut;
+  readonly failures: TFailures | readonly [];
   readonly preview: (input: SchemaOutput<TIn>, ctx: TCtx) => Promise<SchemaInput<TPreview>>;
-  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<SchemaInput<TOut>>;
+  readonly execute: (input: SchemaOutput<TIn>, ctx: TCtx, permit: Permit) => Promise<TResult>;
   /** Validate raw input, preview, validate the preview. */
   readonly runPreview: (input: unknown, ctx: TCtx) => Promise<SchemaOutput<TPreview>>;
   /** Validate raw input, execute under the permit, validate the result. */
-  readonly runExecute: (input: unknown, ctx: TCtx, permit: Permit) => Promise<SchemaOutput<TOut>>;
+  readonly runExecute: (
+    input: unknown,
+    ctx: TCtx,
+    permit: Permit,
+  ) => Promise<SchemaOutput<TOut> | Extract<TResult, Failure>>;
 };
 
 /** Any action whose context accepts `TCtx` — what a module stores. */
@@ -231,6 +243,7 @@ export type AnyAction<TCtx> = ActionBase & {
   readonly input: StandardSchemaV1;
   readonly previewOutput: StandardSchemaV1<unknown, Revisioned>;
   readonly output: StandardSchemaV1;
+  readonly failures: Parameters<typeof serialize>[1];
   readonly runPreview: (input: unknown, ctx: TCtx) => Promise<Revisioned>;
   readonly runExecute: (input: unknown, ctx: TCtx, permit: Permit) => Promise<unknown>;
 };
@@ -430,7 +443,11 @@ export function defineAction<
   TPreview extends StandardSchemaV1<unknown, Revisioned>,
   TOut extends StandardSchemaV1,
   TCtx = unknown,
->(def: ActionDef<TIn, TPreview, TOut, TCtx>): Action<TIn, TPreview, TOut, TCtx> {
+  const TFailures extends Parameters<typeof serialize>[1] = readonly [],
+  TResult extends SchemaInput<TOut> | ReturnType<TFailures[number]> = SchemaInput<TOut>,
+>(
+  def: ActionDef<TIn, TPreview, TOut, TCtx, TFailures, TResult>,
+): Action<TIn, TPreview, TOut, TCtx, TFailures, TResult> {
   const maxTargets = def.maxTargets ?? DEFAULT_MAX_TARGETS;
   assertDefinition(actionMetaSchema, { ...def, maxTargets }, `Action "${def.id}"`);
   const jsonSchema = {
@@ -450,6 +467,7 @@ export function defineAction<
     output: def.output,
     preview: def.preview,
     execute: def.execute,
+    failures: def.failures ?? [],
     jsonSchema,
     runPreview: async (raw, ctx) => {
       const input = await parseInput(def.input, raw, def.id);
@@ -457,7 +475,9 @@ export function defineAction<
     },
     runExecute: async (raw, ctx, permit) => {
       const input = await parseInput(def.input, raw, def.id);
-      return parseOutput(def.output, await def.execute(input, ctx, permit), def.id, 'execute');
+      const result = await def.execute(input, ctx, permit);
+      if (failed(result)) return result;
+      return parseOutput(def.output, result, def.id, 'execute');
     },
     toDotAction: () => ({
       id: def.id,
@@ -469,6 +489,10 @@ export function defineAction<
       meta: { kind: 'action', permission: def.permission, risk: def.risk, maxTargets, ...jsonSchema },
     }),
   };
+}
+
+function failed<Value>(value: Value): value is Extract<Value, Failure> {
+  return isFailure<unknown>(value);
 }
 
 /** Define a signal: timestamped evidence a module emits, with a Standard Schema payload. */

@@ -9,7 +9,8 @@ import { and, asc, count, eq, isNotNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import type { IdGenerationFailure } from '@arki/contracts';
+import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { JobRetention } from '../retention.js';
@@ -87,9 +88,12 @@ beforeEach(async () => {
 afterEach(() => client.close());
 
 const expectOk = (result: unknown) => expect(isFailure(result)).toBe(false);
-async function settle(journal: { readonly drain: (db: PgliteDatabase) => Promise<number> }, limit = 60) {
+async function settle(
+  journal: { readonly drain: (db: PgliteDatabase) => Promise<number | IdGenerationFailure> },
+  limit = 60,
+) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the runs did not settle');
 }
@@ -111,7 +115,7 @@ const eventCount = async (id: string) => {
 };
 /** `pruneWorkflows` as an operator runs it; the number of runs it deleted. */
 const prunedBy = async (journal: Pick<ReturnType<typeof build>['journal'], 'pruneWorkflows'>, limit?: number) => {
-  const done = await journal.pruneWorkflows(db, limit === undefined ? {} : { limit }, operator);
+  const done = orThrow(await journal.pruneWorkflows(db, limit === undefined ? {} : { limit }, operator));
   return done.pruned;
 };
 const operations = () => db.select().from(tables.jobOperations);
@@ -143,7 +147,7 @@ describe('pruneWorkflows', () => {
     // Not yet: the default keeps a completed run 7 days.
     expect(await journal.pruneWorkflows(db, {}, operator)).toEqual({ pruned: 0, operationId: null });
     await expire(sql`id = ${id}`);
-    const done = await journal.pruneWorkflows(db, {}, operator);
+    const done = orThrow(await journal.pruneWorkflows(db, {}, operator));
 
     expect(done.pruned).toBe(1);
     expect(await rowOf(id)).toBeUndefined();
@@ -296,7 +300,7 @@ describe("a run's jobs", () => {
     expectOk(await journal.run(db, stuck.start, { input: {}, id: failed }, caller));
     await settle(journal);
     const [dead] = await hotJobsOf(failed);
-    await runOps().discard(db, dead?.id ?? '', operator);
+    orThrow(await runOps().discard(db, dead?.id ?? '', operator));
     expect(await archivedOf(failed)).toEqual([expect.objectContaining({ outcome: 'discarded', runId: failed })]);
   });
 
@@ -353,11 +357,11 @@ describe("a run's jobs", () => {
     expectOk(await journal.run(db, stuck.start, { input: {}, id: run }, caller));
     await settle(journal);
     const [managed] = await hotJobsOf(run);
-    const loose = jobId();
+    const loose = orThrow(jobId());
     await db.insert(tables.jobs).values({ id: loose, kind: 'queue', jobName: 'demo', args: {}, deadAt: new Date() });
     await ageDeadJobs(40);
 
-    const retried = await journal.retryDead(db, {}, operator);
+    const retried = orThrow(await journal.retryDead(db, {}, operator));
     expect(retried.ids, "the count of a bulk retry is the loose job's alone").toEqual([loose]);
     await expect(journal.retryDead(db, { ids: [managed?.id ?? ''] }, operator)).rejects.toMatchObject({
       code: 'JOB_MANAGED',
@@ -367,7 +371,7 @@ describe("a run's jobs", () => {
       .update(tables.jobs)
       .set({ deadAt: new Date(Date.now() - 40 * DAY) })
       .where(eq(tables.jobs.id, loose));
-    const purged = await journal.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, operator);
+    const purged = orThrow(await journal.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, operator));
     expect(purged).toMatchObject({ archived: 1, deleted: 0 });
     expect(await archivedOf(run)).toEqual([]);
     const [still] = await hotJobsOf(run);

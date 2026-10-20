@@ -29,3 +29,50 @@ it('IdOf reads schema output so transforms and brands cannot be erased by a pref
   // @ts-expect-error A prefix without a canonical schema cannot establish a domain type.
   type _Unvalidated = IdOf<{ prefix: 'refund_' }>;
 });
+
+it('same-format domain kinds reject cross-kind and unvalidated values', () => {
+  const refundId = defineId('id_', { kind: 'billing.refund' });
+  const _paymentId = defineId('id_', { kind: 'billing.payment' });
+  type RefundId = IdOf<typeof refundId>;
+  type PaymentId = IdOf<typeof _paymentId>;
+  expectTypeOf<RefundId>().not.toExtend<PaymentId>();
+  expectTypeOf<PaymentId>().not.toExtend<RefundId>();
+  expectTypeOf<`id_${string}`>().not.toExtend<RefundId>();
+  expectTypeOf<string>().not.toExtend<RefundId>();
+  expectTypeOf<RefundId>().toExtend<`id_${string}`>();
+  expectTypeOf<typeof refundId>().toExtend<IdDeclaration<'id_'>>();
+  expectTypeOf<z.output<typeof refundId.schema>>().toEqualTypeOf<RefundId>();
+  expectTypeOf<ReturnType<typeof refundId.create>>().toEqualTypeOf<RefundId | IdGenerationFailure>();
+  expectTypeOf<FailureOf<typeof refundId.create>>().toEqualTypeOf<IdGenerationFailure>();
+  const raw: unknown = 'id_1';
+  if (refundId.is(raw)) expectTypeOf(raw).toEqualTypeOf<RefundId>();
+  const dynamicKind = String('billing.refund');
+  // @ts-expect-error A widened name cannot establish distinct identity kinds.
+  defineId('id_', { kind: dynamicKind });
+  const multipleKinds: 'billing.refund' | 'billing.payment' = Math.random() ? 'billing.refund' : 'billing.payment';
+  // @ts-expect-error One declaration cannot claim two identity kinds simultaneously.
+  defineId('id_', { kind: multipleKinds });
+  // @ts-expect-error Every domain kind needs a name.
+  defineId('id_', { kind: '' });
+});
+
+it('unprefixed domains remain distinct and external numeric IDs derive their brands from schemas', () => {
+  const _externalUserId = { schema: z.number().int().positive().brand<'provider.user'>() };
+  const _externalTeamId = { schema: z.number().int().positive().brand<'provider.team'>() };
+  expectTypeOf<IdOf<typeof _externalUserId>>().not.toExtend<IdOf<typeof _externalTeamId>>();
+  expectTypeOf<IdOf<typeof _externalUserId>>().toEqualTypeOf<z.output<typeof _externalUserId.schema>>();
+  const _traceId = defineId('', { kind: 'trace' });
+  const _leaseId = defineId('', { kind: 'lease' });
+  expectTypeOf<IdOf<typeof _traceId>>().not.toExtend<IdOf<typeof _leaseId>>();
+  expectTypeOf<string>().not.toExtend<IdOf<typeof _traceId>>();
+});
+
+it('requires a finite literal kind rather than an open template pattern', () => {
+  const _rejectPatterns = (kind: `billing.${string}`, numeric: `${number}`) => {
+    // @ts-expect-error A pattern does not identify one domain.
+    defineId('id_', { kind });
+    // @ts-expect-error An infinite numeric pattern does not identify one domain.
+    defineId('id_', { kind: numeric });
+  };
+  expectTypeOf(_rejectPatterns).toBeFunction();
+});

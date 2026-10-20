@@ -44,7 +44,8 @@ type OnDelete = 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default
  * from `@arki/contracts` has both, and so does {@link createIdFactory}.
  */
 export type IdColumnSource<TId extends string> = {
-  readonly schema: z.ZodType<TId>;
+  // Zod's canonical output retains brands; its deprecated `_output` alias does not.
+  readonly schema: z.ZodType & z.core.$ZodType<TId>;
   readonly create: () => TId | IdGenerationFailure;
 };
 
@@ -63,7 +64,7 @@ export type IdColumnSource<TId extends string> = {
  * });
  * ```
  */
-export function idColumns<TSchema extends z.ZodType<string>>(
+export function idColumns<TSchema extends z.ZodType & z.core.$ZodType<string>>(
   id: IdColumnSource<z.output<NoInfer<TSchema>>> & { readonly schema: TSchema },
 ) {
   type TId = z.output<TSchema>;

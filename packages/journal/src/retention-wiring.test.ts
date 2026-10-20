@@ -76,7 +76,7 @@ const archived = async () => (await journal.archivedJobs(db)).jobs.map(row => [r
 describe('per-effect retention wins over the journal', () => {
   it('at ack: the effect that keeps nothing leaves no archive row, the other follows the journal', async () => {
     await payOrder();
-    expect(await journal.drain(db)).toBe(2);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(2);
     expect(await archived()).toEqual([['loud', 'completed']]);
   });
 
@@ -84,8 +84,8 @@ describe('per-effect retention wins over the journal', () => {
     const { quietId, loudId } = await payOrder();
     await kill(quietId, 1);
     await kill(loudId, 1);
-    await journal.discard(db, quietId, op);
-    await journal.discard(db, loudId, op);
+    orThrow(await journal.discard(db, quietId, op));
+    orThrow(await journal.discard(db, loudId, op));
     expect(await archived()).toEqual([['loud', 'discarded']]);
   });
 
@@ -93,7 +93,7 @@ describe('per-effect retention wins over the journal', () => {
     const { quietId, loudId } = await payOrder();
     await kill(quietId, 40);
     await kill(loudId, 40);
-    const purged = await journal.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, op);
+    const purged = orThrow(await journal.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, op));
     expect(purged).toMatchObject({ archived: 1, deleted: 1 });
     expect(await archived()).toEqual([['loud', 'dead']]);
     expect(await db.select().from(tables.jobs).where(eq(tables.jobs.id, quietId))).toEqual([]);
@@ -118,7 +118,7 @@ describe('per-effect retention wins over the journal', () => {
       .from(tables.jobs)
       .where(eq(tables.jobs.eventSeq, paid.events[0]?.seq ?? -1));
     await kill(row?.id ?? '', 40);
-    const purged = await own.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, op);
+    const purged = orThrow(await own.purgeDead(db, { olderThan: new Date(Date.now() - 35 * DAY) }, op));
     expect(purged).toMatchObject({ archived: 0, deleted: 0, operationId: null });
   });
 });

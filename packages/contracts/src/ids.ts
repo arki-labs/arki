@@ -29,7 +29,7 @@ export const userIdSchema = z.custom<UserId>(value => typeof value === 'string' 
  * Browser-safe on purpose: no Drizzle here. `@arki/db/id`'s `idColumns(storyId)`
  * turns the same declaration into table columns on the server.
  */
-export type IdDeclaration<P extends string> = ReturnType<typeof defineId<P>>;
+export type IdDeclaration<P extends string> = ReturnType<typeof prefixedId<P>>;
 
 /** Canonical failures returned by ID generation, including unexpected provider faults. */
 export const ID_GENERATION_FAILURES = [RandomSourceUnavailable, UnexpectedDefect] as const;
@@ -39,6 +39,15 @@ export type IdGenerationFailure = FailureOf<(typeof ID_GENERATION_FAILURES)[numb
 
 /** The successful ID inferred from its canonical schema, including any domain brand. */
 export type IdOf<D extends { readonly schema: z.ZodType }> = z.output<D['schema']>;
+
+// A runtime choice of two kinds would brand one value as both domains in Zod.
+type SingleKind<Kind extends string, All = Kind> = Kind extends ''
+  ? never
+  : Kind extends unknown
+    ? [All] extends [Kind]
+      ? Kind
+      : never
+    : never;
 
 /**
  * Declare a prefixed id. The prefix is kept exactly as given, so a table
@@ -55,16 +64,45 @@ export type IdOf<D extends { readonly schema: z.ZodType }> = z.output<D['schema'
  * storyId.create();                             // StoryId | IdGenerationFailure
  * ```
  */
-export function defineId<const P extends string>(prefix: P) {
+export function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>;
+/** Give same-format IDs distinct domain types without changing their stored values. */
+export function defineId<const P extends string, const Kind extends string>(
+  prefix: P,
+  options: { readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>) },
+): ReturnType<typeof brandedId<P, Kind>>;
+export function defineId(prefix: string, options?: unknown) {
   if (typeof prefix !== 'string') {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdPrefix,
       'defineId: prefix must be a string. Use an empty string for unprefixed stored IDs.',
     );
   }
-  const schema = z.templateLiteral([prefix, z.string()], {
+  if (options === undefined) return prefixedId(prefix);
+  const kind: unknown = typeof options === 'object' && options !== null ? Reflect.get(options, 'kind') : undefined;
+  if (typeof kind !== 'string' || kind.length === 0) {
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidIdKind,
+      'defineId: kind must be a non-empty domain name. Use one literal name for each identity kind.',
+    );
+  }
+  return brandedId(prefix, kind);
+}
+
+function prefixedIdSchema<const P extends string>(prefix: P) {
+  return z.templateLiteral([prefix, z.string()], {
     error: `Expected an id starting with "${prefix}"`,
   });
+}
+
+function prefixedId<const P extends string>(prefix: P) {
+  return idDeclaration(prefix, prefixedIdSchema(prefix));
+}
+
+function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind) {
+  return idDeclaration(prefix, prefixedIdSchema(prefix).brand<Kind>());
+}
+
+function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${string}`>>(prefix: P, schema: TSchema) {
   return {
     /** The stored prefix, unchanged. */
     prefix,
@@ -81,8 +119,8 @@ export function defineId<const P extends string>(prefix: P) {
         return UnexpectedDefect({ cause: error });
       }
     },
-    /** Tests the prefix and narrows to the success-only ID type. */
-    is: (value: unknown): value is z.output<typeof schema> => typeof value === 'string' && value.startsWith(prefix),
+    /** Validates the canonical schema and narrows to its success-only domain type. */
+    is: (value: unknown): value is z.output<typeof schema> => schema.safeParse(value).success,
   } as const;
 }
 

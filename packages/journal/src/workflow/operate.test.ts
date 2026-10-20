@@ -130,7 +130,7 @@ beforeEach(() => {
 
 async function settle(limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }
@@ -251,15 +251,27 @@ describe('retryStep', () => {
     const refused = (path: string, phase: 'do' | 'undo' = 'do') =>
       journal.workflows.retryStep(db, { runId: id, path, phase }, operator);
     // A finished run, a step that is done, a step that never ran, and a run nobody started.
-    await expect(refused('ship')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_FINISHED' } });
+    await expect(refused('ship')).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_FINISHED' },
+    });
     const open = newId('open');
     expectOk(await journal.run(db, refunding.start, { input: {}, id: open }, caller));
     await settle();
     const openStep = (path: string, phase: 'do' | 'undo') =>
       journal.workflows.retryStep(db, { runId: open, path, phase }, operator);
-    await expect(openStep('charge', 'do')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
-    await expect(openStep('charge', 'undo')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
-    await expect(openStep('nowhere', 'do')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
+    await expect(openStep('charge', 'do')).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'STEP_NOT_DEAD' },
+    });
+    await expect(openStep('charge', 'undo')).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'STEP_NOT_DEAD' },
+    });
+    await expect(openStep('nowhere', 'do')).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'STEP_NOT_DEAD' },
+    });
     await expect(
       journal.workflows.retryStep(db, { runId: 'missing', path: 'ship', phase: 'do' }, operator),
     ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_NOT_FOUND' } });
@@ -359,7 +371,10 @@ describe('skipUndo', () => {
     expect(await stepRow(id, 'charge', 'undo')).toMatchObject({ status: 'skipped', reason: 'the provider is back' });
     const detail = await journal.workflows.run(db, id);
     expect(detail?.residual).toEqual(['charge']);
-    await expect(journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_FINISHED' } });
+    await expect(journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_FINISHED' },
+    });
   });
 });
 
@@ -459,7 +474,7 @@ describe('operator signal and cancel', () => {
 
   it('journal.workflows.cancel is the same transition as def.cancel', async () => {
     const id = await startRefunding('op-cancel');
-    const cancelled = await journal.workflows.cancel(db, { runId: id, reason: 'customer withdrew' }, operator);
+    const cancelled = orThrow(await journal.workflows.cancel(db, { runId: id, reason: 'customer withdrew' }, operator));
     expect(cancelled).toEqual({ state: 'compensating' });
     await settle();
     expect(await runRow(id)).toMatchObject({ state: 'cancelled' });

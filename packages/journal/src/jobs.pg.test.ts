@@ -11,11 +11,10 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-
-import { defineFailure } from '@arki/failure';
 import { z } from 'zod';
 
 import { listenOnPool } from '@arki/db/pg';
+import { defineFailure, orThrow } from '@arki/failure';
 
 import type { JobRunner, ScheduledJob } from './types.js';
 import { jobId } from './id.js';
@@ -44,7 +43,7 @@ const runner = (
 
 /** One queue row and its wake, committed on pool A, as `@arki/queue/outbox` writes them. */
 const schedule = async (args: unknown = {}): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await dbA.transaction(async tx => {
     await tx.insert(tables.jobs).values({ id, kind: 'queue', jobName: 'demo', args });
     await tx.execute(sql`select pg_notify(${journal.wakeChannel}, '{"queue":1}')`);
@@ -86,12 +85,17 @@ describe('queue rows on Postgres', () => {
     const refusal = Refused({ reason: 'the balance cannot be charged' });
     const id = await schedule();
     const reasons: unknown[] = [];
-    await journal.drain(dbA, {
-      jobs: runner(() => refusal, (_job, reason) => {
-        reasons.push(reason);
-        return;
-      }),
-    });
+    await journal
+      .drain(dbA, {
+        jobs: runner(
+          () => refusal,
+          (_job, reason) => {
+            reasons.push(reason);
+            return;
+          },
+        ),
+      })
+      .then(result => orThrow(result));
     expect(reasons).toEqual([refusal]);
     expect(reasons[0]).toBe(refusal);
     const dead = await rowOf(id);
@@ -110,8 +114,8 @@ describe('queue rows on Postgres', () => {
     });
     const ids = await Promise.all(Array.from({ length: 50 }, (_, index) => schedule({ index })));
     const [a, b] = await Promise.all([
-      journal.drain(dbA, { jobs, batchSize: 100 }),
-      journal.drain(dbB, { jobs, batchSize: 100 }),
+      journal.drain(dbA, { jobs, batchSize: 100 }).then(result => orThrow(result)),
+      journal.drain(dbB, { jobs, batchSize: 100 }).then(result => orThrow(result)),
     ]);
     expect(a + b).toBe(50);
     expect(ran.toSorted()).toEqual(ids.toSorted());
@@ -127,7 +131,7 @@ describe('queue rows on Postgres', () => {
     const free = await schedule({ n: 2 });
     await dbA.transaction(async tx => {
       await tx.select().from(tables.jobs).where(eq(tables.jobs.id, locked)).for('update');
-      expect(await journal.drain(dbB, { jobs })).toBe(1);
+      expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(1);
     });
     expect(ran).toEqual([free]);
     expect(await rowOf(locked)).toMatchObject({ attempts: 0 });
@@ -136,10 +140,10 @@ describe('queue rows on Postgres', () => {
   it('a row in an uncommitted transaction is invisible to a worker on another connection', async () => {
     const jobs = runner(() => undefined);
     await dbA.transaction(async tx => {
-      await tx.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'demo', args: {} });
-      expect(await journal.drain(dbB, { jobs })).toBe(0);
+      await tx.insert(tables.jobs).values({ id: orThrow(jobId()), kind: 'queue', jobName: 'demo', args: {} });
+      expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(0);
     });
-    expect(await journal.drain(dbB, { jobs })).toBe(1);
+    expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(1);
   });
 
   it('a worker that crashed after its claim leaves a row the next worker takes once the lease runs out', async () => {
@@ -153,9 +157,9 @@ describe('queue rows on Postgres', () => {
       .update(tables.jobs)
       .set({ leaseToken: 'crashed', leaseUntil: sql`now() + interval '1 second'`, attempts: 1 })
       .where(eq(tables.jobs.id, id));
-    expect(await journal.drain(dbB, { jobs })).toBe(0);
+    expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(0);
     await sleep(1100);
-    expect(await journal.drain(dbB, { jobs })).toBe(1);
+    expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(1);
     expect(ran).toEqual([id]);
   });
 
@@ -170,7 +174,7 @@ describe('queue rows on Postgres', () => {
       }
     });
     const id = await schedule();
-    await journal.drain(dbB, { jobs });
+    await journal.drain(dbB, { jobs }).then(result => orThrow(result));
     // At least once: the external system must dedupe on this id.
     expect(effects).toEqual([id, id]);
   });
@@ -199,14 +203,14 @@ describe('queue rows on Postgres', () => {
       await held;
       seen.push('owner');
     });
-    const stale = journal.drain(dbA, { jobs, leaseSeconds: 1 });
+    const stale = journal.drain(dbA, { jobs, leaseSeconds: 1 }).then(result => orThrow(result));
     await sleep(150);
     // The stale worker stalled past its lease; another worker on another connection takes the row.
     await dbB
       .update(tables.jobs)
       .set({ leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, id));
-    const owner = journal.drain(dbB, { jobs, leaseSeconds: 1 });
+    const owner = journal.drain(dbB, { jobs, leaseSeconds: 1 }).then(result => orThrow(result));
     expect(await stale).toBe(1);
     expect(seen).toEqual(['stale:aborted']);
     expect(await rowOf(id)).not.toBeNull();
@@ -272,7 +276,7 @@ describe('queue rows on Postgres', () => {
       effects: [],
     });
     const id = await schedule();
-    expect(await effects.drain(dbB)).toBe(0);
+    expect(await effects.drain(dbB).then(result => orThrow(result))).toBe(0);
     expect(await rowOf(id)).toMatchObject({ attempts: 0, leaseToken: null });
   });
 });

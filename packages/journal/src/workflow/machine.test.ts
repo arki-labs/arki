@@ -56,7 +56,7 @@ const stepRows = (id: string) =>
 
 describe('the workflow.run reducers', () => {
   it('RunStarted creates a running run that pins its version and shape, so a later code change cannot rewrite what it was', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(await write(id, started()));
     expect(await runRow(id)).toMatchObject({
       state: 'running',
@@ -75,7 +75,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('a happy run folds scheduled, parked, signalled and completed into the right state at each point', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -146,7 +146,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('a timer wakes a parked run, so a sleep ends without a signal', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(id, started(), events.Parked({ node: 'coolOff', waitingFor: null, wakeAt: clock(30), at: clock(1) })),
     );
@@ -155,7 +155,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('a skipped do node is null in results, and a skipped undo leaves results alone', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -169,7 +169,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('a dead step leaves the run state alone, because stuck is derived from the step row', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -182,7 +182,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('cancel then compensation: the first cancel request keeps its time and reason, and the run ends cancelled', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -216,7 +216,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('a deadline then RunFailed ends the run failed; DeadlineReached alone changes no state', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(await write(id, started(), events.DeadlineReached({ at: clock(600) })));
     expect(await runRow(id)).toMatchObject({ state: 'running' });
     orThrow(await write(id, events.RunFailed({ error: 'deadline', at: clock(601), keepUntil: clock(900) })));
@@ -224,7 +224,7 @@ describe('the workflow.run reducers', () => {
   });
 
   it('replay rebuilds the same row from the events, so the row is a projection of the log', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -245,7 +245,7 @@ describe('the workflow.run reducers', () => {
 
 describe('the step projection', () => {
   it('writes one row per node and phase with the status the events say, so Foreman can read position without replaying', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -277,7 +277,7 @@ describe('the step projection', () => {
   });
 
   it('a failed step keeps its error and attempt, and a retry reschedules the same row with a clean slate', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -306,7 +306,7 @@ describe('the step projection', () => {
   });
 
   it('an undo is its own row beside the do row, and a skipped node never scheduled still gets a row with its reason', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -327,7 +327,7 @@ describe('the step projection', () => {
   });
 
   it('steps are deleted with their run, so pruning a run leaves no orphans', async () => {
-    const id = workflowRunId();
+    const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
@@ -340,10 +340,10 @@ describe('the step projection', () => {
   });
 
   it('a second unfinished run with the same name and concurrency key is refused by the database, and a finished one frees the key', async () => {
-    const first = workflowRunId();
+    const first = orThrow(workflowRunId());
     orThrow(await write(first, started(0, 'pay_1')));
-    await expect(write(workflowRunId(), started(0, 'pay_1'))).rejects.toThrow();
+    await expect(write(orThrow(workflowRunId()), started(0, 'pay_1'))).rejects.toThrow();
     orThrow(await write(first, events.RunCompleted({ output: null, at: clock(1), keepUntil: null })));
-    await expect(write(workflowRunId(), started(0, 'pay_1'))).resolves.not.toThrow();
+    await expect(write(orThrow(workflowRunId()), started(0, 'pay_1'))).resolves.not.toThrow();
   });
 });

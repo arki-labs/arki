@@ -11,6 +11,7 @@ import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import { defineFailure } from '@arki/failure';
 
 import type { PermitClaim } from './client';
 import type { ForemanEnv } from './env';
@@ -25,6 +26,7 @@ import {
   AdminError,
   defineAction,
   defineModule,
+  defineRead,
   describeModule,
   isModuleError,
   moduleError,
@@ -34,7 +36,21 @@ import { memoryKv } from './test-support';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
-type Behaviour = 'ok' | 'throw' | 'badOutput' | 'moduleError';
+type Behaviour = 'ok' | 'throw' | 'badOutput' | 'moduleError' | 'refused' | 'defect' | 'undeclared';
+type ThrowAt = 'context' | 'read' | 'preview' | 'execute';
+const Refused = defineFailure('admin.test_refused', { status: 409, message: 'The job changed.' });
+const Defect = defineFailure('admin.test_defect', { status: 500, message: 'private database password' });
+const Undeclared = defineFailure('admin.test_undeclared', {
+  status: 409,
+  message: 'private undeclared data',
+  remediation: 'secret-remediation-sentinel',
+});
+
+/** Models untrusted callbacks that violate the returned-failure contract. */
+function throwUndeclared(): never {
+  // eslint-disable-next-line @typescript-eslint/only-throw-error -- The regression requires a real thrown Failure value.
+  throw Undeclared();
+}
 
 const AUD = 'novelette:prod';
 const BASE_URL = 'https://novelette.test';
@@ -55,7 +71,7 @@ beforeAll(async () => {
   hashes = new Map(description.actions.map(action => [action.id, action.schemaHash]));
 });
 
-function buildModule(behaviour: Behaviour) {
+function buildModule(behaviour: Behaviour, throwAt?: ThrowAt) {
   const runs: { actionId: string; permit: Permit }[] = [];
   const action = (id: string) =>
     defineAction({
@@ -66,22 +82,43 @@ function buildModule(behaviour: Behaviour) {
       input: z.object({ jobId: z.string().min(1) }),
       previewOutput: z.object({ revision: z.string() }),
       output: z.object({ requeued: z.boolean(), jobId: z.string().regex(/^job_\d+$/) }),
-      preview: (_input, _ctx: Ctx) => Promise.resolve({ revision: 'rev_3' }),
-      execute: ({ jobId }, _ctx: Ctx, permit) => {
+      failures: [Refused, Defect, ...(behaviour === 'undeclared' ? [] : [Undeclared])],
+      preview: (_input, _ctx: Ctx) => {
+        if (throwAt === 'preview') throwUndeclared();
+        return Promise.resolve({ revision: 'rev_3' });
+      },
+      execute: async ({ jobId }, _ctx: Ctx, permit) => {
         runs.push({ actionId: id, permit });
+        if (throwAt === 'execute') throwUndeclared();
+        if (behaviour === 'refused') return Refused({ cause: new Error('secret-cause-sentinel') });
+        if (behaviour === 'defect') return Defect();
+        // JavaScript callers can evade the declaration; the dispatcher must still fail closed.
+        if (behaviour === 'undeclared') return Undeclared();
         if (behaviour === 'moduleError') {
-          return Promise.reject(moduleError('ARKI_TEST_E001', 409, 'The job changed since the preview.', 'Preview again.'));
+          throw moduleError('ARKI_TEST_E001', 409, 'The job changed since the preview.', 'Preview again.');
         }
-        if (behaviour === 'throw') return Promise.reject(new Error('database password leaked in this message'));
+        if (behaviour === 'throw') throw new Error('database password leaked in this message');
         // Breaks the action's own output schema: it ran, then answered badly.
-        if (behaviour === 'badOutput') return Promise.resolve({ requeued: true, jobId: 'not a job id' });
-        return Promise.resolve({ requeued: true, jobId });
+        if (behaviour === 'badOutput') return { requeued: true, jobId: 'not a job id' };
+        return { requeued: true, jobId };
       },
     });
   const module = defineModule({
     id: '@arki/queue',
     version: '1.0.0',
-    reads: {},
+    reads: {
+      probe: defineRead({
+        id: 'queue.probe',
+        summary: 'Probe',
+        permission: 'queue:read',
+        input: z.object({}),
+        output: z.object({ ok: z.boolean() }),
+        load: (_input, _ctx: Ctx) => {
+          if (throwAt === 'read') throwUndeclared();
+          return Promise.resolve({ ok: true });
+        },
+      }),
+    },
     actions: { retryJob: action('queue.retryJob'), dropJob: action('queue.dropJob') },
   });
   return { module, runs };
@@ -89,6 +126,7 @@ function buildModule(behaviour: Behaviour) {
 
 type SetupOptions = {
   behaviour?: Behaviour;
+  throwAt?: ThrowAt;
   /** `null`: no receipt store at all. Default: a KV store on the test clock. */
   receipts?: ReceiptStore | null;
   /** The network loses every execute answer after the app handled it. */
@@ -101,7 +139,7 @@ function setup(options: SetupOptions = {}) {
   const clock = new MockClock(T0);
   const kv = memoryKv(clock);
   const receipts = options.receipts === null ? undefined : (options.receipts ?? kvReceiptStore(kv, { namespace: AUD }));
-  const { module, runs } = buildModule(options.behaviour ?? 'ok');
+  const { module, runs } = buildModule(options.behaviour ?? 'ok', options.throwAt);
   const handler = createForemanHandler<Ctx>({
     identity: { aud: AUD, privateKey: appPair.privateKey },
     keys: { read: { current: readPair.publicKey }, execute: { current: executePair.publicKey } },
@@ -115,7 +153,10 @@ function setup(options: SetupOptions = {}) {
       receipts,
       modules: [module],
     }),
-    context: () => ({ tenant: 'acme' }),
+    context: () => {
+      if (options.throwAt === 'context') throwUndeclared();
+      return { tenant: 'acme' };
+    },
     app: { version: '1.2.3' },
     clock,
   });
@@ -161,6 +202,57 @@ async function adminErrorOf(promise: Promise<unknown>): Promise<AdminError> {
 }
 
 describe('T(admin-receipts) the dispatcher records every execute', () => {
+  it('supervises thrown failures before recording or replaying an execution receipt', async () => {
+    const { execute, runs, receiptOf } = setup({ throwAt: 'execute' });
+    const first = await execute('exe_thrown_failure').catch((error: unknown) => error);
+    const second = await execute('exe_thrown_failure').catch((error: unknown) => error);
+    const receipt = await receiptOf('exe_thrown_failure');
+    expect(first).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
+    expect(second).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
+    expect(receipt).toMatchObject({ status: 'failed', error: { code: 'failure.unexpected_defect', status: 500 } });
+    expect(runs).toHaveLength(1);
+    for (const secret of [Undeclared.code, 'private undeclared data', 'secret-remediation-sentinel']) {
+      expect(JSON.stringify({ first, second, receipt })).not.toContain(secret);
+    }
+  });
+
+  it.each(['context', 'read', 'preview'] as const)(
+    'supervises a failure thrown by %s before sending a response',
+    async throwAt => {
+      const { client, runs } = setup({ throwAt });
+      const request =
+        throwAt === 'read'
+          ? client.read('queue.probe', {}, ['queue:read'])
+          : client.preview('queue.retryJob', { jobId: 'job_1' }, ['queue:write']);
+      const error = await request.catch((error_: unknown) => error_);
+      expect(error).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
+      expect(runs).toHaveLength(0);
+      for (const secret of [Undeclared.code, 'private undeclared data', 'secret-remediation-sentinel']) {
+        expect(JSON.stringify(error)).not.toContain(secret);
+      }
+    },
+  );
+  it.each(['refused', 'defect', 'undeclared'] as const)(
+    'records a returned %s as failed and never reruns it',
+    async behaviour => {
+      const { execute, runs, receiptOf } = setup({ behaviour });
+      const first = await execute('exe_returned_failure').catch((error: unknown) => error);
+      const second = await execute('exe_returned_failure').catch((error: unknown) => error);
+      const expected =
+        behaviour === 'refused' ? Refused.code : behaviour === 'defect' ? Defect.code : 'failure.unexpected_defect';
+      expect(first).toMatchObject({ code: expected });
+      expect(second).toMatchObject({ code: expected });
+      expect(runs).toHaveLength(1);
+      const receipt = await receiptOf('exe_returned_failure');
+      expect(receipt).toMatchObject({
+        status: 'failed',
+        error: { code: expected, status: behaviour === 'refused' ? 409 : 500 },
+      });
+      for (const secret of ['private database password', 'secret-cause-sentinel', 'private undeclared data']) {
+        expect(JSON.stringify({ first, second, receipt })).not.toContain(secret);
+      }
+    },
+  );
   it('settles the receipt before the response leaves the app', async () => {
     const order: string[] = [];
     const clock = new MockClock(T0);
@@ -301,18 +393,22 @@ describe('T(admin-receipts) a module declares its own errors', () => {
     );
     expect(isModuleError(error)).toBe(true);
     expect(error).toMatchObject({ code: 'ARKI_TEST_E001', status: 409, remediation: 'Preview again.' });
-    expect(await receiptOf('exe_mod')).toMatchObject({ status: 'failed', error: { code: 'ARKI_TEST_E001', status: 409 } });
+    expect(await receiptOf('exe_mod')).toMatchObject({
+      status: 'failed',
+      error: { code: 'ARKI_TEST_E001', status: 409 },
+    });
     expect(await execute('exe_mod').catch((error_: unknown) => error_)).toMatchObject({
       code: 'ARKI_TEST_E001',
       status: 409,
     });
   });
 
-  it('a ModuleError cannot be made with a server status, so a module can never fake a 5xx', () => {
-    for (const status of [500, 399, 600, 409.5]) {
+  it('ModuleError carries canonical server failures and rejects statuses outside the HTTP error range', () => {
+    for (const status of [399, 600, 409.5]) {
       expect(() => moduleError('ARKI_TEST_E002', status, 'no', 'no')).toThrow(ADMIN_ERROR_CODES.invalidConfig);
     }
     expect(moduleError('ARKI_TEST_E002', 404, 'ok', 'ok').status).toBe(404);
+    expect(moduleError('ARKI_TEST_E002', 500, 'private', 'ok').status).toBe(500);
   });
 });
 
@@ -369,22 +465,13 @@ describe('T(admin-receipts) the KV store', () => {
     expect(await brandability.claim(claim)).toEqual({ claimed: true });
     expect(await novelette.get('exe_shared')).toMatchObject({ status: 'pending' });
     expect(
-      [...kv.entries.keys()].every(
-        key => key.includes('novelette:prod') || key.includes('brandability:prod'),
-      ),
+      [...kv.entries.keys()].every(key => key.includes('novelette:prod') || key.includes('brandability:prod')),
     ).toBe(true);
   });
 
   it('refuses a namespace that is missing or could slip into another key', () => {
     const kv = memoryKv(new MockClock(T0));
-    for (const namespace of [
-      '',
-      'novelette',
-      'novelette:prod:claim',
-      'a:b:value:x',
-      'Nove lette:prod',
-      'novelette:',
-    ]) {
+    for (const namespace of ['', 'novelette', 'novelette:prod:claim', 'a:b:value:x', 'Nove lette:prod', 'novelette:']) {
       expect(() => kvReceiptStore(kv, { namespace })).toThrow(/ARKI_ADMIN_E014/);
     }
   });

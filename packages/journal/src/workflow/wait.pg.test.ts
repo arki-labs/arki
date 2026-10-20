@@ -13,7 +13,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { j, tables } from '../test-support.js';
 
@@ -113,7 +113,7 @@ const expectOk = (result: unknown) => {
 async function parkedAndDue(def: typeof timed | typeof bounded) {
   const id = `race_${++next}`;
   expectOk(await journal.run(dbA, def.start, { input: {}, id }, caller));
-  await journal.drain(dbA);
+  await journal.drain(dbA).then(result => orThrow(result));
   const [row] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
   expect(row?.state).toBe('parked');
   const back = sql`interval '2 hours'`;
@@ -155,12 +155,12 @@ describe('signal, timeout and deadline race on one parked run', () => {
   it('a signal that commits while the timeout is in flight wins, and the timeout commits nothing', async () => {
     const id = await parkedAndDue(timed);
     const timer = hold('timer');
-    const fired = journal.drain(dbA);
+    const fired = journal.drain(dbA).then(result => orThrow(result));
     await timer.arrived.opened;
     expect(await signal(timed, id)).toEqual({ status: 'woke' });
     timer.release.open();
     await fired;
-    await journal.drain(dbA);
+    await journal.drain(dbA).then(result => orThrow(result));
     const outcome = await outcomeOf(id);
     expect(outcome).toMatchObject({ state: 'completed', woken: 1, failed: 0 });
     expect(outcome.types).not.toContain('TimerFired');
@@ -171,7 +171,7 @@ describe('signal, timeout and deadline race on one parked run', () => {
     const late = hold('signal');
     const sent = signal(timed, id);
     await late.arrived.opened;
-    await journal.drain(dbA);
+    await journal.drain(dbA).then(result => orThrow(result));
     expect(await outcomeOf(id)).toMatchObject({ state: 'failed', failed: 1 });
     late.release.open();
     expect(await sent).toEqual({ status: 'finished' });
@@ -184,14 +184,14 @@ describe('signal, timeout and deadline race on one parked run', () => {
       const id = await parkedAndDue(timed);
       const timer = hold('timer');
       const late = hold('signal');
-      const fired = journal.drain(dbA);
+      const fired = journal.drain(dbA).then(result => orThrow(result));
       const sent = signal(timed, id);
       await Promise.all([timer.arrived.opened, late.arrived.opened]);
       timer.release.open();
       late.release.open();
       const [, sentResult] = await Promise.all([fired, sent]);
       expectOk(sentResult);
-      await journal.drain(dbA);
+      await journal.drain(dbA).then(result => orThrow(result));
       const outcome = await outcomeOf(id);
       expect(outcome.woken + outcome.failed, `round ${round}: ${outcome.types.join(',')}`).toBe(1);
       expect(outcome.state).toBe(outcome.failed === 1 ? 'failed' : 'completed');
@@ -203,7 +203,7 @@ describe('signal, timeout and deadline race on one parked run', () => {
       const id = await parkedAndDue(bounded);
       const timer = hold('timer');
       const late = hold('signal');
-      const fired = journal.drain(dbA);
+      const fired = journal.drain(dbA).then(result => orThrow(result));
       const sent = signal(bounded, id);
       await Promise.all([timer.arrived.opened, late.arrived.opened]);
       timer.release.open();
@@ -229,7 +229,7 @@ describe('cancel races a signal and a timeout on one parked run', () => {
       const timer = hold('timer');
       const late = hold('signal');
       const stop = hold('cancel');
-      const fired = journal.drain(dbA);
+      const fired = journal.drain(dbA).then(result => orThrow(result));
       const sent = signal(timed, id);
       const cancelled = journal.run(dbA, timed.cancel, { runId: id, reason: 'race' }, caller);
       await Promise.all([timer.arrived.opened, late.arrived.opened, stop.arrived.opened]);
@@ -238,7 +238,7 @@ describe('cancel races a signal and a timeout on one parked run', () => {
       stop.release.open();
       const [, sentResult, cancelResult] = await Promise.all([fired, sent, cancelled]);
       expectOk(sentResult);
-      await journal.drain(dbA);
+      await journal.drain(dbA).then(result => orThrow(result));
       const events = await dbA
         .select({ type: tables.events.type, data: tables.events.data })
         .from(tables.events)

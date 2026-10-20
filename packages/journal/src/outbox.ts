@@ -10,6 +10,8 @@ import { and, asc, desc, eq, getTableColumns, inArray, is, isNotNull, isNull, lt
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
+import type { IdGenerationFailure } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { JournalTables } from './pg.js';
@@ -19,6 +21,7 @@ import type { JobRow } from './worker.js';
 import { JournalError } from './errors.js';
 import { jobId as newJobId, operationId as newOperationId } from './id.js';
 import { keepFor, keepUntil, MAX_SWEEP_BATCH, retryableForMs } from './retention.js';
+import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 
 const debug = getLogger('arki:journal');
 
@@ -413,8 +416,9 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   /** The transaction is ours when the caller gave a root database; then the wake is ours to fire after commit. */
   const inTransaction = async <T>(db: DbHandle, run: (tx: DbHandle) => Promise<T>, wake: boolean): Promise<T> => {
     const owns = !is(db, PgAsyncTransaction);
-    const result = await db.transaction(run);
-    if (owns && wake) deps.wake();
+    const refusal = rollbackOnFailure<T>();
+    const result = await db.transaction(async tx => refusal.settle(await run(tx))).catch(refusal.recover);
+    if (owns && wake && !isReturnedFailure(result)) deps.wake();
     return result;
   };
 
@@ -424,8 +428,10 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     op: JobOperationInput,
     ids: readonly string[],
     count = ids.length,
-  ): Promise<string> => {
-    const id = newOperationId();
+    reservedId?: string,
+  ): Promise<string | IdGenerationFailure> => {
+    const id = reservedId ?? newOperationId();
+    if (isFailure(id)) return id;
     await tx.insert(jobOperations).values({
       id,
       action,
@@ -521,7 +527,11 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   } as const;
 
   /** Dead to pending under the same id (the idempotency key a handler passes outside). Earlier attempt rows stay. */
-  const retry = async (db: DbHandle, id: string, op: JobOperationInput): Promise<{ operationId: string }> => {
+  const retry = async (
+    db: DbHandle,
+    id: string,
+    op: JobOperationInput,
+  ): Promise<{ operationId: string } | IdGenerationFailure> => {
     assertOperation(op);
     return inTransaction(
       db,
@@ -535,6 +545,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         if (rows.length === 0)
           throw new JournalError('JOB_NOT_DEAD', 'job', id, 'not a dead job; only a dead job is retried');
         const operationId = await record(tx, 'retry', op, [id]);
+        if (isFailure(operationId)) return operationId;
         debug.debug('retry {jobId}: {operationId}', { jobId: id, operationId });
         return { operationId };
       },
@@ -543,7 +554,11 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   };
 
   /** A dead job leaves the hot table. It lands in the archive as `discarded` unless the policy keeps nothing. */
-  const discard = async (db: DbHandle, id: string, op: JobOperationInput): Promise<{ operationId: string }> => {
+  const discard = async (
+    db: DbHandle,
+    id: string,
+    op: JobOperationInput,
+  ): Promise<{ operationId: string } | IdGenerationFailure> => {
     assertOperation(op);
     return inTransaction(
       db,
@@ -559,6 +574,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         if (gone.length === 0)
           throw new JournalError('JOB_NOT_DEAD', 'job', id, 'not a dead job; only a dead job is discarded');
         const operationId = await record(tx, 'discard', op, gone);
+        if (isFailure(operationId)) return operationId;
         debug.debug('discard {jobId}: {operationId}, archived {archived}', {
           jobId: id,
           operationId,
@@ -571,7 +587,11 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   };
 
   /** A waiting job (ready or delayed) leaves the hot table, archived as `cancelled`. A job a worker holds is refused. */
-  const cancel = async (db: DbHandle, id: string, op: JobOperationInput): Promise<{ operationId: string }> => {
+  const cancel = async (
+    db: DbHandle,
+    id: string,
+    op: JobOperationInput,
+  ): Promise<{ operationId: string } | IdGenerationFailure> => {
     assertOperation(op);
     return inTransaction(
       db,
@@ -600,6 +620,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
           );
         }
         const operationId = await record(tx, 'cancel', op, gone);
+        if (isFailure(operationId)) return operationId;
         debug.debug('cancel {jobId}: {operationId}, archived {archived}', {
           jobId: id,
           operationId,
@@ -619,7 +640,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     db: DbHandle,
     selection: JobSelection,
     op: JobOperationInput,
-  ): Promise<{ ids: readonly string[]; operationId: string | null }> => {
+  ): Promise<{ ids: readonly string[]; operationId: string | null } | IdGenerationFailure> => {
     assertOperation(op);
     const filter = 'ids' in selection ? undefined : selection;
     const ids = 'ids' in selection ? [...new Set(selection.ids)] : undefined;
@@ -664,6 +685,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         }
         if (changed.length === 0) return { ids: changed, operationId: null };
         const operationId = await record(tx, 'retryDead', op, changed);
+        if (isFailure(operationId)) return operationId;
         debug.debug('retryDead: {count} jobs, {operationId}', { count: changed.length, operationId });
         return { ids: changed, operationId };
       },
@@ -692,7 +714,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     opts: { readonly olderThan: Date; readonly limit?: number },
     op: JobOperationInput,
     scope: SQL | undefined,
-  ): Promise<{ archived: number; deleted: number; operationId: string | null }> => {
+  ): Promise<{ archived: number; deleted: number; operationId: string | null } | IdGenerationFailure> => {
     assertOperation(op);
     const limit = bounded('purgeDead', opts.limit, PURGE_LIMIT);
     const newest = Date.now() - policy.retryableForMs;
@@ -717,6 +739,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         const count = removed.archivedIds.length + removed.deletedIds.length;
         const operationId =
           count === 0 ? null : await record(tx, 'purgeDead', op, [...removed.archivedIds, ...removed.deletedIds]);
+        if (isFailure(operationId)) return operationId;
         debug.debug('purgeDead: {count} jobs, archived {archived}, {operationId}', {
           count,
           archived: removed.archivedIds.length,
@@ -737,7 +760,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     db: DbHandle,
     archivedId: string,
     op: JobOperationInput,
-  ): Promise<{ jobId: string; operationId: string }> => {
+  ): Promise<{ jobId: string; operationId: string } | IdGenerationFailure> => {
     assertOperation(op);
     return inTransaction(
       db,
@@ -746,6 +769,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         if (source === undefined) throw argument(archivedId, 'no archived job with this id');
         if (managed === 'refuse' && source.runId !== null) throw managedError(archivedId);
         const id = newJobId();
+        if (isFailure(id)) return id;
         const rows = await tx
           .insert(jobsTable)
           .values({
@@ -764,6 +788,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         if (rows.length === 0)
           throw new JournalError('JOB_EXISTS', 'job', archivedId, 'an unfinished job holds the same dedupe key');
         const operationId = await record(tx, 'replay', op, [archivedId, id], 1);
+        if (isFailure(operationId)) return operationId;
         debug.debug('replay {archivedId} as {jobId}: {operationId}', { archivedId, jobId: id, operationId });
         return { jobId: id, operationId };
       },
@@ -784,7 +809,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     db: DbHandle,
     opts?: { readonly limit?: number; readonly signal?: AbortSignal },
     op: JobOperationInput = retentionOp,
-  ): Promise<{ exported: number; failed: boolean; operationId: string | null }> => {
+  ): Promise<{ exported: number; failed: boolean; operationId: string | null } | IdGenerationFailure> => {
     assertOperation(op);
     const limit = bounded('exportArchive', opts?.limit, PURGE_LIMIT);
     const sink = policy.sink;
@@ -800,6 +825,8 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
           .limit(limit)
           .for('update', { skipLocked: true });
         if (rows.length === 0) return { exported: 0, failed: false, operationId: null };
+        const reservedId = newOperationId();
+        if (isFailure(reservedId)) return reservedId;
         try {
           await sink.write(rows, { signal: opts?.signal ?? new AbortController().signal });
         } catch (error) {
@@ -815,7 +842,8 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
           .update(jobArchive)
           .set({ exportedAt: sql`now()` })
           .where(inArray(jobArchive.id, ids));
-        const operationId = await record(tx, 'exportArchive', op, ids);
+        const operationId = await record(tx, 'exportArchive', op, ids, ids.length, reservedId);
+        if (isFailure(operationId)) return operationId;
         debug.debug('exportArchive: {count} rows to {sink}, {operationId}', {
           count: ids.length,
           sink: sink.name,
@@ -840,7 +868,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     db: DbHandle,
     opts?: { readonly limit?: number },
     op: JobOperationInput = retentionOp,
-  ): Promise<{ pruned: number; operationId: string | null }> => {
+  ): Promise<{ pruned: number; operationId: string | null } | IdGenerationFailure> => {
     assertOperation(op);
     const limit = bounded('pruneArchive', opts?.limit, PURGE_LIMIT);
     return inTransaction(
@@ -908,6 +936,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         }
         if (ids.length === 0) return { pruned: 0, operationId: null };
         const operationId = await record(tx, 'pruneArchive', op, ids);
+        if (isFailure(operationId)) return operationId;
         debug.debug('pruneArchive: {count} rows, {operationId}', { count: ids.length, operationId });
         return { pruned: ids.length, operationId };
       },
@@ -926,7 +955,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     db: DbHandle,
     opts?: { readonly limit?: number },
     op: JobOperationInput = retentionOp,
-  ): Promise<{ pruned: number; operationId: string | null }> => {
+  ): Promise<{ pruned: number; operationId: string | null } | IdGenerationFailure> => {
     assertOperation(op);
     const limit = bounded('pruneWorkflows', opts?.limit, PURGE_LIMIT);
     return inTransaction(
@@ -955,6 +984,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         const ids = rowIds(result);
         if (ids.length === 0) return { pruned: 0, operationId: null };
         const operationId = await record(tx, 'pruneWorkflows', op, ids);
+        if (isFailure(operationId)) return operationId;
         debug.debug('pruneWorkflows: {count} runs, {operationId}', { count: ids.length, operationId });
         return { pruned: ids.length, operationId };
       },
@@ -1028,9 +1058,13 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   const sweepOnce = async (db: DbHandle, signal?: AbortSignal): Promise<void> => {
     if (policy.sweep === false) return;
     const { batch } = policy.sweep;
-    const step = async (name: string, run: () => Promise<number>) => {
+    const step = async (name: string, run: () => Promise<number | IdGenerationFailure>) => {
       try {
         const handled = await run();
+        if (isFailure(handled)) {
+          debug.warn('sweep: {step} refused: {failed}', { step: name, failed: handled.code });
+          return;
+        }
         if (handled >= batch)
           debug.warn('sweep: {step} filled its batch of {batch}; the backlog is growing', { step: name, batch });
       } catch (error) {
@@ -1047,24 +1081,29 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         retentionOp,
         outsideLiveRuns,
       );
+      if (isFailure(done)) return done;
       return done.archived + done.deleted;
     });
     if (signal?.aborted !== true && policy.sink !== undefined) {
       await step('exportArchive', async () => {
         const done = await exportArchive(db, { limit: batch, signal }, retentionOp);
+        if (isFailure(done)) return done;
         return done.exported;
       });
     }
     await step('pruneArchive', async () => {
       const done = await pruneArchive(db, { limit: batch }, retentionOp);
+      if (isFailure(done)) return done;
       return done.pruned;
     });
     await step('pruneWorkflows', async () => {
       const done = await pruneWorkflows(db, { limit: batch }, retentionOp);
+      if (isFailure(done)) return done;
       return done.pruned;
     });
     await step('pruneOperations', async () => {
       const done = await pruneOperations(db, { limit: batch });
+      if (isFailure(done)) return done;
       return done.pruned;
     });
   };

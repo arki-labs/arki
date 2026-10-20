@@ -64,6 +64,27 @@ describe('defineId', () => {
   it('is browser-safe: the schema exports a JSON Schema pattern a client can check', () => {
     expect(z.toJSONSchema(storyId.schema)).toMatchObject({ type: 'string', pattern: '^sty_[\\s\\S]{0,}$' });
   });
+
+  it('brands preserve stored bytes and restore their type through canonical JSON boundaries', () => {
+    const refundId = defineId('id_', { kind: 'billing.refund' });
+    const paymentId = defineId('id_', { kind: 'billing.payment' });
+    const stored = 'id_legacy';
+    expect(refundId.schema.parse(stored)).toBe(stored);
+    expect(paymentId.schema.parse(stored)).toBe(stored);
+    const generated = orThrow(refundId.create());
+    const encoded = JSON.stringify(generated);
+    const wire: unknown = JSON.parse(encoded);
+    const decoded = refundId.schema.parse(wire);
+    expect(decoded).toBe(generated);
+    expectTypeOf(decoded).toEqualTypeOf<IdOf<typeof refundId>>();
+    expect(refundId.is(stored)).toBe(true);
+    expect(refundId.is('other_legacy')).toBe(false);
+    expect(z.toJSONSchema(refundId.schema)).toEqual(z.toJSONSchema(paymentId.schema));
+  });
+
+  it.each([null, {}, { kind: 42 }, { kind: '' }])('rejects malformed static domain options %j', options => {
+    expect(() => Reflect.apply(defineId, null, ['id_', options])).toThrow('ARKI_CONTRACTS_E009');
+  });
 });
 
 describe('assertUniqueIdPrefixes', () => {
@@ -101,6 +122,14 @@ describe('ID generation failures', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('nominal branding preserves the exact returned entropy failure', () => {
+    vi.stubGlobal('crypto', null);
+    const id = defineId('id_', { kind: 'billing.refund' });
+    const result = id.create();
+    expect(RandomSourceUnavailable.is(result)).toBe(true);
+    expectTypeOf(result).toEqualTypeOf<IdOf<typeof id> | IdGenerationFailure>();
   });
 
   it.each([undefined, null, false, 'crypto', {}, { getRandomValues: null }, { getRandomValues: 1 }])(

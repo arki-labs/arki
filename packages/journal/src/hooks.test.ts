@@ -168,7 +168,7 @@ describe('effect hooks', () => {
     orThrow(await journal.run(db, placeOrder, { orderId: id }, meta));
     orThrow(await journal.run(db, payOrder, { orderId: id }, meta));
 
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(ran).toEqual([]);
     const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'hooked-mail'));
     expect(job).toMatchObject({
@@ -180,12 +180,12 @@ describe('effect hooks', () => {
     expect(seen).toEqual([{ name: 'hooked-mail', jobId: job?.id, attempt: 1, type: 'OrderPaid' }]);
 
     refuse = false;
-    await journal.retry(db, job?.id ?? '', { actor: 'hook-test' });
+    orThrow(await journal.retry(db, job?.id ?? '', { actor: 'hook-test' }));
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, job?.id ?? ''));
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(ran).toEqual([id]);
     expect(seen[1]).toMatchObject({ attempt: 1 });
     expect(() => journal.hooks.effect.around(async (_ctx, next) => next())).toThrow(

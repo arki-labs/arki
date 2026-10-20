@@ -13,7 +13,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { j, tables } from '../test-support.js';
 
@@ -135,7 +135,7 @@ const ends = (types: readonly string[]) =>
 async function parkedOnChild(def: typeof single | typeof pair | typeof either, label: string) {
   const id = `${label}_${++next}`;
   expectOk(await journal.run(dbA, def.start, { input: {}, id }, caller));
-  await journal.drain(dbA);
+  await journal.drain(dbA).then(result => orThrow(result));
   expect(await stateOf(id)).toBe('parked');
   return id;
 }
@@ -159,7 +159,7 @@ describe('a child ending races the parent', () => {
       stopping.release.open();
       const [finishedResult, cancelResult] = await Promise.all([finished, cancelled]);
       expectOk(finishedResult);
-      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA)) === 0) break;
+      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA).then(result => orThrow(result))) === 0) break;
       const parent = await typesOf(id);
       const child = await typesOf(kidId);
       const label = `round ${round}: parent ${parent.join(',')} | child ${child.join(',')}`;
@@ -198,7 +198,7 @@ describe('a child ending races the parent', () => {
       const [aResult, bResult] = await Promise.all([a, b]);
       expectOk(aResult);
       expectOk(bResult);
-      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA)) === 0) break;
+      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA).then(result => orThrow(result))) === 0) break;
       const parent = await typesOf(id);
       const label = `round ${round}: ${parent.join(',')}`;
       const [row] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
@@ -240,7 +240,7 @@ describe('a child ending races the parent', () => {
       second.release.open();
       expectOk(await a);
       expectOk(await b);
-      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA)) === 0) break;
+      for (let pass = 0; pass < 30; pass++) if ((await journal.drain(dbA).then(result => orThrow(result))) === 0) break;
       const parent = await typesOf(id);
       const label = `round ${round}: ${parent.join(',')}`;
       expect(await stateOf(id), label).toBe('completed');

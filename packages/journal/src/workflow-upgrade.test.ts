@@ -9,6 +9,8 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { jobId } from './id.js';
 import { journalTables } from './pg.js';
 
@@ -16,8 +18,8 @@ const tables = journalTables();
 
 const client = new PGlite('memory://');
 const db = drizzle({ client });
-const liveId = jobId();
-const archivedId = jobId();
+const liveId = orThrow(jobId());
+const archivedId = orThrow(jobId());
 const at = new Date('2026-09-01T00:00:00.000Z');
 
 beforeAll(async () => {

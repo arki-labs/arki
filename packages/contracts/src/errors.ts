@@ -64,6 +64,13 @@ export const CONTRACTS_ERROR_CODES = {
    * @verify bun run test -- src/drizzle.test.ts
    */
   invalidColumnMetadata: 'ARKI_CONTRACTS_E008',
+  /**
+   * `defineId` received a missing, empty or non-string domain kind.
+   *
+   * @fix Supply a non-empty literal domain name, such as `billing.refund`.
+   * @verify bun run test -- src/ids.test.ts
+   */
+  invalidIdKind: 'ARKI_CONTRACTS_E009',
 } as const;
 
 /** The code of a {@link ContractsError}. */
@@ -79,6 +86,7 @@ const REMEDIATIONS: Record<ContractsErrorCode, string> = {
   ARKI_CONTRACTS_E006: 'Rename the contract key: no ".", and not a name the query utils reserve.',
   ARKI_CONTRACTS_E008: 'Use a supported Drizzle column builder and matching Drizzle version.',
   ARKI_CONTRACTS_E007: 'Pass a leaf of createOrpcUtils, or an object built by operations().',
+  ARKI_CONTRACTS_E009: 'Supply a non-empty literal domain name, such as billing.refund.',
 };
 
 /** A coded failure of an `@arki/contracts` function. */

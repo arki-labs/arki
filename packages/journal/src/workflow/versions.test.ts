@@ -9,6 +9,7 @@ import { asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import { TransactionDefect } from '@arki/db/transaction';
 import { isFailure, orThrow } from '@arki/failure';
 
@@ -77,10 +78,10 @@ const eventTypesOf = async (id: string) => {
   return rows.map(row => row.type);
 };
 
-type Draining = { readonly drain: (db: PgliteDatabase) => Promise<number> };
+type Draining = { readonly drain: (db: PgliteDatabase) => Promise<number | IdGenerationFailure> };
 async function settle(journal: Draining, limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the runs did not settle');
 }
@@ -188,7 +189,10 @@ describe('versions', () => {
     const v2 = refundV2(init, log);
     const journal = init.compose({ workflows: [v1, v2], workflowMeta });
     const id = newId('retired');
-    await expect(journal.run(db, v1.start, { input: { cents: 1 }, id }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_VERSION_RETIRED' } });
+    await expect(journal.run(db, v1.start, { input: { cents: 1 }, id }, caller)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_VERSION_RETIRED' },
+    });
     expect(await rowOf(id)).toBeUndefined();
   });
 
@@ -293,7 +297,10 @@ describe('stranded runs', () => {
     // Still stranded: the retry says why and leaves the job dead.
     const retryCharge = (journal: typeof journalA) =>
       journal.workflows.retryStep(db, { runId: id, path: 'charge', phase: 'do' }, operator);
-    await expect(retryCharge(journalB)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_SHAPE_CHANGED' } });
+    await expect(retryCharge(journalB)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_SHAPE_CHANGED' },
+    });
     expect(await deadJobs()).toHaveLength(1);
 
     // The app deploys the old code again; the operator retries.
@@ -413,7 +420,10 @@ describe('stranded runs', () => {
     const edited = fresh();
     const editedDef = editedRefundV1(edited, log);
     const journalB = edited.compose({ workflows: [editedDef], workflowMeta });
-    await expect(journalB.run(db, editedDef.cancel, { runId: id, reason: 'stop' }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_SHAPE_CHANGED' } });
+    await expect(journalB.run(db, editedDef.cancel, { runId: id, reason: 'stop' }, caller)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'WORKFLOW_SHAPE_CHANGED' },
+    });
     expect(await eventTypes(id), 'the refused cancel left no CancelRequested behind').toEqual(before);
 
     log.length = 0;

@@ -6,7 +6,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScheduledJob } from '@arki/journal';
 import { z } from '@arki/contracts';
@@ -124,6 +124,18 @@ const rows = () => db.select().from(tables.jobs);
 const settle = () => new Promise(resolve => setTimeout(resolve, 20));
 
 describe('runAfter in a transaction', () => {
+  it('returns unavailable entropy before writing a queued job', async () => {
+    vi.stubGlobal('crypto', null);
+    let result: unknown;
+    try {
+      result = await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u1' }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(result).toMatchObject({ code: 'contracts.random_source_unavailable', status: 500 });
+    expect(await db.select().from(tables.jobs)).toEqual([]);
+    expect(notifies).toEqual([]);
+  });
   it('a committed transaction leaves one row and one wake; a rolled-back one leaves neither', async () => {
     // Why: the row must commit with the business write or not at all; that is the whole lesson.
     await expect(

@@ -7,18 +7,26 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { UnsafeUrlError } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 
 import type { JobRunner } from '../types.js';
 import type { WebhookSenderOptions } from './webhooks.js';
+import * as ids from '../id.js';
 import { combineRunners } from '../runners.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
 import { WEBHOOK_ERROR_CODES, webhookSender, webhookTables } from './webhooks.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 const hooks = webhookTables();
 const journal = j.compose({});
@@ -64,7 +72,7 @@ const sender = (fetch: WebhookSenderOptions['fetch'], options: Partial<WebhookSe
   });
 
 async function drainAll(runner: JobRunner): Promise<void> {
-  while ((await journal.drain(db, { jobs: runner })) > 0);
+  while ((await journal.drain(db, { jobs: runner }).then(result => orThrow(result))) > 0);
 }
 
 const attemptsOf = (subscriptionId: string) =>
@@ -84,14 +92,14 @@ const dispatchOne = (webhooks: ReturnType<typeof sender>, partner: string, event
 describe('dispatch', () => {
   it('commits with the business write: a rollback leaves no message and no delivery', async () => {
     const webhooks = sender(endpoint().fetch);
-    await webhooks.subscribe(db, {
+    orThrow(await webhooks.subscribe(db, {
       partner: 'p-rollback',
       url: 'https://hooks.example.com/in',
       events: ['order.placed'],
-    });
+    }));
     await expect(
       db.transaction(async tx => {
-        await webhooks.dispatch(tx, { partner: 'p-rollback', event: 'order.placed', payload: {} });
+        orThrow(await webhooks.dispatch(tx, { partner: 'p-rollback', event: 'order.placed', payload: {} }));
         tx.rollback();
       }),
     ).rejects.toThrow();
@@ -102,14 +110,14 @@ describe('dispatch', () => {
   it('queues one delivery per active subscription of that partner and event, and none for anyone else', async () => {
     const webhooks = sender(endpoint().fetch);
     const url = 'https://hooks.example.com/in';
-    await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed', 'order.paid'] });
-    await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] });
-    await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.paid'] });
-    const off = await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] });
+    orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed', 'order.paid'] }));
+    orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] }));
+    orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.paid'] }));
+    const off = orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] }));
     await webhooks.disable(db, off.id);
-    await webhooks.subscribe(db, { partner: 'p-other', url, events: ['order.placed'] });
+    orThrow(await webhooks.subscribe(db, { partner: 'p-other', url, events: ['order.placed'] }));
 
-    const { deliveries } = await dispatchOne(webhooks, 'p-match');
+    const { deliveries } = orThrow(await dispatchOne(webhooks, 'p-match'));
     expect(deliveries).toBe(2);
     expect(await db.select().from(tables.jobs)).toHaveLength(2);
   });
@@ -140,12 +148,14 @@ describe('delivery', () => {
   it('posts the stored bytes, signed so a Standard Webhooks receiver accepts them', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    const { id, secret } = await webhooks.subscribe(db, {
-      partner: 'p-deliver',
-      url: 'https://hooks.example.com/deliver',
-      events: ['order.placed'],
-    });
-    const { messageId } = await dispatchOne(webhooks, 'p-deliver');
+    const { id, secret } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-deliver',
+        url: 'https://hooks.example.com/deliver',
+        events: ['order.placed'],
+      }),
+    );
+    const { messageId } = orThrow(await dispatchOne(webhooks, 'p-deliver'));
     await drainAll(webhooks.runner);
 
     expect(target.received).toHaveLength(1);
@@ -164,12 +174,14 @@ describe('delivery', () => {
 
   it('a failing endpoint: each try is appended, the last one is dead, and the job stays dead for the operator', async () => {
     const webhooks = sender(endpoint(500, 503).fetch);
-    const { id } = await webhooks.subscribe(db, {
-      partner: 'p-fail',
-      url: 'https://hooks.example.com/fail',
-      events: ['order.placed'],
-    });
-    await dispatchOne(webhooks, 'p-fail');
+    const { id } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-fail',
+        url: 'https://hooks.example.com/fail',
+        events: ['order.placed'],
+      }),
+    );
+    orThrow(await dispatchOne(webhooks, 'p-fail'));
     await drainAll(webhooks.runner);
 
     expect(await attemptsOf(id)).toEqual([
@@ -185,12 +197,14 @@ describe('delivery', () => {
     const webhooks = sender(() => Promise.reject(new UnsafeUrlError('Private network addresses are not allowed.')), {
       retry: backoff.constant(0).upTo(3),
     });
-    const { id } = await webhooks.subscribe(db, {
-      partner: 'p-refused',
-      url: 'https://hooks.example.com/refused',
-      events: ['order.placed'],
-    });
-    await dispatchOne(webhooks, 'p-refused');
+    const { id } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-refused',
+        url: 'https://hooks.example.com/refused',
+        events: ['order.placed'],
+      }),
+    );
+    orThrow(await dispatchOne(webhooks, 'p-refused'));
     await drainAll(webhooks.runner);
 
     expect(await attemptsOf(id)).toEqual([{ status: 'dead', attempt: 1, response: null }]);
@@ -201,38 +215,42 @@ describe('delivery', () => {
   it('dead deliveries in a row disable the subscription; a success in between resets the count', async () => {
     const flaky = endpoint(500, 500, 204, 500);
     const webhooks = sender(flaky.fetch);
-    const { id } = await webhooks.subscribe(db, {
-      partner: 'p-disable',
-      url: 'https://hooks.example.com/flaky',
-      events: ['order.placed'],
-    });
-    await dispatchOne(webhooks, 'p-disable'); // 500, 500: dead
+    const { id } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-disable',
+        url: 'https://hooks.example.com/flaky',
+        events: ['order.placed'],
+      }),
+    );
+    orThrow(await dispatchOne(webhooks, 'p-disable')); // 500, 500: dead
     await drainAll(webhooks.runner);
-    await dispatchOne(webhooks, 'p-disable'); // 204: delivered, count reset
+    orThrow(await dispatchOne(webhooks, 'p-disable')); // 204: delivered, count reset
     await drainAll(webhooks.runner);
     expect(await subscriptionRow(id)).toMatchObject({ status: 'active', deadLetters: 0 });
 
-    await dispatchOne(webhooks, 'p-disable'); // 500, 500: dead
+    orThrow(await dispatchOne(webhooks, 'p-disable')); // 500, 500: dead
     await drainAll(webhooks.runner);
-    await dispatchOne(webhooks, 'p-disable'); // 500, 500: dead, the second in a row
+    orThrow(await dispatchOne(webhooks, 'p-disable')); // 500, 500: dead, the second in a row
     await drainAll(webhooks.runner);
     const row = await subscriptionRow(id);
     expect(row).toMatchObject({ status: 'disabled', deadLetters: 2 });
     expect(row.disabledAt).toBeInstanceOf(Date);
 
-    const afterDisable = await dispatchOne(webhooks, 'p-disable');
+    const afterDisable = orThrow(await dispatchOne(webhooks, 'p-disable'));
     expect(afterDisable.deliveries).toBe(0);
   });
 
   it('a delivery queued before its subscription was disabled is skipped, not sent', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    const { id } = await webhooks.subscribe(db, {
-      partner: 'p-skip',
-      url: 'https://hooks.example.com/skip',
-      events: ['order.placed'],
-    });
-    await dispatchOne(webhooks, 'p-skip');
+    const { id } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-skip',
+        url: 'https://hooks.example.com/skip',
+        events: ['order.placed'],
+      }),
+    );
+    orThrow(await dispatchOne(webhooks, 'p-skip'));
     await webhooks.disable(db, id);
     await drainAll(webhooks.runner);
     expect(target.received).toEqual([]);
@@ -244,14 +262,16 @@ describe('replay', () => {
   it('sends a dead message again with the same webhook-id, so the receiver can dedupe it', async () => {
     const target = endpoint(500, 500, 204);
     const webhooks = sender(target.fetch);
-    const { id } = await webhooks.subscribe(db, {
-      partner: 'p-replay',
-      url: 'https://hooks.example.com/replay',
-      events: ['order.placed'],
-    });
-    const { messageId } = await dispatchOne(webhooks, 'p-replay');
+    const { id } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-replay',
+        url: 'https://hooks.example.com/replay',
+        events: ['order.placed'],
+      }),
+    );
+    const { messageId } = orThrow(await dispatchOne(webhooks, 'p-replay'));
     await drainAll(webhooks.runner);
-    await webhooks.replay(db, { messageId, subscriptionId: id });
+    orThrow(await webhooks.replay(db, { messageId, subscriptionId: id }));
     await drainAll(webhooks.runner);
 
     expect(target.received.map(request => request.headers.get('webhook-id'))).toEqual([
@@ -265,13 +285,15 @@ describe('replay', () => {
 
   it("refuses to send one partner's message to another partner's endpoint", async () => {
     const webhooks = sender(endpoint().fetch);
-    await webhooks.subscribe(db, { partner: 'p-a', url: 'https://a.example.com/in', events: ['order.placed'] });
-    const other = await webhooks.subscribe(db, {
-      partner: 'p-b',
-      url: 'https://b.example.com/in',
-      events: ['order.placed'],
-    });
-    const { messageId } = await dispatchOne(webhooks, 'p-a');
+    orThrow(await webhooks.subscribe(db, { partner: 'p-a', url: 'https://a.example.com/in', events: ['order.placed'] }));
+    const other = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-b',
+        url: 'https://b.example.com/in',
+        events: ['order.placed'],
+      }),
+    );
+    const { messageId } = orThrow(await dispatchOne(webhooks, 'p-a'));
     await expect(webhooks.replay(db, { messageId, subscriptionId: other.id })).rejects.toMatchObject({
       code: WEBHOOK_ERROR_CODES.otherPartner,
     });
@@ -282,15 +304,17 @@ describe('secrets', () => {
   it('during a rotation window both secrets sign, so a receiver holding either accepts', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    const { id, secret: oldSecret } = await webhooks.subscribe(db, {
-      partner: 'p-rotate',
-      url: 'https://hooks.example.com/rotate',
-      events: ['order.placed'],
-    });
+    const { id, secret: oldSecret } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-rotate',
+        url: 'https://hooks.example.com/rotate',
+        events: ['order.placed'],
+      }),
+    );
     const { secret: newSecret } = await webhooks.rotateSecret(db, id, { windowSeconds: 3600 });
     expect(newSecret).not.toBe(oldSecret);
     expect(await subscriptionRow(id)).toMatchObject({ secretVersion: 2 });
-    await dispatchOne(webhooks, 'p-rotate');
+    orThrow(await dispatchOne(webhooks, 'p-rotate'));
     await drainAll(webhooks.runner);
 
     const [request] = target.received;
@@ -309,13 +333,15 @@ describe('secrets', () => {
   it('after the window only the new secret signs', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    const { id, secret: oldSecret } = await webhooks.subscribe(db, {
-      partner: 'p-rotated',
-      url: 'https://hooks.example.com/rotated',
-      events: ['order.placed'],
-    });
+    const { id, secret: oldSecret } = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-rotated',
+        url: 'https://hooks.example.com/rotated',
+        events: ['order.placed'],
+      }),
+    );
     await webhooks.rotateSecret(db, id, { windowSeconds: 0 });
-    await dispatchOne(webhooks, 'p-rotated');
+    orThrow(await dispatchOne(webhooks, 'p-rotated'));
     await drainAll(webhooks.runner);
     const [request] = target.received;
     if (request === undefined) throw new Error('no request');
@@ -331,22 +357,26 @@ describe('secrets', () => {
   it('are sealed at rest, and a sealed secret copied onto another subscription does not open', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    const first = await webhooks.subscribe(db, {
-      partner: 'p-seal',
-      url: 'https://hooks.example.com/one',
-      events: ['order.placed'],
-    });
-    const second = await webhooks.subscribe(db, {
-      partner: 'p-seal',
-      url: 'https://hooks.example.com/two',
-      events: ['other.event'],
-    });
+    const first = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-seal',
+        url: 'https://hooks.example.com/one',
+        events: ['order.placed'],
+      }),
+    );
+    const second = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'p-seal',
+        url: 'https://hooks.example.com/two',
+        events: ['other.event'],
+      }),
+    );
     const stored = await subscriptionRow(first.id);
     expect(stored.secret).not.toContain(first.secret.slice('whsec_'.length));
 
     // Someone with write access to the table swaps the first secret onto the second row.
     await db.update(hooks.subscriptions).set({ secret: stored.secret }).where(eq(hooks.subscriptions.id, second.id));
-    await db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-seal', event: 'other.event', payload: {} }));
+    orThrow(await db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-seal', event: 'other.event', payload: {} })));
     await drainAll(webhooks.runner);
     expect(target.received).toEqual([]);
     expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
@@ -374,11 +404,11 @@ describe('combineRunners', () => {
   it('runs webhook deliveries beside another runner on one worker, and refuses two owners of one name', async () => {
     const target = endpoint(204);
     const webhooks = sender(target.fetch);
-    await webhooks.subscribe(db, {
+    orThrow(await webhooks.subscribe(db, {
       partner: 'p-combo',
       url: 'https://hooks.example.com/combo',
       events: ['order.placed'],
-    });
+    }));
     const ran: string[] = [];
     const other: JobRunner = {
       names: ['demo.v1'],
@@ -390,11 +420,49 @@ describe('combineRunners', () => {
       retryDelay: () => 0,
     };
     await db.insert(tables.jobs).values({ id: 'job_demo', kind: 'queue', jobName: 'demo.v1', args: {} });
-    await dispatchOne(webhooks, 'p-combo');
+    orThrow(await dispatchOne(webhooks, 'p-combo'));
     await drainAll(combineRunners(other, webhooks.runner));
     expect(ran).toEqual(['job_demo']);
     expect(target.received).toHaveLength(1);
 
     expect(() => combineRunners(other, other)).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
+  });
+});
+
+describe('webhook entropy ownership', () => {
+  it('returns a subscription-ID refusal before storing or sealing a subscription', async () => {
+    const webhooks = sender(endpoint().fetch);
+    vi.stubGlobal('crypto', null);
+    const result = await webhooks.subscribe(db, {
+      partner: 'entropy-subscribe',
+      url: 'https://hooks.example.com/in',
+      events: ['e'],
+    });
+    expect(RandomSourceUnavailable.is(result)).toBe(true);
+    expect(
+      await db.select().from(hooks.subscriptions).where(eq(hooks.subscriptions.partner, 'entropy-subscribe')),
+    ).toEqual([]);
+  });
+
+  it('rolls a message back when a delivery job ID fails, and replay returns the same refusal', async () => {
+    const webhooks = sender(endpoint().fetch);
+    const subscription = orThrow(
+      await webhooks.subscribe(db, {
+        partner: 'entropy-dispatch',
+        url: 'https://hooks.example.com/in',
+        events: ['order.placed'],
+      }),
+    );
+    const refused = RandomSourceUnavailable();
+    const factory = vi.spyOn(ids, 'jobId').mockReturnValue(refused);
+    expect(await dispatchOne(webhooks, 'entropy-dispatch')).toBe(refused);
+    expect(await db.select().from(hooks.messages).where(eq(hooks.messages.partner, 'entropy-dispatch'))).toEqual([]);
+    expect(await db.select().from(tables.jobs)).toEqual([]);
+    factory.mockRestore();
+    const message = orThrow(await dispatchOne(webhooks, 'entropy-dispatch'));
+    vi.spyOn(ids, 'jobId').mockReturnValue(refused);
+    const before = await db.select().from(tables.jobs);
+    expect(await webhooks.replay(db, { messageId: message.messageId, subscriptionId: subscription.id })).toBe(refused);
+    expect(await db.select().from(tables.jobs)).toEqual(before);
   });
 });

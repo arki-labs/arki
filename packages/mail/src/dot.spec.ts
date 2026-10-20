@@ -92,7 +92,7 @@ describe('mailOutboxPlugin() and mailJobs()', () => {
       db.transaction(tx => app.services.mailOutbox.enqueue(tx, welcome, { name: 'Ada' }, { to: 'ada@example.com' })),
     );
     const runner = await mailJobs().build([], { mailOutbox: app.services.mailOutbox, db });
-    while ((await journal.drain(db, { jobs: runner })) > 0);
+    while (orThrow(await journal.drain(db, { jobs: runner })) > 0);
     expect(sent.map(message => message.to)).toEqual(['ada@example.com']);
     await orThrow(app.dispose());
   });

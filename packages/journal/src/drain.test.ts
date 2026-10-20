@@ -7,8 +7,8 @@ import { z } from 'zod';
 import { TransactionDefect } from '@arki/db/transaction';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
-import { backoff } from './index.js';
 import type { OrderId } from './test-support.js';
+import { backoff } from './index.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -18,12 +18,19 @@ let next = 0;
 const calls: { jobId: string; type: string; signalAborted: boolean }[] = [];
 let failMail = false;
 
-const mail = j.effect('order-mail', order, {
-  OrderPaid: (e, { jobId, signal }) => {
-    calls.push({ jobId, type: e.type, signalAborted: signal.aborted });
-    if (failMail) throw new Error('smtp down');
-  },
-}).withSchedule({ retry: backoff.constant(1000).upTo(7).while(reason => UnexpectedDefect.is(reason)) });
+const mail = j
+  .effect('order-mail', order, {
+    OrderPaid: (e, { jobId, signal }) => {
+      calls.push({ jobId, type: e.type, signalAborted: signal.aborted });
+      if (failMail) throw new Error('smtp down');
+    },
+  })
+  .withSchedule({
+    retry: backoff
+      .constant(1000)
+      .upTo(7)
+      .while(reason => UnexpectedDefect.is(reason)),
+  });
 
 const journal = j.compose({ effects: [mail] });
 const op = { actor: 'drain-test' } as const;
@@ -60,7 +67,7 @@ const jobById = async (id: string) => {
 describe('drain', () => {
   it('runs the handler with the event and the job id, then deletes the job', async () => {
     const job = await placeAndPay();
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(calls.at(-1)).toEqual({ jobId: job.id, type: 'OrderPaid', signalAborted: false });
     expect(await jobById(job.id)).toBeNull();
   });
@@ -69,7 +76,7 @@ describe('drain', () => {
     const job = await placeAndPay();
     failMail = true;
     try {
-      expect(await journal.drain(db)).toBe(1);
+      expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     } finally {
       failMail = false;
     }
@@ -77,14 +84,14 @@ describe('drain', () => {
     expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
     expect(after?.lastError).toContain(UnexpectedDefect.code);
     expect(after?.availableAt.getTime()).toBeGreaterThan(Date.now());
-    expect(await journal.drain(db)).toBe(0);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(0);
 
     // Once the backoff passes, the job runs again and succeeds.
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, job.id));
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });
 
@@ -93,14 +100,14 @@ describe('drain', () => {
     await db.update(tables.jobs).set({ attempts: 7 }).where(eq(tables.jobs.id, job.id));
     failMail = true;
     try {
-      expect(await journal.drain(db)).toBe(1);
+      expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     } finally {
       failMail = false;
     }
     const dead = await jobById(job.id);
     expect(dead?.attempts).toBe(8);
     expect(dead?.deadAt).toBeInstanceOf(Date);
-    expect(await journal.drain(db)).toBe(0);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(0);
     expect(await jobById(job.id)).not.toBeNull();
   });
 
@@ -110,12 +117,12 @@ describe('drain', () => {
       .update(tables.jobs)
       .set({ leaseToken: 'stale', leaseUntil: new Date(Date.now() + 60_000), attempts: 1 })
       .where(eq(tables.jobs.id, job.id));
-    expect(await journal.drain(db)).toBe(0);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(0);
     await db
       .update(tables.jobs)
       .set({ leaseUntil: new Date(Date.now() - 1) })
       .where(eq(tables.jobs.id, job.id));
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });
 
@@ -152,7 +159,7 @@ describe('drain', () => {
     const first = orderId(++next);
     orThrow(await place(first));
     orThrow(await pay(first));
-    const draining = slowJournal.drain(db, { leaseSeconds: 1 });
+    const draining = slowJournal.drain(db, { leaseSeconds: 1 }).then(result => orThrow(result));
     await new Promise(resolve => setTimeout(resolve, 700));
     const midway = await leaseOf('slow-mail');
     expect(midway?.leaseUntil?.getTime(), 'the lease was pushed past its first expiry').toBeGreaterThan(
@@ -166,7 +173,7 @@ describe('drain', () => {
     const second = orderId(++next);
     orThrow(await place(second));
     orThrow(await pay(second));
-    const draining2 = slowJournal.drain(db, { leaseSeconds: 1 });
+    const draining2 = slowJournal.drain(db, { leaseSeconds: 1 }).then(result => orThrow(result));
     await new Promise(resolve => setTimeout(resolve, 200));
     await db.update(tables.jobs).set({ leaseToken: 'other-worker' }).where(eq(tables.jobs.effect, 'slow-mail'));
     expect(await draining2).toBe(1);
@@ -228,10 +235,10 @@ describe('drain', () => {
       ['urgent', 10],
     ]);
     // Only the two due jobs run now, the urgent one first.
-    expect(await scheduled.drain(db)).toBe(2);
+    expect(await scheduled.drain(db).then(result => orThrow(result))).toBe(2);
     expect(order_).toEqual([`urgent:${id}`, `lazy:${id}`]);
     await new Promise(resolve => setTimeout(resolve, 1100));
-    expect(await scheduled.drain(db)).toBe(2);
+    expect(await scheduled.drain(db).then(result => orThrow(result))).toBe(2);
     expect(order_.slice(2).toSorted()).toEqual([`at:${id}`, `later:${id}`]);
     expect(() => urgent.withSchedule({ priority: 1.5 })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
     expect(() => urgent.withSchedule({ delaySeconds: -1 })).toThrow(
@@ -286,14 +293,14 @@ describe('drain', () => {
     expect(dead.map(j => j.id)).toContain(job.id);
     const { jobs: stillPending } = await journal.jobs(db, { effect: 'order-mail' });
     expect(stillPending.map(j => j.id)).not.toContain(job.id);
-    await journal.retry(db, job.id, op);
+    orThrow(await journal.retry(db, job.id, op));
     expect(await jobById(job.id)).toMatchObject({ deadAt: null, attempts: 0, lastError: null, leaseToken: null });
-    expect(await journal.drain(db)).toBeGreaterThanOrEqual(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBeGreaterThanOrEqual(1);
     expect(await jobById(job.id), 'ran and was acknowledged').toBeNull();
 
     const other = await placeAndPay();
     await db.update(tables.jobs).set({ deadAt: new Date() }).where(eq(tables.jobs.id, other.id));
-    await journal.discard(db, other.id, op);
+    orThrow(await journal.discard(db, other.id, op));
     expect(await jobById(other.id)).toBeNull();
     const { jobs: everything } = await journal.jobs(db, { status: 'all', effect: 'order-mail' });
     expect(everything.map(j => j.id)).not.toContain(other.id);
@@ -302,7 +309,7 @@ describe('drain', () => {
   it('leaves a job for an unknown effect pending and untouched', async () => {
     const job = await placeAndPay();
     await db.update(tables.jobs).set({ effect: 'retired-effect' }).where(eq(tables.jobs.id, job.id));
-    expect(await journal.drain(db)).toBe(0);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(0);
     expect(await jobById(job.id)).toMatchObject({ effect: 'retired-effect', attempts: 0, leaseToken: null });
   });
 
@@ -319,24 +326,24 @@ describe('drain', () => {
         }),
       ],
     });
-    expect(await narrowed.drain(db)).toBe(1);
+    expect(await narrowed.drain(db).then(result => orThrow(result))).toBe(1);
     const after = await jobById(job.id);
     expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
     expect(after?.lastError).toContain(UnexpectedDefect.code);
     // After restoring the handler, an operator explicitly retries the dead delivery.
-    await journal.retry(db, job.id, op);
+    orThrow(await journal.retry(db, job.id, op));
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, job.id));
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });
 
   it('drain and worker refuse a transaction handle: effects must run only after the outer commit', async () => {
     await db.transaction(async tx => {
       // @ts-expect-error -- a transaction is not the root database
-      await expect(journal.drain(tx)).rejects.toThrow(/root database/);
+      await expect(journal.drain(tx).then(result => orThrow(result))).rejects.toThrow(/root database/);
       // @ts-expect-error -- a transaction is not the root database
       expect(() => journal.worker(tx)).toThrow(/root database/);
     });
@@ -349,13 +356,13 @@ describe('drain', () => {
     await placeAndPay();
     await placeAndPay();
     await placeAndPay();
-    expect(await journal.drain(db, { batchSize: 2 })).toBe(2);
-    expect(await journal.drain(db, { batchSize: 2 })).toBe(1);
+    expect(await journal.drain(db, { batchSize: 2 }).then(result => orThrow(result))).toBe(2);
+    expect(await journal.drain(db, { batchSize: 2 }).then(result => orThrow(result))).toBe(1);
   });
 
   it('a journal without effects drains nothing', async () => {
     const bare = j.compose({});
-    expect(await bare.drain(db)).toBe(0);
+    expect(await bare.drain(db).then(result => orThrow(result))).toBe(0);
   });
 });
 
@@ -396,7 +403,7 @@ describe('effect context', () => {
     orThrow(
       await db.transaction(tx => auditJournal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
     );
-    expect(await auditJournal.drain(db)).toBe(1);
+    expect(await auditJournal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(seen.db).toBe(db);
     expect(seen.status).toBe('paid');
   });
@@ -457,7 +464,7 @@ describe('effect context: run', () => {
       ],
     });
     const id = await place(auto);
-    expect(await auto.drain(db)).toBe(1);
+    expect(await auto.drain(db).then(result => orThrow(result))).toBe(1);
     expect(await statusOf(id)).toBe('paid');
     const events = await eventsOf(id);
     expect(events.map(event => [event.type, event.meta])).toEqual([
@@ -474,16 +481,16 @@ describe('effect context: run', () => {
 
   it('queues a job for the command it ran and the next claim runs it, so one reaction can start the next', async () => {
     const id = await place(chain);
-    expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
+    expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
     // The receipt job was queued by the job this pass ran, so it waits for the next claim.
     expect(receipts).not.toContain(id);
-    expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
+    expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
     expect(receipts).toContain(id);
   });
 
   it('claims a job queued during the pass in the same pass, because each job is claimed just before it runs', async () => {
     const id = await place(chain);
-    expect(await chain.drain(db)).toBe(2);
+    expect(await chain.drain(db).then(result => orThrow(result))).toBe(2);
     expect(receipts).toContain(id);
   });
 
@@ -501,7 +508,7 @@ describe('effect context: run', () => {
       });
       // This pass runs the paying effect by hand and claims nothing more, so the
       // receipt job is left for the worker, which hears only the wake.
-      expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
+      expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
       await done;
       expect(receipts).toContain(id);
     } finally {
@@ -519,7 +526,7 @@ describe('effect context: run', () => {
       ],
     });
     const id = await place(failing);
-    expect(await failing.drain(db)).toBe(1);
+    expect(await failing.drain(db).then(result => orThrow(result))).toBe(1);
     const job = await jobOf('run-pay-fails');
     expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
     expect(job?.lastError).toContain(TransactionDefect.code);
@@ -540,7 +547,7 @@ describe('effect context: run', () => {
       ],
     });
     const id = await place(halfDone);
-    expect(await halfDone.drain(db)).toBe(1);
+    expect(await halfDone.drain(db).then(result => orThrow(result))).toBe(1);
     const job = await jobOf('run-pay-then-fail');
     expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
     expect(job?.lastError).toContain(UnexpectedDefect.code);
@@ -576,7 +583,7 @@ describe('claiming, stopping and stranded jobs', () => {
     });
     await placeOn(probe);
     await placeOn(probe);
-    expect(await probe.drain(db)).toBe(2);
+    expect(await probe.drain(db).then(result => orThrow(result))).toBe(2);
     expect(othersClaimed).toEqual([false, false]);
   });
 
@@ -595,13 +602,13 @@ describe('claiming, stopping and stranded jobs', () => {
     });
     await placeOn(probe);
     await placeOn(probe);
-    expect(await probe.drain(db, { signal: controller.signal })).toBe(1);
+    expect(await probe.drain(db, { signal: controller.signal }).then(result => orThrow(result))).toBe(1);
     expect(seen).toEqual([true]);
     const left = await jobsOf('abort-probe');
     expect(left).toHaveLength(1);
     expect(left[0]).toMatchObject({ attempts: 0, leaseToken: null });
     // Untouched, so the next drain takes it.
-    expect(await probe.drain(db)).toBe(1);
+    expect(await probe.drain(db).then(result => orThrow(result))).toBe(1);
   });
 
   it('worker.stop() aborts the running effect’s signal and waits for it, so a long effect can end early on shutdown', async () => {

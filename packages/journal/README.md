@@ -316,6 +316,8 @@ Other errors are not `JournalError`. A wrong definition or a misuse is a plain `
 
 ### Upgrading command and durable job outcomes
 
+ID generation uses secure Web Crypto and preserves the existing prefixes and 24-character bodies. `jobId()`, `write`, `adopt`, `drain`, job operation verbs and outgoing webhook subscribe/dispatch/replay can return the original `IdGenerationFailure` from `@arki/contracts`. Check it with `isFailure` before using the success value. Command and workflow runners include these definitions in `COMMAND_FAILURES`; a refused write rolls back its savepoint and a refused claim never leases or acknowledges a job.
+
 Handle `CommandFailure` as part of a runner's inferred result. Receipt key mismatches now return `CommandConflict`; remove exception catches that translate `JournalError` `CONFLICT` around `journal.run`. Declared RPC error maps must include `COMMAND_FAILURES` (spread the definitions into `errorMap`), alongside the command's domain failures. Authorization still runs before every receipt replay, and a refusal or callback defect never creates a receipt.
 
 Workflow step timeouts persist canonical `Deadline` failures. The command transaction owner normalizes unexpected handler, authorize and hook exceptions as `TransactionDefect`; effect and workflow body exceptions become `UnexpectedDefect`. Its original exception is a private `cause`, excluded from persisted JSON and client responses. These defects are fatal by default. A retry requires an explicit predicate selecting a failure definition and an operation safe to repeat. A raw queue `JobRunner.run` returns its outcome; a returned failure goes to `retryDelay` unchanged and never acknowledges the job as successful.

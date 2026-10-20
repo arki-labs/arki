@@ -2,6 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 import type { ActionSource } from '@arki/dot/plugin';
 import { z } from '@arki/contracts';
+import { defineFailure } from '@arki/failure';
 
 import type { ForemanDotAction, ForemanModule, Permit } from './module';
 import { defineAction, defineModule, defineRead, describeModule } from './module';
@@ -39,6 +40,39 @@ const retryJob = defineAction({
 });
 
 describe('module contract types', () => {
+  it('infers only failures the execute implementation actually returns', () => {
+    const Refused = defineFailure('admin.test_refused', { status: 409 });
+    const Unused = defineFailure('admin.test_unused', { status: 409 });
+    const action = defineAction({
+      id: 'queue.refuse',
+      summary: 'Refuse',
+      permission: 'queue:write',
+      risk: 'low',
+      input: z.object({}),
+      previewOutput: z.object({ revision: z.string() }),
+      output: z.object({ applied: z.boolean() }),
+      failures: [Refused, Unused],
+      preview: async () => ({ revision: 'r1' }),
+      execute: async () => Refused(),
+    });
+    expectTypeOf(action.runExecute).returns.resolves.toEqualTypeOf<{ applied: boolean } | ReturnType<typeof Refused>>();
+    expectTypeOf(retryJob.runExecute).returns.resolves.toEqualTypeOf<{ requeued: boolean }>();
+    const violations = () =>
+      defineAction({
+        id: 'queue.refuse',
+        summary: 'Refuse',
+        permission: 'queue:write',
+        risk: 'low',
+        input: z.object({}),
+        previewOutput: z.object({ revision: z.string() }),
+        output: z.object({ applied: z.boolean() }),
+        failures: [Refused],
+        preview: async () => ({ revision: 'r1' }),
+        // @ts-expect-error — undeclared failures are not admitted by the action boundary.
+        execute: async () => Unused(),
+      });
+    expectTypeOf(violations).toBeFunction();
+  });
   it('infers the context from the definitions and keeps per-key types', () => {
     const module = defineModule({ id: '@arki/queue', version: '1.0.0', reads: { failedJobs }, actions: { retryJob } });
     expectTypeOf(module).toExtend<ForemanModule<Ctx>>();

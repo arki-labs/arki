@@ -72,6 +72,8 @@ Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
 
 ## Failure behaviour
 
+Queued mail also returns the journal's exact canonical ID generation failures when secure entropy is unavailable or fails; no job is inserted.
+
 A template validator that throws or rejects returns canonical `schema.validator_defect` (`ValidatorDefect` from `@arki/failure`). Rendering, composing, sending and enqueueing preserve this defect; it must not be retried as ordinary bad input.
 
 `send` does not throw for a mail that was not sent. It returns a failure value, defined with `@arki/failure` and exported from `@arki/mail`. A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.

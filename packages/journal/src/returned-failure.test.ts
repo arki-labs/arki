@@ -1,4 +1,3 @@
-import type { CommandFailure } from './errors.js';
 /**
  * A rule that says no returns a failure (`@arki/failure`) instead of throwing.
  * These tests pin why that is safe: the command's transaction rolls
@@ -12,12 +11,21 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import { TransactionDefect } from '@arki/db/transaction';
 import { defineFailure, findCause, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { CommandFailure } from './errors.js';
 import type { AccountId, OrderId } from './test-support.js';
-import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, isJournalError, JournalError } from './errors.js';
+import {
+  CommandConflict,
+  CommandForbidden,
+  CommandInvalid,
+  CommandNotFound,
+  isJournalError,
+  JournalError,
+} from './errors.js';
 import {
   accountId,
   customerOrderCounts,
@@ -243,7 +251,7 @@ describe('a failure an events function returns', () => {
       events: row => (row ? [OrderNoted({ note: 'x' })] : CommandNotFound({ detail: 'Order not found' })),
     });
 
-    expectTypeOf(written).toExtend<CommandNotFound | { readonly row: unknown } | SchemaFailure>();
+    expectTypeOf(written).toExtend<CommandNotFound | { readonly row: unknown } | SchemaFailure | IdGenerationFailure>();
     expect(CommandNotFound.is(written)).toBe(true);
     expect(await eventsOf(id)).toEqual([]);
   });
@@ -482,7 +490,7 @@ describe("an effect that ignores its command's failure", () => {
     orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
     orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
 
-    await relays.drain(effectDb);
+    await relays.drain(effectDb).then(result => orThrow(result));
 
     const { jobs: dead } = await relays.jobs(effectDb, { status: 'dead' });
     expect(dead.map(job => job.effect)).toEqual(['relay-ignores']);
@@ -815,7 +823,10 @@ describe('a refusal the command accepts', () => {
     expect(error.message).toContain('the child command "placeBackorder" returned the failure "journal.conflict"');
     expect(await rowsOf(input.orderId)).toEqual([]);
 
-    await expect(journal.run(db, throwsInFallback, input, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: 'the backorder service is down' } });
+    await expect(journal.run(db, throwsInFallback, input, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { message: 'the backorder service is down' },
+    });
     expect(await rowsOf(input.orderId), 'accept never hides a throw').toEqual([]);
   });
 
@@ -989,7 +1000,7 @@ describe('a refusal the effect accepts', () => {
     orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
     orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
 
-    await relays.drain(effectDb);
+    await relays.drain(effectDb).then(result => orThrow(result));
 
     const { jobs: accepted } = await relays.jobs(effectDb, { effect: 'relay-accepts' });
     expect(accepted, 'the accepting job is done').toEqual([]);

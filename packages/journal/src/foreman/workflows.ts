@@ -7,6 +7,7 @@
 import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import {
   canonicalJson,
@@ -17,15 +18,19 @@ import {
   moduleError,
   redactSecrets,
 } from '@arki/admin/module';
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { findCause, isFailure, orThrow } from '@arki/failure';
 
 import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
 
+const isIdGenerationFailure = <Value>(value: Value): value is Extract<Value, IdGenerationFailure> =>
+  ID_GENERATION_FAILURES.some(definition => definition.is(value));
+
 /**
  * The coded refusals of the workflow actions. They are module errors, so the dispatcher answers them with the status
- * written here. A refusal never surfaces as a 500.
+ * written here. Canonical generation failures keep their original 500 status.
  */
 export const JOURNAL_WORKFLOWS_ERROR_CODES = {
   /** The run changed since the preview the approval pinned. HTTP 409. */
@@ -594,6 +599,7 @@ export function journalWorkflowsModule<
   // ---- retryStep ----------------------------------------------------------------------------------------------
 
   const retryStep = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'workflow.retryStep',
     summary: 'Run a dead step again, restart its failed children, or retry the dead jobs of a run',
     permission: 'journal:retry',
@@ -676,6 +682,7 @@ export function journalWorkflowsModule<
       const done = await guarded(runId, () =>
         journal.workflows.retryStep(db, { runId, path, phase }, operationOf(permit, reason)),
       );
+      if (isFailure(done) && isIdGenerationFailure(done)) return done;
       return { runId, how: orThrow(done).how };
     },
   });
@@ -701,6 +708,7 @@ export function journalWorkflowsModule<
   }
 
   const resolveStep = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'workflow.resolveStep',
     summary: 'Give the result of a failed step by hand, so the run carries on without running it again',
     permission: 'workflow:resolve',
@@ -730,17 +738,18 @@ export function journalWorkflowsModule<
     },
     execute: async ({ runId, path, result, reason }, _ctx: Record<string, never>, permit) => {
       await assertUnchanged(runId, permit);
-      return orThrow(
-        await guarded(runId, () =>
-          journal.workflows.resolveStep(db, { runId, path, result }, operationOf(permit, reason)),
-        ),
+      const outcome = await guarded(runId, () =>
+        journal.workflows.resolveStep(db, { runId, path, result }, operationOf(permit, reason)),
       );
+      if (isFailure(outcome) && isIdGenerationFailure(outcome)) return outcome;
+      return orThrow(outcome);
     },
   });
 
   // ---- skipUndo -----------------------------------------------------------------------------------------------
 
   const skipUndo = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'workflow.skipUndo',
     summary: 'Give up a failed undo of a compensating run, so the run goes on undoing the rest',
     permission: 'workflow:resolve',
@@ -773,9 +782,11 @@ export function journalWorkflowsModule<
     },
     execute: async ({ runId, path, reason }, _ctx: Record<string, never>, permit) => {
       await assertUnchanged(runId, permit);
-      return orThrow(
-        await guarded(runId, () => journal.workflows.skipUndo(db, { runId, path }, operationOf(permit, reason))),
+      const outcome = await guarded(runId, () =>
+        journal.workflows.skipUndo(db, { runId, path }, operationOf(permit, reason)),
       );
+      if (isFailure(outcome) && isIdGenerationFailure(outcome)) return outcome;
+      return orThrow(outcome);
     },
   });
 
@@ -790,6 +801,7 @@ export function journalWorkflowsModule<
     .strict();
 
   const cancel = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'workflow.cancel',
     summary: 'Stop a run and undo the steps it completed, newest first',
     permission: 'workflow:cancel',
@@ -890,6 +902,7 @@ export function journalWorkflowsModule<
         journal.workflows.cancel(db, { runId, reason }, operationOf(permit, reason)),
       );
       if (isFailure(outcome)) {
+        if (isIdGenerationFailure(outcome)) return outcome;
         if (CommandNotFound.is(outcome)) throw notFound(runId);
         // A conflict: the run moved between the check and the command. Say how it moved.
         const now = await journal.workflows.run(db, runId);
@@ -921,6 +934,7 @@ export function journalWorkflowsModule<
   }
 
   const signal = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'workflow.signal',
     summary: 'Give a run a signal its sender never delivered, such as a webhook that did not come',
     permission: 'workflow:signal',
@@ -971,6 +985,7 @@ export function journalWorkflowsModule<
         journal.workflows.signal(db, { runId, name, deliveryId, payload }, operationOf(permit, reason)),
       );
       if (isFailure(outcome)) {
+        if (isIdGenerationFailure(outcome)) return outcome;
         if (CommandNotFound.is(outcome)) throw notFound(runId);
         if (CommandInvalid.is(outcome) || CommandConflict.is(outcome)) throw badSignal(runId, outcome.data.detail);
         throw stale(runId);

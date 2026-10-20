@@ -12,14 +12,15 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
 import type { ArchivedJob, ArchiveSink, JobRetention } from './retention.js';
 import { jobId } from './id.js';
+import { initJournal } from './journal.js';
 import { createJobOps } from './outbox.js';
 import { journalTables } from './pg.js';
 import { resolveRetention } from './retention.js';
-import { initJournal } from './journal.js';
 
 const tables = journalTables();
 const testMeta = z.object({ actorId: z.string().min(1) });
@@ -74,7 +75,7 @@ function recordingSink(failures = 0) {
 
 type ArchiveInsert = typeof tables.jobArchive.$inferInsert;
 const archiveRow = async (extra?: Partial<ArchiveInsert>): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await dbA.insert(tables.jobArchive).values({
     id,
     kind: 'queue',
@@ -89,7 +90,7 @@ const archiveRow = async (extra?: Partial<ArchiveInsert>): Promise<string> => {
   return id;
 };
 const deadJob = async (): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await dbA.insert(tables.jobs).values({
     id,
     kind: 'queue',
@@ -126,18 +127,14 @@ describe('the sweep verbs on two connections', () => {
     const lock = await lockRows('jobs', held);
     const sweeper = ops();
     // The other connection holds 4 rows. A plain FOR UPDATE would wait for it; SKIP LOCKED goes past.
-    const first = await sweeper.purgeDead(
-      dbA,
-      { olderThan: new Date(Date.now() - 31 * DAY), limit: 100 },
-      { actor: 'worker-a' },
+    const first = orThrow(
+      await sweeper.purgeDead(dbA, { olderThan: new Date(Date.now() - 31 * DAY), limit: 100 }, { actor: 'worker-a' }),
     );
     expect(first).toMatchObject({ archived: 8, deleted: 0 });
     expect(await archiveIds()).toEqual(expect.not.arrayContaining(held));
     await lock.release();
-    const second = await sweeper.purgeDead(
-      dbB,
-      { olderThan: new Date(Date.now() - 31 * DAY), limit: 100 },
-      { actor: 'worker-b' },
+    const second = orThrow(
+      await sweeper.purgeDead(dbB, { olderThan: new Date(Date.now() - 31 * DAY), limit: 100 }, { actor: 'worker-b' }),
     );
     expect(second).toMatchObject({ archived: 4 });
 
@@ -146,10 +143,10 @@ describe('the sweep verbs on two connections', () => {
     await dbA.delete(tables.jobOperations);
     const olderThan = new Date(Date.now() - 31 * DAY);
     await Promise.all([
-      sweeper.purgeDead(dbA, { olderThan, limit: 25 }, { actor: 'worker-a' }),
-      sweeper.purgeDead(dbB, { olderThan, limit: 25 }, { actor: 'worker-b' }),
+      sweeper.purgeDead(dbA, { olderThan, limit: 25 }, { actor: 'worker-a' }).then(result => orThrow(result)),
+      sweeper.purgeDead(dbB, { olderThan, limit: 25 }, { actor: 'worker-b' }).then(result => orThrow(result)),
     ]);
-    await sweeper.purgeDead(dbA, { olderThan, limit: 100 }, { actor: 'worker-a' });
+    orThrow(await sweeper.purgeDead(dbA, { olderThan, limit: 100 }, { actor: 'worker-a' }));
     const touched = (await operations()).flatMap(op => op.jobIds);
     expect(touched).toHaveLength(40);
     expect(new Set(touched)).toEqual(new Set(more));
@@ -205,7 +202,7 @@ describe('the sweep verbs on two connections', () => {
     const id = await archiveRow({ keepUntil: new Date() });
     expect(await sweeper.pruneArchive(dbA)).toMatchObject({ pruned: 0 });
     expect(await archiveIds()).toEqual([id]);
-    await sweeper.exportArchive(dbA);
+    orThrow(await sweeper.exportArchive(dbA));
     expect(ids()).toEqual([id]);
     expect(await sweeper.pruneArchive(dbA)).toMatchObject({ pruned: 1 });
     expect(await archiveIds()).toEqual([]);
@@ -221,7 +218,7 @@ describe('the sweep verbs on two connections', () => {
     const cancelled = await archiveRow({ jobName: 'a', outcome: 'cancelled', archivedAt: at(9) });
     const completed = await Promise.all([1, 2, 3].map(n => archiveRow({ jobName: 'a', archivedAt: at(n) })));
 
-    const result = await sweeper.pruneArchive(dbA);
+    const result = orThrow(await sweeper.pruneArchive(dbA));
     expect(result.pruned).toBe(2);
     const left = new Set(await archiveIds());
     expect(left.has(a1)).toBe(false);

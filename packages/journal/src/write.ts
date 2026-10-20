@@ -6,6 +6,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isUniqueViolation } from '@arki/db/errors';
@@ -134,7 +135,7 @@ export function createWriter<
     trace: Trace,
     onJobs?: (count: number) => void,
     opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure> => {
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure> => {
     const adopting = opts?.mode === 'adopt';
     const expectedVersion = opts?.expectedVersion;
     if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
@@ -145,7 +146,7 @@ export function createWriter<
       if (isSchemaFailure(meta)) return meta;
       // A failure `events` returns rolls the savepoint back, like a throw, and is the write's result.
       const refusal = rollbackOnFailure<
-        WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure
+        WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure
       >();
       const savepoint = tx.transaction(async sp => {
         // Before the row lock, so every journal transaction takes its locks in the same
@@ -249,23 +250,27 @@ export function createWriter<
           throw new JournalError('NO_ROW', entity.kind, id, firstAt);
         }
 
+        const eventRows = [];
+        for (const [index, event] of pending.entries()) {
+          const generated = eventId();
+          if (isFailure(generated)) return refusal.settle(generated);
+          eventRows.push({
+            id: generated,
+            kind: entity.kind,
+            entityId: id,
+            version: baseVersion + index + 1,
+            type: event.type,
+            data: validated[index]?.data,
+            schemaVersion: validated[index]?.schemaVersion,
+            meta,
+            commandId: trace.commandId,
+            causeSeq: trace.causeSeq,
+            correlationId: trace.correlationId,
+          });
+        }
         const inserted = await sp
           .insert(eventsTable)
-          .values(
-            pending.map((event, index) => ({
-              id: eventId(),
-              kind: entity.kind,
-              entityId: id,
-              version: baseVersion + index + 1,
-              type: event.type,
-              data: validated[index]?.data,
-              schemaVersion: validated[index]?.schemaVersion,
-              meta,
-              commandId: trace.commandId,
-              causeSeq: trace.causeSeq,
-              correlationId: trace.correlationId,
-            })),
-          )
+          .values(eventRows)
           .returning()
           .catch((error: unknown) => {
             if (isUniqueViolation(error))
@@ -377,22 +382,26 @@ export function createWriter<
           }
         }
 
-        const jobs = recorded.flatMap(event =>
-          effects
-            .filter(
-              effect =>
-                effect.types.has(event.type) &&
-                effect.entities.some(e => e.kind === entity.kind) &&
-                effect.schedule.when?.(event) !== false,
-            )
-            .map(effect => ({
-              id: jobId(),
-              eventSeq: event.seq,
-              effect: effect.name,
-              priority: effect.schedule.priority ?? 0,
-              ...dueAt(effect, event),
-            })),
-        );
+        const jobs = [];
+        for (const event of recorded) {
+          for (const effect of effects) {
+            if (
+              effect.types.has(event.type) &&
+              effect.entities.some(e => e.kind === entity.kind) &&
+              effect.schedule.when?.(event) !== false
+            ) {
+              const generated = jobId();
+              if (isFailure(generated)) return refusal.settle(generated);
+              jobs.push({
+                id: generated,
+                eventSeq: event.seq,
+                effect: effect.name,
+                priority: effect.schedule.priority ?? 0,
+                ...dueAt(effect, event),
+              });
+            }
+          }
+        }
         if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);
         // Postgres delivers NOTIFY at commit, so every listening worker in every process hears
         // exactly the commits that happened, with the seq range to read. Never the events themselves.
@@ -431,8 +440,10 @@ export function createWriter<
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx, Returned>,
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure> =>
-    writeWithValidatedMeta(
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure> => {
+    const chainId = correlationId();
+    if (isFailure(chainId)) return Promise.resolve(chainId);
+    return writeWithValidatedMeta(
       tx,
       entity,
       id,
@@ -445,10 +456,11 @@ export function createWriter<
       },
       input.events,
       // No command and no cause. A fresh chain, so every recorded event has a correlation id.
-      { commandId: null, causeSeq: null, correlationId: correlationId() },
+      { commandId: null, causeSeq: null, correlationId: chainId },
       undefined,
       { expectedVersion: input.expectedVersion },
     );
+  };
 
   /** `journal.adopt`: `write` in adopt mode, with `meta` parsed for this one call. */
   const adopt = <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
@@ -456,8 +468,10 @@ export function createWriter<
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
-  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | SchemaFailure> =>
-    writeWithValidatedMeta(
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key> | SchemaFailure | IdGenerationFailure> => {
+    const chainId = correlationId();
+    if (isFailure(chainId)) return Promise.resolve(chainId);
+    return writeWithValidatedMeta(
       tx,
       entity,
       id,
@@ -469,10 +483,11 @@ export function createWriter<
         return meta;
       },
       input.events,
-      { commandId: null, causeSeq: null, correlationId: correlationId() },
+      { commandId: null, causeSeq: null, correlationId: chainId },
       undefined,
       { mode: 'adopt' },
     );
+  };
 
   return { write, adopt, writeWithValidatedMeta };
 }

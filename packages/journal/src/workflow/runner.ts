@@ -13,18 +13,10 @@
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { Deadline } from '@arki/async';
-
 import type { AsyncSchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import {
-  defineFailure,
-  InvalidInput,
-  isAsyncSchemaFailure,
-  isFailure,
-  orThrow,
-  ValidatorDefect,
-} from '@arki/failure';
+import { Deadline } from '@arki/async';
+import { defineFailure, InvalidInput, isAsyncSchemaFailure, isFailure, orThrow, ValidatorDefect } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
@@ -784,11 +776,12 @@ export function createWorkflows<
       .where(eq(tables.jobAttempts.jobId, step.jobId));
     if (step.attempt > 1 || (tried?.n ?? 0) > 0) return { events: [], inFlight: true };
     try {
-      await jobOps.cancel(tx, step.jobId, {
+      const cancelled = await jobOps.cancel(tx, step.jobId, {
         actor: WORKFLOW_ACTOR,
         reason: COMPENSATING,
         ...(executionId === undefined ? {} : { executionId }),
       });
+      if (isFailure(cancelled)) return cancelled;
     } catch (error) {
       if (isJournalError(error, 'JOB_RUNNING')) return { events: [], inFlight: true };
       throw error;
@@ -824,6 +817,7 @@ export function createWorkflows<
     const dropped = options.closed
       ? { events: [], inFlight: false }
       : await dropCurrentNode(tx, row, at, options.executionId);
+    if (isFailure(dropped)) return dropped;
     const next = dropped.inFlight
       ? []
       : await compensate(tx, def, row, at, { cause: options.cause, cancelling: options.cancelling === true });
@@ -935,10 +929,14 @@ export function createWorkflows<
     const timerFired = events.TimerFired({ node: fired.node, at });
     if (node.kind === 'waitFor' && node.onTimeout === 'fail') {
       const error = `waitFor '${node.name}' got no '${node.signal}' signal in time`;
-      return [timerFired, ...(await failWait(tx, def, row, node.name, error, at))];
+      const failed = await failWait(tx, def, row, node.name, error, at);
+      if (isFailure(failed)) return failed;
+      return [timerFired, ...failed];
     }
     // `sleep` is over, or `waitFor` goes on without a payload.
-    return [timerFired, ...(await completeWait(tx, def, index, row, null, at))];
+    const completed = await completeWait(tx, def, index, row, null, at);
+    if (isFailure(completed)) return completed;
+    return [timerFired, ...completed];
   };
 
   /** Gives the timer jobs a write just queued their `run_id`, in the same transaction, before any worker can see them. */
@@ -972,12 +970,14 @@ export function createWorkflows<
       );
     for (const job of pending) {
       try {
-        await jobOps.cancel(tx, job.id, { actor: WORKFLOW_ACTOR, reason: 'the run moved on' });
+        const cancelled = await jobOps.cancel(tx, job.id, { actor: WORKFLOW_ACTOR, reason: 'the run moved on' });
+        if (isFailure(cancelled)) return cancelled;
       } catch (error) {
         // A worker claimed it between the read and the cancel: it runs, finds the run moved, and writes nothing.
         if (!isJournalError(error, 'JOB_RUNNING') && !isJournalError(error, 'JOB_NOT_PENDING')) throw error;
       }
     }
+    return;
   };
 
   type RunEvent = {
@@ -1219,7 +1219,8 @@ export function createWorkflows<
   ): Promise<void | CommandFailure> {
     await queueJobs(ctx.tx, runId, written.events);
     const ended = endedBy(written.events);
-    await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
+    const cancelled = await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
+    if (isFailure(cancelled)) return cancelled;
     const { row } = written;
     if (row === null || written.events.length === 0) return;
     if (row.state === 'compensating') {
@@ -1506,6 +1507,7 @@ export function createWorkflows<
     const stored = storable(args.input, def.limits.payload, 'the input', def.name);
     if (stored instanceof JournalError) return CommandConflict({ detail: stored.message });
     const runId = args.id ?? workflowRunId();
+    if (isFailure(runId)) return runId;
     const now = new Date();
     const at = now.toISOString();
     const written = await write(machine.run, runId, row => {
@@ -1629,10 +1631,12 @@ export function createWorkflows<
         return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(parsed)}` });
       }
       if (ValidatorDefect.is(parsed)) return parsed;
+      const signalId = workflowSignalId();
+      if (isFailure(signalId)) return signalId;
       const [inserted] = await inside.tx
         .insert(workflowSignals)
         .values({
-          id: workflowSignalId(),
+          id: signalId,
           runId: row.id,
           name,
           deliveryId: args.deliveryId,
@@ -1653,7 +1657,9 @@ export function createWorkflows<
         ...(operator === null ? {} : operatorOf(operator)),
       });
       if (pastDeadline(row) && row.state !== 'compensating') {
-        return [received, ...(await deadlineEvents(inside.tx, own, row, at))];
+        const expired = await deadlineEvents(inside.tx, own, row, at);
+        if (isFailure(expired)) return expired;
+        return [received, ...expired];
       }
       const index =
         row.state === 'parked' && row.waitingFor === name ? own.nodes.findIndex(n => n.name === row.node) : -1;
@@ -1662,7 +1668,9 @@ export function createWorkflows<
       // The run waits for this signal: it is taken now, and the run moves on in this same commit.
       await takeSignal(inside.tx, row.id, name, node.name);
       result.status = 'woke';
-      return [received, ...(await wakeOnSignal(inside.tx, own, index, row, stored.value, at))];
+      const woke = await wakeOnSignal(inside.tx, own, index, row, stored.value, at);
+      if (isFailure(woke)) return woke;
+      return [received, ...woke];
     });
     if (isFailure(written)) return written;
     const settlement = await settle(context, args.runId, written, before.parked);
@@ -1814,7 +1822,10 @@ export function createWorkflows<
           }
           if (code instanceof JournalError) throw code;
           // The code is back: every job that died with the run (steps, parks, deadline, undos) goes again.
-          for (const job of dead) await jobOps.retry(inside.tx, job.id, jobOperatorOf(args.op));
+          for (const job of dead) {
+            const retried = await jobOps.retry(inside.tx, job.id, jobOperatorOf(args.op));
+            if (isFailure(retried)) return retried;
+          }
           moved.how = 'jobRetried';
           return dead.map(job => events.JobRetried({ jobId: job.id, node: job.node, at, ...by }));
         }

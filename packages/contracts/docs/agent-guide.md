@@ -15,11 +15,12 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 ### Declare an id kind once
 
-1. Write the declaration in a browser-safe model file: `export const storyId = defineId('sty_');`.
+1. Write the declaration in a browser-safe model file: `export const storyId = defineId('sty_', { kind: 'story' });`. Use a stable, literal domain name to separate kinds even when their stored prefixes match.
 2. Derive the type: `export type StoryId = IdOf<typeof storyId>;`.
 3. Validate with `storyId.schema`. Make a new id with `storyId.create()` and check `isFailure` before using it. The exact result is `IdOf<typeof storyId> | IdGenerationFailure`; `ID_GENERATION_FAILURES` is the canonical adapter tuple. Schema output and `IdOf` remain success-only.
 4. On the server, turn it into columns with `idColumns(storyId)` from `@arki/db/id`.
 5. In one test, call `assertUniqueIdPrefixes(...allIds)`.
+6. Parse raw IDs at boundaries with the owning schema; infer stored types with `IdOf`. The one-argument form preserves prefix-only compatibility. See [domain ID migration](upgrades/domain-ids.md) for brands, external/numeric IDs and wire-format limits.
 
 ### Paginate a list with a keyset
 
@@ -79,6 +80,7 @@ Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `Inv
 | `ARKI_CONTRACTS_E005` | Reserved legacy exception code; use `InvalidCursor`.                     | Send the cursor back unchanged, or start from page one.    |
 | `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
 | `ARKI_CONTRACTS_E008` | A Drizzle builder has no runtime metadata config.           | Use a supported Drizzle builder and matching version.      |
+| `ARKI_CONTRACTS_E009` | `defineId` got a missing, empty or non-string domain kind. | Supply one non-empty literal domain name. |
 | `ARKI_CONTRACTS_E007` | The value carries no operation.                             | Pass a `createOrpcUtils` leaf or an `operations()` result. |
 
 | Definition | Meaning | What to do |

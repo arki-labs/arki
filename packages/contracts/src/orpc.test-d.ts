@@ -5,6 +5,8 @@ import { z } from 'zod';
 
 import type { ErrorOf, Identified, InputOf, MetaOf, Operation, OperationOf, Operations, OutputOf } from './orpc.js';
 import { operationOf, operations } from './orpc.js';
+import type { IdOf } from './ids.js';
+import { defineId } from './ids.js';
 
 const postId = z.string().brand<'PostId'>();
 const getPost = oc
@@ -14,6 +16,15 @@ const getPost = oc
   .output(z.object({ id: postId, title: z.string() }));
 
 const contract = { posts: { get: getPost, health: { ping: oc.output(z.literal('pong')) } } };
+
+it('RPC contract outputs retain same-format identity kinds from the canonical declaration', () => {
+  const refundId = defineId('id_', { kind: 'billing.refund' });
+  const paymentId = defineId('id_', { kind: 'billing.payment' });
+  const _refund = oc.input(refundId.schema).output(z.object({ id: refundId.schema, paymentId: paymentId.schema }));
+  type Output = OutputOf<OperationOf<typeof _refund>>;
+  expectTypeOf<Output>().toEqualTypeOf<{ id: IdOf<typeof refundId>; paymentId: IdOf<typeof paymentId> }>();
+  expectTypeOf<Output['id']>().not.toExtend<Output['paymentId']>();
+});
 
 describe('OperationOf', () => {
   type Op = OperationOf<typeof getPost>;

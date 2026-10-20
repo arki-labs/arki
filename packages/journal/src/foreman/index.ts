@@ -9,6 +9,7 @@
 import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { StandardSchemaV1 } from '@arki/schema';
 import {
   ADMIN_ERROR_CODES,
@@ -22,6 +23,8 @@ import {
   redactSecrets,
   schemaHash,
 } from '@arki/admin/module';
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 
 import type {
   ArchivedJob,
@@ -573,7 +576,7 @@ export function journalJobsModule<
     /** Throws the coded refusal when the job is not in the state this action needs. */
     require: (row: HotJob) => void;
     consequence: (row: HotJob) => string;
-    run: (jobId: string, op: JobOperationInput) => Promise<{ operationId: string }>;
+    run: (jobId: string, op: JobOperationInput) => Promise<{ operationId: string } | IdGenerationFailure>;
   }) {
     const load = async (jobId: string): Promise<HotJob | undefined> => journal.job(db, jobId);
     return defineAction({
@@ -584,6 +587,7 @@ export function journalJobsModule<
       input: singleJobInput,
       previewOutput: singleJobPreview,
       output: singleJobOutput,
+      failures: ID_GENERATION_FAILURES,
       preview: async ({ jobId }, _ctx: Record<string, never>) => {
         const row = await load(jobId);
         if (row === undefined) throw def.missing(jobId);
@@ -601,6 +605,7 @@ export function journalJobsModule<
         const row = await load(jobId);
         if (row === undefined || jobRevision(row) !== permit.expectedRevision) throw stale(`Job ${jobId}`);
         const done = await guarded(jobId, () => def.run(jobId, operationOf(permit, reason)));
+        if (isFailure(done)) return done;
         return { jobId, operationId: done.operationId };
       },
     });
@@ -707,6 +712,7 @@ export function journalJobsModule<
     );
 
   const retryDead = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'journal.retryDead',
     summary: 'Retry many dead jobs at once',
     permission: 'journal:retry',
@@ -757,11 +763,13 @@ export function journalJobsModule<
       const done = await guarded(ids.join(','), () =>
         journal.retryDead(db, { ids }, operationOf(permit, input.reason)),
       );
+      if (isFailure(done)) return done;
       return { ids: [...done.ids], operationId: done.operationId };
     },
   });
 
   const purgeDead = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'journal.purgeDead',
     summary: 'Move old dead jobs out of the outbox, archived or deleted by the retention policy',
     permission: 'journal:delete',
@@ -865,6 +873,7 @@ export function journalJobsModule<
   const replayRevision = (row: ArchivedJob) => `${row.id}:${row.archivedAt.getTime()}`;
 
   const replayJob = defineAction({
+    failures: ID_GENERATION_FAILURES,
     id: 'journal.replayJob',
     summary: 'Run a finished job again as a new job',
     permission: 'journal:retry',

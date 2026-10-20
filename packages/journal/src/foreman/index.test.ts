@@ -82,7 +82,7 @@ async function kill(id: string, error = 'provider 503 password=hunter2', ageDays
   for (let attempt = 1; attempt <= 8; attempt++) {
     const startedAt = new Date(deadAt.getTime() - (9 - attempt) * 60_000);
     await db.insert(tables.jobAttempts).values({
-      id: attemptId(),
+      id: orThrow(attemptId()),
       jobId: id,
       attempt,
       startedAt,
@@ -95,7 +95,7 @@ async function kill(id: string, error = 'provider 503 password=hunter2', ageDays
 
 type Insert = typeof tables.jobs.$inferInsert;
 const queueRow = async (extra?: Partial<Insert>): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await db.insert(tables.jobs).values({ id, kind: 'queue', jobName: 'demo', args: { n: 1 }, ...extra });
   return id;
 };
@@ -120,14 +120,14 @@ describe('T(journal-foreman) the worked example', () => {
 
     const preview = await module.actions.retryJob.runPreview({ jobId: id, reason: 'provider outage' }, NO_CTX);
     expect(preview.consequence).toContain('side effects');
-    const done = await module.actions.retryJob.runExecute(
+    const done = orThrow(await module.actions.retryJob.runExecute(
       { jobId: id, reason: 'provider outage' },
       NO_CTX,
       permit(preview.revision),
-    );
+    ));
     expect(done.jobId).toBe(id);
 
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(sent).toBe(1);
     expect(await journal.job(db, id)).toBeUndefined();
     expect(await journal.archivedJob(db, id)).toMatchObject({ outcome: 'completed' });
@@ -169,7 +169,7 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
     const input = { ids: [a, b], limit: 100 };
     const preview = await module.actions.retryDead.runPreview(input, NO_CTX);
     expect(preview.count).toBe(2);
-    await journal.retry(db, b, { actor: 'someone-else' });
+    orThrow(await journal.retry(db, b, { actor: 'someone-else' }));
 
     await expect(module.actions.retryDead.runExecute(input, NO_CTX, permit(preview.revision))).rejects.toMatchObject({
       code: JOURNAL_JOBS_ERROR_CODES.staleRevision,
@@ -184,7 +184,7 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
     await kill(b);
     const input = { effect: 'sendWelcomeMail', limit: 100, reason: 'outage over' };
     const preview = await module.actions.retryDead.runPreview(input, NO_CTX);
-    const done = await module.actions.retryDead.runExecute(input, NO_CTX, permit(preview.revision));
+    const done = orThrow(await module.actions.retryDead.runExecute(input, NO_CTX, permit(preview.revision)));
     expect([...done.ids].toSorted()).toEqual([a, b].toSorted());
     expect(await operations()).toEqual([
       expect.objectContaining({ action: 'retryDead', actor: 'usr_alice', count: 2, reason: 'outage over' }),
@@ -277,7 +277,7 @@ describe('T(journal-foreman) a job must be in the state the action needs', () =>
 
     await db.update(tables.jobs).set({ leaseToken: null, leaseUntil: null }).where(eq(tables.jobs.id, waiting));
     const again = await module.actions.cancelJob.runPreview({ jobId: waiting }, NO_CTX);
-    await module.actions.cancelJob.runExecute({ jobId: waiting }, NO_CTX, permit(again.revision));
+    orThrow(await module.actions.cancelJob.runExecute({ jobId: waiting }, NO_CTX, permit(again.revision)));
     expect(await journal.archivedJob(db, waiting)).toMatchObject({ outcome: 'cancelled' });
   });
 
@@ -305,7 +305,7 @@ describe('T(journal-foreman) nothing secret leaves', () => {
     const secret = { apiKey: 'sk-live-abcdefghijklmnop' };
     const id = await queueRow({ args: secret });
     const other = await queueRow({ args: secret });
-    await journal.cancel(db, other, { actor: 'a' });
+    orThrow(await journal.cancel(db, other, { actor: 'a' }));
     for (const module of [hidden(), redacted()]) {
       const lists = JSON.stringify([
         await module.reads.jobs.run({ status: 'all' }, NO_CTX),
@@ -322,7 +322,7 @@ describe('T(journal-foreman) nothing secret leaves', () => {
   it('archivedJob shows the attempt log redacted and the payload only when the option says so', async () => {
     const id = await queueRow({ args: { to: 'a@b.c', token: 'sk-live-abcdefghijklmnop' } });
     await kill(id, 'smtp://bot:s3cr3t@mail.example.com refused');
-    await journal.discard(db, id, { actor: 'alice', reason: 'bad address' });
+    orThrow(await journal.discard(db, id, { actor: 'alice', reason: 'bad address' }));
 
     const quiet = await hidden().reads.archivedJob.run({ id }, NO_CTX);
     expect(quiet.job.outcome).toBe('discarded');
@@ -344,7 +344,7 @@ describe('T(journal-foreman) replay and purge', () => {
     const module = hidden();
     expect(module.actions.replayJob.risk).toBe('high');
     const id = await queueRow({ dedupeKey: 'welcome:1' });
-    await journal.cancel(db, id, { actor: 'a' });
+    orThrow(await journal.cancel(db, id, { actor: 'a' }));
 
     const preview = await module.actions.replayJob.runPreview({ id }, NO_CTX);
     expect(preview.consequence).toContain('new job id');
@@ -370,13 +370,13 @@ describe('T(journal-foreman) replay and purge', () => {
   it('replayJob creates a new job that remembers where it came from, and the audit names the approver', async () => {
     const module = hidden();
     const id = await queueRow();
-    await journal.cancel(db, id, { actor: 'a' });
+    orThrow(await journal.cancel(db, id, { actor: 'a' }));
     const preview = await module.actions.replayJob.runPreview({ id, reason: 'needed after all' }, NO_CTX);
-    const done = await module.actions.replayJob.runExecute(
+    const done = orThrow(await module.actions.replayJob.runExecute(
       { id, reason: 'needed after all' },
       NO_CTX,
       permit(preview.revision),
-    );
+    ));
     expect(done.jobId).not.toBe(id);
     expect(await journal.job(db, done.jobId)).toMatchObject({ replayOf: id, state: 'ready' });
     expect((await operations()).find(row => row.action === 'replay')).toMatchObject({
@@ -408,7 +408,7 @@ describe('T(journal-foreman) replay and purge', () => {
     const preview = await module.actions.purgeDead.runPreview(input, NO_CTX);
     expect(preview).toMatchObject({ willDo: 'archive', deadJobs: 2 });
 
-    const done = await module.actions.purgeDead.runExecute(input, NO_CTX, permit(preview.revision));
+    const done = orThrow(await module.actions.purgeDead.runExecute(input, NO_CTX, permit(preview.revision)));
     expect(done).toMatchObject({ archived: 1, deleted: 0 });
     expect(await journal.archivedJob(db, old)).toMatchObject({ outcome: 'dead' });
     expect((await journal.job(db, recent))?.state).toBe('dead');

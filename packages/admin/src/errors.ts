@@ -73,7 +73,7 @@ export class AdminError extends Error {
  */
 export class ModuleError extends Error {
   readonly code: string;
-  /** The HTTP status of the answer: 400 to 499. */
+  /** The HTTP status of the answer: 400 to 599. */
   readonly status: number;
   /** What to do about it, in one sentence. */
   readonly remediation: string;
@@ -87,16 +87,16 @@ export class ModuleError extends Error {
   }
 }
 
-/** A module's own coded refusal. `status` must be a 4xx: a module cannot make the dispatcher answer a server error. */
+/** A module's own coded failure. Server error messages are private at the dispatcher boundary. */
 export function moduleError(code: string, status: number, message: string, remediation: string): ModuleError {
   if (code.trim() === '') {
     throw new AdminError(ADMIN_ERROR_CODES.invalidConfig, 'A module error needs a code.', 'Pass the module\'s own code.');
   }
-  if (!Number.isInteger(status) || status < 400 || status > 499) {
+  if (!Number.isInteger(status) || status < 400 || status > 599) {
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidConfig,
-      `Module error ${code} has status ${String(status)}; a module error is a client error, 400 to 499.`,
-      'Use a 4xx status. A failure of the app itself is a plain Error and answers ARKI_ADMIN_E015.',
+      `Module error ${code} has status ${String(status)}; use an HTTP error status, 400 to 599.`,
+      'Use an HTTP error status from 400 to 599.',
     );
   }
   return new ModuleError(code, status, message, remediation);

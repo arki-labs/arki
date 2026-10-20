@@ -6,6 +6,7 @@ import type { Job as BullMQJob } from 'bullmq';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { AsyncSchemaFailure } from '@arki/failure';
 import type { JobRunner } from '@arki/journal';
 import { z } from '@arki/contracts';
@@ -32,7 +33,7 @@ const compileOnly = async (db: PgliteDatabase) => {
   await db.transaction(async tx => {
     // args is the job's input
     expectTypeOf(schedule.runAfter(tx, welcome, { userId: 'u1' })).resolves.toEqualTypeOf<
-      Scheduled | AsyncSchemaFailure
+      Scheduled | AsyncSchemaFailure | IdGenerationFailure
     >();
     orThrow(
       await schedule.runAfter(tx, welcome, { userId: 'u1', locale: 'ro' }, { delayMs: 1000, key: 'k', priority: 1 }),

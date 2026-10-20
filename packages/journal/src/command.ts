@@ -135,6 +135,7 @@ export function createCommandRunner<
       const parsed = await parseAsync<SchemaOutput<S>>(command.input, input);
       if (isSchemaFailure(parsed)) return parsed;
       const own = commandId();
+      if (isFailure(own)) return own;
       const trace: Trace = { ...parent, commandId: own };
       debugCommand.debug('{commandName}: input ok ({own}, {correlationId})', {
         commandName: command.name,
@@ -278,6 +279,8 @@ export function createCommandRunner<
     cause?: { readonly seq: number; readonly correlationId: string | null },
     fence?: Fence,
   ): Promise<Awaited<R> | CommandFailure> => {
+    const chainId = opts?.correlationId ?? cause?.correlationId ?? correlationId();
+    if (isFailure(chainId)) return Promise.resolve(chainId);
     let queued = 0;
     return runCommand(
       source,
@@ -296,7 +299,7 @@ export function createCommandRunner<
       },
       {
         causeSeq: cause?.seq ?? null,
-        correlationId: opts?.correlationId ?? cause?.correlationId ?? correlationId(),
+        correlationId: chainId,
       },
       opts?.idempotencyKey,
       fence,

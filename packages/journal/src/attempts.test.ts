@@ -6,6 +6,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { EffectRetention } from './retention.js';
 import type { JobRunner, ScheduledJob } from './types.js';
 import { jobId } from './id.js';
@@ -30,7 +32,7 @@ beforeEach(async () => {
 const bare = j.compose({});
 
 const queueRow = async (name: string): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await db.insert(tables.jobs).values({ id, kind: 'queue', jobName: name, args: {} });
   return id;
 };
@@ -68,11 +70,13 @@ describe('attempt rows', () => {
     // Why: a try with no row, or a row for a try that never started, would make the attempt log lie.
     const id = await queueRow('demo');
     let seen: Awaited<ReturnType<typeof attemptsOf>> = [];
-    await bare.drain(db, {
-      jobs: runner(async () => {
-        seen = await attemptsOf(id);
-      }),
-    });
+    await bare
+      .drain(db, {
+        jobs: runner(async () => {
+          seen = await attemptsOf(id);
+        }),
+      })
+      .then(result => orThrow(result));
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ attempt: 1, finishedAt: null, outcome: null });
     expect(seen[0]?.id).toMatch(/^att_/);
@@ -82,12 +86,14 @@ describe('attempt rows', () => {
     // Why: only the lease holder may close an attempt. A worker that lost its lease must not
     // rewrite the history of the try that now belongs to someone else.
     const id = await queueRow('demo');
-    await bare.drain(db, {
-      jobs: runner(() => {
-        throw new Error('boom');
-      }),
-      batchSize: 1,
-    });
+    await bare
+      .drain(db, {
+        jobs: runner(() => {
+          throw new Error('boom');
+        }),
+        batchSize: 1,
+      })
+      .then(result => orThrow(result));
     expect(await attemptsOf(id)).toMatchObject([
       { attempt: 1, outcome: 'retry', error: expect.stringContaining('boom') },
     ]);
@@ -110,13 +116,13 @@ describe('attempt rows', () => {
       }
       await second;
     });
-    const first = bare.drain(db, { jobs, batchSize: 1, leaseSeconds: 60 });
+    const first = bare.drain(db, { jobs, batchSize: 1, leaseSeconds: 60 }).then(result => orThrow(result));
     await sleep(100);
     await db
       .update(tables.jobs)
       .set({ leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, slow));
-    const other = bare.drain(db, { jobs, batchSize: 1, leaseSeconds: 60 });
+    const other = bare.drain(db, { jobs, batchSize: 1, leaseSeconds: 60 }).then(result => orThrow(result));
     await first;
     const rows = await attemptsOf(slow);
     expect(rows.map(r => [r.attempt, r.outcome])).toEqual([
@@ -131,16 +137,18 @@ describe('attempt rows', () => {
   it('a dead job’s last attempt ends as dead', async () => {
     // Why: dead is a different end from retry; the log must say which try gave up.
     const id = await queueRow('demo');
-    await bare.drain(db, {
-      jobs: runner(
-        () => {
-          throw new Error('nope');
-        },
-        undefined,
-        () => undefined,
-      ),
-      batchSize: 1,
-    });
+    await bare
+      .drain(db, {
+        jobs: runner(
+          () => {
+            throw new Error('nope');
+          },
+          undefined,
+          () => undefined,
+        ),
+        batchSize: 1,
+      })
+      .then(result => orThrow(result));
     expect((await attemptsOf(id)).map(r => r.outcome)).toEqual(['dead']);
     expect((await jobOf(id))?.deadAt).not.toBeNull();
   });
@@ -154,11 +162,13 @@ describe('attempt rows', () => {
       .set({ attempts: 1, leaseToken: 'lease_gone', leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, again));
     let seen: Awaited<ReturnType<typeof attemptsOf>> = [];
-    await bare.drain(db, {
-      jobs: runner(async () => {
-        seen = await attemptsOf(again);
-      }),
-    });
+    await bare
+      .drain(db, {
+        jobs: runner(async () => {
+          seen = await attemptsOf(again);
+        }),
+      })
+      .then(result => orThrow(result));
     expect(seen.map(r => [r.attempt, r.outcome])).toEqual([
       [1, 'superseded'],
       [2, null],
@@ -173,13 +183,15 @@ describe('archive at ack', () => {
     // deletes nothing, so it must archive nothing: no phantom completed row beside a live job.
     const id = await queueRow('demo');
     let calls = 0;
-    await bare.drain(db, {
-      jobs: runner(() => {
-        calls += 1;
-        if (calls === 1) throw new Error('first try fails');
-      }),
-      batchSize: 2,
-    });
+    await bare
+      .drain(db, {
+        jobs: runner(() => {
+          calls += 1;
+          if (calls === 1) throw new Error('first try fails');
+        }),
+        batchSize: 2,
+      })
+      .then(result => orThrow(result));
     const archived = await archiveOf(id);
     expect(archived).toMatchObject({ id, kind: 'queue', jobName: 'demo', outcome: 'completed', attempts: 2 });
     expect(archived?.keepUntil).not.toBeNull();
@@ -205,13 +217,13 @@ describe('archive at ack', () => {
       }
       await second;
     });
-    const first = bare.drain(db, { jobs, batchSize: 1 });
+    const first = bare.drain(db, { jobs, batchSize: 1 }).then(result => orThrow(result));
     await sleep(100);
     await db
       .update(tables.jobs)
       .set({ leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, slow));
-    const other = bare.drain(db, { jobs, batchSize: 1 });
+    const other = bare.drain(db, { jobs, batchSize: 1 }).then(result => orThrow(result));
     await first;
     expect(await archiveOf(slow), 'the stale ack archived nothing').toBeNull();
     expect(await jobOf(slow)).not.toBeNull();
@@ -224,7 +236,9 @@ describe('archive at ack', () => {
   it('completed: false deletes at ack exactly as before', async () => {
     // Why: an app that opts out must pay nothing and keep nothing.
     const id = await queueRow('demo');
-    await bare.drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: false }) }) });
+    await bare
+      .drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: false }) }) })
+      .then(result => orThrow(result));
     expect(await jobOf(id)).toBeNull();
     expect(await archiveOf(id)).toBeNull();
     expect(await attemptsOf(id)).toEqual([]);
@@ -238,11 +252,13 @@ describe('archive at ack', () => {
       seenNames.push(job.name);
       return { completed: '1d' };
     };
-    await bare.drain(db, { jobs: runner(() => undefined, { retention }) });
+    await bare.drain(db, { jobs: runner(() => undefined, { retention }) }).then(result => orThrow(result));
     const forever = await queueRow('demo');
-    await bare.drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: 'forever' }) }) });
+    await bare
+      .drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: 'forever' }) }) })
+      .then(result => orThrow(result));
     const plain = await queueRow('demo');
-    await bare.drain(db, { jobs: runner(() => undefined) });
+    await bare.drain(db, { jobs: runner(() => undefined) }).then(result => orThrow(result));
 
     expect(seenNames).toEqual(['demo']);
     const dayRow = await archiveOf(day);

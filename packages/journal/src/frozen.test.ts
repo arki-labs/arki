@@ -146,7 +146,7 @@ describe('read-only events', () => {
     frozenFlags.length = 0;
     mutateInEffect = true;
     try {
-      await journal.drain(db);
+      await journal.drain(db).then(result => orThrow(result));
     } finally {
       mutateInEffect = false;
     }

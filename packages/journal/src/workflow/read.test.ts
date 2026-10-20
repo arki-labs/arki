@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { initJournal } from '../journal.js';
@@ -71,7 +71,7 @@ afterAll(() => client.close());
 
 async function settle(on = journal, limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await on.drain(db)) === 0) return;
+    if ((await on.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }
@@ -235,7 +235,7 @@ describe('stranded', () => {
     const withCode = original.compose({ workflows: [v1], workflowMeta });
     expectOk(await withCode.run(own, v1.start, { input: {}, id: 'gone_1' }, caller));
     expectOk(await withCode.run(own, v1.start, { input: {}, id: 'gone_2' }, caller));
-    for (let pass = 0; pass < 10 && (await withCode.drain(own)) > 0; pass++);
+    for (let pass = 0; pass < 10 && (await withCode.drain(own).then(result => orThrow(result))) > 0; pass++);
     expect(await withCode.workflows.stranded(own)).toEqual([]);
 
     const edited = fresh();
@@ -260,7 +260,7 @@ describe('stranded', () => {
     expect(firstStranded.map(run => [run.id, run.code])).toEqual([['gone_1', 'WORKFLOW_UNKNOWN']]);
     // A finished run is never stranded: its code is not needed any more.
     expectOk(await withCode.run(own, v1.signal('ok'), { runId: 'gone_1', deliveryId: 'd', payload: {} }, caller));
-    for (let pass = 0; pass < 10 && (await withCode.drain(own)) > 0; pass++);
+    for (let pass = 0; pass < 10 && (await withCode.drain(own).then(result => orThrow(result))) > 0; pass++);
     const stillStranded = await none.workflows.stranded(own);
     expect(stillStranded.map(run => run.id)).toEqual(['gone_2']);
   });

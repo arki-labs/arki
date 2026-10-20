@@ -116,14 +116,16 @@ Breaking migration: replace `jsonb(name).$type<Shape>()` with `jsonColumn(name, 
 ### Prefixed ids: `defineId`
 
 Write the prefix once; the type, the schema and the generator come from it.
+For new domain IDs, name the kind too. Different kinds remain distinct even when
+their stored prefixes are identical.
 
 ```ts run
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 
-export const storyId = defineId('sty_');
-export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
+export const storyId = defineId('sty_', { kind: 'story' });
+export type StoryId = IdOf<typeof storyId>; // branded `sty_${string}`
 
 const id = storyId.create(); // StoryId | IdGenerationFailure
 if (isFailure(id)) throw new Error(id.message); // Handle or return this failure in application code.
@@ -136,6 +138,10 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
 - **Browser-safe.** No Drizzle. A contract, a form and a client can import it.
   On the server, `idColumns(storyId)` from `@arki/db/id` turns the same
   declaration into columns.
+- **Domain types are inferred from the schema.** `kind` is one non-empty literal
+  name, such as `billing.refund`. `IdOf`, `schema`, `is` and `create` preserve its
+  brand. A raw string or another kind cannot stand in for it. The one-argument
+  form retains its existing prefix-only type for migrations.
 - **Stored prefixes stay as they are.** The prefix is used exactly as given
   (letters, digits and `_`), so `defineId('hlgt_')` matches the rows already
   stored.
@@ -154,6 +160,9 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
 is a compile error (with literal prefixes) and throws; a prefix that starts
 another (`'sub'` and `'sub_'`) throws too, because `sub_abc` passes both
 schemas. Call it once in a test with every declaration of the app.
+It checks wire-format ambiguity, including branded declarations; brands cannot
+distinguish identical bytes at runtime. See [domain ID migration](docs/upgrades/domain-ids.md)
+for canonical parsing and external/numeric IDs.
 
 ### Keyset pagination: `keyset`, `pageInput`, `page`
 
@@ -291,6 +300,7 @@ Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input f
 | Code                  | Raised by                       | Meaning                                                |
 | --------------------- | ------------------------------- | ------------------------------------------------------ |
 | `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not a string.              |
+| `ARKI_CONTRACTS_E009` | `defineId`                      | The domain kind is missing, empty or not a string. |
 | `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
 | `ARKI_CONTRACTS_E003` | legacy reserved exception code  | ID generation now returns `RandomSourceUnavailable`. |
 | `ARKI_CONTRACTS_E004` | `keyset`                        | No keys in the static declaration.               |

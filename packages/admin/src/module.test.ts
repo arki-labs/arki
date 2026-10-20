@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { defineFailure } from '@arki/failure';
 
 import type { AdminErrorCode, ModuleDescription, Permit } from './module';
 import {
@@ -138,6 +139,25 @@ describe('schemaHash', () => {
 });
 
 describe('run / runPreview / runExecute — the dispatcher calls these, never load/preview/execute directly', () => {
+  it('returns the original declared failure without parsing it as successful output', async () => {
+    const Refused = defineFailure('admin.test_refused', { status: 409 });
+    const refusal = Refused();
+    const action = defineAction({
+      id: 'queue.refuse',
+      summary: 'Refuse',
+      permission: 'queue:write',
+      risk: 'low',
+      input: z.object({}),
+      previewOutput: z.object({ revision: z.string() }),
+      output: z.object({ applied: z.boolean() }),
+      failures: [Refused],
+      preview: async () => ({ revision: 'r1' }),
+      execute: async () => refusal,
+    });
+    expect(
+      await action.runExecute({}, {}, { executionId: 'exe_1', expectedRevision: 'r1', approvedBy: 'user_1' }),
+    ).toBe(refusal);
+  });
   it('validates input and strips undeclared output keys, so an app cannot leak fields it did not declare', async () => {
     const { module } = buildModule();
     const jobs = await module.reads.failedJobs.run({ queue: 'mail' }, { tenant: 't1' });

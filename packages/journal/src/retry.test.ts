@@ -24,10 +24,17 @@ const handlers = {
     if (failWith !== undefined) throw failWith;
   },
 };
-const slow = j.effect('slow-retry', order, handlers).withSchedule({ retry: backoff.constant(60_000).upTo(1).while(reason => UnexpectedDefect.is(reason)) });
+const slow = j.effect('slow-retry', order, handlers).withSchedule({
+  retry: backoff
+    .constant(60_000)
+    .upTo(1)
+    .while(reason => UnexpectedDefect.is(reason)),
+});
 const picky = j
   .effect('picky-retry', order, handlers)
-  .withSchedule({ retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason) && !(reason.cause instanceof BadInput)) });
+  .withSchedule({
+    retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason) && !(reason.cause instanceof BadInput)),
+  });
 
 const slowJournal = j.compose({ effects: [slow] });
 const pickyJournal = j.compose({ effects: [picky] });
@@ -88,7 +95,7 @@ async function payOnce(
 async function failingDrain(journal: typeof slowJournal | typeof pickyJournal, error: Error) {
   failWith = error;
   try {
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
   } finally {
     failWith = undefined;
   }
@@ -133,7 +140,7 @@ describe('an effect that returns a failure', () => {
   async function drainReturning(journal: typeof chargeJournal | typeof patientJournal, value: unknown) {
     returnWith = value;
     try {
-      expect(await journal.drain(db)).toBe(1);
+      expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     } finally {
       returnWith = undefined;
     }
@@ -171,7 +178,11 @@ describe('an effect that returns a failure', () => {
   it('an unexpected thrown callback defect is fatal by default', async () => {
     const job = await payOnce(chargeJournal);
     await drainReturning(chargeJournal, new Error('gateway down'));
-    expect(await jobById(job.id)).toMatchObject({ attempts: 1, deadAt: expect.any(Date), lastError: expect.stringContaining(UnexpectedDefect.code) });
+    expect(await jobById(job.id)).toMatchObject({
+      attempts: 1,
+      deadAt: expect.any(Date),
+      lastError: expect.stringContaining(UnexpectedDefect.code),
+    });
   });
 
   it('a plain result still acknowledges the job', async () => {

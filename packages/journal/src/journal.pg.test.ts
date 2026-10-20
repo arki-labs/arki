@@ -307,13 +307,13 @@ const staleAck = async (aOutcome: 'ok' | 'fail', bOutcome: 'ok' | 'fail') => {
       }
       if (bOutcome === 'fail') throw new Error('B failed');
     };
-    drainA = withJobs.drain(dbA);
+    drainA = withJobs.drain(dbA).then(result => orThrow(result));
     await arrival(aStarted.promise, drainA, "drain A never started the job's handler");
     await dbB
       .update(tables.jobs)
       .set({ leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, job.id));
-    expect(await withJobs.drain(dbB)).toBe(1);
+    expect(await withJobs.drain(dbB).then(result => orThrow(result))).toBe(1);
     const afterB = await jobRow(job.id);
     aRelease.resolve();
     expect(await drainA).toBe(1);
@@ -346,7 +346,7 @@ describe('two workers on real Postgres', () => {
     try {
       await dbA.transaction(async tx => {
         await tx.select({ id: tables.jobs.id }).from(tables.jobs).where(eq(tables.jobs.id, locked.id)).for('update');
-        const drained = withJobs.drain(dbB, { batchSize: 5 });
+        const drained = withJobs.drain(dbB, { batchSize: 5 }).then(result => orThrow(result));
         settle.push(drained);
         expect(await withDeadline(drained, 5000, 'the drain waited on the locked job instead of skipping it')).toBe(1);
         expect(seen).toEqual([free.id]);
@@ -354,7 +354,7 @@ describe('two workers on real Postgres', () => {
     } finally {
       await Promise.allSettled(settle);
     }
-    expect(await withJobs.drain(dbB, { batchSize: 5 })).toBe(1);
+    expect(await withJobs.drain(dbB, { batchSize: 5 }).then(result => orThrow(result))).toBe(1);
     expect(seen).toEqual([free.id, locked.id]);
     expect(
       await dbA
@@ -448,13 +448,13 @@ describe('database clock on real Postgres', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(Date.now() + 3_600_000);
-      expect(await withJobs.drain(dbA)).toBe(0);
+      expect(await withJobs.drain(dbA).then(result => orThrow(result))).toBe(0);
     } finally {
       vi.useRealTimers();
     }
     expect(await jobRow(job.id)).toMatchObject({ leaseToken: 'live', attempts: 1 });
     await dbA.update(tables.jobs).set({ leaseToken: null, leaseUntil: null }).where(eq(tables.jobs.id, job.id));
-    expect(await withJobs.drain(dbA)).toBe(1);
+    expect(await withJobs.drain(dbA).then(result => orThrow(result))).toBe(1);
     expect(await jobRow(job.id)).toBeNull();
   }, 30_000);
 
@@ -466,7 +466,7 @@ describe('database clock on real Postgres', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(Date.now() + 3_600_000);
-      expect(await withJobs.drain(dbA)).toBe(1);
+      expect(await withJobs.drain(dbA).then(result => orThrow(result))).toBe(1);
     } finally {
       vi.useRealTimers();
     }
@@ -479,7 +479,7 @@ describe('database clock on real Postgres', () => {
       .update(tables.jobs)
       .set({ availableAt: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, job.id));
-    expect(await withJobs.drain(dbA)).toBe(1);
+    expect(await withJobs.drain(dbA).then(result => orThrow(result))).toBe(1);
     expect(await jobRow(job.id)).toBeNull();
   }, 30_000);
 });

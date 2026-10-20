@@ -1,4 +1,3 @@
-import type { CommandFailure } from './errors.js';
 /**
  * Type-level proof for the design (spec section 12, item 1): the `.create` /
  * `.on` chain and the Drizzle table and transaction types compose without a
@@ -15,6 +14,7 @@ import { z } from 'zod';
 import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { RootCommandRunner, WriteResult } from './api.js';
+import type { CommandFailure } from './errors.js';
 import type { AccountId, order } from './test-support.js';
 import type {
   AnyEntity,
@@ -321,23 +321,26 @@ const plainEffect = jt.effect('plain-db', txOrder, {
 });
 async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
   const journal = jd.compose({ effects: [dbEffect] });
-  await journal.drain(db);
+  await journal.drain(db).then(result => orThrow(result));
   journal.worker(db);
   // @ts-expect-error -- a transaction is not the root database
-  await journal.drain(tx);
+  await journal.drain(tx).then(result => orThrow(result));
   // @ts-expect-error -- a transaction is not the root database
   journal.worker(tx);
   // @ts-expect-error -- the structural `RootDb` is not the app's database type: `ctx.db.query` would be missing
-  await journal.drain(structural);
+  await journal.drain(structural).then(result => orThrow(result));
   // @ts-expect-error -- the structural `RootDb` is not the app's database type
   journal.worker(structural);
   // A journal without `.db<…>()` takes any root database that opens its transaction type.
   const plain = jt.compose({ effects: [plainEffect] });
-  await plain.drain(db);
+  await plain.drain(db).then(result => orThrow(result));
   // @ts-expect-error -- the structural `RootDb` opens `DbHandle` transactions: a command run by an effect needs an `AppTx`
-  await plain.drain(structural);
+  await plain.drain(structural).then(result => orThrow(result));
   // Without `.tx<…>()` too, every root database fits.
-  await j.compose({}).drain(structural);
+  await j
+    .compose({})
+    .drain(structural)
+    .then(result => orThrow(result));
 }
 void typedDb;
 
@@ -441,7 +444,7 @@ async function dbFits() {
     const inner: DbHandle = tx;
     void inner;
     // @ts-expect-error -- a transaction is not the root database
-    return journal.drain(tx);
+    return journal.drain(tx).then(result => orThrow(result));
   });
 }
 void dbFits;

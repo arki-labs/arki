@@ -60,7 +60,7 @@ describe('an effect with needs', () => {
     const journal = j.compose({ effects: [orderMail], services: { mailer } });
 
     const id = await placeAndPay(journal);
-    expect(await journal.drain(db)).toBe(1);
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
 
     expect(sent).toHaveLength(1);
     expect(sent[0]?.orderId).toBe(id);
@@ -74,7 +74,7 @@ describe('an effect with needs', () => {
     j.compose({ effects: [orderMail], services: { mailer: second.mailer } });
 
     await placeAndPay(one);
-    await one.drain(db);
+    await one.drain(db).then(result => orThrow(result));
 
     expect(first.sent).toHaveLength(1);
     expect(second.sent).toHaveLength(0);
@@ -111,7 +111,7 @@ describe("an effect composed with `services: 'worker'`", () => {
 
     const id = await placeAndPay(journal);
     expect(sent).toHaveLength(0);
-    expect(await journal.drain(db, { services: () => ({ mailer }) })).toBe(1);
+    expect(await journal.drain(db, { services: () => ({ mailer }) }).then(result => orThrow(result))).toBe(1);
 
     expect(sent.map(mail => mail.orderId)).toEqual([id]);
   });
@@ -123,10 +123,10 @@ describe("an effect composed with `services: 'worker'`", () => {
     const message =
       'journal: effect "needs-order-mail" needs "mailer", but no service with that name was given; pass it as j.compose({ services: { mailer } }), or in a Dot app add it to the `needs` of the feature that lists this effect';
 
-    await expect(journal.drain(db)).rejects.toThrow(message);
+    await expect(journal.drain(db).then(result => orThrow(result))).rejects.toThrow(message);
     expect(() => journal.worker(db)).toThrow(message);
     // The job was never claimed: it runs once the service is given.
-    expect(await journal.drain(db, { services: () => ({ mailer }) })).toBe(1);
+    expect(await journal.drain(db, { services: () => ({ mailer }) }).then(result => orThrow(result))).toBe(1);
     expect(sent).toHaveLength(1);
   });
 
@@ -142,9 +142,11 @@ describe("an effect composed with `services: 'worker'`", () => {
     const journal = j.compose({ effects: [orderMail, otherMail], services: 'worker' });
     await placeAndPay(journal);
 
-    await journal.drain(db, {
-      services: ({ name }) => ({ mailer: name === 'needs-order-mail' ? first.mailer : second.mailer }),
-    });
+    await journal
+      .drain(db, {
+        services: ({ name }) => ({ mailer: name === 'needs-order-mail' ? first.mailer : second.mailer }),
+      })
+      .then(result => orThrow(result));
 
     expect(first.sent).toHaveLength(1);
     expect(second.sent).toHaveLength(1);

@@ -102,7 +102,9 @@ import { moduleError } from '@arki/admin/module';
 throw moduleError('ARKI_JOURNAL_E002', 409, 'Job job_1 is not dead.', 'Reload the job and check its state.');
 ```
 
-`moduleError(code, status, message, remediation)` takes the module's own `code`, an HTTP `status` from 400 to 499, a `message` and a one-sentence `remediation`. A status outside 400 to 499, or an empty code, throws `ARKI_ADMIN_E014`. A server failure is a plain `Error`; it answers `ARKI_ADMIN_E015` and its text stays in the app's log. `isModuleError(error)` and the `ModuleError` type are exported from `@arki/admin/module`.
+Actions may declare a `failures` tuple of canonical `@arki/failure` definitions and return those failures from `execute`. `runExecute` preserves the original failure and its exact inferred type. The dispatcher validates failures with the canonical serializer, records a failed receipt, and returns the failure code and HTTP status; it hides server messages and private causes. Undeclared or invalid failures become a supervised defect.
+
+`moduleError(code, status, message, remediation)` takes the module's own `code`, an HTTP `status` from 400 to 599, a `message` and a one-sentence `remediation`. A status outside 400 to 599, or an empty code, throws `ARKI_ADMIN_E014`. Server error messages stay private. A plain `Error` answers `ARKI_ADMIN_E015` and its text stays in the app's log. `isModuleError(error)` and the `ModuleError` type are exported from `@arki/admin/module`.
 
 The dispatcher answers a `ModuleError` with the module's own status and code, and the client reads them back. A failed receipt keeps both, so a lost answer settled later through `core.receipts.get` still says `ARKI_JOURNAL_E002`, not a generic code. The wire and receipt `code` is therefore a string: one of `ADMIN_ERROR_CODES`, or a module's own. `@arki/journal/foreman` (`ARKI_JOURNAL_E001` to `E005`) and `@arki/queue/foreman` (`ARKI_QUEUE_E014` to `E016`) use it.
 

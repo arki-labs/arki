@@ -6,7 +6,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import type { Result } from '@arki/failure';
@@ -86,13 +86,27 @@ function outboxWith(transport: MailTransport, maxBytes?: number) {
 }
 
 async function drainAll(runner: JobRunner): Promise<void> {
-  while ((await journal.drain(db, { jobs: runner })) > 0);
+  while (orThrow(await journal.drain(db, { jobs: runner })) > 0);
 }
 
 const queue = () => mailQueueAssertions(db, tables);
 const to = 'ada@example.com';
 
 describe('the mail commits with the write', () => {
+  it('returns unavailable entropy without queuing or sending mail', async () => {
+    const { transport, calls } = provider('ok');
+    const outbox = outboxWith(transport);
+    vi.stubGlobal('crypto', null);
+    let result: unknown;
+    try {
+      result = await db.transaction(tx => outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(result).toMatchObject({ code: 'contracts.random_source_unavailable', status: 500 });
+    expect(await queue().queued()).toEqual([]);
+    expect(calls).toEqual([]);
+  });
   it('a rolled-back transaction leaves no row, and nothing is sent', async () => {
     const { transport, calls } = provider('ok');
     const outbox = outboxWith(transport);

@@ -99,8 +99,8 @@ describe('owned hook defects', () => {
       write(order, id, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
     );
     orThrow(await hooked.run(db, command, {}, meta));
-    expect(await hooked.drain(db)).toBe(1);
-    expect(await hooked.drain(db)).toBe(0);
+    expect(await hooked.drain(db).then(result => orThrow(result))).toBe(1);
+    expect(await hooked.drain(db).then(result => orThrow(result))).toBe(0);
     expect(calls).toBe(1);
     const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, effect.name));
     expect(job).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
@@ -151,7 +151,7 @@ it('worker shutdown releases an interrupted workflow for restart without a dead 
   const id = 'shutdown_resume';
   orThrow(await running.run(db, flow.start, { input: {}, id }, meta));
   const stop = new AbortController();
-  const draining = running.drain(db, { signal: stop.signal });
+  const draining = running.drain(db, { signal: stop.signal }).then(result => orThrow(result));
   await entered;
   stop.abort(new Error('worker shutdown'));
   await draining;
@@ -160,7 +160,7 @@ it('worker shutdown releases an interrupted workflow for restart without a dead 
   const before = await db.select().from(tables.events).where(eq(tables.events.entityId, id));
   expect(before.map(event => event.type)).toEqual(['RunStarted', 'NodeScheduled']);
   interrupted = false;
-  await running.drain(db);
+  await running.drain(db).then(result => orThrow(result));
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
   const [finished] = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
@@ -196,7 +196,7 @@ it('a durable step retries only the explicitly selected returned failure with it
   const running = init.compose({ workflows: [flow], workflowMeta: meta });
   const id = 'failure_selected_retry';
   orThrow(await running.run(db, flow.start, { input: {}, id }, meta));
-  for (let n = 0; n < 10; n++) if ((await running.drain(db)) === 0) break;
+  for (let n = 0; n < 10; n++) if ((await running.drain(db).then(result => orThrow(result))) === 0) break;
   expect(calls).toBe(2);
   expect(reasons).toHaveLength(1);
   expect(reasons[0]).toBe(refusal);

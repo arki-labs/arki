@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { j, tables } from '../test-support.js';
@@ -98,13 +98,23 @@ const bounded = j
 const declining = j
   .workflow('test.declining', { version: 1, input: z.object({}) })
   .step('charge', () => 'charged', { undo: () => void log.push('undo charge') })
-  .step('authorize', () => Declined({}), { retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) })
+  .step('authorize', () => Declined({}), {
+    retry: backoff
+      .constant(0)
+      .upTo(2)
+      .while(reason => UnexpectedDefect.is(reason)),
+  })
   .finish();
 
 const decliningAndCompensating = j
   .workflow('test.declining.compensating', { version: 1, input: z.object({}), onDeadStep: 'compensate' })
   .step('charge', () => 'charged', { undo: () => void log.push('undo charge') })
-  .step('authorize', () => Declined({}), { retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) })
+  .step('authorize', () => Declined({}), {
+    retry: backoff
+      .constant(0)
+      .upTo(2)
+      .while(reason => UnexpectedDefect.is(reason)),
+  })
   .finish();
 
 const dying = j
@@ -160,7 +170,13 @@ const retrying = j
       if (laterTries > 1 && !laterKeepsFailing) return 'later done';
       throw new Error('not yet');
     },
-    { retry: backoff.constant(60_000).upTo(2).while(reason => UnexpectedDefect.is(reason)), undo: () => void log.push('undo later') },
+    {
+      retry: backoff
+        .constant(60_000)
+        .upTo(2)
+        .while(reason => UnexpectedDefect.is(reason)),
+      undo: () => void log.push('undo later'),
+    },
   )
   .finish();
 
@@ -206,7 +222,7 @@ afterAll(() => client.close());
 
 async function settle(limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }

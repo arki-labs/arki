@@ -40,3 +40,23 @@ test('ID defaults and foreign-key nullability agree with parsed output', () => {
   // @ts-expect-error Only the canonical ID generation failures belong in an ID column source.
   idColumns({ schema: id.schema, create: () => Unrelated() });
 });
+
+test('nominal IDs survive inferred columns and canonical storage reconstruction', () => {
+  const refundId = defineId('id_', { kind: 'billing.refund' });
+  const paymentId = defineId('id_', { kind: 'billing.payment' });
+  const refunds = pgTable('nominal_refunds', {
+    id: idColumns(refundId).primaryColumn(),
+    paymentId: idColumns(paymentId).reference('payment_id'),
+  });
+  expectTypeOf<typeof refunds.$inferSelect.id>().toEqualTypeOf<IdOf<typeof refundId>>();
+  expectTypeOf<typeof refunds.$inferSelect.paymentId>().toEqualTypeOf<IdOf<typeof paymentId>>();
+  const source: IdColumnSource<IdOf<typeof refundId>> = refundId;
+  const _fromSource = pgTable('source_refunds', { id: idColumns(source).primaryColumn() });
+  expectTypeOf<typeof _fromSource.$inferSelect.id>().toEqualTypeOf<IdOf<typeof refundId>>();
+  const _schema = createInsertSchema(refunds, { id: () => refundId.schema, paymentId: () => paymentId.schema });
+  expectTypeOf<z.output<typeof _schema>['id']>().toEqualTypeOf<IdOf<typeof refundId> | undefined>();
+  expectTypeOf<z.output<typeof _schema>['paymentId']>().toEqualTypeOf<IdOf<typeof paymentId>>();
+  expectTypeOf<IdOf<typeof paymentId>>().not.toExtend<(typeof refunds.$inferInsert)['id']>();
+  // @ts-expect-error A typed column cannot accept a generator for another nominal kind.
+  idColumns({ schema: refundId.schema, create: paymentId.create });
+});

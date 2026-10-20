@@ -26,12 +26,14 @@
  * once: it is refused the same way on every try, so retrying it only fills `webhook_attempts`.
  */
 import type { PgSchema, PgTableFn } from 'drizzle-orm/pg-core';
-import { createId } from '@paralleldrive/cuid2';
 import { and, arrayContains, eq, sql } from 'drizzle-orm';
 import { bigserial, getTableConfig, index, integer, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { Backoff } from '@arki/resilience';
+import { defineId } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 import { publicFetch, UnsafeUrlError, validatePublicURL } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
@@ -39,6 +41,10 @@ import { backoff } from '@arki/resilience';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, JobRunner, RootDb, ScheduledJob } from '../types.js';
 import { jobId } from '../id.js';
+import { rollbackOnFailure } from '../rollback.js';
+
+const subscriptionId = defineId('whs_');
+const webhookMessageId = defineId('msg_');
 
 /** Stable codes for {@link WebhookError}. Match on codes, never parse messages. */
 export const WEBHOOK_ERROR_CODES = {
@@ -253,18 +259,24 @@ export function webhookSender(options: WebhookSenderOptions) {
   };
   const newSecret = (): string => `whsec_${toBase64(crypto.getRandomValues(new Uint8Array(KEY_BYTES)))}`;
 
-  const enqueue = async (db: DbHandle, messageId: string, subscriptionIds: readonly string[]): Promise<string[]> => {
+  const enqueue = async (
+    db: DbHandle,
+    messageId: string,
+    subscriptionIds: readonly string[],
+  ): Promise<string[] | IdGenerationFailure> => {
     if (subscriptionIds.length === 0) return [];
-    const rows = subscriptionIds.map(subscriptionId => ({
-      id: jobId(),
-      kind: 'queue' as const,
-      jobName: DELIVER_JOB,
-      args: { messageId, subscriptionId },
-    }));
+    const rows: (typeof jobs.$inferInsert)[] = [];
+    const ids: string[] = [];
+    for (const subscriptionId of subscriptionIds) {
+      const id = jobId();
+      if (isFailure(id)) return id;
+      ids.push(id);
+      rows.push({ id, kind: 'queue', jobName: DELIVER_JOB, args: { messageId, subscriptionId } });
+    }
     await db.insert(jobs).values(rows);
     // Delivered at commit, dropped on rollback.
     await db.execute(sql`select pg_notify(${channel}, ${WAKE_PAYLOAD})`);
-    return rows.map(row => row.id);
+    return ids;
   };
 
   /** Each secret signs the same id and time; Standard Webhooks sends the signatures space-separated. */
@@ -391,7 +403,10 @@ export function webhookSender(options: WebhookSenderOptions) {
      * Adds an endpoint for a partner's events and returns its signing secret, the only time it
      * is readable: show it to the partner once. The URL must be public https.
      */
-    subscribe: async (db: DbHandle, input: SubscribeInput): Promise<{ id: string; secret: string }> => {
+    subscribe: async (
+      db: DbHandle,
+      input: SubscribeInput,
+    ): Promise<{ id: string; secret: string } | IdGenerationFailure> => {
       const { partner, url, events } = parse(subscribeInput, input, 'subscribe');
       if (new URL(url).protocol !== 'https:') {
         throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, 'subscribe: the URL must use https');
@@ -401,7 +416,8 @@ export function webhookSender(options: WebhookSenderOptions) {
       } catch (error) {
         throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `subscribe: ${errorText(error)}`, { cause: error });
       }
-      const id = `whs_${createId()}`;
+      const id = subscriptionId.create();
+      if (isFailure(id)) return id;
       const secret = newSecret();
       await db.insert(subscriptions).values({ id, partner, url, events: [...events], secret: await seal(id, secret) });
       return { id, secret };
@@ -412,7 +428,10 @@ export function webhookSender(options: WebhookSenderOptions) {
      * `tx`. A rollback removes them with the business write. The payload is stored once, as the
      * body `{ type, timestamp, data }` every delivery sends.
      */
-    dispatch: async (tx: WebhookTx, input: DispatchInput): Promise<{ messageId: string; deliveries: number }> => {
+    dispatch: async (
+      tx: WebhookTx,
+      input: DispatchInput,
+    ): Promise<{ messageId: string; deliveries: number } | IdGenerationFailure> => {
       // The type already refuses the root database; this catches untyped callers.
       if (typeof Reflect.get(tx, 'rollback') !== 'function') {
         throw new WebhookError(
@@ -434,31 +453,41 @@ export function webhookSender(options: WebhookSenderOptions) {
           `dispatch: the body is ${size} bytes, over maxPayloadBytes (${maxPayloadBytes})`,
         );
       }
-      const messageId = `msg_${createId()}`;
-      await tx.insert(messages).values({ id: messageId, partner, event, payload: body });
-      const targets = await tx
-        .select({ id: subscriptions.id })
-        .from(subscriptions)
-        .where(
-          and(
-            eq(subscriptions.partner, partner),
-            eq(subscriptions.status, 'active'),
-            arrayContains(subscriptions.events, [event]),
-          ),
-        );
-      const queued = await enqueue(
-        tx,
-        messageId,
-        targets.map(target => target.id),
-      );
-      return { messageId, deliveries: queued.length };
+      const messageId = webhookMessageId.create();
+      if (isFailure(messageId)) return messageId;
+      const refusal = rollbackOnFailure<{ messageId: string; deliveries: number } | IdGenerationFailure>();
+      return tx
+        .transaction(async tx => {
+          await tx.insert(messages).values({ id: messageId, partner, event, payload: body });
+          const targets = await tx
+            .select({ id: subscriptions.id })
+            .from(subscriptions)
+            .where(
+              and(
+                eq(subscriptions.partner, partner),
+                eq(subscriptions.status, 'active'),
+                arrayContains(subscriptions.events, [event]),
+              ),
+            );
+          const queued = await enqueue(
+            tx,
+            messageId,
+            targets.map(target => target.id),
+          );
+          if (isFailure(queued)) return refusal.settle(queued);
+          return { messageId, deliveries: queued.length };
+        })
+        .catch(refusal.recover);
     },
 
     /**
      * Sends a stored message again to one subscription of the same partner, with the same
      * `webhook-id`. A disabled subscription records the try as skipped: `enable` it first.
      */
-    replay: async (db: DbHandle, input: { messageId: string; subscriptionId: string }): Promise<{ jobId: string }> => {
+    replay: async (
+      db: DbHandle,
+      input: { messageId: string; subscriptionId: string },
+    ): Promise<{ jobId: string } | IdGenerationFailure> => {
       const message = await db
         .select({ partner: messages.partner })
         .from(messages)
@@ -475,7 +504,9 @@ export function webhookSender(options: WebhookSenderOptions) {
           `message ${input.messageId} and subscription ${input.subscriptionId} belong to different partners`,
         );
       }
-      const [queued] = await enqueue(db, input.messageId, [input.subscriptionId]);
+      const result = await enqueue(db, input.messageId, [input.subscriptionId]);
+      if (isFailure(result)) return result;
+      const [queued] = result;
       if (queued === undefined) throw new WebhookError(WEBHOOK_ERROR_CODES.notFound, 'replay queued nothing');
       return { jobId: queued };
     },

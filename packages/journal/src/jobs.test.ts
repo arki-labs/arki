@@ -36,7 +36,7 @@ const bare = j.compose({});
 type Insert = typeof tables.jobs.$inferInsert;
 
 const queueRow = async (name: string, args: unknown, extra?: Partial<Insert>): Promise<string> => {
-  const id = jobId();
+  const id = orThrow(jobId());
   await db.insert(tables.jobs).values({ id, kind: 'queue', jobName: name, args, ...extra });
   return id;
 };
@@ -65,15 +65,19 @@ describe('journal_jobs schema', () => {
     const id = await queueRow('demo', { a: 1 });
     expect(await rowOf(id)).toMatchObject({ kind: 'queue', jobName: 'demo', args: { a: 1 }, eventSeq: null });
     await expect(
-      db.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'demo', args: {}, effect: 'order-mail' }),
+      db
+        .insert(tables.jobs)
+        .values({ id: orThrow(jobId()), kind: 'queue', jobName: 'demo', args: {}, effect: 'order-mail' }),
     ).rejects.toThrow();
     // A queue row needs stored args: SQL NULL is refused, JSON null is a value.
-    await expect(db.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'demo' })).rejects.toThrow();
-    const nullArgs = jobId();
+    await expect(
+      db.insert(tables.jobs).values({ id: orThrow(jobId()), kind: 'queue', jobName: 'demo' }),
+    ).rejects.toThrow();
+    const nullArgs = orThrow(jobId());
     await db.insert(tables.jobs).values({ id: nullArgs, kind: 'queue', jobName: 'demo', args: sql`'null'::jsonb` });
     expect(await rowOf(nullArgs)).toMatchObject({ args: null });
     // An effect row keeps today's shape: no event, no row.
-    await expect(db.insert(tables.jobs).values({ id: jobId(), effect: 'order-mail' })).rejects.toThrow();
+    await expect(db.insert(tables.jobs).values({ id: orThrow(jobId()), effect: 'order-mail' })).rejects.toThrow();
   });
 
   it('dedupes on (job_name, dedupe_key) and only where a key is set', async () => {
@@ -89,7 +93,9 @@ describe('drain with a job runner', () => {
   it('runs a queue row with its stored args and id, then deletes it; a journal with no effects still drains', async () => {
     const seen: ScheduledJob[] = [];
     const id = await queueRow('demo', { greeting: 'hi' });
-    expect(await bare.drain(db, { jobs: runner(['demo'], job => void seen.push(job)) })).toBe(1);
+    expect(
+      await bare.drain(db, { jobs: runner(['demo'], job => void seen.push(job)) }).then(result => orThrow(result)),
+    ).toBe(1);
     expect(seen).toEqual([{ id, name: 'demo', args: { greeting: 'hi' }, attempt: 1 }]);
     expect(await rowOf(id)).toBeNull();
   });
@@ -99,8 +105,8 @@ describe('drain with a job runner', () => {
     const withEffects = j.compose({
       effects: [j.effect('noop', order, { OrderPlaced: () => Promise.resolve() })],
     });
-    expect(await withEffects.drain(db)).toBe(0);
-    expect(await bare.drain(db)).toBe(0);
+    expect(await withEffects.drain(db).then(result => orThrow(result))).toBe(0);
+    expect(await bare.drain(db).then(result => orThrow(result))).toBe(0);
     expect(await rowOf(id)).toMatchObject({ attempts: 0, leaseToken: null });
   });
 
@@ -115,17 +121,17 @@ describe('drain with a job runner', () => {
       () => 60_000,
     );
     const id = await queueRow('demo', {});
-    expect(await bare.drain(db, { jobs })).toBe(1);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(1);
     const between = await rowOf(id);
     expect(between).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
     expect(between?.lastError).toContain('smtp down');
     expect(between?.availableAt.getTime()).toBeGreaterThan(Date.now() + 30_000);
-    expect(await bare.drain(db, { jobs }), 'held back until the delay passes').toBe(0);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result)), 'held back until the delay passes').toBe(0);
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, id));
-    expect(await bare.drain(db, { jobs })).toBe(1);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(1);
     expect(calls).toBe(2);
     expect(await rowOf(id)).toBeNull();
   });
@@ -142,15 +148,15 @@ describe('drain with a job runner', () => {
       job => (job.attempt < 2 ? 0 : undefined),
     );
     const id = await queueRow('demo', {});
-    expect(await bare.drain(db, { jobs })).toBe(2);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(2);
     expect(await rowOf(id)).toMatchObject({ attempts: 2, leaseToken: null });
     expect((await rowOf(id))?.deadAt).toBeInstanceOf(Date);
-    expect(await bare.drain(db, { jobs })).toBe(0);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(0);
     expect((await bare.jobs(db, { status: 'dead', job: 'demo' })).jobs).toHaveLength(1);
 
     fail = false;
-    await bare.retry(db, id, { actor: 'jobs-test' });
-    expect(await bare.drain(db, { jobs })).toBe(1);
+    orThrow(await bare.retry(db, id, { actor: 'jobs-test' }));
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(1);
     expect(attempts).toEqual([1, 2, 1]);
     expect(await rowOf(id)).toBeNull();
   });
@@ -168,8 +174,8 @@ describe('drain with a job runner', () => {
       }
     });
     const id = await queueRow('demo', {});
-    await bare.drain(db, { jobs });
-    await bare.drain(db, { jobs });
+    await bare.drain(db, { jobs }).then(result => orThrow(result));
+    await bare.drain(db, { jobs }).then(result => orThrow(result));
     expect(handled).toEqual([id, id]);
     expect(await rowOf(id)).toBeNull();
   });
@@ -177,7 +183,7 @@ describe('drain with a job runner', () => {
   it('never claims a name the runner lacks; strandedJobs shows it per kind and name', async () => {
     const id = await queueRow('renamed.v1', {});
     const jobs = runner(['demo'], () => undefined);
-    expect(await bare.drain(db, { jobs })).toBe(0);
+    expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(0);
     expect(await rowOf(id)).toMatchObject({ attempts: 0 });
     expect(await bare.strandedJobs(db, { jobs })).toEqual([{ kind: 'queue', name: 'renamed.v1', jobs: 1 }]);
     // Without the runner the journal cannot judge queue names, so it does not count them.
@@ -199,7 +205,7 @@ describe('drain with a job runner', () => {
     );
     await queueRow('demo', 'normal', { priority: 0 });
     const jobs = runner(['demo'], job => void ran.push(String(job.args)));
-    expect(await lanes.drain(db, { jobs })).toBe(4);
+    expect(await lanes.drain(db, { jobs }).then(result => orThrow(result))).toBe(4);
     // Equal priority falls back to available_at: the effect row was due first.
     expect(ran).toEqual(['critical', 'effect', 'normal', 'background']);
   });
@@ -231,14 +237,14 @@ describe('drain with a job runner', () => {
       seen.push('second');
     });
 
-    const first = bare.drain(db, { jobs, leaseSeconds: 1 });
+    const first = bare.drain(db, { jobs, leaseSeconds: 1 }).then(result => orThrow(result));
     await sleep(150);
     // The first worker stalled: its lease ran out before the next renewal.
     await db
       .update(tables.jobs)
       .set({ leaseUntil: sql`now() - interval '1 second'` })
       .where(eq(tables.jobs.id, id));
-    const other = bare.drain(db, { jobs, leaseSeconds: 1 });
+    const other = bare.drain(db, { jobs, leaseSeconds: 1 }).then(result => orThrow(result));
     expect(await first).toBe(1);
     expect(seen).toEqual(['first:aborted']);
     expect(await rowOf(id), 'the stale ack deleted nothing').not.toBeNull();

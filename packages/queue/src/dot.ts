@@ -21,7 +21,7 @@ import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { DurableSchedulerOptions } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
-import type { Outbox, OutboxOptions, OutboxTx, Scheduled, ScheduleOptions } from './outbox/outbox.ts';
+import type { Outbox, OutboxOptions, OutboxTx, ScheduleOptions } from './outbox/outbox.ts';
 import type { QueueRegistry } from './outbox/registry.ts';
 import type { QueueClient, QueueClientHandle, QueueClientOptions } from './queue-client.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
@@ -682,8 +682,8 @@ export type JobProducers<TJobs> = { readonly [K in keyof TJobs]: JobProducer<Inp
 
 /** A job's producer on the outbox lane: a row in the caller's transaction, under the feature's name for it. */
 export type OutboxProducer<TInput> = {
-  runAfter(tx: OutboxTx, args: TInput, options?: ScheduleOptions): Promise<Scheduled>;
-  runAt(tx: OutboxTx, args: TInput, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>): Promise<Scheduled>;
+  runAfter(tx: OutboxTx, args: TInput, options?: ScheduleOptions): ReturnType<Outbox['runAfter']>;
+  runAt(tx: OutboxTx, args: TInput, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>): ReturnType<Outbox['runAt']>;
 };
 
 export type OutboxProducers<TJobs> = { readonly [K in keyof TJobs]: OutboxProducer<InputOf<TJobs[K]>> };

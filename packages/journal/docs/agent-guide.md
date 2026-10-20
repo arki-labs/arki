@@ -280,6 +280,8 @@ Rules:
 
 ## Errors
 
+Journal ID generation uses `@arki/contracts` declarations with the existing prefixes and 24-character bodies. `jobId`, writes, adopt, drain and job operation verbs return the exact `IdGenerationFailure` union. Commands and workflow doors include it through `COMMAND_FAILURES`; return refusals from handlers so the owning transaction rolls back. Workers log a refused claim without leasing or acknowledging a job. Webhook subscribe, dispatch and replay preserve these failures, and dispatch rolls back its message and jobs together.
+
 Command runners infer domain refusals plus `CommandFailure`, derived from `COMMAND_FAILURES`. See the [upgrade guide](../README.md#upgrading-command-and-durable-job-outcomes) for receipt, callback and durable-worker migrations. An unexpected callback defect is fatal by default; retry predicates receive the exact failure value.
 
 Two kinds of error have a code.

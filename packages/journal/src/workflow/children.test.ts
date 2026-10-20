@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { WorkflowDef } from './define.js';
@@ -182,7 +182,7 @@ beforeEach(() => {
 
 async function settle(limit = 60) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the runs did not settle');
 }

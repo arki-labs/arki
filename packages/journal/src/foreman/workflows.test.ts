@@ -3,18 +3,20 @@
  *  - an operator finds a stuck run from the reads alone, and secrets never leave through them;
  *  - every verb writes the Foreman approver and execution onto the run, so the run says who moved it;
  *  - an approval is for the run the operator saw: a run that changed since the preview is refused (E010);
- *  - every refusal has a code and a 4xx status, never a 500.
+ *  - domain refusals retain their 4xx codes; entropy failures keep their canonical 500 status.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { and, asc, eq, isNotNull } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
-import { isFailure } from '@arki/failure';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
+import * as ids from '../id.js';
 import { initJournal } from '../journal.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
@@ -95,6 +97,7 @@ beforeAll(async () => {
   ({ db, client } = await openJournalDb(tables));
 });
 afterAll(() => client.close());
+afterEach(() => vi.restoreAllMocks());
 beforeEach(() => {
   broken.ship = false;
   broken.undoCharge = false;
@@ -117,7 +120,7 @@ const permit = (revision: string, executionId = 'exe_1'): Permit => ({
 
 async function settle(limit = 40) {
   for (let pass = 0; pass < limit; pass++) {
-    if ((await journal.drain(db)) === 0) return;
+    if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
 }
@@ -217,7 +220,7 @@ describe('retryStep', () => {
     expect(preview.lastError).not.toContain('hunter2');
 
     broken.ship = false;
-    const done = await mod.actions.retryStep.runExecute(input, NO_CTX, permit(preview.revision, 'exe_retry'));
+    const done = orThrow(await mod.actions.retryStep.runExecute(input, NO_CTX, permit(preview.revision, 'exe_retry')));
     expect(done).toEqual({ runId: id, how: 'rescheduled' });
     await settle();
 
@@ -250,12 +253,12 @@ describe('signal', () => {
 
     const preview = await mod.actions.signal.runPreview(input, NO_CTX);
     expect(preview.wakesNow).toBe(true);
-    const first = await mod.actions.signal.runExecute(input, NO_CTX, permit(preview.revision, 'exe_sig'));
+    const first = orThrow(await mod.actions.signal.runExecute(input, NO_CTX, permit(preview.revision, 'exe_sig')));
     expect(first).toEqual({ runId: id, status: 'woke' });
     expect(await stateOf(id)).toBe('completed');
 
     // The same execution again (a lost answer, a retry) is the same delivery: it changes nothing.
-    const again = await mod.actions.signal.runExecute(input, NO_CTX, permit(preview.revision, 'exe_sig'));
+    const again = orThrow(await mod.actions.signal.runExecute(input, NO_CTX, permit(preview.revision, 'exe_sig')));
     expect(again).toEqual({ runId: id, status: 'duplicate' });
 
     const runEvents = await eventsOf(id);
@@ -312,7 +315,9 @@ describe('resolveStep and skipUndo', () => {
     const stuckId = await startPayout('resolve', true);
     const resolveInput = { runId: stuckId, path: 'ship', result: { tracking: 'by-hand' }, reason: 'shipped by phone' };
     const resolvePreview = await mod.actions.resolveStep.runPreview(resolveInput, NO_CTX);
-    await mod.actions.resolveStep.runExecute(resolveInput, NO_CTX, permit(resolvePreview.revision, 'exe_resolve'));
+    orThrow(
+      await mod.actions.resolveStep.runExecute(resolveInput, NO_CTX, permit(resolvePreview.revision, 'exe_resolve')),
+    );
     await settle();
     const resolved = await findEvent(
       stuckId,
@@ -333,7 +338,7 @@ describe('resolveStep and skipUndo', () => {
     const skipInput = { runId: undoId, path: 'charge', reason: 'refunded by hand at the bank' };
     const skipPreview = await mod.actions.skipUndo.runPreview(skipInput, NO_CTX);
     expect(skipPreview.consequence).toContain('residual');
-    await mod.actions.skipUndo.runExecute(skipInput, NO_CTX, permit(skipPreview.revision, 'exe_skip'));
+    orThrow(await mod.actions.skipUndo.runExecute(skipInput, NO_CTX, permit(skipPreview.revision, 'exe_skip')));
     await settle();
     const skipped = await findEvent(
       undoId,
@@ -364,10 +369,12 @@ describe('cancel', () => {
     expect(preview.consequence).toContain('2 step(s) will be undone, newest first: charge, hold.');
     expect(preview.consequence).toContain('payBack has no undo and is skipped.');
 
-    const done = await mod.actions.cancel.runExecute(
-      { runId: id, reason: 'customer left' },
-      NO_CTX,
-      permit(preview.revision, 'exe_cancel'),
+    const done = orThrow(
+      await mod.actions.cancel.runExecute(
+        { runId: id, reason: 'customer left' },
+        NO_CTX,
+        permit(preview.revision, 'exe_cancel'),
+      ),
     );
     expect(done.state).toBe('compensating');
     await settle();
@@ -406,7 +413,7 @@ describe('revision', () => {
     const deploylessJournal = deployless.compose({ workflows: [other], workflowMeta });
     const id = newId('dead');
     expectOk(await journal.run(db, checkout.start, { input: {}, id }, caller));
-    await deploylessJournal.drain(db);
+    await deploylessJournal.drain(db).then(result => orThrow(result));
 
     const input = { runId: id, path: 'hold', phase: 'do' as const };
     const preview = await mod.actions.retryStep.runPreview(input, NO_CTX);
@@ -473,7 +480,7 @@ describe('error mapping', () => {
     const ghostJournal = original.compose({ workflows: [ghost], workflowMeta });
     const ghostId = newId('ghost');
     expectOk(await ghostJournal.run(db, ghost.start, { input: {}, id: ghostId }, caller));
-    await ghostJournal.drain(db);
+    await ghostJournal.drain(db).then(result => orThrow(result));
     await expect(mod.actions.cancel.runPreview({ ...cancelInput, runId: ghostId }, NO_CTX)).rejects.toMatchObject({
       code: CODES.stranded,
       status: 409,
@@ -551,10 +558,8 @@ describe('jobs module', () => {
     const preview = await jobs.actions.purgeDead.runPreview({ olderThanDays: 31, limit: 100 }, NO_CTX);
     expect(preview.deadJobs).toBe(1);
     expect(preview.consequence).not.toContain('counted above');
-    const done = await jobs.actions.purgeDead.runExecute(
-      { olderThanDays: 31, limit: 100 },
-      NO_CTX,
-      permit(preview.revision),
+    const done = orThrow(
+      await jobs.actions.purgeDead.runExecute({ olderThanDays: 31, limit: 100 }, NO_CTX, permit(preview.revision)),
     );
     expect(done.archived + done.deleted).toBe(preview.deadJobs);
     expect(
@@ -564,5 +569,63 @@ describe('jobs module', () => {
         .where(and(eq(tables.jobs.id, 'job_owned'))),
     ).toHaveLength(1);
     await db.delete(tables.jobs).where(isNotNull(tables.jobs.id));
+  });
+});
+
+describe('workflow action entropy failures', () => {
+  it.each(
+    (['retryStep', 'resolveStep', 'skipUndo', 'cancel', 'signal'] as const).flatMap(action =>
+      [false, true].map(defect => ({ action, defect })),
+    ),
+  )('forwards the original refusal through $action (defect: $defect)', async ({ action, defect }) => {
+    const mod = module();
+    const refused = defect
+      ? UnexpectedDefect({ cause: new Error('private entropy fault') })
+      : RandomSourceUnavailable();
+    switch (action) {
+      case 'retryStep': {
+        const runId = await startPayout('entropy-retry', true);
+        const input = { runId, path: 'ship', phase: 'do' as const, reason: 'retry' };
+        const preview = await mod.actions.retryStep.runPreview(input, NO_CTX);
+        vi.spyOn(ids, 'commandId').mockReturnValue(refused);
+        expect(await mod.actions.retryStep.runExecute(input, NO_CTX, permit(preview.revision))).toBe(refused);
+        break;
+      }
+      case 'resolveStep': {
+        const runId = await startPayout('entropy-resolve', true);
+        const input = { runId, path: 'ship', result: { tracking: 'manual' }, reason: 'resolve' };
+        const preview = await mod.actions.resolveStep.runPreview(input, NO_CTX);
+        vi.spyOn(ids, 'commandId').mockReturnValue(refused);
+        expect(await mod.actions.resolveStep.runExecute(input, NO_CTX, permit(preview.revision))).toBe(refused);
+        break;
+      }
+      case 'skipUndo': {
+        broken.undoCharge = true;
+        const runId = await startRefunding();
+        orThrow(await journal.run(db, refunding.cancel, { runId, reason: 'stop' }, caller));
+        await settle();
+        const input = { runId, path: 'charge', reason: 'skip' };
+        const preview = await mod.actions.skipUndo.runPreview(input, NO_CTX);
+        vi.spyOn(ids, 'commandId').mockReturnValue(refused);
+        expect(await mod.actions.skipUndo.runExecute(input, NO_CTX, permit(preview.revision))).toBe(refused);
+        break;
+      }
+      case 'cancel': {
+        const runId = await startCheckout();
+        const input = { runId, reason: 'stop' };
+        const preview = await mod.actions.cancel.runPreview(input, NO_CTX);
+        vi.spyOn(ids, 'commandId').mockReturnValue(refused);
+        expect(await mod.actions.cancel.runExecute(input, NO_CTX, permit(preview.revision))).toBe(refused);
+        break;
+      }
+      case 'signal': {
+        const runId = await startCheckout();
+        const input = { runId, name: 'confirm', payload: { by: 'ops' }, reason: 'signal' };
+        const preview = await mod.actions.signal.runPreview(input, NO_CTX);
+        vi.spyOn(ids, 'commandId').mockReturnValue(refused);
+        expect(await mod.actions.signal.runExecute(input, NO_CTX, permit(preview.revision))).toBe(refused);
+        break;
+      }
+    }
   });
 });

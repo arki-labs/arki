@@ -7,6 +7,7 @@
  */
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { Cancelled } from '@arki/async';
 import { attempt, isFailure, orThrow } from '@arki/failure';
@@ -114,8 +115,12 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
   // An empty list leaves its lane out of the claim; `drain` never claims with both empty.
-  const claimOne = (db: AppDb & RootDb, leaseSeconds: number, queued: readonly string[]): Promise<JobRow | undefined> =>
-    db.transaction(async (tx): Promise<JobRow | undefined> => {
+  const claimOne = (
+    db: AppDb & RootDb,
+    leaseSeconds: number,
+    queued: readonly string[],
+  ): Promise<JobRow | IdGenerationFailure | undefined> =>
+    db.transaction(async (tx): Promise<JobRow | IdGenerationFailure | undefined> => {
       const due = await tx
         .select({ id: jobsTable.id })
         .from(jobsTable)
@@ -135,10 +140,14 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
         .for('update', { skipLocked: true });
       const first = due[0];
       if (first === undefined) return;
+      const token = leaseToken();
+      if (isFailure(token)) return token;
+      const attempt = attemptId();
+      if (isFailure(attempt)) return attempt;
       const [claimed] = await tx
         .update(jobsTable)
         .set({
-          leaseToken: leaseToken(),
+          leaseToken: token,
           leaseUntil: dbNowPlus(leaseSeconds),
           attempts: sql`${jobsTable.attempts} + 1`,
         })
@@ -151,7 +160,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
         .update(attemptsTable)
         .set({ finishedAt: sql`now()`, outcome: 'superseded' })
         .where(and(eq(attemptsTable.jobId, claimed.id), isNull(attemptsTable.finishedAt)));
-      await tx.insert(attemptsTable).values({ id: attemptId(), jobId: claimed.id, attempt: claimed.attempts });
+      await tx.insert(attemptsTable).values({ id: attempt, jobId: claimed.id, attempt: claimed.attempts });
       return claimed;
     });
 
@@ -376,7 +385,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       readonly services?: HandlerServices;
       readonly jobs?: JobRunner<AppDb>;
     },
-  ): Promise<number> => {
+  ): Promise<number | IdGenerationFailure> => {
     assertRootDb(db, 'drain');
     // Before any claim: a missing service refuses the drain, not one job after another.
     const { effects } = bindHandlers({ effects: deps.effects, taps: [] }, opts?.services);
@@ -399,6 +408,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     while (claimed < batchSize && !signal.aborted) {
       const job = await claimOne(db, leaseSeconds, queued);
       if (job === undefined) break;
+      if (isFailure(job)) return job;
       claimed += 1;
       await runJob(db, job, signal, leaseSeconds, effectsByName, runner);
     }
@@ -453,7 +463,7 @@ export type WorkerDeps<AppDb extends RootDb> = {
       readonly services?: HandlerServices;
       readonly jobs?: JobRunner<AppDb>;
     },
-  ) => Promise<number>;
+  ) => Promise<number | IdGenerationFailure>;
   /** One batch per async projection. Returns how many events were scanned. */
   /** The retention sweep: run `run` every `everyMs` while the worker is up. Absent when `retention.sweep` is false. */
   readonly sweep?: {
@@ -748,14 +758,19 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         woken = false;
         let processed = 0;
         try {
-          processed = await deps.drain(db, {
+          const drained = await deps.drain(db, {
             batchSize: opts?.batchSize,
             signal: stopping.signal,
             leaseSeconds: opts?.leaseSeconds,
             services: opts?.services,
             jobs: opts?.jobs,
           });
-          if (isRunning()) {
+          if (isFailure(drained)) {
+            debugWorker.debug('drain refused: {failed}', { failed: errorText(drained) });
+          } else {
+            processed = drained;
+          }
+          if (isRunning() && !isFailure(drained)) {
             const caught = await deps.catchUp(db);
             processed += caught.scanned;
           }

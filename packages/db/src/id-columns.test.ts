@@ -48,6 +48,12 @@ const injectedRows = pgTable('injected_rows', {
 });
 const legacyId = createIdFactory('legacy:/');
 const legacyRows = pgTable('legacy_rows', { id: legacyId.primaryColumn() });
+const refundId = defineId('id_', { kind: 'billing.refund' });
+const paymentId = defineId('id_', { kind: 'billing.payment' });
+const nominalRows = pgTable('nominal_rows', {
+  id: idColumns(refundId).primaryColumn(),
+  paymentId: idColumns(paymentId).reference('payment_id'),
+});
 
 let client: PGlite;
 let db: Awaited<ReturnType<typeof initDbRuntimeLocal<typeof relations>>>['db'];
@@ -61,6 +67,7 @@ beforeAll(async () => {
   await db.execute(sql`create table generated_rows (id varchar(256) primary key, required_id varchar(256) not null)`);
   await db.execute(sql`create table injected_rows (id varchar(256) primary key, required_id varchar(256) not null)`);
   await db.execute(sql`create table legacy_rows (id varchar(256) primary key)`);
+  await db.execute(sql`create table nominal_rows (id varchar(256) primary key, payment_id varchar(256) not null)`);
 });
 
 afterAll(async () => {
@@ -68,6 +75,22 @@ afterAll(async () => {
 });
 
 describe('idColumns', () => {
+  it('keeps same-format domain brands through generated defaults, storage and validated JSON', async () => {
+    const payment = paymentId.schema.parse('id_existing_payment');
+    const [row] = await db.insert(nominalRows).values({ paymentId: payment }).returning();
+    if (!row) throw new Error('Expected inserted row');
+    expectTypeOf(row.id).toEqualTypeOf<IdOf<typeof refundId>>();
+    expectTypeOf(row.paymentId).toEqualTypeOf<IdOf<typeof paymentId>>();
+    expect(row.id).toMatch(/^id_[a-z][a-z0-9]{23}$/);
+    expect(row.paymentId).toBe('id_existing_payment');
+    const encoded = JSON.stringify(row);
+    const wire: unknown = JSON.parse(encoded);
+    const schema = createSelectSchema(nominalRows, { id: () => refundId.schema, paymentId: () => paymentId.schema });
+    const decoded = schema.parse(wire);
+    expectTypeOf(decoded).toEqualTypeOf<typeof row>();
+    expect(decoded).toEqual(row);
+  });
+
   it('types every column from the declaration: no `$type<…>` written by hand', () => {
     type Row = typeof stories.$inferSelect;
     expectTypeOf<Row['id']>().toEqualTypeOf<StoryId>();
