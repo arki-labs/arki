@@ -59,21 +59,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/async": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/journal": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
+    "@arki/schedule": "workspace:*",
     "@arki/schema": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "@electric-sql/pglite": "catalog:",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "bullmq": "catalog:queue",
     "drizzle-orm": "catalog:drizzle",
     "hono": "catalog:backend",
     "ioredis": "catalog:queue",
     "pg-boss": "catalog:queue",
     "superjson": "catalog:utilities",
+    "uuid": "catalog:utilities",
     "zod": "catalog:"
   },
   "devDependencies": {

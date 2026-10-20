@@ -1,3 +1,4 @@
+import type { CommandFailure } from './errors.js';
 /**
  * A rule that says no returns a failure (`@arki/failure`) instead of throwing.
  * These tests pin why that is safe: the command's transaction rolls
@@ -12,10 +13,11 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import type { Failure, SchemaFailure } from '@arki/failure';
-import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { TransactionDefect } from '@arki/db/transaction';
+import { defineFailure, findCause, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { AccountId, OrderId } from './test-support.js';
-import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, isJournalError } from './errors.js';
+import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, isJournalError, JournalError } from './errors.js';
 import {
   accountId,
   customerOrderCounts,
@@ -144,10 +146,10 @@ describe('a failure the handler returns', () => {
       { orderId: orderId(++next), accountId: accountId(++next), nick: 'x' },
       meta,
     );
-    expectTypeOf(result).toEqualTypeOf<{ nick: string } | CommandConflict | SchemaFailure>();
+    expectTypeOf(result).toEqualTypeOf<{ nick: string } | CommandFailure>();
     const _pay = () => journal.run(db, payOrder, { orderId: orderId(1), accountId: accountId(1) }, meta);
     expectTypeOf<Awaited<ReturnType<typeof _pay>>>().toEqualTypeOf<
-      { version: number } | CommandNotFound | CommandConflict | SchemaFailure
+      { version: number } | CommandNotFound | CommandFailure
     >();
   });
 
@@ -272,7 +274,7 @@ describe('a failure authorize returns', () => {
 
     const refused = await journal.run(db, approve, { orderId: id }, { actorId: 'usr_intruder' });
 
-    expectTypeOf(refused).toEqualTypeOf<{ version: number } | CommandForbidden | SchemaFailure>();
+    expectTypeOf(refused).toEqualTypeOf<{ version: number } | CommandForbidden | CommandFailure>();
     expect(refused).toMatchObject({ code: 'journal.forbidden', status: 403, message: 'Not allowed to approve' });
     expect(runs, 'the handler never ran').toBe(before);
     expect(await typesOf(id)).toEqual(['OrderPlaced']);
@@ -348,13 +350,11 @@ describe('a failure a child command returns', () => {
   });
 });
 
-/** The `JournalError` a call rejects with. */
+/** Runtime invariants remain the original private cause of the typed transaction defect. */
 async function misuseOf(call: Promise<unknown>) {
-  const error = await call.then(
-    () => 'resolved',
-    (error: unknown) => error,
-  );
-  if (!isJournalError(error)) throw new Error(`expected a JournalError, got ${String(error)}`);
+  const result = await call;
+  const error = findCause(result, JournalError);
+  if (error === undefined) throw new Error(`expected a JournalError cause, got ${String(result)}`);
   return error;
 }
 
@@ -815,7 +815,7 @@ describe('a refusal the command accepts', () => {
     expect(error.message).toContain('the child command "placeBackorder" returned the failure "journal.conflict"');
     expect(await rowsOf(input.orderId)).toEqual([]);
 
-    await expect(journal.run(db, throwsInFallback, input, meta)).rejects.toThrow('the backorder service is down');
+    await expect(journal.run(db, throwsInFallback, input, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: 'the backorder service is down' } });
     expect(await rowsOf(input.orderId), 'accept never hides a throw').toEqual([]);
   });
 
@@ -983,7 +983,7 @@ describe('a refusal the effect accepts', () => {
     await effectClient.close();
   });
 
-  it('an accepted refusal ends the job done; an unaccepted one dies after one try; misuse throws and is retried', async () => {
+  it('an accepted refusal ends done; an unaccepted refusal or callback misuse dies after one try', async () => {
     const id = orderId(++next);
     orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
     orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
@@ -993,13 +993,13 @@ describe('a refusal the effect accepts', () => {
     const { jobs: accepted } = await relays.jobs(effectDb, { effect: 'relay-accepts' });
     expect(accepted, 'the accepting job is done').toEqual([]);
     const { jobs: dead } = await relays.jobs(effectDb, { status: 'dead' });
-    expect(dead.map(job => job.effect)).toEqual(['relay-forgets']);
+    expect(dead.map(job => job.effect).toSorted()).toEqual(['relay-forgets', 'relay-misuses']);
     expect(dead[0]?.attempts).toBe(1);
-    const { jobs: retrying } = await relays.jobs(effectDb, { effect: 'relay-misuses' });
-    expect(retrying, 'a thrown error goes to the retry policy, not straight to dead').toMatchObject([
-      { attempts: 1, state: 'delayed' },
+    const { jobs: retrying } = await relays.jobs(effectDb, { effect: 'relay-misuses', status: 'dead' });
+    expect(retrying, 'runtime callback misuse is a fatal defect by default').toMatchObject([
+      { attempts: 1, state: 'dead' },
     ]);
-    expect(retrying[0]?.lastError).toContain('INVALID_ACCEPT');
+    expect(retrying[0]?.lastError).toContain(UnexpectedDefect.code);
     expect(
       await effectDb
         .select()

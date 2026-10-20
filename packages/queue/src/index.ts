@@ -148,3 +148,13 @@ export type { Backoff } from '@arki/resilience';
 // Durable backend for @arki/schedule, for processes that do not boot through Dot
 export { createDurableScheduler } from './durable-scheduler.ts';
 export type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
+
+// Value-based execution for custom delivery adapters; handler failures retain their exact union.
+export { executeJob, JOB_SYSTEM_FAILURES } from './job-outcome.ts';
+export type { JobExecutionFailure, JobSystemFailure } from './job-outcome.ts';
+
+export { QueueUnavailable, QueueAcceptanceUnknown, JOB_TRIGGER_FAILURES } from './trigger.ts';
+export type { JobTriggerFailure, JobTriggerResult } from './trigger.ts';
+
+export { FLOW_ENQUEUE_FAILURES } from './flow-jobs.ts';
+export type { FlowEnqueueFailure } from './flow-jobs.ts';

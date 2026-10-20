@@ -142,7 +142,7 @@ describe('schedules(core, [{ lock }])', () => {
     const started = await orThrow(app.start());
     await expect(started.services.scheduler.trigger('cluster-assign')).resolves.toMatchObject({
       status: 'lock-failed',
-      cause: expect.objectContaining({ message: 'connection lost' }),
+      cause: expect.objectContaining({ code: 'failure.unexpected_defect', cause: new Error('connection lost') }),
     });
     expect(calls()).toBe(0);
     await orThrow(started.dispose());

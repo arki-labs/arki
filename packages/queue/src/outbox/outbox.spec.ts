@@ -10,7 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ScheduledJob } from '@arki/journal';
 import { z } from '@arki/contracts';
-import { InvalidInput, orThrow } from '@arki/failure';
+import { defineFailure, InvalidInput, orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
@@ -54,19 +54,22 @@ const welcome = q.job
     return { sent: true };
   });
 
+const RetryableJobFailure = defineFailure('queue.test_flaky', { status: 503 });
+
 const wrapped = q.job
   .use(outer)
   .use(inner)
   .name('wrapped')
   .input(z.object({ n: z.number() }))
-  .options({ retry: backoff.constant(0).upTo(1), retention: { dead: '30d' } })
+  .options({ retry: backoff.constant(0).upTo(1).while(RetryableJobFailure), retention: { dead: '30d' } })
   .handler(async (data, ctx) => {
     order.push('handler');
     handled.push({ name: 'wrapped', data, jobId: ctx.job.id });
     if (failures > 0) {
       failures -= 1;
-      throw new Error('flaky');
+      return RetryableJobFailure();
     }
+    return;
   });
 
 const shout = q.job
@@ -287,11 +290,12 @@ describe('outboxRunner on the journal worker', () => {
     failures = 1;
     orThrow(await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 7 })));
     expect(await journal.drain(db, { jobs: runner })).toBe(2);
-    // The first try throws through the chain, so the outer middleware's `after` runs only on the second.
+    // Returned refusals settle the onion on every delivery; the selected refusal is retried once.
     expect(order).toEqual([
       'outer:before',
       'inner:ctx',
       'handler',
+      'outer:after',
       'outer:before',
       'inner:ctx',
       'handler',

@@ -3,6 +3,7 @@
  * connection and cannot show a second writer waiting on the row lock.
  * Needs Docker: starts a `postgres:16` container through testcontainers.
  */
+import { createServer } from 'node:net';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
@@ -11,10 +12,20 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { listenOnPool } from '@arki/db/pg';
-import { orThrow } from '@arki/failure';
+import {
+  TransactionCommitUncertain,
+  TransactionDefect,
+  TransactionRejected,
+  TransactionUnavailable,
+} from '@arki/db/transaction';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { DbHandle } from './types.js';
+import { CommandConflict } from './errors.js';
+import { backoff } from './index.js';
 import {
   customerOrderCounts,
   j,
@@ -40,7 +51,9 @@ const journal = j.compose({});
 let onPaid: (jobId: string) => Promise<void> | void = () => {
   /* the default handler does nothing */
 };
-const mail = j.effect('order-mail', order, { OrderPaid: (_e, ctx) => onPaid(ctx.jobId) });
+const mail = j
+  .effect('order-mail', order, { OrderPaid: (_e, ctx) => onPaid(ctx.jobId) })
+  .withSchedule({ retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason)) });
 const withJobs = j.compose({ effects: [mail] });
 
 const placeAndPay = async () => {
@@ -355,13 +368,13 @@ describe('two workers on real Postgres', () => {
     // Otherwise a retry that B promised would vanish.
     const { afterB, afterA } = await staleAck('ok', 'fail');
     expect(afterB).toMatchObject({ attempts: 2, leaseToken: null });
-    expect(afterB?.lastError).toContain('B failed');
+    expect(afterB?.lastError).toContain(UnexpectedDefect.code);
     expect(afterA).toEqual(afterB);
   }, 30_000);
 
   it('a stale failure cannot overwrite the error and retry time another worker recorded', async () => {
     const { afterB, afterA } = await staleAck('fail', 'fail');
-    expect(afterB?.lastError).toContain('B failed');
+    expect(afterB?.lastError).toContain(UnexpectedDefect.code);
     expect(afterA).toEqual(afterB);
   }, 30_000);
 
@@ -459,7 +472,7 @@ describe('database clock on real Postgres', () => {
     }
     const after = await jobRow(job.id);
     // The first retry backs off about one second. An hour ahead means the worker clock leaked in.
-    expect(after?.lastError).toContain('smtp down');
+    expect(after?.lastError).toContain(UnexpectedDefect.code);
     expect(after?.availableAt.getTime()).toBeLessThan(Date.now() + 60_000);
     onPaid = quiet;
     await dbA
@@ -469,4 +482,131 @@ describe('database clock on real Postgres', () => {
     expect(await withJobs.drain(dbA)).toBe(1);
     expect(await jobRow(job.id)).toBeNull();
   }, 30_000);
+});
+
+/** A foreign driver wrapper with the real root's query methods and an injected transaction response. */
+const transactionSource = (transaction: DbHandle['transaction']): DbHandle => ({
+  select: dbA.select.bind(dbA),
+  insert: dbA.insert.bind(dbA),
+  update: dbA.update.bind(dbA),
+  // eslint-disable-next-line drizzle/enforce-delete-with-where -- Forwarding a builder performs no delete; its caller adds the predicate.
+  delete: dbA.delete.bind(dbA),
+  execute: dbA.execute.bind(dbA),
+  transaction,
+});
+
+let ownedRuns = 0;
+const ownedPlace = j.command(
+  'transaction.owned.place',
+  z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+  async (input, { write }) => {
+    ownedRuns += 1;
+    const written = await write(order, input.id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]);
+    if (CommandConflict.is(written)) return written;
+    const { row } = orThrow(written);
+    return { version: row?.version ?? 0 };
+  },
+);
+
+describe('direct Journal transaction ownership on PostgreSQL', () => {
+  it('commits success and replays a receipt after an actual COMMIT whose acknowledgment was lost', async () => {
+    const id = orderId(++next);
+    const before = ownedRuns;
+    const key = `owned:${id}`;
+    const lost = Object.assign(new Error('lost commit response'), { code: 'ECONNRESET' });
+    const source = transactionSource(async work => {
+      await dbA.transaction(work);
+      throw lost;
+    });
+    const result = await journal.run(source, ownedPlace, { id }, meta, { idempotencyKey: key });
+    expect(TransactionCommitUncertain.is(result)).toBe(true);
+    if (TransactionCommitUncertain.is(result)) expect(result.cause).toBe(lost);
+    expect(ownedRuns).toBe(before + 1);
+    const [committed] = await dbA.select().from(orders).where(eq(orders.id, id));
+    expect(committed).toMatchObject({ id, version: 1 });
+    expect(await journal.run(dbA, ownedPlace, { id }, meta, { idempotencyKey: key })).toEqual({ version: 1 });
+    expect(ownedRuns).toBe(before + 1);
+    const events = await dbA.select().from(tables.events).where(eq(tables.events.entityId, id));
+    expect(events).toHaveLength(1);
+  });
+
+  it('returns the original refusal only after PostgreSQL rolls back every write and receipt', async () => {
+    const id = orderId(++next);
+    const refusal = CommandConflict({ detail: 'refuse after the write' });
+    const refusing = j.command('transaction.owned.refuse', z.object({}), async (_input, { write }) => {
+      orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
+      return refusal;
+    });
+    const result = await journal.run(dbA, refusing, {}, meta, { idempotencyKey: `refused:${id}` });
+    expect(result).toBe(refusal);
+    expect(await dbA.select().from(orders).where(eq(orders.id, id))).toEqual([]);
+    expect(await dbA.select().from(tables.events).where(eq(tables.events.entityId, id))).toEqual([]);
+    expect(
+      await dbA
+        .select()
+        .from(tables.receipts)
+        .where(eq(tables.receipts.key, `refused:${id}`)),
+    ).toEqual([]);
+  });
+
+  it('never reports the refusal as a confirmed rollback when the driver rejects rollback', async () => {
+    const id = orderId(++next);
+    const refusal = CommandConflict({ detail: 'roll back' });
+    const broken = new Error('rollback response failed');
+    const source = transactionSource(work =>
+      dbA.transaction(async tx => {
+        try {
+          return await work(tx);
+        } catch {
+          throw broken;
+        }
+      }),
+    );
+    const refusing = j.command('transaction.owned.rollback', z.object({}), async (_input, { write }) => {
+      orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
+      return refusal;
+    });
+    const result = await journal.run(source, refusing, {}, meta);
+    expect(TransactionDefect.is(result)).toBe(true);
+    if (!TransactionDefect.is(result) || !(result.cause instanceof AggregateError))
+      throw new Error('expected private rollback evidence');
+    expect(result.cause.errors).toEqual([broken, refusal]);
+    expect(result.cause.errors[1]).toBe(refusal);
+    expect(await dbA.select().from(orders).where(eq(orders.id, id))).toEqual([]);
+  });
+
+  it('classifies a PostgreSQL statement rejection instead of calling it a callback defect', async () => {
+    const id = orderId(++next);
+    orThrow(await journal.run(dbA, ownedPlace, { id }, meta));
+    const duplicate = j.command('transaction.owned.duplicate', z.object({}), (_input, { tx }) =>
+      tx.insert(orders).values({ id, customerId: 'duplicate', total: 1, status: 'placed' }),
+    );
+    const result = await journal.run(dbA, duplicate, {}, meta);
+    expect(TransactionRejected.is(result)).toBe(true);
+    if (TransactionRejected.is(result)) expect(result.data.sqlState).toBe('23505');
+  });
+
+  it('classifies a real unavailable root connection before running the command, without retry', async () => {
+    const listener = createServer();
+    await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+    const address = listener.address();
+    if (typeof address !== 'object' || address === null) throw new Error('expected a local socket');
+    const port = address.port;
+    await new Promise<void>((resolve, reject) =>
+      listener.close(error => (error === undefined ? resolve() : reject(error))),
+    );
+    const unavailablePool = new pg.Pool({ host: '127.0.0.1', port, connectionTimeoutMillis: 1000 });
+    let calls = 0;
+    const never = j.command('transaction.owned.unavailable', z.object({}), () => {
+      calls += 1;
+      return 'unexpected';
+    });
+    try {
+      const result = await journal.run(drizzle({ client: unavailablePool }), never, {}, meta);
+      expect(TransactionUnavailable.is(result)).toBe(true);
+      expect(calls).toBe(0);
+    } finally {
+      await unavailablePool.end();
+    }
+  });
 });

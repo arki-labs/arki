@@ -1,7 +1,7 @@
+import type { CommandFailure } from '../errors.js';
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput } from '@arki/schema';
 
 import type { CommandConflict } from '../errors.js';
@@ -53,7 +53,7 @@ describe('def.signal, as types', () => {
 
   it('keeps the outcome type', () => {
     const _granted = approval.signal('approval.granted');
-    expectTypeOf<Awaited<ReturnType<typeof _granted.handler>>>().toEqualTypeOf<SignalOutcome | SchemaFailure>();
+    expectTypeOf<Awaited<ReturnType<typeof _granted.handler>>>().toEqualTypeOf<SignalOutcome | CommandFailure>();
   });
 });
 
@@ -68,7 +68,7 @@ describe('def.start, as types', () => {
       readonly id?: string;
     }>();
     expectTypeOf<Awaited<ReturnType<typeof refund.start.handler>>>().toEqualTypeOf<
-      { readonly runId: string } | CommandConflict | SchemaFailure
+      { readonly runId: string } | CommandConflict | CommandFailure
     >();
   });
 
@@ -90,7 +90,7 @@ describe('def.cancel, as types', () => {
   });
 
   it('returns the state the run is in, or a refusal', () => {
-    expectTypeOf<Awaited<ReturnType<typeof refund.cancel.handler>>>().toEqualTypeOf<CancelOutcome | SchemaFailure>();
+    expectTypeOf<Awaited<ReturnType<typeof refund.cancel.handler>>>().toEqualTypeOf<CancelOutcome | CommandFailure>();
   });
 
   it('gives an undo the result of its own step, not of another', () => {

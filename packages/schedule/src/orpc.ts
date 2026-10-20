@@ -232,6 +232,10 @@ function reply(
       if (UnexpectedDefect.is(outcome.value)) return policy.failed(name, outcome.value);
       return respond ? respond(outcome.value) : ok(outcome.value);
     }
+    case 'refused': {
+      if (UnexpectedDefect.is(outcome.failure)) return policy.failed(name, outcome.failure);
+      return respond ? respond(outcome.failure) : policy.failed(name, outcome.failure);
+    }
     case 'skipped-overlap':
     case 'skipped-lock': {
       return policy.skipped(name);

@@ -121,7 +121,7 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 - Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app it is a service of the feature that lists the effect, and the feature declares it in `needs`. A missing service is a compile error. `j.compose` and the feature's boot in a Dot app also throw, and the message names the effect and the need.
 - A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws when the effect is defined.
 - `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` is required, and the library never picks an actor. It works the same in a plain app and in a Dot app.
-- If the command throws, the effect fails: nothing of the command is committed and the job is retried. If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
+- If the command returns a callback defect, nothing of the command is committed and the job dies by default. An explicit retry predicate may select a known failure. If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
 - Where it is registered: under `effects` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app. Effect names are unique per journal.
 - Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app, `.serve(journalWorker())` does both.
@@ -166,7 +166,7 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - `journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`. You still give `meta`: the library never picks an actor. `meta` is parsed on every call, as in `journal.run`, so a default in the meta schema is new for each command.
 - `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
 - A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
-- A rule that rejects the request returns a failure: `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, or the app's own. The handler, `authorize` and an `events` function can return one. The command rolls back exactly as for a throw, and the caller gets the same failure, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler (`if (isFailure(x)) return x;`). Going on to a success throws `IGNORED_FAILURE` and nothing commits, unless the handler handled the refusal on purpose and called `accept(x)` first. See [Rejected rules](#rejected-rules).
+- A rule that rejects the request returns a failure: `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, or the app's own. The handler, `authorize` and an `events` function can return one. The command rolls back exactly as for a throw, and the caller gets the same failure, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler (`if (isFailure(x)) return x;`). Going on to a success returns `TransactionDefect` with an `IGNORED_FAILURE` cause and nothing commits, unless the handler handled the refusal on purpose and called `accept(x)` first. See [Rejected rules](#rejected-rules).
 - A permission check goes in `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
 - An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command, and a returned failure answers as an error. A procedure with an output schema, or a contract-first one, uses `orThrowRpc(context.run(cmd, input), errors)` with `errorMap(CommandNotFound, ...)` in the contract. Any other host reads the failure's `status`, or matches it with `CommandNotFound.is(result)` and the like.
 - `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
@@ -280,10 +280,12 @@ Rules:
 
 ## Errors
 
+Command runners infer domain refusals plus `CommandFailure`, derived from `COMMAND_FAILURES`. See the [upgrade guide](../README.md#upgrading-command-and-durable-job-outcomes) for receipt, callback and durable-worker migrations. An unexpected callback defect is fatal by default; retry predicates receive the exact failure value.
+
 Two kinds of error have a code.
 
 - A `JournalError` is the library's own failure. It is about one entity's row or history. It has `code`, `kind` and `entityId`. Its codes are in the table below.
-- A rule of the app that rejects a request returns a failure; it is not a `JournalError`, and the library never makes one on its own. The journal's four are in [Rejected rules](#rejected-rules).
+- A rule of the app that rejects a request returns a failure. Receipt key mismatches also return `CommandConflict`; unexpected command callback exceptions return `TransactionDefect` with a private cause; effect/workflow bodies return `UnexpectedDefect`. Stranded workflow jobs persist `WorkflowStranded`. The journal's four are in [Rejected rules](#rejected-rules).
 
 This is the only copy of this table. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
 

@@ -134,7 +134,7 @@ describe('read-only events', () => {
     for (const e of replayed.events) expectFrozen(e);
   });
 
-  it('an effect receives a frozen event; one that mutates it fails and the job is retried like any handler failure', async () => {
+  it('an effect receives a frozen event; one that mutates it returns a fatal defect', async () => {
     const journal = j.compose({ effects: [watcher] });
     const id = orderId(++next);
     const written = orThrow(await write(journal, tagged, id, ['a']));
@@ -152,7 +152,7 @@ describe('read-only events', () => {
     }
     expect(frozenFlags).toEqual([true, true, true, true]);
     const [after] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, job.id));
-    expect(after).toMatchObject({ attempts: 1, deadAt: null });
-    expect(after?.lastError).toContain('TypeError');
+    expect(after).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
+    expect(after?.lastError).toContain('failure.unexpected_defect');
   });
 });

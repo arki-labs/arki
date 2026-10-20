@@ -1,3 +1,4 @@
+import type { Failure } from '@arki/failure';
 /**
  * Job builder implementation
  * Provides chainable API for creating jobs with middleware
@@ -5,20 +6,24 @@
 
 import type { StandardSchemaV1 } from '@arki/schema';
 
+import type { JobTriggerResult } from './trigger.ts';
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { InternalJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
-import { debugBuilder } from './debug.ts';
+import { debugBuilder, observeQueue } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+import { jobRetryOptions } from './job-options.ts';
 import { defaultJobRetry, jobAttempts } from './job-retry.ts';
+import { jobTraceOptions } from './job-trace.ts';
+import { QueueUnavailable, triggerValidated } from './trigger.ts';
 
 /**
  * Internal state for job builder
  */
-type JobBuilderState<TInput> = {
+type JobBuilderState<TInput, TFailure extends Failure> = {
   config: QueueConfig;
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
+  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta, TFailure>[];
   name?: string;
   inputSchema?: StandardSchemaV1<unknown, TInput>;
   options?: JobOptions;
@@ -28,32 +33,45 @@ type JobBuilderState<TInput> = {
  * Create a job builder
  * @internal
  */
-export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>(params: {
+export function createJobBuilder<
+  TContext,
+  TContextOut,
+  TMeta extends QueueMeta,
+  TFailure extends Failure = never,
+>(params: {
   config: QueueConfig;
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
-}): JobBuilderDef<TContext, TContextOut, TMeta> {
-  debugBuilder.debug('Creating job builder with {middlewaresLength} middleware', {
-    middlewaresLength: params.middlewares.length,
-  });
+  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta, TFailure>[];
+}): JobBuilderDef<TContext, TContextOut, TMeta, TFailure> {
+  observeQueue(() =>
+    debugBuilder.debug('Creating job builder with {middlewaresLength} middleware', {
+      middlewaresLength: params.middlewares.length,
+    }),
+  );
 
   return {
-    use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
-      debugBuilder.debug('Adding middleware to job builder (total: {total})', { total: params.middlewares.length + 1 });
+    use<TContextOut2, TNextFailure extends Failure = never>(
+      middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure>,
+    ) {
+      observeQueue(() =>
+        debugBuilder.debug('Adding middleware to job builder (total: {total})', {
+          total: params.middlewares.length + 1,
+        }),
+      );
 
       // Type safety: middleware transforms TContextOut -> TContextOut2
       // Runtime: store as unknown array for execution
-      return createJobBuilder<TContext, TContextOut2, TMeta>({
+      return createJobBuilder<TContext, TContextOut2, TMeta, TFailure | TNextFailure>({
         config: params.config,
-        middlewares: [...params.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta>],
+        middlewares: [...params.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta, TNextFailure>],
       });
     },
 
     name(name: string) {
-      debugBuilder.debug('Setting job name: {name}', { name });
+      observeQueue(() => debugBuilder.debug('Setting job name: {name}', { name }));
 
       // One runtime object serves both typestates: the JobBuilderNeedsInput
       // type hides `.handler()` until `.input()` runs; the throw below backs it up.
-      return createJobBuilderChain<TContext, TContextOut, TMeta, never, never>({
+      return createJobBuilderChain<TContext, TContextOut, TMeta, never, never, TFailure>({
         config: params.config,
         middlewares: params.middlewares,
         name,
@@ -66,14 +84,19 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
  * Create a job builder chain (after name is set)
  * @internal
  */
-function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInput, TOutput>(
-  state: JobBuilderState<TInput>,
-): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> {
+function createJobBuilderChain<
+  TContext,
+  TContextOut,
+  TMeta extends QueueMeta,
+  TInput,
+  TOutput,
+  TFailure extends Failure,
+>(state: JobBuilderState<TInput, TFailure>): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput, TFailure> {
   return {
     input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>) {
-      debugBuilder.debug('[{value1}] Setting input schema', { value1: state.name ?? 'unnamed' });
+      observeQueue(() => debugBuilder.debug('[{value1}] Setting input schema', { value1: state.name ?? 'unnamed' }));
 
-      return createJobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
+      return createJobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput, TFailure>({
         ...state,
         inputSchema: schema,
         options: undefined, // Reset options when input type changes
@@ -81,16 +104,18 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
     },
 
     options(options: JobOptions) {
-      debugBuilder.debug(
-        '[{value1}] Setting job options (retry attempts: {attempts}, maxParallelism: {maxParallelism})',
-        {
-          value1: state.name ?? 'unnamed',
-          attempts: jobAttempts(options.retry ?? defaultJobRetry),
-          maxParallelism: options.maxParallelism ?? 5,
-        },
+      observeQueue(() =>
+        debugBuilder.debug(
+          '[{value1}] Setting job options (retry attempts: {attempts}, maxParallelism: {maxParallelism})',
+          {
+            value1: state.name ?? 'unnamed',
+            attempts: jobAttempts(options.retry ?? defaultJobRetry),
+            maxParallelism: options.maxParallelism ?? 5,
+          },
+        ),
       );
 
-      return createJobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput>({
+      return createJobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput, TFailure>({
         ...state,
         options: options,
       });
@@ -98,7 +123,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
 
     handler<TResult>(
       handler: (data: TInput, ctx: TContextOut) => Promise<TResult>,
-    ): JobDefinition<TInput, TResult, TContextOut> {
+    ): JobDefinition<TInput, TResult | TFailure, TContextOut> {
       if (!state.name) {
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.missingName,
@@ -115,14 +140,16 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
         });
       }
 
-      debugBuilder.debug('[{stateName}] Creating job definition with {middlewaresLength} middleware', {
-        stateName: state.name,
-        middlewaresLength: state.middlewares.length,
-      });
+      observeQueue(() =>
+        debugBuilder.debug('[{stateName}] Creating job definition with {middlewaresLength} middleware', {
+          stateName: state.name,
+          middlewaresLength: state.middlewares.length,
+        }),
+      );
 
       const jobName = state.name;
 
-      const definition: JobDefinition<TInput, TResult, TContextOut> = {
+      const definition: JobDefinition<TInput, TResult | TFailure, TContextOut> = {
         _type: 'job',
         _internal: {
           name: jobName,
@@ -149,27 +176,32 @@ export async function triggerJob<TInput, TOutput, TDeps>(
   internal: InternalJobDefinition<TInput, TOutput, TDeps>,
   data: TInput,
   options?: TriggerOptions,
-): Promise<string> {
+): Promise<JobTriggerResult> {
+  if (internal._trigger !== undefined) return internal._trigger(data, options);
   const jobName = internal.name;
   const queue = internal._queue;
   if (!queue) {
-    throw new Error(
-      `Job "${jobName}" is not registered with a queue. ` + `Call queue.register() before calling trigger().`,
-    );
+    return QueueUnavailable();
   }
 
-  debugBuilder.debug('[{jobName}] Triggering job with options: {options}', () => ({
-    jobName,
-    options: JSON.stringify(options),
-  }));
+  observeQueue(() =>
+    debugBuilder.debug('[{jobName}] Triggering job with options: {options}', () => ({
+      jobName,
+      options: JSON.stringify(options),
+    })),
+  );
 
-  const job = await queue.add(jobName, data, {
-    priority: options?.priority,
-    delay: options?.delay,
-    jobId: options?.jobId,
-    ...options?.bullmqOptions,
+  return triggerValidated(internal.inputSchema, data, async () => {
+    const job = await queue.add(jobName, data, {
+      ...jobTraceOptions(),
+      priority: options?.priority,
+      delay: options?.delay,
+      jobId: options?.jobId ?? crypto.randomUUID(),
+      ...options?.bullmqOptions,
+      ...jobRetryOptions(internal.options),
+    });
+
+    observeQueue(() => debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id }));
+    return job.id ?? '';
   });
-
-  debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id });
-  return job.id ?? '';
 }

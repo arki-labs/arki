@@ -3,6 +3,8 @@ export type FailedJobRecord = {
   id: string;
   /** The job (queue) name. */
   name: string;
+  /** External stable key, when it differs from the native provider identity. */
+  key?: string;
   attempts: number;
   /** The raw last error message. The module redacts it before it leaves the app. */
   error: string | null;

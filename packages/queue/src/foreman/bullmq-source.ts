@@ -4,6 +4,7 @@ import type { Job, Queue } from 'bullmq';
 import { getLogger } from '@arki/log';
 
 import type { FailedJobRecord, FailedJobSource } from './source.ts';
+import { observeQueue } from '../debug.ts';
 
 const log = getLogger('arki:queue');
 
@@ -21,7 +22,9 @@ export type BullMQFailedJobSourceOptions = {
  */
 function revisionOf(job: Job): string {
   return createHash('sha256')
-    .update(`${job.id ?? ''}:${job.attemptsMade}:${job.attemptsStarted}:${job.finishedOn ?? ''}`)
+    .update(
+      `${job.queueQualifiedName}:${job.id ?? ''}:${job.attemptsMade}:${job.attemptsStarted}:${job.finishedOn ?? ''}`,
+    )
     .digest('hex')
     .slice(0, 16);
 }
@@ -91,11 +94,13 @@ export function bullmqFailedJobSource(options: BullMQFailedJobSourceOptions): Fa
         return true;
       } catch (error) {
         // BullMQ throws when the job is no longer in the failed set: another retry won.
-        log.debug('retry of {jobId} on {queue} was not applied: {error}', {
-          jobId: id,
-          queue: queue.name,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        observeQueue(() =>
+          log.debug('retry of {jobId} on {queue} was not applied: {error}', {
+            jobId: id,
+            queue: queue.name,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
         return false;
       }
     },

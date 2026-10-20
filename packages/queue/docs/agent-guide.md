@@ -79,12 +79,22 @@ Here `scheduling` is `outboxPlugin({ tables })`. A feature lists its jobs with `
 
 Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 
-| Code | Name | Cause |
-| --- | --- | --- |
-| `OUTBOX_E001` | `notInTransaction` | `runAfter` got the root database. Pass `tx`. |
-| `OUTBOX_E002` | `badArgs` | The args do not pass the job's input schema. |
-| `OUTBOX_E003` | `notJson` | The args are not plain JSON, or are over `maxArgsBytes`. |
-| `OUTBOX_E004` | `badTiming` | Bad `delayMs`, invalid `Date`, or a priority outside `QUEUE_PRIORITIES`. |
-| `OUTBOX_E005` | `badStoredArgs` | Stored args no longer pass the schema. The job goes dead at once. |
-| `OUTBOX_E006` | `unknownJob` | A job name is not in the registry. |
-| `OUTBOX_E007` | `duplicateName` | Two jobs in the registry share a name. |
+| Code          | Name               | Cause                                                                    |
+| ------------- | ------------------ | ------------------------------------------------------------------------ |
+| `OUTBOX_E001` | `notInTransaction` | `runAfter` got the root database. Pass `tx`.                             |
+| `OUTBOX_E002` | `badArgs`          | The args do not pass the job's input schema.                             |
+| `OUTBOX_E003` | `notJson`          | The args are not plain JSON, or are over `maxArgsBytes`.                 |
+| `OUTBOX_E004` | `badTiming`        | Bad `delayMs`, invalid `Date`, or a priority outside `QUEUE_PRIORITIES`. |
+| `OUTBOX_E005` | `badStoredArgs`    | Stored args no longer pass the schema. The job goes dead at once.        |
+| `OUTBOX_E006` | `unknownJob`       | A job name is not in the registry.                                       |
+| `OUTBOX_E007` | `duplicateName`    | Two jobs in the registry share a name.                                   |
+
+## Returned outcomes and migration
+
+`executeJob` preserves the exact handler return union plus canonical input/cancel/deadline/defect failures. BullMQ and pg-boss both persist refusals as failed deliveries. Default retry never repeats a returned refusal or defect; use `.options({ retry: backoff.constant(100).upTo(2).while(TransientFailure) })` for selected definitions. Outbox passes returned outcomes directly to Journal before acknowledgement.
+
+`trigger` and job `enqueue` return an id or `JobTriggerFailure`; export `JOB_TRIGGER_FAILURES` into the calling transport's error map. A lost enqueue acknowledgement is `QueueAcceptanceUnknown`, so inspect the idempotency key before replay. See the README upgrade section before changing runtime-local persisted messages.
+
+Use `timeoutMs` and honor `ctx.signal`. Deadline/cancellation waits for settlement; external effects still require idempotency after a crash. Telemetry configuration belongs in the app; the worker restores producer context and records an execution span by default.
+
+A middleware can return a defined failure directly: `q.middleware(async () => AccessRefused())`. `.use()` adds that exact failure to the job output union; returning it stops before the handler. `next()` retains its `{ ctx, output }` protocol and may be called once. A malformed middleware result becomes `UnexpectedDefect`. Retry keys `attempts`/`backoff` belong to the shared `retry` option and cannot be overridden through native BullMQ options. Flow data mappers declare job input only; mapper defects/refusals fail submission before opening Redis.

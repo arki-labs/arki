@@ -11,6 +11,7 @@ import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { defineFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { QueueBuilder } from './types/builder.ts';
@@ -647,6 +648,8 @@ describe('Middleware Integration', () => {
 // Retry and Error Handling Tests
 // ============================================
 
+const RetryableJobFailure = defineFailure('queue.initialization_transient', { status: 503 });
+
 describe('Retry and Error Handling', () => {
   it('should retry failed jobs according to retry config', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -658,14 +661,14 @@ describe('Retry and Error Handling', () => {
       .name('test-retry-job')
       .input(z.object({ shouldFail: z.boolean() }))
       .options({
-        retry: backoff.constant(100).upTo(2),
+        retry: backoff.constant(100).upTo(2).while(RetryableJobFailure),
       })
       .handler(async data => {
         attemptCount++;
         attemptTimestamps.push(Date.now());
 
         if (data.shouldFail && attemptCount < 3) {
-          throw new Error(`Attempt ${attemptCount} failed`);
+          return RetryableJobFailure();
         }
 
         return { success: true, attempts: attemptCount };
@@ -710,12 +713,12 @@ describe('Retry and Error Handling', () => {
       .name('test-maxdelay-job')
       .input(z.object({ id: z.string() }))
       .options({
-        retry: backoff.exponential({ base: 1000, max: 2000 }).upTo(4),
+        retry: backoff.exponential({ base: 1000, max: 2000 }).upTo(4).while(RetryableJobFailure),
       })
       .handler(async () => {
         attemptCount++;
         if (attemptCount < 5) {
-          throw new Error(`Attempt ${attemptCount} failed`);
+          return RetryableJobFailure();
         }
         return { success: true };
       });

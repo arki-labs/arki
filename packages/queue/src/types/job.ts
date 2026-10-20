@@ -3,11 +3,13 @@
  */
 
 import type { JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
+import type { QueueOptions as PgBossQueueOptions } from 'pg-boss';
 
 import type { EffectRetention } from '@arki/journal';
-import type { StandardSchemaV1 } from '@arki/schema';
 import type { Backoff } from '@arki/resilience';
+import type { StandardSchemaV1 } from '@arki/schema';
 
+import type { JobTriggerResult } from '../trigger.ts';
 import type { JobMiddleware } from './middleware.ts';
 import type { QueueMeta } from './queue.ts';
 
@@ -47,6 +49,8 @@ export type JobContext<TDeps = Record<string, never>> = {
    * The job that runs: a BullMQ `Job`, or the same shape from another lane
    */
   job: JobLike;
+  /** Cooperative cancellation; honor it before starting further side effects. */
+  signal: AbortSignal;
 } & TDeps;
 
 /**
@@ -62,6 +66,10 @@ export type JobHandler<TInput, TOutput, TDeps = Record<string, never>> = (
  */
 export type JobOptions = {
   maxParallelism?: number;
+  /** Abort the handler signal after this duration. Settlement waits for owned work to finish. */
+  timeoutMs?: number;
+  /** Native abandoned-claim supervision for the pg-boss lane. Handler retry uses `retry`. */
+  runtimeLocalOptions?: Pick<PgBossQueueOptions, 'expireInSeconds' | 'heartbeatSeconds'>;
   /**
    * When a failed job runs again, and how long it waits first: a `backoff` from
    * `@arki/resilience` (re-exported here). Default: `backoff.exponential({ base: 1000 }).upTo(2)`,
@@ -73,7 +81,7 @@ export type JobOptions = {
    * Overrides the journal's retention for this job name. The BullMQ lane ignores it.
    */
   retention?: EffectRetention;
-  bullmqOptions?: Partial<JobsOptions>;
+  bullmqOptions?: Partial<Omit<JobsOptions, 'attempts' | 'backoff'>>;
   workerOptions?: Partial<WorkerOptions>;
 };
 
@@ -85,9 +93,11 @@ export type InternalJobDefinition<TInput, TOutput, TDeps = Record<string, never>
   inputSchema: StandardSchemaV1<unknown, TInput>;
   handler: JobHandler<TInput, TOutput, TDeps>;
   options?: JobOptions;
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
+  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta, TOutput>[];
   _queue?: Queue;
   _worker?: Worker;
+  /** Non-BullMQ transport; the queue instance owns enqueueing and its provider validation. */
+  _trigger?: (data: unknown, options?: TriggerOptions) => Promise<JobTriggerResult>;
 };
 
 /**
@@ -101,7 +111,7 @@ export type TriggerOptions = {
   /** Custom job ID (defaults to auto-generated) */
   jobId?: string;
   /** Additional BullMQ job options */
-  bullmqOptions?: Partial<JobsOptions>;
+  bullmqOptions?: Partial<Omit<JobsOptions, 'attempts' | 'backoff'>>;
 };
 
 /**
@@ -116,7 +126,7 @@ export type JobDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
    * @param options - Optional trigger options (priority, delay, etc.)
    * @returns Promise resolving to the job ID
    */
-  trigger: (data: TInput, options?: TriggerOptions) => Promise<string>;
+  trigger: (data: TInput, options?: TriggerOptions) => Promise<JobTriggerResult>;
 };
 
 /**
@@ -132,7 +142,7 @@ export type AnyJobDefinition = {
   _internal: Omit<InternalJobDefinition<unknown, unknown>, 'handler'> & {
     handler: (data: never, ctx: never) => Promise<unknown>;
   };
-  trigger: (data: never, options?: TriggerOptions) => Promise<string>;
+  trigger: (data: never, options?: TriggerOptions) => Promise<JobTriggerResult>;
 };
 
 /**

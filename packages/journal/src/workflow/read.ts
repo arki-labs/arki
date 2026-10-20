@@ -6,19 +6,20 @@
 import { and, asc, count, desc, eq, getTableColumns, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { AsyncSchemaFailure, SchemaFailure } from '@arki/failure';
+import type { AsyncSchemaFailure } from '@arki/failure';
 
 import type { JobOperationInput, PageOptions } from '../outbox.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
+import type { CommandFailure, WorkflowStranded } from '../errors.js';
 import { JournalError } from '../errors.js';
 import { bounded, cursorText, LIST_LIMIT, pageOf, pastCursor } from '../outbox.js';
 import { stepStatusSql } from './machine.js';
 import { codeOf } from './stranded.js';
 
 /** Why a run has no code to go on with: no registered workflow has its name and version, or the registered one has other nodes. */
-export type StrandedReason = 'WORKFLOW_UNKNOWN' | 'WORKFLOW_SHAPE_CHANGED';
+export type StrandedReason = WorkflowStranded['data']['reason'];
 
 type RunRow = JournalTables['workflowRuns']['$inferSelect'];
 type StepRow = JournalTables['workflowSteps']['$inferSelect'];
@@ -127,7 +128,7 @@ export type WorkflowVerbs<Tx> = {
     source: TransactionSource<Tx>,
     args: { readonly runId: string; readonly path: string; readonly phase: 'do' | 'undo' },
     op: JobOperationInput,
-  ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | SchemaFailure>;
+  ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | CommandFailure>;
   /**
    * Gives the result of a failed `do` step of a running run. The result is checked with the step's `output` schema, then
    * the run carries on as if the step had returned it: the worker routes the result (`next` may be a function) and
@@ -137,13 +138,13 @@ export type WorkflowVerbs<Tx> = {
     source: TransactionSource<Tx>,
     args: { readonly runId: string; readonly path: string; readonly result: unknown },
     op: JobOperationInput,
-  ): Promise<{ readonly runId: string } | SchemaFailure>;
+  ): Promise<{ readonly runId: string } | CommandFailure>;
   /** Gives up a failed `undo` of a compensating run. `op.reason` is required. Compensation goes on and the path is `residual`. */
   skipUndo(
     source: TransactionSource<Tx>,
     args: { readonly runId: string; readonly path: string },
     op: JobOperationInput,
-  ): Promise<{ readonly runId: string } | SchemaFailure>;
+  ): Promise<{ readonly runId: string } | CommandFailure>;
   /**
    * Delivers signal `name` to a run, for an operator who holds only JSON: the run's own version checks the payload
    * (`def.signal(name)` is the typed door for app code; both are one transition). A repeated `deliveryId` is a
@@ -153,13 +154,13 @@ export type WorkflowVerbs<Tx> = {
     source: TransactionSource<Tx>,
     args: { readonly runId: string; readonly name: string; readonly deliveryId: string; readonly payload: unknown },
     op: JobOperationInput,
-  ): Promise<SignalOutcome | SchemaFailure>;
+  ): Promise<SignalOutcome | CommandFailure>;
   /** Cancels a run of any workflow, for an operator: the same transition as `def.cancel`. `CancelRequested` carries the operator. */
   cancel(
     source: TransactionSource<Tx>,
     args: { readonly runId: string; readonly reason: string },
     op: JobOperationInput,
-  ): Promise<CancelOutcome | SchemaFailure>;
+  ): Promise<CancelOutcome | CommandFailure>;
   /**
    * Whether `resolveStep` would take `result` for step `path`: the step's `output` schema of the run's own version
    * checks it, and nothing is written. A step `resolveStep` could never resolve throws `STEP_NOT_RESOLVABLE`.

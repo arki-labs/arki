@@ -10,6 +10,7 @@ import { defineAction, defineModule, defineRead, moduleError, redactSecrets } fr
 import { getLogger } from '@arki/log';
 
 import type { FailedJobRecord, FailedJobSource } from './source.ts';
+import { observeQueue } from '../debug.ts';
 import { QUEUE_FOREMAN_ERROR_CODES } from './errors.ts';
 
 export { QUEUE_FOREMAN_ERROR_CODES, type QueueForemanErrorCode } from './errors.ts';
@@ -31,6 +32,7 @@ export const failedJobSchema = z
     queue: z.string(),
     /** The job name. */
     name: z.string(),
+    key: z.string().optional(),
     attempts: z.number().int(),
     /** Last error message, with secrets removed. */
     error: z.string().nullable(),
@@ -48,6 +50,7 @@ function toFailedJob(queue: string, record: FailedJobRecord): z.input<typeof fai
     id: record.id,
     queue,
     name: record.name,
+    ...(record.key === undefined ? {} : { key: record.key }),
     attempts: record.attempts,
     error: record.error === null ? null : redactSecrets(record.error),
     failedAt: record.failedAt.toISOString(),
@@ -132,6 +135,7 @@ export function queueForemanModule(options: QueueForemanOptions) {
         queue: z.string(),
         jobId: z.string(),
         name: z.string(),
+        key: z.string().optional(),
         attempts: z.number().int(),
         consequence: z.string(),
       })
@@ -144,6 +148,7 @@ export function queueForemanModule(options: QueueForemanOptions) {
         queue,
         jobId,
         name: record.name,
+        ...(record.key === undefined ? {} : { key: record.key }),
         attempts: record.attempts,
         consequence: `Job "${record.name}" goes back to the queue and runs again once. If it ran side effects before it failed, they may repeat. A second retry of this failure is blocked.`,
       };
@@ -168,11 +173,13 @@ export function queueForemanModule(options: QueueForemanOptions) {
           'Reload the failed jobs list.',
         );
       }
-      log.debug('retry accepted for {jobId} on {queue} (execution {executionId})', {
-        jobId,
-        queue,
-        executionId: permit.executionId,
-      });
+      observeQueue(() =>
+        log.debug('retry accepted for {jobId} on {queue} (execution {executionId})', {
+          jobId,
+          queue,
+          executionId: permit.executionId,
+        }),
+      );
       return { requeued: true as const, jobId };
     },
   });

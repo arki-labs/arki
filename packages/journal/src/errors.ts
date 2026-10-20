@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-import { defineFailure } from '@arki/failure';
+import { TRANSACTION_FAILURES } from '@arki/db/transaction';
+
+import { defineFailure, SCHEMA_FAILURES } from '@arki/failure';
 
 export type JournalErrorCode =
   | 'CONFLICT'
@@ -178,7 +180,8 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   from `@arki/failure`, with `data.issues`. An async schema in a sync call returns
  *   `AsyncSchema`; a throwing validator returns `ValidatorDefect`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
- *   projection passes through unchanged. A rejected business rule is not thrown:
+ *   projection is normalized by command transaction ownership to `TransactionDefect` with a private cause.
+ *   Direct low-level operations keep their documented exception contract. A rejected business rule is not thrown:
  *   it is returned as a failure (`CommandNotFound` and the others below), and
  *   `journal.run` returns it.
  * An error thrown by an effect is caught by `drain` and stored on the job.
@@ -249,3 +252,21 @@ export const CommandConflict = defineFailure('journal.conflict', {
 });
 /** A {@link CommandConflict} failure value. */
 export type CommandConflict = ReturnType<typeof CommandConflict>;
+
+/** The pinned workflow code is unavailable or incompatible; keep the run unchanged until an operator restores it. */
+export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
+  status: 409,
+  data: z.object({
+    runId: z.string(),
+    name: z.string(),
+    version: z.number().int(),
+    reason: z.enum(['WORKFLOW_UNKNOWN', 'WORKFLOW_SHAPE_CHANGED']),
+    detail: z.string(),
+  }),
+  message: '{detail}',
+});
+export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
+
+/** Failures owned by command execution, in addition to the command definition's inferred refusals. */
+export const COMMAND_FAILURES = [...SCHEMA_FAILURES, ...TRANSACTION_FAILURES, CommandConflict] as const;
+export type CommandFailure = ReturnType<(typeof COMMAND_FAILURES)[number]>;

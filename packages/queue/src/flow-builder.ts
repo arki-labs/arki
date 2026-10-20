@@ -38,7 +38,7 @@ import type {
 } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
-import { debugBuilder } from './debug.ts';
+import { debugBuilder, observeQueue } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 
 /**
@@ -98,24 +98,30 @@ type FlowBuilderState<TInput> = {
  * @internal
  */
 function validateFlowDependencies(steps: readonly FlowStepInternal<AnyJobDefinition>[]): void {
-  debugBuilder.debug('Validating flow dependencies for {stepsLength} steps', { stepsLength: steps.length });
+  observeQueue(() =>
+    debugBuilder.debug('Validating flow dependencies for {stepsLength} steps', { stepsLength: steps.length }),
+  );
 
   const stepIds = new Set(steps.map(step => step.id));
 
   for (const step of steps) {
     if (!step.dependsOn) continue;
 
-    debugBuilder.debug('[{stepId}] Validating dependencies: {dependencies}', {
-      stepId: step.id,
-      dependencies: step.dependsOn.join(', '),
-    });
+    observeQueue(() =>
+      debugBuilder.debug('[{stepId}] Validating dependencies: {dependencies}', {
+        stepId: step.id,
+        dependencies: step.dependsOn?.join(', '),
+      }),
+    );
 
     for (const dependency of step.dependsOn) {
       if (!stepIds.has(dependency)) {
-        debugBuilder.debug('[{stepId}] Invalid dependency detected: {detected}', {
-          stepId: step.id,
-          detected: dependency,
-        });
+        observeQueue(() =>
+          debugBuilder.debug('[{stepId}] Invalid dependency detected: {detected}', {
+            stepId: step.id,
+            detected: dependency,
+          }),
+        );
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.unknownStepDependency,
           message:
@@ -130,7 +136,7 @@ function validateFlowDependencies(steps: readonly FlowStepInternal<AnyJobDefinit
   // Check for circular dependencies
   detectCircularDependencies(steps);
   rejectFanOut(steps);
-  debugBuilder.debug('Flow dependencies validated successfully');
+  observeQueue(() => debugBuilder.debug('Flow dependencies validated successfully'));
 }
 
 /**
@@ -138,7 +144,7 @@ function validateFlowDependencies(steps: readonly FlowStepInternal<AnyJobDefinit
  * @internal
  */
 function detectCircularDependencies(steps: readonly FlowStepInternal<AnyJobDefinition>[]): void {
-  debugBuilder.debug('Checking for circular dependencies in flow');
+  observeQueue(() => debugBuilder.debug('Checking for circular dependencies in flow'));
 
   const graph = new Map<string, Set<string>>();
 
@@ -160,7 +166,9 @@ function detectCircularDependencies(steps: readonly FlowStepInternal<AnyJobDefin
       if (!visited.has(dep)) {
         if (hasCycle(dep)) return true;
       } else if (recursionStack.has(dep)) {
-        debugBuilder.debug('Circular dependency detected: {detected} -> {dep}', { detected: stepId, dep });
+        observeQueue(() =>
+          debugBuilder.debug('Circular dependency detected: {detected} -> {dep}', { detected: stepId, dep }),
+        );
         return true;
       }
     }
@@ -179,7 +187,7 @@ function detectCircularDependencies(steps: readonly FlowStepInternal<AnyJobDefin
     }
   }
 
-  debugBuilder.debug('No circular dependencies found');
+  observeQueue(() => debugBuilder.debug('No circular dependencies found'));
 }
 
 /**
@@ -218,11 +226,11 @@ export function createFlowBuilder<TContext, TMeta extends QueueMeta>(
   name: string,
   config: QueueConfig,
 ): FlowBuilderStart<TContext, TMeta> {
-  debugBuilder.debug('[{name}] Creating flow builder', { name });
+  observeQueue(() => debugBuilder.debug('[{name}] Creating flow builder', { name }));
 
   return {
     input<TInput>(schema: StandardSchemaV1<unknown, TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput> {
-      debugBuilder.debug('[{name}] Setting input schema for flow', { name });
+      observeQueue(() => debugBuilder.debug('[{name}] Setting input schema for flow', { name }));
 
       // One runtime object serves both typestates: the FlowBuilderNeedsStep
       // type hides `.build()` until the first `.step()`; the throw below backs it up.
@@ -253,13 +261,17 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         dependsOn?: readonly string[];
       },
     ) {
-      debugBuilder.debug('[{stateName}] Adding step "{id}" (job: {job}, dependencies: {dependencies})', {
-        stateName: state.name,
-        id,
-        job: config.job._internal.name,
-        dependencies: config.dependsOn?.join(', ') ?? 'none',
-      });
+      observeQueue(() =>
+        debugBuilder.debug('[{stateName}] Adding step "{id}" (job: {job}, dependencies: {dependencies})', {
+          stateName: state.name,
+          id,
+          job: config.job._internal.name,
+          dependencies: config.dependsOn?.join(', ') ?? 'none',
+        }),
+      );
 
+      // The mapper declares job input. Submission validates its result before opening Redis;
+      // business refusals belong to the step handler and its shared execution boundary.
       const newStep: FlowStepInternal<AnyJobDefinition> = {
         id,
         job: config.job,
@@ -291,10 +303,12 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         });
       }
 
-      debugBuilder.debug('[{stateName}] Building flow definition with {stepsLength} steps', {
-        stateName: state.name,
-        stepsLength: state.steps.length,
-      });
+      observeQueue(() =>
+        debugBuilder.debug('[{stateName}] Building flow definition with {stepsLength} steps', {
+          stateName: state.name,
+          stepsLength: state.steps.length,
+        }),
+      );
 
       // Validate step dependencies
       validateFlowDependencies(state.steps);
@@ -306,7 +320,9 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         config: state.config,
       };
 
-      debugBuilder.debug('[{stateName}] Flow definition built successfully', { stateName: state.name });
+      observeQueue(() =>
+        debugBuilder.debug('[{stateName}] Flow definition built successfully', { stateName: state.name }),
+      );
 
       return {
         _type: 'flow',

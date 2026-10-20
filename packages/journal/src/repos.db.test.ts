@@ -16,11 +16,12 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import type { DepsOf } from '@arki/dot/feature';
+import { TransactionDefect } from '@arki/db/transaction';
 import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin } from '@arki/dot/plugin';
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { orThrow } from '@arki/failure';
 
 import { initJournal } from './journal.js';
 import { journalTables } from './pg.js';
@@ -112,7 +113,7 @@ describe('repos() in a journal command', () => {
     const app = await orThrow(defineApp('ledger').infra(database).features([accountsFeature]).start());
     try {
       await expect(app.services['accounts.usecases'].open('acc_2', 5, true)).resolves.toMatchObject({
-        code: UnexpectedDefect.code,
+        code: TransactionDefect.code,
         cause: new Error('rolled back after the read'),
       });
       expect(await app.services['accounts.usecases'].balance('acc_2')).toBeNull();

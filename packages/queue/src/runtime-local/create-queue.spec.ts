@@ -14,9 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import { QUEUE_DEFINITION_ERROR_CODES } from '../errors.ts';
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { QueueInstance } from '../types/builder.ts';
+import { QUEUE_DEFINITION_ERROR_CODES } from '../errors.ts';
 import { createRuntimeLocalQueueInstance, initQueue } from './index.ts';
 
 type TestContext = { userId: string };
@@ -90,8 +90,8 @@ describe('runtime-local schedules trigger their job', () => {
     await startQueue(q.registry({ morning, evening }));
 
     expect(await scheduleRows()).toEqual([
-      { name: 'local-shared', key: 'local-evening', data: { slot: 'pm' } },
-      { name: 'local-shared', key: 'local-morning', data: { slot: 'am' } },
+      { name: 'local-shared', key: 'local-evening', data: { version: 1, input: { slot: 'pm' } } },
+      { name: 'local-shared', key: 'local-morning', data: { version: 1, input: { slot: 'am' } } },
     ]);
 
     // A tick sends the schedule data to the job's queue, exactly like trigger().
@@ -127,7 +127,9 @@ describe('runtime-local schedules trigger their job', () => {
 
     await startQueue(q.registry({ schedule }));
 
-    expect(await scheduleRows()).toEqual([{ name: 'local-inline', key: 'local-inline', data: {} }]);
+    expect(await scheduleRows()).toEqual([
+      { name: 'local-inline', key: 'local-inline', data: { version: 1, input: {} } },
+    ]);
 
     const internal = schedule._internal as InternalScheduleDefinition;
     await internal.job.trigger({});

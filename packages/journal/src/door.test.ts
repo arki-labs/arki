@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { TransactionDefect } from '@arki/db/transaction';
 import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { CommandRunner } from './api.js';
@@ -56,7 +57,7 @@ afterAll(async () => {
 });
 
 describe('an error thrown by app code', () => {
-  it('reaches the caller as the same instance and commits nothing, so the app sees its own error and the data stays as it was', async () => {
+  it('returns a typed defect with the private original cause and commits nothing', async () => {
     const id = orderId(next++);
     const thrown = new Error('the app gave up');
     // The first write succeeds. The app then throws inside the second write's
@@ -72,7 +73,8 @@ describe('an error thrown by app code', () => {
 
     const error: unknown = await journal.run(db, placeThenThrow, { id }, meta).catch((error_: unknown) => error_);
 
-    expect(error).toBe(thrown);
+    expect(TransactionDefect.is(error)).toBe(true);
+    if (TransactionDefect.is(error)) expect(error.cause).toBe(thrown);
     expect(await rowsOf(id)).toHaveLength(0);
     expect(await eventsOf(id)).toHaveLength(0);
   });

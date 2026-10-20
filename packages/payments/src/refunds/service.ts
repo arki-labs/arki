@@ -3,6 +3,7 @@ import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { toMillis } from '@arki/date';
+import { TransactionRejected } from '@arki/db/errors';
 import { isFailure } from '@arki/failure';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
@@ -126,25 +127,20 @@ export class RefundService {
     const refused = await this.validateRefundEligibility(data.paymentId, data.amount);
     if (isFailure(refused)) return refused;
 
-    const refund = await this.writes
-      .requestRefund({
-        paymentId: data.paymentId,
-        originalAmount: data.amount.toJSON(),
-        refundAmount: data.amount.toJSON(),
-        reason: data.reason,
-        requestedBy: data.requestedBy,
-        customerNote: data.customerNote,
-        internalNotes: data.internalNotes,
-        metadata: JSON.stringify({}),
-      })
-      .catch((error: unknown) => {
-        // Two requests can pass the check above together; the database lets only one stay pending
-        if (isPendingRefundConflict(error)) {
-          return DuplicatePendingRefund({ paymentId: data.paymentId }, { cause: error });
-        }
-
-        throw error;
-      });
+    const refund = await this.writes.requestRefund({
+      paymentId: data.paymentId,
+      originalAmount: data.amount.toJSON(),
+      refundAmount: data.amount.toJSON(),
+      reason: data.reason,
+      requestedBy: data.requestedBy,
+      customerNote: data.customerNote,
+      internalNotes: data.internalNotes,
+      metadata: JSON.stringify({}),
+    });
+    // Two requests can pass eligibility together; only this unique index proves another is pending.
+    if (TransactionRejected.is(refund) && refund.data.sqlState === '23505' && isPendingRefundConflict(refund.cause)) {
+      return DuplicatePendingRefund({ paymentId: data.paymentId }, { cause: refund });
+    }
     if (isFailure(refund)) return refund;
 
     if (await this.shouldAutoApprove(refund)) {

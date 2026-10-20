@@ -19,9 +19,10 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
-import type { FailureOf, SchemaFailure } from '@arki/failure';
-import type { CommandConflict, CommandInvalid, CommandRunner } from '@arki/journal';
+import type { FailureOf } from '@arki/failure';
+import type { CommandConflict, CommandFailure, CommandInvalid, CommandRunner } from '@arki/journal';
 import { fromDate } from '@arki/date';
+import { TransactionRejected } from '@arki/db/errors';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { CommandNotFound } from '@arki/journal';
 
@@ -39,7 +40,6 @@ import {
   openDb,
   plain,
   refundsTables,
-  rejectionOf,
   schema,
   typed,
   userId,
@@ -365,11 +365,15 @@ describe('what a payment can refund, checked inside the command', () => {
   it('the database allows one pending refund per payment', async () => {
     await orThrow(journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta));
 
-    const error = await rejectionOf(
-      journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta),
-    );
+    const eventsBefore = await countEvents(db);
+    const refused = await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta);
 
-    expect(error).toMatchObject({ cause: { constraint: 'refunds_one_pending_per_payment_idx' } });
+    expect(TransactionRejected.is(refused)).toBe(true);
+    if (!TransactionRejected.is(refused)) throw new Error('expected the database to reject the duplicate refund');
+    expect(refused.data.sqlState).toBe('23505');
+    expect(refused.cause).toMatchObject({ cause: { constraint: 'refunds_one_pending_per_payment_idx' } });
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await db.select().from(refunds).where(eq(refunds.paymentId, paymentId))).toHaveLength(1);
   });
 });
 
@@ -637,8 +641,8 @@ describe('writes(run): what RefundService calls', () => {
 });
 
 describe('types', () => {
-  it('exposes schema failures instead of promising a refund for invalid journal input', () => {
-    expectTypeOf<FailureOf<RefundWrites['requestRefund']>>().extract<SchemaFailure>().toEqualTypeOf<SchemaFailure>();
+  it('exposes command failures instead of promising a refund when journal work fails', () => {
+    expectTypeOf<FailureOf<RefundWrites['requestRefund']>>().extract<CommandFailure>().toEqualTypeOf<CommandFailure>();
   });
 
 

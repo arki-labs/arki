@@ -4,8 +4,10 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { orThrow } from '@arki/failure';
+import { TransactionDefect } from '@arki/db/transaction';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
+import { backoff } from './index.js';
 import type { OrderId } from './test-support.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
@@ -21,7 +23,7 @@ const mail = j.effect('order-mail', order, {
     calls.push({ jobId, type: e.type, signalAborted: signal.aborted });
     if (failMail) throw new Error('smtp down');
   },
-});
+}).withSchedule({ retry: backoff.constant(1000).upTo(7).while(reason => UnexpectedDefect.is(reason)) });
 
 const journal = j.compose({ effects: [mail] });
 const op = { actor: 'drain-test' } as const;
@@ -73,7 +75,7 @@ describe('drain', () => {
     }
     const after = await jobById(job.id);
     expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
-    expect(after?.lastError).toContain('smtp down');
+    expect(after?.lastError).toContain(UnexpectedDefect.code);
     expect(after?.availableAt.getTime()).toBeGreaterThan(Date.now());
     expect(await journal.drain(db)).toBe(0);
 
@@ -304,7 +306,7 @@ describe('drain', () => {
     expect(await jobById(job.id)).toMatchObject({ effect: 'retired-effect', attempts: 0, leaseToken: null });
   });
 
-  it('a claimed job whose effect no longer handles the event type fails and retries; it is never dropped', async () => {
+  it('a claimed job whose effect no longer handles the event type dies; it is never dropped', async () => {
     // A deploy can narrow an effect while jobs for the old type are still queued.
     // Dropping them would lose the side effect for good.
     const job = await placeAndPay();
@@ -319,9 +321,10 @@ describe('drain', () => {
     });
     expect(await narrowed.drain(db)).toBe(1);
     const after = await jobById(job.id);
-    expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
-    expect(after?.lastError).toContain('OrderPaid');
-    // A deploy that brings the handler back finishes the job.
+    expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
+    expect(after?.lastError).toContain(UnexpectedDefect.code);
+    // After restoring the handler, an operator explicitly retries the dead delivery.
+    await journal.retry(db, job.id, op);
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
@@ -507,7 +510,7 @@ describe('effect context: run', () => {
     }
   }, 2000);
 
-  it('fails the job when the command throws: it stays to retry with the error stored, and nothing the command wrote is committed', async () => {
+  it('a command defect ends the job dead and rolls back the command writes', async () => {
     const failing = j.compose({
       effects: [
         j.effect('run-pay-fails', order, {
@@ -518,15 +521,14 @@ describe('effect context: run', () => {
     const id = await place(failing);
     expect(await failing.drain(db)).toBe(1);
     const job = await jobOf('run-pay-fails');
-    expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
-    expect(job?.lastError).toContain('refused after the write');
-    expect(job?.availableAt.getTime()).toBeGreaterThan(Date.now());
+    expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
+    expect(job?.lastError).toContain(TransactionDefect.code);
     expect(await statusOf(id)).toBe('placed');
     const events = await eventsOf(id);
     expect(events.map(event => event.type)).toEqual(['OrderPlaced']);
   });
 
-  it('keeps the command committed when the effect throws after it and retries the job, so the handler must be safe to run twice', async () => {
+  it('a later effect defect keeps the command committed and ends the job dead', async () => {
     const halfDone = j.compose({
       effects: [
         j.effect('run-pay-then-fail', order, {
@@ -540,8 +542,8 @@ describe('effect context: run', () => {
     const id = await place(halfDone);
     expect(await halfDone.drain(db)).toBe(1);
     const job = await jobOf('run-pay-then-fail');
-    expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
-    expect(job?.lastError).toContain('mail down after the payment');
+    expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
+    expect(job?.lastError).toContain(UnexpectedDefect.code);
     expect(await statusOf(id)).toBe('paid');
   });
 });

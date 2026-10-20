@@ -4,14 +4,14 @@
  * once, run the middleware chain around the handler. A job keeps one retry policy on both lanes.
  */
 import type { JobRunner, ScheduledJob } from '@arki/journal';
-import { orThrow, UnexpectedFailure } from '@arki/failure';
+import { UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import { parseAsync } from '@arki/schema';
 
 import type { JobLike } from '../types/job.ts';
 import type { QueueRegistry } from './registry.ts';
-import { defaultJobRetry, ReturnedFailureError, throwIfReturnedFailure } from '../job-retry.ts';
-import { createJobContext, executeMiddlewareChain, withFeatureServices } from '../middleware.ts';
+import { observeQueue } from '../debug.ts';
+import { executeJob } from '../job-outcome.ts';
+import { defaultJobRetry, ReturnedFailureError } from '../job-retry.ts';
 import { isOutboxError, OUTBOX_ERROR_CODES, outboxError } from './errors.ts';
 import { jobsByName } from './registry.ts';
 
@@ -34,11 +34,13 @@ function jobLikeOf(job: ScheduledJob): JobLike {
     data: job.args,
     attemptsMade: job.attempt - 1,
     updateProgress: progress => {
-      debugOutbox.debug('[{job}] {jobId} progress {progress}', { job: job.name, jobId: job.id, progress });
+      observeQueue(() =>
+        debugOutbox.debug('[{job}] {jobId} progress {progress}', { job: job.name, jobId: job.id, progress }),
+      );
       return Promise.resolve();
     },
     log: message => {
-      debugOutbox.debug('[{job}] {jobId} {message}', { job: job.name, jobId: job.id, message });
+      observeQueue(() => debugOutbox.debug('[{job}] {jobId} {message}', { job: job.name, jobId: job.id, message }));
       return Promise.resolve();
     },
   };
@@ -67,29 +69,13 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
 
   return {
     names: [...byName.keys()],
-    async run(job) {
+    async run(job, ctx) {
       const definition = byName.get(job.name);
       // A guard: the worker claims only names this runner lists.
       if (definition === undefined)
         throw outboxError(OUTBOX_ERROR_CODES.unknownJob, `outbox: no job named "${job.name}" in the registry`);
       const internal = definition._internal;
-      // JobRunner reports failed work through its exception-based worker contract.
-      const parsed = orThrow(await parseAsync(internal.inputSchema, job.args));
-      const jobLike = jobLikeOf(job);
-      const jobContext = createJobContext(
-        withFeatureServices(await contextOnce(), servicesByName.get(job.name)),
-        jobLike,
-      );
-      const result = await executeMiddlewareChain<typeof jobContext, typeof jobContext, unknown>(
-        internal.middlewares,
-        jobContext,
-        parsed,
-        jobLike,
-        {},
-        ctx => internal.handler(parsed, ctx),
-      );
-      // A returned failure fails the job, as on the BullMQ lane; the backoff decides whether it runs again.
-      throwIfReturnedFailure(result);
+      return executeJob(internal, jobLikeOf(job), contextOnce, servicesByName.get(job.name), ctx.signal);
     },
     retention: job => byName.get(job.name)?._internal.options?.retention,
     retryDelay(job, error) {

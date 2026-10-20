@@ -78,14 +78,21 @@ describe('queue() client + queueWorker() in separate apps', () => {
       const jobId = await api.services.queue.enqueue(sendMail, { to: 'a@b.c' });
       await waitFor(() => received.length === 1);
       expect(received).toEqual(['w1:a@b.c']);
+      // An API retry can reuse the returned generated key rather than enqueue the effect twice.
+      expect(orThrow(await api.services.queue.enqueue(sendMail, { to: 'a@b.c' }, { jobId: orThrow(jobId) }))).toBe(
+        orThrow(jobId),
+      );
+      await new Promise(resolve => setTimeout(resolve, 650));
+      expect(received).toEqual(['w1:a@b.c']);
 
       const inspect = new Queue(sendMail._internal.name, {
         connection: parseRedisConnection(redisUrl),
         prefix: keyPrefix,
       });
       try {
-        const job = await inspect.getJob(jobId);
+        const job = await inspect.getJob(orThrow(jobId));
         expect(job?.opts.attempts).toBe(5);
+        expect(await inspect.getJobCounts()).toMatchObject({ completed: 1 });
       } finally {
         await inspect.close();
       }

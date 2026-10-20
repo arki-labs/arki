@@ -171,9 +171,7 @@ describe('wake', () => {
   it('a run that rolls back does not wake: its job row was never committed', async () => {
     const { drain, worker } = await sleepingWorker();
     try {
-      await expect(journal.run(db, placeOrder, { id: orderId(++next), fail: true }, meta)).rejects.toThrow(
-        'refused after the write',
-      );
+      await expect(journal.run(db, placeOrder, { id: orderId(++next), fail: true }, meta)).resolves.toMatchObject({ code: 'db.transaction_defect' });
       await tick();
       expect(drain).toHaveBeenCalledTimes(1);
     } finally {

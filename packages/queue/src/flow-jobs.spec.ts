@@ -11,11 +11,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
-import { InvalidInput } from '@arki/failure';
+import { InvalidInput, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
-import { toFlowJobs } from './flow-jobs.ts';
+import { addFlow, toFlowJobs } from './flow-jobs.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
 
@@ -140,4 +140,34 @@ describe('enqueue(flow, input)', () => {
       await handle.close();
     }
   });
+});
+
+it('normalizes mapper defects and returned failures before any dependency-tree submission', async () => {
+  let opened = 0;
+  const open = () => {
+    opened++;
+    throw new Error('The producer must stay closed');
+  };
+  const broken = q.flow
+    .name('mapper-defect')
+    .input(orderInput)
+    .step('one', {
+      job: validateJob,
+      data: () => {
+        throw new Error('Broken mapper');
+      },
+    })
+    .build();
+  expect(UnexpectedDefect.is(await addFlow(open, broken, { orderId: 'o' }))).toBe(true);
+  const refused = q.flow
+    .name('mapper-protocol')
+    .input(orderInput)
+    .step('one', {
+      job: validateJob,
+      // @ts-expect-error A mapper declares job input; a refusal belongs in the job handler.
+      data: () => InvalidInput({ issues: [{ message: 'Unexpected refusal' }] }),
+    })
+    .build();
+  expect(UnexpectedDefect.is(await addFlow(open, refused, { orderId: 'o' }))).toBe(true);
+  expect(opened).toBe(0);
 });

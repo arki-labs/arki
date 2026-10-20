@@ -1,3 +1,5 @@
+import { isFailure } from '@arki/failure';
+
 /**
  * Middleware execution engine
  * Handles running a chain of middleware with context transformations
@@ -6,7 +8,7 @@
 import type { JobContext, JobLike } from './types/job.ts';
 import type { JobMiddleware, MiddlewareResult } from './types/middleware.ts';
 import type { QueueMeta } from './types/queue.ts';
-import { debugMiddleware } from './debug.ts';
+import { debugMiddleware, observeQueue } from './debug.ts';
 
 /**
  * Run a job's middleware chain around its handler (onion order).
@@ -25,30 +27,37 @@ import { debugMiddleware } from './debug.ts';
  * @param handler - The job handler, called with the context the last middleware passed on
  * @returns What the handler returned, or `undefined` when a middleware returned without calling `next()`
  */
-export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[],
+export async function executeMiddlewareChain<TContext, TContextOut, TOutput, TMiddlewareOutput = never>(
+  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta, TMiddlewareOutput>[],
   initialContext: TContext,
   data: unknown,
   job: JobLike,
   meta: QueueMeta,
   handler: (ctx: TContextOut) => Promise<TOutput>,
-): Promise<TOutput | undefined> {
-  debugMiddleware.debug('[Job {jobId}] Starting middleware chain with {middlewaresLength} middleware', {
-    jobId: job.id,
-    middlewaresLength: middlewares.length,
-  });
+): Promise<TOutput | TMiddlewareOutput | undefined> {
+  observeQueue(() =>
+    debugMiddleware.debug('[Job {jobId}] Starting middleware chain with {middlewaresLength} middleware', {
+      jobId: job.id,
+      middlewaresLength: middlewares.length,
+    }),
+  );
 
-  let output: TOutput | undefined;
+  let output: TOutput | TMiddlewareOutput | undefined;
 
   // Create the next function that will be passed to middleware
   const createNext = (index: number, ctx: unknown) => {
+    let called = false;
     return async (opts?: { ctx?: unknown }): Promise<MiddlewareResult<unknown>> => {
+      if (called) throw new Error('Job middleware called next() more than once.');
+      called = true;
       // If context was provided, use it
       const currentContext = opts?.ctx === undefined ? ctx : opts.ctx;
 
       // Past the last middleware: run the handler inside every middleware's next()
       if (index >= middlewares.length) {
-        debugMiddleware.debug('[Job {jobId}] Reached end of middleware chain, running handler', { jobId: job.id });
+        observeQueue(() =>
+          debugMiddleware.debug('[Job {jobId}] Reached end of middleware chain, running handler', { jobId: job.id }),
+        );
         output = await handler(currentContext as TContextOut);
         return { ctx: currentContext, output };
       }
@@ -56,11 +65,13 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
       // Execute the next middleware in the chain
       const middleware = middlewares[index]!;
 
-      debugMiddleware.debug('[Job {jobId}] Executing middleware {value2}/{middlewaresLength}', {
-        jobId: job.id,
-        value2: index + 1,
-        middlewaresLength: middlewares.length,
-      });
+      observeQueue(() =>
+        debugMiddleware.debug('[Job {jobId}] Executing middleware {value2}/{middlewaresLength}', {
+          jobId: job.id,
+          value2: index + 1,
+          middlewaresLength: middlewares.length,
+        }),
+      );
 
       const result = await middleware._fn({
         ctx: currentContext,
@@ -70,18 +81,27 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
         next: createNext(index + 1, currentContext),
       });
 
-      debugMiddleware.debug('[Job {jobId}] Middleware {value2}/{middlewaresLength} completed', {
-        jobId: job.id,
-        value2: index + 1,
-        middlewaresLength: middlewares.length,
-      });
+      observeQueue(() =>
+        debugMiddleware.debug('[Job {jobId}] Middleware {value2}/{middlewaresLength} completed', {
+          jobId: job.id,
+          value2: index + 1,
+          middlewaresLength: middlewares.length,
+        }),
+      );
 
+      if (!isMiddlewareResult(result)) {
+        if (!isFailure<unknown>(result)) throw new Error('Job middleware returned an invalid protocol value.');
+        output = result;
+        return { ctx: currentContext, output: result };
+      }
+      if ('output' in result && !Object.is(result.output, output))
+        throw new Error('Job middleware replaced next().output; return a defined failure directly.');
       return result;
     };
   };
 
   await createNext(0, initialContext)();
-  debugMiddleware.debug('[Job {jobId}] Middleware chain completed successfully', { jobId: job.id });
+  observeQueue(() => debugMiddleware.debug('[Job {jobId}] Middleware chain completed successfully', { jobId: job.id }));
   return output;
 }
 
@@ -102,19 +122,32 @@ export function withFeatureServices<TContext>(baseContext: TContext, services: o
  * @param job - The job that runs (a BullMQ `Job`, or the same shape from another lane)
  * @returns JobContext with utility methods
  */
-export function createJobContext<TContext>(baseContext: TContext, job: JobLike): JobContext<TContext> {
-  debugMiddleware.debug('[Job {jobId}] Creating job context with utility methods', { jobId: job.id });
+export function createJobContext<TContext>(
+  baseContext: TContext,
+  job: JobLike,
+  signal: AbortSignal = new AbortController().signal,
+): JobContext<TContext> {
+  observeQueue(() =>
+    debugMiddleware.debug('[Job {jobId}] Creating job context with utility methods', { jobId: job.id }),
+  );
 
   return {
     ...baseContext,
     updateProgress: async (progress: number) => {
-      debugMiddleware.debug('[Job {jobId}] Updating progress to {progress}%', { jobId: job.id, progress });
+      observeQueue(() =>
+        debugMiddleware.debug('[Job {jobId}] Updating progress to {progress}%', { jobId: job.id, progress }),
+      );
       await job.updateProgress(progress);
     },
     log: async (message: string) => {
-      debugMiddleware.debug('[Job {jobId}] Logging message: {message}', { jobId: job.id, message });
+      observeQueue(() => debugMiddleware.debug('[Job {jobId}] Logging message: {message}', { jobId: job.id, message }));
       await job.log(message);
     },
     job,
+    signal,
   };
+}
+
+function isMiddlewareResult<Value>(value: Value | MiddlewareResult<unknown>): value is MiddlewareResult<unknown> {
+  return typeof value === 'object' && value !== null && 'ctx' in value;
 }

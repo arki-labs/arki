@@ -13,24 +13,35 @@
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { AsyncSchemaFailure, SchemaFailure } from '@arki/failure';
+import { Deadline } from '@arki/async';
+
+import type { AsyncSchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import {
   defineFailure,
   InvalidInput,
   isAsyncSchemaFailure,
   isFailure,
-  isSchemaFailure,
   orThrow,
   ValidatorDefect,
 } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
+import type { CommandFailure } from '../errors.js';
 import type { JournalTables } from '../pg.js';
 import type { JobRetention, RetentionAge } from '../retention.js';
-import type { DbHandle, EffectContext, Needed, Needs, RecordedOf, RootDb, TransactionSource } from '../types.js';
+import type {
+  DbHandle,
+  EffectContext,
+  Needed,
+  Needs,
+  RecordedOf,
+  RootDb,
+  TransactionSource,
+} from '../types.js';
 import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
 import { workflowRunId, workflowSignalId } from '../id.js';
@@ -40,7 +51,7 @@ import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
 import { workflowWith } from './define.js';
 import { workflowMachine } from './machine.js';
-import { codeOf, isStrandedError } from './stranded.js';
+import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
 
 /** The library-owned effect that runs one node attempt. */
 export const STEP_EFFECT = 'workflow.step';
@@ -152,16 +163,16 @@ export type WorkflowStarter<
   Input extends StandardSchemaV1,
   Signals extends AnySignals,
 > = {
-  readonly start: Command<StartSchema<Input>, Promise<StartOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
+  readonly start: Command<StartSchema<Input>, Promise<StartOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
   /**
    * The command that delivers the signal `name` to a run. `name` is one of the signals the workflow's `waitFor`
    * nodes declare, and `payload` is the input of that signal's schema.
    */
   readonly signal: <Name extends keyof Signals & string>(
     name: Name,
-  ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
+  ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
   /** The command that cancels a run: it stops, undoes its completed steps newest first, and ends `cancelled`. */
-  readonly cancel: Command<CancelSchema, Promise<CancelOutcome | SchemaFailure>, SchemaOutput<Meta>, Tx>;
+  readonly cancel: Command<CancelSchema, Promise<CancelOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
 };
 /** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
@@ -297,7 +308,11 @@ type Verdict =
   | { readonly kind: 'children'; readonly plan: ChildrenPlan }
   | { readonly kind: 'failed'; readonly reason: unknown; readonly retryable: boolean };
 
-const failed = (reason: unknown, retryable = true): Verdict => ({ kind: 'failed', reason, retryable });
+const failed = (reason: unknown, retryable = true): Verdict => ({
+  kind: 'failed',
+  reason: isFailure(reason) || isJournalError(reason) ? reason : callbackDefect(reason),
+  retryable,
+});
 
 /** Readable text of whatever failed a step: an error, a returned failure, or anything thrown. */
 function reasonText(reason: unknown): string {
@@ -434,7 +449,7 @@ async function runBody(
   if (timeoutMs === undefined) return invoke(build(signal));
   const timeout = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
+  const expired = new Promise<ReturnType<typeof Deadline>>(resolve => {
     timer = setTimeout(() => {
       const error = new JournalError(
         'STEP_TIMEOUT',
@@ -442,8 +457,9 @@ async function runBody(
         runId,
         `step '${node.name}' ran longer than ${timeoutMs} ms`,
       );
-      timeout.abort(error);
-      reject(error);
+      const deadline = Deadline({ cause: error });
+      timeout.abort(deadline);
+      resolve(deadline);
     }, timeoutMs);
   });
   try {
@@ -1138,7 +1154,7 @@ export function createWorkflows<
     childId: string,
     reason: string,
     reopen: boolean,
-  ): Promise<void | SchemaFailure> => {
+  ): Promise<void | CommandFailure> => {
     const before = { parked: false };
     const written = await ctx.write(run, childId, async (row, inside) => {
       if (row === null) return [];
@@ -1164,7 +1180,7 @@ export function createWorkflows<
    * step is in flight, the newest node to undo may be a child node: its completed children are reopened to undo
    * themselves. Both read the database, so a repeat finds the work done and does nothing.
    */
-  const driveChildren = async (ctx: RunCtx, row: Row): Promise<void | SchemaFailure> => {
+  const driveChildren = async (ctx: RunCtx, row: Row): Promise<void | CommandFailure> => {
     const kids = await kidsOf(ctx.tx, row.id);
     if (kids.length === 0) return;
     const def = definitionOf(row);
@@ -1198,7 +1214,7 @@ export function createWorkflows<
     runId: string,
     written: Written,
     wasParked: boolean,
-  ): Promise<void | SchemaFailure> {
+  ): Promise<void | CommandFailure> {
     await queueJobs(ctx.tx, runId, written.events);
     const ended = endedBy(written.events);
     await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
@@ -1215,7 +1231,7 @@ export function createWorkflows<
   }
 
   /** The parent of an ended child looks at its node again, in the same transaction as the child's end. */
-  async function wakeParent(ctx: RunCtx, parentId: string, base: string): Promise<void | SchemaFailure> {
+  async function wakeParent(ctx: RunCtx, parentId: string, base: string): Promise<void | CommandFailure> {
     const before = { parked: false };
     const moves: Moves = { starts: undefined, stops: [] };
     const written = await ctx.write(run, parentId, async (parent, inside) => {
@@ -1245,7 +1261,7 @@ export function createWorkflows<
     parentId: string,
     path: string,
     error: string,
-  ): Promise<void | SchemaFailure> => {
+  ): Promise<void | CommandFailure> => {
     const before = { parked: false };
     const written = await ctx.write(run, parentId, async (parent, inside) => {
       if (parent === null || parent.finishedAt !== null || parent.state !== 'parked' || parent.node !== path) return [];
@@ -1266,7 +1282,7 @@ export function createWorkflows<
     parentId: string,
     plan: Planned,
     children: Planned['children'],
-  ): Promise<void | SchemaFailure> {
+  ): Promise<void | CommandFailure> {
     let attached = false;
     for (const child of children) {
       const startedRun = await ctx.run(startChild, {
@@ -1275,7 +1291,6 @@ export function createWorkflows<
         input: child.input,
         parent: { id: parentId, path: plan.base },
       });
-      if (isSchemaFailure(startedRun)) return startedRun;
       if (CommandConflict.is(startedRun)) {
         ctx.accept(startedRun);
         return failChildrenNode(
@@ -1285,6 +1300,7 @@ export function createWorkflows<
           `child run ${child.id} could not start: ${JSON.stringify(startedRun)}`,
         );
       }
+      if (isFailure(startedRun)) return startedRun;
       if (!startedRun.created) attached = true;
     }
     if (attached) return wakeParent(ctx, parentId, plan.base);
@@ -1294,7 +1310,7 @@ export function createWorkflows<
   const checkpoint = j.command(
     CHECKPOINT_COMMAND,
     checkpointSchema,
-    async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' } | SchemaFailure> => {
+    async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' } | CommandFailure> => {
       const { write } = context;
       const before = { parked: false };
       const settled = { value: false };
@@ -1465,7 +1481,7 @@ export function createWorkflows<
     { write, tx }: Pick<CommandContext<MetaOut, Tx>, 'write' | 'tx'>,
     args: { readonly input: unknown; readonly id?: string | undefined },
     parent?: { readonly id: string; readonly path: string },
-  ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | SchemaFailure> => {
+  ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | CommandFailure> => {
     if (!started.has(`${def.name}@${def.version}`)) {
       throw new JournalError(
         'WORKFLOW_UNKNOWN',
@@ -1540,7 +1556,7 @@ export function createWorkflows<
     j.command(
       `${def.name}.start`,
       startSchema(def.input),
-      async (args, context): Promise<StartOutcome | SchemaFailure> => {
+      async (args, context): Promise<StartOutcome | CommandFailure> => {
         const outcome = await startRun(def, context, args);
         return isFailure(outcome) ? outcome : { runId: outcome.runId };
       },
@@ -1553,7 +1569,7 @@ export function createWorkflows<
     async (
       args,
       context,
-    ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | SchemaFailure> => {
+    ): Promise<{ readonly runId: string; readonly created: boolean } | CommandConflict | CommandFailure> => {
       const def = started.get(`${args.def.name}@${args.def.version}`);
       if (def === undefined) {
         throw new JournalError(
@@ -1581,7 +1597,7 @@ export function createWorkflows<
     name: string,
     workflowName: string | null,
     operator: OperationInput | null,
-  ): Promise<SignalOutcome | SchemaFailure> {
+  ): Promise<SignalOutcome | CommandFailure> {
     const { write } = context;
     const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
     const before = { parked: false };
@@ -1674,7 +1690,7 @@ export function createWorkflows<
     args: CancelArgs,
     workflowName: string | null,
     actorId: string | null,
-  ): Promise<CancelOutcome | SchemaFailure> {
+  ): Promise<CancelOutcome | CommandFailure> {
     const { write } = context;
     const before = { parked: false };
     const written = await write(run, args.runId, async (row, inside) => {
@@ -1762,7 +1778,7 @@ export function createWorkflows<
     async (
       args,
       context,
-    ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | SchemaFailure> => {
+    ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | CommandFailure> => {
       assertOperator(args.op);
       const before = { parked: false };
       const moved: { how: 'rescheduled' | 'childrenRestarted' | 'jobRetried'; base: string | undefined } = {
@@ -1876,7 +1892,7 @@ export function createWorkflows<
   const resolveStep = j.command(
     RESOLVE_STEP_COMMAND,
     resolveStepSchema,
-    async (args, context): Promise<{ readonly runId: string } | SchemaFailure> => {
+    async (args, context): Promise<{ readonly runId: string } | CommandFailure> => {
       assertOperator(args.op);
       const before = { parked: false };
       const written = await context.write(run, args.runId, async (locked, inside) => {
@@ -1939,7 +1955,7 @@ export function createWorkflows<
   const skipUndo = j.command(
     SKIP_UNDO_COMMAND,
     skipUndoSchema,
-    async (args, context): Promise<{ readonly runId: string } | SchemaFailure> => {
+    async (args, context): Promise<{ readonly runId: string } | CommandFailure> => {
       assertOperator(args.op);
       const reason = args.op.reason?.trim() ?? '';
       if (reason === '') {
@@ -2201,7 +2217,7 @@ export function createWorkflows<
         return failed(error);
       }
       // A returned Failure is a decision, not an accident: the step is dead at once, with no retry.
-      if (isFailure(result)) return failed(result, false);
+      if (isFailure(result)) return failed(result);
 
       try {
         const parsed = node.options.output === undefined ? result : await parseAsync(node.options.output, result);
@@ -2459,7 +2475,7 @@ export function createWorkflows<
       const def = codeOf(row, registry);
       if (def instanceof JournalError) {
         warnStranded(row, def);
-        throw def;
+        return strandedFailure(row, def);
       }
       const index = def.nodes.findIndex(candidate => candidate.name === data.path);
       const node = def.nodes[index];
@@ -2502,7 +2518,7 @@ export function createWorkflows<
       const at = { runId, path: data.path, phase: data.phase, attempt: data.attempt };
       if (verdict.kind !== 'failed') {
         const checkpointed = await ctx.run(checkpoint, { ...at, outcome: verdict }, meta);
-        if (isSchemaFailure(checkpointed)) return checkpointed;
+        if (isFailure(checkpointed)) return checkpointed;
         debugWorkflow.debug('{runId} {path}: {kind}, checkpoint {status}', {
           runId,
           path: data.path,
@@ -2526,11 +2542,11 @@ export function createWorkflows<
           { ...at, outcome: { kind: 'retry', error, key: step.key ?? data.key, at: inMs(wait) } },
           meta,
         );
-        if (isSchemaFailure(checkpointed)) return checkpointed;
+        if (isFailure(checkpointed)) return checkpointed;
         return undefined;
       }
       const checkpointed = await ctx.run(checkpoint, { ...at, outcome: { kind: 'dead', error } }, meta);
-      if (isSchemaFailure(checkpointed)) return checkpointed;
+      if (isFailure(checkpointed)) return checkpointed;
       // Settled: the run compensates (or already was), so no operator is needed and the job ends normally.
       if (checkpointed.status !== 'checkpointed') return undefined;
       debugWorkflow.warn('{runId} {path}: dead after {attempt} attempts, waiting for an operator', {
@@ -2556,14 +2572,14 @@ export function createWorkflows<
         retry: strandedRetry,
       });
 
-    /** A timer of a stranded run writes nothing and throws, so the job is dead and visible, as a step job is. */
+    /** A stranded timer returns the same permanent diagnostic as a step, without changing the pinned run. */
     const refuseStranded = async (runId: string, db: StepEffectContext['db']) => {
       const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
       if (row === undefined || row.finishedAt !== null) return;
       const code = codeOf(row, registry);
       if (!(code instanceof JournalError)) return;
       warnStranded(row, code);
-      throw code;
+      return strandedFailure(row, code);
     };
 
     /**
@@ -2573,7 +2589,8 @@ export function createWorkflows<
     const timer = j
       .effect(TIMER_EFFECT, machine.run, {
         Parked: async (event, ctx) => {
-          await refuseStranded(event.entityId, ctx.db);
+          const stranded = await refuseStranded(event.entityId, ctx.db);
+          if (stranded !== undefined) return stranded;
           return ctx.run(
             checkpoint,
             { runId: event.entityId, fired: { kind: 'wake', node: event.data.node, parkSeq: event.seq } },
@@ -2581,7 +2598,8 @@ export function createWorkflows<
           );
         },
         RunStarted: async (event, ctx) => {
-          await refuseStranded(event.entityId, ctx.db);
+          const stranded = await refuseStranded(event.entityId, ctx.db);
+          if (stranded !== undefined) return stranded;
           return ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'deadline' } }, meta);
         },
       })

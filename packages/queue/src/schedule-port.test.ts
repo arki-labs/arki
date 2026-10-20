@@ -1,22 +1,20 @@
-/**
- * `@arki/queue` implements the durable-schedule port without depending on
- * `@arki/schedule` (it restates the port's shape, so the queue gains no
- * runtime dependency). This file is the one place both meet: if the two
- * shapes drift apart, Dot's needs check rejects the `.use(schedule(...))`
- * below and the typecheck fails.
- */
+/** Queue owns the adapter; schedule owns the canonical port. This test locks their Dot wiring. */
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot/plugin';
 import { orThrow } from '@arki/failure';
 import { durableScheduler } from '@arki/queue/dot';
-
-import { DurableSchedules, schedule } from './dot.js';
-import { defineSchedule } from './index.js';
+import { defineSchedule } from '@arki/schedule';
+import { DurableSchedules, schedule } from '@arki/schedule/dot';
 
 describe('the BullMQ backend fits the durable port', () => {
   it('an app wires durableScheduler() into schedule({ durable }) without a cast', () => {
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
+    const nightly = defineSchedule({
+      name: 'nightly',
+      cron: '0 3 * * *',
+      durable: true,
+      handler: () => Promise.resolve(),
+    });
     // Declaring the backend opens no connection: Redis is reached only when a schedule starts.
     const app = orThrow(
       defineApp('durable-port')

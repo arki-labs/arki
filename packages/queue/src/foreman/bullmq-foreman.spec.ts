@@ -128,7 +128,7 @@ describe('T(queue-foreman-bullmq)', () => {
     expect(page.total).toBe(1);
     const [job] = page.jobs;
     expect(job).toMatchObject({ id: mailId, queue: 'mail', attempts: 1 });
-    expect(job?.error).toContain('SMTP rejected');
+    expect(job?.error).toContain('failure.unexpected_defect');
     expect(job?.error).not.toContain('hunter2');
     expect(job?.error).not.toContain('s3cr3t');
     const all = await module.reads.failedJobs.run({}, {});

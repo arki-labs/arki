@@ -13,6 +13,7 @@ import { isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { WorkflowDef } from './define.js';
+import { JournalError } from '../errors.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
 
@@ -163,7 +164,7 @@ let dieAfterParking = 0;
 journal.hooks.command.around(async (ctx, next) => {
   await next();
   const parking = z.object({ outcome: z.object({ kind: z.literal('children') }) }).safeParse(ctx.input);
-  if (parking.success && dieAfterParking-- > 0) throw new Error('the worker died after the checkpoint');
+  if (parking.success && dieAfterParking-- > 0) throw new JournalError('LEASE_LOST', 'job', 'test', 'the worker died after the checkpoint');
 });
 
 let db: PgliteDatabase;
@@ -266,7 +267,8 @@ describe('a child node', () => {
     await settle();
     expect(await kidsOf(id)).toEqual([]);
     expect(await eventTypes(id)).not.toContain('ChildrenPlanned');
-    // The retry of the node's job is due after its backoff.
+    // The simulated interruption is permanent until an operator explicitly resumes the job.
+    expectOk(await journal.workflows.retryStep(db, { runId: id, path: 'kid', phase: 'do' }, { actor: 'test' }));
     await db
       .update(tables.jobs)
       .set({ availableAt: sql`${tables.jobs.availableAt} - interval '1 hour'` })

@@ -105,6 +105,8 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/async": "workspace:*",
+    "@arki/db": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
@@ -116,7 +118,6 @@
   "devDependencies": {
     "@arki/admin": "workspace:*",
     "@arki/bench": "workspace:*",
-    "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/http": "workspace:*",

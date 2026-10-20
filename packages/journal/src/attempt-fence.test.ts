@@ -9,9 +9,10 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { orThrow } from '@arki/failure';
+import { findCause, orThrow, UnexpectedDefect } from '@arki/failure';
 
-import { isJournalError } from './errors.js';
+import { backoff } from './index.js';
+import { isJournalError, JournalError } from './errors.js';
 import { j, meta, openDb, order, OrderNoted, OrderPaid, OrderPlaced, tables } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -50,7 +51,7 @@ const counting = j.effect('count-attempts', order, {
     attemptsSeen.push(ctx.attempt);
     if (ctx.attempt < 3) throw new Error('not yet');
   },
-});
+}).withSchedule({ retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) });
 const countingJournal = j.compose({ effects: [counting] });
 
 const outcomes: string[] = [];
@@ -65,7 +66,7 @@ const fenced = j.effect('fenced-writer', order, {
       orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note: 'from a stale worker' }, meta));
       outcomes.push('committed');
     } catch (error) {
-      outcomes.push(isJournalError(error, 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
+      outcomes.push(isJournalError(findCause(error, JournalError), 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
       throw error;
     }
   },

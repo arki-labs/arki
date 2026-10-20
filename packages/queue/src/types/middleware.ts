@@ -10,7 +10,7 @@ import type { QueueMeta } from './queue.ts';
  * Middleware function signature
  * Similar to tRPC middleware but adapted for job processing
  */
-export type MiddlewareFunction<TContextOut1, TContextOut2, TMeta extends QueueMeta> = (opts: {
+export type MiddlewareFunction<TContextOut1, TContextOut2, TMeta extends QueueMeta, TFailure = never> = (opts: {
   /**
    * Current context (from previous middleware or base context)
    */
@@ -38,7 +38,7 @@ export type MiddlewareFunction<TContextOut1, TContextOut2, TMeta extends QueueMe
    * wraps the handler. Can optionally replace the context for what follows.
    */
   next: (opts?: { ctx?: TContextOut2 }) => Promise<MiddlewareResult<TContextOut2>>;
-}) => Promise<MiddlewareResult<TContextOut2>>;
+}) => Promise<MiddlewareResult<TContextOut2> | TFailure>;
 
 /**
  * Result from middleware execution
@@ -53,16 +53,16 @@ export type MiddlewareResult<TContext> = {
    * What the handler returned, as seen from `await next()`.
    * Unset when a middleware returns without calling `next()`.
    */
-  output?: unknown;
+  readonly output?: unknown;
 };
 
 /**
  * Job middleware wrapper
  * Contains the middleware function and type information
  */
-export type JobMiddleware<TContextOut1, TContextOut2, TMeta extends QueueMeta> = {
+export type JobMiddleware<TContextOut1, TContextOut2, TMeta extends QueueMeta, TFailure = never> = {
   _type: 'middleware';
-  _fn: MiddlewareFunction<TContextOut1, TContextOut2, TMeta>;
+  _fn: MiddlewareFunction<TContextOut1, TContextOut2, TMeta, TFailure>;
 };
 
 /**

@@ -13,9 +13,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { orThrow } from '@arki/failure';
+import { findCause, orThrow } from '@arki/failure';
 
-import { isJournalError } from './errors.js';
+import { isJournalError, JournalError } from './errors.js';
 import { j, meta, order, OrderNoted, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
 let container: StartedPostgreSqlContainer;
@@ -101,7 +101,7 @@ const racer = j.effect('racer', order, {
       orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note }, meta));
       mine.outcome.push('committed');
     } catch (error) {
-      mine.outcome.push(isJournalError(error, 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
+      mine.outcome.push(isJournalError(findCause(error, JournalError), 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
       throw error;
     }
   },

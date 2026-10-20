@@ -8,7 +8,8 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { isFailure, orThrow } from '@arki/failure';
+import { Cancelled } from '@arki/async';
+import { attempt, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { History } from './history.js';
@@ -33,6 +34,7 @@ import type {
   Unlisten,
   WakeListener,
 } from './types.js';
+import { callbackDefect } from './callback.js';
 import { debugDrain, debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
@@ -220,10 +222,22 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     );
     if (isFailure(event)) return event;
     // Inside the lease: a hook that throws fails the job like a handler failure.
-    return await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () => {
-      const { run, accept, settle } = deps.attemptOn(db, event, effect.name, { jobId: job.id, attempt: job.attempts });
-      return settle(effect.run(event, { jobId: job.id, attempt: job.attempts, signal, db, run, accept }));
-    });
+    return await attempt(
+      () =>
+        deps.hooks.run({ name: effect.name, event, jobId: job.id, attempt: job.attempts }, () => {
+          const { run, accept, settle } = deps.attemptOn(db, event, effect.name, {
+            jobId: job.id,
+            attempt: job.attempts,
+          });
+          return settle(
+            attempt(
+              () => effect.run(event, { jobId: job.id, attempt: job.attempts, signal, db, run, accept }),
+              callbackDefect,
+            ),
+          );
+        }),
+      callbackDefect,
+    );
   };
 
   /** The per-job retention override: a queue job's comes from its runner, an effect's from its schedule. */
@@ -313,25 +327,41 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
         value5: errorText(reason),
       });
     };
+    // A lifecycle stop releases this owned delivery; it does not cancel the business workflow.
+    const releaseInterrupted = async () => {
+      await db.transaction(async tx => {
+        const released = await tx
+          .update(jobsTable)
+          .set({ leaseToken: null, leaseUntil: null })
+          .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')))
+          .returning({ id: jobsTable.id });
+        if (released.length === 0) return;
+        await tx
+          .update(attemptsTable)
+          .set({ finishedAt: sql`now()`, outcome: 'retry', error: errorText(Cancelled()) })
+          .where(and(eq(attemptsTable.jobId, job.id), isNull(attemptsTable.finishedAt)));
+      });
+    };
     try {
       const ownSignal = AbortSignal.any([signal, lost.signal]);
-      // A queue row runs in the runner, which wraps it in its own middleware: effect hooks do not.
-      // The runner turns a returned failure into a throw itself, so it reaches the catch below.
+      let outcome: unknown;
       if (job.kind === 'queue') {
         if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
-        await runner.run(scheduledJob(job), { db, signal: ownSignal });
-      } else {
-        const outcome = await runEffect(db, job, effect, ownSignal);
-        // An expected failure fails the job; by default the backoff does not retry it.
-        if (isFailure(outcome)) {
-          await recordFailure(outcome);
-          return;
-        }
+        outcome = await runner.run(scheduledJob(job), { db, signal: ownSignal });
+      } else outcome = await runEffect(db, job, effect, ownSignal);
+      if (signal.aborted && isFailure(outcome)) {
+        await releaseInterrupted();
+        return;
+      }
+      if (isFailure(outcome)) {
+        await recordFailure(outcome);
+        return;
       }
       await ack(db, job, runner);
       debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
     } catch (error) {
-      await recordFailure(error);
+      if (signal.aborted) await releaseInterrupted();
+      else await recordFailure(error);
     } finally {
       stopRenewing();
     }

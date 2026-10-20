@@ -25,6 +25,8 @@
 
 import superjson from 'superjson';
 
+import type { Failure } from '@arki/failure';
+
 import type { QueueInstanceOptions } from './create-queue.ts';
 import type { FlowBuilderFactory, QueueBuilder, ScheduleBuilderFactory } from './types/builder.ts';
 import type { JobContext } from './types/index.ts';
@@ -32,7 +34,7 @@ import type { JobMiddleware, MiddlewareFunction } from './types/middleware.ts';
 import type { DataTransformer, QueueConfig, QueueMeta } from './types/queue.ts';
 import { createQueueInstance } from './create-queue.ts';
 import { CronPatterns } from './cron-patterns.ts';
-import { debugBuilder } from './debug.ts';
+import { debugBuilder, observeQueue } from './debug.ts';
 import { createFlowBuilder } from './flow-builder.ts';
 import { createJobBuilder } from './job-builder.ts';
 import { createScheduleBuilder } from './schedule-builder.ts';
@@ -93,7 +95,7 @@ export const initQueue = {
  * @internal
  */
 function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConfig): QueueBuilder<TContext, TMeta> {
-  debugBuilder.debug('Creating queue builder');
+  observeQueue(() => debugBuilder.debug('Creating queue builder'));
 
   // Create base job builder with empty middleware
   // Output context is JobContext<TContext> because runtime wraps user context with framework utilities
@@ -104,20 +106,32 @@ function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConf
 
   // Middleware factory
   // By default, middleware maintains JobContext<TContext> as both input and output
-  const middlewareFactory = <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
+  function middlewareFactory<TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
     fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
-  ): JobMiddleware<TContextIn, TContextOut, TMeta> => {
-    debugBuilder.debug('Creating middleware');
-
-    return {
-      _type: 'middleware',
-      _fn: fn,
-    };
-  };
+  ): JobMiddleware<TContextIn, TContextOut, TMeta>;
+  function middlewareFactory<
+    TContextIn = JobContext<TContext>,
+    TContextOut = TContextIn,
+    TFailure extends Failure = never,
+  >(
+    fn: MiddlewareFunction<TContextIn, TContextOut, TMeta, TFailure>,
+  ): JobMiddleware<TContextIn, TContextOut, TMeta, TFailure>;
+  function middlewareFactory<
+    TContextIn = JobContext<TContext>,
+    TContextOut = TContextIn,
+    TFailure extends Failure = never,
+  >(
+    fn: MiddlewareFunction<TContextIn, TContextOut, TMeta, TFailure>,
+  ): JobMiddleware<TContextIn, TContextOut, TMeta, TFailure> {
+    observeQueue(() => debugBuilder.debug('Creating middleware'));
+    return { _type: 'middleware', _fn: fn };
+  }
 
   // Registry factory (simple pass-through for now)
   const registryFactory = <TRegistry extends Record<string, unknown>>(jobs: TRegistry): TRegistry => {
-    debugBuilder.debug('Creating registry with {value1} jobs', { value1: Object.keys(jobs).length });
+    observeQueue(() =>
+      debugBuilder.debug('Creating registry with {value1} jobs', { value1: Object.keys(jobs).length }),
+    );
 
     return jobs;
   };

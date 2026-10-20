@@ -10,15 +10,19 @@
 
 import type { FlowJob, FlowJobNode, FlowProducer, JobNode } from 'bullmq';
 
-import type { AsyncSchemaFailure } from '@arki/failure';
-import { InvalidInput, ValidatorDefect } from '@arki/failure';
+import { InvalidInput, isFailure, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { FlowDefinition, FlowEnqueueResult } from './types/builder.ts';
 import type { AnyJobDefinition } from './types/job.ts';
-import { debugFlow } from './debug.ts';
-import { jobDefaultOptions } from './job-options.ts';
+import { debugFlow, observeQueue } from './debug.ts';
+import { jobDefaultOptions, jobRetryOptions } from './job-options.ts';
+import { jobTraceOptions } from './job-trace.ts';
+import { QueueAcceptanceUnknown } from './trigger.ts';
+
+export const FLOW_ENQUEUE_FAILURES = [InvalidInput, ValidatorDefect, UnexpectedDefect, QueueAcceptanceUnknown] as const;
+export type FlowEnqueueFailure = ReturnType<(typeof FLOW_ENQUEUE_FAILURES)[number]>;
 
 type BuiltFlow = InternalFlowDefinition<unknown, AnyJobDefinition>;
 type FlowStep = BuiltFlow['steps'][number];
@@ -54,7 +58,12 @@ function toFlowJobNode(tree: StepTree, input: unknown): FlowJobNode {
     queueName,
     data: tree.step.data(input),
     // What the job's queue would apply on `add()`, then the step's own options
-    opts: { ...jobDefaultOptions(job._internal.options), ...tree.step.opts },
+    opts: {
+      ...jobDefaultOptions(job._internal.options),
+      ...jobTraceOptions(),
+      ...tree.step.opts,
+      ...jobRetryOptions(job._internal.options),
+    },
   };
   if (tree.children.length === 0) return node;
   return { ...node, children: tree.children.map(child => toFlowJobNode(child, input)) };
@@ -90,20 +99,52 @@ function collectJobIds(trees: readonly StepTree[], nodes: readonly JobNode[], in
 
 /**
  * Validate the input, then add the whole flow in one atomic `addBulk`.
- * An invalid input throws before the producer is opened: nothing is written.
+ * Invalid input or a broken data mapper returns a canonical failure before opening the producer.
  */
 export async function addFlow(
   openProducer: () => FlowProducer,
   flow: FlowDefinition,
   input: unknown,
-): Promise<FlowEnqueueResult | AsyncSchemaFailure> {
+): Promise<FlowEnqueueResult | FlowEnqueueFailure> {
   const internal = flow._internal as BuiltFlow;
   const validated = await parseFlowInput(flow, input);
   if (InvalidInput.is(validated) || ValidatorDefect.is(validated)) return validated;
-  const nodes = await openProducer().addBulk(toFlowJobs(flow, validated));
+  let jobs: FlowJob[];
+  try {
+    jobs = toFlowJobs(flow, validated);
+    const validateTree = async (tree: StepTree, node: FlowJobNode): Promise<FlowEnqueueFailure | undefined> => {
+      // A mapper declares job input, not a business outcome. Never enqueue a refusal inside a success tree.
+      if (isFailure<unknown>(node.data)) return UnexpectedDefect({ cause: node.data });
+      const parsed = await parseAsync(tree.step.job._internal.inputSchema, node.data);
+      if (InvalidInput.is(parsed) || ValidatorDefect.is(parsed)) return parsed;
+      for (const [index, child] of tree.children.entries()) {
+        const childNode = node.children?.[index];
+        if (childNode === undefined) return UnexpectedDefect();
+        const failure = await validateTree(child, childNode);
+        if (failure !== undefined) return failure;
+      }
+      return undefined;
+    };
+    for (const [index, tree] of stepTrees(internal).entries()) {
+      const node = jobs[index];
+      if (node === undefined) return UnexpectedDefect();
+      const failure = await validateTree(tree, node);
+      if (failure !== undefined) return failure;
+    }
+  } catch (error) {
+    return UnexpectedDefect({ cause: error });
+  }
+  let nodes: JobNode[];
+  try {
+    nodes = await openProducer().addBulk(jobs);
+  } catch (error) {
+    return QueueAcceptanceUnknown({ cause: error });
+  }
 
   const jobIds: Record<string, string> = {};
   collectJobIds(stepTrees(internal), nodes, jobIds);
-  debugFlow.debug('[{flow}] Started flow with {roots} root job(s)', { flow: internal.name, roots: nodes.length });
+  observeQueue(() =>
+    debugFlow.debug('[{flow}] Started flow with {roots} root job(s)', { flow: internal.name, roots: nodes.length }),
+  );
   return { flow: internal.name, jobIds };
 }

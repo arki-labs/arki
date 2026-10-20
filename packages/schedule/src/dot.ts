@@ -35,11 +35,12 @@
 
 import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot/plugin';
+import type { SuccessOf } from '@arki/failure';
 import { allFeatures, driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
 import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
-import type { DurableScheduler, ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
+import type { DurableScheduler, ScheduleClock, ScheduleOutcome, ScheduleRefusal, ScheduleRuntime } from './runtime.js';
 import { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';
 import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
 import { DEFAULT_LOCK_HOLD_MS, defineSchedule, lockDurationMs } from './index.js';
@@ -249,12 +250,13 @@ export function scheduleActions<TContext>(
 }
 
 /** The `@arki/dot/feature` slice contract a `schedules(...)` declaration produces. */
-export type ScheduleFeatureSlice<TContext> = {
+export type ScheduleFeatureSlice<TDefinitions extends readonly ScheduleDef<never>[]> = {
   /** Lets a `defineFeature` feature list it in `.entrypoints(...)`; object-form features ignore it. */
   readonly kind: 'schedules';
   readonly key: 'schedules';
   readonly actions: readonly ScheduleDotAction[];
-  readonly resolve: (services: unknown) => readonly ScheduleDef<TContext>[];
+  readonly resolve: (services: unknown) => TDefinitions;
+  readonly definitions: TDefinitions;
 };
 
 /** Exactly one of `cron` or `every`. */
@@ -437,7 +439,9 @@ function isScheduleDefList<TContext>(
  *   `needs`; a missing one is a compile error. (Object-form features; the
  *   core form replaces it.)
  */
-export function schedules<TContext>(defs: readonly ScheduleDef<TContext>[]): ScheduleFeatureSlice<TContext>;
+export function schedules<const TDefinitions extends readonly ScheduleDef<never>[]>(
+  defs: TDefinitions,
+): ScheduleFeatureSlice<TDefinitions>;
 export function schedules<C extends AnyFeatureCore, const D extends readonly FeatureScheduleOptions<DepsOf<C>>[]>(
   core: C,
   defs: D & LockGuard<DepsOf<C>, D>,
@@ -449,9 +453,15 @@ export function schedules<N extends NeedsShape, const D extends readonly Feature
 export function schedules<TContext, N extends NeedsShape, const D extends readonly FeatureScheduleOptions<CtxOf<N>>[]>(
   needsOrDefs: N | AnyFeatureCore | readonly ScheduleDef<TContext>[],
   defs?: D,
-): ScheduleFeatureSlice<TContext> | FeatureScheduleSlice<D, CtxOf<N>> {
+): ScheduleFeatureSlice<readonly ScheduleDef<TContext>[]> | FeatureScheduleSlice<D, CtxOf<N>> {
   if (isScheduleDefList(needsOrDefs)) {
-    return { kind: 'schedules', key: 'schedules', actions: scheduleActions(needsOrDefs), resolve: () => needsOrDefs };
+    return {
+      kind: 'schedules',
+      key: 'schedules',
+      actions: scheduleActions(needsOrDefs),
+      resolve: () => needsOrDefs,
+      definitions: needsOrDefs,
+    };
   }
   // `needs` (or the core) is a type witness: the feature hands its own services to `resolve`.
   if (defs === undefined) {
@@ -680,7 +690,7 @@ type FeatureScheduleDefsOf<F> =
   DeclarationsOf<F> extends infer TSlice
     ? TSlice extends {
         readonly key: 'schedules';
-        readonly definitions: readonly (infer TDef extends FeatureScheduleOptions<never>)[];
+        readonly definitions: readonly (infer TDef extends Pick<FeatureScheduleOptions<never>, 'name' | 'handler'>)[];
       }
       ? TDef
       : never
@@ -722,7 +732,10 @@ export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName e
   FeatureTreeOf<TFeatures[number]> extends infer F
     ? F extends unknown
       ? FeatureScheduleDefsOf<F> extends infer TDef
-        ? TDef extends { readonly name: infer N extends string; readonly handler: (services: never) => infer TResult }
+        ? TDef extends {
+            readonly name: infer N extends string;
+            readonly handler: (services: never, run: ScheduleRun) => infer TResult;
+          }
           ? RegisteredName<F, N> extends TName
             ? Awaited<TResult>
             : never
@@ -730,6 +743,14 @@ export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName e
         : never
       : never
     : never;
+
+/** Successful values and returned failures inferred from the named handler. */
+export type ScheduleSuccessOf<TFeatures extends readonly MountedFeature[], TName extends string> = SuccessOf<
+  () => ScheduleValueOf<TFeatures, TName>
+>;
+export type ScheduleFailureOf<TFeatures extends readonly MountedFeature[], TName extends string> = ScheduleRefusal<
+  ScheduleValueOf<TFeatures, TName>
+>;
 
 /** A `scheduler` service typed from the features' own schedule declarations. */
 export type ScheduleClient<TFeatures extends readonly MountedFeature[]> = {

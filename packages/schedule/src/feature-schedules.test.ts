@@ -263,8 +263,12 @@ describe('the scheduler service', () => {
     );
 
     const outcome = await app.services.scheduler.trigger('fails');
-    expect(outcome).toEqual({ name: 'fails', status: 'handler-failed', cause: boom });
-    expect(outcome.status === 'handler-failed' && outcome.cause).toBe(boom);
+    expect(outcome).toMatchObject({
+      name: 'fails',
+      status: 'handler-failed',
+      cause: { code: 'failure.unexpected_defect', cause: boom },
+    });
+    expect(outcome.status === 'handler-failed' && outcome.cause.cause).toBe(boom);
     await orThrow(app.dispose());
   });
 

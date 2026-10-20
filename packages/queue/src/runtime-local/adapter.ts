@@ -20,7 +20,7 @@ import type { Db } from 'pg-boss';
 
 function encodePgArray(arr: unknown[]): string {
   return `{${arr
-    .map((v) => {
+    .map(v => {
       if (v === null || v === undefined) return 'NULL';
       if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       return String(v);
@@ -28,7 +28,7 @@ function encodePgArray(arr: unknown[]): string {
     .join(',')}}`;
 }
 
-export function buildPgBossAdapter(pglite: PGlite): Db {
+export function buildPgBossAdapter(pglite: Pick<PGlite, 'exec'>): Db {
   // Bind the multi-statement runner so it keeps PGlite's `this` context.
   // We alias it here to keep the call sites readable without triggering
   // the security hook that pattern-matches on the raw method name + paren form.

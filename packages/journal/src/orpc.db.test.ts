@@ -22,10 +22,10 @@ import { z } from 'zod';
 import type { TransactionalDb } from '@arki/db/transaction';
 import { transactionErrorMap, transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
 import { TransactionCommitUncertain } from '@arki/db/transaction';
-import { AsyncSchema, InvalidInput, orThrow, ValidatorDefect } from '@arki/failure';
+import { AsyncSchema, InvalidInput, orThrow, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
-import { CommandConflict, CommandForbidden, initJournal, isJournalError } from './index.js';
+import { CommandConflict, CommandForbidden, initJournal } from './index.js';
 import { commandErrors } from './orpc.js';
 import { journalTables } from './pg.js';
 import { openJournalDb } from './testing.js';
@@ -93,7 +93,7 @@ const contract = {
     .output(z.object({ balance: z.number() }))
     .errors({
       ...transactionErrorMap,
-      ...errorMap(CommandConflict, CommandForbidden, InvalidInput, AsyncSchema, ValidatorDefect),
+      ...errorMap(CommandConflict, CommandForbidden, InvalidInput, AsyncSchema, ValidatorDefect, UnexpectedDefect),
     }),
 };
 
@@ -111,22 +111,13 @@ function depositProcedure(root: TransactionalDb<Transaction>, afterRun?: (attemp
     .handler(async ({ context, input, errors }) => {
       attempt += 1;
       const result = await orThrowRpc(
-        journal
-          .run(
-            context.tx,
-            deposit,
-            { id: input.id, amount: input.amount },
-            { actorId: context.actorId },
-            { idempotencyKey: receiptKey(context, input.key) },
-          )
-          .catch((error: unknown) => {
-            // The receipt API still throws this conflict. Translate it into a
-            // declared failure before the transaction owner supervises it.
-            if (isJournalError(error, 'CONFLICT')) {
-              return CommandConflict({ detail: 'This request key was already used for another operation.' });
-            }
-            throw error;
-          }),
+        journal.run(
+          context.tx,
+          deposit,
+          { id: input.id, amount: input.amount },
+          { actorId: context.actorId },
+          { idempotencyKey: receiptKey(context, input.key) },
+        ),
         errors,
       );
       afterRun?.(attempt);

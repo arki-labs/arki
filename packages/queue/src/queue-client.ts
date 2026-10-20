@@ -10,15 +10,18 @@
 
 import { FlowProducer, Queue } from 'bullmq';
 
-import type { AsyncSchemaFailure } from '@arki/failure';
-
+import type { FlowEnqueueFailure } from './flow-jobs.ts';
 import type { QueueConnection } from './redis-connection.ts';
+import type { JobTriggerResult } from './trigger.ts';
 import type { FlowDefinition, FlowEnqueueResult, QueueEnqueue } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { jobQueueOptions } from './create-queue.ts';
-import { debugJob } from './debug.ts';
+import { debugJob, observeQueue } from './debug.ts';
 import { addFlow } from './flow-jobs.ts';
+import { jobRetryOptions } from './job-options.ts';
+import { jobTraceOptions } from './job-trace.ts';
 import { parseRedisConnection } from './redis-connection.ts';
+import { triggerValidated } from './trigger.ts';
 
 const DEFAULT_KEY_PREFIX = 'queue:';
 
@@ -63,16 +66,16 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
     job: JobDefinition<TInput, TOutput, TContext>,
     data: TInput,
     options?: TriggerOptions,
-  ): Promise<string>;
+  ): Promise<JobTriggerResult>;
   function enqueue<TInput>(
     flow: FlowDefinition<TInput>,
     input: NoInfer<TInput>,
-  ): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
+  ): Promise<FlowEnqueueResult | FlowEnqueueFailure>;
   async function enqueue(
     target: AnyJobDefinition | FlowDefinition,
     data: unknown,
     triggerOptions?: TriggerOptions,
-  ): Promise<string | FlowEnqueueResult | AsyncSchemaFailure> {
+  ): Promise<JobTriggerResult | FlowEnqueueResult | FlowEnqueueFailure> {
     if (target._type === 'flow') {
       return addFlow(
         () =>
@@ -85,15 +88,19 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
       );
     }
     const name = target._internal.name;
-    const queue = queueFor(name, target._internal.options);
-    const added = await queue.add(name, data, {
-      priority: triggerOptions?.priority,
-      delay: triggerOptions?.delay,
-      jobId: triggerOptions?.jobId,
-      ...triggerOptions?.bullmqOptions,
+    return triggerValidated(target._internal.inputSchema, data, async () => {
+      const queue = queueFor(name, target._internal.options);
+      const added = await queue.add(name, data, {
+        ...jobTraceOptions(),
+        priority: triggerOptions?.priority,
+        delay: triggerOptions?.delay,
+        jobId: triggerOptions?.jobId ?? crypto.randomUUID(),
+        ...triggerOptions?.bullmqOptions,
+        ...jobRetryOptions(target._internal.options),
+      });
+      observeQueue(() => debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' }));
+      return added.id ?? '';
     });
-    debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' });
-    return added.id ?? '';
   }
 
   const client: QueueClient = {

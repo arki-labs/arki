@@ -506,9 +506,9 @@ export type ScheduledJob = {
  */
 export type JobRunner<AppDb extends RootDb = RootDb> = {
   readonly names: readonly string[];
-  /** Resolve to ack the row; throw to fail this try. `signal` aborts on `stop()` or a lost lease. */
-  run(job: ScheduledJob, ctx: { readonly db: AppDb; readonly signal: AbortSignal }): Promise<void>;
-  /** Milliseconds before the next try, or `undefined` for dead. Called with the thrown error. */
+  /** Return a success to ack the row, or a failure to fail this try. `signal` aborts on `stop()` or a lost lease. */
+  run(job: ScheduledJob, ctx: { readonly db: AppDb; readonly signal: AbortSignal }): Promise<unknown>;
+  /** Milliseconds before the next try, or `undefined` for dead. Called with the returned failure or thrown error. */
   retryDelay(job: ScheduledJob, error: unknown): number | undefined;
   /** Overrides the journal's archive policy for this job. `undefined` takes the journal's. */
   retention?(job: ScheduledJob): EffectRetention | undefined;

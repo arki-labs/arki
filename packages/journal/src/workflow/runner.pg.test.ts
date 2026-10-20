@@ -2,6 +2,8 @@
  * The checkpoint fence on real Postgres with two workers on two connections: a run's node is checkpointed once,
  * whichever worker is slow. Needs Docker: starts a `postgres:16` container through testcontainers.
  */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
@@ -165,3 +167,78 @@ describe('two workers race one run', () => {
     expect((await completedOf(id)).filter(path => path === 'settle')).toEqual(['settle']);
   }, 30_000);
 });
+
+const restartProcess = promisify(execFile);
+const restartScript = `
+import pg from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { z } from 'zod';
+import { orThrow } from '@arki/failure';
+import { initJournal } from './src/journal.ts';
+import { tables } from './src/test-support.ts';
+const pool = new pg.Pool({ connectionString: process.env.JOURNAL_TEST_URL });
+const db = drizzle({ client: pool });
+const init = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+const v1 = init.workflow('process.restart', { version: 1, input: z.object({}) })
+  .step('prepare', () => 1)
+  .waitFor('approval', { signal: 'approval', schema: z.object({ by: z.string() }) })
+  .step('finish', () => ({ version: 1 })).finish();
+const phase = process.env.JOURNAL_TEST_PHASE;
+const base = init.workflow('process.restart', { version: 2, input: z.object({}) })
+  .step('prepare', () => 2);
+const v2 = (phase === 'incompatible' ? base.step('extra', () => 'edited code') : base)
+  .step('finish', () => ({ version: 2 })).finish();
+const journal = init.compose({ workflows: phase === 'start' ? [v1] : [v1, v2], workflowMeta: { actorId: 'system:workflow' } });
+const meta = { actorId: 'restart:test' };
+const resumeId = process.env.JOURNAL_TEST_RESUME_ID;
+const changedId = process.env.JOURNAL_TEST_CHANGED_ID;
+async function drain() { for (let n = 0; n < 20; n++) if (await journal.drain(db) === 0) return; throw new Error('did not settle'); }
+try {
+  if (phase === 'start') {
+    orThrow(await journal.run(db, v1.start, { input: {}, id: resumeId }, meta));
+    await drain();
+  } else if (phase === 'resume') {
+    orThrow(await journal.run(db, v1.signal('approval'), { runId: resumeId, deliveryId: 'restart:approve', payload: { by: 'operator' } }, meta));
+    await drain();
+    orThrow(await journal.run(db, v2.start, { input: {}, id: changedId }, meta));
+  } else await drain();
+} finally { await pool.end(); }
+`;
+
+it('separate processes resume persisted waits with pinned code and strand structurally incompatible code', async () => {
+  const resumeId = `restart_resume_${Date.now()}`;
+  const changedId = `restart_changed_${Date.now()}`;
+  const runProcess = (phase: string) =>
+    restartProcess('bun', ['-e', restartScript], {
+      cwd: process.cwd(),
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        JOURNAL_TEST_URL: container.getConnectionUri(),
+        JOURNAL_TEST_PHASE: phase,
+        JOURNAL_TEST_RESUME_ID: resumeId,
+        JOURNAL_TEST_CHANGED_ID: changedId,
+      },
+    });
+  await runProcess('start');
+  const [parked] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, resumeId));
+  expect(parked).toMatchObject({ state: 'parked', workflowVersion: 1, waitingFor: 'approval' });
+  await runProcess('resume');
+  const [resumed] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, resumeId));
+  expect(resumed).toMatchObject({ state: 'completed', workflowVersion: 1, output: { version: 1 } });
+  await runProcess('incompatible');
+  const [stranded] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, changedId));
+  expect(stranded).toMatchObject({ state: 'running', workflowVersion: 2, output: null });
+  const [job] = await dbA.select().from(tables.jobs).where(eq(tables.jobs.runId, changedId));
+  expect(job).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
+  expect(JSON.parse(job?.lastError ?? 'null')).toMatchObject({
+    code: 'journal.workflow_stranded',
+    data: { runId: changedId, name: 'process.restart', version: 2, reason: 'WORKFLOW_SHAPE_CHANGED' },
+  });
+  const events = await dbA
+    .select()
+    .from(tables.events)
+    .where(eq(tables.events.entityId, changedId))
+    .orderBy(asc(tables.events.seq));
+  expect(events.map(event => event.type)).toEqual(['RunStarted', 'NodeScheduled']);
+}, 60_000);

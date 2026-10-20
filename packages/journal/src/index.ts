@@ -23,14 +23,16 @@ export type {
   WriteResult,
 } from './api.js';
 export {
+  COMMAND_FAILURES,
   CommandConflict,
   CommandForbidden,
   CommandInvalid,
   CommandNotFound,
   JournalError,
+  WorkflowStranded,
   isJournalError,
 } from './errors.js';
-export type { JournalErrorCode } from './errors.js';
+export type { CommandFailure, JournalErrorCode } from './errors.js';
 export type { GuaranteedCreateKeys, EntityBuilder, OnReducerRow, OnOnlyEntityBuilder } from './entity.js';
 export type {
   AcceptFailure,

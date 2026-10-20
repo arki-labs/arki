@@ -9,9 +9,11 @@ import { asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { TransactionDefect } from '@arki/db/transaction';
 import { isFailure, orThrow } from '@arki/failure';
 
 import type { j as sharedJournal } from '../test-support.js';
+import { WorkflowStranded } from '../errors.js';
 import { initJournal } from '../journal.js';
 import { tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
@@ -186,9 +188,7 @@ describe('versions', () => {
     const v2 = refundV2(init, log);
     const journal = init.compose({ workflows: [v1, v2], workflowMeta });
     const id = newId('retired');
-    await expect(journal.run(db, v1.start, { input: { cents: 1 }, id }, caller)).rejects.toMatchObject({
-      code: 'WORKFLOW_VERSION_RETIRED',
-    });
+    await expect(journal.run(db, v1.start, { input: { cents: 1 }, id }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_VERSION_RETIRED' } });
     expect(await rowOf(id)).toBeUndefined();
   });
 
@@ -248,6 +248,10 @@ describe('stranded runs', () => {
     expect(dead).toHaveLength(1);
     expect(dead[0]).toMatchObject({ attempts: 1, effect: 'workflow.step' });
     expect(dead[0]?.lastError).toContain('has other nodes');
+    expect(JSON.parse(dead[0]?.lastError ?? 'null')).toMatchObject({
+      code: WorkflowStranded.code,
+      data: { runId: id, name: 'refund', version: 1, reason: 'WORKFLOW_SHAPE_CHANGED' },
+    });
   });
 
   it('a run whose version is no longer registered is stranded, not run with other code', async () => {
@@ -267,7 +271,10 @@ describe('stranded runs', () => {
     const dead = await deadJobs();
     expect(dead).toHaveLength(1);
     expect(dead[0]).toMatchObject({ attempts: 1 });
-    expect(dead[0]?.lastError).toContain('no registered workflow "refund" v1');
+    expect(JSON.parse(dead[0]?.lastError ?? 'null')).toMatchObject({
+      code: WorkflowStranded.code,
+      data: { runId: id, name: 'refund', version: 1, reason: 'WORKFLOW_UNKNOWN' },
+    });
   });
 
   it('retryStep resumes a stranded run once its code is back', async () => {
@@ -286,7 +293,7 @@ describe('stranded runs', () => {
     // Still stranded: the retry says why and leaves the job dead.
     const retryCharge = (journal: typeof journalA) =>
       journal.workflows.retryStep(db, { runId: id, path: 'charge', phase: 'do' }, operator);
-    await expect(retryCharge(journalB)).rejects.toMatchObject({ code: 'WORKFLOW_SHAPE_CHANGED' });
+    await expect(retryCharge(journalB)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_SHAPE_CHANGED' } });
     expect(await deadJobs()).toHaveLength(1);
 
     // The app deploys the old code again; the operator retries.
@@ -382,14 +389,14 @@ describe('stranded runs', () => {
     const journalB = edited.compose({ workflows: [editedDef], workflowMeta });
     await expect(
       journalB.run(db, editedDef.signal('approve'), { runId: id, deliveryId: 'd1', payload: { by: 'ann' } }, caller),
-    ).rejects.toMatchObject({ code: 'WORKFLOW_SHAPE_CHANGED' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_SHAPE_CHANGED' } });
 
     const later = fresh();
     const v2 = refundV2(later, log);
     const journalC = later.compose({ workflows: [v2], workflowMeta });
     await expect(
       journalC.run(db, v2.signal('approve'), { runId: id, deliveryId: 'd2', payload: { by: 'zed' } }, caller),
-    ).rejects.toMatchObject({ code: 'WORKFLOW_UNKNOWN' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_UNKNOWN' } });
     expect(await db.select().from(tables.workflowSignals).where(eq(tables.workflowSignals.runId, id))).toEqual([]);
   });
 
@@ -406,9 +413,7 @@ describe('stranded runs', () => {
     const edited = fresh();
     const editedDef = editedRefundV1(edited, log);
     const journalB = edited.compose({ workflows: [editedDef], workflowMeta });
-    await expect(journalB.run(db, editedDef.cancel, { runId: id, reason: 'stop' }, caller)).rejects.toMatchObject({
-      code: 'WORKFLOW_SHAPE_CHANGED',
-    });
+    await expect(journalB.run(db, editedDef.cancel, { runId: id, reason: 'stop' }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_SHAPE_CHANGED' } });
     expect(await eventTypes(id), 'the refused cancel left no CancelRequested behind').toEqual(before);
 
     log.length = 0;

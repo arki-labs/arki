@@ -46,7 +46,28 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
-    "croner": "catalog:"
+    "@opentelemetry/api": "catalog:opentelemetry",
+    "croner": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/lock": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/openapi": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
@@ -63,25 +84,5 @@
     "@orpc/server": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "@arki/dot": "workspace:*",
-    "@arki/eslint-config": "workspace:*",
-    "@arki/lock": "workspace:*",
-    "@arki/prettier-config": "workspace:*",
-    "@arki/queue": "workspace:*",
-    "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
-    "@orpc/contract": "catalog:backend",
-    "@orpc/openapi": "catalog:backend",
-    "@orpc/server": "catalog:backend",
-    "@testcontainers/postgresql": "catalog:testing",
-    "@types/node": "catalog:node",
-    "@types/pg": "catalog:drizzle",
-    "drizzle-orm": "catalog:drizzle",
-    "pg": "catalog:drizzle",
-    "typescript": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
   }
 }

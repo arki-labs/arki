@@ -1,3 +1,7 @@
+import { z } from 'zod';
+
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
+
 export const SCHEDULE_ERROR_CODES = {
   invalidDefinition: 'ARKI_SCHEDULE_E001',
   duplicateSchedule: 'ARKI_SCHEDULE_E002',
@@ -30,3 +34,12 @@ export class ScheduleError extends Error {
     this.remediation = args.remediation;
   }
 }
+/** The lock provider refused execution; the original provider error remains private. */
+export const ScheduleLockFailed = defineFailure('schedule.lock_failed', {
+  status: 503,
+  data: z.object({ lockCode: z.enum(['lost', 'store']) }),
+  message: 'The schedule lock failed ({lockCode}).',
+  remediation: 'Inspect the lock provider before triggering this schedule again.',
+});
+
+export const SCHEDULE_RUNTIME_FAILURES = { lock: ScheduleLockFailed, defect: UnexpectedDefect } as const;

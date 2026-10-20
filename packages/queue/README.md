@@ -28,7 +28,7 @@ Version 2.0 is a complete architectural rewrite inspired by tRPC. The new API fo
 pnpm add @arki/queue bullmq ioredis superjson
 ```
 
-Job and flow input accepts any Standard Schema validator (Zod, Valibot, ArkType, or your own); the examples use Zod. Bad input returns `InvalidInput` from `@arki/failure`, with `data.issues`; a broken validator returns `ValidatorDefect`. Worker callbacks bridge these failures with `orThrow` because BullMQ and pg-boss report failures by throwing.
+Job and flow input accepts any Standard Schema validator (Zod, Valibot, ArkType, or your own); the examples use Zod. Bad input returns `InvalidInput` from `@arki/failure`, with `data.issues`; a broken validator returns `ValidatorDefect`. The shared `executeJob` executor returns these canonical failures. BullMQ callbacks use an exception carrier only at the provider boundary; pg-boss settles through its native fenced API.
 
 Entry points: `@arki/queue` (the core), `/types`, `/runtime-local`, `/dot`, `/projection`, `/foreman` and `/outbox`. `/outbox` needs `@arki/journal` and `drizzle-orm`, not `bullmq` or `ioredis`.
 
@@ -157,13 +157,26 @@ q.job
     retry: backoff
       .exponential({ base: 1_000, max: 30_000 })
       .upTo(4) // 5 tries in all
-      .while(error => error instanceof NetworkError), // other errors fail at once
+      .while(DatabaseUnavailable), // select a failure definition explicitly
   });
 ```
 
-Without `retry`, a job gets `backoff.exponential({ base: 1000 }).upTo(2)`: 3 tries, 1 s then 2 s apart. `backoff.constant(ms)` waits the same time before every retry, and `.upTo(0)` turns retries off. BullMQ's `attempts` is set to `upTo + 1`. BullMQ cannot store a function, so every job uses its custom backoff, and the job's worker asks the `Backoff` for each delay.
+Without `retry`, provider failures have a limit of three attempts. Returned business failures and canonical execution failures stop after the first attempt. `.while(DatabaseUnavailable)` explicitly selects a returned failure definition; `.while(predicate)` can select a precise subset. Both BullMQ and pg-boss use the same `Backoff.delay(attempt, failure)`, counts, and millisecond delay. Polling may make delivery later than its due time.
 
-A handler may return a failure from [`@arki/failure`](../failure) for an expected outcome, such as a declined card. The job then fails at once, without a retry: running it again would repeat the outcome, or charge the card again. It runs again only when the job's `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. The job's `failedReason` is the failure as JSON (code, message, status, data), so the board and the foreman show why it failed. A thrown error retries as before. The `runtime-local` queue (pg-boss) does not apply `retry` yet, so there a returned failure still completes the job.
+The persisted refusal contains its public code, status, message, remediation, and data. Private causes stay in process. Foreman retains that envelope. A thrown handler or middleware defect becomes `UnexpectedDefect`; bad stored input becomes `InvalidInput` or `ValidatorDefect`. These failures stop by default. Provider outages and abandoned claims remain under provider supervision; a settled handler failure is never also thrown into that retry layer.
+
+`timeoutMs` aborts `ctx.signal` and reports canonical `Deadline`; external worker cancellation reports `Cancelled`. Settlement waits for the handler and middleware to finish, so retry never overlaps owned work. Handlers must honor the signal; a handler that ignores cancellation can delay shutdown indefinitely. The older timeout middleware also waits for settlement and clears its timer; prefer `timeoutMs` when work needs the abort signal.
+
+`trigger()` and job `enqueue()` return a job id or `JobTriggerFailure`. Register `JOB_TRIGGER_FAILURES` at transport boundaries. `QueueUnavailable` means no transport is active. `QueueAcceptanceUnknown` means the acknowledgement was lost; inspect the stable idempotency key before trying again. Successful enqueue acknowledges delivery, not business success.
+
+#### Upgrade existing workers
+
+- Handle returned enqueue failures before using the job id. Keep expected refusals as returned definitions; replace transient handler throws with an explicit returned failure and `.while(Definition)`.
+- Stop and drain runtime-local workers before upgrading. pg-boss messages now use `{ version: 1, input, trace? }`; export and re-enqueue pending legacy rows with their original idempotency keys. Legacy rows left in place fail input validation, rather than running with misread input.
+- The pg-boss adapter is pinned to the 12.37 attempt-fenced `fail(name, {id,retryCount}, output, {db})` API and job schema. One PGlite transaction adjusts only the claimed attempt's retry policy, invokes native settlement, and sets the exact persisted due time. Native settlement still owns dependencies and dead-letter transitions. Re-run backend conformance before upgrading pg-boss.
+- Delivery remains at least once after worker death. External effects must use `ctx.job.id` as their idempotency key. Queue Flow remains a BullMQ dependency tree; use Journal for durable business state and replay rules.
+
+Every worker execution creates a `queue.execute` OpenTelemetry span, restores bounded producer propagation metadata on BullMQ and pg-boss messages, and records canonical refusal codes. Configure the propagator, SDK, and exporter in the app. Handler code can add spans through `trace.getTracer(...)`; telemetry failures never change delivery outcomes.
 
 ### Middleware
 
@@ -701,22 +714,22 @@ Use the pattern `featureName:jobType`:
 
 ### 4. Error Handling
 
-Let middleware handle errors, but throw specific errors when needed:
+Return defined failures for expected outcomes, and select transient failures explicitly:
 
 ```typescript
 .handler(async (data, ctx) => {
   // Validation errors (don't retry)
   if (!data.orderId) {
-    throw new Error('VALIDATION_ERROR: orderId is required');
+    return OrderInvalid();
   }
 
   // Business logic errors (don't retry)
   const order = await ctx.db.orders.findById(data.orderId);
   if (order.status === 'cancelled') {
-    throw new Error('BUSINESS_ERROR: Order is cancelled');
+    return OrderCancelled({ orderId: data.orderId });
   }
 
-  // Network/transient errors (will retry)
+  // The adapter returns its declared transient failure; the job retries only with .while(Definition).
   await externalAPI.call(data);
 
   return { success: true };
@@ -869,3 +882,7 @@ See the [examples](./examples/) directory for complete examples:
 ## License
 
 MIT
+
+Middleware refusals must be returned directly. `next().output` is observational and readonly; returning a protocol object with substituted output now fails with `UnexpectedDefect` instead of silently dropping the substitution. A middleware may call `next()` once.
+
+Runtime-local accepts arbitrary stable string `jobId` keys. Triggers generate a UUID key when none is supplied; the returned key can be reused as `jobId` to suppress duplicate delivery, including after restart, while the provider retains the job. pg-boss stores a deterministic UUID v5 identity scoped by queue name and key, while the message retains the original key for handler context and trigger results. Configure `pgBossFailedJobSource({ pglite, name: jobName })` to inspect/retry by that queue's external keys; an unscoped source keeps native UUID identifiers and includes the external `key` field for inspection.

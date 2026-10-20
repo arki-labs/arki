@@ -11,13 +11,12 @@
 import type { Job as BullMQJob, QueueOptions, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
 
-import type { AsyncSchemaFailure } from '@arki/failure';
-import { orThrow } from '@arki/failure';
-import { parseAsync } from '@arki/schema';
-
 import type { InternalFlowDefinition } from './flow-builder.ts';
+import type { FlowEnqueueFailure } from './flow-jobs.ts';
+import type { JobExecutionFailure } from './job-outcome.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
+import type { JobTriggerResult } from './trigger.ts';
 import type {
   BullMQQueueInstance,
   FlowDefinition,
@@ -26,13 +25,14 @@ import type {
   ScheduleDefinition,
 } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
-import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
+import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker, observeQueue } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
 import { addFlow } from './flow-jobs.ts';
 import { jobDefaultOptions } from './job-options.ts';
+import { executeJob } from './job-outcome.ts';
 import { defaultJobRetry, jobAttempts, throwIfReturnedFailure, workerBackoffStrategy } from './job-retry.ts';
-import { createJobContext, executeMiddlewareChain, withFeatureServices } from './middleware.ts';
 import { parseRedisConnection } from './redis-connection.ts';
+import { QueueUnavailable } from './trigger.ts';
 
 /**
  * Registry type - nested structure of jobs, schedules, and flows
@@ -84,7 +84,7 @@ export type QueueInstanceOptions<TContext> = {
 export function createQueueInstance<TContext>(options: QueueInstanceOptions<TContext>): BullMQQueueInstance {
   const { connection, keyPrefix = 'queue:', createContext } = options;
 
-  debugRegister.debug('Creating queue instance with keyPrefix: {keyPrefix}', { keyPrefix });
+  observeQueue(() => debugRegister.debug('Creating queue instance with keyPrefix: {keyPrefix}', { keyPrefix }));
 
   const connectionConfig = parseRedisConnection(connection);
 
@@ -110,63 +110,58 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   ): Queue {
     const internal = definition._internal;
 
-    debugRegister.debug('[{internalName}] Registering job definition', { internalName: internal.name });
+    observeQueue(() =>
+      debugRegister.debug('[{internalName}] Registering job definition', { internalName: internal.name }),
+    );
 
     const existing = registeredJobs.get(internal.name);
     if (existing) {
-      debugRegister.warn('Job {job} is already registered, skipping', { job: internal.name });
+      observeQueue(() => debugRegister.warn('Job {job} is already registered, skipping', { job: internal.name }));
       return existing.queue;
     }
 
     // Create BullMQ queue
-    debugRegister.debug('[{internalName}] Creating BullMQ queue with {value2} retry attempts', {
-      internalName: internal.name,
-      value2: jobAttempts(internal.options?.retry ?? defaultJobRetry),
-    });
+    observeQueue(() =>
+      debugRegister.debug('[{internalName}] Creating BullMQ queue with {value2} retry attempts', {
+        internalName: internal.name,
+        value2: jobAttempts(internal.options?.retry ?? defaultJobRetry),
+      }),
+    );
     const queue = new Queue(internal.name, jobQueueOptions(internal.options, connection, keyPrefix));
 
     // Every job retries through BullMQ's custom backoff, answered by the job's `Backoff`
     const backoffStrategy = workerBackoffStrategy(internal.options?.retry ?? defaultJobRetry);
 
     // Create BullMQ worker
-    debugWorker.debug('[{internalName}] Creating worker with concurrency: {concurrency}', {
-      internalName: internal.name,
-      concurrency: internal.options?.maxParallelism ?? 5,
-    });
+    observeQueue(() =>
+      debugWorker.debug('[{internalName}] Creating worker with concurrency: {concurrency}', {
+        internalName: internal.name,
+        concurrency: internal.options?.maxParallelism ?? 5,
+      }),
+    );
     const worker = new Worker(
       internal.name,
-      async (job: BullMQJob<TInput, TOutput | undefined>) => {
-        debugJob.debug('[{internalName}] Job {jobId} started', { internalName: internal.name, jobId: job.id });
+      async (job: BullMQJob<TInput, TOutput | JobExecutionFailure | undefined>) => {
+        observeQueue(() =>
+          debugJob.debug('[{internalName}] Job {jobId} started', { internalName: internal.name, jobId: job.id }),
+        );
 
-        // Validate input
-        debugJob.debug('[{internalName}] Job {jobId} validating input', { internalName: internal.name, jobId: job.id });
-        const validatedData = orThrow(await parseAsync(internal.inputSchema, job.data));
-        debugJob.debug('[{internalName}] Job {jobId} input validated', { internalName: internal.name, jobId: job.id });
-
-        // Create base context: the worker's, plus the services of the feature that registered the job
-        const baseContext = withFeatureServices(await createContext(), services);
-        const jobContext = createJobContext(baseContext, job);
-
-        // Execute middleware chain around the handler (onion)
-        debugJob.debug('[{internalName}] Job {jobId} executing middleware chain ({middlewaresLength} middleware)', {
-          internalName: internal.name,
-          jobId: job.id,
-          middlewaresLength: internal.middlewares.length,
-        });
-        const handlerResult = await executeMiddlewareChain<typeof jobContext, typeof jobContext, TOutput>(
-          internal.middlewares,
-          jobContext,
-          validatedData,
+        const handlerResult = await executeJob(
+          internal,
           job,
-          {}, // Meta will be populated by middleware if needed
-          ctx => internal.handler(validatedData, ctx),
+          createContext,
+          services,
+          undefined,
+          job.opts.telemetry?.metadata,
         );
         // A returned failure fails the job; the backoff decides whether it runs again.
         throwIfReturnedFailure(handlerResult);
-        debugJob.debug('[{internalName}] Job {jobId} completed successfully', {
-          internalName: internal.name,
-          jobId: job.id,
-        });
+        observeQueue(() =>
+          debugJob.debug('[{internalName}] Job {jobId} completed successfully', {
+            internalName: internal.name,
+            jobId: job.id,
+          }),
+        );
         return handlerResult;
       },
       {
@@ -185,9 +180,11 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     // Error handling
     worker.on('failed', (job: BullMQJob | undefined, error: Error) => {
       const jobId = job?.id ?? 'unknown';
-      debugJob.error('Job {job} failed (job id {jobId})', { job: internal.name, jobId, error });
+      observeQueue(() => debugJob.error('Job {job} failed (job id {jobId})', { job: internal.name, jobId, error }));
       if (job) {
-        debugJob.debug('failed job {jobId} data', () => ({ jobId, data: JSON.stringify(job.data) }));
+        observeQueue(() =>
+          debugJob.debug('failed job {jobId} data', () => ({ jobId, data: JSON.stringify(job.data) })),
+        );
       }
     });
 
@@ -200,7 +197,9 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     workers.push(worker);
     registeredJobs.set(internal.name, { definition: definition as JobDefinition<unknown, unknown, TContext>, queue });
 
-    debugRegister.debug('[{internalName}] Job registered successfully', { internalName: internal.name });
+    observeQueue(() =>
+      debugRegister.debug('[{internalName}] Job registered successfully', { internalName: internal.name }),
+    );
     return queue;
   }
 
@@ -215,11 +214,13 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     const internal = definition._internal as InternalScheduleDefinition;
     const jobName = internal.job._internal.name;
 
-    debugSchedule.debug('[{internalName}] Registering schedule definition (type: {type}, job: {job})', {
-      internalName: internal.name,
-      type: internal.type,
-      job: jobName,
-    });
+    observeQueue(() =>
+      debugSchedule.debug('[{internalName}] Registering schedule definition (type: {type}, job: {job})', {
+        internalName: internal.name,
+        type: internal.type,
+        job: jobName,
+      }),
+    );
 
     if (registeredSchedules.has(internal.name)) {
       throw duplicateScheduleError(internal.name);
@@ -230,10 +231,12 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
     if (internal.type === 'timeout') {
       // Timeout: one-time execution after delay
-      debugSchedule.debug('[{internalName}] Configuring timeout schedule with delay: {delay}ms', {
-        internalName: internal.name,
-        delay: internal.value,
-      });
+      observeQueue(() =>
+        debugSchedule.debug('[{internalName}] Configuring timeout schedule with delay: {delay}ms', {
+          internalName: internal.name,
+          delay: internal.value,
+        }),
+      );
       await queue.add(jobName, internal.data, {
         delay: internal.value as number,
         // BullMQ refuses a custom id with one `:` ("Custom Id cannot contain :")
@@ -261,27 +264,33 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       if (internal.inline) {
         for (const scheduler of await queue.getJobSchedulers()) {
           if (!scheduler.key.startsWith(SCHEDULER_ID_PREFIX)) {
-            debugSchedule.debug('[{internalName}] Removing legacy scheduler entry: {entry}', {
-              internalName: internal.name,
-              entry: scheduler.key,
-            });
+            observeQueue(() =>
+              debugSchedule.debug('[{internalName}] Removing legacy scheduler entry: {entry}', {
+                internalName: internal.name,
+                entry: scheduler.key,
+              }),
+            );
             await queue.removeJobScheduler(scheduler.key);
           }
         }
       }
 
       const schedulerId = `${SCHEDULER_ID_PREFIX}${internal.name}`;
-      debugSchedule.debug('[{internalName}] Configuring {internalType} schedule with value: {value}', {
-        internalName: internal.name,
-        internalType: internal.type,
-        value: internal.value,
-      });
+      observeQueue(() =>
+        debugSchedule.debug('[{internalName}] Configuring {internalType} schedule with value: {value}', {
+          internalName: internal.name,
+          internalType: internal.type,
+          value: internal.value,
+        }),
+      );
       await queue.upsertJobScheduler(schedulerId, repeatOptions, { name: jobName, data: internal.data });
     }
 
     registeredSchedules.set(internal.name, internal);
 
-    debugSchedule.debug('[{internalName}] Schedule registered successfully', { internalName: internal.name });
+    observeQueue(() =>
+      debugSchedule.debug('[{internalName}] Schedule registered successfully', { internalName: internal.name }),
+    );
   }
 
   /**
@@ -307,10 +316,12 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       const live = liveIds.get(jobName);
       for (const scheduler of await queue.getJobSchedulers()) {
         if (scheduler.key.startsWith(SCHEDULER_ID_PREFIX) && !live?.has(scheduler.key)) {
-          debugSchedule.debug('[{jobName}] Removing scheduler of a schedule no longer registered: {registered}', {
-            jobName,
-            registered: scheduler.key,
-          });
+          observeQueue(() =>
+            debugSchedule.debug('[{jobName}] Removing scheduler of a schedule no longer registered: {registered}', {
+              jobName,
+              registered: scheduler.key,
+            }),
+          );
           await queue.removeJobScheduler(scheduler.key);
         }
       }
@@ -323,34 +334,42 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   function registerFlowDefinition(definition: FlowDefinition, services: FeatureServices): void {
     const internal = definition._internal as InternalFlowDefinition;
 
-    debugFlow.debug('[{internalName}] Registering flow definition with {stepsLength} steps', {
-      internalName: internal.name,
-      stepsLength: internal.steps.length,
-    });
+    observeQueue(() =>
+      debugFlow.debug('[{internalName}] Registering flow definition with {stepsLength} steps', {
+        internalName: internal.name,
+        stepsLength: internal.steps.length,
+      }),
+    );
 
     if (registeredFlows.has(internal.name)) {
-      debugFlow.warn('Flow {flow} is already registered, skipping', { flow: internal.name });
+      observeQueue(() => debugFlow.warn('Flow {flow} is already registered, skipping', { flow: internal.name }));
       return;
     }
 
     // Register all jobs used in the flow
-    debugFlow.debug('[{internalName}] Registering {stepsLength} jobs for flow steps', {
-      internalName: internal.name,
-      stepsLength: internal.steps.length,
-    });
+    observeQueue(() =>
+      debugFlow.debug('[{internalName}] Registering {stepsLength} jobs for flow steps', {
+        internalName: internal.name,
+        stepsLength: internal.steps.length,
+      }),
+    );
     for (const step of internal.steps) {
       if (!registeredJobs.has(step.job._internal.name)) {
-        debugFlow.debug('[{internalName}] Registering job for step: {step}', {
-          internalName: internal.name,
-          step: step.job._internal.name,
-        });
+        observeQueue(() =>
+          debugFlow.debug('[{internalName}] Registering job for step: {step}', {
+            internalName: internal.name,
+            step: step.job._internal.name,
+          }),
+        );
         registerJobDefinition(step.job, services);
       }
     }
 
     registeredFlows.set(internal.name, internal);
 
-    debugFlow.debug('[{internalName}] Flow registered successfully', { internalName: internal.name });
+    observeQueue(() =>
+      debugFlow.debug('[{internalName}] Flow registered successfully', { internalName: internal.name }),
+    );
   }
 
   /**
@@ -392,24 +411,26 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    * Register a registry of jobs, schedules, and flows
    */
   async function register(registry: Registry, options?: RegisterOptions): Promise<void> {
-    debugRegister.debug('Starting registry traversal');
+    observeQueue(() => debugRegister.debug('Starting registry traversal'));
     // Each top-level branch runs with its own services (a feature's, keyed by its name), if any
     for (const [key, value] of Object.entries(registry)) {
       await traverseRegistry({ [key]: value }, options?.services?.[key]);
     }
-    debugRegister.debug('Registry traversal complete');
+    observeQueue(() => debugRegister.debug('Registry traversal complete'));
   }
 
   /**
    * Start all workers
    */
   async function start(): Promise<void> {
-    debugWorker.debug('Starting queue infrastructure');
-    debugWorker.debug('Jobs registered: {registered}', { registered: registeredJobs.size });
-    debugWorker.debug('Schedules registered: {registered}', { registered: registeredSchedules.size });
-    debugWorker.debug('Flows registered: {registered}', { registered: registeredFlows.size });
-    debugWorker.debug('Workers created: {created}', { created: workers.length });
-    debugWorker.debug('Queues created: {created}', { created: queues.length });
+    observeQueue(() => debugWorker.debug('Starting queue infrastructure'));
+    observeQueue(() => debugWorker.debug('Jobs registered: {registered}', { registered: registeredJobs.size }));
+    observeQueue(() =>
+      debugWorker.debug('Schedules registered: {registered}', { registered: registeredSchedules.size }),
+    );
+    observeQueue(() => debugWorker.debug('Flows registered: {registered}', { registered: registeredFlows.size }));
+    observeQueue(() => debugWorker.debug('Workers created: {created}', { created: workers.length }));
+    observeQueue(() => debugWorker.debug('Queues created: {created}', { created: queues.length }));
 
     // Every schedule is registered by now; drop schedulers left by removed ones before any tick runs
     await pruneStaleSchedulers();
@@ -419,30 +440,32 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
         startedWorkers.add(worker);
         // Worker.run() resolves when worker stops, so fire-and-forget here.
         void worker.run().catch(error => {
-          debugWorker.error('Worker {worker} stopped unexpectedly', { worker: worker.name, error });
+          observeQueue(() => debugWorker.error('Worker {worker} stopped unexpectedly', { worker: worker.name, error }));
         });
       }
       await worker.waitUntilReady();
     }
 
-    debugRegister.debug('queue infrastructure started: {jobs} jobs, {schedules} schedules, {flows} flows', {
-      jobs: registeredJobs.size,
-      schedules: registeredSchedules.size,
-      flows: registeredFlows.size,
-    });
+    observeQueue(() =>
+      debugRegister.debug('queue infrastructure started: {jobs} jobs, {schedules} schedules, {flows} flows', {
+        jobs: registeredJobs.size,
+        schedules: registeredSchedules.size,
+        flows: registeredFlows.size,
+      }),
+    );
   }
 
   /**
    * Stop all workers and close connections
    */
   async function stop(): Promise<void> {
-    debugWorker.debug('Shutting down queue infrastructure');
+    observeQueue(() => debugWorker.debug('Shutting down queue infrastructure'));
 
     // Close all workers
-    debugWorker.debug('Closing {workersLength} workers', { workersLength: workers.length });
+    observeQueue(() => debugWorker.debug('Closing {workersLength} workers', { workersLength: workers.length }));
     await Promise.all(
       workers.map(async worker => {
-        debugWorker.debug('Closing worker: {worker}', { worker: worker.name });
+        observeQueue(() => debugWorker.debug('Closing worker: {worker}', { worker: worker.name }));
         await worker.close();
       }),
     );
@@ -453,15 +476,15 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     await openFlowProducer?.close();
 
     // Close all queues
-    debugWorker.debug('Closing {queuesLength} queues', { queuesLength: queues.length });
+    observeQueue(() => debugWorker.debug('Closing {queuesLength} queues', { queuesLength: queues.length }));
     await Promise.all(
       queues.map(async queue => {
-        debugWorker.debug('Closing queue: {queue}', { queue: queue.name });
+        observeQueue(() => debugWorker.debug('Closing queue: {queue}', { queue: queue.name }));
         await queue.close();
       }),
     );
 
-    debugWorker.debug('Queue infrastructure shut down successfully');
+    observeQueue(() => debugWorker.debug('Queue infrastructure shut down successfully'));
   }
 
   /**
@@ -472,16 +495,16 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     job: JobDefinition<TInput, TOutput, TJobContext>,
     data: TInput,
     options?: TriggerOptions,
-  ): Promise<string>;
+  ): Promise<JobTriggerResult>;
   function enqueue<TInput>(
     flow: FlowDefinition<TInput>,
     input: NoInfer<TInput>,
-  ): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
+  ): Promise<FlowEnqueueResult | FlowEnqueueFailure>;
   async function enqueue(
     target: AnyJobDefinition | FlowDefinition,
     data: unknown,
     options?: TriggerOptions,
-  ): Promise<string | FlowEnqueueResult | AsyncSchemaFailure> {
+  ): Promise<JobTriggerResult | FlowEnqueueResult | FlowEnqueueFailure> {
     if (target._type === 'flow') {
       return addFlow(
         () => (flowProducer ??= new FlowProducer({ connection: connectionConfig, prefix: keyPrefix })),
@@ -491,9 +514,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     }
     const registered = registeredJobs.get(target._internal.name);
     if (!registered) {
-      throw new Error(
-        `Job "${target._internal.name}" is not registered with a queue. Call queue.register() before calling enqueue().`,
-      );
+      return QueueUnavailable();
     }
     return registered.definition.trigger(data, options);
   }

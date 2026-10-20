@@ -6,6 +6,7 @@
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
+import type { CommandFailure } from './errors.js';
 import type { EntityBuilder } from './entity.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
@@ -136,7 +137,7 @@ export type CallOptions = {
    * Makes the call idempotent. The first run with this key records its result in
    * `journal_receipts`, in its own transaction. A later run with the same key and the same
    * input returns that result without running the handler; the same key with another input
-   * or another command is `CONFLICT`. The result must survive JSON storage, or the first run
+   * or another command returns `CommandConflict`. The result must survive JSON storage, or the first run
    * fails with `UNSTABLE_SCHEMA`. Scope a key from outside to its caller: `${tenant}:${id}`.
    */
   readonly idempotencyKey?: string;
@@ -186,7 +187,7 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     command: Command<S, R, MetaOut, Tx>,
     input: NoInfer<SchemaInput<S>>,
     opts?: CallOptions,
-  ) => Promise<Awaited<R> | SchemaFailure>;
+  ) => Promise<Awaited<R> | CommandFailure>;
   /**
    * Marks a refusal that `write` or `run` returned as handled, so the handler may still return a
    * success: `if (OutOfStock.is(r)) { accept(r); ... }`. Without it, a success after a refusal
@@ -213,7 +214,7 @@ export type RootCommandRunner<
   input: NoInfer<SchemaInput<S>>,
   meta: SchemaInput<Meta>,
   opts?: CallOptions,
-) => Promise<Awaited<R> | SchemaFailure>;
+) => Promise<Awaited<R> | CommandFailure>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -256,7 +257,8 @@ export type Journal<
   /**
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
-   * opens a savepoint. Returns what the handler returns. Errors pass through.
+   * opens a savepoint. Returns what the handler returns. Unexpected callback
+   * exceptions and runtime invariants return typed transaction failures with a private cause.
    * A returned failure (`@arki/failure`) rolls the transaction back like a throw, and is
    * returned, the same instance.
    * On a root database, a run that queued a job calls `wake()` after the commit.
@@ -267,7 +269,7 @@ export type Journal<
     input: NoInfer<SchemaInput<S>>,
     meta: SchemaInput<Meta>,
     opts?: RunOptions,
-  ): Promise<Awaited<R> | SchemaFailure>;
+  ): Promise<Awaited<R> | CommandFailure>;
   /**
    * The command door: `run` with `source` and `meta` fixed. It returns
    * `(command, input) => journal.run(source, command, input, meta)`. A request

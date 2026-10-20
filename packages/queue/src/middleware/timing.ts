@@ -3,6 +3,9 @@
  * Tracks job execution time and adds delays in development
  */
 
+import { Deadline } from '@arki/async';
+import { UnexpectedFailure } from '@arki/failure';
+
 import type { MiddlewareFunction } from '../types/middleware.ts';
 import type { QueueMeta } from '../types/queue.ts';
 
@@ -220,13 +223,17 @@ export function timeoutMiddleware<TContext>(options: {
    */
   message?: string;
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
-  return async ({ next, job }) => {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(options.message ?? `Job ${job.name} timed out after ${options.timeout}ms`));
-      }, options.timeout);
-    });
-
-    return Promise.race([next(), timeoutPromise]);
+  return async ({ next }) => {
+    let expired = false;
+    const timer = setTimeout(() => {
+      expired = true;
+    }, options.timeout);
+    try {
+      const result = await next();
+      if (expired) throw new UnexpectedFailure(Deadline());
+      return result;
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }

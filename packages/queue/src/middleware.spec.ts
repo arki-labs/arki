@@ -923,7 +923,7 @@ describe('Onion order (middleware wraps the handler)', () => {
     const settled = await runToEnd(job._internal._queue!, 'onion-error', {});
 
     expect(caught).toEqual(['handler failed']);
-    expect(settled.failedReason).toBe('handler failed');
+    expect(JSON.parse(settled.failedReason)).toMatchObject({ code: 'failure.unexpected_defect' });
 
     await queue.stop();
   }, 15000);

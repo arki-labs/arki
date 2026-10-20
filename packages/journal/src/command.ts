@@ -10,19 +10,21 @@ import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
 import type { SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { runTransactionOnce, TransactionDefect } from '@arki/db/transaction';
 import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, RunOptions } from './api.js';
+import type { CommandFailure } from './errors.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
 import type { CommandHookContext, DbHandle, Trace, TransactionSource } from './types.js';
 import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
-import { JournalError } from './errors.js';
+import { CommandConflict, JournalError } from './errors.js';
 import { commandId, correlationId } from './id.js';
 import { trackRefusals } from './refusals.js';
-import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
+import { isReturnedFailure } from './rollback.js';
 import { assertRoundTrips, sameValue } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
 
@@ -70,7 +72,7 @@ export function createCommandRunner<
     name: string,
     input: unknown,
     own: string,
-  ): Promise<{ readonly replay: unknown } | undefined> => {
+  ): Promise<{ readonly replay: unknown } | CommandConflict | undefined> => {
     const inserted = await tx
       .insert(receipts)
       .values({ key, command: name, input: throughJson(input) ?? null, commandId: own })
@@ -86,19 +88,9 @@ export function createCommandRunner<
         `journal: idempotency key ${JSON.stringify(key)} is held by a run of "${held.command}" that has not finished; a key cannot be reused inside its own transaction`,
       );
     if (held.command !== name)
-      throw new JournalError(
-        'CONFLICT',
-        'receipt',
-        key,
-        `the idempotency key is held by command "${held.command}", not "${name}"`,
-      );
+      return CommandConflict({ detail: `the idempotency key is held by command "${held.command}", not "${name}"` });
     if (!sameValue(held.input, throughJson(input) ?? null))
-      throw new JournalError(
-        'CONFLICT',
-        'receipt',
-        key,
-        `the idempotency key was used by command "${name}" with a different input`,
-      );
+      return CommandConflict({ detail: `the idempotency key was used by command "${name}" with a different input` });
     return { replay: 'value' in held.result ? held.result.value : undefined };
   };
 
@@ -135,8 +127,8 @@ export function createCommandRunner<
     parent: Omit<Trace, 'commandId'>,
     key: string | undefined,
     fence?: Fence,
-  ): Promise<Awaited<R> | SchemaFailure> =>
-    oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R> | SchemaFailure> => {
+  ): Promise<Awaited<R> | CommandFailure> =>
+    oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R> | CommandFailure> => {
       hooks.freeze();
       const meta = await getValidatedMeta();
       if (isSchemaFailure(meta)) return meta;
@@ -151,120 +143,126 @@ export function createCommandRunner<
       });
       // A failure the handler or `authorize` returns rolls the transaction back, like a throw,
       // and is what the run returns: a rule that says no never leaves half a change behind.
-      const refusal = rollbackOnFailure<Awaited<R> | SchemaFailure>();
-      const transaction = source.transaction(async (tx): Promise<Awaited<R> | SchemaFailure> => {
-        // First statement of the transaction: a stale owner commits nothing, and a claim waits for this commit.
-        await fence?.(tx);
-        // Every operation the handler starts through this context. The transaction
-        // must not close while one is still running: its work would land outside.
-        const started: Promise<unknown>[] = [];
-        let unfinished = 0;
-        const track = <T>(operation: Promise<T>): Promise<T> => {
-          started.push(operation);
-          unfinished += 1;
-          const done = () => {
-            unfinished -= 1;
+      return runTransactionOnce<Tx, Awaited<R> | CommandFailure>(
+        source,
+        async (tx): Promise<Awaited<R> | CommandFailure> => {
+          // First statement of the transaction: a stale owner commits nothing, and a claim waits for this commit.
+          await fence?.(tx);
+          // Every operation the handler starts through this context. The transaction
+          // must not close while one is still running: its work would land outside.
+          const started: Promise<unknown>[] = [];
+          let unfinished = 0;
+          const track = <T>(operation: Promise<T>): Promise<T> => {
+            started.push(operation);
+            unfinished += 1;
+            const done = () => {
+              unfinished -= 1;
+            };
+            void operation.then(done, done);
+            return operation;
           };
-          void operation.then(done, done);
-          return operation;
-        };
-        // Every failure a write's `events` or a child command returned. While one is not accepted,
-        // the command is doomed: it must end with a failure, or an ignored refusal would commit the rest.
-        const refusals = trackRefusals('command', command.name, 'write or run');
-        const { watch } = refusals;
-        /** The handler's result, unless it is a success after a failure it did not accept: then the run throws and rolls back. */
-        const handle = async (): Promise<Awaited<R> | SchemaFailure> => {
-          let value: Awaited<R>;
-          try {
-            value = await command.handler(parsed, context);
-          } finally {
-            refusals.finish();
-          }
-          const ignored = refusals.unhandled();
-          if (ignored === undefined || isReturnedFailure(value)) return value;
-          throw new JournalError(
-            'IGNORED_FAILURE',
-            'command',
-            command.name,
-            `${ignored.from} returned the failure "${ignored.failure.code}", but the handler returned a success`,
-          );
-        };
-        const context: CommandContext<MetaOut, Tx> = {
-          tx,
-          meta,
-          commandId: own,
-          correlationId: trace.correlationId,
-          write: (entity, id, events, opts) =>
-            track(
-              writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs, opts).then(
-                watch(`the write to ${entity.kind} ${id}`),
+          // Every failure a write's `events` or a child command returned. While one is not accepted,
+          // the command is doomed: it must end with a failure, or an ignored refusal would commit the rest.
+          const refusals = trackRefusals('command', command.name, 'write or run');
+          const { watch } = refusals;
+          /** The handler's result, unless it is a success after a failure it did not accept: then the run throws and rolls back. */
+          const handle = async (): Promise<Awaited<R> | CommandFailure> => {
+            let value: Awaited<R>;
+            try {
+              value = await command.handler(parsed, context);
+            } finally {
+              refusals.finish();
+            }
+            const ignored = refusals.unhandled();
+            if (ignored === undefined || isReturnedFailure(value)) return value;
+            throw new JournalError(
+              'IGNORED_FAILURE',
+              'command',
+              command.name,
+              `${ignored.from} returned the failure "${ignored.failure.code}", but the handler returned a success`,
+            );
+          };
+          const context: CommandContext<MetaOut, Tx> = {
+            tx,
+            meta,
+            commandId: own,
+            correlationId: trace.correlationId,
+            write: (entity, id, events, opts) =>
+              track(
+                writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs, opts).then(
+                  watch(`the write to ${entity.kind} ${id}`),
+                ),
               ),
-            ),
-          run: (child, childInput, childOpts) =>
-            track(
-              runCommand(
-                tx,
-                child,
-                childInput,
-                () => Promise.resolve(meta),
-                onJobs,
-                trace,
-                childOpts?.idempotencyKey,
-              ).then(watch(`the child command "${child.name}"`)),
-            ),
-          accept: refusals.accept,
-        };
-        let result: Awaited<R> | SchemaFailure;
-        try {
-          // Inside the transaction: a hook that throws rolls the command back cleanly.
-          result = await hooks.run(
-            {
-              name: command.name,
-              input: parsed,
-              meta,
-              commandId: own,
-              correlationId: trace.correlationId,
-              idempotencyKey: key ?? null,
-            },
-            async (): Promise<Awaited<R> | SchemaFailure> => {
-              // Before the receipt: a receipt proves the command ran once, not that this caller
-              // may have its result. A replay is authorized like a first run.
-              if (command.authorize !== undefined) {
-                const refused = await command.authorize(parsed, { tx, meta });
-                if (isReturnedFailure(refused)) return refused;
-              }
-              if (key === undefined) return await handle();
-              const held = await claimReceipt(tx, key, command.name, parsed, own);
-              if (held !== undefined) {
-                debugCommand.debug('{commandName}: replayed from receipt {key}', { commandName: command.name, key });
-                // The receipt holds what this same command returned earlier, in the JSON form
-                // `storeReceipt` checked against the live value. This is the one cast in the library.
-                return held.replay as Awaited<R>;
-              }
-              const value = await handle();
-              // A refusal is not stored: the rollback takes the claimed key back, so a repeat runs again.
-              if (isReturnedFailure(value)) return value;
-              await storeReceipt(tx, key, command.name, value);
-              return value;
-            },
-          );
-        } catch (error) {
-          // The handler's own error is the one to report; the rollback undoes the rest.
-          await Promise.allSettled(started);
-          throw error;
-        }
-        if (unfinished > 0) {
-          const count = unfinished;
-          await Promise.allSettled(started);
-          throw new Error(
-            `journal: command "${command.name}" returned with ${count} journal operation${count === 1 ? '' : 's'} still running; await every write and run before the handler returns`,
-          );
-        }
-        debugCommand.debug('{commandName}: done', { commandName: command.name });
-        return refusal.settle(result);
-      });
-      return transaction.catch(refusal.recover);
-    });
+            run: (child, childInput, childOpts) =>
+              track(
+                runCommand(
+                  tx,
+                  child,
+                  childInput,
+                  () => Promise.resolve(meta),
+                  onJobs,
+                  trace,
+                  childOpts?.idempotencyKey,
+                ).then(watch(`the child command "${child.name}"`)),
+              ),
+            accept: refusals.accept,
+          };
+          let result: Awaited<R> | CommandFailure;
+          try {
+            // Inside the transaction: a hook that throws rolls the command back cleanly.
+            result = await hooks.run(
+              {
+                name: command.name,
+                input: parsed,
+                meta,
+                commandId: own,
+                correlationId: trace.correlationId,
+                idempotencyKey: key ?? null,
+              },
+              async (): Promise<Awaited<R> | CommandFailure> => {
+                // Before the receipt: a receipt proves the command ran once, not that this caller
+                // may have its result. A replay is authorized like a first run.
+                if (command.authorize !== undefined) {
+                  const refused = await command.authorize(parsed, { tx, meta });
+                  if (isReturnedFailure(refused)) return refused;
+                }
+                if (key === undefined) return await handle();
+                const held = await claimReceipt(tx, key, command.name, parsed, own);
+                if (CommandConflict.is(held)) return held;
+                if (held !== undefined) {
+                  debugCommand.debug('{commandName}: replayed from receipt {key}', {
+                    commandName: command.name,
+                    key,
+                  });
+                  // The receipt holds what this same command returned earlier, in the JSON form
+                  // `storeReceipt` checked against the live value. This is the one cast in the library.
+                  return held.replay as Awaited<R>;
+                }
+                const value = await handle();
+                // A refusal is not stored: the rollback takes the claimed key back, so a repeat runs again.
+                if (isReturnedFailure(value)) return value;
+                await storeReceipt(tx, key, command.name, value);
+                return value;
+              },
+            );
+          } catch (error) {
+            // The handler's own error is the one to report; the rollback undoes the rest.
+            await Promise.allSettled(started);
+            throw error;
+          }
+          if (isReturnedFailure(result)) await Promise.allSettled(started);
+          if (unfinished > 0) {
+            const count = unfinished;
+            await Promise.allSettled(started);
+            throw new Error(
+              `journal: command "${command.name}" returned with ${count} journal operation${count === 1 ? '' : 's'} still running; await every write and run before the handler returns`,
+            );
+          }
+          debugCommand.debug('{commandName}: done', { commandName: command.name });
+          return result;
+        },
+      );
+    }).catch(error => TransactionDefect({ cause: error }));
 
   /**
    * `journal.run`: parses `meta` once for the whole command. `cause` is set only by an
@@ -279,7 +277,7 @@ export function createCommandRunner<
     opts?: RunOptions,
     cause?: { readonly seq: number; readonly correlationId: string | null },
     fence?: Fence,
-  ): Promise<Awaited<R> | SchemaFailure> => {
+  ): Promise<Awaited<R> | CommandFailure> => {
     let queued = 0;
     return runCommand(
       source,
@@ -305,7 +303,7 @@ export function createCommandRunner<
     ).then(result => {
       // The root database has committed by now. Inside a caller's transaction
       // only the caller knows when the commit happens, so the caller wakes.
-      if (queued > 0 && !is(source, PgAsyncTransaction)) deps.wake();
+      if (queued > 0 && !isReturnedFailure(result) && !is(source, PgAsyncTransaction)) deps.wake();
       return result;
     });
   };

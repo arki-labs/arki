@@ -96,8 +96,8 @@ export type FailRefundInput = z.input<typeof failRefundInputSchema>;
 
 /**
  * What `RefundService` calls to change a refund. Each function runs one
- * command and returns the row as it is after the write, or the failure the
- * command returned when a rule said no (nothing was written).
+ * command and returns the row after the write, or the command's canonical
+ * schema, rule or transaction failure. An uncertain commit may already be durable.
  */
 export type RefundWrites = ReturnType<ReturnType<typeof createRefundsJournal>['writes']>;
 

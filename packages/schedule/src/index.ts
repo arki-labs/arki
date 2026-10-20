@@ -13,8 +13,9 @@ type BaseScheduleOptions = {
   readonly overlap?: ScheduleOverlap;
   /**
    * `true` hands this schedule to a durable backend (a BullMQ job scheduler
-   * through `@arki/queue`): each tick runs once across replicas, and a tick
-   * that fell due while no worker ran still runs once when one comes back.
+   * through `@arki/queue`): workers distribute ticks across replicas. A tick
+   * missed while down runs when a worker comes back. Delivery is at least once;
+   * handlers must make external effects idempotent.
    * Default `false`: an in-process timer that skips ticks missed while down.
    */
   readonly durable?: boolean;
@@ -39,18 +40,19 @@ export type ScheduleLock = {
 export type ScheduleRun = { readonly lock?: ScheduleLock };
 
 /** The handler's resolved value is kept on a `ran` result (`ScheduleRunResult`). */
-type ScheduleHandler<TContext> = (ctx: TContext, run: ScheduleRun) => Promise<unknown>;
+type ScheduleHandler<TContext, TResult> = (ctx: TContext, run: ScheduleRun) => Promise<TResult>;
 
-type BaseScheduleOptionsWithContext<TContext> = BaseScheduleOptions & {
-  readonly handler: ScheduleHandler<TContext>;
+type BaseScheduleOptionsWithContext<TContext, TResult, TName extends string> = Omit<BaseScheduleOptions, 'name'> & {
+  readonly name: TName;
+  readonly handler: ScheduleHandler<TContext, TResult>;
 };
 
-export type DefineScheduleOptions<TContext = undefined> =
-  | (BaseScheduleOptionsWithContext<TContext> & {
+export type DefineScheduleOptions<TContext = undefined, TResult = unknown, TName extends string = string> =
+  | (BaseScheduleOptionsWithContext<TContext, TResult, TName> & {
       readonly cron: string;
       readonly every?: never;
     })
-  | (BaseScheduleOptionsWithContext<TContext> & {
+  | (BaseScheduleOptionsWithContext<TContext, TResult, TName> & {
       readonly every: ScheduleInterval;
       readonly cron?: never;
     });
@@ -112,14 +114,14 @@ export function lockDurationMs(value: LockDuration): number {
   );
 }
 
-export type ScheduleDef<TContext = undefined> = {
-  readonly name: string;
+export type ScheduleDef<TContext = undefined, TResult = unknown, TName extends string = string> = {
+  readonly name: TName;
   readonly cron?: string;
   readonly every?: ScheduleInterval;
   readonly timezone?: string;
   readonly overlap: ScheduleOverlap;
   readonly durable: boolean;
-  readonly handler: ScheduleHandler<TContext>;
+  readonly handler: ScheduleHandler<TContext, TResult>;
   /**
    * Run only while holding `key` in `locks`; a run that finds it held is
    * `skipped-lock`. Bound by `schedules(core, [{ lock }])` at boot. The key is
@@ -152,10 +154,12 @@ export function parseEveryInterval(value: ScheduleInterval): number {
   return amount * 3_600_000;
 }
 
-export function defineSchedule<TContext = undefined>(options: DefineScheduleOptions<TContext>): ScheduleDef<TContext> {
-  const name = options.name.trim();
-  if (name === '') {
-    throw invalid('[schedule] schedule name must be a non-empty string.');
+export function defineSchedule<TContext = undefined, TResult = unknown, const TName extends string = string>(
+  options: DefineScheduleOptions<TContext, TResult, TName>,
+): ScheduleDef<TContext, TResult, TName> {
+  const name = options.name;
+  if (name.trim() === '' || name !== name.trim()) {
+    throw invalid('[schedule] schedule name must be a non-empty string without surrounding spaces.');
   }
 
   const durable = options.durable ?? false;
@@ -201,18 +205,21 @@ export function defineSchedule<TContext = undefined>(options: DefineScheduleOpti
   };
 }
 
-export { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
+export { ScheduleError, ScheduleLockFailed, SCHEDULE_ERROR_CODES, SCHEDULE_RUNTIME_FAILURES } from './errors.js';
 export type {
   DurableScheduleRegistration,
   DurableScheduler,
   ScheduleClock,
   ScheduleOutcome,
+  ScheduleRefusal,
   ScheduleRunResult,
   ScheduleRunStatus,
 } from './runtime.js';
 
 export type ScheduleBuilder<TContext> = {
-  define(options: DefineScheduleOptions<TContext>): ScheduleDef<TContext>;
+  define<TResult, const TName extends string>(
+    options: DefineScheduleOptions<TContext, TResult, TName>,
+  ): ScheduleDef<TContext, TResult, TName>;
 };
 
 export const initSchedule = {
@@ -220,7 +227,7 @@ export const initSchedule = {
     return {
       create(): ScheduleBuilder<TContext> {
         return {
-          define: defineSchedule<TContext>,
+          define: options => defineSchedule(options),
         };
       },
     };

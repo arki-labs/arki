@@ -89,6 +89,8 @@ Import the provider failures from `@arki/payments/core/providers/provider-error`
 
 The journal commands (`createCoreJournal(...).commands`, `createRefundsJournal(...).commands`) and the `writes(run)` functions return the journal's own failures when a rule says no, and write nothing: `CommandNotFound` (`journal.not_found`, 404), `CommandConflict` (`journal.conflict`, 409) and `CommandInvalid` (`journal.invalid`, 400), from `@arki/journal`. Their `detail` is the message. Schema validation also returns the canonical `@arki/failure` values `InvalidInput`, `AsyncSchema` and `ValidatorDefect`, without writing. `SubscriptionManager`, `DunningService.handlePaymentFailure` and `handleSubscriptionRecovery`, and `RefundService` return them on. The webhook handler throws them with `orThrow`, so a refused write fails the event and the provider's resend tries it again.
 
+Managed journal transactions also return the canonical transaction failures from `@arki/db/errors`. `RefundService.requestRefund` maps only `TransactionRejected` with SQLSTATE `23505` and the pending-refund index in its private cause to `DuplicatePendingRefund`; it preserves the transaction failure as the cause. Other transaction failures pass through unchanged. `TransactionCommitUncertain` means the write may be durable: reconcile the stored refund before retrying or contacting the provider.
+
 Handle each failure by what it says about your data:
 
 - `CardDeclined`: ask for another card. `IdempotencyConflict`: use a new key.

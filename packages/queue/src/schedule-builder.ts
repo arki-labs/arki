@@ -60,7 +60,7 @@ import type {
 import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
-import { debugBuilder } from './debug.ts';
+import { debugBuilder, observeQueue } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import { createJobBuilder } from './job-builder.ts';
 
@@ -145,11 +145,13 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
   config: QueueConfig,
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[],
 ): ScheduleBuilderDef<TContext, TContextOut, TMeta> {
-  debugBuilder.debug('Creating schedule builder (type: {type}, value: {value}, middleware: {middleware})', {
-    type: scheduleType,
-    value: scheduleValue,
-    middleware: middlewares.length,
-  });
+  observeQueue(() =>
+    debugBuilder.debug('Creating schedule builder (type: {type}, value: {value}, middleware: {middleware})', {
+      type: scheduleType,
+      value: scheduleValue,
+      middleware: middlewares.length,
+    }),
+  );
 
   const state: ScheduleBuilderState<never> = {
     config,
@@ -161,7 +163,9 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
 
   return {
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
-      debugBuilder.debug('Adding middleware to schedule (total: {total})', { total: middlewares.length + 1 });
+      observeQueue(() =>
+        debugBuilder.debug('Adding middleware to schedule (total: {total})', { total: middlewares.length + 1 }),
+      );
 
       // One runtime object serves both typestates: the ScheduleBuilderWithMiddleware
       // type hides `.job()` after `.use()`; the throw in scheduleJob() backs it up.
@@ -179,7 +183,7 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
     },
 
     name(name: string) {
-      debugBuilder.debug('Setting schedule name: {name}', { name });
+      observeQueue(() => debugBuilder.debug('Setting schedule name: {name}', { name }));
 
       // One runtime object serves every named typestate: ScheduleBuilderNamed
       // offers `.job()` and `.input()`, ScheduleBuilderNeedsInput hides `.job()`
@@ -210,18 +214,20 @@ function scheduleJob<TInput>(
     });
   }
 
-  debugBuilder.debug('Wrapping existing job: {job}', { job: job._internal.name });
+  observeQueue(() => debugBuilder.debug('Wrapping existing job: {job}', { job: job._internal.name }));
 
   return {
     data(data: TInput): ScheduleDefinition {
       // Generate name from job if not explicitly set
       const scheduleName = state.name ?? `${job._internal.name}-schedule`;
 
-      debugBuilder.debug('[{scheduleName}] Creating schedule definition (type: {type}, triggers: {triggers})', {
-        scheduleName,
-        type: state.scheduleType,
-        triggers: job._internal.name,
-      });
+      observeQueue(() =>
+        debugBuilder.debug('[{scheduleName}] Creating schedule definition (type: {type}, triggers: {triggers})', {
+          scheduleName,
+          type: state.scheduleType,
+          triggers: job._internal.name,
+        }),
+      );
 
       const internal: InternalScheduleDefinition<AnyJobDefinition> = {
         type: state.scheduleType,
@@ -256,7 +262,9 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
     },
 
     input<TNewInput>(schema: StandardSchemaV1<unknown, TNewInput>) {
-      debugBuilder.debug('[{value1}] Setting input schema for schedule', { value1: state.name ?? 'unnamed' });
+      observeQueue(() =>
+        debugBuilder.debug('[{value1}] Setting input schema for schedule', { value1: state.name ?? 'unnamed' }),
+      );
 
       return createScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
         ...state,
@@ -281,14 +289,16 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
         });
       }
 
-      debugBuilder.debug(
-        '[{stateName}] Creating inline schedule definition (type: {type}, value: {value}, middleware: {middleware})',
-        {
-          stateName: state.name,
-          type: state.scheduleType,
-          value: state.scheduleValue,
-          middleware: state.middlewares.length,
-        },
+      observeQueue(() =>
+        debugBuilder.debug(
+          '[{stateName}] Creating inline schedule definition (type: {type}, value: {value}, middleware: {middleware})',
+          {
+            stateName: state.name,
+            type: state.scheduleType,
+            value: state.scheduleValue,
+            middleware: state.middlewares.length,
+          },
+        ),
       );
 
       // An inline schedule is an anonymous job named after the schedule: its

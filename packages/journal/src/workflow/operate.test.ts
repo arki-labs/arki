@@ -9,6 +9,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { TransactionDefect } from '@arki/db/transaction';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
@@ -233,7 +234,7 @@ describe('retryStep', () => {
     expect(await retry()).toEqual({ how: 'childrenRestarted' });
     // The new child exists at once, and the node waits for it again, so a second retry has nothing to retry.
     expect(await childrenOf(id)).toHaveLength(2);
-    await expect(retry()).rejects.toMatchObject({ code: 'STEP_NOT_DEAD' });
+    await expect(retry()).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
     await settle();
 
     expect(await childrenOf(id)).toEqual([
@@ -250,21 +251,21 @@ describe('retryStep', () => {
     const refused = (path: string, phase: 'do' | 'undo' = 'do') =>
       journal.workflows.retryStep(db, { runId: id, path, phase }, operator);
     // A finished run, a step that is done, a step that never ran, and a run nobody started.
-    await expect(refused('ship')).rejects.toMatchObject({ code: 'WORKFLOW_FINISHED' });
+    await expect(refused('ship')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_FINISHED' } });
     const open = newId('open');
     expectOk(await journal.run(db, refunding.start, { input: {}, id: open }, caller));
     await settle();
     const openStep = (path: string, phase: 'do' | 'undo') =>
       journal.workflows.retryStep(db, { runId: open, path, phase }, operator);
-    await expect(openStep('charge', 'do')).rejects.toMatchObject({ code: 'STEP_NOT_DEAD' });
-    await expect(openStep('charge', 'undo')).rejects.toMatchObject({ code: 'STEP_NOT_DEAD' });
-    await expect(openStep('nowhere', 'do')).rejects.toMatchObject({ code: 'STEP_NOT_DEAD' });
+    await expect(openStep('charge', 'do')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
+    await expect(openStep('charge', 'undo')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
+    await expect(openStep('nowhere', 'do')).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
     await expect(
       journal.workflows.retryStep(db, { runId: 'missing', path: 'ship', phase: 'do' }, operator),
-    ).rejects.toMatchObject({ code: 'WORKFLOW_NOT_FOUND' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_NOT_FOUND' } });
     await expect(
       journal.workflows.retryStep(db, { runId: open, path: 'charge', phase: 'do' }, { actor: ' ' }),
-    ).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'BAD_ARGUMENT' } });
   });
 });
 
@@ -283,12 +284,12 @@ describe('resolveStep', () => {
     await settle();
     await expect(
       journal.workflows.resolveStep(db, { runId: plain, path: 'legacy', result: 'anything' }, operator),
-    ).rejects.toMatchObject({ code: 'STEP_NOT_RESOLVABLE' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_RESOLVABLE' } });
 
     // A step that is not dead cannot be resolved either.
     await expect(
       journal.workflows.resolveStep(db, { runId: id, path: 'charge', result: 'x' }, operator),
-    ).rejects.toMatchObject({ code: 'STEP_NOT_DEAD' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'STEP_NOT_DEAD' } });
   });
 
   it('resolveStep continues the run as if the step had completed', async () => {
@@ -349,7 +350,7 @@ describe('skipUndo', () => {
     // Giving up work that stays done needs a reason on the record.
     await expect(
       journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, { actor: 'usr_ops' }),
-    ).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'BAD_ARGUMENT' } });
     orThrow(await journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator));
     await settle();
 
@@ -358,9 +359,7 @@ describe('skipUndo', () => {
     expect(await stepRow(id, 'charge', 'undo')).toMatchObject({ status: 'skipped', reason: 'the provider is back' });
     const detail = await journal.workflows.run(db, id);
     expect(detail?.residual).toEqual(['charge']);
-    await expect(journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator)).rejects.toMatchObject({
-      code: 'WORKFLOW_FINISHED',
-    });
+    await expect(journal.workflows.skipUndo(db, { runId: id, path: 'charge' }, operator)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_FINISHED' } });
   });
 });
 

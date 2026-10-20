@@ -15,8 +15,8 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { FailureOf, SchemaFailure } from '@arki/failure';
-import type { CommandConflict, CommandInvalid, CommandRunner } from '@arki/journal';
+import type { FailureOf } from '@arki/failure';
+import type { CommandConflict, CommandFailure, CommandInvalid, CommandRunner } from '@arki/journal';
 import { instant } from '@arki/date';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { CommandNotFound } from '@arki/journal';
@@ -505,9 +505,9 @@ describe('writes(run): what the services call', () => {
 });
 
 describe('types', () => {
-  it('exposes schema failures so callers cannot treat a refused sync as a stored subscription', () => {
-    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<SchemaFailure>();
-    expectTypeOf<FailureOf<CoreWrites['initiatePayment']>>().extract<SchemaFailure>().toEqualTypeOf<SchemaFailure>();
+  it('exposes owned command failures so callers cannot treat a refused sync as a stored subscription', () => {
+    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<CommandFailure>();
+    expectTypeOf<FailureOf<CoreWrites['initiatePayment']>>().extract<CommandFailure>().toEqualTypeOf<CommandFailure>();
   });
 
 

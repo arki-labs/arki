@@ -26,15 +26,26 @@ export function jobAttempts(retry: Backoff): number {
 /** The job option that sends every retry to the worker's `backoffStrategy`. */
 export const customJobBackoff: BackoffOptions = { type: 'custom' };
 
+/** Only public fields cross persisted/provider boundaries; private causes stay in process. */
+export function jobFailureEnvelope<F extends Failure>(failure: F) {
+  return {
+    code: failure.code,
+    status: failure.status,
+    message: failure.message,
+    data: failure.data,
+    ...(failure.remediation === undefined ? {} : { remediation: failure.remediation }),
+  };
+}
+
 /**
  * A job whose handler returned a failure. The message is the failure as JSON, so BullMQ's
  * `failedReason`, the board and the foreman keep its code, message, status and data.
  */
-export class ReturnedFailureError extends Error {
-  readonly failure: Failure;
+export class ReturnedFailureError<F extends Failure = Failure> extends Error {
+  readonly failure: F;
 
-  constructor(failure: Failure) {
-    super(JSON.stringify(failure));
+  constructor(failure: F) {
+    super(JSON.stringify(jobFailureEnvelope(failure)));
     this.name = 'ReturnedFailureError';
     this.failure = failure;
   }

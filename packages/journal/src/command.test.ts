@@ -11,11 +11,12 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { InvalidInput, orThrow } from '@arki/failure';
+import { TransactionDefect } from '@arki/db/transaction';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
 import type { DbHandle, Row } from './types.js';
-import { CommandForbidden } from './errors.js';
+import { CommandConflict, CommandForbidden } from './errors.js';
 import { initJournal } from './journal.js';
 import {
   accountId,
@@ -140,11 +141,14 @@ const placeThenNote = j.command(
     note: z.string().min(1),
     catchChild: z.boolean(),
   }),
-  async (input, { write, run }) => {
+  async (input, { write, run, accept }) => {
     orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'nested', total: 1 })]));
-    const child = run(noteOrder, { orderId: input.orderId, childOrderId: input.childOrderId, note: input.note });
-    if (input.catchChild) orThrow(await child.catch(() => 'child rolled back'));
-    else orThrow(await child);
+    const child = await run(noteOrder, { orderId: input.orderId, childOrderId: input.childOrderId, note: input.note });
+    if (isFailure(child)) {
+      if (!input.catchChild) return child;
+      if (TransactionDefect.is(child)) accept(child);
+      else return child;
+    }
     return 'done' as const;
   },
 );
@@ -310,9 +314,7 @@ describe('journal.run', () => {
     // Why: a command is one unit of work; a half-applied command is the bug this exists to prevent.
     const id = orderId(++next);
     const acc = accountId(++next);
-    await expect(journal.run(db, openBoth, { orderId: id, accountId: acc, nick: 'boom' }, meta)).rejects.toThrow(
-      'second write boom',
-    );
+    await expect(journal.run(db, openBoth, { orderId: id, accountId: acc, nick: 'boom' }, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: 'second write boom' } });
     expect(await rowsOf(id)).toEqual([]);
     expect(await db.select().from(profiles).where(eq(profiles.accountId, acc))).toEqual([]);
     expect(await eventsOf(id)).toEqual([]);
@@ -353,7 +355,7 @@ describe('journal.run', () => {
     const childId = orderId(++next);
     await expect(
       journal.run(db, placeThenNote, { orderId: id, childOrderId: childId, note: 'boom', catchChild: false }, meta),
-    ).rejects.toThrow('child boom');
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: 'child boom' } });
     expect(await rowsOf(id)).toEqual([]);
     expect(await eventsOf(id)).toEqual([]);
     expect(await childTraces(id, childId)).toEqual({ rows: 0, events: 0, counts: 0, jobs: 0 });
@@ -392,9 +394,7 @@ describe('journal.run', () => {
     // failure of the second could erase what the first wrote. The second must not start.
     const a = orderId(++next);
     const b = orderId(++next);
-    await expect(journal.run(db, twoAtOnce, { a, b }, meta)).rejects.toThrow(
-      'journal: command "placeOrder" started on a transaction that already has a journal operation in flight; await operations on one transaction one at a time',
-    );
+    await expect(journal.run(db, twoAtOnce, { a, b }, meta)).resolves.toMatchObject({ code: TransactionDefect.code });
     expect(await rowsOf(a)).toEqual([]);
     expect(await rowsOf(b)).toEqual([]);
     expect(await eventsOf(a)).toEqual([]);
@@ -404,9 +404,7 @@ describe('journal.run', () => {
   it('two bound writes started together are refused the same way', async () => {
     const a = orderId(++next);
     const b = orderId(++next);
-    await expect(journal.run(db, twoWritesAtOnce, { a, b }, meta)).rejects.toThrow(
-      `journal: write to order ${b} started on a transaction that already has a journal operation in flight`,
-    );
+    await expect(journal.run(db, twoWritesAtOnce, { a, b }, meta)).resolves.toMatchObject({ code: TransactionDefect.code });
     expect(await rowsOf(a)).toEqual([]);
     expect(await rowsOf(b)).toEqual([]);
   });
@@ -431,7 +429,7 @@ describe('journal.run', () => {
     // after the rollback, outside any transaction, although the command failed.
     const a = orderId(++next);
     const b = orderId(++next);
-    await expect(journal.run(db, throwsWithWriteRunning, { a, b }, meta)).rejects.toThrow('handler boom');
+    await expect(journal.run(db, throwsWithWriteRunning, { a, b }, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: 'handler boom' } });
     expect(await rowsOf(a)).toEqual([]);
     expect(await eventsOf(a)).toEqual([]);
   });
@@ -440,9 +438,7 @@ describe('journal.run', () => {
     // Why: "done" must mean every write of the command is in the transaction that commits.
     const a = orderId(++next);
     const b = orderId(++next);
-    await expect(journal.run(db, returnsWithWriteRunning, { a, b }, meta)).rejects.toThrow(
-      'journal: command "returnsWithWriteRunning" returned with 1 journal operation still running; await every write and run before the handler returns',
-    );
+    await expect(journal.run(db, returnsWithWriteRunning, { a, b }, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: expect.stringContaining('1 journal operation still running') } });
     expect(await rowsOf(a)).toEqual([]);
     expect(await eventsOf(a)).toEqual([]);
   });
@@ -468,13 +464,15 @@ describe('journal.run', () => {
     const a = orderId(++next);
     const b = orderId(++next);
     await expect(
-      db.transaction(tx =>
-        Promise.all([
+      db.transaction(async tx => {
+        const results = await Promise.all([
           journal.write(tx, order, a, { meta, events: placePair }),
           journal.run(tx, placeOrder, { orderId: b, customerId: 'pair', total: 1 }, { actorId: '' }),
-        ]),
-      ),
-    ).rejects.toThrow('journal: command "placeOrder" started on a transaction');
+        ]);
+        for (const result of results) orThrow(result);
+        return results;
+      }),
+    ).rejects.toMatchObject({ code: TransactionDefect.code, cause: { message: expect.stringContaining('journal: command "placeOrder" started on a transaction') } });
     expect(await rowsOf(a)).toEqual([]);
     expect(await eventsOf(a)).toEqual([]);
   });
@@ -564,9 +562,7 @@ describe('expectedVersion from a command', () => {
     const id = orderId(++next);
     orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     orThrow(await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta));
-    await expect(journal.run(db, noteAt, { orderId: id, version: 1, note: 'stale' }, meta)).rejects.toMatchObject({
-      code: 'CONFLICT',
-    });
+    await expect(journal.run(db, noteAt, { orderId: id, version: 1, note: 'stale' }, meta)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'CONFLICT' } });
     await expect(journal.run(db, noteAt, { orderId: id, version: 2, note: 'fresh' }, meta)).resolves.toMatchObject({
       row: { note: 'fresh', version: 3 },
     });
@@ -621,16 +617,16 @@ describe('idempotency receipts', () => {
     });
   });
 
-  it('the same key with another input or another command is CONFLICT; a result that cannot be stored fails the first run', async () => {
+  it('the same key with another input or another command returns CommandConflict; a result that cannot be stored fails the first run', async () => {
     const id = orderId(++next);
     orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const key = `k_${next}`;
     orThrow(await journal.run(db, justNote, { orderId: id, note: 'one' }, meta, { idempotencyKey: key }));
     await expect(
       journal.run(db, justNote, { orderId: id, note: 'two' }, meta, { idempotencyKey: key }),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
-    await expect(journal.run(db, inspectOrder, { orderId: id }, meta, { idempotencyKey: key })).rejects.toMatchObject({
-      code: 'CONFLICT',
+    ).resolves.toMatchObject({ code: CommandConflict.code });
+    await expect(journal.run(db, inspectOrder, { orderId: id }, meta, { idempotencyKey: key })).resolves.toMatchObject({
+      code: CommandConflict.code,
     });
     // A Date does not survive JSON, so the replay could not return what the first call returned.
     const datedResult = j.command('datedResult', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
@@ -640,9 +636,7 @@ describe('idempotency receipts', () => {
     const unstable = `k_unstable_${next}`;
     await expect(
       journal.run(db, datedResult, { orderId: id }, meta, { idempotencyKey: unstable }),
-    ).rejects.toMatchObject({
-      code: 'UNSTABLE_SCHEMA',
-    });
+    ).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'UNSTABLE_SCHEMA' } });
     expect(await receiptOf(unstable), 'rolled back with the write').toBeNull();
     const events = await eventsOf(id);
     expect(events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderNoted']);
@@ -667,9 +661,7 @@ describe('idempotency receipts', () => {
     const nested = j.command('nestedKey', z.object({}), (_input, { run }) =>
       run(nothing, {}, { idempotencyKey: `k_nested_${next}` }),
     );
-    await expect(hooked.run(db, nested, {}, meta, { idempotencyKey: `k_nested_${next}` })).rejects.toThrow(
-      'has not finished',
-    );
+    await expect(hooked.run(db, nested, {}, meta, { idempotencyKey: `k_nested_${next}` })).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: expect.stringContaining('has not finished') } });
     expect(await receiptOf(`k_nested_${next}`), 'the whole run rolled back').toBeNull();
   });
 

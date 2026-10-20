@@ -25,11 +25,12 @@ import type { Outbox, OutboxOptions, OutboxTx, Scheduled, ScheduleOptions } from
 import type { QueueRegistry } from './outbox/registry.ts';
 import type { QueueClient, QueueClientHandle, QueueClientOptions } from './queue-client.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
+import type { JobTriggerResult } from './trigger.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
-import { debugWorker } from './debug.ts';
+import { debugWorker, observeQueue } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
 import { triggerJob } from './job-builder.ts';
 import { outbox } from './outbox/outbox.ts';
@@ -323,10 +324,12 @@ function bootedJobs(
       services[f.name] = slice.services;
       continue;
     }
-    debugWorker.debug('[{value1}] Feature "{featureName}" did not contribute a queue slice.', {
-      value1: 'queue-worker',
-      featureName: f.name,
-    });
+    observeQueue(() =>
+      debugWorker.debug('[{value1}] Feature "{featureName}" did not contribute a queue slice.', {
+        value1: 'queue-worker',
+        featureName: f.name,
+      }),
+    );
   }
   return { registry, services };
 }
@@ -570,10 +573,12 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
         }
 
         startup = runStartup(ctx).catch((error: unknown) => {
-          debugWorker.debug('[{pluginName}] Queue worker startup failed', {
-            pluginName,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          observeQueue(() =>
+            debugWorker.debug('[{pluginName}] Queue worker startup failed', {
+              pluginName,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
           started = false;
           handle = undefined;
         });
@@ -663,14 +668,14 @@ export function outboxJobs<TNeeds extends NeedsShape & NoReservedKeys, TContext>
 
 /** The input type of a job definition, read from its `trigger`. */
 type InputOf<TJob> = TJob extends {
-  readonly trigger: (data: infer TInput, options?: TriggerOptions) => Promise<string>;
+  readonly trigger: (data: infer TInput, options?: TriggerOptions) => Promise<JobTriggerResult>;
 }
   ? TInput
   : never;
 
 /** A job's producer on the Redis lane: enqueue under the feature's name for it (`send-mail#eu` in an instance). */
 export type JobProducer<TInput> = {
-  enqueue(data: TInput, options?: TriggerOptions): Promise<string>;
+  enqueue(data: TInput, options?: TriggerOptions): Promise<JobTriggerResult>;
 };
 
 export type JobProducers<TJobs> = { readonly [K in keyof TJobs]: JobProducer<InputOf<TJobs[K]>> };

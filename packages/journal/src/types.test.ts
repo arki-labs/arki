@@ -1,3 +1,4 @@
+import type { CommandFailure } from './errors.js';
 /**
  * Type-level proof for the design (spec section 12, item 1): the `.create` /
  * `.on` chain and the Drizzle table and transaction types compose without a
@@ -11,7 +12,6 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { SchemaFailure } from '@arki/failure';
 import { InvalidInput, orThrow } from '@arki/failure';
 
 import type { RootCommandRunner, WriteResult } from './api.js';
@@ -355,7 +355,7 @@ const tenantPay = tenants.command('pay', z.object({ id: z.string() }), input => 
 const dbRuns = jd.effect('db-runs', dbOrder, {
   OrderPaid: async (e, { run }) => {
     expectTypeOf(run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
-    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number | SchemaFailure>();
+    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number | CommandFailure>();
     orThrow(await run(plainPay, { id: e.entityId }, { actorId: 'system' }));
     // @ts-expect-error -- `meta` is required: the library never invents an actor
     orThrow(await run(dbPay, { id: e.entityId }));

@@ -28,5 +28,6 @@
 - Expected answers are returned failures (`payments.*`). Check with `isFailure`. Bugs and provider faults throw.
 - Routers stay in the app. The app owns its RPC context and authorization.
 - A refund after 90 days or over the refundable amount returns a failure and writes nothing.
+- Managed journal writes return canonical transaction failures. Only a unique rejection for the pending-refund index maps to `DuplicatePendingRefund`; other failures pass through. Reconcile `TransactionCommitUncertain` before retrying or contacting the provider.
 - Every owner column is a `UserId` (`usr_...`).
 - Tables need the app's `pgSchema` and its user id column.

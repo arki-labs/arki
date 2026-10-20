@@ -17,11 +17,11 @@ import {
   moduleError,
   redactSecrets,
 } from '@arki/admin/module';
-import { isFailure, orThrow } from '@arki/failure';
+import { findCause, isFailure, orThrow } from '@arki/failure';
 
 import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
-import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError } from '../index.js';
+import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
 
 /**
  * The coded refusals of the workflow actions. They are module errors, so the dispatcher answers them with the status
@@ -241,21 +241,28 @@ const stranded = (runId: string, why: string) =>
 
 /** A journal refusal as the coded error an operator sees. Anything else passes through as an app failure. */
 function asModuleError(error: unknown, runId: string): unknown {
-  if (isJournalError(error, 'WORKFLOW_NOT_FOUND')) return notFound(runId);
-  if (isJournalError(error, 'WORKFLOW_FINISHED')) return finished(runId, error.message);
-  if (isJournalError(error, 'WORKFLOW_COMPENSATING')) return compensating(runId);
-  if (isJournalError(error, 'STEP_NOT_DEAD')) return stepNotDead(runId, error.message);
-  if (isJournalError(error, 'STEP_NOT_RESOLVABLE')) return notResolvable(runId, error.message);
-  if (isJournalError(error, 'WORKFLOW_UNKNOWN') || isJournalError(error, 'WORKFLOW_SHAPE_CHANGED')) {
-    return stranded(runId, error.message);
+  const refusal = findCause(error, JournalError);
+  if (refusal === undefined) return error;
+  if (refusal.code === 'WORKFLOW_NOT_FOUND') return notFound(runId);
+  if (refusal.code === 'WORKFLOW_FINISHED') return finished(runId, refusal.message);
+  if (refusal.code === 'WORKFLOW_COMPENSATING') return compensating(runId);
+  if (refusal.code === 'STEP_NOT_DEAD') return stepNotDead(runId, refusal.message);
+  if (refusal.code === 'STEP_NOT_RESOLVABLE') return notResolvable(runId, refusal.message);
+  if (refusal.code === 'WORKFLOW_UNKNOWN' || refusal.code === 'WORKFLOW_SHAPE_CHANGED') {
+    return stranded(runId, refusal.message);
   }
-  if (isJournalError(error, 'BAD_ARGUMENT')) return notResolvable(runId, error.message, 400);
+  if (refusal.code === 'BAD_ARGUMENT') return notResolvable(runId, refusal.message, 400);
   return error;
 }
 
 async function guarded<T>(runId: string, run: () => Promise<T>): Promise<T> {
   try {
-    return await run();
+    const value = await run();
+    if (isFailure<unknown>(value)) {
+      const mapped = asModuleError(value, runId);
+      if (mapped !== value) throw mapped;
+    }
+    return value;
   } catch (error) {
     throw asModuleError(error, runId);
   }

@@ -1,47 +1,28 @@
 /**
  * BullMQ backend for `@arki/schedule` durable schedules.
  *
- * `@arki/schedule` declares the port (`DurableScheduler`) and must not
- * depend on BullMQ, so this module restates the port's shape structurally.
- * `packages/schedule/src/durable-port.test.ts` wires `durableScheduler()` into
- * `schedule({ durable })`, so the typecheck fails if the two shapes drift apart.
+ * `@arki/schedule` owns the canonical port imported here. The integration in
+ * `packages/queue/src/schedule-port.test.ts` wires `durableScheduler()` into
+ * `schedule({ durable })` and checks that both packages share that contract.
  */
 
 import type { Job } from 'bullmq';
 import { Queue, Worker } from 'bullmq';
 
+import type { DurableScheduler, DurableScheduleRegistration, ScheduleRunResult } from '@arki/schedule/runtime';
 import { getLogger } from '@arki/log';
 
 import type { QueueConnection } from './redis-connection.ts';
-import { debugSchedule } from './debug.ts';
+import { debugSchedule, observeQueue } from './debug.ts';
+import { ReturnedFailureError } from './job-retry.ts';
 import { parseRedisConnection } from './redis-connection.ts';
+
+export type { DurableScheduleRegistration, DurableScheduler } from '@arki/schedule/runtime';
 
 const log = getLogger('arki:queue:durable-scheduler');
 
-/** What one durable tick reports back (`@arki/schedule`'s `ScheduleRunResult`). */
-export type DurableRunResult = {
-  readonly name: string;
-  readonly status: string;
-};
-
-/** One durable schedule as `@arki/schedule` hands it over. */
-export type DurableScheduleRegistration =
-  | {
-      readonly name: string;
-      readonly cron: string;
-      readonly timezone?: string;
-      readonly run: () => Promise<DurableRunResult>;
-    }
-  | {
-      readonly name: string;
-      readonly everyMs: number;
-      readonly run: () => Promise<DurableRunResult>;
-    };
-
-export type DurableScheduler = {
-  readonly start: (schedules: readonly DurableScheduleRegistration[]) => Promise<void>;
-  readonly stop: () => Promise<void>;
-};
+/** The schedule package is the sole source of durable tick outcomes. */
+export type DurableRunResult = ScheduleRunResult;
 
 export type DurableSchedulerOptions = {
   readonly connection: QueueConnection;
@@ -82,12 +63,16 @@ async function ensureScheduler(queue: Queue, schedule: DurableScheduleRegistrati
       ? existing.pattern === repeat.pattern && existing.tz === repeat.tz
       : existing.every === repeat.every);
   if (unchanged) {
-    debugSchedule.debug('[{scheduleName}] Durable scheduler unchanged, keeping its pending tick', {
-      scheduleName: schedule.name,
-    });
+    observeQueue(() =>
+      debugSchedule.debug('[{scheduleName}] Durable scheduler unchanged, keeping its pending tick', {
+        scheduleName: schedule.name,
+      }),
+    );
     return;
   }
-  debugSchedule.debug('[{scheduleName}] Upserting durable scheduler', { scheduleName: schedule.name });
+  observeQueue(() =>
+    debugSchedule.debug('[{scheduleName}] Upserting durable scheduler', { scheduleName: schedule.name }),
+  );
   await queue.upsertJobScheduler(schedule.name, repeat, {
     name: schedule.name,
     data: {},
@@ -116,16 +101,17 @@ export function createDurableScheduler(options: DurableSchedulerOptions): Durabl
     const worker = new Worker(
       name,
       async (job: Job) => {
-        debugSchedule.debug('[{scheduleName}] Durable tick {jobId} started', {
-          scheduleName: schedule.name,
-          jobId: job.id,
-        });
+        observeQueue(() =>
+          debugSchedule.debug('[{scheduleName}] Durable tick {jobId} started', {
+            scheduleName: schedule.name,
+            jobId: job.id,
+          }),
+        );
         const result = await schedule.run();
-        if (result.status === 'handler-failed') {
-          // Fail the BullMQ job so the failure shows in the board and events.
-          throw new Error(`[schedule] durable schedule "${schedule.name}" handler failed.`);
-        }
-        return result.status;
+        if (result.status === 'refused') throw new ReturnedFailureError(result.failure);
+        if (result.status === 'handler-failed' || result.status === 'lock-failed')
+          throw new ReturnedFailureError(result.cause);
+        return result;
       },
       { connection, prefix, autorun: false, concurrency: 1 },
     );
@@ -133,10 +119,12 @@ export function createDurableScheduler(options: DurableSchedulerOptions): Durabl
 
     await ensureScheduler(queue, schedule);
     void worker.run().catch((error: unknown) => {
-      log.error('durable schedule worker stopped unexpectedly', {
-        schedule: schedule.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      observeQueue(() =>
+        log.error('durable schedule worker stopped unexpectedly', {
+          schedule: schedule.name,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     });
     await worker.waitUntilReady();
   }

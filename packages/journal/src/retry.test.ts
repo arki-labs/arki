@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { backoff } from './index.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
@@ -24,10 +24,10 @@ const handlers = {
     if (failWith !== undefined) throw failWith;
   },
 };
-const slow = j.effect('slow-retry', order, handlers).withSchedule({ retry: backoff.constant(60_000).upTo(1) });
+const slow = j.effect('slow-retry', order, handlers).withSchedule({ retry: backoff.constant(60_000).upTo(1).while(reason => UnexpectedDefect.is(reason)) });
 const picky = j
   .effect('picky-retry', order, handlers)
-  .withSchedule({ retry: backoff.constant(1000).while(error => !(error instanceof BadInput)) });
+  .withSchedule({ retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason) && !(reason.cause instanceof BadInput)) });
 
 const slowJournal = j.compose({ effects: [slow] });
 const pickyJournal = j.compose({ effects: [picky] });
@@ -46,7 +46,7 @@ const charging = {
     return returnWith;
   },
 };
-// The default retry: 8 tries for a thrown error.
+// The default retry does not replay callback defects.
 const charge = j.effect('charge-default-retry', order, charging);
 const patient = j.effect('charge-timeout-retry', order, charging).withSchedule({
   retry: backoff
@@ -168,10 +168,10 @@ describe('an effect that returns a failure', () => {
     expect(await jobById(declined.id)).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
   });
 
-  it('a thrown error on the same effect still runs again: only a returned failure is final', async () => {
+  it('an unexpected thrown callback defect is fatal by default', async () => {
     const job = await payOnce(chargeJournal);
     await drainReturning(chargeJournal, new Error('gateway down'));
-    expect(await jobById(job.id)).toMatchObject({ attempts: 1, deadAt: null, lastError: 'Error: gateway down' });
+    expect(await jobById(job.id)).toMatchObject({ attempts: 1, deadAt: expect.any(Date), lastError: expect.stringContaining(UnexpectedDefect.code) });
   });
 
   it('a plain result still acknowledges the job', async () => {

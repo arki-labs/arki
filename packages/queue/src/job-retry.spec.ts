@@ -52,10 +52,13 @@ describe('job retry bridge to BullMQ', () => {
     );
   });
 
-  it('lets bullmqOptions override what retry sets', () => {
-    expect(jobDefaultOptions({ retry: backoff.constant(5).upTo(1), bullmqOptions: { attempts: 9 } })).toMatchObject({
-      attempts: 9,
+  it('keeps Backoff authoritative even if plain JavaScript supplies native retry overrides', () => {
+    const options = jobDefaultOptions({
+      retry: backoff.constant(5).upTo(1),
+      // @ts-expect-error Native retry options would diverge from the pg-boss lane.
+      bullmqOptions: { attempts: 9 },
     });
+    expect(options).toMatchObject({ attempts: 2, backoff: customJobBackoff });
   });
 });
 

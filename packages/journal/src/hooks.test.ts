@@ -4,7 +4,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { orThrow } from '@arki/failure';
+import { TransactionDefect } from '@arki/db/transaction';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
@@ -57,14 +58,17 @@ describe('command hooks', () => {
     expect(trail).toEqual(['outer:placeOrder:cmd_:req_h', 'inner', 'inner:done', 'outer:done']);
   });
 
-  it('run inside the transaction: a hook that throws after next rolls the write back, and the caller gets that error', async () => {
+  it('run inside the transaction: a hook that throws after next rolls the write back, and the caller receives a typed defect with its private cause', async () => {
     const journal = j.compose({});
     journal.hooks.command.around(async (_ctx, next) => {
       await next();
       throw new Error('audit refused');
     });
     const id = orderId(++next);
-    await expect(journal.run(db, placeOrder, { orderId: id }, meta)).rejects.toThrow('audit refused');
+    await expect(journal.run(db, placeOrder, { orderId: id }, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { message: 'audit refused' },
+    });
     expect(await rowOf(id)).toBeNull();
   });
 
@@ -72,7 +76,10 @@ describe('command hooks', () => {
     const journal = j.compose({});
     journal.hooks.command.around(() => Promise.reject(new Error('not allowed')));
     const id = orderId(++next);
-    await expect(journal.run(db, placeOrder, { orderId: id }, meta)).rejects.toThrow('not allowed');
+    await expect(journal.run(db, placeOrder, { orderId: id }, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { message: 'not allowed' },
+    });
     expect(await rowOf(id)).toBeNull();
   });
 
@@ -86,7 +93,10 @@ describe('command hooks', () => {
       });
     });
     const unpaid = orderId(++next);
-    await expect(swallowing.run(db, payOrder, { orderId: unpaid }, meta)).rejects.toMatchObject({ code: 'NO_ROW' });
+    await expect(swallowing.run(db, payOrder, { orderId: unpaid }, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { code: 'NO_ROW' },
+    });
 
     const twice = j.compose({});
     twice.hooks.command.around(async (_ctx, next) => {
@@ -94,13 +104,19 @@ describe('command hooks', () => {
       await next();
     });
     const id = orderId(++next);
-    await expect(twice.run(db, placeOrder, { orderId: id }, meta)).rejects.toThrow('called next twice');
+    await expect(twice.run(db, placeOrder, { orderId: id }, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { message: expect.stringContaining('called next twice') },
+    });
     expect(await rowOf(id), 'the error after next rolled the write back').toBeNull();
 
     const skipping = j.compose({});
     skipping.hooks.command.around(() => Promise.resolve());
     const skipped = orderId(++next);
-    await expect(skipping.run(db, placeOrder, { orderId: skipped }, meta)).rejects.toThrow('without calling next');
+    await expect(skipping.run(db, placeOrder, { orderId: skipped }, meta)).resolves.toMatchObject({
+      code: TransactionDefect.code,
+      cause: { message: expect.stringContaining('without calling next') },
+    });
     expect(await rowOf(skipped)).toBeNull();
   });
 
@@ -155,17 +171,23 @@ describe('effect hooks', () => {
     expect(await journal.drain(db)).toBe(1);
     expect(ran).toEqual([]);
     const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'hooked-mail'));
-    expect(job).toMatchObject({ attempts: 1, lastError: expect.stringContaining('circuit open') });
+    expect(job).toMatchObject({
+      attempts: 1,
+      deadAt: expect.any(Date),
+      lastError: expect.stringContaining(UnexpectedDefect.code),
+    });
+    expect(job?.lastError).not.toContain('circuit open');
     expect(seen).toEqual([{ name: 'hooked-mail', jobId: job?.id, attempt: 1, type: 'OrderPaid' }]);
 
     refuse = false;
+    await journal.retry(db, job?.id ?? '', { actor: 'hook-test' });
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, job?.id ?? ''));
     expect(await journal.drain(db)).toBe(1);
     expect(ran).toEqual([id]);
-    expect(seen[1]).toMatchObject({ attempt: 2 });
+    expect(seen[1]).toMatchObject({ attempt: 1 });
     expect(() => journal.hooks.effect.around(async (_ctx, next) => next())).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );

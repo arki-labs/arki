@@ -46,3 +46,12 @@ export const debugBuilder = getLogger('queue:builder');
  * Enable all queue debug logs
  * Enable with: DEBUG=queue:*
  */
+
+/** Observer callbacks, including app-owned logging sinks and trace sources, never own queue outcomes. */
+export function observeQueue(observe: () => void): void {
+  try {
+    observe();
+  } catch {
+    // Logging remains best effort; explicit job.log provider commands are supervised separately.
+  }
+}

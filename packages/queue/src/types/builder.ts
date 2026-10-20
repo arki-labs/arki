@@ -5,10 +5,12 @@
 
 import type { JobsOptions, Queue } from 'bullmq';
 
-import type { AsyncSchemaFailure } from '@arki/failure';
+import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 
+import type { FlowEnqueueFailure } from '../flow-jobs.ts';
 import type { QueueConnection } from '../redis-connection.ts';
+import type { JobTriggerResult } from '../trigger.ts';
 import type { JobContext, JobDefinition, JobOptions, TriggerOptions } from './job.ts';
 import type { JobMiddleware, MiddlewareFunction } from './middleware.ts';
 import type { QueueConfig, QueueMeta } from './queue.ts';
@@ -38,9 +40,14 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
    * - middleware<MyContextIn, MyContextOut>(...) for full control
    * - middleware<MyContext>(...) to use same type for input and output
    */
-  middleware: <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
-    fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
-  ) => JobMiddleware<TContextIn, TContextOut, TMeta>;
+  middleware: {
+    <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
+      fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
+    ): JobMiddleware<TContextIn, TContextOut, TMeta>;
+    <TContextIn = JobContext<TContext>, TContextOut = TContextIn, TFailure extends Failure = never>(
+      fn: MiddlewareFunction<TContextIn, TContextOut, TMeta, TFailure>,
+    ): JobMiddleware<TContextIn, TContextOut, TMeta, TFailure>;
+  };
 
   /**
    * Create a job registry for organizing jobs by feature
@@ -75,19 +82,19 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
  * @template TContextOut - The current output context type (after middleware chain)
  * @template TMeta - Metadata type for the queue
  */
-export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
+export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta, TFailure extends Failure = never> = {
   /**
    * Add middleware to this job builder
    * Middleware can transform context, add logging, handle errors, etc.
    */
-  use<TContextOut2>(
-    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>,
-  ): JobBuilderDef<TContext, TContextOut2, TMeta>;
+  use<TContextOut2, TNextFailure extends Failure = never>(
+    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure>,
+  ): JobBuilderDef<TContext, TContextOut2, TMeta, TFailure | TNextFailure>;
 
   /**
    * Set the job name (starts the chainable builder)
    */
-  name(name: string): JobBuilderNeedsInput<TContext, TContextOut, TMeta>;
+  name(name: string): JobBuilderNeedsInput<TContext, TContextOut, TMeta, TFailure>;
 };
 
 /**
@@ -98,18 +105,18 @@ export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
  * @template TContextOut - The current output context type (after middleware chain)
  * @template TMeta - Metadata type for the queue
  */
-export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta> = {
+export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta, TFailure extends Failure = never> = {
   /**
    * Set input schema (unlocks `.handler()`)
    */
   input<TNewInput>(
     schema: StandardSchemaV1<unknown, TNewInput>,
-  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
+  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never, TFailure>;
 
   /**
    * Set job options
    */
-  options(options: JobOptions): JobBuilderNeedsInput<TContext, TContextOut, TMeta>;
+  options(options: JobOptions): JobBuilderNeedsInput<TContext, TContextOut, TMeta, TFailure>;
 };
 
 /**
@@ -121,25 +128,32 @@ export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta>
  * @template TInput - Input data type for the job
  * @template TOutput - Output/return type for the job
  */
-export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInput, TOutput> = {
+export type JobBuilderChain<
+  TContext,
+  TContextOut,
+  TMeta extends QueueMeta,
+  TInput,
+  TOutput,
+  TFailure extends Failure = never,
+> = {
   /**
    * Set input schema
    */
   input<TNewInput>(
     schema: StandardSchemaV1<unknown, TNewInput>,
-  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
+  ): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput, TFailure>;
 
   /**
    * Set job options
    */
-  options(options: JobOptions): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput>;
+  options(options: JobOptions): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput, TFailure>;
 
   /**
    * Set handler function (completes the builder)
    */
   handler<TResult>(
     handler: (data: TInput, ctx: TContextOut) => Promise<TResult>,
-  ): JobDefinition<TInput, TResult, TContextOut>;
+  ): JobDefinition<TInput, TResult | TFailure, TContextOut>;
 };
 
 /**
@@ -474,7 +488,7 @@ export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
  * BullMQ options of one flow step's job. `parent` and `repeat` are owned by
  * the flow (the tree sets parents; a flow step does not repeat).
  */
-export type FlowStepOptions = Omit<JobsOptions, 'parent' | 'repeat' | 'deduplication'>;
+export type FlowStepOptions = Omit<JobsOptions, 'parent' | 'repeat' | 'deduplication' | 'attempts' | 'backoff'>;
 
 /**
  * Flow definition. Start one with `enqueue(flow, input)`.
@@ -501,8 +515,8 @@ export type QueueEnqueue = {
     job: JobDefinition<TInput, TOutput, TContext>,
     data: TInput,
     options?: TriggerOptions,
-  ): Promise<string>;
-  <TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult | AsyncSchemaFailure>;
+  ): Promise<JobTriggerResult>;
+  <TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult | FlowEnqueueFailure>;
 };
 
 /**

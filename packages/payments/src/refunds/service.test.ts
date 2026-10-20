@@ -16,6 +16,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
 import { instant, isInstant } from '@arki/date';
+import {
+  TransactionCancelled,
+  TransactionCommitUncertain,
+  TransactionConflict,
+  TransactionDefect,
+  TransactionRejected,
+  TransactionUnavailable,
+} from '@arki/db/errors';
 import { isFailure, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
@@ -50,6 +58,7 @@ import {
 } from './failures.js';
 import { createRefundId } from './primitives.js';
 import { RefundService } from './service.js';
+import { pendingRefundIndexName } from './tables.js';
 
 type Provider = ConstructorParameters<typeof RefundService>[2];
 
@@ -630,6 +639,9 @@ describe('two requests at once for one payment', () => {
     const refused = await blind.requestRefund(request(payment.id, money(20, 'USD')));
 
     expect(DuplicatePendingRefund.is(refused)).toBe(true);
+    if (!DuplicatePendingRefund.is(refused)) throw new Error('expected the pending-refund refusal');
+    expect(TransactionRejected.is(refused.cause)).toBe(true);
+    expect(JSON.stringify(refused)).not.toContain('constraint');
     const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
     expect(rows).toHaveLength(1);
   });
@@ -652,5 +664,60 @@ describe('two requests at once for one payment', () => {
     expect(results.filter(result => !isFailure(result))).toHaveLength(1);
     const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('transaction failures before a refund is requested', () => {
+  const pendingConflict = new Error('query failed', {
+    cause: Object.assign(new Error('duplicate pending refund'), { constraint: pendingRefundIndexName }),
+  });
+
+  it.each([
+    TransactionConflict({ attempts: 1, sqlState: '40001' }, { cause: pendingConflict }),
+    TransactionUnavailable({ cause: pendingConflict }),
+    TransactionCommitUncertain({ cause: pendingConflict }),
+    TransactionCancelled({ cause: pendingConflict }),
+    TransactionDefect({ cause: pendingConflict }),
+    TransactionRejected({ sqlState: '23503' }, { cause: pendingConflict }),
+    TransactionRejected(
+      { sqlState: '23505' },
+      {
+        cause: Object.assign(new Error('another unique constraint'), { constraint: 'refunds_pkey' }),
+      },
+    ),
+    TransactionRejected({ sqlState: '23505' }),
+  ])('preserves $code and its cause without retrying or calling the provider', async failure => {
+    let attempts = 0;
+    const service = new RefundService(
+      refundReads(db),
+      {
+        ...writes,
+        requestRefund: () => {
+          attempts += 1;
+          return Promise.resolve(failure);
+        },
+      },
+      providerThatRefunds,
+      coreReads(db),
+      { systemUserId: adminId },
+    );
+    const payment = await seedPayment(coreWrites, null, '100');
+    const eventsBefore = await countEvents(db);
+    const providerCallsBefore = askedToRefund.length;
+
+    const result = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(1, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+
+    expect(result).toBe(failure);
+    expect(attempts).toBe(1);
+    expect(askedToRefund).toHaveLength(providerCallsBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(
+      await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id)),
+    ).toHaveLength(0);
   });
 });

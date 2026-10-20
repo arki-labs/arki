@@ -7,17 +7,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
-import { isModuleError, redactSecrets as adminRedactSecrets } from '@arki/admin/module';
+import { redactSecrets as adminRedactSecrets, isModuleError } from '@arki/admin/module';
 import { z } from '@arki/contracts';
 
 import type { QueueInstance } from '../types/builder.ts';
 import { createRuntimeLocalQueueInstance, initQueue } from '../runtime-local/index.ts';
-import {
-  pgBossFailedJobSource,
-  QUEUE_FOREMAN_ERROR_CODES,
-  queueForemanModule,
-  redactSecrets,
-} from './index.ts';
+import { pgBossFailedJobSource, QUEUE_FOREMAN_ERROR_CODES, queueForemanModule, redactSecrets } from './index.ts';
 
 let pglite: PGlite;
 let queue: QueueInstance | undefined;
@@ -44,7 +39,7 @@ async function waitFor(done: () => Promise<boolean>): Promise<void> {
 async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number; release: () => void }> {
   const q = initQueue.context<{ userId: string }>().create();
   let runs = 0;
-  // pg-boss runs a job 3 times before it is failed. The run after a retry waits here, so the retried job stays in flight.
+  // A defect is permanent by default. The operator retry waits here, so it stays in flight.
   let release = () => {};
   const gate = new Promise<void>(resolve => {
     release = resolve;
@@ -54,7 +49,7 @@ async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number
     .input(z.object({ to: z.string() }))
     .handler(async () => {
       runs += 1;
-      if (runs > 3) return gate;
+      if (runs > 1) return gate;
       throw new Error('SMTP rejected: password=hunter2 for smtp://bot:s3cr3t@mail.example.com');
     });
   const instance = createRuntimeLocalQueueInstance({ pglite, createContext: () => ({ userId: 'u' }) });
@@ -92,8 +87,8 @@ describe('T(queue-foreman)', () => {
     expect(page.total).toBe(1);
     expect(page.nextOffset).toBeNull();
     const [job] = page.jobs;
-    expect(job).toMatchObject({ id: jobId, queue: 'main', name: 'send-mail', attempts: 3 });
-    expect(job?.error).toContain('SMTP rejected');
+    expect(job).toMatchObject({ id: jobId, queue: 'main', name: 'send-mail', attempts: 1 });
+    expect(job?.error).toContain('failure.unexpected_defect');
     expect(job?.error).not.toContain('hunter2');
     expect(job?.error).not.toContain('s3cr3t');
   }, 20000);

@@ -1,4 +1,4 @@
-import { JournalError } from '../errors.js';
+import { JournalError, WorkflowStranded } from '../errors.js';
 
 /** The part of a run row that says which code it needs. */
 type RunCode = {
@@ -40,3 +40,14 @@ export function codeOf<Def extends { readonly shapeHash: string }>(
 /** A stranded run's job is dead at once: retrying it before the code is back would fail the same way. */
 export const isStrandedError = (reason: unknown): boolean =>
   reason instanceof JournalError && (reason.code === 'WORKFLOW_UNKNOWN' || reason.code === 'WORKFLOW_SHAPE_CHANGED');
+
+/** The worker owns the durable failure outcome; preserve the pinned identity and operator diagnostic as data. */
+export function strandedFailure(run: RunCode, error: JournalError): WorkflowStranded {
+  return WorkflowStranded({
+    runId: run.id,
+    name: run.name,
+    version: run.workflowVersion,
+    reason: error.code === 'WORKFLOW_SHAPE_CHANGED' ? 'WORKFLOW_SHAPE_CHANGED' : 'WORKFLOW_UNKNOWN',
+    detail: error.message,
+  });
+}

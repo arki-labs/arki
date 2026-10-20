@@ -12,6 +12,9 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { defineFailure } from '@arki/failure';
+import { z } from 'zod';
+
 import { listenOnPool } from '@arki/db/pg';
 
 import type { JobRunner, ScheduledJob } from './types.js';
@@ -29,12 +32,12 @@ const journal = j.compose({});
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const runner = (
-  run: (job: ScheduledJob, signal: AbortSignal) => Promise<void> | void,
+  run: (job: ScheduledJob, signal: AbortSignal) => unknown,
   retryDelay: JobRunner['retryDelay'] = () => 0,
 ): JobRunner => ({
   names: ['demo'],
   run: async (job, ctx) => {
-    await run(job, ctx.signal);
+    return await run(job, ctx.signal);
   },
   retryDelay,
 });
@@ -78,6 +81,28 @@ beforeEach(async () => {
 });
 
 describe('queue rows on Postgres', () => {
+  it('a returned refusal stays dead with its exact data and never becomes a successful delivery', async () => {
+    const Refused = defineFailure('test.delivery_refused', { data: z.object({ reason: z.string() }) });
+    const refusal = Refused({ reason: 'the balance cannot be charged' });
+    const id = await schedule();
+    const reasons: unknown[] = [];
+    await journal.drain(dbA, {
+      jobs: runner(() => refusal, (_job, reason) => {
+        reasons.push(reason);
+        return;
+      }),
+    });
+    expect(reasons).toEqual([refusal]);
+    expect(reasons[0]).toBe(refusal);
+    const dead = await rowOf(id);
+    expect(dead).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
+    expect(JSON.parse(dead?.lastError ?? 'null')).toMatchObject({ code: Refused.code, data: refusal.data });
+    const attempts = await dbA.select().from(tables.jobAttempts).where(eq(tables.jobAttempts.jobId, id));
+    expect(attempts.map(attempt => attempt.outcome)).toEqual(['dead']);
+    const archive = await dbA.select().from(tables.jobArchive).where(eq(tables.jobArchive.id, id));
+    expect(archive).toEqual([]);
+  });
+
   it('two workers compete for 50 rows: every row runs, none twice', async () => {
     const ran: string[] = [];
     const jobs = runner(job => {

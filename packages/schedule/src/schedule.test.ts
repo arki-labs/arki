@@ -244,7 +244,7 @@ describe('schedule runtime', () => {
     await expect(runtime.trigger('failing')).resolves.toEqual({
       name: 'failing',
       status: 'handler-failed',
-      cause: expect.objectContaining({ message: 'boom' }),
+      cause: expect.objectContaining({ code: 'failure.unexpected_defect', cause: new Error('boom') }),
     });
     expect(runtime.handlerFailures).toBe(1);
   });
@@ -396,7 +396,7 @@ describe('durable schedules', () => {
     await expect(registration(fake, 'failing').run()).resolves.toEqual({
       name: 'failing',
       status: 'handler-failed',
-      cause: expect.objectContaining({ message: 'boom' }),
+      cause: expect.objectContaining({ code: 'failure.unexpected_defect', cause: new Error('boom') }),
     });
     expect(runtime.handlerFailures).toBe(1);
     await runtime.stop();

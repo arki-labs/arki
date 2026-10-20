@@ -1,11 +1,14 @@
 import { Cron } from 'croner';
 
+import type { Failure, FailureIn } from '@arki/failure';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
+import type { SCHEDULE_RUNTIME_FAILURES } from './errors.js';
 import type { ScheduleDef, ScheduleLock } from './index.js';
-import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
+import { SCHEDULE_ERROR_CODES, ScheduleError, ScheduleLockFailed } from './errors.js';
 import { DEFAULT_LOCK_HOLD_MS, parseEveryInterval } from './index.js';
+import { observe, observeSchedule } from './telemetry.js';
 
 const debugSchedule = getLogger('arki:schedule');
 const log = getLogger('arki:schedule');
@@ -74,10 +77,18 @@ export type ScheduleRuntimeOptions<TContext = undefined> = ScheduleRuntimeBaseOp
  * What one run reports. `ran` keeps the handler's resolved value; a failure
  * keeps its cause; `unavailable` means the runtime was already stopped.
  */
+export type ScheduleRefusal<T> = Exclude<FailureIn<T>, ReturnType<typeof UnexpectedDefect>>;
+
 export type ScheduleRunResult<T = unknown> =
-  | { readonly name: string; readonly status: 'ran'; readonly value: T }
+  | { readonly name: string; readonly status: 'ran'; readonly value: Exclude<T, Failure> }
+  | { readonly name: string; readonly status: 'refused'; readonly failure: ScheduleRefusal<T> }
   | { readonly name: string; readonly status: 'skipped-overlap' | 'skipped-lock' }
-  | { readonly name: string; readonly status: 'handler-failed' | 'lock-failed'; readonly cause: unknown }
+  | { readonly name: string; readonly status: 'handler-failed'; readonly cause: ReturnType<typeof UnexpectedDefect> }
+  | {
+      readonly name: string;
+      readonly status: 'lock-failed';
+      readonly cause: ReturnType<(typeof SCHEDULE_RUNTIME_FAILURES)[keyof typeof SCHEDULE_RUNTIME_FAILURES]>;
+    }
   | { readonly name: string; readonly status: 'unavailable' };
 
 /** A run result, or `unknown` when no schedule has that name (the `scheduler` service's `trigger`). */
@@ -85,16 +96,23 @@ export type ScheduleOutcome<T> = ScheduleRunResult<T> | { readonly name: string;
 
 export type ScheduleRunStatus = ScheduleRunResult['status'];
 
-export type ScheduleRuntime = {
+/** A named definition is the sole source of its resolved handler result. */
+type RuntimeValueOf<
+  TDefinitions extends readonly ScheduleDef<never>[],
+  TName extends string,
+> = TDefinitions[number] extends infer TDefinition
+  ? TDefinition extends ScheduleDef<never>
+    ? TName extends TDefinition['name']
+      ? Awaited<ReturnType<TDefinition['handler']>>
+      : never
+    : never
+  : never;
+
+export type ScheduleRuntime<TDefinitions extends readonly ScheduleDef<never>[] = readonly ScheduleDef<never>[]> = {
   start(): void;
   /** Stop firing, refuse new triggers (`unavailable`) and wait for accepted runs to finish. */
   stop(): Promise<void>;
-  /**
-   * Run one schedule now. Works before `start()` (the runtime is built, so
-   * the run is real) and reports `unavailable` after `stop()`. Throws a
-   * coded `ScheduleError` for a name this runtime does not hold.
-   */
-  trigger(name: string): Promise<ScheduleRunResult>;
+  /** Returned business refusals and supervised handler defects. Scheduling skips do not increment this. */
   readonly handlerFailures: number;
   /** Runs skipped because another holder had the lock (`skipped-lock`). */
   readonly lockContention: number;
@@ -108,7 +126,14 @@ export type ScheduleRuntime = {
   readonly lockLost: number;
   // A failed release is not counted here: `createLocks` logs it and counts it
   // in its own `Locks.counters.releaseErrors` (and calls `onReleaseError`).
-};
+} & (string extends TDefinitions[number]['name']
+  ? { trigger(name: string): Promise<ScheduleRunResult> }
+  : {
+      /** Runs before start, refuses after stop, and rejects undeclared names at compile time. */
+      trigger<TName extends TDefinitions[number]['name']>(
+        name: TName,
+      ): Promise<ScheduleRunResult<RuntimeValueOf<TDefinitions, TName>>>;
+    });
 
 /** The `code` of a `LockError`-like failure, read without importing the lock library. */
 function lockErrorCode(error: unknown): string | undefined {
@@ -190,9 +215,14 @@ export function assertSingleClock<TContext>(
   });
 }
 
-export function createScheduleRuntime<TContext = undefined>(
-  options: ScheduleRuntimeOptions<TContext>,
-): ScheduleRuntime {
+export function createScheduleRuntime<const TDefinitions extends readonly ScheduleDef<undefined>[]>(
+  options: ScheduleRuntimeOptions<undefined> & { readonly schedules: TDefinitions },
+): ScheduleRuntime<TDefinitions>;
+export function createScheduleRuntime<
+  TContext,
+  const TDefinitions extends readonly ScheduleDef<TContext>[] = readonly ScheduleDef<TContext>[],
+>(options: ScheduleRuntimeOptions<TContext> & { readonly schedules: TDefinitions }): ScheduleRuntime<TDefinitions>;
+export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<TContext>): ScheduleRuntime {
   assertUniqueSchedules(options.schedules);
   const clock = options.clock ?? 'internal';
   assertSingleClock(options.schedules, options.durable, clock);
@@ -233,32 +263,43 @@ export function createScheduleRuntime<TContext = undefined>(
       // The handler's result is never a failure, so a failure here is the busy lock.
       if (!isFailure(locked)) return locked;
       lockContention += 1;
-      debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {
-        scheduleName: schedule.name,
-        lockKey: lock.key,
-      });
+      observe(() =>
+        debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {
+          scheduleName: schedule.name,
+          lockKey: lock.key,
+        }),
+      );
       return { name: schedule.name, status: 'skipped-lock' };
     } catch (error) {
       // runHandler reports handler errors as `handler-failed` and never throws,
       // so whatever lands here came from taking, keeping or releasing the lock.
-      const code = lockErrorCode(error);
+      const code = observe(() => lockErrorCode(error));
       if (code === 'lost' && finished !== undefined) {
         lockLost += 1;
-        log.warn('lock lost during the hold — another replica may run this tick', {
-          schedule: schedule.name,
-          lock: lock.key,
-        });
+        observe(() =>
+          log.warn('lock lost during the hold — another replica may run this tick', {
+            schedule: schedule.name,
+            lock: lock.key,
+          }),
+        );
         return finished;
       }
       if (code === 'lost') lockLost += 1;
       else lockFailures += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      log.error('schedule lock failed', { schedule: schedule.name, lock: lock.key, error: message });
-      return { name: schedule.name, status: 'lock-failed', cause: error };
+      const parsed = ScheduleLockFailed.dataSchema.safeParse({ lockCode: code });
+      const cause = parsed.success
+        ? ScheduleLockFailed(parsed.data, { cause: error })
+        : UnexpectedDefect({ cause: error });
+      observe(() => log.error('schedule lock failed', { schedule: schedule.name, code: cause.code }));
+      return { name: schedule.name, status: 'lock-failed', cause };
     }
   }
 
-  async function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
+  function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
+    return observeSchedule(schedule.name, () => execute(schedule));
+  }
+
+  async function execute(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
     if (stopped) return { name: schedule.name, status: 'unavailable' };
 
     const active = running.get(schedule.name) ?? 0;
@@ -291,6 +332,10 @@ export function createScheduleRuntime<TContext = undefined>(
         held === undefined ? {} : { lock: { signal: held.signal, fence: held.fence } },
       );
       if (UnexpectedDefect.is(value)) return recordHandlerFailure(schedule.name, value);
+      if (isFailure(value)) {
+        handlerFailures += 1;
+        return { name: schedule.name, status: 'refused', failure: value };
+      }
       return { name: schedule.name, status: 'ran', value };
     } catch (error) {
       return recordHandlerFailure(schedule.name, error);
@@ -299,10 +344,10 @@ export function createScheduleRuntime<TContext = undefined>(
 
   function recordHandlerFailure(scheduleName: string, error: unknown): ScheduleRunResult {
     handlerFailures += 1;
-    const message = error instanceof Error ? error.message : String(error);
-    debugSchedule.debug('[{scheduleName}] handler failed: {failed}', { scheduleName, failed: message });
-    log.error('schedule handler failed', { schedule: scheduleName, error: message });
-    return { name: scheduleName, status: 'handler-failed', cause: error };
+    const cause = UnexpectedDefect.is(error) ? error : UnexpectedDefect({ cause: error });
+    observe(() => debugSchedule.debug('[{scheduleName}] handler failed', { scheduleName }));
+    observe(() => log.error('schedule handler failed', { schedule: scheduleName, code: cause.code }));
+    return { name: scheduleName, status: 'handler-failed', cause };
   }
 
   function trackPromise<T>(promise: Promise<T>): Promise<T> {
@@ -357,16 +402,15 @@ export function createScheduleRuntime<TContext = undefined>(
 
   function startDurable(durable: DurableScheduler, schedules: readonly ScheduleDef<TContext>[]): void {
     durableStarted = true;
-    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch(
-      (error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        debugSchedule.debug('durable registration failed: {failed}', { failed: message });
+    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch(() => {
+      observe(() => debugSchedule.debug('durable registration failed', { code: UnexpectedDefect.code }));
+      observe(() =>
         log.error('schedule durable registration failed', {
           schedules: schedules.map(schedule => schedule.name).join(','),
-          error: message,
-        });
-      },
-    );
+          code: UnexpectedDefect.code,
+        }),
+      );
+    });
   }
 
   return {

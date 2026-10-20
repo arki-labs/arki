@@ -8,10 +8,12 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { isFailure, orThrow } from '@arki/failure';
+import { TransactionDefect } from '@arki/db/transaction';
+import { Deadline } from '@arki/async';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
-import { isJournalError } from '../errors.js';
+import { JournalError } from '../errors.js';
 import { initJournal } from '../journal.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
@@ -78,7 +80,7 @@ const flaky = j
       note('provider', ctx);
       throw new Error('provider down');
     },
-    { retry: backoff.constant(0).upTo(2) },
+    { retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)) },
   )
   .step('after', () => 'never')
   .finish();
@@ -260,9 +262,7 @@ describe('start and the step effect', () => {
       .step('a', () => 1)
       .finish();
     const loneJournal = lone.compose({});
-    await expect(loneJournal.run(db, orphan.start, { input: {} }, caller)).rejects.toSatisfy(error =>
-      isJournalError(error, 'WORKFLOW_UNKNOWN'),
-    );
+    await expect(loneJournal.run(db, orphan.start, { input: {} }, caller)).resolves.toMatchObject({ code: TransactionDefect.code, cause: { code: 'WORKFLOW_UNKNOWN' } });
   });
 });
 
@@ -321,7 +321,7 @@ describe('failure, retry and the key', () => {
     expect(tries.map(entry => entry.attempt)).toEqual([1, 2, 3]);
     expect(new Set(tries.map(entry => entry.key))).toEqual(new Set([`${id}:provider:do`]));
     expect(await stepRow(id, 'provider')).toMatchObject({ status: 'failed', attempt: 3 });
-    expect((await stepRow(id, 'provider'))?.error).toContain('provider down');
+    expect((await stepRow(id, 'provider'))?.error).toContain(UnexpectedDefect.code);
     expect(await runRow(id)).toMatchObject({ state: 'running', node: 'provider' });
     expect((await eventTypes(id)).filter(type => type === 'NodeFailed')).toHaveLength(3);
     const [dead] = await jobsOf(id);
@@ -337,14 +337,14 @@ describe('failure, retry and the key', () => {
     expect((await stepRow(id, 'charge'))?.key).toBe('charge:pay_7');
   });
 
-  it('a step that runs past its timeout is aborted and fails with STEP_TIMEOUT', async () => {
+  it('a step that runs past its timeout is aborted and returns a typed Deadline', async () => {
     const id = newId('hanging');
     orThrow(await journal.run(db, hanging.start, { input: {}, id }, caller));
     await settle();
     expect(sawAbort).toBe(true);
     const step = await stepRow(id, 'hang');
     expect(step?.status).toBe('failed');
-    expect(step?.error).toContain('STEP_TIMEOUT');
+    expect(step?.error).toContain(Deadline.code);
   });
 });
 
@@ -406,7 +406,7 @@ describe('the checkpoint fence', () => {
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
     expect((await stepRow(id, 'slow'))?.status).toBe('scheduled');
     const [job] = await jobsOf(id);
-    expect(job?.lastError).toContain('LEASE_LOST');
+    expect(job?.lastError).toContain(TransactionDefect.code);
   });
 });
 
@@ -425,7 +425,7 @@ describe('a crash between the body and the checkpoint', () => {
     // The process dies after the body answered, before the checkpoint commits.
     if (ctx.name === 'workflow.checkpoint' && !died) {
       died = true;
-      throw new Error('process died');
+      throw new JournalError('LEASE_LOST', 'job', 'test', 'process died');
     }
     await next();
   });
@@ -435,7 +435,8 @@ describe('a crash between the body and the checkpoint', () => {
     orThrow(await crashJournal.run(db, crashing.start, { input: {}, id }, caller));
     await crashJournal.drain(db);
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
-    // The job failed; its retry is due.
+    // The simulated interruption is a typed defect: an operator explicitly resumes it.
+    orThrow(await crashJournal.workflows.retryStep(db, { runId: id, path: 'chargeCard', phase: 'do' }, { actor: 'test' }));
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })

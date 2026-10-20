@@ -1,7 +1,7 @@
 /**
  * A returned failure rolls its transaction back. Drizzle rolls back only when the
  * callback throws, so the failure leaves the transaction as a private signal and
- * comes back as the result right outside it. `command` and `write` use it.
+ * comes back as the result right outside it. `write` uses it; command transactions use @arki/db ownership.
  * Leaf file: imports nothing from this package.
  */
 import type { Failure } from '@arki/failure';

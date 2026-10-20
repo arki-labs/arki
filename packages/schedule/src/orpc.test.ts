@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 import { feature } from '@arki/dot/feature';
 import { service } from '@arki/dot/plugin';
-import { UnexpectedDefect } from '@arki/failure';
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleOutcome } from './dot.js';
 import type { CronContext } from './orpc.js';
@@ -21,6 +21,7 @@ import { checkOnly, cronErrorBody, cronRouterFor, defineCronContract, fail, ok, 
 
 type Clock = { readonly now: () => number };
 const needs = { clock: service<Clock>() };
+const DeliveryRefused = defineFailure('schedule.delivery_refused', { status: 409 });
 
 /** Three value shapes: exactly the body, a value that needs a mapping, and one with a legacy lock-held body. */
 const reader = feature('reader', {
@@ -42,6 +43,7 @@ const reader = feature('reader', {
           clock.now() > 0 ? { ok: true, body: { purged: 4 } } : { ok: false, error: 'pool timed out' },
       },
       { name: 'items', every: '1m', handler: () => ({ processed: 7, failed: 0, durationMs: 120 }) },
+      { name: 'business', every: '1m', handler: ({ clock }) => (clock.now() > 0 ? { sent: 1 } : DeliveryRefused()) },
     ]),
   ],
 });
@@ -51,6 +53,7 @@ const features = [reader] as const;
 const contract = defineCronContract({
   gate: z.object({ skipped: z.number(), gated: z.number() }),
   retain: z.object({ purged: z.number() }),
+  business: z.object({ sent: z.number() }),
   items: {
     body: z.object({ durationMs: z.number(), processed: z.number(), failed: z.number() }),
     skipped: { skipped: true, reason: 'lock-held' },
@@ -59,7 +62,10 @@ const contract = defineCronContract({
 
 const cronImplementer = implement(contract).$context<CronContext>();
 const router = cronRouterFor(cronImplementer, contract, features, {
-  respond: { retain: v => (v.ok ? ok(v.body) : fail(500, { error: v.error })) },
+  respond: {
+    retain: v => (v.ok ? ok(v.body) : fail(500, { error: v.error })),
+    business: value => (DeliveryRefused.is(value) ? fail(value.status, { code: value.code }) : ok(value)),
+  },
   skipped: () => skipped(),
   failed: (_name, cause) => rethrow(cause),
   unavailable: () => fail(503, { error: 'schedule unavailable' }),
@@ -121,8 +127,13 @@ describe('cron procedures on the wire', () => {
     expect(items).toMatchObject({ status: 200, text: '{"skipped":true,"reason":"lock-held"}' });
   });
 
+  it('sends a classified business refusal through its explicit responder', async () => {
+    const shot = await post('business', { name: 'business', status: 'refused', failure: DeliveryRefused() });
+    expect(shot).toMatchObject({ status: 409, text: '{"code":"schedule.delivery_refused"}' });
+  });
+
   it('carries a failed run out of oRPC, so the host answers and reports it', async () => {
-    const cause = new Error('boom');
+    const cause = UnexpectedDefect({ cause: new Error('boom') });
     const shot = await post('gate', { name: 'gate', status: 'handler-failed', cause });
     expect(shot.carried).toBe(cause);
   });

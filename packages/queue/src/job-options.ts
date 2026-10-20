@@ -11,8 +11,15 @@ import { customJobBackoff, defaultJobRetry, jobAttempts } from './job-retry.ts';
 
 export function jobDefaultOptions(options: JobOptions | undefined): DefaultJobOptions {
   return {
+    ...options?.bullmqOptions,
+    ...jobRetryOptions(options),
+  };
+}
+
+/** The shared retry contract owns these keys even when plain JavaScript passes native overrides. */
+export function jobRetryOptions(options: JobOptions | undefined) {
+  return {
     attempts: jobAttempts(options?.retry ?? defaultJobRetry),
     backoff: customJobBackoff,
-    ...options?.bullmqOptions,
   };
 }
