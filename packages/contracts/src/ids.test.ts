@@ -304,14 +304,24 @@ describe('UUID generation format', () => {
       return uuid;
     });
     const readMethod = vi.fn(() => randomUUID);
-    const provider = Object.defineProperty({}, 'randomUUID', { get: readMethod });
+    const provider = Object.defineProperties(
+      {},
+      {
+        randomUUID: { get: readMethod },
+        getRandomValues: {
+          get() {
+            throw new Error('A native UUID must not read the fallback provider');
+          },
+        },
+      },
+    );
     vi.stubGlobal('crypto', provider);
     expect(defineId('job_', { kind: 'queue.job', format: 'uuid' }).create()).toBe(`job_${uuid}`);
     expect(readMethod).toHaveBeenCalledTimes(1);
     expect(randomUUID).toHaveBeenCalledTimes(1);
   });
 
-  it.each([undefined, null, false, {}, { randomUUID: 1 }, { getRandomValues: () => new Uint8Array(48) }])(
+  it.each([undefined, null, false, {}, { randomUUID: 1 }, { randomUUID: null, getRandomValues: 1 }])(
     'returns canonical unavailability for missing UUID provider %j',
     crypto => {
       vi.stubGlobal('crypto', crypto);
@@ -320,6 +330,111 @@ describe('UUID generation format', () => {
       expect(weakRandom).not.toHaveBeenCalled();
     },
   );
+
+  it.each([undefined, null, false, 1])('uses secure bytes when randomUUID is unavailable (%j)', randomUUID => {
+    const getRandomValues = vi.fn(function (this: unknown, bytes: Uint8Array) {
+      expect(this).toBe(provider);
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      expect(bytes.byteLength).toBe(16);
+      bytes.set([1, 35, 69, 103, 137, 171, 205, 239, 1, 35, 69, 103, 137, 171, 205, 239]);
+      return bytes;
+    });
+    const readMethod = vi.fn(() => getRandomValues);
+    const provider = Object.defineProperty({ randomUUID }, 'getRandomValues', { get: readMethod });
+    vi.stubGlobal('crypto', provider);
+    const weakRandom = vi.spyOn(Math, 'random');
+    expect(defineId('job_', { kind: 'queue.job', format: 'uuid' }).create()).toBe(
+      'job_01234567-89ab-4def-8123-456789abcdef',
+    );
+    expect(readMethod).toHaveBeenCalledTimes(1);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(weakRandom).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [0, '00000000-0000-4000-8000-000000000000'],
+    [255, 'ffffffff-ffff-4fff-bfff-ffffffffffff'],
+    [64, '40404040-4040-4040-8040-404040404040'],
+    [128, '80808080-8080-4080-8080-808080808080'],
+  ] as const)('sets only RFC 9562 version and variant bits for byte %i', (byte, expected) => {
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(byte) });
+    expect(jobId.create()).toBe(expected);
+  });
+
+  it.each(['method getter', 'provider'])('keeps thrown fallback %s defects private', location => {
+    const cause = new Error('private fallback details');
+    const fail = () => {
+      throw cause;
+    };
+    vi.stubGlobal(
+      'crypto',
+      location === 'method getter'
+        ? Object.defineProperty({}, 'getRandomValues', { get: fail })
+        : { getRandomValues: fail },
+    );
+    const result = jobId.create();
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    if (!isFailure(result)) throw new Error('Expected UUID fallback defect');
+    expect(result.cause).toBe(cause);
+    expect(JSON.stringify(result)).not.toContain('private fallback');
+    expect({ ...result }).not.toHaveProperty('cause');
+  });
+
+  it.each([undefined, null, 42, {}, new Uint8Array(16)])('rejects foreign fallback output %j', output => {
+    const getRandomValues = vi.fn(() => output);
+    vi.stubGlobal('crypto', { getRandomValues });
+    expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads only the fallback buffer indices even if its iterator or length is replaced', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.fill(0);
+        Object.defineProperty(bytes, Symbol.iterator, {
+          value() {
+            throw new Error('Do not iterate');
+          },
+        });
+        Object.defineProperty(bytes, 'length', { value: Infinity });
+        return bytes;
+      },
+    });
+    expect(jobId.create()).toBe('00000000-0000-4000-8000-000000000000');
+  });
+
+  it('refuses a detached fallback buffer instead of returning a partial UUID', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        const buffer = bytes.buffer;
+        if (!(buffer instanceof ArrayBuffer)) throw new Error('Expected a transferable array buffer');
+        structuredClone(buffer, { transfer: [buffer] });
+        return bytes;
+      },
+    });
+    expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+  });
+
+  it('observes asynchronous fallback protocol failures without retrying or exposing their causes', async () => {
+    const readThen = vi.fn(() => {
+      throw new Error('private fallback then getter');
+    });
+    for (const output of [
+      Promise.reject(new Error('private fallback rejection')),
+      Promise.resolve(new Uint8Array(16)),
+      // eslint-disable-next-line unicorn/no-thenable -- Intentional malformed foreign protocol fixture.
+      Object.defineProperty({}, 'then', { get: readThen }),
+    ]) {
+      const getRandomValues = vi.fn(() => output);
+      vi.stubGlobal('crypto', { getRandomValues });
+      const result = jobId.create();
+      expect(UnexpectedDefect.is(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('private fallback');
+      expect(getRandomValues).toHaveBeenCalledTimes(1);
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(readThen).toHaveBeenCalledTimes(1);
+  });
 
   it.each(['global getter', 'method getter', 'provider'])('keeps thrown UUID %s defects private', location => {
     const cause = new Error('private UUID details');
@@ -330,7 +445,14 @@ describe('UUID generation format', () => {
     else
       vi.stubGlobal(
         'crypto',
-        location === 'method getter' ? Object.defineProperty({}, 'randomUUID', { get: fail }) : { randomUUID: fail },
+        location === 'method getter'
+          ? Object.defineProperty({}, 'randomUUID', { get: fail })
+          : {
+              randomUUID: fail,
+              getRandomValues: () => {
+                throw new Error('Do not retry native faults');
+              },
+            },
       );
     const result = jobId.create();
     expect(UnexpectedDefect.is(result)).toBe(true);
@@ -348,8 +470,10 @@ describe('UUID generation format', () => {
     '01234567-89ab-1cde-8f01-23456789abcd',
     '01234567-89ab-4cde-7f01-23456789abcd',
   ])('rejects invalid UUID output %j', output => {
-    vi.stubGlobal('crypto', { randomUUID: () => output });
+    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(0));
+    vi.stubGlobal('crypto', { randomUUID: () => output, getRandomValues });
     expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+    expect(getRandomValues).not.toHaveBeenCalled();
   });
 
   it('observes rejected promises and hostile thenables as synchronous protocol defects', async () => {
@@ -362,8 +486,10 @@ describe('UUID generation format', () => {
       // eslint-disable-next-line unicorn/no-thenable -- Intentional malformed foreign protocol fixture.
       Object.defineProperty({}, 'then', { get: readThen }),
     ]) {
-      vi.stubGlobal('crypto', { randomUUID: () => output });
+      const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(0));
+      vi.stubGlobal('crypto', { randomUUID: () => output, getRandomValues });
       expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+      expect(getRandomValues).not.toHaveBeenCalled();
     }
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(readThen).toHaveBeenCalledTimes(1);

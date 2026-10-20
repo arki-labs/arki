@@ -6,7 +6,7 @@
 import { oc } from '@orpc/contract';
 import { pgTable } from 'drizzle-orm/pg-core';
 
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { createInsertSchema, createSelectSchema, createUpdateSchema, jsonColumn } from '../dist/drizzle.js';
 import {
@@ -60,17 +60,77 @@ if (typeof globalThis.crypto?.getRandomValues === 'function') {
   check(RandomSourceUnavailable.is(generatedId), 'create() without crypto returns canonical unavailability');
 }
 
-// UUID generation uses randomUUID specifically; Hermes may lack that capability.
+// UUID generation prefers randomUUID and can use secure random bytes instead.
 const jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
 check(jobId.schema.parse('customer:job/42') === 'customer:job/42', 'UUID domains restore external job keys');
 const generatedJobId = jobId.create();
-if (typeof globalThis.crypto?.randomUUID === 'function') {
+if (typeof globalThis.crypto?.randomUUID === 'function' || typeof globalThis.crypto?.getRandomValues === 'function') {
   check(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(orThrow(generatedJobId)),
-    'UUID generation returns native UUID v4',
+    'UUID generation returns UUID v4 from Web Crypto',
   );
 } else {
-  check(RandomSourceUnavailable.is(generatedJobId), 'UUID generation without randomUUID returns canonical unavailability');
+  check(
+    RandomSourceUnavailable.is(generatedJobId),
+    'UUID generation without secure providers returns canonical unavailability',
+  );
+}
+
+// Controlled foreign-provider fixtures exercise the fallback even on native UUID engines.
+const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+const fallbackCrypto = {
+  getRandomValues(bytes) {
+    check(this === fallbackCrypto, 'UUID fallback retains the provider receiver');
+    check(bytes.byteLength === 16, 'UUID fallback requests exactly 16 bytes');
+    return bytes.fill(255);
+  },
+};
+try {
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: fallbackCrypto });
+  check(jobId.create() === 'ffffffff-ffff-4fff-bfff-ffffffffffff', 'UUID fallback sets version and variant bits');
+  check(jobId.schema.parse('legacy:job') === 'legacy:job', 'fallback preserves prefix-only stored schemas');
+
+  const nativeUuid = '01234567-89AB-4CDE-8F01-23456789ABCD';
+  const nativeCrypto = {
+    randomUUID() {
+      check(this === nativeCrypto, 'native UUID retains the provider receiver');
+      return nativeUuid;
+    },
+    getRandomValues() {
+      throw new Error('Do not invoke fallback for an available native UUID');
+    },
+  };
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: nativeCrypto });
+  check(jobId.create() === nativeUuid, 'native UUID bytes take precedence and retain their case');
+  nativeCrypto.randomUUID = () => 'invalid';
+  check(UnexpectedDefect.is(jobId.create()), 'malformed native UUID is a defect without fallback');
+  const cause = new Error('private provider details');
+  nativeCrypto.randomUUID = () => {
+    throw cause;
+  };
+  const failedNative = jobId.create();
+  check(UnexpectedDefect.is(failedNative), 'thrown native UUID is a defect without fallback');
+  check(isFailure(failedNative) && failedNative.cause === cause, 'UUID defects retain their private cause');
+  check(!JSON.stringify(failedNative).includes('private provider'), 'UUID defects omit private causes from JSON');
+
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {} });
+  check(RandomSourceUnavailable.is(jobId.create()), 'UUID without either provider is unavailable');
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { getRandomValues: () => new Uint8Array(16) },
+  });
+  check(UnexpectedDefect.is(jobId.create()), 'UUID fallback rejects a different returned buffer');
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { getRandomValues: () => Promise.reject(cause) },
+  });
+  check(UnexpectedDefect.is(jobId.create()), 'asynchronous fallback returns a synchronous defect');
+  // Let a rejected foreign provider surface if the library forgot to observe it.
+  await Promise.resolve();
+  await Promise.resolve();
+} finally {
+  if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
+  else Reflect.deleteProperty(globalThis, 'crypto');
 }
 
 // zod-form-data loads on every engine. Plain Hermes has no FormData class (React Native adds one), so parsing runs where it exists.

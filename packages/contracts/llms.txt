@@ -32,5 +32,5 @@ Match errors on `error.code`, never on the message. The main entry never loads D
 - A contract key may not contain `.` or be a reserved query-utils name. `operations()` throws.
 - End a keyset on a unique key and order by NOT NULL columns.
 - A cursor only works with the keyset that made it. It is opaque, not secret.
-- `defineId().create()` returns ID | IdGenerationFailure; check `isFailure`. `ID_GENERATION_FAILURES` declares RandomSourceUnavailable / UnexpectedDefect. Web Crypto is required; React Native needs a polyfill.
+- `defineId().create()` returns ID | IdGenerationFailure; check `isFailure`. `ID_GENERATION_FAILURES` declares RandomSourceUnavailable / UnexpectedDefect. UUID generation prefers randomUUID, falling back to secure getRandomValues bytes. Applications without Web Crypto own provider initialization and must require secure platform entropy or fail closed in every supported mode; Contracts cannot certify entropy quality from output.
 - No two id prefixes in one app may be equal or start one another. Call `assertUniqueIdPrefixes` in a test.

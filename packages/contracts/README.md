@@ -52,7 +52,7 @@ false
 
 ## Runtime support
 
-The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. `defineId().create()` needs `globalThis.crypto.getRandomValues`; Hermes has none, so install `react-native-get-random-values` in React Native. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
+The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. Default ID generation needs `crypto.getRandomValues`; UUID generation prefers `crypto.randomUUID` and otherwise uses secure random bytes. Plain Hermes has neither. Applications on runtimes without Web Crypto must initialize a provider backed by secure platform entropy that fails closed in every supported mode, including debugging. Contracts cannot certify entropy quality from returned bytes. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
 
 ## Why
 
@@ -151,10 +151,11 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
   with a private cause. `ID_GENERATION_FAILURES` declares these for adapters.
   This small synchronous entropy operation needs no separate OTel span; its
   calling operation observes and reports the returned failure.
-- **The generator uses Web Crypto** (`crypto.getRandomValues`): Node, Bun,
-  Deno and browsers have it; React Native needs a polyfill such as
-  `react-native-get-random-values`. There is no `Math.random` fallback — ids
-  end up in URLs, and guessable ones are a gift to the curious.
+- **The generator uses Web Crypto.** Default bodies use `crypto.getRandomValues`;
+  UUID-v4 declarations prefer `crypto.randomUUID`, falling back to 16 secure
+  random bytes only when that method is not callable. Applications own any
+  platform-backed provider initialization and must ensure it fails closed in
+  every supported mode. There is no `Math.random` fallback.
 
 `assertUniqueIdPrefixes(...ids)` checks one app's ids. The same prefix twice
 is a compile error (with literal prefixes) and throws; a prefix that starts
@@ -330,7 +331,7 @@ Cursor codecs return `contracts.invalid_cursor` or `contracts.invalid_cursor_val
 - **Key values.** A keyset key may not be NULL in a row. Order by NOT NULL columns, and end on a unique one.
 - **Cursors.** A cursor works only with the keyset that made it. Changing the order invalidates cursors already handed out.
 - **Prefixes.** Letters, digits and `_`. No two prefixes in one app may be equal or start one another (`sub` and `sub_`).
-- **Ids need randomness.** `create()` needs `globalThis.crypto.getRandomValues`. There is no `Math.random` fallback. Rejection sampling stops after 32 batches of 48 bytes; a provider that never supplies accepted bytes returns `UnexpectedDefect`.
+- **Ids need secure randomness.** Default `create()` uses `crypto.getRandomValues`; UUID generation prefers `crypto.randomUUID`, with secure random bytes as its fallback. Default rejection sampling stops after 32 batches of 48 bytes; a provider that never supplies accepted bytes returns `UnexpectedDefect`. Missing providers return `RandomSourceUnavailable`; thrown faults and malformed output return `UnexpectedDefect`. There is no `Math.random` fallback.
 - **Operations.** A contract key may not contain `.` or use a name the query utils reserve.
 
 ## Documentation

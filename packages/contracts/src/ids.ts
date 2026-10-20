@@ -67,7 +67,7 @@ type SingleKind<Kind extends string, All = Kind> = Kind extends ''
 export function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>;
 /**
  * Give same-format IDs distinct domain types without changing their stored values.
- * `format: 'uuid'` generates UUID v4 with native Web Crypto; omitting it keeps
+ * `format: 'uuid'` generates UUID v4 with Web Crypto; omitting it keeps
  * the default 24-character body. Schemas still validate only the stored prefix.
  */
 export function defineId<const P extends string, const Kind extends string>(
@@ -203,7 +203,29 @@ function createUuidBody(): string | IdGenerationFailure {
     const source: unknown = Reflect.get(globalThis, 'crypto');
     if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
     const randomUUID: unknown = Reflect.get(source, 'randomUUID');
-    if (typeof randomUUID !== 'function') return RandomSourceUnavailable();
+    if (typeof randomUUID !== 'function') {
+      const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
+      if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+      const bytes = new Uint8Array(16);
+      const result: unknown = Reflect.apply(getRandomValues, source, [bytes]);
+      if (result !== bytes) {
+        void Promise.resolve(result).catch(() => {
+          // The synchronous protocol failure below already owns this outcome.
+        });
+        return UnexpectedDefect({ cause: new TypeError('Random provider returned a different buffer.') });
+      }
+      let hex = '';
+      for (let index = 0; index < 16; index++) {
+        const byte = bytes[index];
+        if (byte === undefined)
+          return UnexpectedDefect({ cause: new TypeError('Random provider detached its buffer.') });
+        // RFC 9562: retain random bits except the UUID-v4 version and variant.
+        const value =
+          index === 6 ? (byte & 0b0000_1111) | 0b0100_0000 : index === 8 ? (byte & 0b0011_1111) | 0b1000_0000 : byte;
+        hex += value.toString(16).padStart(2, '0');
+      }
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
     const result: unknown = Reflect.apply(randomUUID, source, []);
     if (
       typeof result === 'string' &&

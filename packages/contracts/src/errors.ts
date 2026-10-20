@@ -25,7 +25,7 @@ export const CONTRACTS_ERROR_CODES = {
   /**
    * Reserved legacy exception code; ID generation now returns RandomSourceUnavailable.
    *
-   * @fix Run on an engine that has it. In React Native, install `react-native-get-random-values`.
+   * @fix Provide Web Crypto getRandomValues; application-owned secure providers must fail closed in every supported mode.
    * @verify bun run test:runtimes
    */
   noRandomSource: 'ARKI_CONTRACTS_E003',
@@ -87,7 +87,7 @@ const REMEDIATIONS: Record<ContractsErrorCode, string> = {
   ARKI_CONTRACTS_E001: 'Supply the stored prefix as a string; use an empty string for unprefixed IDs.',
   ARKI_CONTRACTS_E002: 'Give each id kind a prefix that is not the start of another one.',
   ARKI_CONTRACTS_E003:
-    'Run on an engine with globalThis.crypto.getRandomValues. In React Native, install react-native-get-random-values.',
+    'Provide Web Crypto getRandomValues; application-owned secure providers must fail closed in every supported mode.',
   ARKI_CONTRACTS_E004: 'Declare at least one key, and order by NOT NULL columns that end on a unique one.',
   ARKI_CONTRACTS_E005: 'Pass back a cursor exactly as the same keyset returned it, or start from the first page.',
   ARKI_CONTRACTS_E006: 'Rename the contract key: no ".", and not a name the query utils reserve.',
@@ -132,11 +132,12 @@ export const InvalidCursorValue = defineFailure('contracts.invalid_cursor_value'
 });
 
 /** Secure ID generation has no usable Web Crypto provider.
- * @fix Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; install a secure polyfill when needed.
+ * @fix Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; application-owned secure providers must fail closed in every supported mode.
  * @verify bun run test -- src/ids.test.ts
  */
 export const RandomSourceUnavailable = defineFailure('contracts.random_source_unavailable', {
   status: 500,
   message: 'Secure random generation is unavailable.',
-  remediation: 'Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; install a secure polyfill when needed.',
+  remediation:
+    'Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; application-owned secure providers must fail closed in every supported mode.',
 });

@@ -24,8 +24,20 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 For UUID-v4 generation, use `defineId('', { kind: 'queue.job', format: 'uuid' })`.
 Only generation changes: the prefix-only schema still accepts external job keys.
-The default remains a 24-character body. UUID generation requires native
-`crypto.randomUUID`; no alternate source or fallback is used.
+The default remains a 24-character body. UUID generation prefers native
+`crypto.randomUUID`. If it is not callable, the generator uses 16 bytes from
+`crypto.getRandomValues`, setting the RFC 9562 UUID-v4 version and variant bits.
+An available native provider that throws or returns invalid output produces
+`UnexpectedDefect`; it never triggers the fallback. Missing both secure providers
+returns `RandomSourceUnavailable`. Both paths preserve the exact failure union.
+
+When the runtime lacks Web Crypto, initialize an application-owned provider
+backed by secure platform entropy before calling `create()`. It must fail closed
+when secure entropy is unavailable in every supported mode, including debugging.
+A secure `getRandomValues` provider supports UUID generation without `randomUUID`.
+Contracts checks the synchronous provider protocol; it cannot certify entropy
+quality from returned bytes. The library never installs a global polyfill or
+substitutes weak entropy.
 
 ### Paginate a list with a keyset
 
@@ -69,7 +81,7 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 - **End a keyset on a unique key.** Rows with the same `createdAt` have no order of their own.
 - **A cursor is not secret.** It is base64url JSON of the last row's key values.
 - **Prefixes are stored as given.** `defineId('hlgt_')` matches rows already stored.
-- **`defineId().create()` needs Web Crypto.** React Native needs `react-native-get-random-values`.
+- **`defineId().create()` needs Web Crypto.** Applications on runtimes without it must initialize a provider backed by secure platform entropy that fails closed in every supported mode.
 - **`createIdBody()` is the shared entropy primitive.** It returns the same `IdGenerationFailure` union and a 24-character body on success. Use an ID declaration to give it a domain identity; raw bodies do not establish domain types.
 
 ## Errors

@@ -83,6 +83,12 @@ it('UUID generation retains exact domain types and literal kind guards', () => {
   type JobId = IdOf<typeof _jobId>;
   expectTypeOf<JobId>().toEqualTypeOf<z.output<typeof _jobId.schema>>();
   expectTypeOf<ReturnType<typeof _jobId.create>>().toEqualTypeOf<JobId | IdGenerationFailure>();
+  expectTypeOf<FailureOf<typeof _jobId.create>>().toEqualTypeOf<IdGenerationFailure>();
+  const _prefixedJobId = defineId('job_', { kind: 'queue.prefixed-job', format: 'uuid' });
+  expectTypeOf<ReturnType<typeof _prefixedJobId.create>>().toEqualTypeOf<
+    IdOf<typeof _prefixedJobId> | IdGenerationFailure
+  >();
+  expectTypeOf<FailureOf<typeof _prefixedJobId.create>>().toEqualTypeOf<IdGenerationFailure>();
   expectTypeOf<JobId>().not.toExtend<IdOf<typeof _otherId>>();
   expectTypeOf<string>().not.toExtend<JobId>();
   expectTypeOf<JobId>().toExtend<string>();

@@ -72,7 +72,19 @@ if (jobId.schema.parse('customer:job/42') !== 'customer:job/42') throw new Error
 
 `format` controls generation only; schemas keep prefix-only validation so explicit
 external job keys remain valid. Existing UUID bytes are unchanged. Native Web
-Crypto `randomUUID` is required; missing providers return `RandomSourceUnavailable`,
-while thrown faults, invalid UUID-v4 output and asynchronous protocol violations
-return `UnexpectedDefect` with private causes. Omitting format preserves the
-existing 24-character generation algorithm.
+Crypto `randomUUID` takes precedence. If it is not callable, generation uses
+16 secure bytes from `getRandomValues`, setting the
+[RFC 9562 UUID-v4 version and variant bits](https://www.rfc-editor.org/rfc/rfc9562.html#section-5.4). Missing both providers returns `RandomSourceUnavailable`; thrown
+faults, invalid output and asynchronous protocol violations return
+`UnexpectedDefect` with private causes. A broken available native UUID provider
+never triggers a fallback. `create()` retains its exact canonical failure union.
+Omitting format preserves the existing 24-character generation algorithm.
+
+An application on a runtime without Web Crypto must initialize its own provider
+backed by secure platform entropy before generation. It must fail closed when
+secure entropy is unavailable in every supported mode, including debugging. A
+secure byte provider supports UUID generation even without `randomUUID`. Contracts
+checks the synchronous provider protocol; it cannot certify entropy quality from
+returned bytes. It does not install global polyfills or use weak randomness.
+Missing providers return `RandomSourceUnavailable`; a provider that throws when
+entropy is unavailable returns `UnexpectedDefect` with its private cause.
