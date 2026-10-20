@@ -5,6 +5,7 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScopeAggregate, SupervisorFailure } from './errors.js';
 import { ASYNC_ERROR_CODES, AsyncError, Cancelled, Deadline, scopeAggregate } from './errors.js';
+import { scopeTelemetry } from './scope-telemetry.js';
 import { linkedController } from './signal.js';
 
 const EntryTag: unique symbol = Symbol('scope.entry');
@@ -144,8 +145,13 @@ async function openScopeRuntime(plan: Plan, options: ScopeOptions = {}) {
         break;
       }
       Object.defineProperty(state.values, name, { value: opened, enumerable: true });
-    } else if (entry.kind === 'cleanup') state.defer(entry.close);
-    else state.fork(entry.run);
+    } else if (entry.kind === 'cleanup') {
+      // eslint-disable-next-line failure/must-use -- The owner already retains signal cancellation and closes below.
+      state.defer(entry.close);
+    } else {
+      // eslint-disable-next-line failure/must-use -- The owner already retains signal cancellation and joins the child below.
+      state.fork(entry.run);
+    }
   }
   if (state.signal.aborted || state.hasFailure()) {
     const failed = await state.close();
@@ -158,7 +164,7 @@ async function openScopeRuntime(plan: Plan, options: ScopeOptions = {}) {
     async complete(body: (values: Readonly<Record<string, unknown>>, signal: AbortSignal) => unknown) {
       let value: unknown;
       try {
-        value = await body(state.values, state.signal);
+        value = await state.run(() => body(state.values, state.signal));
         if (refused(value)) state.fail(value);
       } catch (error) {
         const failure = state.defect(error);
@@ -224,6 +230,7 @@ export function createLifetime(options: ScopeOptions): unknown {
   return lifetimeRuntime(options);
 }
 function lifetimeRuntime(options: ScopeOptions) {
+  const telemetry = scopeTelemetry();
   const { controller, unlink } = linkedController();
   const ownedReason = Object.freeze({ owner: 'scope.stop' });
   const primary: Failure[] = [];
@@ -259,7 +266,7 @@ function lifetimeRuntime(options: ScopeOptions) {
   };
   const finalize = async (run: () => unknown) => {
     try {
-      const result = await run();
+      const result = await telemetry.run(run);
       if (refused(result)) cleanupFailures.push(result);
     } catch (error) {
       cleanupFailures.push(UnexpectedDefect({ cause: error }));
@@ -271,7 +278,7 @@ function lifetimeRuntime(options: ScopeOptions) {
     // Track admission before user code can synchronously close this lifetime.
     const acquiring = Promise.resolve().then(async () => {
       try {
-        const prepared = await prepare(controller.signal);
+        const prepared = await telemetry.run(() => prepare(controller.signal));
         if (refused(prepared)) {
           abort(prepared);
           return prepared;
@@ -298,7 +305,7 @@ function lifetimeRuntime(options: ScopeOptions) {
     if (!admission || controller.signal.aborted) return Cancelled({ cause: ownedReason });
     children.push(
       Promise.resolve()
-        .then(() => run(controller.signal))
+        .then(() => telemetry.run(() => run(controller.signal)))
         .then(
           value => {
             if (refused(value)) {
@@ -328,13 +335,17 @@ function lifetimeRuntime(options: ScopeOptions) {
   function close() {
     if (closing !== undefined) return closing;
     closing = Promise.resolve().then(async () => {
+      // eslint-disable-next-line failure/must-use -- Close reduces the retained primary failures after every finalizer.
       await quiesce();
       for (const finalizer of finalizers.reverse()) await finalize(finalizer);
       options.signal?.removeEventListener('abort', onAbort);
       options.deadline?.removeEventListener('abort', onDeadline);
       unlink();
-      return finish(undefined, primary, cleanupFailures);
+      const outcome = finish(undefined, primary, cleanupFailures);
+      telemetry.end(outcome, primary, cleanupFailures, finalizers.length);
+      return outcome;
     });
+    // eslint-disable-next-line failure/must-use -- Close returns the retained primary and cleanup failures together.
     void quiesce();
     return closing;
   }
@@ -349,6 +360,7 @@ function lifetimeRuntime(options: ScopeOptions) {
     defect: normalize,
     quiesce,
     close,
+    run: telemetry.run,
   };
 }
 
@@ -413,7 +425,7 @@ export function dynamicScope(definitions: readonly Definition[]): unknown {
       if (state.signal.aborted) return state.close();
       let value: unknown;
       try {
-        value = await body(scope);
+        value = await state.run(() => body(scope));
         if (refused(value)) state.fail(value);
       } catch (error) {
         const failure = state.defect(error);

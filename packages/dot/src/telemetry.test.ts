@@ -4,6 +4,7 @@ import { context, createNoopMeter, metrics, ROOT_CONTEXT, SpanStatusCode, trace 
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { resource } from '@arki/async';
 import { defineFailure, orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
@@ -183,6 +184,60 @@ it('supplies plugin and feature hooks with telemetry scoped from their mounted i
   expect(feature?.events[0]?.attributes).toMatchObject({ 'dot.plugin.name': 'catalog#eu' });
 });
 
+it('keeps resource telemetry in the plugin lifetime through cleanup and preserves its refusal', async () => {
+  const refusal = Refused({ cause: new Error('private cleanup detail') });
+  const parent = provider.getTracer('host').startSpan('host');
+  const activeIds: (string | undefined)[] = [];
+  let opened = 0;
+  let closed = 0;
+  const app = orThrow(
+    await context.with(trace.setSpan(context.active(), parent), () =>
+      defineApp('owned-telemetry')
+        .use(
+          plugin({
+            name: 'connection',
+            provides: {
+              connection: ctx =>
+                resource(
+                  async () => {
+                    await Promise.resolve();
+                    opened++;
+                    activeIds.push(trace.getActiveSpan()?.spanContext().spanId);
+                    ctx.$telemetry.event('connection.opened');
+                    return { ready: true };
+                  },
+                  async connection => {
+                    await Promise.resolve();
+                    expect(connection.ready).toBe(true);
+                    closed++;
+                    activeIds.push(trace.getActiveSpan()?.spanContext().spanId);
+                    ctx.$telemetry.event('connection.closed');
+                    return refusal;
+                  },
+                ),
+            },
+          }),
+        )
+        .boot(),
+    ),
+  );
+  expect(exporter.getFinishedSpans().filter(span => span.name === 'async.scope')).toHaveLength(0);
+  expect(await app.dispose()).toBe(refusal);
+  parent.end();
+
+  const scopes = exporter.getFinishedSpans().filter(span => span.name === 'async.scope');
+  expect(scopes).toHaveLength(1);
+  const owner = scopes[0];
+  expect(owner?.spanContext().traceId).toBe(parent.spanContext().traceId);
+  expect(activeIds).toEqual([owner?.spanContext().spanId, owner?.spanContext().spanId]);
+  expect(owner?.events.map(event => event.name)).toEqual(['connection.opened', 'connection.closed']);
+  expect(owner?.events.every(event => event.attributes?.['dot.plugin.name'] === 'connection')).toBe(true);
+  expect(owner?.status.code).toBe(SpanStatusCode.ERROR);
+  expect(owner?.attributes['failure.code']).toBe(refusal.code);
+  expect(JSON.stringify(owner?.attributes)).not.toContain('private cleanup detail');
+  expect([opened, closed]).toEqual([1, 1]);
+});
+
 it('keeps application outcomes and the parent context when reporters cannot start operations', async () => {
   const parent = provider.getTracer('transport').startSpan('request');
   trace.disable();
@@ -355,12 +410,18 @@ it('A and B share request context and classify their single execution span ident
     parent.end();
   }
   const spans = exporter.getFinishedSpans();
-  expect(spans).toHaveLength(4);
+  expect(spans).toHaveLength(6);
   const executions = spans.filter(span => span.name === 'dot.action');
   expect(executions).toHaveLength(2);
   for (const execution of executions) {
     expect(execution.attributes['failure.code']).toBe(Refused.code);
     expect(execution.events).toEqual([]);
     expect(spans.some(span => span.name.startsWith('request.') && span.spanContext().spanId === execution.parentSpanContext?.spanId)).toBe(true);
+  }
+  const scopes = spans.filter(span => span.name === 'async.scope');
+  expect(scopes).toHaveLength(2);
+  for (const scope of scopes) {
+    expect(scope.attributes['failure.code']).toBe(Refused.code);
+    expect(executions.some(execution => execution.spanContext().spanId === scope.parentSpanContext?.spanId)).toBe(true);
   }
 });

@@ -73,6 +73,7 @@
   "dependencies": {
     "@arki/clock": "workspace:*",
     "@arki/failure": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@standard-schema/spec": "^1.1.0"
   },
   "devDependencies": {
@@ -82,6 +83,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/lodash": "^4.17.25",
     "@types/lodash.debounce": "^4.0.9",
     "@types/lodash.throttle": "^4.1.9",

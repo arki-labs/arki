@@ -239,10 +239,16 @@ it('noncooperative child keeps close pending and cleanup waits', async () => {
   const lifetime = createLifetime({});
   const finish = gate<void>();
   let finalized = false;
-  lifetime.defer(() => {
-    finalized = true;
-  });
-  lifetime.fork(() => finish.promise);
+  assert.equal(
+    lifetime.defer(() => {
+      finalized = true;
+    }),
+    undefined,
+  );
+  assert.equal(
+    lifetime.fork(() => finish.promise),
+    undefined,
+  );
   const closing = lifetime.close();
   await Promise.resolve();
   assert.equal(finalized, false);
@@ -317,7 +323,10 @@ it('dependent child reads db during shutdown before outer close', async () => {
 it('dynamic registered callback failures are checked at runtime', async () => {
   const accepted = [Refused, CloseRefused, ChildRefused] as const;
   const result = await dynamicScope(accepted).run(async scope => {
-    scope.defer(() => CloseRefused());
+    assert.equal(
+      scope.defer(() => CloseRefused()),
+      undefined,
+    );
     const db = await scope.acquire(
       () => ({ query: () => 42 }),
       db => {
@@ -357,7 +366,7 @@ it('admission closes before cancellation and late registration is refused', asyn
       }),
     ),
   );
-  await closing;
+  assert.equal(await closing, undefined);
   assert.equal(ran, false);
 });
 
@@ -444,6 +453,7 @@ it('unawaited late acquisition refusal is owned and not lost', async () => {
   const failed = gate<ReturnType<typeof Refused>>();
   const refusal = Refused();
   const resultPromise = dynamicScope([Refused]).run(scope => {
+    // eslint-disable-next-line failure/must-use -- This test proves the owner retains deliberately ignored late refusals.
     void scope.acquire(
       () => failed.promise,
       () => void 0,
@@ -466,6 +476,7 @@ it('returned acquisition refusal is identity-deduplicated', async () => {
 it('unawaited acquisition defect is owned and not lost', async () => {
   const secret = new Error('unawaited acquisition defect');
   const result = await dynamicScope([]).run(scope => {
+    // eslint-disable-next-line failure/must-use -- This test proves ignored acquisition defects remain owned.
     void scope.acquire(
       () => Promise.reject(secret),
       () => void 0,
@@ -514,9 +525,12 @@ it('quiesces children before a dispose hook, then runs registered finalizers', a
   const started = gate<void>();
   const order: string[] = [];
   const lifetime = createLifetime({});
-  lifetime.defer(() => {
-    order.push('finalizer');
-  });
+  assert.equal(
+    lifetime.defer(() => {
+      order.push('finalizer');
+    }),
+    undefined,
+  );
   const watcher = child(async signal => {
     started.resolve();
     try {
@@ -525,7 +539,7 @@ it('quiesces children before a dispose hook, then runs registered finalizers', a
       order.push('child');
     }
   });
-  lifetime.fork(watcher.run);
+  assert.equal(lifetime.fork(watcher.run), undefined);
   await started.promise;
   const first = lifetime.quiesce();
   assert.equal(first, lifetime.quiesce());
@@ -539,9 +553,12 @@ it('quiesces children before a dispose hook, then runs registered finalizers', a
 it('reentrant abort listeners share one close and one finalization', async () => {
   const lifetime = createLifetime({});
   let finalized = 0;
-  lifetime.defer(() => {
-    finalized++;
-  });
+  assert.equal(
+    lifetime.defer(() => {
+      finalized++;
+    }),
+    undefined,
+  );
   let nested: ReturnType<typeof lifetime.close> | undefined;
   lifetime.signal.addEventListener('abort', () => {
     nested = lifetime.close();
@@ -586,10 +603,13 @@ it('late-acquired resources stay open until admitted children settle', async () 
   const childDone = gate<void>();
   let joined = false;
   let finalized = false;
-  lifetime.fork(async () => {
-    await childDone.promise;
-    joined = true;
-  });
+  assert.equal(
+    lifetime.fork(async () => {
+      await childDone.promise;
+      joined = true;
+    }),
+    undefined,
+  );
   const acquiring = lifetime.acquire(
     resource(
       () => opened.promise,

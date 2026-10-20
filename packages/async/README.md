@@ -181,6 +181,10 @@ Use lexical nesting when one resource or child needs an earlier resource. Use `o
 
 For dynamic work, `dynamicScope([CanonicalFailure, ...])` fixes the allowed failure definitions before its body runs. Its `acquire`, `defer`, and `fork` registrations cannot enlarge that contract. An admitted acquisition failure remains owned even when its returned promise is ignored; recover before admission or in a separately supervised attempt.
 
+Owned lifetimes (`scoped`, `openScope`, `dynamicScope`, and `createLifetime`) emit one OpenTelemetry `async.scope` span and an `async.scope.duration` histogram under `@arki/async`. The span stays open through cancellation, child joining and cleanup. It records failure codes, status and counts; resource values, abort reasons and private causes are never exported. Owner-requested shutdown is successful control flow. Descriptor construction and guards do not emit spans.
+
+Install your SDK and context manager at the app entry; providers may be registered after importing this package. With no SDK the API is a no-op. Scope callbacks activate the owned span, so nested scopes, custom OTel operations and app-configured log correlation share its trace. Use the typed `@opentelemetry/api` context, trace and metrics APIs for custom instrumentation. The library installs no SDK, logger or runtime-specific context manager. Telemetry failures cannot change callback execution or scope outcomes. Context across awaits requires an app-provided context manager for the runtime (including Hermes).
+
 ### `all(tasks, { concurrency, signal }?)`
 
 `Promise.all` for tasks that take a signal, typed per position like `Promise.all`.

@@ -9,6 +9,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 3. `all`, `mapConcurrent`, `race` and `timeout` share one internal signal. The first failure aborts it, so siblings see it.
 4. Cancellation is cooperative. A task must pass its signal to `fetch`, `sleep` and anything else that accepts one.
 5. Time comes from a `Clock`. Tests pass a `MockClock`.
+6. Owned lifetimes emit one `async.scope` span and `async.scope.duration` metric via the OpenTelemetry API. Configure the SDK/context manager at the app entry. Scope callbacks carry the active owner context for custom instrumentation and app-configured log correlation; telemetry never replaces results or private failures.
 
 ## Task map
 
