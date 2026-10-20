@@ -1,12 +1,9 @@
 /* ────────────────────────────────────────────────────────────────
    marketing.css — chrome and brand-token scope for the arki.dev
    marketing surface. Loaded by `_marketing.tsx` layout route.
-   The `.marketing` root re-declares the arki brand palette (amber
-   on dark zinc, IBM Plex Sans + JetBrains Mono) so the workbench
-   design system used by the rest of the app remains untouched.
+   The scoped zinc and amber palette uses the self-hosted Workbench
+   font contract inherited from the application.
    ──────────────────────────────────────────────────────────────── */
-
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=VT323&display=swap");
 
 .marketing {
   /* arki brand palette — light mode ("paper-printed man page").
@@ -18,11 +15,9 @@
   --card-foreground: hsl(240 10% 4%);
   --border: hsl(240 5% 84%);
   --muted: hsl(240 6% 90%);
-  --muted-foreground: hsl(240 4% 46%);
+  --muted-foreground: hsl(240 4% 40%);
   --accent: hsl(43 96% 56%);
   --accent-foreground: hsl(240 10% 4%);
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   background: var(--background);
@@ -37,7 +32,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: 1fr auto;
 }
 
 :is(.dark) .marketing {
@@ -134,8 +129,8 @@
   background: currentColor;
 }
 .marketing-statusbar .marketing-icon-btn {
-  height: 24px;
-  width: 24px;
+  height: 44px;
+  width: 44px;
 }
 .marketing-statusbar .marketing-icon-btn svg {
   font-size: 14px;

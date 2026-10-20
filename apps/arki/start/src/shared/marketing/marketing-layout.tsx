@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-import { KineticBand } from './kinetic-band';
 import { MarketingStatusBar } from './marketing-status-bar';
 
 type Props = {
@@ -12,7 +11,6 @@ export function MarketingLayout({ children }: Readonly<Props>) {
     <div className="marketing">
       <main>{children}</main>
       <MarketingStatusBar />
-      <KineticBand />
     </div>
   );
 }

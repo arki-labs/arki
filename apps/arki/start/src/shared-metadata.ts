@@ -27,6 +27,7 @@ export const defaultMetadata: HeadMeta = {
 
 export const getDefaultMeta = (overrides: Partial<HeadMeta> = {}) => ({
   meta: [
+    { title: overrides.title ?? config.appDefaultTitle },
     { name: 'description', content: overrides.description ?? config.appDescription },
     { property: 'og:title', content: overrides.title ?? config.appDefaultTitle },
     { property: 'og:description', content: overrides.description ?? config.appDescription },
