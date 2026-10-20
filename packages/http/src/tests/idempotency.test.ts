@@ -6,29 +6,37 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { BeginResult, IdempotencyOwnerId, IdempotentOptions, ResponseCache, StoredResponse } from '../idempotency.js';
+import type {
+  BeginResult,
+  IdempotencyOwnerId,
+  IdempotentOptions,
+  ResponseCache,
+  StoredResponse,
+} from '../idempotency.js';
 import { route } from '../contract.js';
 import { composeMiddleware } from '../engine.js';
-import { IDEMPOTENCY_FAILURES, idempotent } from '../idempotency.js';
+import { IDEMPOTENCY_FAILURES, IdempotencyOwnershipLost, idempotent } from '../idempotency.js';
 
-type Entry = { fingerprint: string; owner: IdempotencyOwnerId; expiresAt: number; response?: StoredResponse };
+type Entry = { fingerprint: string; owner: IdempotencyOwnerId; expiresAt?: number; response?: StoredResponse };
 
 function memoryCache(now: () => number = Date.now): ResponseCache & { readonly entries: Map<string, Entry> } {
   const entries = new Map<string, Entry>();
   return {
     entries,
-    begin: (key, fingerprint, owner, ttl): Promise<BeginResult> => {
+    begin: (key, fingerprint, owner): Promise<BeginResult> => {
       const held = entries.get(key);
-      if (held === undefined || held.expiresAt <= now()) {
-        entries.set(key, { fingerprint, owner, expiresAt: now() + ttl });
+      if (held === undefined || (held.expiresAt !== undefined && held.expiresAt <= now())) {
+        entries.set(key, { fingerprint, owner });
         return Promise.resolve('started');
       }
       if (held.fingerprint !== fingerprint) return Promise.resolve('conflict');
       return Promise.resolve(held.response === undefined ? 'in-progress' : { replay: held.response });
     },
-    finish: (key, owner, response) => {
+    finish: (key, owner, response, ttl) => {
       const held = entries.get(key);
-      if (held?.owner === owner) held.response = response;
+      if (held?.owner !== owner) return Promise.resolve(IdempotencyOwnershipLost());
+      held.response = response;
+      held.expiresAt = now() + ttl;
       return Promise.resolve();
     },
     abandon: (key, owner) => {
@@ -179,19 +187,30 @@ describe('idempotent', () => {
     expect(res.status).toBe(400);
   });
 
-  it('frees the key after a 5xx, a 409, a 429 or a throw, so the client can retry', async () => {
-    for (const status of [500, 503, 409, 429]) {
-      const { fetch, calls } = setup(() => new Response('no', { status }));
-      await fetch(post('/orders', {}, keyed));
-      await fetch(post('/orders', {}, keyed));
-      expect(calls()).toBe(2);
-    }
-    const { fetch, calls } = setup(() => {
+  it.each([200, 201, 204, 205, 301, 304, 409, 422, 429, 500, 503, 599])(
+    'retains a finite %i response because an error status does not prove the write did not happen',
+    async status => {
+      const body = [204, 205, 304].includes(status) ? null : 'answer';
+      const { fetch, calls } = setup(() => new Response(body, { status }));
+      const first = await fetch(post('/orders', {}, keyed));
+      const replay = await fetch(post('/orders', {}, keyed));
+      expect(replay.status).toBe(status);
+      expect(await replay.text()).toBe(await first.text());
+      expect(replay.headers.get('idempotent-replayed')).toBe('true');
+      expect(calls()).toBe(1);
+    },
+  );
+
+  it('retains ownership after a handler throws because its effects may already have committed', async () => {
+    const { fetch, calls, cache } = setup(() => {
       throw new Error('boom');
     });
-    await expect(fetch(post('/orders', {}, keyed))).resolves.toHaveProperty('status', 500);
-    await fetch(post('/orders', {}, keyed));
-    expect(calls()).toBe(2);
+    await expect(fetch(post('/orders', {}, keyed))).resolves.toMatchObject({ status: 500 });
+    const retry = await fetch(post('/orders', {}, keyed));
+    expect(retry.status).toBe(409);
+    expect(await retry.json()).toMatchObject({ error: { code: 'http.idempotency_in_progress' } });
+    expect(calls()).toBe(1);
+    expect(cache.entries.size).toBe(1);
   });
 
   it('stores a 4xx answer: the same bad request keeps getting the same answer', async () => {
@@ -202,35 +221,74 @@ describe('idempotent', () => {
     expect(calls()).toBe(1);
   });
 
-  it('does not store a response over maxBodyBytes, and runs an oversized request body unprotected', async () => {
-    const big = setup(() => new Response('x'.repeat(100), { status: 200 }), { maxBodyBytes: 50 });
-    await big.fetch(post('/orders', {}, keyed));
-    await big.fetch(post('/orders', {}, keyed));
-    expect(big.calls()).toBe(2);
-    expect(big.cache.entries.size).toBe(0);
-
-    const small = setup(created, { maxBodyBytes: 50 });
-    const hugeBody = { text: 'y'.repeat(200) };
-    await small.fetch(post('/orders', hugeBody, keyed));
-    await small.fetch(post('/orders', hugeBody, keyed));
-    expect(small.calls()).toBe(2);
+  it('retains an unresolved reservation when the response exceeds the cap', async () => {
+    const { fetch, calls, cache } = setup(() => new Response('x'.repeat(100)), { maxBodyBytes: 50 });
+    const first = await fetch(post('/orders', {}, keyed));
+    expect(first.status).toBe(500);
+    expect(await first.json()).toMatchObject({ error: { code: 'http.idempotency_response_unavailable' } });
+    await expect(fetch(post('/orders', {}, keyed))).resolves.toMatchObject({ status: 409 });
+    expect(calls()).toBe(1);
+    expect(cache.entries.size).toBe(1);
   });
 
-  it('caps a chunked request body by counting bytes, not by trusting content-length', async () => {
-    // No content-length: before the cap counted bytes, the whole stream was buffered first.
-    const { cache, fetch, calls } = setup(
-      async req => {
-        const text = await req.text();
-        return Response.json({ size: text.length });
+  it.each(['declared', 'buffered', 'chunked'])(
+    'refuses an oversized %s request before any unprotected effects',
+    async kind => {
+      const { fetch, calls, cache } = setup(created, { maxBodyBytes: 50 });
+      const request = () =>
+        kind === 'chunked'
+          ? chunkedPost(80)
+          : post(
+              '/orders',
+              { text: 'y'.repeat(200) },
+              {
+                ...keyed,
+                ...(kind === 'declared' ? { 'content-length': '211' } : {}),
+              },
+            );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await fetch(request());
+        expect(response.status).toBe(413);
+        expect(await response.json()).toMatchObject({ error: { code: 'http.idempotency_request_too_large' } });
+      }
+      expect(calls()).toBe(0);
+      expect(cache.entries.size).toBe(0);
+    },
+  );
+
+  it('keeps pending claims past the TTL and starts replay retention only at finish', async () => {
+    let now = 0;
+    const cache = memoryCache(() => now);
+    let finishHandler: (() => void) | undefined;
+    let startedHandler: (() => void) | undefined;
+    const started = new Promise<void>(resolve => {
+      startedHandler = resolve;
+    });
+    const gate = new Promise<void>(resolve => {
+      finishHandler = resolve;
+    });
+    const { fetch, calls } = setup(
+      async () => {
+        startedHandler?.();
+        await gate;
+        return new Response('done');
       },
-      { maxBodyBytes: 50 },
+      { cache, ttl: 100 },
     );
-    const first = await fetch(chunkedPost(80));
-    await fetch(chunkedPost(80));
+    const first = fetch(post('/orders', {}, keyed));
+    await started;
+    now = 1000;
+    await expect(fetch(post('/orders', {}, keyed))).resolves.toMatchObject({ status: 409 });
+    expect(calls()).toBe(1);
+    finishHandler?.();
+    await first;
+    now = 1099;
+    const retained = await fetch(post('/orders', {}, keyed));
+    expect(retained.headers.get('idempotent-replayed')).toBe('true');
+    now = 1100;
+    const expired = await fetch(post('/orders', {}, keyed));
+    expect(expired.headers.get('idempotent-replayed')).toBeNull();
     expect(calls()).toBe(2);
-    expect(cache.entries.size).toBe(0);
-    // The handler still gets the whole body: the cap only read a clone.
-    expect(await first.json()).toEqual({ size: 80 });
   });
 
   it('lets the handler read the body after the middleware fingerprinted it', async () => {

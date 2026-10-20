@@ -226,7 +226,7 @@ export function journalTables(schema?: PgSchema) {
      * request that holds the key. Only that request can finish or abandon it.
      */
     owner: varchar('owner', { length: 64 }),
-    /** Response cache rows only. After this time the key can be taken again. A command receipt never expires. */
+    /** Completed response cache rows only. Retention starts at finish; null while unresolved. Command receipts never expire. */
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
     /** Response cache rows only. The stored response once the request finished; null while it runs. */
     response: jsonb('response'),

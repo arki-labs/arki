@@ -446,9 +446,9 @@ http({
 
 - The fingerprint is method + path + sorted query + a SHA-256 of the body. The cache key is the scope plus the header value.
 - No header on a listed route: 400 (`http.idempotency_key_required`). Same key, different request: 422 (`http.idempotency_key_reused`). Same key while the first is running: 409 with `Retry-After` (`http.idempotency_in_progress`). A replay has the stored status and body, the allowlisted headers, and `Idempotent-Replayed: true`.
-- **What is stored.** Every 2xx, 3xx and 4xx answer, except 409 and 429. A 5xx, a 409, a 429, a handler that throws, and an event stream free the key (`abandon`), so a retry runs the handler again. A 4xx is stored because the same request would fail the same way.
-- **Size.** A response body over `maxBodyBytes` (default 1 MiB) is not stored: the key is freed. A request body over it cannot be fingerprinted cheaply, so that request runs with no idempotency at all. Raise the limit for routes that take big uploads, or keep them off `routes`.
-- A failing cache fails the request. Running unprotected could do the work twice.
+- **What is stored.** Every bounded response, including 5xx, 409 and 429. A status or exception does not prove that application effects never happened. Pending reservations never expire automatically; replay retention (`ttl`, milliseconds) starts at confirmed `finish`.
+- **Size.** Requests over `maxBodyBytes` (default 1 MiB) are refused with 413 before execution. Streaming, oversized or unreadable responses return `http.idempotency_response_unavailable` and retain the unresolved reservation. A thrown handler also retains its reservation.
+- Cache acquisition failures stop execution. Unconfirmed response persistence never releases ownership. Query the same key or reconcile the application outcome; do not repeat with a new key. `abandon` is an explicit reconciliation operation, never an automatic response to a failed request.
 - This caches responses for HTTP replay. It is not the journal's command receipt, which commits with the business write. Use both for a payment: the cache answers a repeat cheaply, the receipt keeps a repeat that reaches the handler from writing twice.
 
 ## Webhooks
@@ -700,6 +700,11 @@ Stable API — match on codes, never parse messages.
 | `schema.invalid_input` | local or server input validation failed (400) |
 | `failure.invalid_envelope` | unknown wire code, malformed envelope or invalid payload |
 | `contracts.random_source_unavailable` / `failure.unexpected_defect` | request or idempotency owner generation lacks secure entropy or its provider is defective; answers 500 before protected execution |
+| `http.idempotency_claim_unconfirmed` | ownership acquisition unconfirmed (503); handler does not run |
+| `http.idempotency_write_unconfirmed` / `http.idempotency_ownership_lost` | response persistence unconfirmed (500) or ownership lost (409); reconcile before repetition |
+| `http.idempotency_release_unconfirmed` | explicit reconciled release unconfirmed (503); query the reservation |
+| `http.idempotency_replay_invalid` / `http.idempotency_response_unavailable` | invalid stored replay or completed response cannot be retained (500); reservation stays held |
+| `http.idempotency_request_too_large` | body exceeds protection limit (413); handler does not run |
 | `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |

@@ -99,16 +99,19 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
 ```ts
 import { Redis } from 'ioredis';
 
-import { idempotent } from '@arki/http/idempotency';
+import { route } from '@arki/http';
+import { IDEMPOTENCY_FAILURES, idempotent } from '@arki/http/idempotency';
 import { redisResponseCache } from '@arki/kv/redis/idempotency';
 
 const redis = new Redis(process.env.KV_URL ?? 'redis://localhost:6379');
 const scope = (): string => 'tenant-1';
 
-idempotent({ cache: redisResponseCache(redis), scope, routes: ['POST /orders'], ttl: 86_400_000 });
+idempotent({ cache: redisResponseCache(redis), scope, routes: [route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES })], ttl: 86_400_000 });
 ```
 
-`begin` is `SET key value NX PX ttl`, so only one first request starts. `finish` and `abandon` are Lua scripts that check the request's owner token and write in one step: a slow request whose key expired and was taken by another cannot touch the new entry. The TTL counts from `begin`; `finish` keeps the remaining time (`KEEPTTL`, Redis 6 or newer). Keys use the prefix `idem:` unless you pass `{ prefix }`. `@arki/http` is an optional peer.
+`begin` uses `SET key value NX` without expiry. Pending reservations persist until the application reconciles them. `finish` checks the owner and atomically writes the response with `PX ttl`, starting replay retention then. A missing or different owner returns `IdempotencyOwnershipLost`; Redis rejection returns the operation's unconfirmed failure with a private cause. Invalid replay data returns `IdempotencyReplayInvalid`. `abandon` releases only a pending reservation owned by the caller, after reconciliation proves repetition safe. Keys use `idem:` unless you pass `{ prefix }`. `@arki/http` is an optional peer.
+
+Upgrade with all old writers stopped: drain active requests, inventory legacy pending keys, reconcile their application outcomes, and `PERSIST` unresolved keys before reopening traffic. Do not delete a pending key merely because its old TTL elapsed. Mixed writer versions are unsafe because old writers can expire unresolved reservations. Use durable Redis persistence and an eviction policy that preserves reservations; store loss still needs durable application receipts to prevent duplicate business work.
 
 ## Environment variables
 

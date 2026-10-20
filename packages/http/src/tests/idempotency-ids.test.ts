@@ -46,8 +46,8 @@ describe('idempotency owner generation', () => {
     expect(response.status).toBe(204);
     const owner = idempotencyOwnerId.schema.parse(uuid);
     expect(randomUUID).toHaveBeenCalledTimes(1);
-    expect(cache.begin).toHaveBeenCalledWith(expect.any(String), expect.any(String), owner, 10_000);
-    expect(cache.finish).toHaveBeenCalledWith(expect.any(String), owner, expect.objectContaining({ status: 204 }));
+    expect(cache.begin).toHaveBeenCalledWith(expect.any(String), expect.any(String), owner);
+    expect(cache.finish).toHaveBeenCalledWith(expect.any(String), owner, expect.objectContaining({ status: 204 }), 10_000);
     expect(handler).toHaveBeenCalledTimes(1);
   });
 

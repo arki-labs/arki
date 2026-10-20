@@ -9,15 +9,25 @@
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { composeMiddleware, route } from '@arki/http';
-import { IDEMPOTENCY_FAILURES, idempotencyOwnerId, idempotent } from '@arki/http/idempotency';
+import {
+  IDEMPOTENCY_FAILURES,
+  IdempotencyClaimUnconfirmed,
+  idempotencyOwnerId,
+  IdempotencyOwnershipLost,
+  IdempotencyReleaseUnconfirmed,
+  IdempotencyReplayInvalid,
+  IdempotencyWriteUnconfirmed,
+  idempotent,
+} from '@arki/http/idempotency';
 
 import { responseCache } from './http.js';
+import { initJournal } from './journal.js';
 import { journalTables } from './pg.js';
 
 const tables = journalTables();
@@ -126,51 +136,51 @@ describe('journal response cache (Postgres)', () => {
     expect(replay.headers.get('idempotent-replayed')).toBe('true');
   });
 
-  it('a stale owner cannot finish after the entry expired and was given to someone else', async () => {
+  it('pending reservations survive replay retention and only their owner can finish', async () => {
     const key = freshKey();
-    const oldOwner = idempotencyOwnerId.schema.parse('owner-old');
-    const newOwner = idempotencyOwnerId.schema.parse('owner-new');
-    const thirdOwner = idempotencyOwnerId.schema.parse('owner-third');
     const stale = cacheA();
     const fresh = cacheB();
-    expect(await stale.begin(key, 'fp', oldOwner, 100)).toBe('started');
+    expect(await stale.begin(key, 'fp', ownerOne)).toBe('started');
     await sleep(250);
-    expect(await fresh.begin(key, 'fp', newOwner, 60_000)).toBe('started');
-    await stale.finish(key, oldOwner, response);
-    await stale.abandon(key, oldOwner);
-    // The new owner still holds a running entry: the old owner's finish and abandon did nothing.
-    expect(await fresh.begin(key, 'fp', thirdOwner, 60_000)).toBe('in-progress');
-    await fresh.finish(key, newOwner, response);
-    expect(await fresh.begin(key, 'fp', thirdOwner, 60_000)).toEqual({ replay: response });
+    expect(await fresh.begin(key, 'fp', ownerTwo)).toBe('in-progress');
+    expect(await fresh.finish(key, ownerTwo, response, 100)).toMatchObject({ code: IdempotencyOwnershipLost.code });
+    expect(await fresh.abandon(key, ownerTwo)).toBeUndefined();
+    expect(await stale.finish(key, ownerOne, response, 100)).toBeUndefined();
+    expect(await fresh.begin(key, 'fp', ownerTwo)).toEqual({ replay: response });
+    expect(await fresh.abandon(key, ownerOne)).toBeUndefined();
+    expect(await fresh.begin(key, 'fp', ownerTwo)).toEqual({ replay: response });
   });
 
   it('after the TTL the key can be used again, with a different request too', async () => {
     const key = freshKey();
     const cache = cacheA();
-    await cache.begin(key, 'fp-1', ownerOne, 1500);
-    await cache.finish(key, ownerOne, response);
-    expect(await cache.begin(key, 'fp-1', ownerTwo, 1500)).toEqual({ replay: response });
+    expect(await cache.begin(key, 'fp-1', ownerOne)).toBe('started');
+    expect(await cache.finish(key, ownerOne, response, 1500)).toBeUndefined();
+    expect(await cache.begin(key, 'fp-1', ownerTwo)).toEqual({ replay: response });
     await sleep(1800);
-    expect(await cache.begin(key, 'fp-2', ownerThree, 60_000)).toBe('started');
+    expect(await cache.begin(key, 'fp-2', ownerThree)).toBe('started');
+    expect(await cache.finish(key, ownerOne, response, 5000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
+    expect(await cache.abandon(key, ownerOne)).toBeUndefined();
+    expect(await cache.begin(key, 'fp-2', ownerTwo)).toBe('in-progress');
   });
 
   it('an abandoned key can be taken at once', async () => {
     const key = freshKey();
     const cache = cacheA();
-    await cache.begin(key, 'fp', ownerOne, 60_000);
-    await cache.abandon(key, ownerOne);
-    expect(await cache.begin(key, 'fp', ownerTwo, 60_000)).toBe('started');
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    expect(await cache.abandon(key, ownerOne)).toBeUndefined();
+    expect(await cache.begin(key, 'fp', ownerTwo)).toBe('started');
   });
 
-  it('5xx is not cached: the retry runs the handler again', async () => {
+  it('5xx is cached because application work may already have committed', async () => {
     let status = 503;
     const { fetch, calls } = app(cacheA(), () => Promise.resolve(new Response('x', { status })));
     const headers = { 'x-user': 'u1', 'idempotency-key': freshKey() };
     const failed = await fetch(post({}, headers));
     status = 201;
     const retried = await fetch(post({}, headers));
-    expect([failed.status, retried.status]).toEqual([503, 201]);
-    expect(calls()).toBe(2);
+    expect([failed.status, retried.status]).toEqual([503, 503]);
+    expect(calls()).toBe(1);
   });
 
   it('unauthenticated request never replays', async () => {
@@ -186,9 +196,155 @@ describe('journal response cache (Postgres)', () => {
     await dbA
       .insert(tables.receipts)
       .values({ key: 'plain-command-key', command: 'pay', input: {}, commandId: 'cmd_1', result: {} });
-    await cacheA().begin('plain-command-key', 'fp', ownerOne, 60_000);
+    expect(await cacheA().begin('plain-command-key', 'fp', ownerOne)).toBe('started');
     const [row] = await dbA.select().from(tables.receipts).where(eq(tables.receipts.key, 'plain-command-key'));
     expect(row?.command).toBe('pay');
     expect(row?.expiresAt).toBeNull();
+  });
+  it('missing ownership and invalid retention never report a confirmed write', async () => {
+    const key = freshKey();
+    const cache = cacheA();
+    expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    for (const ttl of [0, -1, Number.NaN, Infinity, 0.5]) {
+      expect(await cache.finish(key, ownerOne, response, ttl)).toMatchObject({
+        code: IdempotencyWriteUnconfirmed.code,
+      });
+    }
+    expect(await cache.begin(key, 'fp', ownerTwo)).toBe('in-progress');
+    await dbA.delete(tables.receipts).where(eq(tables.receipts.key, `http:${key}`));
+    expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
+  });
+
+  it.each([
+    { status: 999, headers: {}, body: '' },
+    { status: 200, headers: {}, body: '%%%invalid' },
+    { status: 200, headers: { 'bad header': 'value' }, body: '' },
+  ])('invalid stored responses fail closed: %j', async malformed => {
+    const key = freshKey();
+    const cache = cacheA();
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    await dbA
+      .update(tables.receipts)
+      .set({ response: malformed, expiresAt: new Date(Date.now() + 60_000) })
+      .where(eq(tables.receipts.key, `http:${key}`));
+    expect(await cache.begin(key, 'fp', ownerTwo)).toMatchObject({ code: IdempotencyReplayInvalid.code });
+  });
+
+  it('driver rejections return failures and leave uncertain work reserved', async () => {
+    const key = freshKey();
+    const cache = cacheA();
+    const cause = new Error('private database rejection');
+    vi.spyOn(dbA, 'insert').mockImplementationOnce(() => {
+      throw cause;
+    });
+    expect(await cache.begin(key, 'fp', ownerOne)).toMatchObject({ code: IdempotencyClaimUnconfirmed.code, cause });
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    vi.spyOn(dbA, 'update').mockImplementationOnce(() => {
+      throw cause;
+    });
+    expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({
+      code: IdempotencyWriteUnconfirmed.code,
+      cause,
+    });
+    expect(await cache.begin(key, 'fp', ownerTwo)).toBe('in-progress');
+    vi.spyOn(dbA, 'delete').mockImplementationOnce(() => {
+      throw cause;
+    });
+    expect(await cache.abandon(key, ownerOne)).toMatchObject({ code: IdempotencyReleaseUnconfirmed.code, cause });
+    expect(await cache.begin(key, 'fp', ownerTwo)).toBe('in-progress');
+    vi.restoreAllMocks();
+  });
+
+  it('asynchronous driver rejection returns unconfirmed outcomes', async () => {
+    const disconnectedPool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    const disconnectedDb = drizzle({ client: disconnectedPool });
+    const cache = responseCache(disconnectedDb, tables);
+    const key = freshKey();
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    await disconnectedPool.end();
+    expect(await cache.begin(freshKey(), 'fp', ownerOne)).toMatchObject({ code: IdempotencyClaimUnconfirmed.code });
+    expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({ code: IdempotencyWriteUnconfirmed.code });
+    expect(await cache.abandon(key, ownerOne)).toMatchObject({ code: IdempotencyReleaseUnconfirmed.code });
+    expect(await cacheB().begin(key, 'fp', ownerTwo)).toBe('in-progress');
+  });
+
+  it('a failed response write does not execute application work again', async () => {
+    const application = app(cacheA(), () => {
+      vi.spyOn(dbA, 'update').mockImplementationOnce(() => {
+        throw new Error('write rejected');
+      });
+      return Promise.resolve(Response.json({ committed: true }, { status: 201 }));
+    });
+    const headers = { 'x-user': 'u1', 'idempotency-key': freshKey() };
+    const first = await application.fetch(post({}, headers));
+    expect(first.status).toBe(500);
+    const repeat = await application.fetch(post({}, headers));
+    expect(repeat.status).toBe(409);
+    expect(application.calls()).toBe(1);
+    vi.restoreAllMocks();
+  });
+
+  it('pruning preserves unresolved legacy claims and live replays', async () => {
+    const pending = freshKey();
+    const legacyPending = freshKey();
+    const live = freshKey();
+    const expired = freshKey();
+    const recentExpired = freshKey();
+    const old = new Date(Date.now() - 120_000);
+    const past = new Date(Date.now() - 60_000);
+    const future = new Date(Date.now() + 60_000);
+    for (const key of [pending, legacyPending, live, expired, recentExpired]) {
+      expect(await cacheA().begin(key, 'fp', ownerOne)).toBe('started');
+    }
+    await dbA
+      .update(tables.receipts)
+      .set({ recordedAt: old })
+      .where(
+        inArray(
+          tables.receipts.key,
+          [pending, legacyPending, live, expired].map(key => `http:${key}`),
+        ),
+      );
+    await dbA
+      .update(tables.receipts)
+      .set({ expiresAt: past })
+      .where(eq(tables.receipts.key, `http:${legacyPending}`));
+    for (const [key, expiresAt] of [
+      [live, future],
+      [expired, past],
+      [recentExpired, past],
+    ] as const) {
+      await dbA
+        .update(tables.receipts)
+        .set({ response, expiresAt })
+        .where(eq(tables.receipts.key, `http:${key}`));
+    }
+    const journal = initJournal({ tables }).compose({});
+    // An application's command may have the same name; only the reserved key namespace
+    // plus the discriminator identifies an HTTP reservation.
+    const commandKey = freshKey();
+    await dbA.insert(tables.receipts).values({
+      key: commandKey,
+      command: 'http.response',
+      input: {},
+      commandId: 'command',
+      recordedAt: old,
+    });
+    expect(await journal.pruneReceipts(dbA, { before: past })).toBe(2);
+    expect(await dbA.select().from(tables.receipts).where(eq(tables.receipts.key, commandKey))).toEqual([]);
+    const rows = await dbA
+      .select({ key: tables.receipts.key })
+      .from(tables.receipts)
+      .where(
+        inArray(
+          tables.receipts.key,
+          [pending, legacyPending, live, expired, recentExpired].map(key => `http:${key}`),
+        ),
+      );
+    expect(rows.map(row => row.key).toSorted()).toEqual(
+      [pending, legacyPending, live, recentExpired].map(key => `http:${key}`).toSorted(),
+    );
+    expect(await cacheB().begin(legacyPending, 'fp', ownerTwo)).toBe('in-progress');
   });
 });

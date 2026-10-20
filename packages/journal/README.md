@@ -193,7 +193,9 @@ import { responseCache } from '@arki/journal/http';
 idempotent({ cache: responseCache(db, tables), scope, routes: ['POST /orders'], ttl: 86_400_000 });
 ```
 
-Give it the root database, not a command's transaction. The two uses of the table stay apart: a cache row has a key that starts with `http:`, `command = 'http.response'`, and an `expires_at`; a command receipt never expires. `begin` is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE expires_at <= now()`, so two concurrent first requests meet on the row lock, and an expired key is taken in the same statement. `finish` and `abandon` match the request's `owner`, so a slow request whose key expired and was given away cannot overwrite the new entry. Expiry uses the database clock. `pruneReceipts` removes old cache rows too.
+Give it the root database, not a command's transaction. Cache rows use `http:` keys and `command = 'http.response'`. Pending reservations have no expiry. `begin` atomically claims a missing key or takes over an expired completed replay. `finish` checks the owner and atomically writes the response and expiry, starting replay retention at that moment. A missing or different owner returns `IdempotencyOwnershipLost`; database rejection returns the operation's unconfirmed failure with a private cause. Invalid replay data returns `IdempotencyReplayInvalid`. `abandon` releases only a pending reservation owned by the caller, after application reconciliation proves repetition safe. `pruneReceipts` preserves every unresolved reservation and every unexpired replay, even when its recording time is old.
+
+Upgrade with all old writers stopped: drain active requests, inventory legacy pending rows, reconcile their application outcomes, and preserve unresolved rows with `expires_at = NULL` before reopening traffic. Do not delete a pending row merely because its old TTL elapsed. Mixed writer versions are unsafe: an old writer can restore expiry on an unresolved reservation. Store loss still needs durable application receipts to prevent duplicate business work.
 
 For oRPC, `idempotent({ scope })` from `@arki/journal/orpc` reads `Idempotency-Key` from `context.headers`. Place it before `actorRun`: `os.use(idempotent({ scope: ctx => ctx.session?.user.id })).use(asActor)`. Each command the procedure runs then uses `${scope.length}:${scope}:${key}:${commandName}` as its receipt key (the length keeps a key with colons from reaching another scope), so a procedure with two commands replays both. The same effect without oRPC: `journal.bind(db, meta, { idempotencyKey, keyPerCommand: true })`.
 
@@ -972,7 +974,7 @@ journal_receipts
   command_id    varchar not null
   recorded_at   timestamptz not null default now()
   owner         varchar(64)               -- response cache rows only (@arki/journal/http); null on a command receipt
-  expires_at    timestamptz               -- response cache rows only
+  expires_at    timestamptz               -- completed response replay only; null while unresolved
   response      jsonb                     -- response cache rows only; null while the request runs
 
 journal_cursors

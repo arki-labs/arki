@@ -39,6 +39,9 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 2. The client sends the same `Idempotency-Key` for every retry of one action. List `IDEMPOTENCY_FAILURES` on that route to infer its refusals.
 3. `ResponseCache` owner arguments are `IdempotencyOwnerId`. Restore stored/test strings with `idempotencyOwnerId.schema`; do not restate the brand or cast a string. The middleware generates before hashing or cache acquisition, returning canonical entropy failures through its HTTP bridge.
 
+4. Cache adapters implement `begin(key, fingerprint, owner)` and `finish(key, owner, response, ttl)`. Infer exact failures from the exported method-specific tuples. Pending claims have no expiry; `finish` starts replay retention. Never discard a claim merely because a handler throws or returns an error status.
+5. Every bounded response is replayed, including 5xx/409/429. Unsupported response bodies retain the claim and return a canonical failure; oversized requests stop before the handler. Use `abandon` only after application reconciliation proves repetition safe. See [persistence migration](upgrade-idempotency.md) for coordinated store upgrades and retention limits.
+
 ### Correlate and trace a request
 
 1. Use the inferred `ctx.requestId` (`RequestId`). Every present `x-request-id` is preserved; without one, canonical UUID generation must succeed before bound execution.

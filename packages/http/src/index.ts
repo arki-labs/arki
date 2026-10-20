@@ -93,5 +93,15 @@ export {
   IdempotencyKeyRequired,
   IdempotencyKeyReused,
   IdempotencyInProgress,
+  IdempotencyClaimUnconfirmed,
+  IdempotencyWriteUnconfirmed,
+  IdempotencyReleaseUnconfirmed,
+  IdempotencyOwnershipLost,
+  IdempotencyReplayInvalid,
+  IdempotencyResponseUnavailable,
+  IdempotencyRequestTooLarge,
+  RESPONSE_CACHE_BEGIN_FAILURES,
+  RESPONSE_CACHE_FINISH_FAILURES,
+  RESPONSE_CACHE_ABANDON_FAILURES,
 } from './failures.js';
 export type { HttpClientFailure } from './failures.js';

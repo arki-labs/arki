@@ -55,14 +55,86 @@ export const IdempotencyKeyReused = defineFailure('http.idempotency_key_reused',
  */
 export const IdempotencyInProgress = defineFailure('http.idempotency_in_progress', {
   status: 409,
-  message: 'A request with this idempotency key is still running.',
-  remediation: 'Wait and send the same request again.',
+  message: 'A request with this idempotency key is running or awaiting reconciliation.',
+  remediation: 'Poll with the same key. Reconcile an unresolved operation before releasing its reservation.',
 });
+
+/** Cache acquisition did not confirm whether this request owns the key.
+ * @fix Retry the same key; never execute without confirmed ownership.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyClaimUnconfirmed = defineFailure('http.idempotency_claim_unconfirmed', {
+  status: 503,
+  message: 'Idempotency ownership could not be confirmed.',
+  remediation: 'Retry with the same key. Do not execute the operation without confirmed ownership.',
+});
+/** Application work ran but persistence of its response is unconfirmed.
+ * @fix Reconcile the application outcome before releasing or replacing its key.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyWriteUnconfirmed = defineFailure('http.idempotency_write_unconfirmed', {
+  status: 500,
+  message: 'The operation ran but persistence of its response could not be confirmed.',
+  remediation: 'Query the same key or reconcile the application outcome. Do not repeat with a new key.',
+});
+/** Release of a reconciled reservation was not confirmed.
+ * @fix Check the reservation before executing or releasing again.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyReleaseUnconfirmed = defineFailure('http.idempotency_release_unconfirmed', {
+  status: 503,
+  message: 'Release of the idempotency reservation could not be confirmed.',
+  remediation: 'Check the reservation and reconcile the operation before retrying.',
+});
+/** The expected owner cannot persist a response.
+ * @fix Reconcile the operation; never treat lost ownership as permission to repeat it.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyOwnershipLost = defineFailure('http.idempotency_ownership_lost', {
+  status: 409,
+  message: 'The operation no longer owns its idempotency reservation.',
+  remediation: 'Reconcile the application outcome. Do not repeat with a new key.',
+});
+/** Persisted replay data cannot be safely reconstructed.
+ * @fix Repair the stored response after reconciling the application outcome.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyReplayInvalid = defineFailure('http.idempotency_replay_invalid', {
+  status: 500,
+  message: 'The stored idempotency response is invalid.',
+  remediation: 'Reconcile the application outcome before repairing or releasing the reservation.',
+});
+/** Application work ran but its response cannot be stored for replay.
+ * @fix Use a bounded, nonstreaming response and reconcile this operation.
+ * @verify bun run test -- src/tests/idempotency-outcomes.test.ts
+ */
+export const IdempotencyResponseUnavailable = defineFailure('http.idempotency_response_unavailable', {
+  status: 500,
+  message: 'The operation ran but its response could not be retained for replay.',
+  remediation: 'Reconcile the application outcome. Use a bounded, nonstreaming response for protected routes.',
+});
+/** The request cannot be fingerprinted within the configured bound.
+ * @fix Reduce the body size or raise the configured limit.
+ * @verify bun run test -- src/tests/idempotency.test.ts
+ */
+export const IdempotencyRequestTooLarge = defineFailure('http.idempotency_request_too_large', {
+  status: 413,
+  message: 'The request is too large for idempotency protection.',
+  remediation: 'Reduce the request body size or raise the configured limit before retrying.',
+});
+
+export const RESPONSE_CACHE_BEGIN_FAILURES = [IdempotencyClaimUnconfirmed, IdempotencyReplayInvalid] as const;
+export const RESPONSE_CACHE_FINISH_FAILURES = [IdempotencyWriteUnconfirmed, IdempotencyOwnershipLost] as const;
+export const RESPONSE_CACHE_ABANDON_FAILURES = [IdempotencyReleaseUnconfirmed] as const;
 
 export const IDEMPOTENCY_FAILURES = [
   IdempotencyKeyRequired,
   IdempotencyKeyReused,
   IdempotencyInProgress,
+  ...RESPONSE_CACHE_BEGIN_FAILURES,
+  ...RESPONSE_CACHE_FINISH_FAILURES,
+  IdempotencyResponseUnavailable,
+  IdempotencyRequestTooLarge,
   ...ID_GENERATION_FAILURES,
 ] as const;
 

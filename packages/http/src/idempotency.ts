@@ -10,7 +10,6 @@
 import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
-import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { ContractLike, CoversFailures } from './contract.js';
 import type { HttpMiddleware } from './engine.js';
@@ -19,11 +18,17 @@ import { idempotencyOwnerId } from './ids.js';
 import { observeHttp } from './telemetry.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
 import { HTTP_ERROR_CODES, HttpConfigError, orThrowHttp } from './error.js';
+import type { RESPONSE_CACHE_BEGIN_FAILURES, RESPONSE_CACHE_FINISH_FAILURES, RESPONSE_CACHE_ABANDON_FAILURES } from './failures.js';
 import {
   IDEMPOTENCY_FAILURES,
   IdempotencyInProgress,
   IdempotencyKeyRequired,
   IdempotencyKeyReused,
+  IdempotencyClaimUnconfirmed,
+  IdempotencyWriteUnconfirmed,
+  IdempotencyReplayInvalid,
+  IdempotencyResponseUnavailable,
+  IdempotencyRequestTooLarge,
 } from './failures.js';
 
 export {
@@ -31,20 +36,38 @@ export {
   IdempotencyKeyRequired,
   IdempotencyKeyReused,
   IdempotencyInProgress,
+  IdempotencyClaimUnconfirmed,
+  IdempotencyWriteUnconfirmed,
+  IdempotencyReleaseUnconfirmed,
+  IdempotencyOwnershipLost,
+  IdempotencyReplayInvalid,
+  IdempotencyResponseUnavailable,
+  IdempotencyRequestTooLarge,
+  RESPONSE_CACHE_BEGIN_FAILURES,
+  RESPONSE_CACHE_FINISH_FAILURES,
+  RESPONSE_CACHE_ABANDON_FAILURES,
 } from './failures.js';
 
 export { idempotencyOwnerId } from './ids.js';
 export type { IdempotencyOwnerId } from './ids.js';
 
-/** A response as the cache keeps it: the status, the allowlisted headers, and the body as base64. */
-export type StoredResponse = { status: number; headers: Record<string, string>; body: string };
-
 /** Checks a {@link StoredResponse} read back from a cache: `parse(storedResponse, value)` from `@arki/schema`. */
-export const storedResponse: StandardSchemaV1<unknown, StoredResponse> = z.object({
+export const storedResponse = z.object({
   status: z.int().min(200).max(599),
   headers: z.record(z.string(), z.string()),
   body: z.string(),
-});
+}).refine(value => {
+  try {
+    new Headers(value.headers);
+    fromBase64(value.body);
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Stored response headers and body must be valid HTTP/base64 values.');
+
+/** A response as the cache keeps it, inferred from its canonical persisted schema. */
+export type StoredResponse = z.output<typeof storedResponse>;
 
 /** What `begin` found for a key. */
 export type BeginResult =
@@ -59,16 +82,23 @@ export type BeginResult =
 
 /**
  * Where responses wait for a repeat. Every method is atomic in the store. `owner` is a token
- * that is unique per request: only the owner can `finish` or `abandon`, so a slow worker whose
- * entry expired and was given to someone else cannot overwrite the new entry.
- * `ttl` is in milliseconds and counts from `begin`. An expired entry can be taken again.
+ * that is unique per request. Unresolved reservations MUST NOT expire: elapsed time does not
+ * prove application work never happened. `ttl` starts only when `finish` persists the replay.
+ * Only reconciled operations may be abandoned. Store loss/eviction breaks this guarantee;
+ * durable application receipts remain necessary for atomic business idempotency.
  */
 export type ResponseCache = {
-  begin(key: string, fingerprint: string, owner: IdempotencyOwnerId, ttl: number): Promise<BeginResult>;
-  /** Store the response under the key. A no-op when `owner` does not hold the key any more. */
-  finish(key: string, owner: IdempotencyOwnerId, response: StoredResponse): Promise<void>;
-  /** Free the key so a retry can run again. A no-op when `owner` does not hold the key. */
-  abandon(key: string, owner: IdempotencyOwnerId): Promise<void>;
+  begin(key: string, fingerprint: string, owner: IdempotencyOwnerId): Promise<
+    BeginResult | ReturnType<(typeof RESPONSE_CACHE_BEGIN_FAILURES)[number]>
+  >;
+  /** Persist the response and start replay retention (milliseconds). Confirm ownership or return its failure. */
+  finish(key: string, owner: IdempotencyOwnerId, response: StoredResponse, ttl: number): Promise<
+    void | ReturnType<(typeof RESPONSE_CACHE_FINISH_FAILURES)[number]>
+  >;
+  /** Release only after reconciliation proves repetition safe. A no-op for an absent/different owner. */
+  abandon(key: string, owner: IdempotencyOwnerId): Promise<
+    void | ReturnType<(typeof RESPONSE_CACHE_ABANDON_FAILURES)[number]>
+  >;
 };
 
 export type IdempotentOptions<Routes extends readonly ContractLike[] = readonly ContractLike[]> = {
@@ -84,9 +114,9 @@ export type IdempotentOptions<Routes extends readonly ContractLike[] = readonly 
   readonly routes: Routes;
   /** Default `Idempotency-Key`. */
   readonly header?: string;
-  /** How long a key lives, in milliseconds. */
+  /** Replay retention after confirmed finish, in milliseconds. Pending reservations do not expire. */
   readonly ttl: number;
-  /** Default 1 MiB. A request body over this runs uncached. A response body over this is not stored. */
+  /** Default 1 MiB. Larger requests are refused; larger responses retain an unresolved reservation. */
   readonly maxBodyBytes?: number;
   /** Response headers a replay carries, lower case. Default `content-type`, `location`, `etag`. */
   readonly replayHeaders?: readonly string[];
@@ -129,22 +159,24 @@ const replayResponse = (stored: StoredResponse): Response => {
   return new Response(bodyless ? null : fromBase64(stored.body), { status: stored.status, headers });
 };
 
-/** 5xx and the two retry-me statuses are not an answer worth repeating. */
-const isCacheable = (status: number): boolean => status < 500 && status !== 409 && status !== 429;
+/** Release unread response resources without granting permission to repeat application work. */
+function discardResponse(response: Response): void {
+  try {
+    void response.body?.cancel().catch(() => null);
+  } catch {
+    // A foreign/locked stream may refuse cancellation; the reservation remains held.
+  }
+}
 
 /**
- * Run each listed request once per `Idempotency-Key`. Put it after authentication and CORS in the
- * `middleware` list, so the principal in `scope` is already trusted.
- *
- * What is stored: every 2xx, 3xx and 4xx answer except 409 and 429, because a client that gets
- * those is expected to try again. A 5xx, a 409, a 429, a thrown handler, a streaming response
- * (`text/event-stream`) and a response body over `maxBodyBytes` call `abandon`: the key is freed
- * and a retry runs the handler again. A request body over `maxBodyBytes` cannot be fingerprinted
- * cheaply, so it runs without protection.
- *
- * A missing or unusable key on a listed route is 400. The same key with another request is 422.
- * The same key while the first is running is 409 with `retry-after`. If the cache itself fails,
- * the request fails: running it unprotected could do the work twice.
+ * Run each listed request once per key while its reservation/replay is retained.
+ * Configure after authentication and CORS. Pending claims never expire. Every bounded response,
+ * including 5xx/409/429, is stored; the replay TTL starts at confirmed persistence.
+ * After handler dispatch, no status, exception or cache fault proves repetition safe. The
+ * middleware never abandons that reservation. Unreplayable responses return a typed failure;
+ * reconciliation must determine the application outcome before an operator releases the key.
+ * Oversized requests are refused before execution. Store loss and replay expiry are outside
+ * this cache's protection; use transactional business receipts for durable idempotency.
  */
 export function idempotent<const Routes extends readonly ContractLike[]>(
   options: IdempotentOptions<Routes> & {
@@ -156,8 +188,22 @@ export function idempotent<const Routes extends readonly ContractLike[]>(
 ): HttpMiddleware;
 export function idempotent(options: IdempotentOptions): HttpMiddleware {
   const { cache, scope, ttl } = options;
+  if (!Number.isSafeInteger(ttl) || ttl <= 0) {
+    throw new HttpConfigError({
+      code: HTTP_ERROR_CODES.invalidContract,
+      message: 'Idempotency replay retention must be a positive safe integer in milliseconds.',
+      remediation: 'Configure a finite positive integer ttl.',
+    });
+  }
   const headerName = options.header ?? 'Idempotency-Key';
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes <= 0) {
+    throw new HttpConfigError({
+      code: HTTP_ERROR_CODES.invalidContract,
+      message: 'Idempotency body limit must be a positive safe integer in bytes.',
+      remediation: 'Configure a finite positive integer maxBodyBytes.',
+    });
+  }
   const allowed = new Set((options.replayHeaders ?? DEFAULT_REPLAY_HEADERS).map(name => name.toLowerCase()));
   const patterns = options.routes.map(route => {
     if (!IDEMPOTENCY_FAILURES.every(failure => route.failures?.some(candidate => candidate.code === failure.code))) {
@@ -184,9 +230,9 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
       }
 
       const declared = Number(req.headers.get('content-length') ?? 0);
-      if (declared > maxBodyBytes) return next(req);
+      if (declared > maxBodyBytes) return orThrowHttp(IdempotencyRequestTooLarge(), IDEMPOTENCY_FAILURES);
       const body = await readCapped(req.clone().body, maxBodyBytes);
-      if (body === undefined) return next(req);
+      if (body === undefined) return orThrowHttp(IdempotencyRequestTooLarge(), IDEMPOTENCY_FAILURES);
 
       // Secure ownership must be established before hashing, cache acquisition or application effects.
       const owner = idempotencyOwnerId.create();
@@ -194,41 +240,55 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
       const key = await sha256(`${principal.length}:${principal}${supplied}`);
       const fingerprint = await fingerprintOf(req, url, body);
 
-      const outcome = await cache.begin(key, fingerprint, owner, ttl);
+      let outcome: Awaited<ReturnType<ResponseCache['begin']>>;
+      try {
+        outcome = await cache.begin(key, fingerprint, owner);
+      } catch (error) {
+        outcome = IdempotencyClaimUnconfirmed({ cause: error });
+      }
+      if (isFailure(outcome)) return orThrowHttp(outcome, IDEMPOTENCY_FAILURES);
       if (outcome === 'conflict') return orThrowHttp(IdempotencyKeyReused(), IDEMPOTENCY_FAILURES);
       if (outcome === 'in-progress') {
         return orThrowHttp(IdempotencyInProgress(), IDEMPOTENCY_FAILURES, { headers: { 'retry-after': '1' } });
       }
-      if (outcome !== 'started') return replayResponse(outcome.replay);
-
-      let response: Response;
-      try {
-        response = await next(req);
-      } catch (error) {
-        await cache.abandon(key, owner);
-        throw error;
+      if (outcome !== 'started') {
+        try {
+          return replayResponse(outcome.replay);
+        } catch (error) {
+          return orThrowHttp(IdempotencyReplayInvalid({ cause: error }), IDEMPOTENCY_FAILURES);
+        }
       }
 
-      const streaming = response.headers.get('content-type')?.startsWith('text/event-stream') === true;
-      if (streaming || !isCacheable(response.status)) {
-        await cache.abandon(key, owner);
-        return response;
-      }
-      const bytes = await readCapped(response.clone().body, maxBodyBytes);
-      if (bytes === undefined) {
-        await cache.abandon(key, owner);
-        return response;
-      }
-      const headers: Record<string, string> = {};
-      for (const [name, value] of response.headers) if (allowed.has(name)) headers[name] = value;
+      // After dispatch, even an exception or 5xx can follow a committed business effect.
+      const response = await next(req);
+      let stored: StoredResponse | undefined;
       try {
-        await cache.finish(key, owner, { status: response.status, headers, body: toBase64(bytes) });
+        const streaming = response.headers.get('content-type')?.startsWith('text/event-stream') === true;
+        if (!streaming) {
+          const bytes = await readCapped(response.clone().body, maxBodyBytes);
+          if (bytes !== undefined) {
+            const headers: Record<string, string> = {};
+            for (const [name, value] of response.headers) if (allowed.has(name)) headers[name] = value;
+            stored = { status: response.status, headers, body: toBase64(bytes) };
+          }
+        }
       } catch (error) {
-        // The work is done but its answer is not stored. Free the key if the cache still answers, and fail loud.
-        await cache.abandon(key, owner).catch(() => {
-          /* the original error is the one to report */
-        });
-        throw error;
+        discardResponse(response);
+        return orThrowHttp(IdempotencyResponseUnavailable({ cause: error }), IDEMPOTENCY_FAILURES);
+      }
+      if (stored === undefined) {
+        discardResponse(response);
+        return orThrowHttp(IdempotencyResponseUnavailable(), IDEMPOTENCY_FAILURES);
+      }
+      let finished: Awaited<ReturnType<ResponseCache['finish']>>;
+      try {
+        finished = await cache.finish(key, owner, stored, ttl);
+      } catch (error) {
+        finished = IdempotencyWriteUnconfirmed({ cause: error });
+      }
+      if (isFailure(finished)) {
+        discardResponse(response);
+        return orThrowHttp(finished, IDEMPOTENCY_FAILURES);
       }
       return response;
     });

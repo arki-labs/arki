@@ -4,7 +4,21 @@
  * dependencies and wires the public methods.
  * May import every other file. No implementation file may import this one.
  */
-import { and, eq, getTableColumns, getTableName, is, isNull, lt } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  getTableColumns,
+  getTableName,
+  is,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notLike,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
 
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
@@ -394,7 +408,16 @@ function createJournal<
     pruneReceipts: async (db, opts) => {
       const gone = await db
         .delete(tables.receipts)
-        .where(lt(tables.receipts.recordedAt, opts.before))
+        .where(
+          and(
+            lt(tables.receipts.recordedAt, opts.before),
+            or(
+              ne(tables.receipts.command, 'http.response'),
+              notLike(tables.receipts.key, 'http:%'),
+              and(isNotNull(tables.receipts.response), lte(tables.receipts.expiresAt, sql`now()`)),
+            ),
+          ),
+        )
         .returning({ key: tables.receipts.key });
       return gone.length;
     },

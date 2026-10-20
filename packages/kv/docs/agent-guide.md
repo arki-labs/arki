@@ -29,7 +29,8 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. Create an `ioredis` client.
 2. `idempotent({ cache: redisResponseCache(redis), scope, routes: ['POST /orders'], ttl: 86_400_000 })`. The TTL is in milliseconds.
-3. Needs Redis 6 or newer.
+3. Pending reservations never expire. Replay TTL starts at confirmed `finish`. Release only after reconciliation proves repetition safe.
+4. Stop old writers and drain/reconcile legacy pending keys before upgrading; preserve unresolved keys with `PERSIST`. Mixed writer versions are unsafe. See README for failure outcomes and store-loss limits.
 
 ### Run an app without Redis in dev
 

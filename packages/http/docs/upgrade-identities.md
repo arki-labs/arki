@@ -31,6 +31,8 @@ context. Libraries do not install or configure an SDK. These spans observe the
 response boundary, not completion of a streamed response body. Failures in
 instrumentation preserve the operation's result and cannot rerun it.
 
-This change does not finish the broader failure migration: cache provider
+This change does not finish the broader failure migration: remaining provider
 methods, request-body reads, fingerprinting/signature crypto, listener lifecycle
 and stream completion still need their own precise boundary audit.
+
+HTTP response-cache persistence now has a separate [migration guide](upgrade-idempotency.md).

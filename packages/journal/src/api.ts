@@ -334,7 +334,9 @@ export type Journal<
   /**
    * Delete receipts recorded before `before`. Receipts hold inputs and results, which may
    * carry personal data; `forget` does not touch them, so an app that keys personal flows
-   * prunes on a schedule. Returns how many were deleted.
+   * prunes on a schedule. Unresolved HTTP reservations and unexpired HTTP replays are
+   * retained; reconcile unresolved application work before releasing its reservation.
+   * Returns how many were deleted.
    */
   pruneReceipts(db: DbHandle, opts: { readonly before: Date }): Promise<number | IdGenerationFailure>;
   /** Lock the row, replay, save the result. Writes no event, runs no projection, creates no job. */
