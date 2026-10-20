@@ -52,9 +52,13 @@ describe('defineId', () => {
     expect(defineId('poet_notif_').prefix).toBe('poet_notif_');
   });
 
-  it('rejects a prefix with characters that would need escaping in URLs or SQL', () => {
-    expect(() => defineId('st y_')).toThrow(TypeError);
-    expect(() => defineId('')).toThrow(TypeError);
+  it.each(['', 'legacy:/', 'st y_', 'a.*[b]'])('preserves stored format %j with literal schema matching', prefix => {
+    const declaration = defineId(prefix);
+    const id = declaration.create();
+    expect(declaration.schema.parse(id)).toBe(id);
+    expect(declaration.schema.parse(prefix)).toBe(prefix);
+    expect(declaration.prefix).toBe(prefix);
+    if (prefix) expect(declaration.schema.safeParse(`wrong${prefix}`).success).toBe(false);
   });
 
   it('is browser-safe: the schema exports a JSON Schema pattern a client can check', () => {
@@ -81,13 +85,14 @@ describe('ContractsError', () => {
   it('carries a stable code and a remediation, and stays a TypeError for older instanceof checks', () => {
     let caught: unknown;
     try {
-      defineId('bad prefix');
+      // JavaScript callers can supply malformed static definitions.
+      Reflect.apply(defineId, null, [42]);
     } catch (error) {
       caught = error;
     }
     expect(caught).toBeInstanceOf(TypeError);
     expect(caught).toMatchObject({ name: 'ContractsError', code: 'ARKI_CONTRACTS_E001' });
-    expect(caught).toHaveProperty('remediation', expect.stringContaining('letters'));
+    expect(caught).toHaveProperty('remediation', expect.stringContaining('string'));
   });
 });
 

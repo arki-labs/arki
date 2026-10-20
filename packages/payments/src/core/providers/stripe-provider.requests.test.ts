@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * StripeProvider: subscriptions and intents against a fake HTTP layer
  *
@@ -5,8 +6,9 @@
  * request Stripe would receive (path, form fields, idempotency key) and how the
  * answer becomes our types, so a rename in the SDK or a wrong unit shows up here.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { RandomSourceUnavailable } from '@arki/contracts';
 import { fromUnix, now } from '@arki/date';
 import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
@@ -22,7 +24,7 @@ const PERIOD_START = 1_767_225_600;
 const PERIOD_END = 1_769_904_000;
 
 const customer: Customer = {
-  id: createCustomerId(),
+  id: orThrow(createCustomerId()),
   userId: 'usr_alice',
   providerCustomerId: 'cus_alice',
   provider: 'stripe',
@@ -36,7 +38,7 @@ const customer: Customer = {
 
 function planRow(priceId: string | null): Plan {
   return {
-    id: createPlanId(),
+    id: orThrow(createPlanId()),
     name: 'Pro',
     description: null,
     tier: 'pro',
@@ -57,7 +59,7 @@ const proPlan = planRow('price_pro');
 const teamPlan = planRow('price_team');
 
 const subscriptionRow: Subscription = {
-  id: createSubscriptionId(),
+  id: orThrow(createSubscriptionId()),
   userId: customer.userId,
   planId: proPlan.id,
   customerId: customer.id,
@@ -272,7 +274,7 @@ describe('cancelSubscription', () => {
 
   it('returns ReferenceNotFound for an unknown subscription without calling Stripe', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeSubscription() }));
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     const result = await stripe.cancelSubscription(subscriptionId, {});
 
@@ -407,5 +409,35 @@ describe('createSetupIntent', () => {
     const { stripe } = provider(() => ({ body: { id: 'seti_2', object: 'setup_intent', client_secret: null } }));
 
     await expect(stripe.createSetupIntent(customer.id)).rejects.toMatchObject({ code: 'unknown' });
+  });
+});
+
+describe('ID failure before charge requests', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns the canonical refusal before creating subscriptions or payment intents', async () => {
+    const http = createFakeStripeHttp(() => ({ body: {} }));
+    const stripe = new StripeProvider(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      {
+        httpClient: http.client,
+        maxNetworkRetries: 0,
+        references: { ...references, findPlanById: () => Promise.resolve(proPlan) },
+      },
+    );
+    vi.stubGlobal('crypto', {});
+    expect(
+      RandomSourceUnavailable.is(await stripe.createSubscription({ customerId: customer.id, planId: proPlan.id })),
+    ).toBe(true);
+    expect(
+      RandomSourceUnavailable.is(
+        await stripe.createPayment({
+          customerId: customer.id,
+          amount: money('9.99', 'USD'),
+          paymentMethodId: 'pm_1',
+        }),
+      ),
+    ).toBe(true);
+    expect(http.requests).toHaveLength(0);
   });
 });

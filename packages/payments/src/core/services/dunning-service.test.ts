@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * DunningService on the journal
  *
@@ -129,7 +130,7 @@ describe('handlePaymentFailure', () => {
     const { id } = await seedSubscription(writes, 'active');
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(service.handlePaymentFailure(createPaymentId(), id));
+    const error = await rejectionOf(service.handlePaymentFailure(orThrow(createPaymentId()), id));
 
     expect(error).toMatchObject({ message: 'Payment or subscription not found' });
     expect(await countEvents(db)).toBe(eventsBefore);

@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * A payment's refunds and disputes on the journal
  *
@@ -35,7 +36,7 @@ afterAll(async () => {
 
 async function seed(options: { collected: boolean; amount?: string; currency?: string }): Promise<PaymentId> {
   next += 1;
-  const paymentId = createPaymentId();
+  const paymentId = orThrow(createPaymentId());
   await orThrow(
     journal.run(
       db,
@@ -186,7 +187,7 @@ describe('recordPaymentDispute', () => {
     const refused = await journal.run(
       db,
       commands.recordPaymentDispute,
-      { paymentId: createPaymentId(), disputeId: 'dp_3', status: 'needs_response' },
+      { paymentId: orThrow(createPaymentId()), disputeId: 'dp_3', status: 'needs_response' },
       meta,
     );
 

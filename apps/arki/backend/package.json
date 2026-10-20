@@ -32,6 +32,7 @@
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",

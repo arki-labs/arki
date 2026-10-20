@@ -1,3 +1,5 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+
 /**
  * TaxService.calculateTax: a failure is never zero tax
  *
@@ -7,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import { createCustomerId } from '../core/primitives.js';
@@ -38,7 +41,7 @@ function serviceAnswering(status: number, body: unknown) {
 }
 
 const input = {
-  customerId: createCustomerId(),
+  customerId: orThrow(createCustomerId()),
   currency: 'USD',
   lineItems: [{ amount: money('100', 'USD'), description: 'Pro', reference: 'line_1' }],
 };

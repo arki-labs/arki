@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * StripeProvider: customers, plans, payments and payment methods against a fake HTTP layer
  *
@@ -5,10 +6,10 @@
  * `references`, and every answer is mapped back to our row types, so a wrong path, a wrong unit or a
  * leftover placeholder shows up here.
  */
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer, Payment, Plan, Subscription } from '../types.js';
@@ -21,7 +22,7 @@ const T0 = 1_767_225_600;
 const T1 = 1_769_904_000;
 
 const customer: Customer = {
-  id: createCustomerId(),
+  id: orThrow(createCustomerId()),
   userId: 'usr_alice',
   providerCustomerId: 'cus_alice',
   provider: 'stripe',
@@ -33,7 +34,7 @@ const customer: Customer = {
   updatedAt: now(),
 };
 
-const planId = createPlanId();
+const planId = orThrow(createPlanId());
 const planRow: Plan = {
   id: planId,
   name: 'Old name',
@@ -50,10 +51,10 @@ const planRow: Plan = {
   createdAt: now(),
   updatedAt: now(),
 };
-const otherPlanId = createPlanId();
+const otherPlanId = orThrow(createPlanId());
 
 const subscriptionRow: Subscription = {
-  id: createSubscriptionId(),
+  id: orThrow(createSubscriptionId()),
   userId: customer.userId,
   planId,
   customerId: customer.id,
@@ -71,7 +72,7 @@ const subscriptionRow: Subscription = {
 };
 
 const paymentRow: Payment = {
-  id: createPaymentId(),
+  id: orThrow(createPaymentId()),
   userId: customer.userId,
   customerId: customer.id,
   subscriptionId: subscriptionRow.id,
@@ -201,7 +202,7 @@ describe('customers', () => {
 
   it('getCustomer is null for an unknown id (no request) and for a customer deleted in Stripe', async () => {
     const unknown = provider(() => ({ body: {} }));
-    expect(await unknown.stripe.getCustomer(createCustomerId())).toBeNull();
+    expect(await unknown.stripe.getCustomer(orThrow(createCustomerId()))).toBeNull();
     expect(unknown.requests).toHaveLength(0);
 
     const deleted = provider(() => ({ body: { id: 'cus_alice', object: 'customer', deleted: true } }));
@@ -250,6 +251,7 @@ describe('plans', () => {
       interval: 'monthly',
     });
 
+    assert(!isFailure(plan), 'plan creation must succeed with working entropy');
     expect(requests[1]?.form['metadata[planId]']).toBe(plan.id);
     expect(plan.metadata).toMatchObject({ stripePriceId: 'price_new' });
   });
@@ -295,7 +297,7 @@ describe('plans', () => {
 
   it('getPlan is null for an unknown plan', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
-    expect(await stripe.getPlan(createPlanId())).toBeNull();
+    expect(await stripe.getPlan(orThrow(createPlanId()))).toBeNull();
     expect(requests).toHaveLength(0);
   });
 
@@ -362,7 +364,7 @@ describe('subscriptions', () => {
 
   it('getSubscription is null for an unknown id', async () => {
     const { stripe } = provider(() => ({ body: {} }));
-    expect(await stripe.getSubscription(createSubscriptionId())).toBeNull();
+    expect(await stripe.getSubscription(orThrow(createSubscriptionId()))).toBeNull();
   });
 
   it('reactivateSubscription turns off the scheduled cancellation', async () => {
@@ -519,7 +521,7 @@ describe('payments', () => {
 
   it('getPayment is null for an unknown id', async () => {
     const { stripe } = provider(() => ({ body: {} }));
-    expect(await stripe.getPayment(createPaymentId())).toBeNull();
+    expect(await stripe.getPayment(orThrow(createPaymentId()))).toBeNull();
   });
 
   it("confirmPayment confirms the row's intent", async () => {

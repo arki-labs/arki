@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * PaymentRepository list filters, on the real relational queries
  *
@@ -37,8 +38,8 @@ const relations = defineRelations(
 let client: PGlite;
 let repo: PaymentRepository;
 let writes: ReturnType<typeof typed.core.writes>;
-const proPlanId = createPlanId();
-const otherCustomerId = createCustomerId();
+const proPlanId = orThrow(createPlanId());
+const otherCustomerId = orThrow(createCustomerId());
 
 const page = { limit: 50, offset: 0 };
 
@@ -51,8 +52,8 @@ beforeAll(async () => {
 
   await db.insert(core.plans).values([
     { id: proPlanId, name: 'Pro monthly', tier: 'pro', priceMinor: 2000, interval: 'monthly' },
-    { id: createPlanId(), name: 'Pro yearly', tier: 'pro', priceMinor: 20_000, interval: 'yearly' },
-    { id: createPlanId(), name: 'Retired', tier: 'premium', priceMinor: 900, isActive: false },
+    { id: orThrow(createPlanId()), name: 'Pro yearly', tier: 'pro', priceMinor: 20_000, interval: 'yearly' },
+    { id: orThrow(createPlanId()), name: 'Retired', tier: 'premium', priceMinor: 900, isActive: false },
   ]);
   await db
     .insert(core.customers)

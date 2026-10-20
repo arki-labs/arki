@@ -1,7 +1,8 @@
+import type { IdGenerationFailure } from '@arki/contracts';
 import { EventEmitter } from 'node:events';
 
 import { now, sub } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { fromStripeAmount } from '@arki/money/stripe';
 
@@ -144,7 +145,7 @@ export class WebhookHandler extends EventEmitter {
     timestamp: string,
     sourceIp: string,
     webhookSecret: string,
-  ): Promise<WebhookProcessingResult> {
+  ): Promise<WebhookProcessingResult | IdGenerationFailure> {
     try {
       // 1. Validate webhook security
       const validation = await this.webhookSecurity.validateWebhook(
@@ -186,9 +187,12 @@ export class WebhookHandler extends EventEmitter {
       //    process it; the database's unique index decides, so this holds
       //    across concurrent requests and across server instances.
       //    `attempts` counts started attempts.
+      const webhookIdResult = createWebhookId();
+      if (isFailure(webhookIdResult)) return webhookIdResult;
+
       const data = validation.data || {};
       const { event, created } = await this.paymentRepository.claimWebhookEvent({
-        id: createWebhookId(),
+        id: webhookIdResult,
         provider,
         eventType,
         providerEventId: eventData.id,

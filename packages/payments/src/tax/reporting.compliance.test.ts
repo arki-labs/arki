@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * Tax compliance reports, exports, audit trail and checks: from stored data
  *
@@ -24,7 +25,7 @@ import { createTaxRepositories } from './repository.js';
 import { createTaxTables } from './tables.js';
 
 const tax = createTaxTables({ schema });
-const otherCustomerId = createCustomerId();
+const otherCustomerId = orThrow(createCustomerId());
 
 const relations = defineRelations(
   { plans: core.plans, customers: core.customers, subscriptions: core.subscriptions, payments: core.payments },

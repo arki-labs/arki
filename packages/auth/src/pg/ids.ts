@@ -5,7 +5,7 @@
  * Column helpers only. Make ids with `create*Id` from `@arki/auth/ids`; check them with the
  * schemas on `@arki/auth/zod`.
  */
-import { idColumns } from '@arki/db/id-factory';
+import { idColumns } from '@arki/db/id';
 
 import { accountId, sessionId, userId, verificationId } from '../id-declarations.js';
 

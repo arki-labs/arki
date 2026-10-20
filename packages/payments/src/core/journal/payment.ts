@@ -201,6 +201,7 @@ export function createPaymentJournal<
 
   const initiatePayment = j.command('initiatePayment', initiatePaymentInputSchema, (input, { write }) => {
     const paymentId = input.paymentId ?? createPaymentId();
+    if (isFailure(paymentId)) return paymentId;
 
     return write(payment, paymentId, row => {
       if (row) {

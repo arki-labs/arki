@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * TaxReportingService.getCustomerTaxSummary: from stored payments, not placeholders
  *
@@ -40,7 +41,7 @@ const relations = defineRelations(
 );
 
 const thisYear = new Date().getUTCFullYear();
-const otherCustomerId = createCustomerId();
+const otherCustomerId = orThrow(createCustomerId());
 
 let client: PGlite;
 let writes: ReturnType<typeof typed.core.writes>;

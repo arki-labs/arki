@@ -236,6 +236,7 @@ export function createRefundsJournal<
    */
   const requestRefund = j.command('requestRefund', requestRefundInputSchema, async (input, { tx, write }) => {
     const refundId = input.refundId ?? createRefundId();
+    if (isFailure(refundId)) return refundId;
 
     const [payment] = await tx
       .select({ amountMinor: payments.amountMinor, currency: payments.currency })

@@ -1,11 +1,15 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+
 /**
  * StripeProvider: every Stripe failure reaches the caller as a PaymentProviderError
  *
  * A caller decides what to do from `code` and `retryable`. A raw Stripe error would hide both,
  * so the methods that once let it through are pinned here.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { RecordedStripeRequest } from './stripe-test-support.js';
@@ -168,11 +172,35 @@ describe('calculateTax', () => {
     }));
 
     const result = await stripe.calculateTax({
-      customerId: createCustomerId(),
+      customerId: orThrow(createCustomerId()),
       currency: 'eur',
       lineItems: [{ amount: money('10.00', 'EUR'), reference: 'plan' }],
     });
 
     expect(result.taxBreakdown[0]).toMatchObject({ jurisdiction: 'Germany', rate: 19, taxCode: 'txcd_10103001' });
+  });
+});
+
+describe('ID failures before Stripe effects', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns the canonical failure before creating customers or products', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+    vi.stubGlobal('crypto', {});
+
+    expect(RandomSourceUnavailable.is(await stripe.createCustomer({ userId: 'usr_a', email: 'a@example.com' }))).toBe(
+      true,
+    );
+    expect(
+      RandomSourceUnavailable.is(
+        await stripe.createPlan({
+          name: 'Pro',
+          tier: 'pro',
+          amount: money('9.99', 'USD'),
+          interval: 'monthly',
+        }),
+      ),
+    ).toBe(true);
+    expect(requests).toHaveLength(0);
   });
 });

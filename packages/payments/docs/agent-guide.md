@@ -54,6 +54,8 @@ Only `TransactionRejected` with SQLSTATE `23505` for the pending-refund index be
 
 ## Errors
 
+ID generators return their successful ID or the canonical `IdGenerationFailure` from `@arki/contracts` (`ID_GENERATION_FAILURES`). ID schemas and aliases describe successful strings only. Journal commands, provider creates, checkout setup and webhook claiming return these failures before their writes or provider effects. Check `isFailure` before reading the success. The Stripe and RevenueCat subscription presets return the exact journal write failure, including ID failures, instead of acknowledging the delivery. Webhook routes must reject a returned failure so the provider can retry. Drizzle scalar defaults still throw at the callback boundary; direct repository inserts that rely on those defaults need an owned transaction to recover the failure.
+
 | Code                                | Status | Meaning                                | What to do                            |
 | ----------------------------------- | ------ | -------------------------------------- | ------------------------------------- |
 | `payments.card_declined`            | 402    | The card was refused                   | Ask for another card                  |

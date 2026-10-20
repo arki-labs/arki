@@ -1,4 +1,6 @@
+import type { Failure } from '@arki/failure';
 import { sleep } from '@arki/async';
+import { isFailure } from '@arki/failure';
 
 import { debugOrchestration } from '../debug';
 
@@ -18,10 +20,13 @@ export type FlowEvent<State> =
   | { type: 'flow:complete'; state: State; steps: number; timestamp: number }
   | { type: 'flow:failed'; nodeId: string; error: Error; steps: number; timestamp: number };
 
-export type FlowNode<State, Context> = {
+/** A state patch cannot carry the canonical failure brand, even if fields overlap. */
+type FlowOutput<Output> = Output extends Failure | void ? Output : Output & { readonly '~failure'?: never };
+
+type FlowTask<State, Context, Output> = {
   id: string;
   description?: string;
-  run: (state: State, ctx: Context, signal?: AbortSignal) => Promise<Partial<State> | void>;
+  run: (state: State, ctx: Context, signal?: AbortSignal) => Promise<Output & FlowOutput<Output>>;
   next?: string | ((state: State, ctx: Context) => string | null | undefined);
   retries?: number;
   retryDelayMs?: number;
@@ -29,9 +34,17 @@ export type FlowNode<State, Context> = {
   timeoutMs?: number;
 };
 
-export type FlowConfig<State, Context> = {
+/** Use `satisfies` to retain the node's concrete return type when it can refuse. */
+export type FlowNode<State, Context, Refusal extends Failure = never> = FlowTask<
+  State,
+  Context,
+  Partial<State> | void | Refusal
+>;
+
+/** Output is the node return type; infer it with the curried `createFlow` builder. */
+export type FlowConfig<State, Context, Output extends Partial<State> | void | Failure = Partial<State> | void> = {
   start: string;
-  nodes: Record<string, FlowNode<State, Context>>;
+  nodes: Record<string, FlowTask<State, Context, Output>>;
   maxSteps?: number;
   mergeState?: (state: State, patch: Partial<State>) => State;
   onEvent?: (event: FlowEvent<State>) => void;
@@ -65,6 +78,14 @@ const DEFAULT_RETRY_DELAY_MS = 250;
 const DEFAULT_RETRY_BACKOFF = 2;
 
 class FlowInterruptedError extends FlowError {}
+
+function isStatePatch<State>(value: Partial<State> | void | Failure): value is Partial<State> | void {
+  return !isFailure<unknown>(value);
+}
+
+function isNodeFailure<Value>(value: Value): value is Extract<Value, Failure> {
+  return isFailure<unknown>(value);
+}
 
 /** Bound the attempt on interruption; never retry work that may still be stopping. */
 async function runAttempt<T>(
@@ -114,8 +135,8 @@ async function runAttempt<T>(
   }
 }
 
-export class Flow<State, Context> {
-  private readonly nodes: Map<string, FlowNode<State, Context>>;
+export class Flow<State, Context, Output extends Partial<State> | void | Failure = Partial<State> | void> {
+  private readonly nodes: Map<string, FlowTask<State, Context, Output>>;
   private readonly start: string;
   private readonly maxSteps: number;
   private readonly mergeState: (state: State, patch: Partial<State>) => State;
@@ -123,7 +144,7 @@ export class Flow<State, Context> {
   private readonly signal?: AbortSignal;
   private readonly onCheckpoint?: (nodeId: string, state: State) => Promise<void>;
 
-  constructor(config: FlowConfig<State, Context>) {
+  constructor(config: FlowConfig<State, Context, Output>) {
     this.nodes = new Map(Object.entries(config.nodes));
     this.start = config.start;
     this.maxSteps = config.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -141,7 +162,7 @@ export class Flow<State, Context> {
     this.onEvent?.(event);
   }
 
-  async run(initialState: State, ctx: Context): Promise<State> {
+  async run(initialState: State, ctx: Context): Promise<State | Extract<Output, Failure>> {
     let state = initialState;
     let current = this.start;
     let steps = 0;
@@ -183,7 +204,7 @@ export class Flow<State, Context> {
 
       const maxAttempts = Math.max(1, (node.retries ?? 0) + 1);
       let attempt = 0;
-      let patch: Partial<State> | void | undefined;
+      let patch: Partial<State> | void = undefined;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -192,7 +213,16 @@ export class Flow<State, Context> {
         this.emit({ type: 'node:start', nodeId: node.id, attempt, state, timestamp: Date.now() });
 
         try {
-          patch = await runAttempt(signal => node.run(state, ctx, signal), this.signal, node.timeoutMs, node.id);
+          const result = await runAttempt<Output>(
+            signal => node.run(state, ctx, signal),
+            this.signal,
+            node.timeoutMs,
+            node.id,
+          );
+          // Separate truthful guards retain the exact failure even when State can
+          // itself contain a Failure; a generic negative guard cannot prove a patch.
+          if (isStatePatch<State>(result)) patch = result;
+          else if (isNodeFailure(result)) return result;
 
           if (patch && typeof patch === 'object') {
             state = this.mergeState(state, patch);
@@ -249,6 +279,24 @@ export class Flow<State, Context> {
   }
 }
 
-export function createFlow<State, Context>(config: FlowConfig<State, Context>): Flow<State, Context> {
-  return new Flow(config);
+type InferredFlowConfig<State, Context, Outputs extends Record<string, Partial<State> | void | Failure>> = Omit<
+  FlowConfig<State, Context>,
+  'nodes'
+> & {
+  nodes: { [Name in keyof Outputs]: FlowTask<State, Context, Outputs[Name]> };
+};
+
+export function createFlow<State, Context>(): <Outputs extends Record<string, Partial<State> | void | Failure>>(
+  config: InferredFlowConfig<State, Context, Outputs>,
+) => Flow<State, Context, Outputs[keyof Outputs]>;
+export function createFlow<State, Context, Output extends Partial<State> | void | Failure = Partial<State> | void>(
+  config: FlowConfig<State, Context, Output>,
+): Flow<State, Context, Output>;
+export function createFlow<State, Context, Output extends Partial<State> | void | Failure = Partial<State> | void>(
+  config?: FlowConfig<State, Context, Output>,
+) {
+  if (config) return new Flow(config);
+  return <Outputs extends Record<string, Partial<State> | void | Failure>>(
+    flowConfig: InferredFlowConfig<State, Context, Outputs>,
+  ) => new Flow<State, Context, Outputs[keyof Outputs]>(flowConfig);
 }

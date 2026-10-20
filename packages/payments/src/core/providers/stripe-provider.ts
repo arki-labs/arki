@@ -1,3 +1,4 @@
+import type { IdGenerationFailure } from '@arki/contracts';
 import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
@@ -279,7 +280,10 @@ export class StripeProvider extends BasePaymentProvider {
     email: string;
     name?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Customer> {
+  }): Promise<Customer | IdGenerationFailure> {
+    const customerId = createCustomerId();
+    if (isFailure(customerId)) return customerId;
+
     const stripeCustomer = await this.call(() =>
       this.stripe.customers.create({
         email: params.email,
@@ -292,7 +296,7 @@ export class StripeProvider extends BasePaymentProvider {
     );
 
     return {
-      id: createCustomerId(),
+      id: customerId,
       userId: params.userId,
       providerCustomerId: stripeCustomer.id,
       provider: 'stripe',
@@ -397,8 +401,9 @@ export class StripeProvider extends BasePaymentProvider {
     intervalCount?: number;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
-  }): Promise<Plan> {
+  }): Promise<Plan | IdGenerationFailure> {
     const planId = createPlanId();
+    if (isFailure(planId)) return planId;
     const stripeProduct = await this.call(() =>
       this.stripe.products.create({
         name: params.name,
@@ -522,6 +527,9 @@ export class StripeProvider extends BasePaymentProvider {
     const priceId = await this.priceRef(params.planId);
     if (isFailure(priceId)) return priceId;
 
+    const subscriptionId = createSubscriptionId();
+    if (isFailure(subscriptionId)) return subscriptionId;
+
     const stripeSubscription = await this.call(
       () =>
         this.stripe.subscriptions.create(
@@ -544,7 +552,7 @@ export class StripeProvider extends BasePaymentProvider {
     if (isFailure(stripeSubscription)) return stripeSubscription;
 
     return this.toSubscription(stripeSubscription, {
-      id: createSubscriptionId(),
+      id: subscriptionId,
       userId: customer.userId,
       planId: params.planId,
       customerId: customer.id,
@@ -816,6 +824,9 @@ export class StripeProvider extends BasePaymentProvider {
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
 
+    const paymentId = createPaymentId();
+    if (isFailure(paymentId)) return paymentId;
+
     const intent = await this.call(
       () =>
         this.stripe.paymentIntents.create({
@@ -836,7 +847,7 @@ export class StripeProvider extends BasePaymentProvider {
     if (isFailure(intent)) return intent;
 
     return this.toPayment(intent, {
-      id: createPaymentId(),
+      id: paymentId,
       userId: customer.userId,
       customerId: customer.id,
       subscriptionId: null,

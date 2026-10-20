@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * RefundService on the journal
  *
@@ -188,7 +189,7 @@ describe('requestRefund', () => {
 
   it('a refund for a payment we do not know is an answer the caller branches on, and writes nothing', async () => {
     const eventsBefore = await countEvents(db);
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     const refused = await serviceWith(providerThatRefunds).requestRefund({
       paymentId,
@@ -480,7 +481,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
 
   it('approving a refund that does not exist returns RefundNotFound, which the caller can tell from an outage', async () => {
     const eventsBefore = await countEvents(db);
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
 
     const refused = await serviceWith(providerThatRefunds).approveRefund({ refundId, approvedBy: adminId });
 
@@ -491,7 +492,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
 
   it('rejecting a refund that does not exist returns RefundNotFound', async () => {
     const refused = await serviceWith(providerThatRefunds).rejectRefund({
-      refundId: createRefundId(),
+      refundId: orThrow(createRefundId()),
       rejectedBy: adminId,
       reason: 'no',
     });

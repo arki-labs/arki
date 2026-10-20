@@ -1,3 +1,5 @@
+import { idColumns } from '@arki/db/id';
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * Refunds on the journal
  *
@@ -84,7 +86,7 @@ function request(
 
 /** A refund moved along its path up to the given status. */
 async function seed(status: 'pending' | 'approved' | 'processing' | 'completed' | 'rejected'): Promise<RefundId> {
-  const refundId = createRefundId();
+  const refundId = orThrow(createRefundId());
   await orThrow(journal.run(db, commands.requestRefund, { refundId, ...request() }, meta));
 
   if (status === 'rejected') {
@@ -138,7 +140,7 @@ async function expectRejected(
 let paymentCounter = 0;
 async function freshPayment(): Promise<PaymentId> {
   paymentCounter += 1;
-  const id = createPaymentId();
+  const id = orThrow(createPaymentId());
   await orThrow(
     journal.run(
       db,
@@ -165,7 +167,7 @@ afterAll(async () => {
 
 describe('requestRefund', () => {
   it('stores a pending refund with amounts in minor units of its currency', async () => {
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
 
     const result = await orThrow(
       journal.run(
@@ -247,7 +249,7 @@ describe('requestRefund', () => {
   });
 
   it('stores a JPY refund in yen, never multiplied or divided by 100', async () => {
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
 
     await orThrow(
       journal.run(
@@ -272,7 +274,7 @@ describe('requestRefund', () => {
   });
 
   it('stores a KWD refund to the fils: three decimals, which a two-decimal column used to cut', async () => {
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
 
     await orThrow(
       journal.run(
@@ -301,7 +303,7 @@ describe('a refund recorded before minor units (`RefundRequested`)', () => {
     // The column kept two decimals, so 1.234 KWD had become 1.23
     [10, 1.234, 'KWD', 10_000, 1230],
   ])('%d / %d %s replays to %d / %d minor units', async (original, refunded, currency, originalMinor, refundMinor) => {
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
     const old = typed.refunds.events.RefundRequested({
       paymentId,
       originalAmount: original,
@@ -329,7 +331,7 @@ describe('a refund recorded before minor units (`RefundRequested`)', () => {
 
 describe('what a payment can refund, checked inside the command', () => {
   it('refuses a request over what earlier approved refunds left, and writes nothing', async () => {
-    const earlier = createRefundId();
+    const earlier = orThrow(createRefundId());
     await orThrow(
       journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta),
     );
@@ -343,7 +345,7 @@ describe('what a payment can refund, checked inside the command', () => {
   });
 
   it('lets a request through that fits what is left', async () => {
-    const earlier = createRefundId();
+    const earlier = orThrow(createRefundId());
     await orThrow(
       journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta),
     );
@@ -357,7 +359,7 @@ describe('what a payment can refund, checked inside the command', () => {
   });
 
   it('refuses a refund of a payment that does not exist', async () => {
-    const refused = await journal.run(db, commands.requestRefund, { ...request(), paymentId: createPaymentId() }, meta);
+    const refused = await journal.run(db, commands.requestRefund, { ...request(), paymentId: orThrow(createPaymentId()) }, meta);
 
     expect(CommandNotFound.is(refused)).toBe(true);
   });
@@ -566,7 +568,7 @@ describe('processRefund, completeRefund and failRefund', () => {
   it.each(['approveRefund', 'rejectRefund', 'processRefund', 'completeRefund', 'failRefund'] as const)(
     '%s rejects a refund that is not there',
     async name => {
-      const refundId = createRefundId();
+      const refundId = orThrow(createRefundId());
       const attempts = {
         approveRefund: () => journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta),
         rejectRefund: () =>
@@ -584,7 +586,7 @@ describe('processRefund, completeRefund and failRefund', () => {
 describe('writes(run): what RefundService calls', () => {
   it('runs a whole refund, one event per step, and the row replays from its events', async () => {
     const writes = typed.refunds.writes(run);
-    const refundId = createRefundId();
+    const refundId = orThrow(createRefundId());
 
     const requested = await orThrow(writes.requestRefund({ refundId, ...request() }));
     expect(requested).toMatchObject({ id: refundId, status: 'pending', refundAmountMinor: 2550 });
@@ -659,7 +661,7 @@ describe('types', () => {
 });
 
 /** A table shaped like the one an app had before the journal: no `version` column. */
-const legacyRefunds = schema.table('legacy_refunds', { id: refundIdFactory.primaryColumn() });
+const legacyRefunds = schema.table('legacy_refunds', { id: idColumns(refundIdFactory).primaryColumn() });
 
 /** Never called: `tsc` checks it. An app that forgot the schema change must fail to compile, not fail at run time. */
 function rejectsATableWithoutVersion() {

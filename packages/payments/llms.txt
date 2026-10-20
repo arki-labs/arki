@@ -25,7 +25,7 @@
 - [Wire the package into an app](docs/agent-guide.md#wire-the-package-into-an-app)
 
 ## Rules that bite
-- Expected answers are returned failures (`payments.*`). Check with `isFailure`. Bugs and provider faults throw.
+- Expected answers are returned failures (`payments.*`). Check with `isFailure`. Bugs and provider faults throw. Subscription presets preserve exact journal and ID failures; webhook routes must reject them instead of acknowledging the delivery.
 - Routers stay in the app. The app owns its RPC context and authorization.
 - A refund after 90 days or over the refundable amount returns a failure and writes nothing.
 - Managed journal writes return canonical transaction failures. Only a unique rejection for the pending-refund index maps to `DuplicatePendingRefund`; other failures pass through. Reconcile `TransactionCommitUncertain` before retrying or contacting the provider.

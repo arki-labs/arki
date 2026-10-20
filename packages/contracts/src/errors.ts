@@ -9,9 +9,9 @@ import { defineFailure } from '@arki/failure';
 /** Stable error codes of `@arki/contracts`. */
 export const CONTRACTS_ERROR_CODES = {
   /**
-   * `defineId` got a prefix that is not letters, digits or `_`.
+   * `defineId` got a non-string prefix.
    *
-   * @fix Use letters, digits and `_` only, for example `sty_`.
+   * @fix Supply the exact stored prefix as a string; use `''` for unprefixed IDs.
    * @verify bun run test -- src/ids.test.ts
    */
   invalidIdPrefix: 'ARKI_CONTRACTS_E001',
@@ -70,7 +70,7 @@ export const CONTRACTS_ERROR_CODES = {
 export type ContractsErrorCode = (typeof CONTRACTS_ERROR_CODES)[keyof typeof CONTRACTS_ERROR_CODES];
 
 const REMEDIATIONS: Record<ContractsErrorCode, string> = {
-  ARKI_CONTRACTS_E001: 'Use letters, digits and "_" only, for example "sty_".',
+  ARKI_CONTRACTS_E001: 'Supply the stored prefix as a string; use an empty string for unprefixed IDs.',
   ARKI_CONTRACTS_E002: 'Give each id kind a prefix that is not the start of another one.',
   ARKI_CONTRACTS_E003:
     'Run on an engine with globalThis.crypto.getRandomValues. In React Native, install react-native-get-random-values.',

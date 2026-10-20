@@ -1,3 +1,5 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+
 /**
  * Shared fixture for the package tests
  *
@@ -17,6 +19,7 @@ import { pgSchema, varchar } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
@@ -41,8 +44,8 @@ export const journalTablesInSchema = journalTables(schema);
 
 export const userId: UserId = 'usr_buyer';
 export const adminId: UserId = 'usr_admin';
-export const planId = createPlanId();
-export const customerId = createCustomerId();
+export const planId = orThrow(createPlanId());
+export const customerId = orThrow(createCustomerId());
 
 export const metaSchema = z.object({ actorId: z.string().min(1) });
 export const meta = { actorId: 'usr_test' };

@@ -1,3 +1,6 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import { orThrow } from '@arki/failure';
+
 /**
  * Response schemas derived from the tables
  *
@@ -39,9 +42,9 @@ const at = instant('2026-01-10T00:00:00.000Z');
 
 function onePayment() {
   return {
-    id: createPaymentId(),
+    id: orThrow(createPaymentId()),
     userId,
-    customerId: createCustomerId(),
+    customerId: orThrow(createCustomerId()),
     subscriptionId: null,
     providerPaymentId: 'pi_one_off',
     amountMinor: toMinorColumn(money(25, 'USD')),
@@ -143,7 +146,7 @@ describe('canonical table validators', () => {
         trialStart: true,
       })
       .parse({
-        id: createSubscriptionId(),
+        id: orThrow(createSubscriptionId()),
         createdAt: at.toString(),
         currentPeriodStart: new Date(at.epochMilliseconds),
         trialStart: null,

@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import type { UserId } from '../core/user-id.js';
 import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 import { fromMillis, now, toMillis } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal.js';
@@ -109,6 +110,7 @@ const NON_EXPIRING_MS = 100 * 365 * 24 * 60 * 60 * 1000;
  * A repeated delivery writes no event. RevenueCat sends no cancel time, so `canceledAt` is "now" on
  * every `EXPIRATION`; the command keeps the time of the first one once the row is canceled.
  *
+ * A refused write is returned unchanged; the webhook route must reject it.
  * Returns `{ handled: false }` for event types that aren't a subscription-state change.
  */
 export async function projectRevenueCatEvent(params: {
@@ -117,7 +119,7 @@ export async function projectRevenueCatEvent(params: {
   event: RevenueCatEvent;
   customer: { id: CustomerId; userId: UserId };
   planId: PlanId;
-}): Promise<{ handled: boolean }> {
+}) {
   const { writes, event, customer, planId } = params;
 
   const mapped = mapRevenueCatStatus(event.type, event.period_type);
@@ -134,7 +136,7 @@ export async function projectRevenueCatEvent(params: {
     : fromMillis(toMillis(periodStart) + NON_EXPIRING_MS);
   const isTrial = event.period_type === 'TRIAL';
 
-  await writes.syncSubscription({
+  const result = await writes.syncSubscription({
     userId: customer.userId,
     customerId: customer.id,
     planId,
@@ -148,5 +150,6 @@ export async function projectRevenueCatEvent(params: {
     canceledAt: mapped.status === 'canceled' ? now() : null,
     metadata: { provider: 'revenuecat', store: event.store ?? null, environment: event.environment ?? null },
   });
+  if (isFailure(result)) return result;
   return { handled: true };
 }

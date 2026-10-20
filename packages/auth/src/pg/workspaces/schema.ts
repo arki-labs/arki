@@ -1,7 +1,7 @@
 import type { AnyPgColumn, AnyPgColumnBuilder, PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { integer, text, timestamp } from 'drizzle-orm/pg-core';
 
-import { idColumns } from '@arki/db/id-factory';
+import { idColumns } from '@arki/db/id';
 
 import type { AuthColumnFill, AuthColumnOptions, PrimaryColumnSource } from '../schema/column-options.js';
 import { organizationId, teamId } from '../../id-declarations.js';

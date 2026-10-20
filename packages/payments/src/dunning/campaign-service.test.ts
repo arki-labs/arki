@@ -1,3 +1,6 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import { orThrow } from '@arki/failure';
+
 /**
  * DunningCampaignService.createCampaign: one transaction
  *
@@ -319,8 +322,8 @@ describe('campaign analytics', () => {
 
 /** A customer of its own, so the eligibility queries see only the rows a test made. */
 async function newCustomer(label: string) {
-  const owner = userIdFactory.create();
-  const id = createCustomerId();
+  const owner = orThrow(userIdFactory.create());
+  const id = orThrow(createCustomerId());
   await db.insert(users).values({ id: owner });
   await db
     .insert(core.customers)
@@ -338,7 +341,7 @@ async function newSubscription(
   row: { status: 'past_due' | 'trialing'; currentPeriodEnd: ReturnType<typeof now>; trialEnd?: ReturnType<typeof now> },
 ) {
   await newPlan();
-  const id = createSubscriptionId();
+  const id = orThrow(createSubscriptionId());
   await db.insert(core.subscriptions).values({
     id,
     userId: buyer.owner,
@@ -359,7 +362,7 @@ async function newPayment(
   status: 'failed' | 'succeeded',
   createdAt: ReturnType<typeof now>,
 ) {
-  const id = createPaymentId();
+  const id = orThrow(createPaymentId());
   await db.insert(core.payments).values({
     id,
     userId: buyer.owner,

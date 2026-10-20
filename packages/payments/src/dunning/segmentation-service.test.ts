@@ -1,3 +1,5 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+
 /**
  * CustomerSegmentationService in a named schema
  *
@@ -13,6 +15,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import { fromMinorColumn } from '../core/money.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
@@ -46,8 +49,8 @@ let db: ReturnType<typeof drizzle<typeof relations>>;
 let service: CustomerSegmentationService;
 
 async function newCustomer(label: string) {
-  const owner = userIdFactory.create();
-  const id = createCustomerId();
+  const owner = orThrow(userIdFactory.create());
+  const id = orThrow(createCustomerId());
   await db.insert(users).values({ id: owner });
   await db
     .insert(core.customers)
@@ -57,7 +60,7 @@ async function newCustomer(label: string) {
 }
 
 async function pay(buyer: Awaited<ReturnType<typeof newCustomer>>, amountMinor: number, currency = 'EUR') {
-  const id = createPaymentId();
+  const id = orThrow(createPaymentId());
   await db.insert(core.payments).values({
     id,
     userId: buyer.owner,
@@ -120,7 +123,7 @@ describe('segment criteria', () => {
     await newCustomer('notier');
     await db.insert(core.plans).values({ id: planId, name: 'Pro', tier: 'pro', priceMinor: 1999 });
     await db.insert(core.subscriptions).values({
-      id: createSubscriptionId(),
+      id: orThrow(createSubscriptionId()),
       userId: pro.owner,
       planId,
       customerId: pro.id,

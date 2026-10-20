@@ -1,3 +1,5 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+
 /**
  * ProrationService: exact money for a plan change
  *
@@ -11,6 +13,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
@@ -30,7 +33,7 @@ let writes: CoreWrites;
 const effectiveDate = instant('2026-01-11T00:00:00.000Z');
 
 async function planAt(price: string, currency: string): Promise<PlanId> {
-  const id = createPlanId();
+  const id = orThrow(createPlanId());
   const priceMinor = money(price, currency).toMinorNumber();
   await db.insert(core.plans).values({ id, name: `Plan ${price} ${currency}`, priceMinor, currency });
 

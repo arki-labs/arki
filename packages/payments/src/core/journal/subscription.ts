@@ -278,6 +278,7 @@ export function createSubscriptionJournal<
   /** Stores a subscription the provider just created, with the status the provider reported. */
   const createSubscription = j.command('createSubscription', createSubscriptionInputSchema, (input, { write }) => {
     const subscriptionId = input.subscriptionId ?? createSubscriptionId();
+    if (isFailure(subscriptionId)) return subscriptionId;
 
     return write(subscription, subscriptionId, row => {
       if (row) {
@@ -306,6 +307,7 @@ export function createSubscriptionJournal<
       .where(eq(subscriptions.providerSubscriptionId, input.providerSubscriptionId))
       .limit(1);
     const subscriptionId = existing?.id ?? createSubscriptionId();
+    if (isFailure(subscriptionId)) return subscriptionId;
 
     return write(subscription, subscriptionId, row => {
       const next = snapshotOfDelivery(input, row);

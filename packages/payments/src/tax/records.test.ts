@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * Customer tax summary: from stored per-jurisdiction tax records
  *
@@ -24,7 +25,7 @@ import { TaxService } from './service.js';
 import { createTaxTables } from './tables.js';
 
 const tax = createTaxTables({ schema });
-const otherCustomer = createCustomerId();
+const otherCustomer = orThrow(createCustomerId());
 
 let client: PGlite;
 let service: TaxService;

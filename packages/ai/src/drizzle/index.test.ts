@@ -10,6 +10,9 @@ import { pgSchema } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { IdGenerationFailure, z } from '@arki/contracts';
+import { RandomSourceUnavailable } from '@arki/contracts';
+
 import { createTombstoneTable, tombstoneOutbox } from './index';
 
 type UserId = `u_${string}`;
@@ -47,8 +50,27 @@ afterAll(async () => {
 });
 
 describe('createTombstoneTable', () => {
+  it.each(['', 'old-/ .'])('preserves existing arbitrary prefix %j through declarations and column schemas', prefix => {
+    const { table, id } = createTombstoneTable(schema, { name: 'prefix_compat', idPrefix: prefix });
+    const generated = id.create();
+    expect(id.prefix).toBe(prefix);
+    expect(id.schema.safeParse(generated).success).toBe(true);
+    expect(table.id.name).toBe('id');
+    expect(id.schema.parse(`${prefix}existing`)).toBe(`${prefix}existing`);
+  });
+  it('exposes the canonical generation refusal without widening stored row IDs', () => {
+    vi.stubGlobal('crypto', {});
+    try {
+      expect(RandomSourceUnavailable.is(tombstoneId.create())).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('mints prefixed ids and types the user column with the app brand', () => {
     expect(tombstoneId.create()).toMatch(/^vtmb_/);
+    expectTypeOf<ReturnType<typeof tombstoneId.create>>().toEqualTypeOf<`vtmb_${string}` | IdGenerationFailure>();
+    expectTypeOf<z.output<typeof tombstoneId.schema>>().toEqualTypeOf<`vtmb_${string}`>();
     expectTypeOf<typeof Tombstone.$inferSelect>().toEqualTypeOf<{
       id: `vtmb_${string}`;
       pointId: string;

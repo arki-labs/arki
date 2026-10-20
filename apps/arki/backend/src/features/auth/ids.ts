@@ -1,10 +1,10 @@
-import { createIdFactory } from '@arki/db/id-factory';
+import { defineId } from '@arki/contracts';
 
 // Type-safe ID factories
-const userId = createIdFactory('u');
-const roleId = createIdFactory('r');
-const permissionId = createIdFactory('p');
-const accountId = createIdFactory('acc');
+const userId = defineId('u');
+const roleId = defineId('r');
+const permissionId = defineId('p');
+const accountId = defineId('acc');
 
 // ID Generation helper functions (backward compatibility)
 export const createUserId = userId.create;

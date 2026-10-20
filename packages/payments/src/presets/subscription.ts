@@ -1,3 +1,4 @@
+import { isFailure } from '@arki/failure';
 import type Stripe from 'stripe';
 
 import type { UserId } from '../core/user-id.js';
@@ -22,7 +23,7 @@ type SubscriptionSync = Pick<CoreWrites, 'syncSubscription'>;
  * customer id, map the Stripe fields to a provider snapshot, and hand it to the journal command
  * `syncSubscription`. The command **upserts by `providerSubscriptionId`**, so repeated or
  * out-of-order webhook deliveries converge to one row, and a delivery that changes nothing
- * writes no event.
+ * writes no event. A refused write is returned unchanged; the webhook route must reject it.
  *
  * Cancellation needs no special case: a deleted/canceled subscription arrives with
  * `status: 'canceled'`, which the status map carries straight through.
@@ -36,7 +37,7 @@ export async function projectStripeSubscription(params: {
   planId: PlanId;
   /** Provider status → our `SubscriptionStatus` (pass `provider.mapSubscriptionStatus`). */
   mapStatus: (providerStatus: string) => SubscriptionStatus;
-}): Promise<void> {
+}) {
   const { repo, writes, subscription: sub, planId, mapStatus } = params;
 
   const stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
@@ -57,7 +58,7 @@ export async function projectStripeSubscription(params: {
     throw new Error(`[@arki/payments] subscription ${sub.id}: no line items to read the period from`);
   }
 
-  await writes.syncSubscription({
+  const result = await writes.syncSubscription({
     userId: customer.userId,
     customerId: customer.id,
     planId,
@@ -71,6 +72,8 @@ export async function projectStripeSubscription(params: {
     canceledAt: sub.canceled_at ? fromUnix(sub.canceled_at) : null,
     metadata: sub.metadata,
   });
+  if (isFailure(result)) return result;
+  return;
 }
 
 /* ── status mapping ─────────────────────────────────────────────────────────────────────────── */
@@ -164,21 +167,7 @@ export type SubscriptionBillingConfig = {
   automaticTax?: boolean;
 };
 
-export type SubscriptionBilling = {
-  /** Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to. */
-  createCheckoutSession(params: {
-    userId: UserId;
-    email: string;
-    priceId: string;
-  }): Promise<{ url: string; sessionId: string }>;
-  /** Verify + project a Stripe webhook. Throws on a bad signature (map to HTTP 400). */
-  handleWebhook(
-    payload: string | Buffer,
-    signature: string,
-  ): Promise<{ handled: boolean; type: string }>;
-  /** Current Pro/free entitlement for a user, read from our table. */
-  getEntitlement(userId: UserId): Promise<Entitlement>;
-};
+export type SubscriptionBilling = ReturnType<typeof createSubscriptionBilling>;
 
 /**
  * The high-level subscription-billing preset: the whole web Stripe flow — checkout, webhook
@@ -189,12 +178,13 @@ export type SubscriptionBilling = {
  * are NOT NULL, so a local customer row must exist *before* the subscription webhook arrives (the
  * projection resolves the owning user via the Stripe customer id).
  */
-export function createSubscriptionBilling(config: SubscriptionBillingConfig): SubscriptionBilling {
+export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
   const { provider, repo, writes, urls, trialDays, automaticTax } = config;
   const planByPrice = new Map(config.prices.map((p) => [p.priceId, p.planId]));
 
   return {
-    async createCheckoutSession({ userId, email, priceId }) {
+    /** Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to. */
+    async createCheckoutSession({ userId, email, priceId }: { userId: UserId; email: string; priceId: string }) {
       if (!planByPrice.has(priceId)) {
         throw new Error(`[@arki/payments] cannot checkout: price "${priceId}" is not configured`);
       }
@@ -204,6 +194,7 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig): Su
       let customer = await repo.findCustomerByUserId(userId);
       if (!customer) {
         const created = await provider.createCustomer({ userId, email });
+        if (isFailure(created)) return created;
         customer = await repo.createCustomer(created);
       }
 
@@ -219,7 +210,8 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig): Su
       });
     },
 
-    async handleWebhook(payload, signature) {
+    /** Verify + project a Stripe webhook. Return write failures; throw on a bad signature. */
+    async handleWebhook(payload: string | Buffer, signature: string) {
       const event = provider.constructWebhookEvent(payload, signature);
 
       if (
@@ -242,20 +234,22 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig): Su
             `[@arki/payments] subscription ${subscription.id}: price "${priceId}" is not a configured plan`,
           );
         }
-        await projectStripeSubscription({
+        const result = await projectStripeSubscription({
           repo,
           writes,
           subscription,
           planId,
           mapStatus: toSubscriptionStatus,
         });
+        if (isFailure(result)) return result;
         return { handled: true, type: event.type };
       }
 
       return { handled: false, type: event.type };
     },
 
-    getEntitlement(userId) {
+    /** Current Pro/free entitlement for a user, read from our table. */
+    getEntitlement(userId: UserId) {
       return getEntitlement(repo, userId);
     },
   };

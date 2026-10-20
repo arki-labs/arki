@@ -1,18 +1,19 @@
-import { createIdFactory } from '@arki/db/id-factory';
+import type { IdOf } from '@arki/contracts';
+import { defineId } from '@arki/contracts';
 
-export type DunningCampaignId = ReturnType<typeof dunningCampaignId.create>;
-export type DunningTemplateId = ReturnType<typeof dunningTemplateId.create>;
-export type DunningExecutionId = ReturnType<typeof dunningExecutionId.create>;
-export type DunningCommunicationId = ReturnType<typeof dunningCommunicationId.create>;
-export type CustomerSegmentId = ReturnType<typeof customerSegmentId.create>;
-export type CustomerRiskProfileId = ReturnType<typeof customerRiskProfileId.create>;
+export type DunningCampaignId = IdOf<typeof dunningCampaignId>;
+export type DunningTemplateId = IdOf<typeof dunningTemplateId>;
+export type DunningExecutionId = IdOf<typeof dunningExecutionId>;
+export type DunningCommunicationId = IdOf<typeof dunningCommunicationId>;
+export type CustomerSegmentId = IdOf<typeof customerSegmentId>;
+export type CustomerRiskProfileId = IdOf<typeof customerRiskProfileId>;
 
-const dunningCampaignId = createIdFactory('dc');
-const dunningTemplateId = createIdFactory('dt');
-const dunningExecutionId = createIdFactory('de');
-const dunningCommunicationId = createIdFactory('dcm');
-const customerSegmentId = createIdFactory('cs');
-const customerRiskProfileId = createIdFactory('crp');
+const dunningCampaignId = defineId('dc');
+const dunningTemplateId = defineId('dt');
+const dunningExecutionId = defineId('de');
+const dunningCommunicationId = defineId('dcm');
+const customerSegmentId = defineId('cs');
+const customerRiskProfileId = defineId('crp');
 
 export const createDunningCampaignId = dunningCampaignId.create;
 export const createDunningTemplateId = dunningTemplateId.create;

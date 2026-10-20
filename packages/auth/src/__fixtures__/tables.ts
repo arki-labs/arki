@@ -5,7 +5,8 @@
  */
 import { jsonb, pgSchema, text } from 'drizzle-orm/pg-core';
 
-import { createIdFactory } from '@arki/db/id-factory';
+import { defineId } from '@arki/contracts';
+import { idColumns } from '@arki/db/id';
 
 import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from '../pg/ids.js';
 import { createAuthTables } from '../pg/schema/index.js';
@@ -38,11 +39,11 @@ export const workspaceTables = createWorkspaceTables(schema, {
   fill: 'app',
   user: { id: authTables.User.id },
   ids: {
-    organization: createIdFactory('org_'),
-    member: createIdFactory('mem_'),
-    invitation: createIdFactory('inv_'),
-    team: createIdFactory('team_'),
-    teamMember: createIdFactory('tmem_'),
+    organization: idColumns(defineId('org_')),
+    member: idColumns(defineId('mem_')),
+    invitation: idColumns(defineId('inv_')),
+    team: idColumns(defineId('team_')),
+    teamMember: idColumns(defineId('tmem_')),
   },
 });
 

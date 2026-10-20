@@ -1,3 +1,4 @@
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result } from '@arki/failure';
 import type { Money } from '@arki/money';
 
@@ -53,7 +54,7 @@ export abstract class BasePaymentProvider {
     email: string;
     name?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Customer>;
+  }): Promise<Result<Customer, IdGenerationFailure>>;
 
   abstract getCustomer(customerId: CustomerId): Promise<Customer | null>;
 
@@ -79,7 +80,7 @@ export abstract class BasePaymentProvider {
     intervalCount?: number;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
-  }): Promise<Plan>;
+  }): Promise<Result<Plan, IdGenerationFailure>>;
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
   abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound>>;
@@ -105,7 +106,7 @@ export abstract class BasePaymentProvider {
     metadata?: Record<string, unknown>;
     /** Same key, same parameters: the provider returns the first result instead of creating a second subscription. */
     idempotencyKey?: string;
-  }): Promise<Result<Subscription, Declined | Conflict | NotFound>>;
+  }): Promise<Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure>>;
 
   abstract getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null>;
 
@@ -151,7 +152,7 @@ export abstract class BasePaymentProvider {
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Payment, Declined | NotFound>>;
+  }): Promise<Result<Payment, Declined | NotFound | IdGenerationFailure>>;
 
   abstract getPayment(paymentId: PaymentId): Promise<Payment | null>;
 

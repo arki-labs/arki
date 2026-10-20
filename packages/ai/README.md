@@ -175,6 +175,12 @@ const result = await flow.run(
 );
 ```
 
+Nodes can return canonical `@arki/failure` values. Use `createFlow<State, Context>()(config)` to infer the exact union of failures from every node; `flow.run(...)` returns the successful state or the original failure. A returned failure stops the flow before merging state, retrying, running the next node, or emitting success events.
+
+For separately declared nodes, use `satisfies FlowNode<State, Context, Failure>` (with `Failure` imported from `@arki/failure`) to validate the shape while retaining each concrete return type. A type annotation using the broad `Failure` type erases that precision. `FlowConfig` and `Flow` accept a third generic for the complete node output type when explicit typing is needed. Existing failure-free `createFlow<State, Context>(config)` calls remain supported.
+
+This returned-failure contract does not migrate Flow's existing thrown configuration, node, timeout, cancellation, checkpoint, or retry-wait errors. Those paths still reject.
+
 ### Agents (AI SDK ToolLoopAgent)
 
 `@arki/ai` re-exports the AI SDK agent utilities for tool-based loops.

@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * SubscriptionManager on the journal
  *
@@ -135,7 +136,7 @@ describe('cancelSubscription', () => {
 describe('updateSubscription', () => {
   it('stores the plan the provider moved the subscription to, and records one event', async () => {
     const { id } = await seedSubscription(writes, 'active');
-    const premium = createPlanId();
+    const premium = orThrow(createPlanId());
     await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
     const manager = managerWith(current => ({ ...current, planId: premium }));
 
@@ -149,7 +150,7 @@ describe('updateSubscription', () => {
   /** The provider did not move the plan, so the row must not either: the caller gets the decline to show. */
   it('a plan change the card declines is returned as CardDeclined, and the row keeps its plan', async () => {
     const { id } = await seedSubscription(writes, 'active');
-    const premium = createPlanId();
+    const premium = orThrow(createPlanId());
     await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
     const rowBefore = await subscriptionRow(db, id);
     const eventsBefore = await countEvents(db);

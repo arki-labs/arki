@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * WebhookHandler: every event runs, and runs once at a time
  *
@@ -16,10 +17,11 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import { asc, eq, isNotNull } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RandomSourceUnavailable } from '@arki/contracts';
 import { add, fromUnix, now, sub } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { AppDb } from '../../test-support.js';
 import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
@@ -154,8 +156,8 @@ function failingOnce(run: number): Promise<void> {
   return run === 1 ? Promise.reject(new Error('downstream unavailable')) : Promise.resolve();
 }
 
-function deliver(handler: WebhookHandler, eventId: string) {
-  return handler.processWebhook(
+async function deliver(handler: WebhookHandler, eventId: string) {
+  const result = await handler.processWebhook(
     'stripe',
     JSON.stringify({ id: eventId, type: 'customer.subscription.created' }),
     't=0,v1=stub',
@@ -163,6 +165,8 @@ function deliver(handler: WebhookHandler, eventId: string) {
     '203.0.113.7',
     'whsec_test',
   );
+  assert(!isFailure(result), 'webhook scenarios require working entropy');
+  return result;
 }
 
 async function rowFor(eventId: string): Promise<WebhookEvent> {
@@ -175,7 +179,7 @@ async function rowFor(eventId: string): Promise<WebhookEvent> {
 /** Store a row as an earlier attempt left it. */
 async function seedRow(eventId: string, row: { lastAttemptAt: WebhookEvent['lastAttemptAt']; errorMessage?: string }) {
   const { event } = await claimWebhookEvent(db, webhookEvents, {
-    id: createWebhookId(),
+    id: orThrow(createWebhookId()),
     provider: 'stripe',
     eventType: 'subscription.created',
     providerEventId: eventId,
@@ -846,5 +850,24 @@ function chargeWithRefund(providerPaymentId: string, refund: Record<string, unkn
     expect(await rowFor('evt_crash')).toMatchObject({ attempts: 2, processed: true });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
+  });
+});
+
+
+describe('webhook ID failure', () => {
+  it('returns the canonical refusal before claiming or processing a provider event', async () => {
+    const { handler, counter } = countingHandler();
+    vi.stubGlobal('crypto', {});
+    try {
+      const result = await handler.processWebhook(
+        'stripe', JSON.stringify({ id: 'evt_no_entropy', type: 'customer.subscription.created' }),
+        't=0,v1=stub', '0', '203.0.113.7', 'whsec_test',
+      );
+      expect(RandomSourceUnavailable.is(result)).toBe(true);
+      expect(counter.runs).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(await db.select().from(webhookEvents).where(eq(webhookEvents.providerEventId, 'evt_no_entropy'))).toEqual([]);
   });
 });

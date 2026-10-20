@@ -1,7 +1,7 @@
 import { pgTable } from 'drizzle-orm/pg-core';
 import { expectTypeOf, test } from 'vitest';
 
-import type { IdGenerationFailure, z } from '@arki/contracts';
+import type { IdGenerationFailure, IdOf, z } from '@arki/contracts';
 import type { FailureOf } from '@arki/failure';
 import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { createInsertSchema } from '@arki/contracts/drizzle';
@@ -12,9 +12,12 @@ import { createIdFactory, idColumns } from './id-factory.js';
 
 test('legacy factories derive the id solely from the stored prefix', () => {
   const _factory = createIdFactory('pt_');
-  expectTypeOf<ReturnType<typeof _factory.create>>().toEqualTypeOf<`pt_${string}`>();
+  expectTypeOf<ReturnType<typeof _factory.create>>().toEqualTypeOf<`pt_${string}` | IdGenerationFailure>();
+  expectTypeOf<typeof _factory.make>().toEqualTypeOf<typeof _factory.create>();
+  expectTypeOf<typeof _factory.new>().toEqualTypeOf<typeof _factory.create>();
   expectTypeOf<z.input<typeof _factory.schema>>().toEqualTypeOf<string>();
-  expectTypeOf<z.output<typeof _factory.schema>>().toEqualTypeOf<ReturnType<typeof _factory.create>>();
+  expectTypeOf<z.output<typeof _factory.schema>>().toEqualTypeOf<`pt_${string}`>();
+  expectTypeOf<IdOf<typeof _factory>>().toEqualTypeOf<`pt_${string}`>();
   // @ts-expect-error A prefix cannot prove an arbitrarily narrower caller-supplied id type.
   createIdFactory<'pt_', 'pt_fixed'>('pt_');
 });

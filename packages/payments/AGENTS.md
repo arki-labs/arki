@@ -12,7 +12,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 6. Amounts are decimal text in the payment's currency. Never compare money as a float. Use `@arki/money` rules.
 7. A refused write writes nothing. A refund check runs before any provider request.
 8. Stripe calls that charge take an `idempotencyKey`. A repeated key with different parameters returns `IdempotencyConflict`.
-9. A webhook handler throws a refused write, so the provider's resend tries the event again.
+9. Owned webhook services return canonical refused writes. The native HTTP adapter rejects that outcome before acknowledgement, so the provider's resend tries the event again.
 10. Env-driven config (`STRIPE_SECRET_KEY`, notification settings) is injected at app boot, never read per request.
 11. Never log card data, keys or webhook secrets.
 

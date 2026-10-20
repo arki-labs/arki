@@ -1,3 +1,6 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import { orThrow } from '@arki/failure';
+
 /**
  * Money in dunning analytics
  *
@@ -47,7 +50,7 @@ describe('minor-unit columns', () => {
 
 describe('analyticsRowId', () => {
   it('differs per currency so one day never mixes two currencies in a row', () => {
-    const campaign = createDunningCampaignId();
+    const campaign = orThrow(createDunningCampaignId());
 
     expect(analyticsRowId(campaign, '2026-10-13', 'usd')).toBe(`${campaign}-2026-10-13-USD`);
     expect(analyticsRowId(campaign, '2026-10-13', 'EUR')).not.toBe(analyticsRowId(campaign, '2026-10-13', 'USD'));

@@ -12,7 +12,8 @@ import type { PgAsyncDatabase, PgQueryResultHKT, PgSchema } from 'drizzle-orm/pg
 import { asc, inArray, sql } from 'drizzle-orm';
 import { index, varchar } from 'drizzle-orm/pg-core';
 
-import { createIdFactory } from '@arki/db/id';
+import { defineId } from '@arki/contracts';
+import { idColumns } from '@arki/db/id';
 import { instant } from '@arki/db/temporal';
 
 import type { TombstoneStore } from '../vector-search/reconcile';
@@ -20,7 +21,7 @@ import type { TombstoneStore } from '../vector-search/reconcile';
 export type TombstoneTableOptions<TPrefix extends string> = {
   /** Table name, e.g. `vector_tombstones`; the index is `idx_${name}_created`. */
   name: string;
-  /** Id prefix, e.g. `vtmb_`. */
+  /** Id prefix, e.g. `vtmb_`; arbitrary stored prefix bytes, including empty strings, are preserved. */
   idPrefix: TPrefix;
 };
 
@@ -34,11 +35,11 @@ export function createTombstoneTable<TUserId extends string = string, TPrefix ex
   schema: PgSchema,
   { name, idPrefix }: TombstoneTableOptions<TPrefix>,
 ) {
-  const id = createIdFactory(idPrefix);
+  const id = defineId(idPrefix);
   const table = schema.table(
     name,
     {
-      id: id.primaryColumn(),
+      id: idColumns(id).primaryColumn(),
       /** The point id to erase (the source row id). */
       pointId: varchar('point_id', { length: 256 }).notNull(),
       userId: varchar('user_id', { length: 256 }).$type<TUserId>().notNull(),

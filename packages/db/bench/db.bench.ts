@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import { v7 as uuidv7 } from 'uuid';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
+import { orThrow } from '@arki/failure';
 import { createIdFactory, createPrefixedId } from '@arki/db/id';
 import { defineRelations } from '@arki/db/orm';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
@@ -80,14 +81,14 @@ export default defineSuite({
   intro:
     'ID creation in `@arki/db`, and in-memory PGlite queries through the `@arki/db` handle (`initDbRuntimeLocal`) against raw Drizzle on the same PGlite instance.',
   notes: [
-    '`@arki/db` has no repository class. It supplies the prefixed ID factory (cuid2 with a typed prefix, plus a validated column) and the PGlite runtime. The query tables compare the `@arki/db` handle with a plain `drizzle()` on the same PGlite and the same table, so the difference is only the handle.',
+    '`@arki/db` has no repository class. It supplies the prefixed ID factory (secure randomness with a typed prefix, plus a validated column) and the PGlite runtime. The query tables compare the `@arki/db` handle with a plain `drizzle()` on the same PGlite and the same table, so the difference is only the handle.',
     'IDs are random. The ID table compares their shape, not their value. nanoid, uuid v7 and `randomUUID()` return another shape, so they appear in a separate table without ranking.',
     'The insert table writes to a table that grows during the run; compare its rows with each other only.',
   ],
   groups: [
     compare<number>({
       id: 'prefixed-id',
-      title: 'Create one prefixed cuid2 ID',
+      title: 'Create one prefixed ID',
       contract: {
         id: 'db-prefixed-id/v1',
         description:
@@ -102,7 +103,8 @@ export default defineSuite({
           label: '@arki/db createIdFactory("usr_").create()',
           package: '@arki/db',
           setup: index => index,
-          run: () => userId.create(),
+          // The benchmark requires a successful scalar; fail the run if entropy is unavailable.
+          run: () => orThrow(userId.create()),
           normalize: idShape,
         }),
         prefixed: c({
@@ -110,7 +112,8 @@ export default defineSuite({
           package: '@arki/db',
           variant: true,
           setup: index => index,
-          run: () => createPrefixedId('usr_'),
+          // The benchmark requires a successful scalar; fail the run if entropy is unavailable.
+          run: () => orThrow(createPrefixedId('usr_')),
           normalize: idShape,
         }),
         cuid2: c({
@@ -128,7 +131,7 @@ export default defineSuite({
       title: 'Create one random ID of any shape',
       note: 'Different shapes and lengths: shown side by side, not ranked. uuid v7 is time-ordered; randomUUID is v4.',
       cases: {
-        arki: { label: '@arki/db createIdFactory("usr_").create()', package: '@arki/db', run: () => userId.create() },
+        arki: { label: '@arki/db createIdFactory("usr_").create()', package: '@arki/db', run: () => orThrow(userId.create()) },
         cuid2: {
           label: '@paralleldrive/cuid2 createId (no prefix)',
           package: '@paralleldrive/cuid2',

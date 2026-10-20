@@ -1,3 +1,4 @@
+import { idColumns } from '@arki/db/id';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { bigint, integer, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
@@ -23,8 +24,8 @@ export type CreateRefundsTablesDeps = {
 export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateRefundsTablesDeps) {
   // Re-build FK factories locally so COLUMN_ZOD_SCHEMA tagging matches the host-app's
   // version of these column builders exactly.
-  const paymentFk = paymentIdFactory.createForeignKeyFactory(paymentIdRef);
-  const userFk = userIdFactory.createForeignKeyFactory(userIdRef);
+  const paymentFk = idColumns(paymentIdFactory).createForeignKeyFactory(paymentIdRef);
+  const userFk = idColumns(userIdFactory).createForeignKeyFactory(userIdRef);
 
   const refundReasonEnum = schema.enum('refund_reason', refundReasonValues);
   const refundStatusEnum = schema.enum('refund_status', refundStatusValues);
@@ -32,7 +33,7 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
   const refunds = schema.table(
     'refunds',
     {
-      id: refundIdFactory.primaryColumn(),
+      id: idColumns(refundIdFactory).primaryColumn(),
       paymentId: paymentFk.required('payment_id'),
       /** Whole minor units of `currency`: 2550 is 25.50 EUR, 1500 is 1500 JPY. Read and write through `core/money.ts`. */
       originalAmountMinor: bigint('original_amount_minor', { mode: 'number' }).notNull(),
@@ -63,7 +64,7 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
     table => [uniqueIndex(pendingRefundIndexName).on(table.paymentId).where(sql`${table.status} = 'pending'`)],
   );
 
-  const refundForeignKeys = refundIdFactory.createForeignKeyFactory(() => refunds.id);
+  const refundForeignKeys = idColumns(refundIdFactory).createForeignKeyFactory(() => refunds.id);
 
   return {
     enums: {

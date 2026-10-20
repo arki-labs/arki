@@ -1,18 +1,19 @@
 /** Prefixed id factories (`createIdFactory`) and `idColumns` for ids declared with `defineId`. */
 import type { PgColumn } from 'drizzle-orm/pg-core';
-import { createId as createCuid } from '@paralleldrive/cuid2';
 import { varchar } from 'drizzle-orm/pg-core';
 
 import type { IdGenerationFailure } from '@arki/contracts';
-import { CONTRACTS_ERROR_CODES, ContractsError, z } from '@arki/contracts';
+import { CONTRACTS_ERROR_CODES, ContractsError, createIdBody, z } from '@arki/contracts';
 import { COLUMN_ZOD_SCHEMA } from '@arki/contracts/drizzle';
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
-// Core ID creation
-export const createId = () => createCuid();
+/** Generate an unprefixed legacy ID, or the canonical entropy failure. */
+export const createId = createIdBody;
 
-export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` => {
-  return `${prefix}${createId()}`;
+/** Preserve the supplied prefix exactly, including legacy empty or non-word prefixes. */
+export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` | IdGenerationFailure => {
+  const body = createId();
+  return isFailure(body) ? body : `${prefix}${body}`;
 };
 
 /**
@@ -158,8 +159,8 @@ export function idColumns<TSchema extends z.ZodType<string>>(
  *
  * @example
  * ```typescript
- * export type PoetId = `pt${string}`;
  * const poetId = createIdFactory('pt');
+ * export type PoetId = IdOf<typeof poetId>;
  *
  * export const createPoetId = poetId.create;
  * export const poetIdSchema = poetId.schema;

@@ -64,6 +64,7 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 - **A cursor is not secret.** It is base64url JSON of the last row's key values.
 - **Prefixes are stored as given.** `defineId('hlgt_')` matches rows already stored.
 - **`defineId().create()` needs Web Crypto.** React Native needs `react-native-get-random-values`.
+- **`createIdBody()` is the shared entropy primitive.** It returns the same `IdGenerationFailure` union and a 24-character body on success. Use an ID declaration to give it a domain identity; raw bodies do not establish domain types.
 
 ## Errors
 
@@ -71,7 +72,7 @@ Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `Inv
 
 | Code                  | Meaning                                                     | What to do                                                 |
 | --- | --- | --- |
-| `ARKI_CONTRACTS_E001` | `defineId` got a prefix that is not letters, digits or `_`. | Use letters, digits and `_`, for example `sty_`.           |
+| `ARKI_CONTRACTS_E001` | `defineId` got a non-string prefix. | Supply the exact stored prefix as a string; `''` means unprefixed. |
 | `ARKI_CONTRACTS_E002` | Two prefixes are equal or one starts the other.             | Give each id kind a prefix that does not start another.    |
 | `ARKI_CONTRACTS_E003` | Reserved legacy exception code; use `RandomSourceUnavailable`. | Run where it exists, or add a polyfill.                    |
 | `ARKI_CONTRACTS_E004` | `keyset` got no keys in its static declaration.             | Declare a key. Order by NOT NULL columns.                  |

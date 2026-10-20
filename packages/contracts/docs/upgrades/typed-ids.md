@@ -27,6 +27,4 @@ there is no `Math.random` fallback. Providers must implement the synchronous
 Web Crypto buffer protocol. Broken output, rejected asynchronous output and
 exhausted rejection sampling return a defect instead of yielding partial IDs.
 
-Legacy DB `createId`, `createPrefixedId` and `createIdFactory` have not migrated
-in this slice. Their duplicate implementations and consumer graph remain T08
-work. The framework migration is still active.
+Legacy DB generation now shares the same supervised entropy primitive. Migrate declarations to `defineId(prefix)` and server columns to `idColumns(declaration)`; see the [DB migration guide](../../../db/docs/upgrades/legacy-id-failures.md). `IdOf<typeof declaration>` infers the canonical schema output, retaining domain brands instead of reconstructing a type from the prefix. Empty and punctuation prefixes preserve existing stored formats. Nominal separation for same-format kinds and other custom generators remains active T08 work.

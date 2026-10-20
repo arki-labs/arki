@@ -71,6 +71,8 @@ Every owner column is a `UserId`, the string type `` `usr_${string}` `` exported
 
 ## Failure behaviour
 
+ID generators return their successful ID or the canonical `IdGenerationFailure` from `@arki/contracts` (`ID_GENERATION_FAILURES`). ID schemas and aliases describe successful strings only. Journal commands, provider creates, checkout setup and webhook claiming return these failures before their writes or provider effects. Check `isFailure` before reading the success. The Stripe and RevenueCat subscription presets return the exact journal write failure, including ID failures, instead of acknowledging the delivery. Webhook routes must reject a returned failure so the provider can retry. Drizzle scalar defaults still throw at the callback boundary; direct repository inserts that rely on those defaults need an owned transaction to recover the failure.
+
 Answers a correct caller must handle are returned as [`@arki/failure`](https://www.npmjs.com/package/@arki/failure) values, never thrown. Check them with `isFailure`, `Definition.is` or `match`. Bugs, bad input and provider faults (`rate_limited`, `unavailable`, `authentication`, `not_configured`) are still thrown, as `PaymentProviderError` or `RefundError`.
 
 | Failure                  | Code                                | Status | Returned by                                                                      |

@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * StripeProvider: tax transactions and tax settings against a fake HTTP layer
  *
@@ -17,7 +18,7 @@ import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
 const customer: Customer = {
-  id: createCustomerId(),
+  id: orThrow(createCustomerId()),
   userId: 'usr_alice',
   providerCustomerId: 'cus_alice',
   provider: 'stripe',

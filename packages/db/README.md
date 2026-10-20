@@ -131,11 +131,13 @@ const userProjection = d.projection
 
 ```ts run
 import { createIdFactory, createPrefixedId } from '@arki/db/id';
+import { isFailure } from '@arki/failure';
 
 const userId = createPrefixedId('usr_'); // 'usr_…'
 const idFactory = createIdFactory('post_');
 const postId = idFactory.create();
 
+if (isFailure(userId) || isFailure(postId)) throw new Error('This example needs Web Crypto');
 if (!userId.startsWith('usr_') || !postId.startsWith('post_')) throw new Error('prefix missing');
 ```
 
@@ -182,8 +184,13 @@ with `orThrow` at Drizzle's scalar default callback. A raw insert rejects with
 `UnexpectedFailure` and writes no row. Owned transactions roll back and return the
 original declared ID failure; `TRANSACTION_FAILURES` and `transactionErrorMap`
 include `ID_GENERATION_FAILURES`. Supplying an explicit ID skips its default.
-The legacy `createIdFactory`, `createId`, and `createPrefixedId` producers retain
-their existing behavior pending a separate migration.
+Legacy `createIdFactory` (`create`/`make`/`new`), `createId`, and `createPrefixedId`
+return the same canonical generation failures. They share the secure generator;
+no producer falls back to `Math.random`. Their stored format remains a 24-character
+lowercase alphanumeric body starting with a letter, with the prefix concatenated
+exactly as supplied. Legacy empty and punctuation prefixes remain accepted.
+The generation algorithm changes from Cuid2 to the shared Web Crypto sampler.
+See the [legacy ID upgrade guide](docs/upgrades/legacy-id-failures.md).
 
 ### Temporal columns
 
@@ -825,6 +832,9 @@ Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the pack
 <!-- bench:start -->
 
 ## Benchmarks
+
+The measurements below predate the bounded Web Crypto ID generator. They describe the previous Cuid2 implementation; rerun the benchmark before using these numbers for current ID performance.
+
 
 ID creation against the common ID generators, and PGlite (in memory) queries through the @arki/db handle against raw Drizzle on the same PGlite instance.
 

@@ -1,11 +1,16 @@
+import { orThrow } from '@arki/failure';
+import { defineId } from '@arki/contracts';
+import { idColumns } from '@arki/db/id';
 import { boolean, primaryKey, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 import { EMPTY_TWEAKS, tweaksColumn } from '@arki/auth/tweaks-column';
-import { createPrefixedId } from '@arki/db/id-factory';
 
 import { schema } from '../_schema';
 import { accountIdFactory, permissionIdFactory, roleIdFactory, userIdFactory } from './ids';
 import type { UserId, VerificationId } from './types';
+
+const sessionId = defineId("sess");
+const verificationsId = defineId("verif");
 
 export const userRolesEnum = schema.enum('user_roles', ['user', 'admin']);
 export type UserRole = (typeof userRolesEnum.enumValues)[number];
@@ -40,7 +45,7 @@ export const restrictedResourcesEnum = schema.enum('restricted_resources', [
 export type RestrictedResource = (typeof restrictedResourcesEnum.enumValues)[number];
 
 export const User = schema.table('users', {
-  id: userIdFactory.primaryColumn(),
+  id: idColumns(userIdFactory).primaryColumn(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified')
@@ -57,10 +62,10 @@ export const User = schema.table('users', {
 });
 
 // Export commonly used foreign key factory
-export const userForeignKeys = userIdFactory.createForeignKeyFactory(() => User.id);
+export const userForeignKeys = idColumns(userIdFactory).createForeignKeyFactory(() => User.id);
 
 export const Account = schema.table('accounts', {
-  id: accountIdFactory.primaryColumn(),
+  id: idColumns(accountIdFactory).primaryColumn(),
   accountId: text('account_id').notNull(),
   providerId: text('provider_id').notNull(),
   userId: text('user_id')
@@ -80,7 +85,7 @@ export const Account = schema.table('accounts', {
 export const Session = schema.table('sessions', {
   id: text('id')
     .primaryKey()
-    .$defaultFn(() => createPrefixedId('sess')),
+    .$defaultFn(() => /* Drizzle requires a scalar default; bridge the canonical failure at its callback. */ orThrow(sessionId.create())),
   expiresAt: timestamp('expires_at').notNull(),
   token: text('token').notNull().unique(),
   createdAt: timestamp('created_at').notNull(),
@@ -97,7 +102,7 @@ export const verifications = schema.table('verifications', {
   id: text('id')
     .primaryKey()
     .$type<VerificationId>()
-    .$defaultFn(() => createPrefixedId('verif')),
+    .$defaultFn(() => /* Drizzle requires a scalar default; bridge the canonical failure at its callback. */ orThrow(verificationsId.create())),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
   expiresAt: timestamp('expires_at').notNull(),
@@ -107,7 +112,7 @@ export const verifications = schema.table('verifications', {
 
 // Permission schema
 export const Permission = schema.table('permissions', {
-  id: permissionIdFactory.primaryColumn(),
+  id: idColumns(permissionIdFactory).primaryColumn(),
   name: varchar('name', { length: 100 }).notNull().unique(),
   description: text('description'),
   resource: restrictedResourcesEnum('resource').notNull(),
@@ -118,7 +123,7 @@ export const Permission = schema.table('permissions', {
 
 // Role schema
 export const Role = schema.table('roles', {
-  id: roleIdFactory.primaryColumn(),
+  id: idColumns(roleIdFactory).primaryColumn(),
   name: varchar('name', { length: 100 }).notNull().unique(),
   description: text('description'),
   isDefault: boolean('is_default').default(false).notNull(),

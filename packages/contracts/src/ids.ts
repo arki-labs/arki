@@ -37,11 +37,8 @@ export const ID_GENERATION_FAILURES = [RandomSourceUnavailable, UnexpectedDefect
 /** The exact failure union derived from the canonical generation definitions. */
 export type IdGenerationFailure = FailureOf<(typeof ID_GENERATION_FAILURES)[number]>;
 
-/** The id type of a declaration: `type StoryId = IdOf<typeof storyId>` is `` `sty_${string}` ``. */
-export type IdOf<D extends { readonly prefix: string }> = `${D['prefix']}${string}`;
-
-/** Letters, digits and `_` only. Stored prefixes like `'pt'`, `'usr_'` and `'poet_notif_'` all pass. */
-const PREFIX_PATTERN = /^\w+$/;
+/** The successful ID inferred from its canonical schema, including any domain brand. */
+export type IdOf<D extends { readonly schema: z.ZodType }> = z.output<D['schema']>;
 
 /**
  * Declare a prefixed id. The prefix is kept exactly as given, so a table
@@ -59,10 +56,10 @@ const PREFIX_PATTERN = /^\w+$/;
  * ```
  */
 export function defineId<const P extends string>(prefix: P) {
-  if (!PREFIX_PATTERN.test(prefix)) {
+  if (typeof prefix !== 'string') {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdPrefix,
-      `defineId: prefix "${prefix}" must be letters, digits or "_" (for example "sty_").`,
+      'defineId: prefix must be a string. Use an empty string for unprefixed stored IDs.',
     );
   }
   const schema = z.templateLiteral([prefix, z.string()], {
@@ -74,12 +71,18 @@ export function defineId<const P extends string>(prefix: P) {
     /** Validates successful IDs; generation failures never enter the schema type. */
     schema,
     /** A new prefixed ID, or a canonical failure when secure generation cannot finish. */
-    create: (): `${P}${string}` | IdGenerationFailure => {
-      const body = randomBody();
-      return isFailure(body) ? body : `${prefix}${body}`;
+    create: (): z.output<typeof schema> | IdGenerationFailure => {
+      const body = createIdBody();
+      if (isFailure(body)) return body;
+      try {
+        const result = schema.safeParse(`${prefix}${body}`);
+        return result.success ? result.data : UnexpectedDefect({ cause: result.error });
+      } catch (error) {
+        return UnexpectedDefect({ cause: error });
+      }
     },
     /** Tests the prefix and narrows to the success-only ID type. */
-    is: (value: unknown): value is `${P}${string}` => typeof value === 'string' && value.startsWith(prefix),
+    is: (value: unknown): value is z.output<typeof schema> => typeof value === 'string' && value.startsWith(prefix),
   } as const;
 }
 
@@ -94,11 +97,15 @@ const RANDOM_BATCH_SIZE = BODY_LENGTH * 2;
 const MAX_RANDOM_BATCHES = 32;
 
 /**
+ * Generate the unprefixed body shared by modern declarations and legacy DB IDs.
+ * This is an entropy primitive, not a domain identity declaration: use `defineId`
+ * to associate a body with its schema and ID kind.
+ *
  * 24 characters shaped like a cuid2: a letter first, then letters and digits.
  * Rejection sampling keeps each character equally likely. Only our fixed-size
  * buffer is read, by index, so provider-owned iterators cannot control the loop.
  */
-function randomBody(): string | IdGenerationFailure {
+export function createIdBody(): string | IdGenerationFailure {
   try {
     const source: unknown = Reflect.get(globalThis, 'crypto');
     if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();

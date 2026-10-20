@@ -46,6 +46,8 @@ const injectedRows = pgTable('injected_rows', {
   id: injected.primaryColumn(),
   requiredId: injected.requiredColumn('required_id'),
 });
+const legacyId = createIdFactory('legacy:/');
+const legacyRows = pgTable('legacy_rows', { id: legacyId.primaryColumn() });
 
 let client: PGlite;
 let db: Awaited<ReturnType<typeof initDbRuntimeLocal<typeof relations>>>['db'];
@@ -58,6 +60,7 @@ beforeAll(async () => {
   await db.execute(sql`create table profiles (id integer primary key, profile jsonb not null)`);
   await db.execute(sql`create table generated_rows (id varchar(256) primary key, required_id varchar(256) not null)`);
   await db.execute(sql`create table injected_rows (id varchar(256) primary key, required_id varchar(256) not null)`);
+  await db.execute(sql`create table legacy_rows (id varchar(256) primary key)`);
 });
 
 afterAll(async () => {
@@ -190,5 +193,22 @@ describe('idColumns', () => {
     expect(poet.create()).toMatch(/^pt_/);
     expect(poet.make).toBe(poet.create);
     expect(poet.schema.safeParse('xx_1').success).toBe(false);
+  });
+
+  it('legacy scalar defaults commit successes and roll back preceding writes on entropy refusal', async () => {
+    const committed = await runTransactionOnce(db, tx => tx.insert(legacyRows).values({}).returning());
+    expect(committed).toEqual([{ id: expect.stringMatching(/^legacy:\/[a-z][a-z0-9]{23}$/) }]);
+    vi.stubGlobal('crypto', null);
+    try {
+      const refused = await runTransactionOnce(db, async tx => {
+        await tx.insert(profiles).values({ id: 101, profile: { age: 42 } });
+        return tx.insert(legacyRows).values({}).returning();
+      });
+      expect(RandomSourceUnavailable.is(refused)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(await db.select().from(legacyRows)).toEqual(committed);
+    expect(await db.select().from(profiles)).not.toContainEqual({ id: 101, profile: { age: 42 } });
   });
 });

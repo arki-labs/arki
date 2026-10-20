@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import { expectTypeOf, it } from 'vitest';
 
 import type { FailureOf, UnexpectedDefect } from '@arki/failure';
@@ -18,4 +18,14 @@ it('ID generation exposes exact canonical failures while schema and IdOf remain 
   expectTypeOf<FailureOf<typeof storyId.create>>().toEqualTypeOf<
     FailureOf<typeof RandomSourceUnavailable> | FailureOf<typeof UnexpectedDefect>
   >();
+});
+
+it('IdOf reads schema output so transforms and brands cannot be erased by a prefix', () => {
+  const _domain = { schema: z.string().brand<'RefundId'>() };
+  expectTypeOf<IdOf<typeof _domain>>().toEqualTypeOf<z.output<typeof _domain.schema>>();
+  expectTypeOf<IdOf<typeof _domain>>().not.toEqualTypeOf<string>();
+  const _transformed = { schema: z.string().transform(value => value.length) };
+  expectTypeOf<IdOf<typeof _transformed>>().toEqualTypeOf<number>();
+  // @ts-expect-error A prefix without a canonical schema cannot establish a domain type.
+  type _Unvalidated = IdOf<{ prefix: 'refund_' }>;
 });

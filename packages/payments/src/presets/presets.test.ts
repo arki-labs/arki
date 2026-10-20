@@ -1,3 +1,9 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import type { FailureOf } from '@arki/failure';
+import { orThrow } from '@arki/failure';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { CommandConflict } from '@arki/journal';
+
 /**
  * The two webhook presets on the journal
  *
@@ -12,7 +18,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { and, eq } from 'drizzle-orm';
 import Stripe from 'stripe';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { fromMillis, fromUnix, instant, toDate } from '@arki/date';
 
@@ -21,7 +27,8 @@ import type { SubscriptionStatus } from '../core/primitives.js';
 import type { PaymentProviderType, Subscription } from '../core/types.js';
 import type { AppDb } from '../test-support.js';
 import type { RevenueCatEvent } from './revenuecat.js';
-import type { SubscriptionBilling } from './subscription.js';
+import type { SubscriptionBilling, projectStripeSubscription } from './subscription.js';
+import * as subscriptionIds from '../core/primitives.js';
 import { createSubscriptionId } from '../core/primitives.js';
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { coreReads, runnerOn } from '../service-test-support.js';
@@ -165,6 +172,36 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     return billing.handleWebhook(payload, sign(payload));
   }
 
+  it.each([
+    'customer.subscription.created',
+    'customer.subscription.updated',
+    'customer.subscription.deleted',
+  ] as const)('%s returns an ID refusal without acknowledging or writing the subscription', async type => {
+    const before = await countEvents(db);
+    const refused = RandomSourceUnavailable();
+    const generate = vi.spyOn(subscriptionIds, 'createSubscriptionId').mockReturnValue(refused);
+    try {
+      expect(await deliver(type, `sub_no_entropy_${type}`)).toBe(refused);
+    } finally {
+      generate.mockRestore();
+    }
+    expect(await countEvents(db)).toBe(before);
+    expect(await rowsOf(`sub_no_entropy_${type}`)).toEqual([]);
+  });
+
+  it('returns the exact journal refusal instead of acknowledging the event', async () => {
+    const before = await countEvents(db);
+    const refused = CommandConflict({ detail: 'subscription write refused' });
+    const sync = vi.spyOn(writes, 'syncSubscription').mockResolvedValue(refused);
+    try {
+      expect(await deliver('customer.subscription.updated', 'sub_refused')).toBe(refused);
+    } finally {
+      sync.mockRestore();
+    }
+    expect(await countEvents(db)).toBe(before);
+    expect(await rowsOf('sub_refused')).toEqual([]);
+  });
+
   it('the first delivery creates the row for the owner of the Stripe customer and leaves one event', async () => {
     const before = await countEvents(db);
 
@@ -191,13 +228,13 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
   });
 
   it('an identical second delivery writes no event and keeps one row', async () => {
-    await deliver('customer.subscription.created', 'sub_repeat');
+    await orThrow(deliver('customer.subscription.created', 'sub_repeat'));
     const first = await rowOf('sub_repeat');
     const before = await countEvents(db);
 
     const result = await deliver('customer.subscription.created', 'sub_repeat');
 
-    expect(result.handled).toBe(true);
+    expect(orThrow(result).handled).toBe(true);
     expect(await countEvents(db)).toBe(before);
     expect(await rowOf('sub_repeat')).toEqual(first);
     const rows = await db.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, 'sub_repeat'));
@@ -205,13 +242,13 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
   });
 
   it('a changed delivery writes exactly one SubscriptionSynced', async () => {
-    await deliver('customer.subscription.created', 'sub_renewed');
+    await orThrow(deliver('customer.subscription.created', 'sub_renewed'));
     const before = await countEvents(db);
 
-    await deliver('customer.subscription.updated', 'sub_renewed', {
+    await orThrow(deliver('customer.subscription.updated', 'sub_renewed', {
       status: 'active',
       items: { data: [{ current_period_start: FEB_1, current_period_end: MAR_1, price: { id: PRICE_ID } }] },
-    });
+    }));
 
     const row = await rowOf('sub_renewed');
     expect(row).toMatchObject({
@@ -225,13 +262,13 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
   });
 
   it('a status change is stored as Stripe reports it, with Stripe’s own cancel time', async () => {
-    await deliver('customer.subscription.created', 'sub_status', { status: 'active' });
+    await orThrow(deliver('customer.subscription.created', 'sub_status', { status: 'active' }));
 
-    await deliver('customer.subscription.updated', 'sub_status', { status: 'past_due' });
+    await orThrow(deliver('customer.subscription.updated', 'sub_status', { status: 'past_due' }));
     const pastDue = await rowOf('sub_status');
     expect(pastDue.status).toBe('past_due');
 
-    await deliver('customer.subscription.deleted', 'sub_status', { status: 'canceled', canceled_at: JAN_8 });
+    await orThrow(deliver('customer.subscription.deleted', 'sub_status', { status: 'canceled', canceled_at: JAN_8 }));
 
     const row = await rowOf('sub_status');
     expect(row).toMatchObject({ status: 'canceled', canceledAt: fromUnix(JAN_8), version: 3 });
@@ -336,7 +373,7 @@ describe('getEntitlement', () => {
 
   function subscription(status: SubscriptionStatus, changes: Partial<Subscription> = {}): Subscription {
     return {
-      id: createSubscriptionId(),
+      id: orThrow(createSubscriptionId()),
       userId,
       planId,
       customerId,
@@ -444,6 +481,32 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
     });
   }
 
+  it('returns an ID refusal without acknowledging or writing the native subscription', async () => {
+    const before = await countEvents(db);
+    const refused = RandomSourceUnavailable();
+    const generate = vi.spyOn(subscriptionIds, 'createSubscriptionId').mockReturnValue(refused);
+    try {
+      expect(await deliver('rc_no_entropy')).toBe(refused);
+    } finally {
+      generate.mockRestore();
+    }
+    expect(await countEvents(db)).toBe(before);
+    expect(await rowsOf('rc_no_entropy')).toEqual([]);
+  });
+
+  it('returns the exact journal refusal instead of acknowledging the native event', async () => {
+    const before = await countEvents(db);
+    const refused = CommandConflict({ detail: 'native subscription write refused' });
+    const sync = vi.spyOn(writes, 'syncSubscription').mockResolvedValue(refused);
+    try {
+      expect(await deliver('rc_refused')).toBe(refused);
+    } finally {
+      sync.mockRestore();
+    }
+    expect(await countEvents(db)).toBe(before);
+    expect(await rowsOf('rc_refused')).toEqual([]);
+  });
+
   it('the first delivery creates the row and leaves one event', async () => {
     const before = await countEvents(db);
 
@@ -470,7 +533,7 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   });
 
   it('an identical second delivery writes no event', async () => {
-    await deliver('rc_repeat');
+    await orThrow(deliver('rc_repeat'));
     const first = await rowOf('rc_repeat');
     const before = await countEvents(db);
 
@@ -482,10 +545,10 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   });
 
   it('a renewal writes exactly one SubscriptionSynced with the new period', async () => {
-    await deliver('rc_renewed');
+    await orThrow(deliver('rc_renewed'));
     const before = await countEvents(db);
 
-    await deliver('rc_renewed', { type: 'RENEWAL', purchased_at_ms: FEB_1, expiration_at_ms: MAR_1 });
+    await orThrow(deliver('rc_renewed', { type: 'RENEWAL', purchased_at_ms: FEB_1, expiration_at_ms: MAR_1 }));
 
     const row = await rowOf('rc_renewed');
     expect(row).toMatchObject({
@@ -504,9 +567,9 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
     const firstSeen = instant('2026-02-01T10:00:00.000Z');
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(toDate(firstSeen));
-    await deliver('rc_expired');
+    await orThrow(deliver('rc_expired'));
 
-    await deliver('rc_expired', { type: 'EXPIRATION' });
+    await orThrow(deliver('rc_expired', { type: 'EXPIRATION' }));
     const canceled = await rowOf('rc_expired');
     expect(canceled).toMatchObject({ status: 'canceled', canceledAt: firstSeen, version: 2 });
     const before = await countEvents(db);
@@ -521,7 +584,7 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   });
 
   it('a purchase inside a trial period is stored as trialing with the trial window', async () => {
-    await deliver('rc_trial', { period_type: 'TRIAL' });
+    await orThrow(deliver('rc_trial', { period_type: 'TRIAL' }));
 
     expect(await rowOf('rc_trial')).toMatchObject({
       status: 'trialing',
@@ -532,9 +595,9 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   });
 
   it('a cancellation keeps access until the period ends', async () => {
-    await deliver('rc_cancel');
+    await orThrow(deliver('rc_cancel'));
 
-    await deliver('rc_cancel', { type: 'CANCELLATION' });
+    await orThrow(deliver('rc_cancel', { type: 'CANCELLATION' }));
 
     expect(await rowOf('rc_cancel')).toMatchObject({
       status: 'active',
@@ -544,15 +607,15 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   });
 
   it('a billing issue moves the subscription to past due', async () => {
-    await deliver('rc_billing');
+    await orThrow(deliver('rc_billing'));
 
-    await deliver('rc_billing', { type: 'BILLING_ISSUE' });
+    await orThrow(deliver('rc_billing', { type: 'BILLING_ISSUE' }));
 
     expect(await rowOf('rc_billing')).toMatchObject({ status: 'past_due' });
   });
 
   it('a purchase that never expires gets a period end about 100 years out', async () => {
-    await deliver('rc_lifetime', { type: 'NON_RENEWING_PURCHASE', expiration_at_ms: null });
+    await orThrow(deliver('rc_lifetime', { type: 'NON_RENEWING_PURCHASE', expiration_at_ms: null }));
 
     expect(await rowOf('rc_lifetime')).toMatchObject({
       status: 'active',
@@ -571,8 +634,8 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
       expiration_at_ms: FEB_1,
     };
 
-    await projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId });
-    await projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId });
+    await orThrow(projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId }));
+    await orThrow(projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId }));
 
     const rows = await db
       .select()
@@ -589,5 +652,14 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
 
     expect(result).toEqual({ handled: false });
     expect(await countEvents(db)).toBe(before);
+  });
+});
+
+
+describe('preset failure types', () => {
+  it('preserves exactly the sync command failures at every webhook boundary', () => {
+    expectTypeOf<FailureOf<typeof projectStripeSubscription>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
+    expectTypeOf<FailureOf<SubscriptionBilling['handleWebhook']>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
+    expectTypeOf<FailureOf<typeof projectRevenueCatEvent>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
   });
 });

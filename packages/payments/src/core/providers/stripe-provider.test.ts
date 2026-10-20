@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * StripeProvider: amounts in Stripe's units, and refunds
  *
@@ -23,9 +24,9 @@ const CREATED = 1_767_225_600;
 
 function paymentRow(overrides: Partial<Payment> = {}): Payment {
   return {
-    id: createPaymentId(),
+    id: orThrow(createPaymentId()),
     userId: 'usr_alice',
-    customerId: createCustomerId(),
+    customerId: orThrow(createCustomerId()),
     subscriptionId: null,
     providerPaymentId: 'pi_charged',
     amountMinor: 5000,
@@ -167,7 +168,7 @@ describe('refundPayment', () => {
   it('returns ReferenceNotFound for an unknown payment id without calling Stripe: no money moves', async () => {
     const { stripe, requests } = provider(paymentRow(), refundAnswers({ amount: 1 }, { amount: 1, refunded: 0 }));
 
-    const result = await stripe.refundPayment(createPaymentId(), {});
+    const result = await stripe.refundPayment(orThrow(createPaymentId()), {});
 
     expect(result).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'payment', missing: 'row' } });
     expect(requests).toHaveLength(0);
@@ -233,7 +234,7 @@ describe('calculateTax', () => {
     const { stripe, requests } = taxProvider();
 
     const result = await stripe.calculateTax({
-      customerId: createCustomerId(),
+      customerId: orThrow(createCustomerId()),
       currency: 'jpy',
       lineItems: [{ amount: money(1500, 'JPY'), reference: 'plan' }],
     });
@@ -249,7 +250,7 @@ describe('calculateTax', () => {
 
     await expect(
       stripe.calculateTax({
-        customerId: createCustomerId(),
+        customerId: orThrow(createCustomerId()),
         currency: 'USD',
         lineItems: [{ amount: money(10, 'EUR'), reference: 'plan' }],
       }),

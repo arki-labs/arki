@@ -1,3 +1,4 @@
+import { idColumns } from '@arki/db/id';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, integer, jsonb, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
@@ -45,12 +46,12 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const paymentMethodTypeEnum = schema.enum('payment_method_type', paymentMethodTypeValues);
   const webhookEventTypeEnum = schema.enum('webhook_event_type', webhookEventTypeValues);
 
-  const userFk = userIdFactory.createForeignKeyFactory(userIdRef);
+  const userFk = idColumns(userIdFactory).createForeignKeyFactory(userIdRef);
 
   const plans = schema.table(
     'plans',
     {
-      id: planIdFactory.primaryColumn(),
+      id: idColumns(planIdFactory).primaryColumn(),
       name: varchar('name', { length: 255 }).notNull(),
       description: text('description'),
       tier: planTierEnum('tier').$type<PlanTier>().notNull().default('basic'),
@@ -72,7 +73,7 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const customers = schema.table(
     'customers',
     {
-      id: customerIdFactory.primaryColumn(),
+      id: idColumns(customerIdFactory).primaryColumn(),
       userId: userFk.required('user_id', { onDelete: 'cascade' }),
       providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
       provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull().default('stripe'),
@@ -94,10 +95,10 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const subscriptions = schema.table(
     'subscriptions',
     {
-      id: subscriptionIdFactory.primaryColumn(),
+      id: idColumns(subscriptionIdFactory).primaryColumn(),
       userId: userFk.required('user_id', { onDelete: 'cascade' }),
-      planId: planIdFactory.foreignKey('plan_id', () => plans.id, { onDelete: 'restrict' }),
-      customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
+      planId: idColumns(planIdFactory).foreignKey('plan_id', () => plans.id, { onDelete: 'restrict' }),
+      customerId: idColumns(customerIdFactory).foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
       providerSubscriptionId: varchar('provider_subscription_id', { length: 255 }).notNull(),
       status: subscriptionStatusEnum('status').$type<SubscriptionStatus>().notNull().default('incomplete'),
       currentPeriodStart: instant('current_period_start').notNull(),
@@ -118,12 +119,12 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const payments = schema.table(
     'payments',
     {
-      id: paymentIdFactory.primaryColumn(),
-      subscriptionId: subscriptionIdFactory.optionalForeignKey('subscription_id', () => subscriptions.id, {
+      id: idColumns(paymentIdFactory).primaryColumn(),
+      subscriptionId: idColumns(subscriptionIdFactory).optionalForeignKey('subscription_id', () => subscriptions.id, {
         onDelete: 'set null',
       }),
       userId: userFk.required('user_id', { onDelete: 'cascade' }),
-      customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
+      customerId: idColumns(customerIdFactory).foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
       providerPaymentId: varchar('provider_payment_id', { length: 255 }).notNull(),
       /** Whole minor units of `currency`, like `plans.price_minor`. */
       amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
@@ -155,7 +156,7 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const webhookEvents = schema.table(
     'webhook_events',
     {
-      id: webhookIdFactory.primaryColumn(),
+      id: idColumns(webhookIdFactory).primaryColumn(),
       provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull(),
       eventType: webhookEventTypeEnum('event_type').$type<WebhookEventType>().notNull(),
       providerEventId: varchar('provider_event_id', { length: 255 }).notNull(),
@@ -172,10 +173,10 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     (table) => [uniqueIndex('webhook_events_provider_event_id_idx').on(table.providerEventId)],
   );
 
-  const planForeignKeys = planIdFactory.createForeignKeyFactory(() => plans.id);
-  const subscriptionForeignKeys = subscriptionIdFactory.createForeignKeyFactory(() => subscriptions.id);
-  const paymentForeignKeys = paymentIdFactory.createForeignKeyFactory(() => payments.id);
-  const customerForeignKeys = customerIdFactory.createForeignKeyFactory(() => customers.id);
+  const planForeignKeys = idColumns(planIdFactory).createForeignKeyFactory(() => plans.id);
+  const subscriptionForeignKeys = idColumns(subscriptionIdFactory).createForeignKeyFactory(() => subscriptions.id);
+  const paymentForeignKeys = idColumns(paymentIdFactory).createForeignKeyFactory(() => payments.id);
+  const customerForeignKeys = idColumns(customerIdFactory).createForeignKeyFactory(() => customers.id);
 
   return {
     enums: {

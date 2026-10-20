@@ -1,3 +1,6 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import { orThrow } from '@arki/failure';
+
 /**
  * Customers: one per user, one per provider customer
  *
@@ -37,7 +40,7 @@ describe('customers table', () => {
     const error = await rejectionOf(
       db
         .insert(core.customers)
-        .values({ id: createCustomerId(), userId, providerCustomerId: 'cus_second', email: 'buyer@example.com' }),
+        .values({ id: orThrow(createCustomerId()), userId, providerCustomerId: 'cus_second', email: 'buyer@example.com' }),
     );
 
     expect(error).toMatchObject({ cause: { message: expect.stringContaining('customers_user_id_idx') } });
@@ -47,7 +50,7 @@ describe('customers table', () => {
     const [row] = await db
       .insert(core.customers)
       .values({
-        id: createCustomerId(),
+        id: orThrow(createCustomerId()),
         userId: adminId,
         providerCustomerId: 'cus_test',
         provider: 'paypal',
@@ -64,7 +67,7 @@ describe('customers table', () => {
     const error = await rejectionOf(
       db
         .insert(core.customers)
-        .values({ id: createCustomerId(), userId: adminId, providerCustomerId: 'cus_test', email: 'admin@example.com' }),
+        .values({ id: orThrow(createCustomerId()), userId: adminId, providerCustomerId: 'cus_test', email: 'admin@example.com' }),
     );
 
     expect(error).toMatchObject({ cause: { message: expect.stringContaining('customers_provider_customer_id_idx') } });
@@ -74,13 +77,13 @@ describe('customers table', () => {
 describe('PaymentRepository.createCustomer', () => {
   it('returns the existing row when the same customer is created twice', async () => {
     const first = await repo.createCustomer({
-      id: createCustomerId(),
+      id: orThrow(createCustomerId()),
       userId: adminId,
       providerCustomerId: 'cus_admin',
       email: 'admin@example.com',
     });
     const second = await repo.createCustomer({
-      id: createCustomerId(),
+      id: orThrow(createCustomerId()),
       userId: adminId,
       providerCustomerId: 'cus_admin',
       email: 'admin@example.com',
@@ -92,7 +95,7 @@ describe('PaymentRepository.createCustomer', () => {
   it('fails loudly when the user already has a different provider customer', async () => {
     const error = await rejectionOf(
       repo.createCustomer({
-        id: createCustomerId(),
+        id: orThrow(createCustomerId()),
         userId,
         providerCustomerId: 'cus_other',
         email: 'buyer@example.com',
@@ -107,7 +110,7 @@ describe('PaymentRepository.createCustomer', () => {
 
     const taken = await rejectionOf(
       repo.createCustomer({
-        id: createCustomerId(),
+        id: orThrow(createCustomerId()),
         userId: 'usr_stranger',
         providerCustomerId: 'cus_test',
         email: 'x@example.com',

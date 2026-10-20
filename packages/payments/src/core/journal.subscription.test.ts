@@ -1,3 +1,4 @@
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * Subscriptions on the journal
  *
@@ -54,7 +55,7 @@ async function seed(
   status: SubscriptionStatus,
   overrides: Partial<SyncSubscriptionInput> = {},
 ): Promise<SubscriptionId> {
-  const subscriptionId = createSubscriptionId();
+  const subscriptionId = orThrow(createSubscriptionId());
   await orThrow(
     journal.run(db, commands.createSubscription, { subscriptionId, ...delivery({ status, ...overrides }) }, meta),
   );
@@ -105,7 +106,7 @@ afterAll(async () => {
 
 describe('createSubscription', () => {
   it('stores the status the provider reported, because the provider owns it (the old rule forced `incomplete`)', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
     const input = delivery({ status: 'active', metadata: { taxAmount: 1.9, taxInclusive: false } });
 
     const result = await orThrow(journal.run(db, commands.createSubscription, { subscriptionId, ...input }, meta));
@@ -191,7 +192,7 @@ describe('cancelSubscription', () => {
   });
 
   it('rejects a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.cancelSubscription, { subscriptionId }, meta),
@@ -248,7 +249,7 @@ describe('reactivateSubscription', () => {
   });
 
   it('rejects a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.reactivateSubscription, { subscriptionId }, meta),
@@ -288,7 +289,7 @@ describe('pauseSubscription and resumeSubscription', () => {
   });
 
   it('rejects pausing a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.pauseSubscription, { subscriptionId }, meta),
@@ -320,7 +321,7 @@ describe('pauseSubscription and resumeSubscription', () => {
   });
 
   it('rejects resuming a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.resumeSubscription, { subscriptionId }, meta),
@@ -352,7 +353,7 @@ describe('markSubscriptionPastDue and activateSubscription (dunning and payment 
   });
 
   it('rejects marking a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.markSubscriptionPastDue, { subscriptionId }, meta),
@@ -392,7 +393,7 @@ describe('markSubscriptionPastDue and activateSubscription (dunning and payment 
   });
 
   it('rejects activating a subscription that is not there', async () => {
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
 
     await expectRejected(
       () => journal.run(db, commands.activateSubscription, { subscriptionId }, meta),
@@ -439,7 +440,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
   it('writes one `SubscriptionSynced` with the whole provider snapshot when a delivery changes something', async () => {
     const input = delivery({ metadata: { plan: 'pro' } });
     const first = await orThrow(journal.run(db, commands.syncSubscription, input, meta));
-    const subscriptionId = first.row?.id ?? createSubscriptionId();
+    const subscriptionId = first.row?.id ?? orThrow(createSubscriptionId());
     const renewedUntil = instant('2026-03-01T00:00:00.000Z');
 
     // A renewal that goes past due. The delivery does not mention the metadata, so the row keeps it.
@@ -499,7 +500,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
 
   it('finds a subscription made by `createSubscription` by its provider id, so checkout and webhook share one row', async () => {
     const input = delivery({ status: 'incomplete' });
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
     await orThrow(journal.run(db, commands.createSubscription, { subscriptionId, ...input }, meta));
 
     const synced = await orThrow(journal.run(db, commands.syncSubscription, { ...input, status: 'active' }, meta));
@@ -516,7 +517,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
 describe('a whole subscription life', () => {
   it('replays from its events to the stored row, so the journal can rebuild or repair the table', async () => {
     const input = delivery({ status: 'trialing', trialStart: periodStart, trialEnd: periodEnd, metadata: { a: 1 } });
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
     await orThrow(journal.run(db, commands.createSubscription, { subscriptionId, ...input }, meta));
     await orThrow(journal.run(db, commands.syncSubscription, { ...input, status: 'active' }, meta));
     await orThrow(journal.run(db, commands.markSubscriptionPastDue, { subscriptionId }, meta));

@@ -273,7 +273,7 @@ Static definition misuse throws `ContractsError`, a `TypeError`. ID generation a
 import { CONTRACTS_ERROR_CODES, ContractsError, defineId } from '@arki/contracts';
 
 try {
-  defineId('bad prefix!');
+  Reflect.apply(defineId, undefined, [42]);
 } catch (error) {
   if (!(error instanceof ContractsError)) throw error;
   console.log(error.code === CONTRACTS_ERROR_CODES.invalidIdPrefix);
@@ -283,14 +283,14 @@ try {
 
 ```text
 true
-Use letters, digits and "_" only, for example "sty_".
+Supply the stored prefix as a string; use an empty string for unprefixed IDs.
 ```
 
 Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input from outside.
 
 | Code                  | Raised by                       | Meaning                                                |
 | --------------------- | ------------------------------- | ------------------------------------------------------ |
-| `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not letters, digits or `_`.              |
+| `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not a string.              |
 | `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
 | `ARKI_CONTRACTS_E003` | legacy reserved exception code  | ID generation now returns `RandomSourceUnavailable`. |
 | `ARKI_CONTRACTS_E004` | `keyset`                        | No keys in the static declaration.               |

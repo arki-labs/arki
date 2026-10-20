@@ -1,3 +1,6 @@
+import { idColumns } from '@arki/db/id';
+import type { IdGenerationFailure } from '@arki/contracts';
+// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 /**
  * Payments on the journal, and the `writes(run)` functions of the core journal
  *
@@ -13,10 +16,11 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { FailureOf } from '@arki/failure';
 import type { CommandConflict, CommandFailure, CommandInvalid, CommandRunner } from '@arki/journal';
+import { RandomSourceUnavailable } from '@arki/contracts';
 import { instant } from '@arki/date';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { CommandNotFound } from '@arki/journal';
@@ -24,6 +28,7 @@ import { CommandNotFound } from '@arki/journal';
 import type { AppDb, AppTx } from '../test-support.js';
 import type { CoreWrites } from './journal.js';
 import type { PaymentId } from './types.js';
+import * as paymentIds from './primitives.js';
 import {
   core,
   countEvents,
@@ -59,7 +64,7 @@ function intent(amount = '19.99', currency = 'USD') {
 }
 
 async function seed(): Promise<PaymentId> {
-  const paymentId = createPaymentId();
+  const paymentId = orThrow(createPaymentId());
   await orThrow(journal.run(db, commands.initiatePayment, { paymentId, ...intent() }, meta));
 
   return paymentId;
@@ -104,7 +109,7 @@ afterAll(async () => {
 
 describe('initiatePayment', () => {
   it('stores a pending payment and one event, as the checkout does today', async () => {
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
     const input = { ...intent(), description: 'Pro plan', metadata: { taxAmount: 3.8, paymentIntentId: 'pi_x' } };
 
     const result = await orThrow(journal.run(db, commands.initiatePayment, { paymentId, ...input }, meta));
@@ -150,7 +155,7 @@ describe('initiatePayment', () => {
 
 describe('money in minor-unit columns', () => {
   it('stores 19.99 USD as 1999 and the event keeps the exact text, so replay lands on the same row', async () => {
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     const result = await orThrow(journal.run(db, commands.initiatePayment, { paymentId, ...intent('19.99') }, meta));
 
@@ -160,7 +165,7 @@ describe('money in minor-unit columns', () => {
   });
 
   it('keeps 1234567.89 to the cent: a 4-byte float column kept only 1234567.9', async () => {
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     await orThrow(journal.run(db, commands.initiatePayment, { paymentId, ...intent('1234567.89') }, meta));
 
@@ -171,7 +176,7 @@ describe('money in minor-unit columns', () => {
 
 /** Records a payment the way the code before minor units did: a `PaymentInitiated` event with a float amount. */
 async function recordOld(amount: number, currency: string): Promise<PaymentId> {
-  const paymentId = createPaymentId();
+  const paymentId = orThrow(createPaymentId());
   next += 1;
   const old = plain.core.events.PaymentInitiated({
     subscriptionId: null,
@@ -224,7 +229,7 @@ describe('a payment recorded before minor units (`PaymentInitiated`)', () => {
 
 describe('money with its currency', () => {
   it('stores a JPY payment in yen: 1000 JPY is 1000, not 10 or 100000', async () => {
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     const result = await orThrow(
       journal.run(db, commands.initiatePayment, { paymentId, ...intent('1000', 'JPY') }, meta),
@@ -235,7 +240,7 @@ describe('money with its currency', () => {
   });
 
   it('rejects a negative amount and writes nothing: a payment never moves money backwards', async () => {
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     const refused = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('-1') }, meta);
 
@@ -393,7 +398,7 @@ describe('completePayment, failPayment and cancelPayment', () => {
   it.each(['completePayment', 'failPayment', 'cancelPayment', 'markPaymentRequiresAction'] as const)(
     '%s rejects a payment that is not there',
     async name => {
-      const paymentId = createPaymentId();
+      const paymentId = orThrow(createPaymentId());
       const attempts = {
         completePayment: () => journal.run(db, commands.completePayment, { paymentId }, meta),
         failPayment: () => journal.run(db, commands.failPayment, { paymentId, failureReason: 'x' }, meta),
@@ -409,9 +414,9 @@ describe('completePayment, failPayment and cancelPayment', () => {
 describe('writes(run): what the services call', () => {
   it('runs the payment commands and hands back rows without the journal `version`', async () => {
     const writes = plain.core.writes(run);
-    const completed = createPaymentId();
-    const failed = createPaymentId();
-    const canceled = createPaymentId();
+    const completed = orThrow(createPaymentId());
+    const failed = orThrow(createPaymentId());
+    const canceled = orThrow(createPaymentId());
 
     const initiated = await orThrow(writes.initiatePayment({ paymentId: completed, ...intent() }));
     await orThrow(writes.initiatePayment({ paymentId: failed, ...intent() }));
@@ -432,7 +437,7 @@ describe('writes(run): what the services call', () => {
 
   it('runs markPaymentRequiresAction and hands back the row without the journal `version`', async () => {
     const writes = plain.core.writes(run);
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
     await orThrow(writes.initiatePayment({ paymentId, ...intent() }));
 
     const waiting = await orThrow(writes.markPaymentRequiresAction({ paymentId }));
@@ -444,7 +449,7 @@ describe('writes(run): what the services call', () => {
 
   it('runs the subscription commands, one event per call, in the order the services call them', async () => {
     const writes = plain.core.writes(run);
-    const subscriptionId = createSubscriptionId();
+    const subscriptionId = orThrow(createSubscriptionId());
     const delivery = {
       userId,
       planId,
@@ -491,7 +496,7 @@ describe('writes(run): what the services call', () => {
 
   it('returns a refused rule to the service as a failure, so the app can map it to an API answer', async () => {
     const writes = plain.core.writes(run);
-    const paymentId = createPaymentId();
+    const paymentId = orThrow(createPaymentId());
 
     const refused = await writes.completePayment({ paymentId });
 
@@ -504,9 +509,31 @@ describe('writes(run): what the services call', () => {
   });
 });
 
+describe('ID generation failure', () => {
+  it('returns the canonical refusal before a payment command can write rows or events', async () => {
+    const before = await countEvents(db);
+    let result: Awaited<ReturnType<CoreWrites['initiatePayment']>>;
+    const refused = RandomSourceUnavailable();
+    const generate = vi.spyOn(paymentIds, 'createPaymentId').mockReturnValue(refused);
+    try {
+      result = await plain.core.writes(run).initiatePayment({
+        userId,
+        customerId,
+        providerPaymentId: 'pi_no_entropy',
+        amount: { amount: '1.00', currency: 'USD' },
+      });
+    } finally {
+      generate.mockRestore();
+    }
+    expect(result).toBe(refused);
+    expect(await countEvents(db)).toBe(before);
+    expect(await db.select().from(core.payments).where(eq(core.payments.providerPaymentId, 'pi_no_entropy'))).toEqual([]);
+  });
+});
+
 describe('types', () => {
   it('exposes owned command failures so callers cannot treat a refused sync as a stored subscription', () => {
-    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<CommandFailure>();
+    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<CommandFailure | IdGenerationFailure>();
     expectTypeOf<FailureOf<CoreWrites['initiatePayment']>>().extract<CommandFailure>().toEqualTypeOf<CommandFailure>();
   });
 
@@ -526,8 +553,8 @@ describe('types', () => {
 });
 
 /** Tables shaped like the ones an app had before the journal: no `version` column. */
-const legacySubscriptions = schema.table('legacy_subscriptions', { id: subscriptionIdFactory.primaryColumn() });
-const legacyPayments = schema.table('legacy_payments', { id: paymentIdFactory.primaryColumn() });
+const legacySubscriptions = schema.table('legacy_subscriptions', { id: idColumns(subscriptionIdFactory).primaryColumn() });
+const legacyPayments = schema.table('legacy_payments', { id: idColumns(paymentIdFactory).primaryColumn() });
 
 /** Never called: `tsc` checks it. An app that forgot the schema change must fail to compile, not fail at run time. */
 function rejectsTablesWithoutVersion() {

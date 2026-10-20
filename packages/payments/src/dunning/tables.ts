@@ -1,3 +1,4 @@
+import { idColumns } from '@arki/db/id';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, integer, jsonb, real, text, varchar } from 'drizzle-orm/pg-core';
@@ -56,9 +57,9 @@ export function createDunningTables({
   paymentIdRef,
   subscriptionIdRef,
 }: CreateDunningTablesDeps) {
-  const customerFk = customerIdFactory.createForeignKeyFactory(customerIdRef);
-  const paymentFk = paymentIdFactory.createForeignKeyFactory(paymentIdRef);
-  const subscriptionFk = subscriptionIdFactory.createForeignKeyFactory(subscriptionIdRef);
+  const customerFk = idColumns(customerIdFactory).createForeignKeyFactory(customerIdRef);
+  const paymentFk = idColumns(paymentIdFactory).createForeignKeyFactory(paymentIdRef);
+  const subscriptionFk = idColumns(subscriptionIdFactory).createForeignKeyFactory(subscriptionIdRef);
 
   const dunningCampaignTypeEnum = schema.enum('dunning_campaign_type', dunningCampaignTypeValues);
   const dunningCampaignStatusEnum = schema.enum('dunning_campaign_status', dunningCampaignStatusValues);
@@ -69,7 +70,7 @@ export function createDunningTables({
   const riskCategoryEnum = schema.enum('risk_category', riskCategoryValues);
 
   const dunningCampaigns = schema.table('dunning_campaigns', {
-    id: dunningCampaignIdFactory.primaryColumn(),
+    id: idColumns(dunningCampaignIdFactory).primaryColumn(),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
     type: dunningCampaignTypeEnum('type').$type<DunningCampaignType>().notNull(),
@@ -116,8 +117,8 @@ export function createDunningTables({
   });
 
   const dunningTemplates = schema.table('dunning_templates', {
-    id: dunningTemplateIdFactory.primaryColumn(),
-    campaignId: dunningCampaignIdFactory.foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
+    id: idColumns(dunningTemplateIdFactory).primaryColumn(),
+    campaignId: idColumns(dunningCampaignIdFactory).foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
     stepNumber: integer('step_number').notNull(),
@@ -143,9 +144,9 @@ export function createDunningTables({
   });
 
   const dunningExecutions = schema.table('dunning_executions', {
-    id: dunningExecutionIdFactory.primaryColumn(),
-    campaignId: dunningCampaignIdFactory.foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
-    templateId: dunningTemplateIdFactory.optionalForeignKey('template_id', () => dunningTemplates.id, {
+    id: idColumns(dunningExecutionIdFactory).primaryColumn(),
+    campaignId: idColumns(dunningCampaignIdFactory).foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
+    templateId: idColumns(dunningTemplateIdFactory).optionalForeignKey('template_id', () => dunningTemplates.id, {
       onDelete: 'set null',
     }),
     customerId: customerFk.required('customer_id', { onDelete: 'cascade' }),
@@ -167,12 +168,12 @@ export function createDunningTables({
   });
 
   const dunningCommunications = schema.table('dunning_communications', {
-    id: dunningCommunicationIdFactory.primaryColumn(),
-    executionId: dunningExecutionIdFactory.foreignKey('execution_id', () => dunningExecutions.id, {
+    id: idColumns(dunningCommunicationIdFactory).primaryColumn(),
+    executionId: idColumns(dunningExecutionIdFactory).foreignKey('execution_id', () => dunningExecutions.id, {
       onDelete: 'cascade',
     }),
     customerId: customerFk.required('customer_id', { onDelete: 'cascade' }),
-    templateId: dunningTemplateIdFactory.foreignKey('template_id', () => dunningTemplates.id, { onDelete: 'restrict' }),
+    templateId: idColumns(dunningTemplateIdFactory).foreignKey('template_id', () => dunningTemplates.id, { onDelete: 'restrict' }),
     channel: communicationChannelEnum('channel').$type<CommunicationChannel>().notNull(),
     recipient: varchar('recipient', { length: 255 }).notNull(),
     subject: varchar('subject', { length: 500 }),
@@ -192,7 +193,7 @@ export function createDunningTables({
   });
 
   const customerSegments = schema.table('customer_segments', {
-    id: customerSegmentIdFactory.primaryColumn(),
+    id: idColumns(customerSegmentIdFactory).primaryColumn(),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
     type: customerSegmentTypeEnum('type').$type<CustomerSegmentType>().notNull(),
@@ -221,7 +222,7 @@ export function createDunningTables({
   });
 
   const customerRiskProfiles = schema.table('customer_risk_profiles', {
-    id: customerRiskProfileIdFactory.primaryColumn(),
+    id: idColumns(customerRiskProfileIdFactory).primaryColumn(),
     customerId: customerFk.required('customer_id', { onDelete: 'cascade' }),
     segmentIds: jsonb('segment_ids').$type<string[]>().notNull().default([]),
     riskScore: jsonb('risk_score')
@@ -282,7 +283,7 @@ export function createDunningTables({
 
   const dunningCampaignAnalytics = schema.table('dunning_campaign_analytics', {
     id: varchar('id', { length: 255 }).primaryKey(),
-    campaignId: dunningCampaignIdFactory.foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
+    campaignId: idColumns(dunningCampaignIdFactory).foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
     date: instant('date').notNull(),
     executions: integer('executions').notNull().default(0),
     customersReached: integer('customers_reached').notNull().default(0),
@@ -311,14 +312,14 @@ export function createDunningTables({
     check('dunning_analytics_processing_costs_minor_not_negative', sql`"processing_costs_minor" >= 0`),
   ]);
 
-  const dunningCampaignForeignKeys = dunningCampaignIdFactory.createForeignKeyFactory(() => dunningCampaigns.id);
-  const dunningTemplateForeignKeys = dunningTemplateIdFactory.createForeignKeyFactory(() => dunningTemplates.id);
-  const dunningExecutionForeignKeys = dunningExecutionIdFactory.createForeignKeyFactory(() => dunningExecutions.id);
-  const dunningCommunicationForeignKeys = dunningCommunicationIdFactory.createForeignKeyFactory(
+  const dunningCampaignForeignKeys = idColumns(dunningCampaignIdFactory).createForeignKeyFactory(() => dunningCampaigns.id);
+  const dunningTemplateForeignKeys = idColumns(dunningTemplateIdFactory).createForeignKeyFactory(() => dunningTemplates.id);
+  const dunningExecutionForeignKeys = idColumns(dunningExecutionIdFactory).createForeignKeyFactory(() => dunningExecutions.id);
+  const dunningCommunicationForeignKeys = idColumns(dunningCommunicationIdFactory).createForeignKeyFactory(
     () => dunningCommunications.id,
   );
-  const customerSegmentForeignKeys = customerSegmentIdFactory.createForeignKeyFactory(() => customerSegments.id);
-  const customerRiskProfileForeignKeys = customerRiskProfileIdFactory.createForeignKeyFactory(
+  const customerSegmentForeignKeys = idColumns(customerSegmentIdFactory).createForeignKeyFactory(() => customerSegments.id);
+  const customerRiskProfileForeignKeys = idColumns(customerRiskProfileIdFactory).createForeignKeyFactory(
     () => customerRiskProfiles.id,
   );
 
