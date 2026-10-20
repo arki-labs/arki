@@ -15,7 +15,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { composeMiddleware, route } from '@arki/http';
-import { IDEMPOTENCY_FAILURES, idempotent } from '@arki/http/idempotency';
+import { IDEMPOTENCY_FAILURES, idempotencyOwnerId, idempotent } from '@arki/http/idempotency';
 
 import { responseCache } from './http.js';
 import { journalTables } from './pg.js';
@@ -49,6 +49,9 @@ const cacheB = () => responseCache(dbB, tables);
 let counter = 0;
 const freshKey = () => `k${++counter}-${Math.random().toString(36).slice(2)}`;
 const response = { status: 201, headers: { 'content-type': 'application/json' }, body: btoa('{"ok":true}') };
+const ownerOne = idempotencyOwnerId.schema.parse('o1');
+const ownerTwo = idempotencyOwnerId.schema.parse('o2');
+const ownerThree = idempotencyOwnerId.schema.parse('o3');
 
 const post = (body: unknown, headers: Record<string, string>) =>
   new Request('http://x/orders', { method: 'POST', headers, body: JSON.stringify(body) });
@@ -125,35 +128,38 @@ describe('journal response cache (Postgres)', () => {
 
   it('a stale owner cannot finish after the entry expired and was given to someone else', async () => {
     const key = freshKey();
+    const oldOwner = idempotencyOwnerId.schema.parse('owner-old');
+    const newOwner = idempotencyOwnerId.schema.parse('owner-new');
+    const thirdOwner = idempotencyOwnerId.schema.parse('owner-third');
     const stale = cacheA();
     const fresh = cacheB();
-    expect(await stale.begin(key, 'fp', 'owner-old', 100)).toBe('started');
+    expect(await stale.begin(key, 'fp', oldOwner, 100)).toBe('started');
     await sleep(250);
-    expect(await fresh.begin(key, 'fp', 'owner-new', 60_000)).toBe('started');
-    await stale.finish(key, 'owner-old', response);
-    await stale.abandon(key, 'owner-old');
+    expect(await fresh.begin(key, 'fp', newOwner, 60_000)).toBe('started');
+    await stale.finish(key, oldOwner, response);
+    await stale.abandon(key, oldOwner);
     // The new owner still holds a running entry: the old owner's finish and abandon did nothing.
-    expect(await fresh.begin(key, 'fp', 'owner-third', 60_000)).toBe('in-progress');
-    await fresh.finish(key, 'owner-new', response);
-    expect(await fresh.begin(key, 'fp', 'owner-third', 60_000)).toEqual({ replay: response });
+    expect(await fresh.begin(key, 'fp', thirdOwner, 60_000)).toBe('in-progress');
+    await fresh.finish(key, newOwner, response);
+    expect(await fresh.begin(key, 'fp', thirdOwner, 60_000)).toEqual({ replay: response });
   });
 
   it('after the TTL the key can be used again, with a different request too', async () => {
     const key = freshKey();
     const cache = cacheA();
-    await cache.begin(key, 'fp-1', 'o1', 1500);
-    await cache.finish(key, 'o1', response);
-    expect(await cache.begin(key, 'fp-1', 'o2', 1500)).toEqual({ replay: response });
+    await cache.begin(key, 'fp-1', ownerOne, 1500);
+    await cache.finish(key, ownerOne, response);
+    expect(await cache.begin(key, 'fp-1', ownerTwo, 1500)).toEqual({ replay: response });
     await sleep(1800);
-    expect(await cache.begin(key, 'fp-2', 'o3', 60_000)).toBe('started');
+    expect(await cache.begin(key, 'fp-2', ownerThree, 60_000)).toBe('started');
   });
 
   it('an abandoned key can be taken at once', async () => {
     const key = freshKey();
     const cache = cacheA();
-    await cache.begin(key, 'fp', 'o1', 60_000);
-    await cache.abandon(key, 'o1');
-    expect(await cache.begin(key, 'fp', 'o2', 60_000)).toBe('started');
+    await cache.begin(key, 'fp', ownerOne, 60_000);
+    await cache.abandon(key, ownerOne);
+    expect(await cache.begin(key, 'fp', ownerTwo, 60_000)).toBe('started');
   });
 
   it('5xx is not cached: the retry runs the handler again', async () => {
@@ -180,7 +186,7 @@ describe('journal response cache (Postgres)', () => {
     await dbA
       .insert(tables.receipts)
       .values({ key: 'plain-command-key', command: 'pay', input: {}, commandId: 'cmd_1', result: {} });
-    await cacheA().begin('plain-command-key', 'fp', 'o1', 60_000);
+    await cacheA().begin('plain-command-key', 'fp', ownerOne, 60_000);
     const [row] = await dbA.select().from(tables.receipts).where(eq(tables.receipts.key, 'plain-command-key'));
     expect(row?.command).toBe('pay');
     expect(row?.expiresAt).toBeNull();

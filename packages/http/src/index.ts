@@ -59,6 +59,8 @@ export type {
 
 export { BASE_CTX_KEYS, derive } from './derive.js';
 export type { BaseRequestCtx, Deriver, ErasedDeriver, FailureHeaders } from './derive.js';
+export { requestId } from './ids.js';
+export type { RequestId } from './ids.js';
 
 export {
   describeInternalError,
@@ -84,6 +86,7 @@ export type { ListenHandle, ListenOptions } from './listen.js';
 export {
   IDEMPOTENCY_FAILURES,
   HTTP_CLIENT_FAILURES,
+  HTTP_SERVER_FAILURES,
   NetworkFailure,
   RequestCancelled,
   RequestTimeout,

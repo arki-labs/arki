@@ -1,5 +1,7 @@
 import type { Failure } from '@arki/failure';
 
+import type { RequestId } from './ids.js';
+
 /**
  * Request-scope derivers — "scope is data, not containers."
  *
@@ -31,7 +33,7 @@ export type BaseRequestCtx = {
   readonly req: Request;
   readonly url: URL;
   /** Inbound `x-request-id` header, else a fresh UUID. */
-  readonly requestId: string;
+  readonly requestId: RequestId;
   /** Aborts when the client disconnects. */
   readonly signal: AbortSignal;
 };

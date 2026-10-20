@@ -6,12 +6,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { BeginResult, IdempotentOptions, ResponseCache, StoredResponse } from '../idempotency.js';
+import type { BeginResult, IdempotencyOwnerId, IdempotentOptions, ResponseCache, StoredResponse } from '../idempotency.js';
 import { route } from '../contract.js';
 import { composeMiddleware } from '../engine.js';
 import { IDEMPOTENCY_FAILURES, idempotent } from '../idempotency.js';
 
-type Entry = { fingerprint: string; owner: string; expiresAt: number; response?: StoredResponse };
+type Entry = { fingerprint: string; owner: IdempotencyOwnerId; expiresAt: number; response?: StoredResponse };
 
 function memoryCache(now: () => number = Date.now): ResponseCache & { readonly entries: Map<string, Entry> } {
   const entries = new Map<string, Entry>();

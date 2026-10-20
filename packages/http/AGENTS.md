@@ -7,7 +7,7 @@ Typed HTTP: route contracts as data, Standard Schema validation, a fetch engine 
 ## Laws
 
 1. A contract is plain data at module scope. A handler is bound later. Never put a handler inside a contract.
-2. Any Standard Schema works. Never import a schema library into the core (`zod` is only a dev and doc dependency).
+2. Route validation accepts any Standard Schema; never require a particular validator in user contracts. Canonical identity declarations use `@arki/contracts` under A-38. Existing built-in protocol schemas may use Zod; this does not change the route validation protocol.
 3. No Hono type appears in the public API. Routing stays an implementation detail.
 4. Every failure on the wire is a coded envelope. A new code goes in `HTTP_ERROR_CODES` or `HTTP_PLUGIN_ERROR_CODES` with JSDoc (summary, `@fix`, `@verify`) and a row in the README error table.
 5. `@arki/http/client` imports nothing from Node. It must run on Hermes and in browsers.

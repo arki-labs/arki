@@ -47,7 +47,7 @@ import type { HttpClientFailure } from './failures.js';
 import type { RawOutput } from './raw.js';
 import type { Fields, Job, Ran, Where, Wire, WireValue } from './wire.js';
 import { HTTP_ERROR_CODES, HttpError } from './error.js';
-import { NetworkFailure, RequestCancelled, RequestTimeout } from './failures.js';
+import { HTTP_SERVER_FAILURES, NetworkFailure, RequestCancelled, RequestTimeout } from './failures.js';
 import { isRawOutput } from './raw.js';
 import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs } from './wire.js';
 
@@ -524,5 +524,10 @@ async function toListedFailure(contract: AnyRoute, response: Response): Promise<
   }
   const envelope = errorEnvelopeSchema.safeParse(body);
   if (!envelope.success) return InvalidEnvelope({ reason: 'malformed' });
-  return revive(envelope.data.error, [InvalidInput, ...REVIVAL_FAILURES, ...(contract.failures ?? [])]);
+  return revive(envelope.data.error, [
+    InvalidInput,
+    ...REVIVAL_FAILURES,
+    ...HTTP_SERVER_FAILURES,
+    ...(contract.failures ?? []),
+  ]);
 }

@@ -19,6 +19,8 @@
  * Every code is stable API. Match on codes, never parse messages.
  */
 
+import { trace } from '@opentelemetry/api';
+
 import type { Failure } from '@arki/failure';
 import { InvalidInput, isFailure, serialize } from '@arki/failure';
 
@@ -354,6 +356,11 @@ export function errorResponse(
     readonly data?: unknown;
   } = {},
 ): Response {
+  try {
+    trace.getActiveSpan()?.setAttribute('failure.code', code);
+  } catch {
+    // Application-owned reporting cannot replace an error response.
+  }
   const envelope: HttpErrorEnvelope = {
     error: {
       code,

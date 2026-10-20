@@ -9,6 +9,7 @@
 
 import { Hono } from 'hono';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, serialize } from '@arki/failure';
@@ -21,9 +22,12 @@ import type { Field, Job, Ran, Where, Wire } from './wire.js';
 import { isReply } from './bundle.js';
 import { runWithRequestContext } from './context.js';
 import { errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
+import { HTTP_SERVER_FAILURES } from './failures.js';
+import { requestId } from './ids.js';
 import { openApiPaths } from './path.js';
 import { isRawOutput } from './raw.js';
 import { sseResponse } from './sse.js';
+import { observeHttp } from './telemetry.js';
 import { decoderOf, encoderOf, fieldParts, issuesOf, missingField, runJobs, runSchema } from './wire.js';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -71,7 +75,7 @@ export function buildEngine(bundles: readonly RouteBundle[]): Engine {
   app.onError((error, _c) => toErrorResponse(error));
 
   return {
-    fetch: req => Promise.resolve(app.fetch(req)),
+    fetch: req => observeHttp('http.request', () => app.fetch(req)),
     routeIds,
   };
 }
@@ -110,11 +114,14 @@ function registerRpc(app: Hono, claimed: Map<string, string>, bundle: RouteBundl
   app.mount(rpc.path, req => executeRpc(bundle, rpc, req), { replaceRequest: false });
 }
 
-function createBaseCtx(req: Request): BaseRequestCtx {
+function createBaseCtx(req: Request): BaseRequestCtx | IdGenerationFailure {
+  const supplied = req.headers.get('x-request-id');
+  const id = requestId.is(supplied) ? supplied : requestId.create();
+  if (isFailure(id)) return id;
   return {
     req,
     url: new URL(req.url),
-    requestId: req.headers.get('x-request-id') ?? crypto.randomUUID(),
+    requestId: id,
     signal: req.signal,
   };
 }
@@ -129,6 +136,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 
 async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): Promise<Response> {
   const base = createBaseCtx(req);
+  if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
   return runWithRequestContext(base, async () => {
     try {
       let ctx: BaseRequestCtx & Record<string, unknown> = base;
@@ -183,6 +191,7 @@ function executeBinding(
   params: Record<string, string>,
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
+  if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
   if ((binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined) {
     return runWithRequestContext(base, () => executeBindingAsync(bundle, binding, req, base, params));
   }

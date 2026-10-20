@@ -99,11 +99,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@hono/node-server": "catalog:",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "hono": "catalog:backend",
     "ipaddr.js": "catalog:",
     "undici": "catalog:",
@@ -127,6 +129,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@hono/zod-validator": "^0.9.1",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "arktype": "catalog:",
     "itty-router": "^5.0.24",

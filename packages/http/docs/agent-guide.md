@@ -37,6 +37,14 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. Pass the same canonical route descriptors to `idempotent({ routes: [writeRoute], ... })`. Each must list all `IDEMPOTENCY_FAILURES`; omitted or partial declarations fail typechecking and configure-time validation.
 2. The client sends the same `Idempotency-Key` for every retry of one action. List `IDEMPOTENCY_FAILURES` on that route to infer its refusals.
+3. `ResponseCache` owner arguments are `IdempotencyOwnerId`. Restore stored/test strings with `idempotencyOwnerId.schema`; do not restate the brand or cast a string. The middleware generates before hashing or cache acquisition, returning canonical entropy failures through its HTTP bridge.
+
+### Correlate and trace a request
+
+1. Use the inferred `ctx.requestId` (`RequestId`). Every present `x-request-id` is preserved; without one, canonical UUID generation must succeed before bound execution.
+2. Configure your OTel SDK and async context manager once at the application entry. The engine and protected idempotency middleware create `http.request` and `http.idempotency` spans automatically.
+3. Use `trace.getActiveSpan()` or the application tracer inside a handler/plugin. Built-in attributes contain only response status and failure code. Keep secrets, request bodies and private failure causes out of your attributes.
+4. See [the upgrade guide](upgrade-identities.md) for nominal fixtures and the expanded inferred failure tuples.
 
 ### Receive a signed webhook
 

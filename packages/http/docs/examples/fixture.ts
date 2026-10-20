@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 
-import type { HttpMiddleware, RouteBundle } from '@arki/http';
+import type { HttpMiddleware, RequestId, RouteBundle } from '@arki/http';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
@@ -26,7 +26,7 @@ export type Db = {
   readonly orders: {
     list(query?: OrderQuery): Promise<OrderValue[]>;
     find(tenant: string, id: string): Promise<OrderValue | undefined>;
-    create(body: z.output<typeof CreateOrder>, requestId: string): Promise<OrderValue>;
+    create(body: z.output<typeof CreateOrder>, requestId: RequestId): Promise<OrderValue>;
   };
 };
 

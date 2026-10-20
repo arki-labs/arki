@@ -1,5 +1,9 @@
 /** Canonical client-owned outcomes; route-owned failures stay on each contract. */
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure, InvalidInput, REVIVAL_FAILURES } from '@arki/failure';
+
+/** Framework request setup can refuse before a route handler or deriver runs. */
+export const HTTP_SERVER_FAILURES = ID_GENERATION_FAILURES;
 
 /** A fetch attempt failed to reach its destination.
  * @fix Check connectivity and retry only repeatable requests.
@@ -55,11 +59,17 @@ export const IdempotencyInProgress = defineFailure('http.idempotency_in_progress
   remediation: 'Wait and send the same request again.',
 });
 
-export const IDEMPOTENCY_FAILURES = [IdempotencyKeyRequired, IdempotencyKeyReused, IdempotencyInProgress] as const;
+export const IDEMPOTENCY_FAILURES = [
+  IdempotencyKeyRequired,
+  IdempotencyKeyReused,
+  IdempotencyInProgress,
+  ...ID_GENERATION_FAILURES,
+] as const;
 
 export const HTTP_CLIENT_FAILURES = [
   InvalidInput,
   ...REVIVAL_FAILURES,
+  ...HTTP_SERVER_FAILURES,
   NetworkFailure,
   RequestTimeout,
   RequestCancelled,

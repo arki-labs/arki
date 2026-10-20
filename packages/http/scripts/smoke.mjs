@@ -6,7 +6,8 @@
 
 import { z } from 'zod';
 
-import { defineFailure, isFailure } from '@arki/failure';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
 import { createClient } from '../dist/client.js';
 
@@ -160,6 +161,18 @@ async function main() {
     ['the retried call decodes the success', retried.id, 'e1'],
     ['timeoutMs returns a canonical failure', timedOut.value && timedOut.value.code, 'http.request_timeout'],
   ];
+
+  for (const definition of [RandomSourceUnavailable, UnexpectedDefect]) {
+    const refused = fakeFetch(() => ({
+      status: 500,
+      body: { error: { code: definition.code, message: 'untrusted remote message' } },
+    }));
+    const result = await createClient(lockEvent, { baseUrl: 'https://api.test', fetch: refused.fetch })({
+      params: { id: 'e1' },
+    });
+    checks.push([`${definition.code} is automatically admitted`, definition.is(result), true]);
+    checks.push([`${definition.code} presentation is canonical`, result.message, definition().message]);
+  }
 
   let failedChecks = 0;
   for (const [name, actual, expected] of checks) {

@@ -699,6 +699,7 @@ Stable API — match on codes, never parse messages.
 | `http.network_failure` / `http.request_cancelled` | client network failure (503) / caller cancellation (499) |
 | `schema.invalid_input` | local or server input validation failed (400) |
 | `failure.invalid_envelope` | unknown wire code, malformed envelope or invalid payload |
+| `contracts.random_source_unavailable` / `failure.unexpected_defect` | request or idempotency owner generation lacks secure entropy or its provider is defective; answers 500 before protected execution |
 | `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |
@@ -787,7 +788,7 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 MIT
 
 Client calls return success, exactly the failures in `route.failures`, or `HttpClientFailure`
-(inferred from `HTTP_CLIENT_FAILURES`). They resolve canonical failures for network errors,
+(inferred from `HTTP_CLIENT_FAILURES` and `HTTP_SERVER_FAILURES`). They resolve canonical failures for network errors,
 deadlines, cancellation, local validation and protocol drift. Unknown remote codes and invalid
 known payloads return `InvalidEnvelope`; inspect its `data.reason`. Remote presentation fields
 are ignored during revival.
@@ -809,5 +810,29 @@ Handler-owned refusals use `bind(contract, handler, { failureHeaders })`.
 Bindings snapshot their derivers: adding a guard later in a chain cannot change a route bound
 earlier. Typed RPC mounts declare their guard failures with `rpcMount(path, { id, failures })`.
 Idempotency `routes` accepts canonical descriptors, not method/path strings, and checks all
-three `IDEMPOTENCY_FAILURES` on every descriptor. Foreign fetch middleware remains an untyped
+definitions in `IDEMPOTENCY_FAILURES` on every descriptor. Foreign fetch middleware remains an untyped
 transport edge.
+
+### Request identities and tracing
+
+`BaseRequestCtx.requestId` is `RequestId`, inferred from the exported `requestId`
+definition. Every present `x-request-id` string, including an empty string, keeps
+its bytes and bypasses entropy. Otherwise HTTP generates a UUID through
+`@arki/contracts`: native `randomUUID`, or secure `getRandomValues` when the native
+method is absent. Provider failures stop bound handlers, derivers and RPC context
+creation. Typed clients admit these framework failures automatically.
+
+Idempotency cache owners use a separate `IdempotencyOwnerId`, exported with
+`idempotencyOwnerId` from `@arki/http/idempotency`. Generate the owner before
+hashing, cache acquisition or application execution. Use the canonical schema to
+restore existing owner strings in adapters and fixtures. Storage bytes do not
+change. `IDEMPOTENCY_FAILURES` includes generation failures; derive its union
+instead of copying its members.
+
+The engine creates an `http.request` span and protected idempotency middleware
+creates an `http.idempotency` span through `@opentelemetry/api`. They inherit the
+active context and record response status and canonical failure codes, without
+request IDs, URLs, keys, bodies or private causes. Configure the SDK and context
+manager in the application. Handlers and plugins can use the active span or
+create their own children. Reporting failures cannot repeat or suppress the
+owned execution. See the [identity upgrade guide](docs/upgrade-identities.md).

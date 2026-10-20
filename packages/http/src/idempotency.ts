@@ -9,10 +9,14 @@
  */
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { ContractLike, CoversFailures } from './contract.js';
 import type { HttpMiddleware } from './engine.js';
+import type { IdempotencyOwnerId } from './ids.js';
+import { idempotencyOwnerId } from './ids.js';
+import { observeHttp } from './telemetry.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
 import { HTTP_ERROR_CODES, HttpConfigError, orThrowHttp } from './error.js';
 import {
@@ -28,6 +32,9 @@ export {
   IdempotencyKeyReused,
   IdempotencyInProgress,
 } from './failures.js';
+
+export { idempotencyOwnerId } from './ids.js';
+export type { IdempotencyOwnerId } from './ids.js';
 
 /** A response as the cache keeps it: the status, the allowlisted headers, and the body as base64. */
 export type StoredResponse = { status: number; headers: Record<string, string>; body: string };
@@ -57,11 +64,11 @@ export type BeginResult =
  * `ttl` is in milliseconds and counts from `begin`. An expired entry can be taken again.
  */
 export type ResponseCache = {
-  begin(key: string, fingerprint: string, owner: string, ttl: number): Promise<BeginResult>;
+  begin(key: string, fingerprint: string, owner: IdempotencyOwnerId, ttl: number): Promise<BeginResult>;
   /** Store the response under the key. A no-op when `owner` does not hold the key any more. */
-  finish(key: string, owner: string, response: StoredResponse): Promise<void>;
+  finish(key: string, owner: IdempotencyOwnerId, response: StoredResponse): Promise<void>;
   /** Free the key so a retry can run again. A no-op when `owner` does not hold the key. */
-  abandon(key: string, owner: string): Promise<void>;
+  abandon(key: string, owner: IdempotencyOwnerId): Promise<void>;
 };
 
 export type IdempotentOptions<Routes extends readonly ContractLike[] = readonly ContractLike[]> = {
@@ -167,59 +174,63 @@ export function idempotent(options: IdempotentOptions): HttpMiddleware {
     const url = new URL(req.url);
     if (!patterns.some(pattern => pattern.method === req.method && pattern.path.test(url.pathname))) return next(req);
 
-    const principal = await scope(req);
-    if (principal === undefined) return next(req);
+    return observeHttp('http.idempotency', async () => {
+      const principal = await scope(req);
+      if (principal === undefined) return next(req);
 
-    const supplied = req.headers.get(headerName)?.trim();
-    if (supplied === undefined || supplied === '' || supplied.length > MAX_KEY_LENGTH) {
-      orThrowHttp(IdempotencyKeyRequired(), IDEMPOTENCY_FAILURES);
-    }
+      const supplied = req.headers.get(headerName)?.trim();
+      if (supplied === undefined || supplied === '' || supplied.length > MAX_KEY_LENGTH) {
+        orThrowHttp(IdempotencyKeyRequired(), IDEMPOTENCY_FAILURES);
+      }
 
-    const declared = Number(req.headers.get('content-length') ?? 0);
-    if (declared > maxBodyBytes) return next(req);
-    const body = await readCapped(req.clone().body, maxBodyBytes);
-    if (body === undefined) return next(req);
+      const declared = Number(req.headers.get('content-length') ?? 0);
+      if (declared > maxBodyBytes) return next(req);
+      const body = await readCapped(req.clone().body, maxBodyBytes);
+      if (body === undefined) return next(req);
 
-    const key = await sha256(`${principal.length}:${principal}${supplied}`);
-    const fingerprint = await fingerprintOf(req, url, body);
-    const owner = crypto.randomUUID();
+      // Secure ownership must be established before hashing, cache acquisition or application effects.
+      const owner = idempotencyOwnerId.create();
+      if (isFailure(owner)) return orThrowHttp(owner, IDEMPOTENCY_FAILURES);
+      const key = await sha256(`${principal.length}:${principal}${supplied}`);
+      const fingerprint = await fingerprintOf(req, url, body);
 
-    const outcome = await cache.begin(key, fingerprint, owner, ttl);
-    if (outcome === 'conflict') return orThrowHttp(IdempotencyKeyReused(), IDEMPOTENCY_FAILURES);
-    if (outcome === 'in-progress') {
-      return orThrowHttp(IdempotencyInProgress(), IDEMPOTENCY_FAILURES, { headers: { 'retry-after': '1' } });
-    }
-    if (outcome !== 'started') return replayResponse(outcome.replay);
+      const outcome = await cache.begin(key, fingerprint, owner, ttl);
+      if (outcome === 'conflict') return orThrowHttp(IdempotencyKeyReused(), IDEMPOTENCY_FAILURES);
+      if (outcome === 'in-progress') {
+        return orThrowHttp(IdempotencyInProgress(), IDEMPOTENCY_FAILURES, { headers: { 'retry-after': '1' } });
+      }
+      if (outcome !== 'started') return replayResponse(outcome.replay);
 
-    let response: Response;
-    try {
-      response = await next(req);
-    } catch (error) {
-      await cache.abandon(key, owner);
-      throw error;
-    }
+      let response: Response;
+      try {
+        response = await next(req);
+      } catch (error) {
+        await cache.abandon(key, owner);
+        throw error;
+      }
 
-    const streaming = response.headers.get('content-type')?.startsWith('text/event-stream') === true;
-    if (streaming || !isCacheable(response.status)) {
-      await cache.abandon(key, owner);
+      const streaming = response.headers.get('content-type')?.startsWith('text/event-stream') === true;
+      if (streaming || !isCacheable(response.status)) {
+        await cache.abandon(key, owner);
+        return response;
+      }
+      const bytes = await readCapped(response.clone().body, maxBodyBytes);
+      if (bytes === undefined) {
+        await cache.abandon(key, owner);
+        return response;
+      }
+      const headers: Record<string, string> = {};
+      for (const [name, value] of response.headers) if (allowed.has(name)) headers[name] = value;
+      try {
+        await cache.finish(key, owner, { status: response.status, headers, body: toBase64(bytes) });
+      } catch (error) {
+        // The work is done but its answer is not stored. Free the key if the cache still answers, and fail loud.
+        await cache.abandon(key, owner).catch(() => {
+          /* the original error is the one to report */
+        });
+        throw error;
+      }
       return response;
-    }
-    const bytes = await readCapped(response.clone().body, maxBodyBytes);
-    if (bytes === undefined) {
-      await cache.abandon(key, owner);
-      return response;
-    }
-    const headers: Record<string, string> = {};
-    for (const [name, value] of response.headers) if (allowed.has(name)) headers[name] = value;
-    try {
-      await cache.finish(key, owner, { status: response.status, headers, body: toBase64(bytes) });
-    } catch (error) {
-      // The work is done but its answer is not stored. Free the key if the cache still answers, and fail loud.
-      await cache.abandon(key, owner).catch(() => {
-        /* the original error is the one to report */
-      });
-      throw error;
-    }
-    return response;
+    });
   };
 }
