@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+import type { FailureOf } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import { CONTRACTS_ERROR_CODES, ContractsError, RandomSourceUnavailable } from './errors.js';
 
 /**
  * The id of a user: `usr_` followed by an id. Every package that refers to a user, whether or
@@ -26,16 +29,13 @@ export const userIdSchema = z.custom<UserId>(value => typeof value === 'string' 
  * Browser-safe on purpose: no Drizzle here. `@arki/db/id`'s `idColumns(storyId)`
  * turns the same declaration into table columns on the server.
  */
-export type IdDeclaration<P extends string> = {
-  /** The prefix every id of this kind starts with, exactly as stored (`'sty_'`). */
-  readonly prefix: P;
-  /** Validates an id of this kind. Its output type is the id type. */
-  readonly schema: z.ZodType<`${P}${string}`>;
-  /** A new random id: the prefix plus 24 lowercase letters and digits. */
-  readonly create: () => `${P}${string}`;
-  /** True when `value` is an id of this kind (a type guard, for code that has no schema at hand). */
-  readonly is: (value: unknown) => value is `${P}${string}`;
-};
+export type IdDeclaration<P extends string> = ReturnType<typeof defineId<P>>;
+
+/** Canonical failures returned by ID generation, including unexpected provider faults. */
+export const ID_GENERATION_FAILURES = [RandomSourceUnavailable, UnexpectedDefect] as const;
+
+/** The exact failure union derived from the canonical generation definitions. */
+export type IdGenerationFailure = FailureOf<(typeof ID_GENERATION_FAILURES)[number]>;
 
 /** The id type of a declaration: `type StoryId = IdOf<typeof storyId>` is `` `sty_${string}` ``. */
 export type IdOf<D extends { readonly prefix: string }> = `${D['prefix']}${string}`;
@@ -55,10 +55,10 @@ const PREFIX_PATTERN = /^\w+$/;
  * export type StoryId = IdOf<typeof storyId>;   // `sty_${string}`
  *
  * storyId.schema.parse('sty_k3…');              // StoryId
- * storyId.create();                             // 'sty_' + 24 random chars
+ * storyId.create();                             // StoryId | IdGenerationFailure
  * ```
  */
-export function defineId<const P extends string>(prefix: P): IdDeclaration<P> {
+export function defineId<const P extends string>(prefix: P) {
   if (!PREFIX_PATTERN.test(prefix)) {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdPrefix,
@@ -69,11 +69,18 @@ export function defineId<const P extends string>(prefix: P): IdDeclaration<P> {
     error: `Expected an id starting with "${prefix}"`,
   });
   return {
+    /** The stored prefix, unchanged. */
     prefix,
+    /** Validates successful IDs; generation failures never enter the schema type. */
     schema,
-    create: () => `${prefix}${randomBody()}`,
+    /** A new prefixed ID, or a canonical failure when secure generation cannot finish. */
+    create: (): `${P}${string}` | IdGenerationFailure => {
+      const body = randomBody();
+      return isFailure(body) ? body : `${prefix}${body}`;
+    },
+    /** Tests the prefix and narrows to the success-only ID type. */
     is: (value: unknown): value is `${P}${string}` => typeof value === 'string' && value.startsWith(prefix),
-  };
+  } as const;
 }
 
 /* ---- the generator: Web Crypto, so it runs in Node, Bun, Deno and browsers ---- */
@@ -82,50 +89,49 @@ const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const ALPHABET = `${LETTERS}0123456789`;
 const BODY_LENGTH = 24;
 
-type RandomSource = { getRandomValues(array: Uint8Array): Uint8Array };
-
-function hasRandomValues(value: unknown): value is RandomSource {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'getRandomValues' in value &&
-    typeof value.getRandomValues === 'function'
-  );
-}
-
-/** `globalThis.crypto`, read without DOM or Node typings. */
-function randomSource(): RandomSource {
-  const candidate: unknown = Reflect.get(globalThis, 'crypto');
-  if (!hasRandomValues(candidate)) {
-    // No Math.random fallback: ids end up in URLs, and guessable ones are a gift to the curious.
-    throw new ContractsError(
-      CONTRACTS_ERROR_CODES.noRandomSource,
-      'defineId().create() needs globalThis.crypto.getRandomValues. In React Native, install a polyfill such as react-native-get-random-values.',
-    );
-  }
-  return candidate;
-}
+const RANDOM_BATCH_SIZE = BODY_LENGTH * 2;
+// 1536 samples give rejection sampling ample room, while broken providers cannot loop forever.
+const MAX_RANDOM_BATCHES = 32;
 
 /**
- * 24 characters shaped like a cuid2 (the format `@arki/db` ids already use):
- * a letter first, then letters and digits. Rejection sampling keeps every
- * character equally likely — `byte % 36` alone would favour the first few.
+ * 24 characters shaped like a cuid2: a letter first, then letters and digits.
+ * Rejection sampling keeps each character equally likely. Only our fixed-size
+ * buffer is read, by index, so provider-owned iterators cannot control the loop.
  */
-function randomBody(): string {
-  const source = randomSource();
-  let out = '';
-  while (out.length < BODY_LENGTH) {
-    const bytes = source.getRandomValues(new Uint8Array(BODY_LENGTH * 2));
-    for (const byte of bytes) {
-      const alphabet = out.length === 0 ? LETTERS : ALPHABET;
-      // Largest multiple of the alphabet size that fits in a byte: above it, the modulo is biased.
-      const limit = 256 - (256 % alphabet.length);
-      if (byte >= limit) continue;
-      out += alphabet[byte % alphabet.length];
-      if (out.length === BODY_LENGTH) break;
+function randomBody(): string | IdGenerationFailure {
+  try {
+    const source: unknown = Reflect.get(globalThis, 'crypto');
+    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
+    if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+    let out = '';
+    for (let batch = 0; batch < MAX_RANDOM_BATCHES; batch++) {
+      const bytes = new Uint8Array(RANDOM_BATCH_SIZE);
+      // Web Crypto requires its receiver and returns the exact buffer passed in.
+      const result: unknown = Reflect.apply(getRandomValues, source, [bytes]);
+      if (result !== bytes) {
+        // A broken synchronous provider may still return rejected asynchronous work.
+        // Observe it without delaying this protocol failure or exposing its private cause.
+        void Promise.resolve(result).catch(() => {
+          // The synchronous protocol failure below already owns this outcome.
+        });
+        return UnexpectedDefect({ cause: new TypeError('Random provider returned a different buffer.') });
+      }
+      for (let index = 0; index < RANDOM_BATCH_SIZE; index++) {
+        const byte = bytes[index];
+        if (byte === undefined)
+          return UnexpectedDefect({ cause: new TypeError('Random provider detached its buffer.') });
+        const alphabet = out.length === 0 ? LETTERS : ALPHABET;
+        const limit = 256 - (256 % alphabet.length);
+        if (byte >= limit) continue;
+        out += alphabet[byte % alphabet.length];
+        if (out.length === BODY_LENGTH) return out;
+      }
     }
+    return UnexpectedDefect({ cause: new Error('Random provider exhausted the rejection sampling budget.') });
+  } catch (error) {
+    return UnexpectedDefect({ cause: error });
   }
-  return out;
 }
 
 /* ---- prefix uniqueness across an app ---- */

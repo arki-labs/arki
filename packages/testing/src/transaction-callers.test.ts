@@ -1,3 +1,5 @@
+// Fixture setup needs concrete IDs; abort setup if secure generation fails.
+import { orThrow } from '@arki/failure';
 /**
  * Callers follow the test transaction
  *
@@ -30,7 +32,7 @@ type Handle = NodePgDatabase<AnyRelations> | NodePgTransaction<AnyRelations>;
 type Context = { db: Handle };
 type Caller = { addWidget(name: string): Promise<void> };
 
-const user: TestUser = { id: createUserId(), email: 'test@example.com', name: 'Test' };
+const user: TestUser = { id: orThrow(createUserId()), email: 'test@example.com', name: 'Test' };
 
 const t = initTester
   .context<Context>()

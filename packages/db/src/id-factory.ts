@@ -3,8 +3,10 @@ import type { PgColumn } from 'drizzle-orm/pg-core';
 import { createId as createCuid } from '@paralleldrive/cuid2';
 import { varchar } from 'drizzle-orm/pg-core';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import { CONTRACTS_ERROR_CODES, ContractsError, z } from '@arki/contracts';
 import { COLUMN_ZOD_SCHEMA } from '@arki/contracts/drizzle';
+import { orThrow } from '@arki/failure';
 
 // Core ID creation
 export const createId = () => createCuid();
@@ -42,7 +44,7 @@ type OnDelete = 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default
  */
 export type IdColumnSource<TId extends string> = {
   readonly schema: z.ZodType<TId>;
-  readonly create: () => TId;
+  readonly create: () => TId | IdGenerationFailure;
 };
 
 /**
@@ -72,7 +74,17 @@ export function idColumns<TSchema extends z.ZodType<string>>(
      * Automatically configures as varchar(256), not null, primary key, with proper type and default
      */
     primaryColumn: (name = 'id') =>
-      tagColumnSchema(varchar(name, { length: 256 }).notNull().primaryKey().$type<TId>().$defaultFn(create), schema),
+      tagColumnSchema(
+        varchar(name, { length: 256 })
+          .notNull()
+          .primaryKey()
+          .$type<TId>()
+          .$defaultFn(() => {
+            // Drizzle requires a scalar default; its foreign callback cannot return a Failure.
+            return orThrow(create());
+          }),
+        schema,
+      ),
 
     optionalColumn: (name: string) =>
       tagColumnSchema(
@@ -83,7 +95,16 @@ export function idColumns<TSchema extends z.ZodType<string>>(
       ),
 
     requiredColumn: (name: string) =>
-      tagColumnSchema(varchar(name, { length: 256 }).notNull().$type<TId>().$defaultFn(create), schema),
+      tagColumnSchema(
+        varchar(name, { length: 256 })
+          .notNull()
+          .$type<TId>()
+          .$defaultFn(() => {
+            // Drizzle requires a scalar default; its foreign callback cannot return a Failure.
+            return orThrow(create());
+          }),
+        schema,
+      ),
 
     /**
      * Drizzle column helper for foreign key reference columns

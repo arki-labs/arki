@@ -15,7 +15,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MockClock } from '@arki/clock';
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, isFailure, orThrow, UnexpectedFailure } from '@arki/failure';
 import { configure, memorySink } from '@arki/log';
 import { fakeLog } from '@arki/log/testing';
 
@@ -293,6 +293,30 @@ describe('retryableSqlState: the nearest code decides', () => {
 const Refused = defineFailure('test.transaction_refused');
 
 describe('failure-aware transaction boundaries', () => {
+  it.each([TransactionUnavailable(), TransactionConflict({ attempts: 1, sqlState: '40001' })])(
+    'a canonical transaction failure survives a scalar bridge by identity without retrying ($code)',
+    async failure => {
+      const { db, configs } = scriptedDb();
+      expect(await runTransaction(db, () => Promise.resolve().then(() => orThrow(failure)))).toBe(failure);
+      expect(configs).toHaveLength(1);
+    },
+  );
+
+  it('an undeclared bridged failure remains an owned defect', async () => {
+    const { db, configs } = scriptedDb();
+    const bridge = new UnexpectedFailure(Refused());
+    const result = await runTransaction(db, () => Promise.reject(bridge));
+    expect(TransactionDefect.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause: bridge });
+    expect(configs).toHaveLength(1);
+  });
+
+  it('a synchronous scalar callback bridge also restores the canonical failure', async () => {
+    const { db } = scriptedDb();
+    const failure = TransactionUnavailable();
+    expect(await runTransaction(db, () => orThrow(failure))).toBe(failure);
+  });
+
   it('a returned conflict failure is restored by identity and never retried', async () => {
     const { db, configs } = scriptedDb();
     const failure = TransactionConflict({ attempts: 1, sqlState: '40001' });
@@ -324,6 +348,26 @@ describe('failure-aware transaction boundaries', () => {
     expect(TransactionDefect.is(result)).toBe(true);
     expect(result).toMatchObject({ cause: { errors: [cause, failure] } });
     expect(result).not.toBe(failure);
+  });
+
+  it('a failed rollback after a bridged refusal cannot replay work, even with 40001', async () => {
+    const cause = sqlError('40001');
+    const failure = TransactionUnavailable();
+    let attempts = 0;
+    const db: TransactionalDb<FakeTx> = {
+      async transaction(fn) {
+        attempts += 1;
+        try {
+          return await fn({ attempt: attempts });
+        } catch {
+          throw cause;
+        }
+      },
+    };
+    const result = await runTransaction(db, () => Promise.resolve().then(() => orThrow(failure)));
+    expect(TransactionDefect.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause: { errors: [cause, failure] } });
+    expect(attempts).toBe(1);
   });
 
   it('cancellation after work returns rolls back before COMMIT', async () => {

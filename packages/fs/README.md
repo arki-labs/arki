@@ -272,6 +272,8 @@ browser can `reviveRpcError(error, [FileUnavailable, ...])` them.
 | `FileWrongState`  | `fs.file_wrong_state` | 409    | `confirmUpload`, `url` | not ready (for `url`), being deleted, or the confirm window passed                    |
 | `UploadMismatch`  | `fs.upload_mismatch`  | 422    | `confirmUpload`        | stored size, type or hash differs from the request; the row is now deleting           |
 
+`createUpload` also returns failures from `ID_GENERATION_FAILURES` (`@arki/contracts`) before inserting a row or signing a URL. The exported `CREATE_UPLOAD_FAILURES` tuple defines both its return failures and its native RPC error map. Narrow the result with `isFailure`; an unavailable or broken random provider must never become an object key.
+
 `FileUnavailable` is one failure on purpose: a missing file and a denied one look the same, so a caller
 cannot probe which files exist. The `arki:fs` debug log says which it was. Its `fileId` is absent only
 when the policy refused a new upload.

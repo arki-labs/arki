@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
 /**
@@ -106,6 +107,7 @@ export const TRANSACTION_FAILURES = [
   TransactionCommitUncertain,
   TransactionCancelled,
   TransactionDefect,
+  ...ID_GENERATION_FAILURES,
 ] as const;
 
 export type TransactionFailure = ReturnType<(typeof TRANSACTION_FAILURES)[number]>;

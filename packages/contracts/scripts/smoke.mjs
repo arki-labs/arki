@@ -10,7 +10,6 @@ import { orThrow } from '@arki/failure';
 
 import { createInsertSchema, createSelectSchema, createUpdateSchema, jsonColumn } from '../dist/drizzle.js';
 import {
-  ContractsError,
   defineId,
   formData,
   InvalidCursor,
@@ -18,6 +17,7 @@ import {
   keyset,
   page,
   pageInput,
+  RandomSourceUnavailable,
   z,
 } from '../dist/index.js';
 import { OPERATION, operationAt, operationOf, operations } from '../dist/orpc.js';
@@ -52,17 +52,12 @@ check(
 const storyId = defineId('sty_');
 check(storyId.schema.safeParse('sty_abc').success, 'an id with its prefix parses');
 check(!storyId.schema.safeParse('usr_abc').success, 'an id with another prefix is rejected');
-// Hermes ships no globalThis.crypto: there create() must fail with its coded error, not a bare TypeError.
+// Hermes has no crypto; generation returns canonical unavailability there.
+const generatedId = storyId.create();
 if (typeof globalThis.crypto?.getRandomValues === 'function') {
-  check(storyId.create().startsWith('sty_'), 'create() makes an id with the prefix');
+  check(orThrow(generatedId).startsWith('sty_'), 'create() makes an id with the prefix');
 } else {
-  let createCode = 'none';
-  try {
-    storyId.create();
-  } catch (error) {
-    createCode = error instanceof ContractsError ? error.code : String(error);
-  }
-  check(createCode === 'ARKI_CONTRACTS_E003', 'create() without crypto fails with a stable code');
+  check(RandomSourceUnavailable.is(generatedId), 'create() without crypto returns canonical unavailability');
 }
 
 // zod-form-data loads on every engine. Plain Hermes has no FormData class (React Native adds one), so parsing runs where it exists.

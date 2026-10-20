@@ -39,7 +39,7 @@ afterAll(async () => {
 
 async function staleTickets(count: number) {
   for (let index = 0; index < count; index += 1) {
-    const ticket = orThrow(await storage.createUpload(userId.create(), { mime: 'text/plain', size: 1 }));
+    const ticket = orThrow(await storage.createUpload(orThrow(userId.create()), { mime: 'text/plain', size: 1 }));
     await db
       .update(files)
       .set({ cleanupAt: sql`now() - interval '1 second'` })

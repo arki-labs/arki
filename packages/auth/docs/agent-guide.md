@@ -250,3 +250,7 @@ bun run layers
 dot explain --json | jq .data.services   # in an app using @arki/auth/dot: lists auth, needing db and mail
 dot doctor --json | jq .data             # in that app: no missing db or mail service
 ```
+
+## ID generation
+
+`./ids` generators infer `IdGenerationFailure` from Contracts alongside the success ID. Propagate it and declare `ID_GENERATION_FAILURES` at owned boundaries; keep stored ID types derived from the declaration or schema. The Drizzle default is the foreign string-only callback where the internal exception bridge belongs.

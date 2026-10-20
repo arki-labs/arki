@@ -24,7 +24,7 @@ import { filesTable, fileStorage } from './index.js';
 
 const userId = defineId('usr_');
 const files = filesTable({ owner: userId });
-const alice = userId.create();
+const alice = orThrow(userId.create());
 const hello = new TextEncoder().encode('hello');
 
 let container: StartedPostgreSqlContainer;

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { FileId, FileRecord, UploadRequest, UploadTicket } from './index.js';
 import {
   FILE_ERROR_CODES,
@@ -18,7 +20,7 @@ afterEach(() => {
 describe('fileId', () => {
   it('is written once, as the fil_ prefix', () => {
     expectTypeOf<FileId>().toEqualTypeOf<`fil_${string}`>();
-    expect(fileId.create()).toMatch(/^fil_[a-z][a-z0-9]{23}$/);
+    expect(orThrow(fileId.create())).toMatch(/^fil_[a-z][a-z0-9]{23}$/);
   });
 });
 
@@ -72,7 +74,7 @@ function fakeClient(confirmed: FileRecord) {
 }
 
 const record: FileRecord = {
-  id: fileId.create(),
+  id: orThrow(fileId.create()),
   mime: 'text/plain',
   size: 5,
   sha256: null,

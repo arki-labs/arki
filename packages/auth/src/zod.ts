@@ -12,7 +12,7 @@ import { z } from '@arki/contracts';
 import { accountId, organizationId, sessionId, teamId, userId, verificationId } from './id-declarations.js';
 
 /** A schema that takes a string and gives the declaration's id type, or fails with the prefix it wanted. */
-function idSchema<const P extends string>(declaration: IdDeclaration<P>) {
+function idSchema<const P extends string>(declaration: IdDeclaration<NoInfer<P>> & { readonly prefix: P }) {
   return z.string().transform((value, context): `${P}${string}` => {
     if (declaration.is(value)) return value;
     context.addIssue({ code: 'custom', message: `Expected an id starting with "${declaration.prefix}"` });

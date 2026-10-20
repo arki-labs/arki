@@ -45,6 +45,7 @@ See [Ambiguous commit recovery](#ambiguous-commit-recovery).
 3. Reuse `storyId.schema` in table validator refinements for precise branded output. The metadata enforces runtime prefixes; Drizzle discards its static schema type.
 4. Legacy `createIdFactory(prefix)` now derives its ID only from the prefix; remove its former type arguments. A caller-supplied narrower type was not runtime validation.
 5. JSON storage uses `jsonColumn(name, storageSchema)` from `@arki/contracts/drizzle`. Apply wire codecs only in explicit insert refinements, then store parsed output; select validates the stable storage schema.
+6. `defineId().create()` returns an ID or `IdGenerationFailure`; narrow direct calls before passing them as values. Generated primary/required defaults bridge failures with `orThrow` because Drizzle requires a scalar. Raw inserts reject with `UnexpectedFailure`; owned transactions restore declared generation failures by identity after rollback. Explicit IDs bypass generation. `TRANSACTION_FAILURES` includes `ID_GENERATION_FAILURES`, so native transaction error maps cover these outcomes.
 
 ### Paginate with a keyset
 

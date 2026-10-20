@@ -5,7 +5,7 @@
  */
 export { FILE_ERROR_CODES, FileStorageError, isFileStorageError } from './errors.js';
 export type { FileErrorCode } from './errors.js';
-export { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from './failures.js';
+export { CREATE_UPLOAD_FAILURES, FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from './failures.js';
 export { fileId, fileRecord, fileStatus, mimeSchema, signedFileUrl, uploadRequest, uploadTicket } from './schemas.js';
 export type { FileId, FileRecord, FileStatus, SignedFileUrl, UploadRequest, UploadTicket } from './schemas.js';
 export { uploadFile } from './upload-file.js';

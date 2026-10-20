@@ -42,6 +42,8 @@ Bind it on the server, guard procedures and add the form with the [recipes](#rec
 
 `./ids` and `./workspaces` are pure too: `./ids` declares its ids with `defineId` (`@arki/contracts`), and the workspace database parts live on `./pg/workspaces`. `./zod` is pure and needs Zod. `bun run test:runtimes` runs the smoke script on Node, Bun, Deno and in a browser against the built `dist/`.
 
+ID generators return their inferred ID or `IdGenerationFailure` from `@arki/contracts`. Narrow with `isFailure` before using the value, and declare `ID_GENERATION_FAILURES` at managed boundaries. ID types and schemas still describe successful strings only. Table defaults bridge failures to Drizzle's exception protocol; owned DB transactions recover the canonical failure.
+
 Every other entry is Node and Bun.
 
 ## Recipes

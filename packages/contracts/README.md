@@ -22,11 +22,13 @@ Declare an id kind and a list order once. Parse with them.
 
 ```ts run expect
 import { defineId, keyset, pageInput } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 
 const storyId = defineId('sty_');
 const order = keyset({ createdAt: 'desc', id: 'desc' });
 
 const id = storyId.create();
+if (isFailure(id)) throw new Error(id.message); // This example's outer application boundary.
 if (!storyId.is(id)) throw new Error('create() made an id that is() rejects');
 
 console.log(storyId.schema.safeParse('pod_123').success);
@@ -118,11 +120,14 @@ Write the prefix once; the type, the schema and the generator come from it.
 ```ts run
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 
 export const storyId = defineId('sty_');
 export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
 
-const input = { id: storyId.create() };
+const id = storyId.create(); // StoryId | IdGenerationFailure
+if (isFailure(id)) throw new Error(id.message); // Handle or return this failure in application code.
+const input = { id };
 const parsed: StoryId = storyId.schema.parse(input.id); // StoryId, or a ZodError for 'pod_…'
 if (!storyId.is(parsed)) throw new Error('is() rejected a parsed id'); // type guard
 if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the prefix plus 24 characters');
@@ -134,6 +139,12 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
 - **Stored prefixes stay as they are.** The prefix is used exactly as given
   (letters, digits and `_`), so `defineId('hlgt_')` matches the rows already
   stored.
+- **Generation returns exact failures.** Check `isFailure` before using the ID.
+  Missing or malformed providers return `RandomSourceUnavailable`; thrown provider
+  faults, invalid output and exhausted rejection sampling return `UnexpectedDefect`
+  with a private cause. `ID_GENERATION_FAILURES` declares these for adapters.
+  This small synchronous entropy operation needs no separate OTel span; its
+  calling operation observes and reports the returned failure.
 - **The generator uses Web Crypto** (`crypto.getRandomValues`): Node, Bun,
   Deno and browsers have it; React Native needs a polyfill such as
   `react-native-get-random-values`. There is no `Math.random` fallback — ids
@@ -225,8 +236,8 @@ if (ops.posts.create.name !== 'posts.create') throw new Error('operation name ch
 ## Public imports
 
 | Import                    | Needs                  | What it holds                                                                |
-| ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `@arki/contracts`         | `@arki/failure`, `zod`, `zod-form-data` | `z`, `formData`, `defineId`, `keyset`, `pageInput`, `page`, `ContractsError`, `InvalidCursor`, `InvalidCursorValue`, `CURSOR_FAILURES` |
+| --------------------- | ------------------------------- | ------------------------------------------------------ |
+| `@arki/contracts`         | `@arki/failure`, `zod`, `zod-form-data` | `z`, `formData`, `defineId`, `keyset`, `pageInput`, `page`, `ContractsError`, `InvalidCursor`, `InvalidCursorValue`, `CURSOR_FAILURES`, `RandomSourceUnavailable`, `ID_GENERATION_FAILURES` |
 | `@arki/contracts/drizzle` | peer `drizzle-orm`     | `createSelectSchema`, `createInsertSchema`, `createUpdateSchema`             |
 | `@arki/contracts/orpc`    | peer `@orpc/contract`  | `operations`, `operationAt`, `operationOf`                                   |
 
@@ -256,7 +267,7 @@ Drizzle entry, `@arki/contracts/drizzle`:
 
 ## Failure behaviour
 
-Static definition misuse throws `ContractsError`, a `TypeError`. Cursor codecs return canonical failures; check them with their definitions or `isFailure`. Match on code, never on message.
+Static definition misuse throws `ContractsError`, a `TypeError`. ID generation and cursor codecs return canonical failures; check them with their definitions or `isFailure`. Match on code, never on message.
 
 ```ts run expect
 import { CONTRACTS_ERROR_CODES, ContractsError, defineId } from '@arki/contracts';
@@ -281,7 +292,7 @@ Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input f
 | --------------------- | ------------------------------- | ------------------------------------------------------ |
 | `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not letters, digits or `_`.              |
 | `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
-| `ARKI_CONTRACTS_E003` | `defineId().create()`           | No `globalThis.crypto.getRandomValues` on this engine. |
+| `ARKI_CONTRACTS_E003` | legacy reserved exception code  | ID generation now returns `RandomSourceUnavailable`. |
 | `ARKI_CONTRACTS_E004` | `keyset`                        | No keys in the static declaration.               |
 | `ARKI_CONTRACTS_E005` | legacy reserved exception code | Cursor input now returns `InvalidCursor`.              |
 | `ARKI_CONTRACTS_E006` | `operations`, `createOrpcUtils` | A contract key contains "." or uses a reserved name.   |
@@ -309,7 +320,7 @@ Cursor codecs return `contracts.invalid_cursor` or `contracts.invalid_cursor_val
 - **Key values.** A keyset key may not be NULL in a row. Order by NOT NULL columns, and end on a unique one.
 - **Cursors.** A cursor works only with the keyset that made it. Changing the order invalidates cursors already handed out.
 - **Prefixes.** Letters, digits and `_`. No two prefixes in one app may be equal or start one another (`sub` and `sub_`).
-- **Ids need randomness.** `create()` needs `globalThis.crypto.getRandomValues`. There is no `Math.random` fallback.
+- **Ids need randomness.** `create()` needs `globalThis.crypto.getRandomValues`. There is no `Math.random` fallback. Rejection sampling stops after 32 batches of 48 bytes; a provider that never supplies accepted bytes returns `UnexpectedDefect`.
 - **Operations.** A contract key may not contain `.` or use a name the query utils reserve.
 
 ## Documentation
@@ -335,15 +346,15 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 Usually done once at startup.
 
-| Library                            | Time / op | vs fastest |
-| ---------------------------------- | --------: | ---------: |
+| Library                       | Time / op | vs fastest |
+| ----------------------------- | --------: | ---------: |
 | @arki/contracts createSelectSchema | 193.66 µs |      1.26× |
 | drizzle-orm/zod createSelectSchema | 153.73 µs |    fastest |
 
 ### Build insert schema (15 columns)
 
-| Library                            | Time / op | vs fastest |
-| ---------------------------------- | --------: | ---------: |
+| Library                       | Time / op | vs fastest |
+| ----------------------------- | --------: | ---------: |
 | @arki/contracts createInsertSchema | 148.37 µs |      1.60× |
 | drizzle-orm/zod createInsertSchema |  92.97 µs |    fastest |
 

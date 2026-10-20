@@ -7,6 +7,7 @@
  */
 import { z } from 'zod';
 
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
 import { fileId } from './schemas.js';
@@ -23,6 +24,9 @@ export const FileUnavailable = defineFailure('fs.file_unavailable', {
   message: 'file unavailable',
   remediation: 'Check the file id and that this user may use the file.',
 });
+
+/** Declared refusals of upload creation, including failure before an object key or row exists. */
+export const CREATE_UPLOAD_FAILURES = [FileUnavailable, ...ID_GENERATION_FAILURES] as const;
 
 /** Confirm came before the PUT finished. The row stays pending, so confirming again later is fine. */
 export const UploadPending = defineFailure('fs.upload_pending', {

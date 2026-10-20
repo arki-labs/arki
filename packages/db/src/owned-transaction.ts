@@ -1,12 +1,13 @@
 /** Private owned boundary shared by serializable retries and savepoint-capable openers. */
 import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
 import {
+  TRANSACTION_FAILURES,
   TransactionCancelled,
   TransactionCommitUncertain,
   TransactionConflict,
@@ -28,14 +29,21 @@ export async function transactionAttempt<Tx, T>(
   work: (tx: Tx) => Promise<T>,
   config?: PgTransactionConfig,
   signal?: AbortSignal,
-): Promise<{ value: T } | { failure: TransactionFailure }> {
+): Promise<{ value: T | TransactionFailure } | { failure: TransactionFailure }> {
   const rollback = new Error('Transaction callback returned a failure');
-  let refused: { value: T } | undefined;
+  let refused: { value: T | TransactionFailure } | undefined;
   let workCompleted = false;
   try {
     signal?.throwIfAborted();
     const value = await db.transaction(async tx => {
-      const result = await work(tx);
+      let result: T | TransactionFailure;
+      try {
+        result = await work(tx);
+      } catch (error) {
+        const failure = bridgedTransactionFailure(error);
+        if (failure === undefined) throw error;
+        result = failure;
+      }
       if (isFailure<unknown>(result)) {
         refused = { value: result };
         throw rollback;
@@ -70,6 +78,16 @@ export async function transactionAttempt<Tx, T>(
     }
     return { failure };
   }
+}
+
+/** Drizzle's scalar callbacks throw; restore only our declared failure union. */
+function bridgedTransactionFailure(error: unknown): TransactionFailure | undefined {
+  if (error instanceof UnexpectedFailure) {
+    for (const definition of TRANSACTION_FAILURES) {
+      if (definition.is(error.failure)) return error.failure;
+    }
+  }
+  return;
 }
 
 /** Preserve the caller's isolation/savepoint policy and execute exactly once. */

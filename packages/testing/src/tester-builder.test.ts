@@ -1,3 +1,5 @@
+// Fixture setup needs concrete IDs; abort setup if secure generation fails.
+import { orThrow } from '@arki/failure';
 /**
  * initTester type inference
  *
@@ -14,7 +16,7 @@ import { createUserId } from '@arki/auth/ids';
 import type { TestUser } from './types';
 import { initTester } from './tester-builder';
 
-const testUser: TestUser = { id: createUserId(), email: 'test@example.com', name: 'Test' };
+const testUser: TestUser = { id: orThrow(createUserId()), email: 'test@example.com', name: 'Test' };
 
 type AppDb = NodePgDatabase<AnyRelations>;
 /** What the app's repositories take: the database, or the transaction a test runs in. */

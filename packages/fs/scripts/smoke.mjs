@@ -4,6 +4,8 @@
 // The adapter entries (/pg, /orpc, /testing) and the Node-only storage entries are not
 // exercised here; their unit tests cover them.
 
+import { RandomSourceUnavailable } from '@arki/contracts';
+
 import {
   FILE_ERROR_CODES,
   fileId,
@@ -18,8 +20,17 @@ const check = (name, ok) => {
   if (!ok) throw new Error(`smoke check failed: ${name}`);
 };
 
-const id = fileId.create();
-check('fileId.create makes a fil_ id', /^fil_[a-z][a-z0-9]{23}$/.test(id) && fileId.is(id));
+const created = fileId.create();
+let id;
+if (typeof globalThis.crypto?.getRandomValues === 'function') {
+  check('fileId.create makes a fil_ id', typeof created === 'string' && /^fil_[a-z][a-z0-9]{23}$/.test(created));
+  id = created;
+} else {
+  check('missing entropy returns the declared refusal', RandomSourceUnavailable.is(created));
+  // Engines without Web Crypto still validate stored IDs and exchange upload contracts.
+  id = 'fil_abcdefghijklmnopqrstuvwx';
+}
+check('fileId recognizes a stored ID', fileId.is(id));
 
 const ticket = uploadTicket.parse({
   fileId: id,

@@ -17,7 +17,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. Write the declaration in a browser-safe model file: `export const storyId = defineId('sty_');`.
 2. Derive the type: `export type StoryId = IdOf<typeof storyId>;`.
-3. Validate with `storyId.schema`. Make a new id with `storyId.create()`.
+3. Validate with `storyId.schema`. Make a new id with `storyId.create()` and check `isFailure` before using it. The exact result is `IdOf<typeof storyId> | IdGenerationFailure`; `ID_GENERATION_FAILURES` is the canonical adapter tuple. Schema output and `IdOf` remain success-only.
 4. On the server, turn it into columns with `idColumns(storyId)` from `@arki/db/id`.
 5. In one test, call `assertUniqueIdPrefixes(...allIds)`.
 
@@ -67,13 +67,13 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 
 ## Errors
 
-Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `InvalidCursor`, `InvalidCursorValue`, `ValidatorDefect` or `UnexpectedDefect`; derive their exact per-operation unions from `CURSOR_DECODE_FAILURES` / `CURSOR_ENCODE_FAILURES`. Causes are private. Match on canonical definitions.
+Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `InvalidCursor`, `InvalidCursorValue`, `ValidatorDefect` or `UnexpectedDefect`; derive their exact per-operation unions from `CURSOR_DECODE_FAILURES` / `CURSOR_ENCODE_FAILURES`. ID generation returns `RandomSourceUnavailable` for missing/malformed providers and `UnexpectedDefect` for thrown access/provider faults, invalid output or exhausted rejection sampling (32 batches of 48 bytes). Causes are private. Match on canonical definitions.
 
 | Code                  | Meaning                                                     | What to do                                                 |
-| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| --- | --- | --- |
 | `ARKI_CONTRACTS_E001` | `defineId` got a prefix that is not letters, digits or `_`. | Use letters, digits and `_`, for example `sty_`.           |
 | `ARKI_CONTRACTS_E002` | Two prefixes are equal or one starts the other.             | Give each id kind a prefix that does not start another.    |
-| `ARKI_CONTRACTS_E003` | No `crypto.getRandomValues` on this engine.                 | Run where it exists, or add a polyfill.                    |
+| `ARKI_CONTRACTS_E003` | Reserved legacy exception code; use `RandomSourceUnavailable`. | Run where it exists, or add a polyfill.                    |
 | `ARKI_CONTRACTS_E004` | `keyset` got no keys in its static declaration.             | Declare a key. Order by NOT NULL columns.                  |
 | `ARKI_CONTRACTS_E005` | Reserved legacy exception code; use `InvalidCursor`.                     | Send the cursor back unchanged, or start from page one.    |
 | `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
@@ -82,10 +82,11 @@ Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `Inv
 
 | Definition | Meaning | What to do |
 | --- | --- | --- |
+| `contracts.random_source_unavailable` | No callable Web Crypto provider.                            | Install a secure Web Crypto provider.                                   |
 | `contracts.invalid_cursor` | Malformed external cursor. | Send it unchanged or start from page one. |
 | `contracts.invalid_cursor_value` | Missing/unrepresentable key or cursor over 1024 characters. | Use valid Dates, finite numbers, strings and booleans in NOT NULL keys. |
 | `schema.validator_defect` | Cursor validator failed unexpectedly. | Fix the validator; inspect its private cause. |
-| `failure.unexpected_defect` | Cursor codec/provider failed unexpectedly. | Inspect the private cause at the owning boundary. |
+| `failure.unexpected_defect`           | Cursor codec or ID provider failed unexpectedly.            | Inspect the private cause at the owning boundary.                       |
 
 ## Verify
 

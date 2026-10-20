@@ -18,7 +18,8 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure } from '@arki/failure';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
 import type { TransactionalDb } from './composition.js';
 import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from './orpc.js';
@@ -258,6 +259,21 @@ describe('transactionalProcedure: the pipeline is checked, fail closed', () => {
 });
 
 const Refused = defineFailure('test.rpc_refused');
+
+it('maps a bridged ID generation failure through the declared native error map after rollback', async () => {
+  const failure = RandomSourceUnavailable();
+  const transact = transactionalProcedure(db, { repos: () => repositories });
+  const procedure = impl.isolation.use(transact).handler(async ({ context }) => {
+    await context.tx.insert(accounts).values({ id: 'generation_failed', balance: 7 });
+    return orThrow(failure);
+  });
+  await expect(call(procedure, {})).rejects.toMatchObject({
+    code: failure.code,
+    status: 500,
+    defined: true,
+  });
+  expect(await balanceOf('generation_failed')).toBeNull();
+});
 
 it('classifies next().output and preserves the native result metadata while rolling back', async () => {
   const failure = Refused();

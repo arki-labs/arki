@@ -8,16 +8,17 @@ import type { ContractRouterClient } from '@orpc/contract';
 import { createRouterClient, implement, ORPCError } from '@orpc/server';
 import { pushSchema } from 'drizzle-kit/api-postgres';
 import { defineRelations } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
-import { defineId } from '@arki/contracts';
+import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { reviveRpcError } from '@arki/failure/orpc';
 
 import type { FileRecord, SignedFileUrl } from './files/index.js';
 import type { FileStorage } from './pg/index.js';
-import { FileUnavailable, uploadFile, UploadPending } from './files/index.js';
+import { CREATE_UPLOAD_FAILURES, fileId, FileUnavailable, uploadFile, UploadPending } from './files/index.js';
 import { filesContract, filesRouter } from './orpc.js';
 import { filesTable, fileStorage } from './pg/index.js';
 import { memoryUploadAdapter } from './testing.js';
@@ -25,8 +26,8 @@ import { memoryUploadAdapter } from './testing.js';
 const userId = defineId('usr_');
 type UserId = IdOf<typeof userId>;
 const files = filesTable({ owner: userId });
-const alice = userId.create();
-const bob = userId.create();
+const alice = orThrow(userId.create());
+const bob = orThrow(userId.create());
 
 type AppContext = { userId: UserId | null };
 const appContract = { files: filesContract };
@@ -64,6 +65,8 @@ afterAll(async () => {
   await pglite.close();
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 /** Routes the browser's PUT to the memory store. */
 function stubStoreFetch() {
   vi.stubGlobal('fetch', async (url: string, init: { body: Blob; headers: Record<string, string> }) =>
@@ -83,6 +86,21 @@ describe('filesContract types', () => {
 });
 
 describe('filesRouter', () => {
+  it.each([RandomSourceUnavailable(), UnexpectedDefect({ cause: new Error('private entropy detail') })])(
+    'sends $code through the declared upload error map without private causes',
+    async failure => {
+      vi.spyOn(fileId, 'create').mockReturnValue(failure);
+      const caught = await clientFor(alice)
+        .files.createUpload({ mime: 'text/plain', size: 1 })
+        .catch((error: unknown) => error);
+      expect(caught).toMatchObject({ code: failure.code, status: failure.status, defined: true });
+      expect(reviveRpcError(caught, CREATE_UPLOAD_FAILURES)).toMatchObject({
+        code: failure.code,
+        data: failure.data,
+      });
+      expect(JSON.stringify(caught)).not.toContain('private entropy detail');
+    },
+  );
   it('drives createUpload → PUT → confirmUpload → url → remove, with uploadFile on the client', async () => {
     stubStoreFetch();
     const client = clientFor(alice);

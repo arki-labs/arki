@@ -14,7 +14,7 @@
  *
  * // Define a factory
  * const userFactory = createFactory<User>(() => ({
- *   id: createUserId(),
+ *   id: orThrow(createUserId()),
  *   email: faker.internet.email(),
  *   name: faker.person.fullName(),
  *   createdAt: faker.date.past(),

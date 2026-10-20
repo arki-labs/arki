@@ -176,6 +176,15 @@ the `hlgt_…` rows already there. Never value-import `@arki/db/id` from browser
 code — it re-exports Drizzle; the browser imports the declaration from the
 `model/ids.ts` file instead.
 
+`storyId.create()` returns an ID or `IdGenerationFailure`; check direct calls
+before using their value. Generated primary and required columns bridge failures
+with `orThrow` at Drizzle's scalar default callback. A raw insert rejects with
+`UnexpectedFailure` and writes no row. Owned transactions roll back and return the
+original declared ID failure; `TRANSACTION_FAILURES` and `transactionErrorMap`
+include `ID_GENERATION_FAILURES`. Supplying an explicit ID skips its default.
+The legacy `createIdFactory`, `createId`, and `createPrefixedId` producers retain
+their existing behavior pending a separate migration.
+
 ### Temporal columns
 
 `@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:

@@ -14,7 +14,9 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { FailureOf } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 
+import type { CREATE_UPLOAD_FAILURES } from '../files/failures.js';
 import type { FileId, SignedFileUrl, UploadRequest, UploadTicket } from '../files/schemas.js';
 import type { SignedUploadAdapter, StorageAdapter } from '../storage/types.js';
 import type { CleanupOptions, CleanupResult } from './cleanup.js';
@@ -61,8 +63,11 @@ type Unavailable = FailureOf<typeof FileUnavailable>;
 type WrongState = FailureOf<typeof FileWrongState>;
 
 export type FileStorage<T extends FilesTable> = {
-  /** Writes a pending row, then signs a create-only PUT for it. `FileUnavailable` when the policy refuses. */
-  createUpload(actor: OwnerOf<T>, request: UploadRequest): Promise<UploadTicket | Unavailable>;
+  /** Writes a pending row, then signs a create-only PUT. Policy and ID refusals return before I/O. */
+  createUpload(
+    actor: OwnerOf<T>,
+    request: UploadRequest,
+  ): Promise<UploadTicket | FailureOf<(typeof CREATE_UPLOAD_FAILURES)[number]>>;
   /** Checks the stored object against the row and marks it ready. Idempotent. */
   confirmUpload(
     actor: OwnerOf<T>,
@@ -249,6 +254,7 @@ export function fileStorage<T extends FilesTable>(
       }
 
       const id = fileId.create();
+      if (isFailure(id)) return id;
       const key = `${config.keyPrefix}/${id}`;
       const ttl = config.uploadTtlSeconds;
       // The row commits before any URL exists (G1). If signing fails, the sweep removes the row.

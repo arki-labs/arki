@@ -7,15 +7,16 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { generateDrizzleJson, generateMigration, pushSchema } from 'drizzle-kit/api-postgres';
 import { count, defineRelations, eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
-import { defineId } from '@arki/contracts';
+import type { FailureOf } from '@arki/failure';
+import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
-import { isFailure, orThrow } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
-import type { FileId } from '../files/index.js';
+import type { CREATE_UPLOAD_FAILURES, FileId, UploadTicket } from '../files/index.js';
 import type { FileRow, FilesDb, FileStorage, OwnerOf } from './index.js';
 import type { FileStorageOptions } from './storage.js';
 import {
@@ -57,8 +58,10 @@ afterAll(async () => {
   await pglite.close();
 });
 
-const alice = userId.create();
-const bob = userId.create();
+afterEach(() => vi.restoreAllMocks());
+
+const alice = orThrow(userId.create());
+const bob = orThrow(userId.create());
 const hello = new TextEncoder().encode('hello');
 
 type Options = Partial<FileStorageOptions<typeof files>>;
@@ -127,6 +130,11 @@ describe('filesTable', () => {
 });
 
 describe('fileStorage types', () => {
+  it('keeps upload failures identical to the definitions used by the RPC contract', () => {
+    expectTypeOf<Awaited<ReturnType<FileStorage<typeof files>['createUpload']>>>().toEqualTypeOf<
+      UploadTicket | FailureOf<(typeof CREATE_UPLOAD_FAILURES)[number]>
+    >();
+  });
   it('takes the owner type as actor and hands policies typed rows', () => {
     expectTypeOf<FileStorage<typeof files>['createUpload']>().parameter(0).toEqualTypeOf<UserId>();
     type CanRead = NonNullable<NonNullable<FileStorageOptions<typeof files>['policy']>['canRead']>;
@@ -160,6 +168,20 @@ describe('fileStorage types', () => {
 });
 
 describe('createUpload', () => {
+  it.each([RandomSourceUnavailable(), UnexpectedDefect({ cause: new Error('private entropy detail') })])(
+    'returns $code unchanged before inserting or signing',
+    async failure => {
+      const env = setup();
+      const before = await rowCount();
+      vi.spyOn(fileId, 'create').mockReturnValue(failure);
+      const insert = vi.spyOn(db, 'insert');
+      const sign = vi.spyOn(env.adapter, 'getSignedUrl');
+      expect(await env.storage.createUpload(alice, { mime: 'text/plain', size: 1 })).toBe(failure);
+      expect(insert).not.toHaveBeenCalled();
+      expect(sign).not.toHaveBeenCalled();
+      expect(await rowCount()).toBe(before);
+    },
+  );
   it('writes a pending row first and returns a create-only ticket for a server-derived key', async () => {
     const env = setup();
     const ticket = orThrow(await env.storage.createUpload(alice, { mime: 'text/plain', size: 5 }));
@@ -324,7 +346,7 @@ describe('expected outcomes', () => {
   // placeholder, confirm again later), not a fault. So it is returned, never thrown.
   it('returns failures as values, with the file id in the data', async () => {
     const env = setup();
-    const missing = fileId.create();
+    const missing = orThrow(fileId.create());
     const unavailable = await env.storage.get(alice, missing);
     expect(FileUnavailable.is(unavailable)).toBe(true);
     expect(unavailable).toMatchObject({ code: 'fs.file_unavailable', status: 404, data: { fileId: missing } });
@@ -359,7 +381,7 @@ describe('access', () => {
       env.storage.get(bob, ticket.fileId),
       env.storage.url(bob, ticket.fileId),
       env.storage.remove(bob, ticket.fileId),
-      env.storage.get(alice, fileId.create()),
+      env.storage.get(alice, orThrow(fileId.create())),
     ]) {
       // Denied and missing look the same, down to the data: nothing tells a prober the file exists.
       const result = await call;

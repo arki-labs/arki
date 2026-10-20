@@ -1,8 +1,11 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { IdOf } from './ids.js';
-import { assertUniqueIdPrefixes, defineId, userIdSchema } from './ids.js';
+import { isFailure, orThrow, revive, serialize, UnexpectedDefect } from '@arki/failure';
+
+import type { IdGenerationFailure, IdOf } from './ids.js';
+import { RandomSourceUnavailable } from './errors.js';
+import { assertUniqueIdPrefixes, defineId, ID_GENERATION_FAILURES, userIdSchema } from './ids.js';
 
 describe('userIdSchema', () => {
   it('accepts a string that starts with usr_ and keeps it as is', () => {
@@ -23,7 +26,7 @@ describe('defineId', () => {
 
   it('infers the id type from the prefix, so the prefix is written once', () => {
     expectTypeOf<StoryId>().toEqualTypeOf<`sty_${string}`>();
-    expectTypeOf(storyId.create()).toEqualTypeOf<StoryId>();
+    expectTypeOf(storyId.create()).toEqualTypeOf<StoryId | IdGenerationFailure>();
     expectTypeOf(storyId.schema.parse('sty_1')).toEqualTypeOf<StoryId>();
   });
 
@@ -36,7 +39,7 @@ describe('defineId', () => {
   });
 
   it('creates cuid2-shaped ids that its own schema accepts, and never twice the same', () => {
-    const ids = Array.from({ length: 500 }, () => storyId.create());
+    const ids = Array.from({ length: 500 }, () => orThrow(storyId.create()));
     for (const id of ids) {
       expect(id).toMatch(/^sty_[a-z][a-z0-9]{23}$/);
       expect(storyId.schema.safeParse(id).success).toBe(true);
@@ -85,5 +88,162 @@ describe('ContractsError', () => {
     expect(caught).toBeInstanceOf(TypeError);
     expect(caught).toMatchObject({ name: 'ContractsError', code: 'ARKI_CONTRACTS_E001' });
     expect(caught).toHaveProperty('remediation', expect.stringContaining('letters'));
+  });
+});
+
+describe('ID generation failures', () => {
+  const storyId = defineId('sty_');
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each([undefined, null, false, 'crypto', {}, { getRandomValues: null }, { getRandomValues: 1 }])(
+    'returns canonical unavailability for unusable provider %s without weak randomness',
+    crypto => {
+      vi.stubGlobal('crypto', crypto);
+      const weakRandom = vi.spyOn(Math, 'random');
+      const result = storyId.create();
+      expect(RandomSourceUnavailable.is(result)).toBe(true);
+      expect(result).toMatchObject({ code: 'contracts.random_source_unavailable', status: 500, data: undefined });
+      expect(weakRandom).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the crypto receiver, reads the method once, and rejects biased byte ranges', () => {
+    const getRandomValues = vi.fn(function (this: unknown, bytes: Uint8Array) {
+      expect(this).toBe(provider);
+      bytes.fill(0);
+      bytes.set([255, 234, 233, 252, 251, 25, 26]);
+      return bytes;
+    });
+    const readMethod = vi.fn(() => getRandomValues);
+    const provider = Object.defineProperty({}, 'getRandomValues', { get: readMethod });
+    vi.stubGlobal('crypto', provider);
+    expect(orThrow(storyId.create())).toBe(`sty_z9z0${'a'.repeat(20)}`);
+    expect(readMethod).toHaveBeenCalledTimes(1);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+  });
+
+  it('can refill rejected batches without returning a partial ID', () => {
+    let calls = 0;
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.fill(calls++ === 0 ? 255 : 0);
+        return bytes;
+      },
+    });
+    expect(storyId.create()).toBe(`sty_${'a'.repeat(24)}`);
+    expect(calls).toBe(2);
+  });
+
+  it.each(['global getter', 'method getter', 'provider'])('keeps thrown %s defects private', location => {
+    const cause = new Error('private entropy service details');
+    const fail = () => {
+      throw cause;
+    };
+    if (location === 'global getter') {
+      vi.spyOn(globalThis, 'crypto', 'get').mockImplementation(fail);
+    } else {
+      vi.stubGlobal(
+        'crypto',
+        location === 'method getter'
+          ? Object.defineProperty({}, 'getRandomValues', { get: fail })
+          : { getRandomValues: fail },
+      );
+    }
+    const result = storyId.create();
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    if (!isFailure(result)) throw new Error('Expected a generation defect');
+    expect(result.cause).toBe(cause);
+    expect(JSON.stringify(result)).not.toContain('private entropy');
+    expect({ ...result }).not.toHaveProperty('cause');
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    new Uint8Array(48),
+    {
+      [Symbol.iterator]: () => {
+        throw new Error('Do not iterate provider output');
+      },
+    },
+  ])('rejects foreign provider output %s without iterating it', output => {
+    vi.stubGlobal('crypto', { getRandomValues: () => output });
+    expect(UnexpectedDefect.is(storyId.create())).toBe(true);
+  });
+
+  it('observes rejected asynchronous provider output while returning a synchronous defect', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: () => Promise.reject(new Error('private rejected work')) });
+    const result = storyId.create();
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('private rejected work');
+    // Vitest fails on unhandled rejections; give the rejection a full turn to surface.
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  it('observes hostile thenable output without invoking the provider again', async () => {
+    const readThen = vi.fn(() => {
+      throw new Error('private then getter');
+    });
+    // eslint-disable-next-line unicorn/no-thenable -- Intentional malformed foreign protocol fixture.
+    const provider = vi.fn(() => Object.defineProperty({}, 'then', { get: readThen }));
+    vi.stubGlobal('crypto', { getRandomValues: provider });
+    expect(UnexpectedDefect.is(storyId.create())).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(readThen).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds rejection sampling when a provider never supplies an acceptable byte', () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(255));
+    vi.stubGlobal('crypto', { getRandomValues });
+    expect(UnexpectedDefect.is(storyId.create())).toBe(true);
+    expect(getRandomValues.mock.calls.length).toBeLessThanOrEqual(100);
+  });
+
+  it('reads only its fixed buffer indices even if the provider installs a hostile iterator', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.fill(0);
+        Object.defineProperty(bytes, Symbol.iterator, {
+          value: () => {
+            throw new Error('Do not iterate');
+          },
+        });
+        Object.defineProperty(bytes, 'length', { value: Infinity });
+        return bytes;
+      },
+    });
+    expect(storyId.create()).toBe(`sty_${'a'.repeat(24)}`);
+  });
+
+  it('refuses detached buffers rather than publishing a partial ID', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        const buffer = bytes.buffer;
+        if (!(buffer instanceof ArrayBuffer)) throw new Error('Expected a transferable array buffer');
+        structuredClone(buffer, { transfer: [buffer] });
+        return bytes;
+      },
+    });
+    expect(UnexpectedDefect.is(storyId.create())).toBe(true);
+  });
+
+  it('roundtrips only registered canonical generation failures and omits private causes', () => {
+    for (const failure of [
+      RandomSourceUnavailable({ cause: 'private provider' }),
+      UnexpectedDefect({ cause: 'private defect' }),
+    ]) {
+      const envelope = orThrow(serialize(failure, ID_GENERATION_FAILURES));
+      const json = JSON.stringify(envelope);
+      expect(json).not.toContain('private');
+      const wire: unknown = JSON.parse(json);
+      const revived = revive(wire, ID_GENERATION_FAILURES);
+      expect(revived?.code).toBe(failure.code);
+      if (isFailure(revived)) expect(revived.cause).toBeUndefined();
+    }
   });
 });

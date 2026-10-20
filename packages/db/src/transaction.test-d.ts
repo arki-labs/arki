@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest';
 
+import type { IdGenerationFailure } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
 import type { TRANSACTION_FAILURES, TransactionalDb, TransactionFailure } from './transaction.js';
@@ -18,3 +19,4 @@ expectTypeOf(result).toEqualTypeOf<Promise<Expected>>();
 expectTypeOf(once).toEqualTypeOf<Promise<Expected>>();
 expectTypeOf(scoped).toEqualTypeOf<Promise<Expected>>();
 expectTypeOf<TransactionFailure>().toEqualTypeOf<ReturnType<(typeof TRANSACTION_FAILURES)[number]>>();
+expectTypeOf<Extract<TransactionFailure, IdGenerationFailure>>().toEqualTypeOf<IdGenerationFailure>();

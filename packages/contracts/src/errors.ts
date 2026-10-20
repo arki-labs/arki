@@ -2,7 +2,7 @@ import { defineFailure } from '@arki/failure';
 
 /**
  * Static definition misuse raises {@link ContractsError} with a stable code.
- * Cursor operations return canonical failures. Match on code. A `ContractsError` is a
+ * Cursor and ID generation operations return canonical failures. Match on code. A `ContractsError` is a
  * `TypeError`, so `instanceof TypeError` checks written before the codes still hold.
  */
 
@@ -23,7 +23,7 @@ export const CONTRACTS_ERROR_CODES = {
    */
   overlappingIdPrefixes: 'ARKI_CONTRACTS_E002',
   /**
-   * `create()` found no `globalThis.crypto.getRandomValues` on this engine.
+   * Reserved legacy exception code; ID generation now returns RandomSourceUnavailable.
    *
    * @fix Run on an engine that has it. In React Native, install `react-native-get-random-values`.
    * @verify bun run test:runtimes
@@ -113,4 +113,14 @@ export const InvalidCursorValue = defineFailure('contracts.invalid_cursor_value'
   status: 500,
   message: 'The row cannot be represented by a cursor.',
   remediation: 'Use non-null strings, finite numbers, booleans or valid Dates and a cursor of at most 1024 characters.',
+});
+
+/** Secure ID generation has no usable Web Crypto provider.
+ * @fix Provide globalThis.crypto.getRandomValues; install the React Native crypto polyfill when needed.
+ * @verify bun run test -- src/ids.test.ts
+ */
+export const RandomSourceUnavailable = defineFailure('contracts.random_source_unavailable', {
+  status: 500,
+  message: 'Secure random generation is unavailable.',
+  remediation: 'Provide globalThis.crypto.getRandomValues; install the React Native crypto polyfill when needed.',
 });

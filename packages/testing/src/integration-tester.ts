@@ -1,3 +1,5 @@
+// Fixture setup needs concrete IDs; abort setup if secure generation fails.
+import { orThrow } from '@arki/failure';
 import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { PgTable } from 'drizzle-orm/pg-core';
@@ -753,7 +755,7 @@ export class IntegrationTester<
    * ```
    */
   async createUser(): Promise<{ user: TestUser; caller: TCaller }> {
-    const userId = createUserId();
+    const userId = orThrow(createUserId());
     const email = this.generateEmail();
     const name = `Test User ${this.generateString(8)}`;
 

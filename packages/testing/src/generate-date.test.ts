@@ -1,3 +1,5 @@
+// Fixture setup needs concrete IDs; abort setup if secure generation fails.
+import { orThrow } from '@arki/failure';
 /**
  * generateDate bounds
  *
@@ -14,7 +16,7 @@ import { instant, zoned } from '@arki/date';
 import type { TestUser } from './types';
 import { IntegrationTester } from './integration-tester';
 
-const testUser: TestUser = { id: createUserId(), email: 'test@example.com', name: 'Test' };
+const testUser: TestUser = { id: orThrow(createUserId()), email: 'test@example.com', name: 'Test' };
 
 /** A tester that never connects: `generateDate` needs no database. */
 function offlineTester() {

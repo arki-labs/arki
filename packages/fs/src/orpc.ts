@@ -21,14 +21,23 @@ import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 import type { FileErrorCode } from './files/errors.js';
 import type { FilesTable, FileStorage, OwnerOf } from './pg/index.js';
 import { FILE_ERROR_CODES, isFileStorageError } from './files/errors.js';
-import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from './files/failures.js';
+import {
+  CREATE_UPLOAD_FAILURES,
+  FileUnavailable,
+  FileWrongState,
+  UploadMismatch,
+  UploadPending,
+} from './files/failures.js';
 import { fileId, fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
 import { toFileRecord } from './pg/record.js';
 
 const byFileId = z.strictObject({ fileId: fileId.schema });
 
 export const filesContract = {
-  createUpload: oc.errors(errorMap(FileUnavailable)).input(uploadRequest).output(uploadTicket),
+  createUpload: oc
+    .errors(errorMap(...CREATE_UPLOAD_FAILURES))
+    .input(uploadRequest)
+    .output(uploadTicket),
   confirmUpload: oc
     .errors(errorMap(FileUnavailable, FileWrongState, UploadPending, UploadMismatch))
     .input(byFileId)

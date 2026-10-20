@@ -1,10 +1,13 @@
 import { pgTable } from 'drizzle-orm/pg-core';
 import { expectTypeOf, test } from 'vitest';
 
-import type { z } from '@arki/contracts';
-import { defineId } from '@arki/contracts';
+import type { IdGenerationFailure, z } from '@arki/contracts';
+import type { FailureOf } from '@arki/failure';
+import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { createInsertSchema } from '@arki/contracts/drizzle';
+import { defineFailure } from '@arki/failure';
 
+import type { IdColumnSource } from './id-factory.js';
 import { createIdFactory, idColumns } from './id-factory.js';
 
 test('legacy factories derive the id solely from the stored prefix', () => {
@@ -20,6 +23,8 @@ test('ID defaults and foreign-key nullability agree with parsed output', () => {
   const id = defineId('row_');
   const columns = idColumns(id);
   const table = pgTable('rows', { id: columns.primaryColumn(), parentId: columns.optionalReference('parent_id') });
+  expectTypeOf<typeof table.$inferSelect.id>().toEqualTypeOf<`row_${string}`>();
+  expectTypeOf<FailureOf<IdColumnSource<`row_${string}`>['create']>>().toEqualTypeOf<IdGenerationFailure>();
   const _insert = createInsertSchema(table, { id: () => id.schema, parentId: () => id.schema });
   expectTypeOf<z.output<typeof _insert>['id']>().toEqualTypeOf<z.output<typeof id.schema> | undefined>();
   expectTypeOf<z.output<typeof _insert>['parentId']>().toEqualTypeOf<z.output<typeof id.schema> | null | undefined>();
@@ -27,4 +32,8 @@ test('ID defaults and foreign-key nullability agree with parsed output', () => {
   idColumns({ schema: id.schema, create: () => 42 });
   // @ts-expect-error Prefix mismatches cannot widen the schema's inferred ID type.
   idColumns({ schema: id.schema, create: () => 'wrong_1' });
+  idColumns({ schema: id.schema, create: () => RandomSourceUnavailable() });
+  const Unrelated = defineFailure('test.unrelated_generation_failure');
+  // @ts-expect-error Only the canonical ID generation failures belong in an ID column source.
+  idColumns({ schema: id.schema, create: () => Unrelated() });
 });
