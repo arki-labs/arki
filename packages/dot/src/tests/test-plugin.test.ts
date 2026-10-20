@@ -10,7 +10,7 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { defineFailure, orThrow } from '@arki/failure';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Lazy } from '../plugin-contract.js';
 import { lazyOf, plugin, service, token } from '../plugin-contract.js';
@@ -44,27 +44,24 @@ describe('testPlugin', () => {
     orThrow(await app.dispose());
   });
 
-  it('boot() does not compile until every need is provided; wrong shapes fail at provide()', () => {
+  it('boot() does not compile until every need is provided; wrong shapes fail at provide()', async () => {
     const consumer = plugin({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
       provides: { rows: ({ db }) => db.query('q') },
     });
 
-    // The runtime boot really does reject (kernel E012) — swallow it so the
-    // compile-time demonstration doesn't leak an unhandled rejection.
+    // Missing providers are also rejected at runtime with the canonical wiring defect.
     // @ts-expect-error — `cache` is still unprovided: `.boot()`'s `this` type names it.
-    // The runtime boot really does reject (kernel E012) — swallow it so the
-    // compile-time demonstration doesn't leak an unhandled rejection.
-    void testPlugin(consumer).provide(Db, { query: () => [] }).boot().catch(() => null);
+    const missingProvider = await testPlugin(consumer).provide(Db, { query: () => [] }).boot();
+    expect(UnexpectedDefect.is(missingProvider)).toBe(true);
+    if (UnexpectedDefect.is(missingProvider)) expect(missingProvider.cause).toMatchObject({ code: 'ARKI_DOT_E012' });
 
     // @ts-expect-error — a number is not a Db
     void testPlugin(consumer).provide(Db, 42);
 
     // @ts-expect-error — `nope` is not one of this plugin's needs
     void testPlugin(consumer).provide('nope', 1);
-
-    expect(true).toBe(true);
   });
 
   it('lifts a plain fake for a service.lazy need; lazyOf works for pre-built handles', async () => {

@@ -171,8 +171,9 @@ export const listStories = oc
   order of their own; `id` breaks the tie.
 - **The cursor** is the last row's key values, base64url JSON — URL-safe,
   opaque to clients, not secret. A `Date` comes back a `Date`. A cursor another
-  keyset made, or a hand-edited one, is rejected (`TypeError`; the
-  `pageInput` schema fails validation).
+  keyset made, or a hand-edited one, returns `InvalidCursor`; the
+  `pageInput` schema reports invalid input. Unexpected codec defects reach the schema owner.
+- **Codec results.** Check `order.encode(row)` and `order.decode(cursor)` with `isFailure` before using their values. `InvalidCursorValue` rejects missing keys, non-finite numbers, invalid Dates, Dates outside the decoder’s ISO format and cursors over 1024 characters. `CURSOR_FAILURES` contains the original definitions for adapter error maps.
 - **"No more pages" is `nextCursor: null`**, decided by fetching one extra
   row — never guessed from a short page.
 
@@ -225,7 +226,7 @@ if (ops.posts.create.name !== 'posts.create') throw new Error('operation name ch
 
 | Import                    | Needs                  | What it holds                                                                |
 | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `@arki/contracts`         | `zod`, `zod-form-data` | `z`, `formData`, `defineId`, `keyset`, `pageInput`, `page`, `ContractsError` |
+| `@arki/contracts`         | `@arki/failure`, `zod`, `zod-form-data` | `z`, `formData`, `defineId`, `keyset`, `pageInput`, `page`, `ContractsError`, `InvalidCursor`, `InvalidCursorValue`, `CURSOR_FAILURES` |
 | `@arki/contracts/drizzle` | peer `drizzle-orm`     | `createSelectSchema`, `createInsertSchema`, `createUpdateSchema`             |
 | `@arki/contracts/orpc`    | peer `@orpc/contract`  | `operations`, `operationAt`, `operationOf`                                   |
 
@@ -255,7 +256,7 @@ Drizzle entry, `@arki/contracts/drizzle`:
 
 ## Failure behaviour
 
-Every failure on purpose is a `ContractsError`. It extends `TypeError`, so older `instanceof TypeError` checks still hold. Match on `error.code`. Never match on the message.
+Static definition misuse throws `ContractsError`, a `TypeError`. Cursor codecs return canonical failures; check them with their definitions or `isFailure`. Match on code, never on message.
 
 ```ts run expect
 import { CONTRACTS_ERROR_CODES, ContractsError, defineId } from '@arki/contracts';
@@ -281,10 +282,12 @@ Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input f
 | `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not letters, digits or `_`.              |
 | `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
 | `ARKI_CONTRACTS_E003` | `defineId().create()`           | No `globalThis.crypto.getRandomValues` on this engine. |
-| `ARKI_CONTRACTS_E004` | `keyset`                        | No keys, or a row with a NULL key value.               |
-| `ARKI_CONTRACTS_E005` | `keyset().decode`               | The cursor is not one this keyset made.                |
+| `ARKI_CONTRACTS_E004` | `keyset`                        | No keys in the static declaration.               |
+| `ARKI_CONTRACTS_E005` | legacy reserved exception code | Cursor input now returns `InvalidCursor`.              |
 | `ARKI_CONTRACTS_E006` | `operations`, `createOrpcUtils` | A contract key contains "." or uses a reserved name.   |
 | `ARKI_CONTRACTS_E007` | `operationOf`                   | The value carries no operation.                        |
+
+Cursor codecs return `contracts.invalid_cursor` or `contracts.invalid_cursor_value`, plus canonical `schema.validator_defect` / `failure.unexpected_defect` for unexpected faults. Causes stay private. These pure codecs need no separate OTel span; the calling query or transport owns the operation span.
 
 ## Limits
 

@@ -136,8 +136,8 @@ const erasedFeature: AnyFeature = feature('erased', { provides: factories, boot 
 const _erasedApp = defineApp('erased').features([erasedFeature]);
 const genericBootFailure: Exclude<DotBootOutcome<Failure, Failure>, void> = Open();
 const erasedAppFailure: FailureOf<typeof _erasedApp.boot> = Open();
-void genericBootFailure;
-void erasedAppFailure;
+expectTypeOf(genericBootFailure).toExtend<Failure>();
+expectTypeOf(erasedAppFailure).toExtend<Failure>();
 const erasedResource: ReturnType<typeof resource> = resource(
   (): unknown => open(),
   (_value: unknown): unknown => Close(),
@@ -172,8 +172,8 @@ const erasedCloseAppFailure: FailureOf<
   Extract<Awaited<ReturnType<typeof _erasedApp.boot>>, { dispose: unknown }>['dispose']
 > = Close();
 const erasedStartFailure: FailureOf<typeof _erasedApp.start> = Open();
-void erasedCloseAppFailure;
-void erasedStartFailure;
+expectTypeOf(erasedCloseAppFailure).toExtend<Failure>();
+expectTypeOf(erasedStartFailure).toExtend<Failure>();
 const createEntitlements = (db: { tag: string }) => ({
   source: db.tag,
   planOf: (id: string) => (id === 'pro' ? ('pro' as const) : ('free' as const)),

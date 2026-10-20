@@ -26,7 +26,8 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 1. Declare the order once: `export const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });`.
 2. Use it in the contract: `oc.input(pageInput(storyOrder)).output(page(storySchema))`.
 3. In the repository, build the query with `keysetQuery(storyOrder, columns)` from `@arki/db/pagination`.
-4. Return `nextCursor: null` when there are no more rows. Decide it by fetching one extra row.
+4. Check `keysetQuery.after` and `keysetQuery.page` with `isFailure` before using their values. Encoding and decoding return exact canonical failures; declare `CURSOR_FAILURES` through the adapter error map.
+5. Return `nextCursor: null` when there are no more rows. Decide it by fetching one extra row.
 
 ### Build branded table schemas
 
@@ -66,18 +67,25 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 
 ## Errors
 
-Every error is a `ContractsError` (a `TypeError`). Match on `error.code`.
+Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `InvalidCursor`, `InvalidCursorValue`, `ValidatorDefect` or `UnexpectedDefect`; derive their exact per-operation unions from `CURSOR_DECODE_FAILURES` / `CURSOR_ENCODE_FAILURES`. Causes are private. Match on canonical definitions.
 
 | Code                  | Meaning                                                     | What to do                                                 |
 | --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
 | `ARKI_CONTRACTS_E001` | `defineId` got a prefix that is not letters, digits or `_`. | Use letters, digits and `_`, for example `sty_`.           |
 | `ARKI_CONTRACTS_E002` | Two prefixes are equal or one starts the other.             | Give each id kind a prefix that does not start another.    |
 | `ARKI_CONTRACTS_E003` | No `crypto.getRandomValues` on this engine.                 | Run where it exists, or add a polyfill.                    |
-| `ARKI_CONTRACTS_E004` | `keyset` got no keys, or a row with a NULL key.             | Declare a key. Order by NOT NULL columns.                  |
-| `ARKI_CONTRACTS_E005` | The cursor is not one this keyset made.                     | Send the cursor back unchanged, or start from page one.    |
+| `ARKI_CONTRACTS_E004` | `keyset` got no keys in its static declaration.             | Declare a key. Order by NOT NULL columns.                  |
+| `ARKI_CONTRACTS_E005` | Reserved legacy exception code; use `InvalidCursor`.                     | Send the cursor back unchanged, or start from page one.    |
 | `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
 | `ARKI_CONTRACTS_E008` | A Drizzle builder has no runtime metadata config.           | Use a supported Drizzle builder and matching version.      |
 | `ARKI_CONTRACTS_E007` | The value carries no operation.                             | Pass a `createOrpcUtils` leaf or an `operations()` result. |
+
+| Definition | Meaning | What to do |
+| --- | --- | --- |
+| `contracts.invalid_cursor` | Malformed external cursor. | Send it unchanged or start from page one. |
+| `contracts.invalid_cursor_value` | Missing/unrepresentable key or cursor over 1024 characters. | Use valid Dates, finite numbers, strings and booleans in NOT NULL keys. |
+| `schema.validator_defect` | Cursor validator failed unexpectedly. | Fix the validator; inspect its private cause. |
+| `failure.unexpected_defect` | Cursor codec/provider failed unexpectedly. | Inspect the private cause at the owning boundary. |
 
 ## Verify
 

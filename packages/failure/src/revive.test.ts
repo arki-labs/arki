@@ -219,7 +219,7 @@ describe('JSON-safe failure boundaries', () => {
   it('rejects an undeclared failure at compile time', () => {
     const check = () => {
       // @ts-expect-error The transport did not declare this failure.
-      serialize(Unauthorized(), [PostNotFound]);
+      return serialize(Unauthorized(), [PostNotFound]);
     };
     expect(check).toBeTypeOf('function');
   });

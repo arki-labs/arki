@@ -91,6 +91,7 @@ expectTypeOf<
   Extract<FailureOf<typeof _overrideApp.boot>, FailureOf<typeof Open> | FailureOf<typeof Close>>
 >().toEqualTypeOf<never>();
 
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const hidden: () => void = () => Close();
 const hiddenAsync: () => Promise<void> = () => Promise.resolve(hidden());
 const unknownFactory = (): unknown => Open();

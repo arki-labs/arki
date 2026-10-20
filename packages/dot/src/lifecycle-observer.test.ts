@@ -32,9 +32,7 @@ describe('DotLifecycleObserver — happy path', () => {
       },
     });
 
-    defineApp('configure-events', { observers: [observer] })
-      .use(pluginA)
-      .configure();
+    orThrow(defineApp('configure-events', { observers: [observer] }).use(pluginA).configure());
 
     // Expected sequence: phase-starting -> hook-starting -> hook-completed -> phase-completed
     expect(events.map(e => `${e.kind}:${e.status}`)).toEqual([
@@ -172,7 +170,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
 
     const unsubscribe = app.subscribe(e => events.push(e));
 
-    await app.stop();
+    expect(await app.stop()).toBeUndefined();
     expect(events.some(e => e.kind === 'phase' && e.phase === 'stop' && e.status === 'starting')).toBe(true);
 
     unsubscribe();

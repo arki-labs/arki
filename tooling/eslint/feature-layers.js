@@ -81,16 +81,17 @@ const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoi
 
 /**
  * Only the contract's own vocabulary: oRPC contract, zod, the `offlineSafe`
- * marker (policy is declared on the contract), `errorMap` from
+ * marker (policy is declared on the contract), canonical failure definitions,
+ * `errorMap` from
  * `@arki/failure/orpc` (browser-safe: it imports only `@orpc/client`), canonical
  * database failures from `@arki/db/errors`, its model, and (in the app
  * contract) the feature contracts.
  */
 const CONTRACT_ONLY = {
   regex:
-    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc|@arki/failure/orpc|@arki/auth|@arki/db/errors|@arki/dot/action|@arki/mcp/contract)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
+    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc|@arki/failure|@arki/failure/orpc|@arki/auth|@arki/db/errors|@arki/dot/action|@arki/mcp/contract)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
   message:
-    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), @arki/failure/orpc (errorMap), @arki/auth (canonical auth failures), @arki/db/errors (canonical database failures), @arki/dot/action, @arki/mcp/contract, ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
+    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), @arki/failure (canonical failures), @arki/failure/orpc (errorMap), @arki/auth (canonical auth failures), @arki/db/errors (canonical database failures), @arki/dot/action, @arki/mcp/contract, ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
 };
 
 /**
@@ -501,7 +502,21 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
       name: 'arki/feature-layers/contracts',
       files: contracts,
       ignores: TESTS,
-      rules: rule([CONTRACT_ONLY]),
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [CONTRACT_ONLY],
+            paths: [
+              {
+                name: '@arki/failure',
+                importNames: ['orThrow'],
+                message: 'A contract declares failures; the exception bridge belongs in its implementation.',
+              },
+            ],
+          },
+        ],
+      },
     },
     {
       name: 'arki/feature-layers/model',

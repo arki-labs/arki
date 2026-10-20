@@ -6,8 +6,20 @@
 import { oc } from '@orpc/contract';
 import { pgTable } from 'drizzle-orm/pg-core';
 
+import { orThrow } from '@arki/failure';
+
 import { createInsertSchema, createSelectSchema, createUpdateSchema, jsonColumn } from '../dist/drizzle.js';
-import { ContractsError, defineId, formData, keyset, page, pageInput, z } from '../dist/index.js';
+import {
+  ContractsError,
+  defineId,
+  formData,
+  InvalidCursor,
+  InvalidCursorValue,
+  keyset,
+  page,
+  pageInput,
+  z,
+} from '../dist/index.js';
 import { OPERATION, operationAt, operationOf, operations } from '../dist/orpc.js';
 
 let checks = 0;
@@ -19,24 +31,22 @@ function check(condition, message) {
 // Keyset pagination: a cursor round-trips and the page schemas parse.
 const order = keyset({ createdAt: 'desc', id: 'desc' });
 const createdAt = new Date('2026-10-15T08:00:00.000Z');
-const cursor = order.encode({ createdAt, id: 'sty_b' });
-check(order.decode(cursor).createdAt.getTime() === createdAt.getTime(), 'a cursor round-trips a Date');
+const cursor = orThrow(order.encode({ createdAt, id: 'sty_b' }));
+check(orThrow(order.decode(cursor)).createdAt.getTime() === createdAt.getTime(), 'a cursor round-trips a Date');
 check(pageInput(order).parse({}).limit === 20, 'pageInput defaults the limit to 20');
 check(page(z.string()).parse({ items: ['a'], nextCursor: null }).items[0] === 'a', 'page parses');
 
 // A non-ASCII cursor decodes on every engine (Hermes has no TextDecoder).
 const byName = keyset({ name: 'asc', id: 'asc' });
 check(
-  byName.decode(byName.encode({ name: 'Ștefan 🎯', id: 'u_1' })).name === 'Ștefan 🎯',
+  orThrow(byName.decode(orThrow(byName.encode({ name: 'Ștefan 🎯', id: 'u_1' })))).name === 'Ștefan 🎯',
   'a non-ASCII key round-trips through the cursor',
 );
-let cursorCode = 'none';
-try {
-  order.decode('not a cursor');
-} catch (error) {
-  cursorCode = error instanceof ContractsError ? error.code : String(error);
-}
-check(cursorCode === 'ARKI_CONTRACTS_E005', 'a foreign cursor fails with a stable code');
+check(InvalidCursor.is(order.decode('not a cursor')), 'a foreign cursor returns a canonical failure');
+check(
+  InvalidCursorValue.is(byName.encode({ name: NaN, id: 'u_1' })),
+  'non-finite cursor keys return a canonical failure',
+);
 
 // Ids: a prefixed schema, and a random id from globalThis.crypto.
 const storyId = defineId('sty_');

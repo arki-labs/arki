@@ -1669,6 +1669,7 @@ export class DotAppImpl<
       // task/resource result, so its result is recorded exactly once below.
       if (lifetime !== undefined) {
         try {
+          // eslint-disable-next-line failure/must-use -- close() below returns the retained primary failures together with cleanup failures exactly once.
           await lifetime.quiesce();
         } catch (error) {
           const failure = this.#hookDefect('dispose', record.plugin.name, error);

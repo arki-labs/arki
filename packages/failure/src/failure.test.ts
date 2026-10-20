@@ -98,12 +98,14 @@ describe('defineFailure', () => {
     expectTypeOf(Unauthorized().data).toEqualTypeOf<undefined>();
     // Compile-time only: these calls must not type-check, so they are never run.
     const mustNotCompile = () => {
-      // @ts-expect-error -- data is required when the definition has a schema
-      PostNotFound();
-      // @ts-expect-error -- the data must match the schema
-      PostNotFound({ id: 1 });
-      // @ts-expect-error -- a definition without a schema takes no data
-      Unauthorized({ id: 'x' });
+      return [
+        // @ts-expect-error -- data is required when the definition has a schema
+        PostNotFound(),
+        // @ts-expect-error -- the data must match the schema
+        PostNotFound({ id: 1 }),
+        // @ts-expect-error -- a definition without a schema takes no data
+        Unauthorized({ id: 'x' }),
+      ];
     };
     expectTypeOf(mustNotCompile).toBeFunction();
   });

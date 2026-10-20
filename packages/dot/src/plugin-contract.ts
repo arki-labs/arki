@@ -1022,13 +1022,16 @@ export function createPluginRuntime(
                     lifetime.fail(opened);
                     break;
                   }
-                } else if (value.kind === 'cleanup') lifetime.defer(() => normalize(value.close));
-                else {
+                } else if (value.kind === 'cleanup') {
+                  // eslint-disable-next-line failure/must-use -- close() owns cleanup outcomes; admission denial only follows an already retained primary failure.
+                  lifetime.defer(() => normalize(value.close));
+                } else {
                   const run = async (signal: AbortSignal) => {
                     const result = await value.run(signal);
                     if (failed(result)) return result;
                     return;
                   };
+                  // eslint-disable-next-line failure/must-use -- close() owns child outcomes; admission denial only follows an already retained primary failure.
                   lifetime.fork(run);
                 }
               }

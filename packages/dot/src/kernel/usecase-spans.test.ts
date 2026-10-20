@@ -2,7 +2,7 @@
 import { runInNewContext } from 'node:vm';
 import type { Context, ContextManager } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
-import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, createNoopMeter, metrics, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
@@ -11,8 +11,10 @@ import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import type { SupervisedUsecase } from './usecase.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
-import { hookDurationHistogram, tracer, traceUsecase, withPhaseSpan, withPluginHookSpan } from './otel.js';
+import { traceUsecase, withPhaseSpan, withPluginHookSpan } from './otel.js';
 import { superviseUsecase } from './usecase.js';
+
+const tracer = trace.getTracer('@arki/dot');
 
 const OrderNotFound = defineFailure('order.not_found', { status: 404 });
 
@@ -159,6 +161,7 @@ describe('with an SDK registered', () => {
   });
 
   it('keeps primary outcomes when span creation fails', async () => {
+    const acquire = vi.spyOn(trace, 'getTracer').mockReturnValue(tracer);
     const reporter = vi.spyOn(tracer, 'startSpan').mockImplementation(() => {
       throw new Error('reporter');
     });
@@ -182,11 +185,13 @@ describe('with an SDK registered', () => {
       expect(reporter).toHaveBeenCalledTimes(3);
     } finally {
       reporter.mockRestore();
+      acquire.mockRestore();
     }
   });
 
   it('does not replace a primary failure or recursively report broken reporters', async () => {
     const span = tracer.startSpan('reporter.broken');
+    const acquire = vi.spyOn(trace, 'getTracer').mockReturnValue(tracer);
     const start = vi.spyOn(tracer, 'startSpan').mockReturnValue(span);
     const status = vi.spyOn(span, 'setStatus').mockImplementation(() => {
       throw new Error('status reporter');
@@ -194,8 +199,13 @@ describe('with an SDK registered', () => {
     const end = vi.spyOn(span, 'end').mockImplementation(() => {
       throw new Error('end reporter');
     });
-    const duration = vi.spyOn(hookDurationHistogram, 'record').mockImplementation(() => {
+    const duration = vi.fn(() => {
       throw new Error('metric reporter');
+    });
+    const noopMeter = createNoopMeter();
+    const meter = vi.spyOn(metrics, 'getMeter').mockReturnValue({
+      ...noopMeter,
+      createHistogram: (name, options) => ({ ...noopMeter.createHistogram(name, options), record: duration }),
     });
     try {
       const primary = OrderNotFound();
@@ -206,6 +216,7 @@ describe('with an SDK registered', () => {
       expect(status).toHaveBeenCalledTimes(1);
       expect(end).toHaveBeenCalledTimes(1);
       expect(duration).toHaveBeenCalledTimes(1);
+      expect(duration).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ 'dot.status': 'failed' }));
       const cause = new Error('private');
       const defect = superviseUsecase(() => {
         throw cause;
@@ -217,15 +228,17 @@ describe('with an SDK registered', () => {
       expect(end).toHaveBeenCalledTimes(2);
     } finally {
       start.mockRestore();
+      acquire.mockRestore();
       status.mockRestore();
       end.mockRestore();
-      duration.mockRestore();
+      meter.mockRestore();
       span.end();
     }
   });
 
   it('keeps a hook rejection when exception reporting throws', async () => {
     const span = tracer.startSpan('reporter.exception');
+    const acquire = vi.spyOn(trace, 'getTracer').mockReturnValue(tracer);
     const start = vi.spyOn(tracer, 'startSpan').mockReturnValue(span);
     const exception = vi.spyOn(span, 'recordException').mockImplementation(() => {
       throw new Error('exception reporter');
@@ -240,6 +253,7 @@ describe('with an SDK registered', () => {
       expect(exception).toHaveBeenCalledTimes(1);
     } finally {
       start.mockRestore();
+      acquire.mockRestore();
       exception.mockRestore();
       span.end();
     }

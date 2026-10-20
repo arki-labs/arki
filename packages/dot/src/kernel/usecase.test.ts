@@ -247,6 +247,7 @@ describe('feature usecase construction', () => {
 });
 
 // A void annotation can conceal a refusal at the creation boundary.
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const erasedCreation: () => void = () => Refused();
 // @ts-expect-error Creation must retain its value and failure channels.
 defineFeature('erased-creation').usecases({ run: erasedCreation });
@@ -254,6 +255,7 @@ defineFeature('erased-creation').usecases({ run: erasedCreation });
 defineFeature('erased-async-creation').usecases({ run: async () => erasedCreation() });
 
 // The invoked function must also retain its actual return, independently of its factory.
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const erasedInvocation: () => void = () => Refused();
 // @ts-expect-error An invoked void return could hide a business failure.
 defineFeature('erased-invocation').usecases({ run: () => erasedInvocation });

@@ -1,7 +1,9 @@
+import failure from '@arki/failure/eslint';
 import { library } from '@arki/eslint-config/library';
 
 export default [
   ...library(),
+  failure.configs.recommended,
   {
     // Failure is the acyclic foundation; canonical spec types have no runtime edge.
     files: ['src/**/*.ts'],

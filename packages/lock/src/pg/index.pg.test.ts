@@ -216,7 +216,7 @@ describe('pgSession across replicas', () => {
         .tryRun(() => 'ran'),
     ).toBe('ran');
     finish.resolve();
-    await avocabo;
+    expect(await avocabo).toBeUndefined();
   });
 
   it('a server-side idle-in-transaction timeout does not drop a held lock, because the pinned connection is exempt', async () => {
@@ -327,7 +327,7 @@ describe('release speed of a held pgSession lock', () => {
     await delay(500);
     const releasedAt = performance.now();
     await holder.release();
-    await waiting;
+    expect(await waiting).toBeUndefined();
     // The beat in flight at release is at most HOLD_BEAT_SECONDS; the old 200 ms beat plus overhead failed this.
     expect(gotAt - releasedAt).toBeLessThan(HOLD_BEAT_SECONDS * 1000 + 100);
   });

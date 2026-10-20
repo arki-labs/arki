@@ -50,6 +50,8 @@ See [Ambiguous commit recovery](#ambiguous-commit-recovery).
 
 1. Declare the order with `keyset(...)` from `@arki/contracts`.
 2. Build the query with `keysetQuery(order, columns)` from `@arki/db/pagination`.
+3. Check `after(cursor)` with `isFailure` before building SQL; check `page(rows, limit)` before accessing items. They preserve the original cursor decoder/encoder failure unions.
+4. Use `CURSOR_FAILURES` from `@arki/contracts` in adapter error maps. Static empty keyset misuse still throws; malformed cursor/row data returns canonical failures.
 
 ### Back up and restore a database
 

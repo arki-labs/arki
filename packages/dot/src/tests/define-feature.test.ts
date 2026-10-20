@@ -217,7 +217,7 @@ describe('the chain: each step typed from the earlier ones', () => {
     expect(first.services['counted.usecases']).toBe(first.services.a);
     const second = orThrow(await defineApp('b').features([counted]).start());
     expect(second.services.a.id).toBe(2);
-    await Promise.all([first.dispose(), second.dispose()]);
+    expect(await Promise.all([first.dispose(), second.dispose()])).toEqual([undefined, undefined]);
   });
 
   it('types the usecases deps, the handles and the entrypoint services from the chain', () => {

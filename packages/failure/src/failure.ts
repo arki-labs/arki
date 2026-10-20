@@ -178,6 +178,7 @@ class FailureValue {
     this.status = status;
     this.remediation = remediation;
     this.#cause = cause;
+    // eslint-disable-next-line failure/must-use -- Object.freeze returns this same instance; construction returns it to the caller.
     Object.freeze(this);
   }
 
@@ -188,6 +189,7 @@ class FailureValue {
     return this.#cause;
   }
 }
+// eslint-disable-next-line failure/must-use -- Native prototype mutation returns its target, not a newly produced failure.
 Object.defineProperty(FailureValue.prototype, BRAND, { value: true });
 
 /** The `cause` of a definition call's options argument, if it has one. */

@@ -30,9 +30,11 @@ test('contracts ship to the browser, so importing outside their vocabulary fails
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { z } from 'zod'; import { m } from '../model/m';`), []);
 });
 
-test("a contract lists its failures with @arki/failure/orpc's errorMap (browser-safe), and nothing else from the package", () => {
+test('a contract declares canonical failures and their RPC map without importing an exception bridge', () => {
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { errorMap } from '@arki/failure/orpc';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { defineFailure, SCHEMA_FAILURES } from '@arki/failure';`), []);
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { orThrow } from '@arki/failure';`), [RESTRICT]);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { orThrow as unwrap } from '@arki/failure';`), [RESTRICT]);
 });
 
 test('contracts may annotate browser-safe actions, canonical failures and MCP policy without importing executors', () => {

@@ -82,7 +82,7 @@ describe('createAppRuntime', () => {
     expect(a).toBe(b);
     const started = orThrow(a);
     expect(started.services.flaky).toBe('up');
-    await started.dispose();
+    expect(await started.dispose()).toBeUndefined();
   });
 
   it('starts the replacing module only after the replaced app finished disposing', async () => {
@@ -90,7 +90,7 @@ describe('createAppRuntime', () => {
     const data: Record<string, unknown> = {};
 
     const first = hotModule(data);
-    await createAppRuntime(app, { hot: first.hot }).get();
+    orThrow(await createAppRuntime(app, { hot: first.hot }).get());
     first.replace();
 
     const second = hotModule(data);
@@ -98,7 +98,7 @@ describe('createAppRuntime', () => {
 
     expect(counts.maxLive).toBe(1);
     expect(counts.live).toBe(1);
-    await started.dispose();
+    expect(await started.dispose()).toBeUndefined();
   });
 
   it('refuses get() on the replaced module: the new module owns the app', async () => {
@@ -106,12 +106,12 @@ describe('createAppRuntime', () => {
     const data: Record<string, unknown> = {};
     const old = hotModule(data);
     const oldRuntime = createAppRuntime(app, { hot: old.hot });
-    await oldRuntime.get();
+    orThrow(await oldRuntime.get());
     old.replace();
 
     expect(RuntimeReplaced.is(await oldRuntime.get())).toBe(true);
     const current = orThrow(await createAppRuntime(app, { hot: hotModule(data).hot }).get());
-    await current.dispose();
+    expect(await current.dispose()).toBeUndefined();
   });
 
   it('hooks signals for the started app and unhooks them on a hot update', async () => {
@@ -120,14 +120,14 @@ describe('createAppRuntime', () => {
     const before = process.listenerCount('SIGTERM');
 
     const first = hotModule(data);
-    await createAppRuntime(app, { hot: first.hot }).get();
+    orThrow(await createAppRuntime(app, { hot: first.hot }).get());
     expect(process.listenerCount('SIGTERM')).toBe(before + 1);
     first.replace();
     expect(process.listenerCount('SIGTERM')).toBe(before);
 
     const current = orThrow(await createAppRuntime(app, { hot: hotModule(data).hot }).get());
     expect(process.listenerCount('SIGTERM')).toBe(before + 1);
-    await current.dispose();
+    expect(await current.dispose()).toBeUndefined();
   });
 
   it('blocks HMR replacement when the previous owner could not release its resource', async () => {

@@ -13,9 +13,9 @@ import { chainNativePromise } from './usecase.js';
  *
  * DOT is OTel-first: every lifecycle phase and every per-plugin hook
  * automatically emits a span and a duration histogram. When no SDK is
- * registered, the OTel API returns no-op implementations and the kernel
- * pays zero allocation per call — the discipline that makes "OTel-first"
- * compatible with principle 5 (zero optional dependencies in the kernel).
+ * registered, the OTel API returns no-op implementations. Instruments are
+ * acquired inside the observation boundary so late or defective SDK setup
+ * cannot prevent application loading or change execution.
  *
  * Consumers wire the SDK however they like (`@opentelemetry/sdk-node`,
  * `@fleet/meter`, etc.); the kernel never touches the SDK directly.
@@ -41,38 +41,16 @@ import { chainNativePromise } from './usecase.js';
 const INSTRUMENTATION_NAME = '@arki/dot';
 const INSTRUMENTATION_VERSION = packageMetadata.version;
 
-/** OTel tracer for the DOT kernel. No-op when no SDK is registered. */
-export const tracer = trace.getTracer(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION);
+/** Acquire instruments inside the observation boundary, after the app can install its SDK. */
+function tracer() {
+  return trace.getTracer(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION);
+}
 
-/** OTel meter for the DOT kernel. No-op when no SDK is registered. */
-export const meter = metrics.getMeter(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION);
-
-/**
- * Histogram recording per-plugin per-hook execution duration in milliseconds.
- *
- * Attributes:
- *   - `dot.app.name` — app name
- *   - `dot.plugin.name` — plugin name
- *   - `dot.hook`     — which lifecycle hook (`configure` | `boot` | ...)
- *   - `dot.status`   — `ok` | `failed`
- */
-export const hookDurationHistogram = meter.createHistogram('dot.plugin.hook.duration', {
-  description: 'Wall-clock duration of a single plugin lifecycle hook execution.',
-  unit: 'ms',
-});
-
-/**
- * Histogram recording per-phase (app-level) execution duration.
- *
- * Attributes:
- *   - `dot.app.name`  — app name
- *   - `dot.app.phase` — which phase (`configure` | `boot` | `start` | `stop` | `dispose`)
- *   - `dot.status`    — `ok` | `failed`
- */
-export const phaseDurationHistogram = meter.createHistogram('dot.app.phase.duration', {
-  description: 'Wall-clock duration of a complete app-level lifecycle phase.',
-  unit: 'ms',
-});
+function duration(name: string, description: string) {
+  return metrics
+    .getMeter(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION)
+    .createHistogram(name, { description, unit: 'ms' });
+}
 
 /**
  * Sanitize attribute values — OTel rejects `undefined` and strips out
@@ -137,7 +115,7 @@ export function withPluginHookSpan<R>(
   fn: (span: Span) => R,
 ): R {
   const span = observe(() =>
-    tracer.startSpan(`dot.plugin.${opts.hook}`, {
+    tracer().startSpan(`dot.plugin.${opts.hook}`, {
       attributes: attrs({
         'dot.app.name': opts.appName,
         'dot.plugin.name': opts.pluginName,
@@ -151,12 +129,15 @@ export function withPluginHookSpan<R>(
     span,
     () => fnWithSpan(span, fn),
     status => {
-      hookDurationHistogram.record(nowMs() - started, {
-        'dot.app.name': opts.appName,
-        'dot.plugin.name': opts.pluginName,
-        'dot.hook': opts.hook,
-        'dot.status': status,
-      });
+      duration('dot.plugin.hook.duration', 'Wall-clock duration of a single plugin lifecycle hook execution.').record(
+        nowMs() - started,
+        {
+          'dot.app.name': opts.appName,
+          'dot.plugin.name': opts.pluginName,
+          'dot.hook': opts.hook,
+          'dot.status': status,
+        },
+      );
     },
   );
 }
@@ -179,7 +160,7 @@ export function withPhaseSpan<R>(
   fn: (span: Span) => R,
 ): R {
   const span = observe(() =>
-    tracer.startSpan(`dot.app.${opts.phase}`, {
+    tracer().startSpan(`dot.app.${opts.phase}`, {
       attributes: attrs({
         'dot.app.name': opts.appName,
         'dot.app.version': opts.appVersion,
@@ -193,11 +174,14 @@ export function withPhaseSpan<R>(
     span,
     () => fnWithSpan(span, fn),
     status => {
-      phaseDurationHistogram.record(nowMs() - started, {
-        'dot.app.name': opts.appName,
-        'dot.app.phase': opts.phase,
-        'dot.status': status,
-      });
+      duration('dot.app.phase.duration', 'Wall-clock duration of a complete app-level lifecycle phase.').record(
+        nowMs() - started,
+        {
+          'dot.app.name': opts.appName,
+          'dot.app.phase': opts.phase,
+          'dot.status': status,
+        },
+      );
     },
   );
 }
@@ -247,16 +231,18 @@ export function withOutcomeSpan<Value>(
   recordDuration?: (status: 'ok' | 'failed') => void,
 ): Value {
   const returned = (value: unknown): void => {
-    let status: 'ok' | 'failed' = 'ok';
+    const status = observe(() => (isFailure(value) ? 'failed' : 'ok'));
     observe(() => {
-      status = span === undefined ? (isFailure(value) ? 'failed' : 'ok') : recordOutcome(span, value);
+      if (span !== undefined) recordOutcome(span, value);
     });
-    observe(() => recordDuration?.(status));
+    if (status !== undefined) observe(() => recordDuration?.(status));
     observe(() => span?.end());
   };
   const thrown = (cause: unknown): void => {
     observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: stringifyForSpan(cause) }));
-    if (cause instanceof Error) observe(() => span?.recordException(cause));
+    observe(() => {
+      if (cause instanceof Error) span?.recordException(cause);
+    });
     observe(() => recordDuration?.('failed'));
     observe(() => span?.end());
   };
@@ -293,7 +279,7 @@ export function traceUsecase(featureName: string, usecaseName: string, usecase: 
   const call = usecase;
   const spanName = `feature.${featureName}.${usecaseName}`;
   function traced(this: unknown, ...args: unknown[]): unknown {
-    const span = observe(() => tracer.startSpan(spanName));
+    const span = observe(() => tracer().startSpan(spanName));
     return withOutcomeSpan(span, () => withSpanContext(span, () => Reflect.apply(call, this, args)));
   }
   return Object.defineProperties(traced, Object.getOwnPropertyDescriptors(usecase));

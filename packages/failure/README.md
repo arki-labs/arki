@@ -326,6 +326,8 @@ await remove(id); // ✓ dropped on purpose, with the reason in the comment
 
 The disable comment is the only deliberate discard. A kept value (`const result = await remove(id)`) is left to the compiler and the unused-variable rules.
 
+The rule also checks callbacks passed to `void` signatures, including function references and callback properties. Return a failure only where the receiving API preserves that result; otherwise handle it inside the callback. Discarded arrays, tuples, settled promise results and iterator reads retain their element failures through forwarding helpers. Arbitrary object fields and cold iterable construction are outside this rule's result protocols.
+
 `no-blind-accept` guards a helper that lets one checked refusal through, such as `accept` on an `@arki/journal` command context. Accepting any failure accepts every refusal, including codes the callee adds later, so check the kind first:
 
 ```ts
@@ -339,7 +341,7 @@ if (OutOfStock.is(r)) accept(r); // ✓ one kind
 if (OutOfStock.is(r) || Busy.is(r)) accept(r); // ✓ each kind checked by name
 ```
 
-"Checked by kind" comes from types. Every part of the value's type at the call must be a failure with a literal `code`. One code is enough. With two or more codes, the type cannot tell `isFailure(r)` from `A.is(r) || B.is(r)`, so the rule reads the nearest condition that mentions the value: each `||` branch must be a non-generic guard whose type predicate names one code (`Def.is` does; the generic `isFailure` never does). Limits: with one failure code in the value, `if (isFailure(r)) accept(r)` passes, since its type is the same as after `Def.is`; and two or more codes checked by an early return or a `switch` are reported, so check them in an `if` around the call. The checked calls default to `accept` (as `accept(x)` or `ctx.accept(x)`); set `names` to check others: `'failure/no-blind-accept': ['error', { names: ['accept', 'handled'] }]`. A call whose argument cannot be a failure (such as `dialog.accept('yes')`) is left alone.
+"Checked by kind" comes from types and the nearest condition about the value. Every part must be a failure with a literal `code`. Each `||` branch must check one named kind or compare `code` to one literal value. A bare `isFailure` is rejected even when the result currently has only one refusal. A preceding `if (!guard) return` or `throw` is checked the same way. A directly constructed failure remains valid. Const aliases preserve the checked value's identity. Multiple codes checked through a `switch` or more complex control flow still require an enclosing kind check. The checked calls default to `accept`, including member calls, static computed properties, imported aliases and local const aliases; set `names` to check others: `'failure/no-blind-accept': ['error', { names: ['accept', 'handled'] }]`. Mutable helper aliases are not followed. A call whose argument cannot be a failure (such as `dialog.accept('yes')`) is left alone.
 
 ```js skip="needs an app's eslint config and typescript-eslint"
 // eslint.config.js

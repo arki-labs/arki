@@ -620,8 +620,8 @@ describe('lease guard', () => {
     await flush();
     expect(t.calls.acquire).toHaveLength(1);
     first.resolve(await busy());
-    await a;
-    await b;
+    expect(LockHeld.is(await a)).toBe(true);
+    expect(LockHeld.is(await b)).toBe(false);
     expect(t.calls.acquire).toHaveLength(2);
     expect(t.maxInFlight()).toBe(1);
   });
@@ -713,7 +713,7 @@ describe('release', () => {
       await t.clock.advance(4999);
       expect(t.calls.release).toHaveLength(0);
       await t.clock.advance(1);
-      await pending;
+      expect(await pending).toBe(1);
       expect(t.calls.release).toHaveLength(1);
     },
   );

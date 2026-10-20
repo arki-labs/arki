@@ -596,7 +596,7 @@ describe('lifecycle and explain', () => {
     const child = defineFeature('tree.child').infra(leaf).entrypoints();
     const tree = defineFeature('tree').infra(root).features(child).entrypoints();
     const app = orThrow(await defineApp('order').features([tree]).start());
-    await app.stop();
+    expect(await app.stop()).toBeUndefined();
     expect(stopped).toEqual(['leaf', 'root']);
     expect(tree.plugins().map(u => u.name)).toEqual(['tree/root', 'tree.child/leaf', 'tree.child', 'tree']);
   });

@@ -5,11 +5,15 @@
  * through must return every row once — no repeats, no gaps.
  */
 import type { PGlite } from '@electric-sql/pglite';
+import { oc } from '@orpc/contract';
+import { call, implement, ORPCError } from '@orpc/server';
 import { and, defineRelations, eq, sql } from 'drizzle-orm';
 import { integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { keyset } from '@arki/contracts';
+import { CURSOR_FAILURES, InvalidCursor, InvalidCursorValue, keyset, z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
+import { errorMap, orThrowRpc, reviveRpcError, rpcFailureDefinitions } from '@arki/failure/orpc';
 
 import { keysetQuery } from './pagination.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -65,10 +69,10 @@ async function walk(limit: number, query = byNewest, userId = 'usr_me') {
     const rows = await db
       .select()
       .from(stories)
-      .where(and(eq(stories.userId, userId), query.after(cursor)))
+      .where(and(eq(stories.userId, userId), orThrow(query.after(cursor))))
       .orderBy(...query.orderBy)
       .limit(query.take(limit));
-    const page = query.page(rows, limit);
+    const page = orThrow(query.page(rows, limit));
     expect(page.items.length).toBeLessThanOrEqual(limit);
     seen.push(...page.items.map(row => row.id));
     cursor = page.nextCursor ?? undefined;
@@ -125,8 +129,40 @@ describe('keysetQuery', () => {
       { id: 'sty_2', createdAt: LATER },
       { id: 'sty_1', createdAt: LATER },
     ];
-    const page = byNewest.page(rows, 2);
+    const page = orThrow(byNewest.page(rows, 2));
     expect(page.items.map(row => row.id)).toEqual(['sty_3', 'sty_2']);
-    expect(page.nextCursor === null ? null : newestFirst.decode(page.nextCursor).id).toBe('sty_2');
+    expect(page.nextCursor === null ? null : orThrow(newestFirst.decode(page.nextCursor)).id).toBe('sty_2');
   });
+});
+
+it('returns malformed cursor refusal before a query can treat it as a predicate', () => {
+  expect(InvalidCursor.is(byNewest.after('not-a-cursor'))).toBe(true);
+});
+
+it('refuses an unrepresentable last-row cursor instead of publishing a broken page', () => {
+  const rows = [
+    { createdAt: new Date(Number.NaN), id: 'sty_bad' },
+    { createdAt: LATER, id: 'sty_extra' },
+  ];
+  expect(InvalidCursorValue.is(byNewest.page(rows, 1))).toBe(true);
+});
+
+it('uses original cursor definitions through the native RPC failure adapter', async () => {
+  const contract = oc
+    .errors(errorMap(...CURSOR_FAILURES))
+    .input(z.string())
+    .output(z.unknown());
+  const procedure = implement(contract).handler(({ input, errors }) => orThrowRpc(byNewest.after(input), errors));
+  try {
+    await call(procedure, 'bad-cursor');
+    throw new Error('Invalid cursor unexpectedly reached the success output');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ORPCError);
+    if (!(error instanceof ORPCError)) throw error;
+    expect(error.status).toBe(400);
+    expect(error.defined).toBe(true);
+    const definitions = rpcFailureDefinitions(contract['~orpc'].errorMap);
+    expect(definitions).toEqual([...CURSOR_FAILURES]);
+    expect(InvalidCursor.is(reviveRpcError(error, definitions))).toBe(true);
+  }
 });

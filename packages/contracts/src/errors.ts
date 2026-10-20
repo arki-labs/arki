@@ -1,6 +1,8 @@
+import { defineFailure } from '@arki/failure';
+
 /**
- * Every failure this package raises on purpose is a {@link ContractsError} with a
- * stable `code`. Match on the code, never on the message. A `ContractsError` is a
+ * Static definition misuse raises {@link ContractsError} with a stable code.
+ * Cursor operations return canonical failures. Match on code. A `ContractsError` is a
  * `TypeError`, so `instanceof TypeError` checks written before the codes still hold.
  */
 
@@ -28,14 +30,14 @@ export const CONTRACTS_ERROR_CODES = {
    */
   noRandomSource: 'ARKI_CONTRACTS_E003',
   /**
-   * `keyset` got no keys, or a row with a NULL key value.
+   * `keyset` got no keys.
    *
    * @fix Declare at least one key. Order by NOT NULL columns and end on a unique one.
    * @verify bun run test -- src/pagination.test.ts
    */
   invalidKeyset: 'ARKI_CONTRACTS_E004',
   /**
-   * A cursor string is not one this keyset made.
+   * Reserved legacy exception code; cursor decoding now returns InvalidCursor.
    *
    * @fix Send back a cursor exactly as the same keyset returned it, or start from the first page.
    * @verify bun run test -- src/pagination.test.ts
@@ -92,3 +94,23 @@ export class ContractsError extends TypeError {
     this.remediation = REMEDIATIONS[code];
   }
 }
+
+/** A cursor cannot be decoded for this keyset.
+ * @fix Send back the cursor unchanged, or start from the first page.
+ * @verify bun run test -- src/pagination.test.ts
+ */
+export const InvalidCursor = defineFailure('contracts.invalid_cursor', {
+  status: 400,
+  message: 'The cursor is not valid for this list.',
+  remediation: 'Send back the cursor unchanged, or start from the first page.',
+});
+
+/** A row has a missing or unrepresentable cursor key.
+ * @fix Use non-null strings, finite numbers, booleans or valid Dates and keep the cursor within 1024 characters.
+ * @verify bun run test -- src/pagination.test.ts
+ */
+export const InvalidCursorValue = defineFailure('contracts.invalid_cursor_value', {
+  status: 500,
+  message: 'The row cannot be represented by a cursor.',
+  remediation: 'Use non-null strings, finite numbers, booleans or valid Dates and a cursor of at most 1024 characters.',
+});

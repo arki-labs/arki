@@ -8,7 +8,7 @@ Shared Zod schemas for arki apps. When a doc and the code disagree, `src/index.t
 
 1. The main entry (`src/index.ts`) stays browser-safe. It never imports Drizzle, oRPC, Node builtins or `process`.
 2. Drizzle code lives in `src/drizzle.ts` only. oRPC code lives in `src/orpc.ts` only. Both peers stay optional.
-3. Every deliberate failure is a `ContractsError` with a code from `CONTRACTS_ERROR_CODES`. Each code has JSDoc with a summary, `@fix` and `@verify`. A new code needs a remediation in `src/errors.ts`.
+3. Cursor operations return exact canonical failures defined in `src/errors.ts`; foreign Zod validators keep their native protocol. Static definition misuse still throws `ContractsError`. Every code/definition has JSDoc, `@fix`, `@verify` and remediation.
 4. Id prefixes are used exactly as given. Changing how a prefix is stored breaks rows already saved.
 5. Ids come from Web Crypto. Never add a `Math.random` fallback.
 6. Cursors use `btoa`, `atob` and URI coding. Never use `TextDecoder`: Hermes has none.

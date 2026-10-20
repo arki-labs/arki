@@ -526,7 +526,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
           { wait: '5m', weight },
         );
       });
-      await pump(Promise.all(tasks), context.options.advanceTime);
+      const results = await pump(Promise.all(tasks), context.options.advanceTime);
+      for (const result of results) check(!LockHeld.is(result), 'every queued pool task should acquire permits');
       check(finished === taskCount, `only ${finished} of ${taskCount} tasks ran`);
       check(maxInUse <= POOL_LIMIT, `${maxInUse} permits were in use at once, the limit is ${POOL_LIMIT}`);
       check(maxInUse >= 2, 'the tasks never overlapped, so the test proved nothing');

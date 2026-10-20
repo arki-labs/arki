@@ -65,4 +65,4 @@ const formatted = bindAction(transformed, input => {
 expectTypeOf<Exclude<Awaited<ReturnType<typeof formatted.run>>, Failure>>().toEqualTypeOf<string>();
 expectTypeOf<Exclude<Awaited<ReturnType<typeof formatted.handle>>, Failure>>().toEqualTypeOf<number>();
 // @ts-expect-error Native handlers accept the already parsed input, never the wire input.
-void formatted.handle('book', { binding: 'http', principal: 'anonymous', approval: 'absent' });
+const _wrongNativeInput = formatted.handle('book', { binding: 'http', principal: 'anonymous', approval: 'absent' });

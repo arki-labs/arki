@@ -14,8 +14,22 @@
  * export default [failure.configs.recommended]; // TypeScript files only
  */
 import type { TSESLint, TSESTree } from '@typescript-eslint/utils';
-import type { Type, TypeChecker } from 'typescript';
-import { AST_NODE_TYPES, AST_TOKEN_TYPES, ESLintUtils } from '@typescript-eslint/utils';
+import type { Node, Type, TypeChecker, Symbol as TypeSymbol } from 'typescript';
+import { AST_NODE_TYPES, ESLintUtils } from '@typescript-eslint/utils';
+import {
+  forEachChild,
+  isBindingElement,
+  isElementAccessExpression,
+  isExpression,
+  isIdentifier,
+  isObjectBindingPattern,
+  isPropertyAccessExpression,
+  isVariableDeclaration,
+  isVariableDeclarationList,
+  NodeFlags,
+  SymbolFlags,
+  TypeFlags,
+} from 'typescript';
 
 /** The brand every failure type carries (see `Failure` in the core entry). */
 const BRAND = '~failure';
@@ -30,7 +44,9 @@ export const mustUse = createRule({
     docs: { description: 'Disallow discarding the result of a call that may return a failure' },
     messages: {
       mustUse:
-        'This call can return a failure ({{codes}}) and its result is thrown away. Handle it or return it. To drop it on purpose, add `// eslint-disable-next-line failure/must-use -- <reason>`.',
+        'This result can contain a failure ({{codes}}) and is thrown away. Handle it or return it. To drop it on purpose, add `// eslint-disable-next-line failure/must-use -- <reason>`.',
+      callbackReturn:
+        'This callback can return a failure ({{codes}}), but its return value is discarded by a void signature. Handle the failure before returning from the callback.',
     },
     schema: [],
   },
@@ -38,13 +54,60 @@ export const mustUse = createRule({
   create(context) {
     const services = ESLintUtils.getParserServices(context);
     const checker = services.program.getTypeChecker();
+    const checkedCallbacks = new Set<TSESTree.Expression>();
+    const checkCallback = (expression: TSESTree.Expression): void => {
+      if (checkedCallbacks.has(expression)) return;
+      checkedCallbacks.add(expression);
+      const tsNode = services.esTreeNodeToTSNodeMap.get(expression);
+      if (!isExpression(tsNode)) return;
+      const expected = checker.getContextualType(tsNode);
+      const signatures =
+        expected === undefined
+          ? []
+          : (expected.isUnion() ? expected.types : [expected]).flatMap(part => part.getCallSignatures());
+      if (
+        signatures.length === 0 ||
+        !signatures.every(signature => (checker.getReturnTypeOfSignature(signature).flags & TypeFlags.Void) !== 0)
+      )
+        return;
+      const codes = new Set(
+        services
+          .getTypeAtLocation(expression)
+          .getCallSignatures()
+          .flatMap(signature => resultTypes(checker, checker.getReturnTypeOfSignature(signature)))
+          .flatMap(part => failureCodes(checker, part)),
+      );
+      if (codes.size > 0)
+        context.report({ node: expression, messageId: 'callbackReturn', data: { codes: [...codes].join(', ') } });
+    };
+    const checkArguments = (node: Call): void => {
+      for (const argument of node.arguments)
+        if (argument.type !== AST_NODE_TYPES.SpreadElement) checkCallback(argument);
+    };
     return {
+      CallExpression: checkArguments,
+      NewExpression: checkArguments,
+      ArrowFunctionExpression: checkCallback,
+      FunctionExpression: checkCallback,
+      VariableDeclarator(node) {
+        if (node.init !== null) checkCallback(node.init);
+      },
+      AssignmentExpression(node) {
+        checkCallback(node.right);
+      },
+      AssignmentPattern(node) {
+        checkCallback(node.right);
+      },
+      Property(node) {
+        if (node.value.type === AST_NODE_TYPES.Identifier || node.value.type === AST_NODE_TYPES.MemberExpression)
+          checkCallback(node.value);
+      },
       ExpressionStatement(node) {
-        const call = discardedCall(node.expression);
-        if (call === undefined) return;
-        const type = services.getTypeAtLocation(call);
-        const result = checker.getAwaitedType(type) ?? type;
-        const codes = new Set(resultTypes(checker, call, result).flatMap(part => failureCodes(checker, part)));
+        const codes = new Set(
+          discardedValues(node.expression).flatMap(value =>
+            resultTypes(checker, services.getTypeAtLocation(value)).flatMap(part => failureCodes(checker, part)),
+          ),
+        );
         if (codes.size > 0) context.report({ node, messageId: 'mustUse', data: { codes: [...codes].join(', ') } });
       },
     };
@@ -54,49 +117,54 @@ export const mustUse = createRule({
 type Call = TSESTree.CallExpression | TSESTree.NewExpression;
 
 /**
- * The call a statement throws away: a call, optionally under `void`, awaited or optional-chained.
+ * The values a statement throws away, under `void`, await, optional chains and branches.
  * `void` is not an opt-out: it hides the failure just as well. Assignments are left to the
  * compiler and the unused-variable rules.
  */
-function discardedCall(expression: TSESTree.Expression): Call | undefined {
-  const kept =
-    expression.type === AST_NODE_TYPES.UnaryExpression && expression.operator === 'void'
-      ? expression.argument
-      : expression;
-  const inner = kept.type === AST_NODE_TYPES.AwaitExpression ? kept.argument : kept;
-  const call = inner.type === AST_NODE_TYPES.ChainExpression ? inner.expression : inner;
-  return call.type === AST_NODE_TYPES.CallExpression || call.type === AST_NODE_TYPES.NewExpression ? call : undefined;
+function discardedValues(expression: TSESTree.Expression): TSESTree.Expression[] {
+  if (expression.type === AST_NODE_TYPES.UnaryExpression && expression.operator === 'void')
+    return discardedValues(expression.argument);
+  if (expression.type === AST_NODE_TYPES.AwaitExpression) return discardedValues(expression.argument);
+  if (expression.type === AST_NODE_TYPES.ChainExpression) return discardedValues(expression.expression);
+  if (expression.type === AST_NODE_TYPES.LogicalExpression)
+    return [...discardedValues(expression.left), ...discardedValues(expression.right)];
+  if (expression.type === AST_NODE_TYPES.ConditionalExpression)
+    return [...discardedValues(expression.consequent), ...discardedValues(expression.alternate)];
+  if (expression.type === AST_NODE_TYPES.SequenceExpression)
+    return expression.expressions.flatMap(part => discardedValues(part));
+  return expression.type === AST_NODE_TYPES.AssignmentExpression ? [] : [expression];
 }
 
 /**
- * The types that may hold a failure: the result itself, plus each item's result for
- * `Promise.all` and `Promise.allSettled`, which return an array, not a union.
- * (`Promise.any` and `Promise.race` already return a union of the item results.)
+ * Result containers with a defined consumption protocol: arrays/tuples, fulfilled
+ * settled results and iterator results. Follow their values through forwarding helpers,
+ * without treating arbitrary object properties as discarded failures.
  */
-function resultTypes(checker: TypeChecker, call: Call, result: Type): Type[] {
-  const method = promiseCombinator(call);
-  const item = method === undefined ? undefined : result.getNumberIndexType();
-  if (item === undefined) return [result];
-  if (method === 'all') return [result, item];
-  // An allSettled item is `PromiseFulfilledResult<T> | PromiseRejectedResult`; the failure sits in `value`.
-  const settled = item.isUnion() ? item.types : [item];
-  return [
-    result,
-    ...settled.flatMap(part => {
-      const value = part.getProperty('value');
-      return value === undefined ? [] : [checker.getTypeOfSymbol(value)];
-    }),
-  ];
-}
-
-/** `all` or `allSettled` when the call is `Promise.all(...)` or `Promise.allSettled(...)`. */
-function promiseCombinator(call: Call): 'all' | 'allSettled' | undefined {
-  const callee = call.callee;
-  if (callee.type !== AST_NODE_TYPES.MemberExpression || callee.computed) return undefined;
-  if (callee.object.type !== AST_NODE_TYPES.Identifier || callee.object.name !== 'Promise') return undefined;
-  if (callee.property.type !== AST_NODE_TYPES.Identifier) return undefined;
-  const name = callee.property.name;
-  return name === 'all' || name === 'allSettled' ? name : undefined;
+function resultTypes(checker: TypeChecker, type: Type, seen = new Set<Type>()): Type[] {
+  const result = checker.getAwaitedType(type) ?? type;
+  if (seen.has(result)) return [];
+  seen.add(result);
+  if (result.isUnion()) return result.types.flatMap(part => resultTypes(checker, part, seen));
+  const children: Type[] = [];
+  if (checker.isArrayType(result) || checker.isTupleType(result)) {
+    const item = result.getNumberIndexType();
+    if (item !== undefined) children.push(item);
+  }
+  const value = result.getProperty('value');
+  if (value !== undefined) {
+    const status = result.getProperty('status');
+    const statusType = status === undefined ? undefined : checker.getTypeOfSymbol(status);
+    const done = result.getProperty('done');
+    const doneType = done === undefined ? undefined : checker.getTypeOfSymbol(done);
+    const iteratorResult =
+      doneType !== undefined &&
+      (doneType.isUnion() ? doneType.types : [doneType]).every(
+        part => (part.flags & (TypeFlags.BooleanLike | TypeFlags.Undefined)) !== 0,
+      );
+    if ((statusType?.isStringLiteral() === true && statusType.value === 'fulfilled') || iteratorResult)
+      children.push(checker.getTypeOfSymbol(value));
+  }
+  return [result, ...children.flatMap(child => resultTypes(checker, child, seen))];
 }
 
 /** The codes of the failures a type may be; empty when it cannot be a failure. */
@@ -118,11 +186,9 @@ function failureCodes(checker: TypeChecker, type: Type): string[] {
  * `if (isFailure(r)) accept(r)` accepts every refusal, including codes the callee adds later, so it
  * defeats the rule. Check the kind first: `if (OutOfStock.is(r)) { accept(r); … }`.
  *
- * "Checked by kind" is decided from types: every part of `x`'s type at the call is a failure with
- * a literal `code`. One code is enough. With two or more codes, the type alone cannot tell
- * `isFailure(r)` from `A.is(r) || B.is(r)` (both narrow to `A | B`), so the rule also reads the
- * nearest condition that mentions `x`: each of its `||` branches must be a non-generic guard
- * whose type predicate names exactly one code. `isFailure<Value>` is generic, so it never counts.
+ * Every part of `x`'s type must be a failure with a literal `code`. The nearest condition
+ * about it must check a named kind or an exact code; a bare `isFailure` is blind even when
+ * today's result has only one refusal. Const aliases keep the same subject identity.
  */
 export const noBlindAccept = createRule({
   name: 'no-blind-accept',
@@ -149,11 +215,27 @@ export const noBlindAccept = createRule({
     const checker = services.program.getTypeChecker();
 
     /** A guard that narrows `subject` to exactly one failure code, such as `OutOfStock.is(r)`. */
-    const checksKind = (test: TSESTree.Expression, subject: string): boolean => {
+    const checksKind = (test: TSESTree.Expression, subject: TypeSymbol): boolean => {
       if (test.type === AST_NODE_TYPES.LogicalExpression && test.operator === '||')
         return checksKind(test.left, subject) && checksKind(test.right, subject);
       if (test.type === AST_NODE_TYPES.LogicalExpression && test.operator === '&&')
         return checksKind(test.left, subject) || checksKind(test.right, subject);
+      if (test.type === AST_NODE_TYPES.BinaryExpression && test.operator === '===') {
+        const codeAccess = (expression: TSESTree.Expression): boolean =>
+          expression.type === AST_NODE_TYPES.MemberExpression &&
+          expression.object.type === AST_NODE_TYPES.Identifier &&
+          subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(expression.object)) === subject &&
+          ((!expression.computed &&
+            expression.property.type === AST_NODE_TYPES.Identifier &&
+            expression.property.name === 'code') ||
+            (expression.computed &&
+              expression.property.type === AST_NODE_TYPES.Literal &&
+              expression.property.value === 'code'));
+        return (
+          (codeAccess(test.left) && services.getTypeAtLocation(test.right).isStringLiteral()) ||
+          (codeAccess(test.right) && services.getTypeAtLocation(test.left).isStringLiteral())
+        );
+      }
       if (test.type !== AST_NODE_TYPES.CallExpression) return false;
       const signature = checker.getResolvedSignature(services.esTreeNodeToTSNodeMap.get(test));
       // A generic guard such as `isFailure<Value>` narrows to whatever its argument may be, so it names no kind.
@@ -161,54 +243,99 @@ export const noBlindAccept = createRule({
       const predicate = checker.getTypePredicateOfSignature(signature);
       if (predicate?.type === undefined || predicate.parameterIndex === undefined) return false;
       const argument = test.arguments[predicate.parameterIndex];
-      if (argument?.type !== AST_NODE_TYPES.Identifier || argument.name !== subject) return false;
+      if (
+        argument?.type !== AST_NODE_TYPES.Identifier ||
+        subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(argument)) !== subject
+      )
+        return false;
       const narrowed = kinds(checker, predicate.type);
       return narrowed.codes.size === 1 && !narrowed.wide && !narrowed.plain;
     };
 
     return {
       CallExpression(node) {
-        const name = calleeName(node.callee);
-        if (name === undefined || !names.includes(name)) return;
+        const name = checkedCallee(checker, services.esTreeNodeToTSNodeMap.get(node.callee), names);
+        if (name === undefined) return;
         const argument = node.arguments[0];
         if (argument === undefined || argument.type === AST_NODE_TYPES.SpreadElement) return;
         const found = kinds(checker, services.getTypeAtLocation(argument));
         // Not a failure at all (such as `dialog.accept('yes')`): another API's `accept`.
         if (found.codes.size === 0 && !found.wide) return;
-        const blind =
-          found.plain ||
-          found.wide ||
-          (found.codes.size > 1 && !guardedByKind(context.sourceCode, node, argument, checksKind));
+        const subject =
+          argument.type === AST_NODE_TYPES.Identifier
+            ? subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(argument))
+            : undefined;
+        const guard =
+          subject === undefined
+            ? undefined
+            : guardedByKind(
+                node,
+                test => mentionsSubject(checker, services.esTreeNodeToTSNodeMap.get(test), subject),
+                test => checksKind(test, subject),
+              );
+        const blind = found.plain || found.wide || guard === false || (found.codes.size > 1 && guard !== true);
         if (blind) context.report({ node, messageId: 'noBlindAccept', data: { name } });
       },
     };
   },
 });
 
-/** `accept` for `accept(x)`, `ctx.accept(x)` and `ctx?.accept(x)`; undefined for other callees. */
-function calleeName(callee: TSESTree.Expression): string | undefined {
-  if (callee.type === AST_NODE_TYPES.Identifier) return callee.name;
-  if (
-    callee.type === AST_NODE_TYPES.MemberExpression &&
-    !callee.computed &&
-    callee.property.type === AST_NODE_TYPES.Identifier
-  )
-    return callee.property.name;
+/** Resolve configured entrypoints through imports, const aliases and object destructuring. */
+function checkedCallee(
+  checker: TypeChecker,
+  callee: Node,
+  names: readonly string[],
+  seen = new Set<TypeSymbol>(),
+): string | undefined {
+  const symbol = isElementAccessExpression(callee)
+    ? (() => {
+        const key = checker.getTypeAtLocation(callee.argumentExpression);
+        return key.isStringLiteral()
+          ? checker.getPropertyOfType(checker.getTypeAtLocation(callee.expression), key.value)
+          : undefined;
+      })()
+    : checker.getSymbolAtLocation(isPropertyAccessExpression(callee) ? callee.name : callee);
+  if (symbol === undefined || seen.has(symbol)) return undefined;
+  seen.add(symbol);
+  const name = symbol.getName();
+  if (names.includes(name)) return name;
+  if ((symbol.flags & SymbolFlags.Alias) !== 0) {
+    const imported = checker.getAliasedSymbol(symbol);
+    if (names.includes(imported.getName())) return imported.getName();
+  }
+  for (const declaration of symbol.getDeclarations() ?? []) {
+    if (
+      isVariableDeclaration(declaration) &&
+      declaration.initializer !== undefined &&
+      isVariableDeclarationList(declaration.parent) &&
+      (declaration.parent.flags & NodeFlags.Const) !== 0
+    )
+      return checkedCallee(checker, declaration.initializer, names, seen);
+    if (
+      isBindingElement(declaration) &&
+      isObjectBindingPattern(declaration.parent) &&
+      isVariableDeclaration(declaration.parent.parent) &&
+      isVariableDeclarationList(declaration.parent.parent.parent) &&
+      (declaration.parent.parent.parent.flags & NodeFlags.Const) !== 0
+    ) {
+      const property = declaration.propertyName ?? declaration.name;
+      if (!isIdentifier(property)) continue;
+      const original = checker.getPropertyOfType(checker.getTypeAtLocation(declaration.parent), property.text);
+      if (original !== undefined && names.includes(original.getName())) return original.getName();
+    }
+  }
   return undefined;
 }
 
 /**
- * True when the nearest condition that mentions `argument` (an `if` or `?:` around the call, or
- * the left of `&&`) checks it by kind. False when there is none, or `argument` is not a plain variable.
+ * Whether the nearest condition about the subject checks it by kind. No enclosing
+ * condition is distinct from an explicit blind guard: a directly constructed failure is precise.
  */
 function guardedByKind(
-  sourceCode: TSESLint.SourceCode,
   call: TSESTree.CallExpression,
-  argument: TSESTree.Expression,
-  checksKind: (test: TSESTree.Expression, subject: string) => boolean,
-): boolean {
-  if (argument.type !== AST_NODE_TYPES.Identifier) return false;
-  const subject = argument.name;
+  mentions: (test: TSESTree.Expression) => boolean,
+  checksKind: (test: TSESTree.Expression) => boolean,
+): boolean | undefined {
   let child: TSESTree.Node = call;
   for (let node: TSESTree.Node | undefined = call.parent; node !== undefined; child = node, node = node.parent) {
     if (
@@ -216,7 +343,23 @@ function guardedByKind(
       node.type === AST_NODE_TYPES.FunctionExpression ||
       node.type === AST_NODE_TYPES.ArrowFunctionExpression
     )
-      return false;
+      return undefined;
+    if (node.type === AST_NODE_TYPES.BlockStatement) {
+      const statements: readonly TSESTree.Node[] = node.body;
+      const position = statements.indexOf(child);
+      for (let index = position - 1; index >= 0; index -= 1) {
+        const preceding = node.body[index];
+        if (
+          preceding?.type === AST_NODE_TYPES.IfStatement &&
+          preceding.alternate === null &&
+          exitsFunction(preceding.consequent) &&
+          preceding.test.type === AST_NODE_TYPES.UnaryExpression &&
+          preceding.test.operator === '!' &&
+          mentions(preceding.test.argument)
+        )
+          return checksKind(preceding.test.argument);
+      }
+    }
     const test =
       (node.type === AST_NODE_TYPES.IfStatement || node.type === AST_NODE_TYPES.ConditionalExpression) &&
       node.consequent === child
@@ -225,12 +368,42 @@ function guardedByKind(
           ? node.left
           : undefined;
     if (test === undefined) continue;
-    const mentions = sourceCode
-      .getTokens(test)
-      .some(token => token.type === AST_TOKEN_TYPES.Identifier && token.value === subject);
-    if (mentions) return checksKind(test, subject);
+    if (mentions(test)) return checksKind(test);
   }
-  return false;
+  return undefined;
+}
+
+/** Only a direct return/throw, possibly in a block, proves this preceding guard's other path exits. */
+function exitsFunction(statement: TSESTree.Statement): boolean {
+  if (statement.type === AST_NODE_TYPES.ReturnStatement || statement.type === AST_NODE_TYPES.ThrowStatement)
+    return true;
+  const last = statement.type === AST_NODE_TYPES.BlockStatement ? statement.body.at(-1) : undefined;
+  return last !== undefined && exitsFunction(last);
+}
+
+/** Const aliases name the same checked value; mutable assignments need separate flow analysis. */
+function subjectSymbol(checker: TypeChecker, node: Node, seen = new Set<TypeSymbol>()): TypeSymbol | undefined {
+  const symbol = checker.getSymbolAtLocation(node);
+  if (symbol === undefined || seen.has(symbol)) return symbol;
+  seen.add(symbol);
+  const declaration = symbol.valueDeclaration;
+  if (
+    declaration !== undefined &&
+    isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    isIdentifier(declaration.initializer) &&
+    isVariableDeclarationList(declaration.parent) &&
+    (declaration.parent.flags & NodeFlags.Const) !== 0
+  )
+    return subjectSymbol(checker, declaration.initializer, seen);
+  return symbol;
+}
+
+function mentionsSubject(checker: TypeChecker, node: Node, subject: TypeSymbol): boolean {
+  return (
+    (isIdentifier(node) && subjectSymbol(checker, node) === subject) ||
+    forEachChild(node, child => (mentionsSubject(checker, child, subject) ? true : undefined)) === true
+  );
 }
 
 /** What a type may be: the distinct literal failure codes, a failure with a wide code, a non-failure. */

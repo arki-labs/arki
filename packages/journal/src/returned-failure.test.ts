@@ -918,6 +918,7 @@ describe('a refusal the command accepts', () => {
     const late = captured.accept;
     const failure = captured.failure;
     if (late === undefined || failure === undefined) throw new Error('the handler did not run');
+    // eslint-disable-next-line failure/no-blind-accept -- accepting after completion is the misuse under test
     const error = thrownBy(() => late(failure));
 
     expect(isJournalError(error, 'INVALID_ACCEPT')).toBe(true);
@@ -1011,6 +1012,7 @@ describe('a refusal the effect accepts', () => {
     const late = captured.accept;
     const failure = captured.failure;
     if (late === undefined || failure === undefined) throw new Error('the accepting effect did not run');
+    // eslint-disable-next-line failure/no-blind-accept -- accepting after completion is the misuse under test
     const error = thrownBy(() => late(failure));
     expect(isJournalError(error, 'INVALID_ACCEPT'), 'a late call cannot change a settled job').toBe(true);
     expect(error).toMatchObject({ kind: 'effect', entityId: 'relay-accepts' });

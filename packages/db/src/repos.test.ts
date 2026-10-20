@@ -103,8 +103,8 @@ describe('repos(): boot and wiring', () => {
     const app = await bootNotes();
     try {
       const usecases = app.services['notes.usecases'];
-      await usecases.write('n1', 'one');
-      await usecases.write('n2', 'two');
+      orThrow(await usecases.write('n1', 'one'));
+      orThrow(await usecases.write('n2', 'two'));
       expect(await usecases.read('n1')).toBe('one');
       expect(await usecases.count()).toBe(2);
       expect(built).toBe(1);
@@ -278,7 +278,7 @@ describe('reader(): cross-feature reads', () => {
   it('publishes bound methods, so a class repository keeps its this.db', async () => {
     const app = await bootNotes();
     try {
-      await app.services['notes.usecases'].write('x', 'shared');
+      orThrow(await app.services['notes.usecases'].write('x', 'shared'));
       const { get } = app.services.noteReader;
       expect(await get('x')).toBe('shared');
       // The trap reader() avoids: an unbound copy loses `this`.

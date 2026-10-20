@@ -235,7 +235,7 @@ describe('redisStore against a real server', () => {
     const waiter = locks.mutex(name).run(() => 'ran', { wait: '10s' });
     await eventually(() => subscribers.length === 1, 3000, 'the subscriber to open');
     await holder.release();
-    await waiter;
+    expect(await waiter).toBe('ran');
     await store.dispose?.();
     await eventually(() => subscribers[0]?.status === 'end', 3000, 'the subscriber to close');
     expect(owner.status).toBe('ready');

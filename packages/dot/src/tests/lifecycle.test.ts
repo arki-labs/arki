@@ -289,7 +289,7 @@ describe('DOT lifecycle', () => {
       },
     });
     const app = orThrow(await defineApp('test').use(p).boot());
-    await app.stop();
+    expect(await app.stop()).toBeUndefined();
     expect(stopCalls).toBe(0);
     expect(app.state).toBe('stopped');
     orThrow(await app.dispose());
@@ -679,7 +679,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     expect(signals).toHaveLength(2);
     expect(signals[0]).not.toBe(signals[1]);
     expect(signals.some(signal => signal.aborted)).toBe(false);
-    await app.stop();
+    expect(await app.stop()).toBeUndefined();
     orThrow(await app.dispose());
   });
 

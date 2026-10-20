@@ -24,7 +24,7 @@ ID. One waterfall. Click a span; see its logs.
 
 ---
 
-## Zero cost by default
+## Without an SDK
 
 DOT depends on `@opentelemetry/api`. It does **not** depend on
 `@opentelemetry/sdk-node` or any exporter. Until you register a
@@ -36,10 +36,13 @@ That means:
 - No metrics are exported.
 - The kernel still calls `tracer.startSpan(...)` and
   `meter.createHistogram(...)`, but each call returns a stub that does
-  nothing. Modern V8 inlines these to near-zero cost.
+  nothing.
 
 You opt in by registering an SDK at app boot, exactly once, before
-`defineApp(...)`:
+executing the lifecycle. Importing Dot before SDK setup is supported:
+instruments are acquired when each boundary runs. Failed provider or instrument
+acquisition cannot prevent module loading or application execution. Duration
+metrics classify the original outcome even if span reporting fails.
 
 ```ts skip="needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
 // observability.ts — your app's entry point

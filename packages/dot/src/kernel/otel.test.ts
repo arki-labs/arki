@@ -174,7 +174,7 @@ describe('@arki/dot OTel instrumentation', () => {
     });
 
     const app = orThrow(await defineApp('otel-full-lifecycle-test').use(envPlugin).use(webPlugin).start());
-    await app.stop();
+    expect(await app.stop()).toBeUndefined();
     orThrow(await app.dispose());
 
     // One root phase span per public phase call.

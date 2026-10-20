@@ -181,7 +181,7 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
         if (attempt === 1) await bothLocked.arrive();
         await tx.execute(sql`update accounts set balance = balance + 10 where id = ${to}`);
       });
-    await Promise.all([transfer(dbA, 'a', 'b'), transfer(dbB, 'b', 'a')]);
+    expect(await Promise.all([transfer(dbA, 'a', 'b'), transfer(dbB, 'b', 'a')])).toEqual([undefined, undefined]);
 
     expect([await balanceOf(dbA, 'a'), await balanceOf(dbA, 'b')]).toEqual([100, 100]);
     log.assertLogged({ category: 'arki:db:transaction', level: 'debug', fields: { sqlState: '40P01' } });
@@ -202,8 +202,11 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
         }
       });
 
-    const early = write(dbA, 'a').then(() => firstCommitted.resolve());
-    await Promise.all([early, write(late.db, 'b', firstCommitted.promise)]);
+    const early = write(dbA, 'a').then(outcome => {
+      firstCommitted.resolve();
+      return outcome;
+    });
+    expect(await Promise.all([early, write(late.db, 'b', firstCommitted.promise)])).toEqual([undefined, undefined]);
 
     expect(late.outcomes).toHaveLength(2);
     // Attempt 1 finished all its statements; the 40001 came from COMMIT.
@@ -268,7 +271,7 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
     // The retry is waiting on the mock clock. The pool's only connection must be free.
     expect(await runTransaction(single, async tx => total(tx))).toBe(200);
     await clock.advanceAsync(1000);
-    await retrying;
+    expect(isFailure(await retrying)).toBe(false);
     expect(await balanceOf(dbA, 'a')).toBe(101);
   });
 });

@@ -150,7 +150,7 @@ describe('memoryStore semaphore', () => {
     await orThrow(pool.run(() => void ran.push('light'), { wait: '5s', weight: 1 }));
     expect(ran).toEqual(['light']);
     await holder.release();
-    await heavy;
+    expect(await heavy).toBeUndefined();
     expect(ran).toEqual(['light', 'heavy']);
   });
 });

@@ -207,6 +207,7 @@ expectTypeOf<PluginPhaseFailures<ReturnType<typeof plug<typeof _mixedObject>>>['
 >();
 
 // Void callbacks can hide actual Failure values, so detached callbacks must prove undefined.
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const erasedHook: () => void = () => StartRefused();
 const erasedPromiseHook: () => Promise<void> = () => Promise.resolve(erasedHook());
 // @ts-expect-error a void return hides a failure

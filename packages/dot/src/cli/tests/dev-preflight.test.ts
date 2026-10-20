@@ -112,7 +112,7 @@ describe('the preflight process', () => {
     expect(migrationsOf(events)).toEqual([['v1'], ['v2']]);
 
     controller.abort();
-    await result;
+    expect(isFailure(await result)).toBe(false);
   }, 60_000);
 
   it('a child that prints garbage fails the preflight', async () => {

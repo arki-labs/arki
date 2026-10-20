@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+import { isFailure, orThrow, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
+
+import { CONTRACTS_ERROR_CODES, ContractsError, InvalidCursor, InvalidCursorValue } from './errors.js';
 
 /**
  * Keyset ("cursor") pagination, the browser-safe half: the order a list is
@@ -23,25 +25,38 @@ export type SortDirection = 'asc' | 'desc';
 /** The sort order: row field → direction, most significant first. `{ createdAt: 'desc', id: 'desc' }`. */
 export type KeysetOrder = Readonly<Record<string, SortDirection>>;
 
-/** What a cursor can hold for one key: the value of a NOT NULL column. */
-export type CursorValue = string | number | boolean | Date;
+const cursorValue = z.union([z.string(), z.number(), z.boolean(), z.date()]);
+
+/** What a cursor can hold for one key of a NOT NULL column. */
+export type CursorValue = z.output<typeof cursorValue>;
 
 /** The decoded cursor: one value per key of the order. */
 export type CursorValues<O extends KeysetOrder> = { readonly [K in keyof O]: CursorValue };
 
-/** A keyset declaration — see {@link keyset}. */
-export type Keyset<O extends KeysetOrder> = {
-  /** The order, as declared. */
-  readonly order: O;
-  /** The keys, most significant first. */
-  readonly keys: readonly (keyof O & string)[];
-  /** The cursor of `row`: the next page starts right after it. */
-  readonly encode: (row: CursorValues<O>) => string;
-  /** The values inside a cursor. Throws a `TypeError` on a cursor this keyset did not make. */
-  readonly decode: (cursor: string) => CursorValues<O>;
-  /** Validates a cursor string sent by a client (it must decode). A string on both sides of the wire. */
-  readonly cursor: z.ZodType<string, string>;
-};
+/** A keyset declaration, including its inferred codec failures. */
+export type Keyset<O extends KeysetOrder> = ReturnType<typeof keyset<O>>;
+
+/** Canonical failures returned by cursor decoding. */
+export const CURSOR_DECODE_FAILURES = [InvalidCursor, ValidatorDefect, UnexpectedDefect] as const;
+/** Canonical failures returned by cursor encoding. */
+export const CURSOR_ENCODE_FAILURES = [InvalidCursorValue, ValidatorDefect, UnexpectedDefect] as const;
+/** Canonical cursor failures for adapters that expose both operations. */
+export const CURSOR_FAILURES = [InvalidCursor, InvalidCursorValue, ValidatorDefect, UnexpectedDefect] as const;
+
+const cursorText = z
+  .string()
+  .max(1024)
+  .regex(/^[\w-]*$/)
+  .refine(value => value.length % 4 !== 1);
+
+/** A validator defect is different from data that fails its checks. */
+function validate<Schema extends z.ZodType>(schema: Schema, value: unknown) {
+  try {
+    return schema.safeParse(value);
+  } catch (error) {
+    return ValidatorDefect({ cause: error });
+  }
+}
 
 /** Tagged so a `Date` comes back a `Date`, not a string that happens to look like one. */
 const encodedValue = z.union([
@@ -53,16 +68,11 @@ const encodedValue = z.union([
 
 type EncodedValue = z.infer<typeof encodedValue>;
 
-function encodeValue(key: string, value: CursorValue | null | undefined): EncodedValue {
+function encodeValue(value: CursorValue): EncodedValue {
   if (typeof value === 'string') return ['s', value];
   if (typeof value === 'number') return ['n', value];
   if (typeof value === 'boolean') return ['b', value];
-  if (value instanceof Date) return ['d', value.toISOString()];
-  // A NULL key has no place in the order: `x < NULL` is never true, so the next page would be empty.
-  throw new ContractsError(
-    CONTRACTS_ERROR_CODES.invalidKeyset,
-    `keyset: "${key}" is ${String(value)}; keyset keys must be NOT NULL columns.`,
-  );
+  return ['d', value.toISOString()];
 }
 
 function decodeValue([tag, value]: EncodedValue): CursorValue {
@@ -101,12 +111,12 @@ function fromBase64Url(text: string): string {
  * ```ts
  * export const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });
  * const cursor = storyOrder.encode({ createdAt: row.createdAt, id: row.id });
- * storyOrder.decode(cursor);   // { createdAt: Date, id: 'sty_…' }
+ * // Check or forward a failure before passing the successful cursor to decode.
  * ```
  */
-export function keyset<const O extends KeysetOrder>(order: O): Keyset<O> {
+export function keyset<const O extends KeysetOrder>(order: O) {
   // `Object.keys` is typed `string[]`; these are exactly the keys of `order`.
-  const keys = Object.keys(order) as (keyof O & string)[];
+  const keys = Object.freeze(Object.keys(order) as (keyof O & string)[]);
   if (keys.length === 0)
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidKeyset,
@@ -115,44 +125,80 @@ export function keyset<const O extends KeysetOrder>(order: O): Keyset<O> {
 
   const payload = z.array(encodedValue).length(keys.length);
 
-  const decode = (cursor: string): CursorValues<O> => {
-    let parsed: unknown;
+  const decode = (cursor: string) => {
     try {
-      parsed = JSON.parse(fromBase64Url(cursor));
+      const text = validate(cursorText, cursor);
+      if (isFailure(text)) return text;
+      if (!text.success) return InvalidCursor();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(fromBase64Url(text.data));
+      } catch (error) {
+        if (
+          error instanceof SyntaxError ||
+          error instanceof URIError ||
+          (error instanceof Error && error.name === 'InvalidCharacterError')
+        )
+          return InvalidCursor({ cause: error });
+        return UnexpectedDefect({ cause: error });
+      }
+      const result = validate(payload, parsed);
+      if (isFailure(result)) return result;
+      if (!result.success) return InvalidCursor();
+      const values: Record<string, CursorValue> = {};
+      for (const [index, key] of keys.entries()) {
+        const encoded = result.data[index];
+        if (encoded !== undefined)
+          Object.defineProperty(values, key, { value: decodeValue(encoded), enumerable: true });
+      }
+      // Erasure seam: payload checked one value per key; each field is defined above.
+      return values as CursorValues<O>;
     } catch (error) {
-      throw new ContractsError(CONTRACTS_ERROR_CODES.invalidCursor, 'keyset: the cursor is not one this list made.', {
-        cause: error,
-      });
+      return UnexpectedDefect({ cause: error });
     }
-    const result = payload.safeParse(parsed);
-    if (!result.success)
-      throw new ContractsError(CONTRACTS_ERROR_CODES.invalidCursor, 'keyset: the cursor is not one this list made.');
-    const values: Record<string, CursorValue> = {};
-    for (const [index, key] of keys.entries()) {
-      const encoded = result.data[index];
-      if (encoded !== undefined) values[key] = decodeValue(encoded);
-    }
-    // Erasure seam: built key by key above; `payload` checked there is exactly one value per key.
-    return values as CursorValues<O>;
   };
 
-  const isCursor = (value: string): boolean => {
+  const encode = (row: CursorValues<O>) => {
     try {
-      decode(value);
-      return true;
-    } catch {
-      return false;
+      if (typeof row !== 'object' || row === null) return InvalidCursorValue();
+      const values: EncodedValue[] = [];
+      for (const key of keys) {
+        const result = validate(cursorValue, row[key]);
+        if (isFailure(result)) return result;
+        if (!result.success) return InvalidCursorValue();
+        values.push(encodeValue(result.data));
+      }
+      // Validate the wire output too: valid Dates may use extended ISO years
+      // outside the decoder schema, and must not become unreadable cursors.
+      const payloadResult = validate(payload, values);
+      if (isFailure(payloadResult)) return payloadResult;
+      if (!payloadResult.success) return InvalidCursorValue();
+      const cursor = toBase64Url(JSON.stringify(payloadResult.data));
+      const result = validate(cursorText, cursor);
+      if (isFailure(result)) return result;
+      return result.success ? result.data : InvalidCursorValue();
+    } catch (error) {
+      return UnexpectedDefect({ cause: error });
     }
   };
 
   return {
     order,
     keys,
-    encode: row => toBase64Url(JSON.stringify(keys.map(key => encodeValue(key, row[key])))),
+    encode,
     decode,
-    // 1 KB is generous: a two-key cursor is about 80 characters.
-    cursor: z.string().max(1024).refine(isCursor, { error: 'Invalid cursor' }),
-  };
+    // Zod is an explicit foreign validator boundary: expected input refusals
+    // become issues; unexpected codec defects must reach the parsing owner.
+    cursor: cursorText.refine(
+      value => {
+        const result = decode(value);
+        if (InvalidCursor.is(result)) return false;
+        orThrow(result);
+        return true;
+      },
+      { error: 'Invalid cursor' },
+    ),
+  } as const;
 }
 
 /** Limits for {@link pageInput}. */

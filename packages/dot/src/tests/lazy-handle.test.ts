@@ -42,7 +42,7 @@ describe('lazy handle ownership', () => {
     assert.equal(handle.peek(), value);
     assert.equal(handle.initialized, true);
     assert.equal(attempts, 1);
-    await handle.dispose();
+    assert.equal(await handle.dispose(), undefined);
     assert.equal(handle.initialized, false);
     assert.equal(handle.peek(), undefined);
     assert.ok(LazyClosed.is(await handle.get()));
@@ -66,7 +66,7 @@ describe('lazy handle ownership', () => {
     assert.ok(!isFailure(next));
     assert.equal(next.id, 1);
     assert.equal(attempts, 2);
-    await handle.dispose();
+    assert.equal(await handle.dispose(), undefined);
     assert.equal(cleanups, 1);
   });
   it('sync init throw becomes private UnexpectedDefect and later call retries', async () => {
@@ -82,7 +82,7 @@ describe('lazy handle ownership', () => {
     assert.ok(!JSON.stringify(failed).includes('init-private-secret'));
     assert.equal(handle.peek(), undefined);
     assert.equal(await handle.get(), 42);
-    await handle.dispose();
+    assert.equal(await handle.dispose(), undefined);
   });
   it('async init rejection becomes UnexpectedDefect', async () => {
     const cause = new Error('async init');
@@ -109,7 +109,7 @@ describe('lazy handle ownership', () => {
     assert.equal(handle.initialized, false);
     gate.resolve({ id: 8 });
     assert.deepEqual(await getting, { id: 8 });
-    await disposing;
+    assert.equal(await disposing, undefined);
     assert.deepEqual(events, ['close:8']);
   });
   it('pending init refusal reaches disposer, skips cleanup, and caches result', async () => {
@@ -156,7 +156,7 @@ describe('lazy handle ownership', () => {
         return failure;
       },
     });
-    await handle.get();
+    assert.equal(await handle.get(), 42);
     const disposing = handle.dispose();
     assert.equal(await disposing, failure);
     assert.equal(await handle.dispose(), failure);
@@ -173,7 +173,7 @@ describe('lazy handle ownership', () => {
         return gate.promise;
       },
     });
-    await handle.get();
+    assert.equal(await handle.get(), 42);
     let settled = false;
     const first = handle.dispose();
     const second = handle.dispose();
@@ -198,7 +198,7 @@ describe('lazy handle ownership', () => {
       () => Promise.reject(cause),
     ]) {
       const handle = lazy(() => 42, { dispose: close });
-      await handle.get();
+      assert.equal(await handle.get(), 42);
       const failed = await handle.dispose();
       assert.ok(UnexpectedDefect.is(failed));
       assert.equal(failed.cause, cause);
@@ -244,12 +244,12 @@ describe('lazy handle ownership', () => {
     assert.equal(await handle.get(), undefined);
     assert.equal(opened, true);
     assert.equal(handle.initialized, true);
-    await handle.dispose();
+    assert.equal(await handle.dispose(), undefined);
     assert.equal(cleanups, 1);
   });
   it('incidental cleanup success normalizes to void and stays cached', async () => {
     const handle = lazy(() => 42, { dispose: () => 123 });
-    await handle.get();
+    assert.equal(await handle.get(), 42);
     assert.equal(await handle.dispose(), undefined);
     assert.equal(await handle.dispose(), undefined);
   });

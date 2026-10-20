@@ -134,6 +134,7 @@ expectTypeOf<PluginOpenFailure<typeof _owned>>().toEqualTypeOf<never>();
 expectTypeOf<PluginCloseFailure<typeof _owned>>().toEqualTypeOf<FailureOf<typeof CloseRefused>>();
 expectTypeOf<Provided<typeof _owned.provides.db>>().toEqualTypeOf<{ count: number }>();
 
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const hidden: () => void = () => Refused();
 const hiddenAsync: () => Promise<void> = () => Promise.resolve(hidden());
 // @ts-expect-error void hides the actual returned failure
@@ -164,6 +165,7 @@ feature<'hidden'>('hidden', { boot: hiddenAsync });
 factory.plugin<readonly []>({ name: 'hidden', boot: hidden });
 
 // No factory may erase the refusal it actually returns behind void.
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const erasedProvider: () => void = () => Refused();
 // @ts-expect-error A provider's value and failure channels must remain visible.
 plugin({ name: 'void-provider', provides: { value: erasedProvider } });
@@ -287,6 +289,7 @@ const _harnessOriginal = plugin({ name: 'harness', provides: { value: () => 42 }
 // @ts-expect-error A test cannot replace a number factory with a string behind the original handle.
 testPlugin({ ..._harnessOriginal, factories: { value: () => 'changed' } });
 
+// eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
 const erasedBoot: () => void = () => Refused();
 const opaqueBoot: () => unknown = () => Refused();
 const _erasedBootUnit = { ..._harnessOriginal, hooks: { boot: erasedBoot } };

@@ -30,6 +30,14 @@ declare function fetchTitle(id: string): Promise<string>;
 declare const repo: { find(id: string): { title: string } | PostNotFound } | undefined;
 `;
 
+/** Real definitions keep callback and persistence fixtures tied to the public failure contract. */
+const callbackDeclarations = `
+import { defineFailure, isFailure } from '../index.js';
+const Refused = defineFailure('fixture.refused');
+function persist() { return Refused(); }
+declare function foreign(callback: () => void): void;
+`;
+
 ruleTester.run('must-use', mustUse, {
   valid: [
     // Why: using the value is how the compiler forces the check.
@@ -43,6 +51,14 @@ ruleTester.run('must-use', mustUse, {
     `${declarations} async function f() { await Promise.all([fetchTitle('a'), fetchTitle('b')]); }`,
     // A kept Promise.all result is checked by the compiler, like any other value.
     `${declarations} async function f() { const results = await Promise.all([remove('a'), remove('b')]); return results; }`,
+    `${declarations} let stored: ReturnType<typeof save>; stored = save('a');`,
+    `${declarations} declare function envelope(): { value: PostNotFound }; envelope();`,
+    `${declarations} declare function plainStream(): AsyncIterable<string>; plainStream()[Symbol.asyncIterator]().next();`,
+    `${callbackDeclarations} foreign(() => { const result = persist(); if (isFailure(result)) return; });`,
+    `${callbackDeclarations} declare function retained<T>(callback: () => T): T; function f() { return retained(() => persist()); }`,
+    `${callbackDeclarations} async function checkpoint() { return persist(); } async function workflow() { const written = await checkpoint(); if (isFailure(written)) return written; return 'checkpointed'; }`,
+    `${callbackDeclarations} async function* stream() { yield persist(); } async function f() { const item = await stream().next(); if (!item.done && isFailure(item.value)) return item.value; }`,
+    `${callbackDeclarations} async function middleware(next: () => Promise<ReturnType<typeof Refused>>) { return next(); }`,
     // The one deliberate discard left: a disable comment, which must say why. (The rule tester registers the rule as
     // `@rule-tester/must-use`; `configs.recommended` registers it as `failure/must-use`.)
     `${declarations} async function f() {
@@ -104,6 +120,53 @@ ruleTester.run('must-use', mustUse, {
       code: `${declarations} async function f() { void (await Promise.race([remove('a'), fetchTitle('b')])); }`,
       errors: [{ messageId: 'mustUse', data: { codes: '"post.not_found", "post.locked"' } }],
     },
+    ...[
+      `await (void remove('a'));`,
+      `void (void save('a'));`,
+      `true && save('a');`,
+      `true ? save('a') : save('b');`,
+      `await Promise['all']([remove('a')]);`,
+      `const all = Promise.all.bind(Promise); await all([remove('a')]);`,
+      `async function collect() { return Promise.all([remove('a')]); } await collect();`,
+      `const pending = Promise.all([remove('a')]); await pending;`,
+      `await Promise.all([Promise.all([remove('a')])]);`,
+      `await Promise['allSettled']([remove('a')]);`,
+      `declareStream()[Symbol.asyncIterator]().next();`,
+      `async function read() { return declareStream()[Symbol.asyncIterator]().next(); } await read();`,
+      `const pending = declareStream()[Symbol.asyncIterator]().next(); await pending;`,
+    ].map(body => ({
+      // A different expression spelling or a forwarding helper must not hide the same refusal.
+      code: `${declarations}
+        declare function declareStream(): AsyncIterable<string | PostNotFound>;
+        async function f() { ${body} }`,
+      errors: [{ messageId: 'mustUse' as const }],
+    })),
+    ...[
+      `foreign(() => persist());`,
+      `foreign(() => { return persist(); });`,
+      `foreign(persist);`,
+      `foreign(async () => persist());`,
+      `[1].forEach(() => persist());`,
+      `const checkpoint: () => void = () => persist();`,
+      `const checkpoint: () => void = persist;`,
+      `let checkpoint: () => void; checkpoint = persist;`,
+      `declare function hooks(options: { onClose: () => void }): void; hooks({ onClose: persist });`,
+      `function workflow(checkpoint: () => void = persist) { checkpoint(); }`,
+      `function workflow({ checkpoint = persist }: { checkpoint?: () => void }) { checkpoint(); }`,
+    ].map(body => ({
+      // A void callback boundary silently erases a persistence refusal that still must be handled.
+      code: `${callbackDeclarations} ${body}`,
+      errors: [{ messageId: 'callbackReturn' as const }],
+    })),
+    ...[
+      `async function checkpoint() { return persist(); } async function workflow() { await checkpoint(); }`,
+      `async function* stream() { yield persist(); } async function f() { await stream().next(); }`,
+      `async function middleware(next: () => Promise<ReturnType<typeof Refused>>) { await next(); }`,
+    ].map(body => ({
+      // Persistence, streams and owned middleware must keep the same canonical refusal at the caller.
+      code: `${callbackDeclarations} ${body}`,
+      errors: [{ messageId: 'mustUse' as const }],
+    })),
   ],
 });
 
@@ -139,6 +202,7 @@ ruleTester.run('no-blind-accept', noBlindAccept, {
     `${acceptDeclarations} async function f() { const r = await reserve(); if (OutOfStock.is(r) || Busy.is(r)) accept(r); return r; }`,
     // Checked kinds plus an extra condition are still those kinds.
     `${acceptDeclarations} async function f(retry: boolean) { const r = await reserve(); if ((OutOfStock.is(r) || Busy.is(r)) && retry) accept(r); return r; }`,
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r) && (r.code === 'stock.out' || r.code === 'stock.busy')) accept(r); return r; }`,
     // The kinds are checked in a nested condition: the nearest condition about r decides, not the outer isFailure.
     `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) { if (OutOfStock.is(r) || Busy.is(r)) accept(r); } return r; }`,
     // A wide failure narrowed by a definition's .is is one known kind.
@@ -150,14 +214,34 @@ ruleTester.run('no-blind-accept', noBlindAccept, {
       code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) accept(r); return r; }`,
       options: [{ names: ['handled'] }],
     },
-    // Known limit: with one failure code in the value, isFailure narrows to the same type as OutOfStock.is,
-    // so the type cannot show the check was blind. The rule lets it pass.
-    `${acceptDeclarations} async function f() { const r = await reserveOne(); if (isFailure(r)) accept(r); return r; }`,
+    `${acceptDeclarations} async function f() { const r = await reserveOne(); if (OutOfStock.is(r)) accept(r); return r; }`,
+    `${acceptDeclarations} async function f() { const r = await reserveOne(); if (!OutOfStock.is(r)) return r; accept(r); }`,
+    `${acceptDeclarations} async function f() { const r = await reserve(); if (!(OutOfStock.is(r) || Busy.is(r))) return r; accept(r); }`,
+    `${callbackDeclarations} declare function accept(value: ReturnType<typeof Refused>): void; accept(Refused());`,
+    `${acceptDeclarations} async function f() { const r = await reserve(); let { accept: allow } = ctx; allow = () => {}; if (isFailure(r)) allow(r); }`,
   ],
   invalid: [
     {
       // The headline bug: isFailure accepts every refusal, so a refusal the handler never thought about commits too.
       code: `${acceptDeclarations} async function f() { const r = await reserve(); if (isFailure(r)) accept(r); return r; }`,
+      errors: [{ messageId: 'noBlindAccept', data: { name: 'accept' } }],
+    },
+    ...[
+      `const r = await reserveOne(); if (isFailure(r)) accept(r);`,
+      `const r = await reserveOne(); if (!isFailure(r)) return r; accept(r);`,
+      `const r = await reserveOne(); if (!isFailure(r)) { return r; } const alias = r; accept(alias);`,
+      `const r = await reserveOne(); if (isFailure(r)) { const alias = r; accept(alias); }`,
+      `const r = await reserve(); const allow = accept; if (isFailure(r)) allow(r);`,
+      `const r = await reserve(); const { accept: allow } = ctx; if (isFailure(r)) allow(r);`,
+      `const r = await reserve(); if (isFailure(r)) ctx['accept'](r);`,
+      `const r = await reserve(); const allow = ctx.accept; if (isFailure(r)) allow(r);`,
+    ].map(body => ({
+      // Adding a new refusal later must not make an earlier blind acceptance silently commit it.
+      code: `${acceptDeclarations} async function f() { ${body} }`,
+      errors: [{ messageId: 'noBlindAccept' as const, data: { name: 'accept' } }],
+    })),
+    {
+      code: `${callbackDeclarations} import { accept as allow } from './accept.js'; const r = persist(); if (isFailure(r)) allow(r);`,
       errors: [{ messageId: 'noBlindAccept', data: { name: 'accept' } }],
     },
     {

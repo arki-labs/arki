@@ -655,6 +655,7 @@ into the query:
 import { keyset } from '@arki/contracts';
 import { and, eq } from '@arki/db/orm';
 import { keysetQuery } from '@arki/db/pagination';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { db, stories } from './fixture.ts';
 
@@ -662,17 +663,19 @@ const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });
 const byNewest = keysetQuery(storyOrder, stories); // columns named like the keys
 
 async function listStories(userId: string, cursor: string | undefined, limit: number) {
+  const after = byNewest.after(cursor);
+  if (isFailure(after)) return after;
   const rows = await db
     .select()
     .from(stories)
-    .where(and(eq(stories.userId, userId), byNewest.after(cursor)))
+    .where(and(eq(stories.userId, userId), after))
     .orderBy(...byNewest.orderBy)
     .limit(byNewest.take(limit)); // limit + 1
   return byNewest.page(rows, limit); // { items, nextCursor } — null on the last page
 }
 
-const first = await listStories('usr_1', undefined, 2);
-const last = await listStories('usr_1', first.nextCursor ?? undefined, 2);
+const first = orThrow(await listStories('usr_1', undefined, 2));
+const last = orThrow(await listStories('usr_1', first.nextCursor ?? undefined, 2));
 console.log(first.items.map(story => story.title).join(', '));
 console.log(last.items.map(story => story.title).join(', '), last.nextCursor);
 ```
@@ -689,6 +692,8 @@ first null
 - Keys must be NOT NULL columns. Declare keyset timestamps with
   `{ precision: 3 }` (or `mode: 'string'`): a JS `Date` keeps milliseconds,
   Postgres keeps microseconds, and a rounded cursor can skip rows.
+
+`after` preserves the decoder's exact failures; `page` preserves the encoder's exact failures. Check both before using a predicate or page. A malformed cursor is `InvalidCursor`; unrepresentable row keys are `InvalidCursorValue`. `CURSOR_FAILURES` in `@arki/contracts` supplies original definitions for a transport error map. These local SQL/codec helpers add no separate OTel span; query execution owns it.
 
 ## Environment variables
 
