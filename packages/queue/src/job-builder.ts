@@ -12,6 +12,7 @@ import type { InternalJobDefinition, JobDefinition, JobOptions, TriggerOptions }
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder, observeQueue } from './debug.ts';
+import { withEnqueueSpan } from './enqueue-span.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import { jobRetryOptions } from './job-options.ts';
 import { defaultJobRetry, jobAttempts } from './job-retry.ts';
@@ -181,7 +182,7 @@ export async function triggerJob<TInput, TOutput, TDeps>(
   const jobName = internal.name;
   const queue = internal._queue;
   if (!queue) {
-    return QueueUnavailable();
+    return withEnqueueSpan(() => QueueUnavailable(), jobName);
   }
 
   observeQueue(() =>
@@ -191,17 +192,23 @@ export async function triggerJob<TInput, TOutput, TDeps>(
     })),
   );
 
-  return triggerValidated(internal.inputSchema, data, options?.bullmqOptions?.jobId ?? options?.jobId, async key => {
-    const job = await queue.add(jobName, data, {
-      ...jobTraceOptions(),
-      priority: options?.priority,
-      delay: options?.delay,
-      ...options?.bullmqOptions,
-      jobId: key,
-      ...jobRetryOptions(internal.options),
-    });
+  return triggerValidated(
+    internal.inputSchema,
+    data,
+    options?.bullmqOptions?.jobId ?? options?.jobId,
+    async key => {
+      const job = await queue.add(jobName, data, {
+        ...jobTraceOptions(),
+        priority: options?.priority,
+        delay: options?.delay,
+        ...options?.bullmqOptions,
+        jobId: key,
+        ...jobRetryOptions(internal.options),
+      });
 
-    observeQueue(() => debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id }));
-    return job.id;
-  });
+      observeQueue(() => debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id }));
+      return job.id;
+    },
+    jobName,
+  );
 }

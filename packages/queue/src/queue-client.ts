@@ -107,6 +107,7 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
         );
         return added.id;
       },
+      name,
     );
   }
 

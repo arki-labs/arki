@@ -25,6 +25,7 @@ import type { JobTriggerResult } from '../trigger.ts';
 import type { QueueInstance, RegisterOptions, ScheduleDefinition } from '../types/builder.ts';
 import type { JobDefinition, JobLike } from '../types/job.ts';
 import { debugJob, debugRegister, debugSchedule, debugWorker, observeQueue } from '../debug.ts';
+import { withEnqueueSpan } from '../enqueue-span.ts';
 import { duplicateScheduleError } from '../errors.ts';
 import { executeJob } from '../job-outcome.ts';
 import { defaultJobRetry, jobFailureEnvelope } from '../job-retry.ts';
@@ -98,21 +99,27 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
     def._internal._trigger = (data, opts): Promise<JobTriggerResult> => {
       const activeBoss = boss;
-      if (activeBoss === null) return Promise.resolve(QueueUnavailable());
-      return triggerValidated(def._internal.inputSchema, data, opts?.jobId, async key => {
-        const acknowledged = await activeBoss.send(
-          name,
-          { version: 1, input: data, trace: captureJobTrace(), key },
-          {
-            ...(opts?.priority === undefined ? {} : { priority: opts.priority }),
-            startAfter: opts?.delay ? new Date(Date.now() + opts.delay) : undefined,
-            // Explicit ids provide durable duplicate suppression; singleton keys expire with retention.
-            id: pgBossJobId(name, key),
-          },
-        );
-        if (acknowledged === null && !(await activeBoss.getJobById(name, pgBossJobId(name, key)))) return;
-        return key;
-      });
+      if (activeBoss === null) return withEnqueueSpan(() => QueueUnavailable(), name);
+      return triggerValidated(
+        def._internal.inputSchema,
+        data,
+        opts?.jobId,
+        async key => {
+          const acknowledged = await activeBoss.send(
+            name,
+            { version: 1, input: data, trace: captureJobTrace(), key },
+            {
+              ...(opts?.priority === undefined ? {} : { priority: opts.priority }),
+              startAfter: opts?.delay ? new Date(Date.now() + opts.delay) : undefined,
+              // Explicit ids provide durable duplicate suppression; singleton keys expire with retention.
+              id: pgBossJobId(name, key),
+            },
+          );
+          if (acknowledged === null && !(await activeBoss.getJobById(name, pgBossJobId(name, key)))) return;
+          return key;
+        },
+        name,
+      );
     };
 
     jobDefs.set(name, def);

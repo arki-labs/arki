@@ -26,6 +26,7 @@ import type {
 } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker, observeQueue } from './debug.ts';
+import { withEnqueueSpan } from './enqueue-span.ts';
 import { duplicateScheduleError } from './errors.ts';
 import { addFlow } from './flow-jobs.ts';
 import { jobDefaultOptions } from './job-options.ts';
@@ -514,7 +515,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     }
     const registered = registeredJobs.get(target._internal.name);
     if (!registered) {
-      return QueueUnavailable();
+      return withEnqueueSpan(() => QueueUnavailable(), target._internal.name);
     }
     return registered.definition.trigger(data, options);
   }

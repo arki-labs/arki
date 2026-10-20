@@ -5,6 +5,7 @@ import { defineFailure, InvalidInput, isAsyncSchemaFailure, isFailure, Validator
 import { parseAsync } from '@arki/schema';
 
 import type { QueueJobId } from './job-id.ts';
+import { withEnqueueSpan } from './enqueue-span.ts';
 import { queueJobId } from './job-id.ts';
 
 export const QueueUnavailable = defineFailure('queue.unavailable', {
@@ -33,17 +34,20 @@ export async function triggerValidated<Input>(
   data: unknown,
   key: string | undefined,
   send: (key: QueueJobId) => Promise<string | undefined>,
+  jobName?: string,
 ): Promise<JobTriggerResult> {
-  const checked = await parseAsync(schema, data);
-  if (isAsyncSchemaFailure(checked)) return checked;
-  const id = key === undefined ? queueJobId.create() : await parseAsync(queueJobId.schema, key);
-  if (isFailure(id)) return id;
-  try {
-    const acknowledged = await send(id);
-    if (acknowledged === undefined) return QueueAcceptanceUnknown();
-    const restored = await parseAsync(queueJobId.schema, acknowledged);
-    return isAsyncSchemaFailure(restored) ? QueueAcceptanceUnknown({ cause: restored }) : restored;
-  } catch (error) {
-    return QueueAcceptanceUnknown({ cause: error });
-  }
+  return withEnqueueSpan(async () => {
+    const checked = await parseAsync(schema, data);
+    if (isAsyncSchemaFailure(checked)) return checked;
+    const id = key === undefined ? queueJobId.create() : await parseAsync(queueJobId.schema, key);
+    if (isFailure(id)) return id;
+    try {
+      const acknowledged = await send(id);
+      if (acknowledged === undefined) return QueueAcceptanceUnknown();
+      const restored = await parseAsync(queueJobId.schema, acknowledged);
+      return isAsyncSchemaFailure(restored) ? QueueAcceptanceUnknown({ cause: restored }) : restored;
+    } catch (error) {
+      return QueueAcceptanceUnknown({ cause: error });
+    }
+  }, jobName);
 }
