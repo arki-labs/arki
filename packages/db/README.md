@@ -125,6 +125,13 @@ return `UnexpectedDefect`. Existing stored owner IDs remain readable.
 See [local runtime migration](docs/upgrades/local-runtime.md) for the exact
 failure definitions and cleanup policy.
 
+Local startup emits `db.local.init` and, for file storage, a nested
+`db.local.acquire` span through the `@arki/db` tracer. Owned cleanup emits
+`db.local.close` under the context active when close is called. Concurrent
+close calls share one execution and span. Failures record only `failure.code`;
+paths, owner IDs and private causes are excluded. The application configures
+OpenTelemetry; absent or faulty instrumentation does not change the result.
+
 `dbMigrations({ migrationsFolder })` applies pending migrations at boot. It also provides `migrations: { pending }`, the names it found pending and applied, read before applying (`pendingMigrations(db, options)` from `@arki/db/migrate` gives the same list on demand). `dot dev` prints it.
 
 ### Projections (event sourcing read models)

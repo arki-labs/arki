@@ -11,6 +11,7 @@ import type { LocalRuntimeCloseFailure, LocalRuntimeFailure } from './runtime-lo
 import { debugInit } from './debug.js';
 import { acquireOwnerLock, classifyLocalRuntimeFailure, lockableDataDir } from './owner-lock.js';
 import { LocalRuntimeCleanupFailed } from './runtime-local-failures.js';
+import { observeLocalRuntime } from './runtime-local-telemetry.js';
 
 export { DB_RUNTIME_LOCAL_ERROR_CODES, DbRuntimeLocalError } from './owner-lock.js';
 export type { DbRuntimeLocalErrorCode } from './owner-lock.js';
@@ -41,18 +42,23 @@ class LockedPGlite extends PGlite {
 
   closeOwned(): Promise<void | LocalRuntimeCloseFailure> {
     if (this.#closing !== undefined) return this.#closing;
-    this.#closing = (async () => {
-      try {
-        // A failed driver close may leave a live database. Its lock must remain held.
-        if (!this.closed) await super.close();
-        return await this.#release();
-      } catch (error) {
-        const failure = classifyLocalRuntimeFailure(error);
-        return LocalRuntimeCleanupFailed.is(failure) ? failure : LocalRuntimeCleanupFailed({ cause: error });
-      } finally {
+    // Reserve ownership before tracing can reenter; release it only after reporting ends.
+    this.#closing = Promise.resolve()
+      .then(() =>
+        observeLocalRuntime('db.local.close', async () => {
+          try {
+            // A failed driver close may leave a live database. Its lock must remain held.
+            if (!this.closed) await super.close();
+            return await this.#release();
+          } catch (error) {
+            const failure = classifyLocalRuntimeFailure(error);
+            return LocalRuntimeCleanupFailed.is(failure) ? failure : LocalRuntimeCleanupFailed({ cause: error });
+          }
+        }),
+      )
+      .finally(() => {
         this.#closing = undefined;
-      }
-    })();
+      });
     return this.#closing;
   }
 
@@ -100,34 +106,36 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
     }
   | LocalRuntimeFailure
 > {
-  let pglite: LockedPGlite | undefined;
-  let release: (() => Promise<void | LocalRuntimeCloseFailure>) | undefined;
-  try {
-    const url = options.memory === true ? 'memory://' : (options.dataDir ?? './.local/db');
-    debugInit.debug('[runtime-local] Initializing PGlite at: {url}', { url });
-    const pgliteOptions: PGliteOptions = options.extensions ? { extensions: options.extensions } : {};
-    const lockDir = lockableDataDir(url);
-    if (lockDir !== null) {
-      const acquired = await acquireOwnerLock(lockDir);
-      if (isFailure(acquired)) return acquired;
-      release = acquired;
-    }
-    pglite = new LockedPGlite(url, pgliteOptions, release ?? (() => Promise.resolve()));
-    await pglite.waitReady;
-    const db = drizzle<TRelations>({
-      client: pglite,
-      relations: config.relations,
-      ...(config.logger === undefined ? {} : { logger: config.logger }),
-    });
-    const handle = pglite;
-    return { db, pglite, close: () => handle.closeOwned() };
-  } catch (error) {
-    const failure: LocalRuntimeFailure = classifyLocalRuntimeFailure(error);
-    const cleanup = pglite === undefined ? await release?.() : await pglite.cleanupFailedStart();
-    if (isFailure(cleanup))
-      return LocalRuntimeCleanupFailed({
-        cause: new AggregateError([failure, cleanup], 'Local database startup failed and cleanup is unconfirmed.'),
+  return observeLocalRuntime('db.local.init', async () => {
+    let pglite: LockedPGlite | undefined;
+    let release: (() => Promise<void | LocalRuntimeCloseFailure>) | undefined;
+    try {
+      const url = options.memory === true ? 'memory://' : (options.dataDir ?? './.local/db');
+      debugInit.debug('[runtime-local] Initializing PGlite at: {url}', { url });
+      const pgliteOptions: PGliteOptions = options.extensions ? { extensions: options.extensions } : {};
+      const lockDir = lockableDataDir(url);
+      if (lockDir !== null) {
+        const acquired = await observeLocalRuntime('db.local.acquire', () => acquireOwnerLock(lockDir));
+        if (isFailure(acquired)) return acquired;
+        release = acquired;
+      }
+      pglite = new LockedPGlite(url, pgliteOptions, release ?? (() => Promise.resolve()));
+      await pglite.waitReady;
+      const db = drizzle<TRelations>({
+        client: pglite,
+        relations: config.relations,
+        ...(config.logger === undefined ? {} : { logger: config.logger }),
       });
-    return failure;
-  }
+      const handle = pglite;
+      return { db, pglite, close: () => handle.closeOwned() };
+    } catch (error) {
+      const failure: LocalRuntimeFailure = classifyLocalRuntimeFailure(error);
+      const cleanup = pglite === undefined ? await release?.() : await pglite.cleanupFailedStart();
+      if (isFailure(cleanup))
+        return LocalRuntimeCleanupFailed({
+          cause: new AggregateError([failure, cleanup], 'Local database startup failed and cleanup is unconfirmed.'),
+        });
+      return failure;
+    }
+  });
 }

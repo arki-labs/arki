@@ -134,6 +134,12 @@ The PGlite Dot provider propagates both unions. File-backed startup generates a
 nominal UUID owner ID before filesystem mutation. Existing stored owner IDs
 remain valid. Unconfirmed close retains ownership; failed release is retryable.
 
+The `@arki/db` tracer emits `db.local.init`, nested `db.local.acquire` for
+file ownership, and `db.local.close` for the shared cleanup attempt. Spans
+inherit the caller's active context, including Dot boot/disposal context.
+Only canonical failure codes are recorded. Libraries never configure an SDK;
+reporting failures cannot repeat operations or change their returned outcomes.
+
 | Code                              | Definition                  |
 | --------------------------------- | --------------------------- |
 | `db.local_data_dir_in_use`        | `DataDirInUse`              |

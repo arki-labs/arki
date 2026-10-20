@@ -47,6 +47,18 @@ existing diagnostic integrations; new initialization outcomes use the canonical
 definitions above. Tests and terminal process startup may explicitly use
 `orThrow`; reusable services should propagate failures.
 
-Default local initialization and close spans remain part of the outstanding
-T08 observability work. This migration does not claim new browser, Hermes,
-native Deno, Node26 or packed-artifact coverage for local database storage.
+The `@arki/db` tracer now emits `db.local.init` around the full startup and its
+failed-start cleanup. File ownership acquisition has a nested
+`db.local.acquire` span. Each owned cleanup attempt emits `db.local.close`;
+concurrent callers share the same attempt, while a later retry gets a new span.
+Raw PGlite close uses that same owned cleanup before its foreign error bridge.
+Close inherits its invocation context, rather than retaining the startup span.
+
+No SDK setup is needed in this package. Configure the application's
+OpenTelemetry provider/context manager to export spans and propagate context
+through asynchronous work. Failures record `failure.code` and error status;
+no paths, PIDs, owner IDs, exception messages or private causes are exported.
+Missing or defective instrumentation cannot change a result, duplicate work,
+or release an unconfirmed owner. General transaction/provider observability
+remains T08 work. This slice adds no browser, Hermes, native Deno, Node26 or
+packed-artifact coverage for local database storage.
