@@ -7,7 +7,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 1. A `Clock` has three methods: `now()`, `setTimer(callback, ms)` and `sleep(ms, signal?)`.
 2. `SystemClock` is the real one. `MockClock` is the test one: time moves only when you call `advance`, `advanceAsync` or `setNow`.
 3. Code that needs time takes a `Clock` parameter and defaults it to `new SystemClock()`.
-4. Both clocks apply the same delay rules and raise the same `ClockError` codes.
+4. Both clocks apply the same delay rules and return the same cancellation definition and throw the same setup `ClockError` codes.
 
 ## Task map
 
@@ -39,6 +39,7 @@ if (!isExpired(clock, deadline)) throw new Error('should be expired');
 3. Await the code under test.
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { MockClock } from '@arki/clock';
 
 const clock = new MockClock();
@@ -46,7 +47,8 @@ async function retry(attempts: number): Promise<number> {
   let tries = 0;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     tries += 1;
-    await clock.sleep(1000 * 2 ** attempt);
+    const outcome = await clock.sleep(1000 * 2 ** attempt);
+    if (isFailure(outcome)) throw outcome;
   }
   return tries;
 }
@@ -59,7 +61,7 @@ if ((await done) !== 3) throw new Error('expected three tries');
 ### Cancel a wait
 
 1. Pass an `AbortSignal` to `sleep`.
-2. Catch `ClockError` and branch on `error.code === CLOCK_ERROR_CODES.aborted`.
+2. Await the outcome and check `SleepCancelled.is(outcome)`; cancellation is returned, never rejected.
 
 ## Rules that bite
 
@@ -75,7 +77,7 @@ if ((await done) !== 3) throw new Error('expected three tries');
 | ----------------- | -------------------------------------------------------------- | ------------------------------------------- |
 | `ARKI_CLOCK_E001` | `advance` or `advanceAsync` got a negative or non-finite step. | Pass zero or more. Use `setNow` to go back. |
 | `ARKI_CLOCK_E002` | A delay is negative, not finite, or above `MAX_TIMER_MS`.      | Pass a valid delay. Split long waits.       |
-| `ARKI_CLOCK_E003` | The signal aborted a `sleep`. `cause` is `signal.reason`.      | Catch it where you abort.                   |
+| `clock.sleep_cancelled` | The signal aborted a `sleep`; private `cause` is `signal.reason`. | Handle the returned outcome. |
 
 ## Verify
 
@@ -84,3 +86,5 @@ bun run test
 bun run test:docs
 bun ../../tooling/library/src/llms.ts --check
 ```
+
+Sleep waits for asynchronous cleanup returned by a provider before settling. Asynchronous listener registration rejection becomes a defect while sleep is pending; a rejection after completion is observed without changing the completed outcome. Owned sleep provider registration and cleanup defects return canonical `UnexpectedDefect` from `@arki/failure`. `SLEEP_FAILURES` contains exactly `SleepCancelled` and `UnexpectedDefect`; private causes are excluded from serialization.

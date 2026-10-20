@@ -1,5 +1,4 @@
 import type { ResiliencePolicy, ResiliencePolicyOptions } from './policies.js';
-import type { Policy } from './policy.js';
 import { backoff } from './backoff.js';
 import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy, wrap } from './policies.js';
 
@@ -30,7 +29,7 @@ export const externalApiPolicy: ResiliencePolicy = createResiliencePolicy({
  * - Retry: 2 retries, 50 ms doubling to at most 1 s, 25% jitter
  * - Timeout: 5 s per attempt
  */
-export const databasePolicy: Policy = wrap(
+export const databasePolicy = wrap(
   createRetryPolicy({ backoff: backoff.exponential({ base: 50, max: 1000, jitter: 0.25 }).upTo(2) }),
   createTimeoutPolicy({
     timeoutMs: 5000,

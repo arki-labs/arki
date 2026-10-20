@@ -3,14 +3,20 @@
  * tokens, cookies or passwords, and an observer bug can never change what the user gets back.
  * `beforeUserCreate` is the one hook that can refuse (avocabo's waitlist).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { UnexpectedDefect } from '@arki/failure';
 
 import type { AuthEvents } from './types.js';
 import { cookiesOf, PASSWORD, post } from '../__fixtures__/http.js';
 import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES, AuthError } from '../errors.js';
+import { log } from '../log.js';
 import { testAuth } from '../testing/index.js';
+import { requestIdOf } from './events.js';
+
+afterEach(() => vi.restoreAllMocks());
 
 const open = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], verifyEmail: 'none' });
 const strict = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'] });
@@ -39,6 +45,50 @@ function recorder() {
 }
 
 describe('auth events', () => {
+  it('preserves inbound correlation bytes without consulting entropy', () => {
+    const random = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+      throw new Error('unavailable');
+    });
+    expect(requestIdOf(new Headers({ 'x-request-id': 'edge/inbound:123' }))).toBe('edge/inbound:123');
+    expect(random).not.toHaveBeenCalled();
+  });
+
+  it('retains the exact entropy defect and preserves the completed sign-up', async () => {
+    const { on, named } = recorder();
+    const { auth, dispose } = await testAuth(open, { tables: authTables, on });
+    const cause = new Error('UUID provider fault');
+    vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+      throw cause;
+    });
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {
+      // Capture the exact failure without emitting the fixture's deliberate fault.
+    });
+    try {
+      const failure = requestIdOf(new Headers());
+      expect(UnexpectedDefect.is(failure)).toBe(true);
+      if (!UnexpectedDefect.is(failure)) throw new Error('Expected canonical defect');
+      expect(failure.cause).toBe(cause);
+      expect(warn).toHaveBeenCalledWith(expect.any(String), { failure });
+      const response = await post(auth, '/sign-up/email', {
+        email: 'entropy@notes.test',
+        password: PASSWORD,
+        name: 'Ada',
+      });
+      expect(response.status).toBe(200);
+      expect(await auth.principal(new Headers({ cookie: cookiesOf(response) }))).not.toBeNull();
+      expect(named('userCreated')).toHaveLength(1);
+      expect(named('signIn')).toHaveLength(0);
+      const refused = await post(auth, '/sign-in/email', {
+        email: 'entropy@notes.test',
+        password: 'incorrect password',
+      });
+      expect(refused.status).toBe(401);
+      expect(named('signInFailed')).toHaveLength(0);
+    } finally {
+      await dispose();
+    }
+  });
+
   it('report sign-up, sign-in, failure, password change and sign-out with their method', async () => {
     const { events, on, named } = recorder();
     const { auth, dispose } = await testAuth(open, { tables: authTables, on });

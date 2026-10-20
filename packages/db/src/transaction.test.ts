@@ -14,8 +14,8 @@ import { DrizzleQueryError } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MockClock } from '@arki/clock';
-import { defineFailure, isFailure, orThrow, UnexpectedFailure } from '@arki/failure';
+import { MockClock, SleepCancelled } from '@arki/clock';
+import { defineFailure, isFailure, orThrow, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 import { configure, memorySink } from '@arki/log';
 import { fakeLog } from '@arki/log/testing';
 
@@ -530,5 +530,25 @@ it.each(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_A
     const result = await runTransaction(scriptedDb().db, () => Promise.reject(cause));
     expect(TransactionUnavailable.is(result)).toBe(true);
     expect(result).toMatchObject({ cause });
+  },
+);
+
+
+it.each([SleepCancelled({ cause: 'foreign cancellation' }), UnexpectedDefect({ cause: new Error('timer failed') })])(
+  'a refused retry wait ($code) cannot replay transaction work',
+  async refusal => {
+    const clock = new MockClock();
+    const sleep = vi.spyOn(clock, 'sleep').mockResolvedValue(refusal);
+    const { db, configs } = scriptedDb([sqlError('40001')]);
+    const work = vi.fn(() => Promise.resolve('done'));
+    const result = await runTransaction(db, work, { clock });
+    expect(result).toMatchObject({
+      code: SleepCancelled.is(refusal) ? TransactionCancelled.code : TransactionDefect.code,
+    });
+    if (!isFailure(result)) throw new Error('expected transaction failure');
+    expect(result.cause).toBe(refusal);
+    expect(work).toHaveBeenCalledOnce();
+    expect(configs).toHaveLength(1);
+    expect(sleep).toHaveBeenCalledOnce();
   },
 );

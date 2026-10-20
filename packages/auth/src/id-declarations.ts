@@ -11,3 +11,6 @@ export const accountId = defineId('acc_');
 export const verificationId = defineId('verif_');
 export const organizationId = defineId('organization_');
 export const teamId = defineId('team_');
+
+/** Correlation identity; inbound header values keep their existing format. */
+export const authRequestId = defineId('', { kind: 'auth.request', format: 'uuid' });

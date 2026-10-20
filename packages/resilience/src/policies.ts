@@ -9,7 +9,7 @@ import {
   TimeoutStrategy,
 } from 'cockatiel';
 
-import type { Clock } from '@arki/clock';
+import type { Clock, SleepFailure } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
 
 import type { Backoff } from './backoff.js';
@@ -148,7 +148,7 @@ export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): Bulkh
  * every attempt goes through the breaker and then the timeout. Events on the result are
  * those of the outermost policy.
  */
-export function wrap(first: Policy, ...rest: Policy[]): Policy {
+export function wrap<E = never>(first: Policy<never, E>, ...rest: Policy<never, E>[]): Policy<never, E> {
   return fromEngine(cockatielWrap(engineOf(first), ...rest.map(policy => engineOf(policy))), {});
 }
 
@@ -168,7 +168,7 @@ export type ResilienceComponents = {
  * What `createResiliencePolicy` returns: the composed policy plus the parts it runs. `F` is what
  * its `onThrow` may answer instead of the function's own `T`; `never` without one.
  */
-export type ResiliencePolicy<F = never> = Policy<F> & { readonly components: ResilienceComponents };
+export type ResiliencePolicy<F = never> = Policy<F, SleepFailure> & { readonly components: ResilienceComponents };
 
 /**
  * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.

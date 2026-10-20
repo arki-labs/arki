@@ -1,3 +1,5 @@
+import type { MutationIdempotencyKey } from '../src/mutations/identity.ts';
+import { orThrow } from '@arki/failure';
 // The README's Tier 2 examples, compiled.
 import { oc } from '@orpc/contract';
 import type { ContractRouterClient } from '@orpc/contract';
@@ -33,8 +35,8 @@ it('README: useOfflineMutation(orpc.posts.create)', async () => {
   // What `createOrpcUtils(rpcContract, client)` gives each leaf; the hook reads only this.
   const orpc = { posts: { create: { [OPERATION]: operations(rpcContract).posts.create } } };
   const { mutate } = useOfflineMutation(orpc.posts.create);
-  const { idempotencyKey } = await mutate({ title: 'Hello' });
-  expectTypeOf(idempotencyKey).toEqualTypeOf<string>();
+  const { idempotencyKey } = orThrow(await mutate({ title: 'Hello' }));
+  expectTypeOf(idempotencyKey).toEqualTypeOf<MutationIdempotencyKey>();
 });
 
 declare const client: ContractRouterClient<typeof rpcContract>;

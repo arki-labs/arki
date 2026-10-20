@@ -1,11 +1,13 @@
 // The reason retry takes a clock: a retry with real-size delays (seconds) must be testable
 // without waiting those seconds and without faking the global timers.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { MockClock } from '@arki/clock';
+import type { SleepFailure } from '@arki/clock';
+import { UnexpectedDefect } from '@arki/failure';
+import { MockClock, SleepCancelled } from '@arki/clock';
 
-import { backoff, CancelledError, createResiliencePolicy, createRetryPolicy, withRetry } from './index.js';
+import { backoff, createResiliencePolicy, createRetryPolicy, createTimeoutPolicy, noop, withRetry, withResilience, wrap } from './index.js';
 
 /** A function that fails `failures` times, then returns 'ok'. Records the clock time of each call. */
 function flaky(clock: MockClock, failures: number) {
@@ -91,7 +93,7 @@ describe('retry delays on a MockClock', () => {
     expect(delays).toEqual([2000, 4000]);
   });
 
-  it('an abort during the delay ends the call with CancelledError, without another try', async () => {
+  it('an abort during the delay returns SleepCancelled, without another try', async () => {
     const clock = new MockClock();
     const { fn, calledAt } = flaky(clock, 5);
     const controller = new AbortController();
@@ -104,7 +106,7 @@ describe('retry delays on a MockClock', () => {
     await clock.advanceAsync(1000);
     controller.abort();
 
-    await expect(settled).resolves.toBeInstanceOf(CancelledError);
+    expect(SleepCancelled.is(await settled)).toBe(true);
     expect(calledAt).toEqual([0]);
   });
 
@@ -119,4 +121,28 @@ describe('retry delays on a MockClock', () => {
     await expect(result).resolves.toBe('ok');
     expect(calledAt).toEqual([0, 1500, 4500]);
   });
+});
+
+
+it('preserves a clock refusal through composition and never repeats the operation', async () => {
+  const refused = UnexpectedDefect({ cause: new Error('private timer provider') });
+  class RefusingClock extends MockClock {
+    override sleep() { return Promise.resolve(refused); }
+  }
+  const retry = createRetryPolicy({ clock: new RefusingClock(), backoff: backoff.constant(1).upTo(3) });
+  const policy = wrap(retry, createTimeoutPolicy());
+  let attempts = 0;
+  const result = withResilience(() => { attempts++; throw new Error('try once'); }, policy);
+  expectTypeOf(result).toEqualTypeOf<Promise<SleepFailure>>();
+  expect(await result).toBe(refused);
+  expect(attempts).toBe(1);
+  expectTypeOf(noop.execute(() => 1)).toEqualTypeOf<Promise<number>>();
+});
+
+it('keeps engine execution usable when detached or copied into a plain policy', async () => {
+  const original = createTimeoutPolicy();
+  const { execute } = original;
+  expect(await execute(() => 42)).toBe(42);
+  const copied = { ...original };
+  expect(await copied.execute(() => 'copied')).toBe('copied');
 });

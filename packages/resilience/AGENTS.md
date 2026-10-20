@@ -10,7 +10,7 @@ Retry, circuit breaker, timeout, bulkhead and presets. Read these before you cha
 2. A thrown error is retried by the backoff and, when the retries run out, thrown again unchanged. The retry policy does not wrap it in another error.
 3. A backoff without `.upTo(n)` retries forever. Always bound production retries. `upTo(0)` never retries.
 4. `.while(...definitions)` is decided once: the first `while` decides alone for failures, and a second `while` narrows the first. Name all the definitions in one call.
-5. A cancel by the caller's signal is a `CancelledError`. It is never retried, never mapped by `onThrow`, and never given to a fallback.
+5. A cancel during a retry delay returns canonical `SleepCancelled`; timer defects return `UnexpectedDefect`. Other engine cancellation still uses a `CancelledError` during the A-33 migration. It is never retried, never mapped by `onThrow`, and never given to a fallback.
 6. A policy with `withFallback` or `onThrow` is a `Policy<F>`. It is outermost and cannot go inside `wrap`. This is a compile error on purpose.
 7. Retry waits on a `Clock` from `@arki/clock`. Tests pass a `MockClock`. Never `await` a real timer in a test.
 8. A breaker keeps state. Build it once and reuse it. A `presets` object shared by two apps shares its breakers.

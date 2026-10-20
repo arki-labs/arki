@@ -393,3 +393,7 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 ## Support
 
 Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues). Report a security problem privately to the maintainers, not in a public issue.
+
+Auth event correlation IDs use the `AuthRequestId` domain type exported by `@arki/auth/ids`. Restore inbound IDs with `authRequestIdSchema` from `@arki/auth/zod`. Existing inbound `x-request-id` values keep their bytes. When secure correlation ID generation fails, auth logs the exact canonical failure and omits the correlated `signIn`/`signInFailed` event; the HTTP response or native sign-in result remains unchanged. Other observers still run. Observers are best effort, not a durable audit delivery mechanism.
+
+The Postgres runtime emits OpenTelemetry spans for `auth.handler`, `auth.principal`, `auth.sign_in_with_id_token` and event observers. Configure the SDK/exporter in the app. Observer code can use the active OTel context for custom spans. Default attributes contain HTTP status and failure code only; credentials and event payloads are excluded. Reporter faults cannot change or repeat authentication.

@@ -4,9 +4,13 @@
  * Both hooks read from OfflineQueueProvider context.
  * useQueueStatus uses useSyncExternalStore for React 18+ correctness.
  */
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 
 import type { Identified, InputOf } from '@arki/contracts/orpc';
+
+import { isFailure } from '@arki/failure';
+import type { EnqueueFailure, OfflineQueueFailure } from './failures.ts';
+import type { EnqueueReceipt, OfflineMutationQueue } from './queue.ts';
 
 import type { OfflineSafeOperation, QueueEvent } from './queue.ts';
 import { useOfflineQueue } from './OfflineQueueProvider.tsx';
@@ -15,11 +19,7 @@ import { useOfflineQueue } from './OfflineQueueProvider.tsx';
 // useQueueStatus
 // ---------------------------------------------------------------------------
 
-export interface QueueStatus {
-  queued: number;
-  sending: boolean;
-  deadLettered: number;
-}
+export type QueueStatus = ReturnType<OfflineMutationQueue['status']>;
 
 /**
  * Subscribes to queue events and returns a live status snapshot.
@@ -45,9 +45,12 @@ export function useQueueStatus(): QueueStatus {
   const sending = useSyncExternalStore(subscribe, getSendingSnapshot, getServerFalse);
   const deadLettered = useSyncExternalStore(subscribe, getDeadLetteredSnapshot, getServerZero);
 
-  return useMemo(() => ({ queued, sending, deadLettered }), [queued, sending, deadLettered]);
+  const getFailure = useCallback(() => queue.status().failure, [queue]);
+  const failure = useSyncExternalStore(subscribe, getFailure, getServerFailure);
+  return useMemo(() => ({ queued, sending, deadLettered, failure }), [queued, sending, deadLettered, failure]);
 }
 
+const getServerFailure = (): OfflineQueueFailure | null => null;
 const getServerZero = (): number => 0;
 const getServerFalse = (): boolean => false;
 
@@ -56,8 +59,10 @@ const getServerFalse = (): boolean => false;
 // ---------------------------------------------------------------------------
 
 export type UseOfflineMutationResult<TInput> = {
-  readonly mutate: (input: TInput) => Promise<{ idempotencyKey: string }>;
+  readonly mutate: (input: TInput) => Promise<EnqueueReceipt | EnqueueFailure>;
   readonly isQueued: boolean;
+  readonly isPending: boolean;
+  readonly failure: OfflineQueueFailure | null;
 };
 
 /**
@@ -73,11 +78,19 @@ export function useOfflineMutation<Op extends OfflineSafeOperation>(
 ): UseOfflineMutationResult<InputOf<Op>> {
   const { queue } = useOfflineQueue();
   const status = useQueueStatus();
+  const [pending, setPending] = useState(0);
+  const [failure, setFailure] = useState<EnqueueFailure | null>(null);
 
   const mutate = useCallback(
-    async (input: InputOf<Op>): Promise<{ idempotencyKey: string }> => {
-      const result = await queue.enqueue(carrier, input);
-      return { idempotencyKey: result.idempotencyKey };
+    async (input: InputOf<Op>): Promise<EnqueueReceipt | EnqueueFailure> => {
+      setPending(count => count + 1);
+      try {
+        const result = await queue.enqueue(carrier, input);
+        setFailure(isFailure(result) ? result : null);
+        return result;
+      } finally {
+        setPending(count => count - 1);
+      }
     },
     [queue, carrier],
   );
@@ -85,5 +98,7 @@ export function useOfflineMutation<Op extends OfflineSafeOperation>(
   return {
     mutate,
     isQueued: status.queued > 0,
+    isPending: pending > 0,
+    failure: failure ?? status.failure,
   };
 }

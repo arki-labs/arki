@@ -17,14 +17,14 @@ import type { Policy, PolicyCallback } from './policy.js';
  * const quote = await quotes.execute(() => fetchQuote()); // Quote | null
  * ```
  */
-export function withFallback<F, G = never>(
-  policy: Policy<G>,
+export function withFallback<F, G = never, E = never>(
+  policy: Policy<G, E>,
   fallback: (error: unknown) => F | PromiseLike<F>,
-): Policy<G | F> {
+): Policy<G | F, E> {
   return {
     onSuccess: policy.onSuccess,
     onFailure: policy.onFailure,
-    async execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | G | F> {
+    async execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | G | F | E> {
       try {
         return await policy.execute(fn, signal);
       } catch (error) {

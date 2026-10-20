@@ -1,6 +1,8 @@
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
+
 /**
- * Every failure this package raises on purpose is a {@link ClockError} with a
- * stable `code`. Match on the code, never on the message.
+ * Static timer configuration misuse raises {@link ClockError}. Sleep operational
+ * outcomes are canonical failure values. Match definitions or codes, never messages.
  */
 
 /** Stable error codes of `@arki/clock`. */
@@ -20,9 +22,10 @@ export const CLOCK_ERROR_CODES = {
    */
   invalidDelay: 'ARKI_CLOCK_E002',
   /**
-   * A `sleep` was cut short by its `AbortSignal`. `cause` is `signal.reason`.
+   * Legacy abort exception code; sleep now returns SleepCancelled.
+   * @deprecated Match SleepCancelled instead.
    *
-   * @fix Catch `ClockError` with this code where you abort, or check `signal.aborted` before you sleep.
+   * @fix Handle SleepCancelled returned from sleep.
    * @verify bun run test
    */
   aborted: 'ARKI_CLOCK_E003',
@@ -44,3 +47,18 @@ export class ClockError extends Error {
     this.remediation = remediation;
   }
 }
+
+/** A sleep ended before its timer because its owner cancelled it.
+ * @fix Handle cancellation at the owning operation boundary.
+ * @verify bun run test
+ */
+export const SleepCancelled = defineFailure('clock.sleep_cancelled', {
+  status: 499,
+  message: 'Sleep was cancelled before it finished.',
+  remediation: 'Handle cancellation at the owning operation boundary.',
+});
+
+/** Exact canonical failure definitions returned by Clock.sleep. */
+export const SLEEP_FAILURES = [SleepCancelled, UnexpectedDefect] as const;
+/** Every operational outcome of Clock.sleep, inferred from its definitions. */
+export type SleepFailure = ReturnType<(typeof SLEEP_FAILURES)[number]>;

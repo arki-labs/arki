@@ -263,14 +263,16 @@ describe('lazy clocks and borrowed services', () => {
     let cleaned = false;
     const handle = lazy(
       async () => {
-        await clock.sleep(20);
+        const slept = await clock.sleep(20);
+        if (slept !== undefined) return slept;
         initialized = true;
         return { id: 9 };
       },
       {
         dispose: async value => {
           expect(value.id).toBe(9);
-          await clock.sleep(30);
+          const slept = await clock.sleep(30);
+          if (slept !== undefined) return slept;
           cleaned = true;
           return refused;
         },

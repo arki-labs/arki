@@ -15,6 +15,11 @@
       "import": "./src/react/index.ts",
       "browser": "./src/react/index.ts"
     },
+    "./react/index": {
+      "types": "./dist/src/react/index.d.ts",
+      "import": "./src/react/index.ts",
+      "browser": "./src/react/index.ts"
+    },
     "./react/*": {
       "types": "./dist/src/react/*.d.ts",
       "import": "./src/react/*.tsx",

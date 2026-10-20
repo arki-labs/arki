@@ -66,7 +66,7 @@ export function createCooldownGate(clock: Clock, windowMs: number) {
 
 ## Runtime support
 
-Pure ESM with no dependencies and no `node:*` imports. It uses only `Date` and `setTimeout` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+Pure ESM with a portable `@arki/failure` dependency and no `node:*` imports. It uses only `Date` and `setTimeout` at call time, so it runs on Node, Bun, Deno, browsers and React Native (Hermes). `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
 
 <!-- runtimes:start -->
 
@@ -90,7 +90,7 @@ The type every clock implements:
 
 - `now(): Date` — return the current time as a `Date`.
 - `setTimer(callback, ms): () => void` — call `callback` once, `ms` milliseconds from now. Returns a function that cancels the timer. Throws `ARKI_CLOCK_E002` when `ms` is negative, not finite, or above `MAX_TIMER_MS`.
-- `sleep(ms, signal?): Promise<void>` — resolve `ms` milliseconds from now. Aborting `signal` clears the timer and rejects with `ARKI_CLOCK_E003` (`cause` is `signal.reason`).
+- `sleep(ms, signal?): Promise<void | SleepFailure>` — resolve `ms` milliseconds from now. Aborting `signal` clears the timer and returns `SleepCancelled` (private `cause` is `signal.reason`).
 
 `MAX_TIMER_MS` is 2^31 - 1 ms (about 24.8 days), the longest delay every runtime's `setTimeout` honors.
 
@@ -109,6 +109,7 @@ Controllable clock for tests.
 - `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios. Fires no timers.
 
 ```ts run
+import { isFailure } from '@arki/failure';
 import { MockClock } from '@arki/clock';
 
 const clock = new MockClock();
@@ -116,7 +117,8 @@ async function callWithRetry(): Promise<number> {
   let tries = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     tries += 1;
-    await clock.sleep(1000 * 2 ** attempt); // 1 s, 2 s, 4 s between tries
+    const outcome = await clock.sleep(1000 * 2 ** attempt); // 1 s, 2 s, 4 s between tries
+    if (isFailure(outcome)) throw outcome;
   }
   return tries;
 }
@@ -128,30 +130,26 @@ if ((await result) !== 3) throw new Error('expected three tries');
 
 ## Failure behaviour
 
-Every failure is a `ClockError` with a stable `code` and a `remediation` sentence. Match on `error.code`, never on the message. `setTimer`, `advance` and `advanceAsync` throw at once. `sleep` rejects. `now()` and `setNow()` never throw.
+Operational cancellation returns `SleepCancelled`, defined once in `SLEEP_FAILURES`; `SleepFailure` is inferred from that tuple. Static timer/advance misuse still throws `ClockError` under A33. Unknown callback/runtime defects remain exceptions. `now()` and `setNow()` add no failure outcome.
 
 | Code              | Raised by                           | Meaning                                                             |
 | ----------------- | ----------------------------------- | ------------------------------------------------------------------- |
 | `ARKI_CLOCK_E001` | `MockClock.advance`, `advanceAsync` | The step is negative, `NaN` or not finite. Use `setNow` to go back. |
 | `ARKI_CLOCK_E002` | `setTimer`, `sleep`                 | The delay is negative, not finite, or above `MAX_TIMER_MS`.         |
-| `ARKI_CLOCK_E003` | `sleep`                             | The signal aborted the sleep. `cause` is `signal.reason`.           |
+| `clock.sleep_cancelled` | `sleep` | The signal aborted the sleep; private `cause` is `signal.reason`. |
 
 Handle an aborted sleep like this:
 
 ```ts run
-import { CLOCK_ERROR_CODES, ClockError, MockClock } from '@arki/clock';
+import { SleepCancelled, MockClock } from '@arki/clock';
 
 const clock = new MockClock();
 const controller = new AbortController();
 const waiting = clock.sleep(1000, controller.signal);
 controller.abort('user cancelled');
-try {
-  await waiting;
-  throw new Error('sleep should have rejected');
-} catch (error) {
-  if (!(error instanceof ClockError) || error.code !== CLOCK_ERROR_CODES.aborted) throw error;
-  if (error.cause !== 'user cancelled') throw new Error('cause should be the abort reason');
-}
+const outcome = await waiting;
+if (!SleepCancelled.is(outcome)) throw new Error('sleep should have returned cancellation');
+if (outcome.cause !== 'user cancelled') throw new Error('cause should be the abort reason');
 ```
 
 ## Limits
@@ -240,3 +238,5 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 ## License
 
 MIT. See [LICENSE](./LICENSE).
+
+Sleep waits for asynchronous cleanup returned by a provider before settling. Asynchronous listener registration rejection becomes a defect while sleep is pending; a rejection after completion is observed without changing the completed outcome. Owned sleep provider registration and cleanup defects return canonical `UnexpectedDefect` from `@arki/failure`. `SLEEP_FAILURES` contains exactly `SleepCancelled` and `UnexpectedDefect`; private causes are excluded from serialization.

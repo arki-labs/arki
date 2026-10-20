@@ -215,13 +215,13 @@ const result = await withResilience(({ signal }) => doWork(signal), policy);
 Every policy has the same shape, the `Policy` type:
 
 ```ts
-import type { Policy, PolicyContext } from '@arki/resilience';
+import type { PolicyContext } from '@arki/resilience';
 import { createResiliencePolicy } from '@arki/resilience';
 
 declare function fetchPage(signal: AbortSignal): Promise<string>;
 declare const parentSignal: AbortSignal;
 
-const policy: Policy = createResiliencePolicy();
+const policy = createResiliencePolicy();
 
 await policy.execute(({ signal, attempt }: PolicyContext) => fetchPage(signal), parentSignal);
 ```
@@ -331,7 +331,7 @@ class ServiceUnavailable extends Error {}
 
 const policy = createResiliencePolicy();
 
-export async function callWithCache(cachedAnswer: string): Promise<string> {
+export async function callWithCache(cachedAnswer: string) {
   try {
     return await withResilience(() => callDownstream(), policy);
   } catch (error) {
@@ -479,3 +479,7 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Typed retry waits
+
+Retry delay cancellation now returns `SleepCancelled` from `@arki/clock`; a clock provider fault returns `UnexpectedDefect`. These exact `SleepFailure` outcomes propagate through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without retrying or invoking a throw fallback. Check returned failures before using successful values. Other policy engine rejections retain their existing bridge during the A-33 migration; cancellation during an in-flight timeout is still `CancelledError`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no sleep failures.

@@ -7,6 +7,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Failure } from '@arki/failure';
+import type { SleepFailure } from '@arki/clock';
 import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure } from '@arki/failure';
 
@@ -179,7 +180,7 @@ describe('onThrow types', () => {
     const policy = createResiliencePolicy({ onThrow: cause => Unavailable({ cause }) });
 
     expectTypeOf(policy).toEqualTypeOf<ResiliencePolicy<Failure<'push.unavailable', undefined>>>();
-    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined>>>();
+    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined> | SleepFailure>>();
   });
 
   it('an async mapper unwraps, and a rethrowing branch adds nothing', () => {
@@ -196,8 +197,8 @@ describe('onThrow types', () => {
   it('without onThrow nothing is added, and the policy is a plain Policy that wrap accepts', () => {
     const plain = createResiliencePolicy();
 
-    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number>>();
-    expectTypeOf(plain).toExtend<Policy>();
+    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number | SleepFailure>>();
+    expectTypeOf(plain).toExtend<Policy<never, SleepFailure>>();
     expectTypeOf(createRetryPolicy()).toEqualTypeOf<RetryPolicy>();
   });
 

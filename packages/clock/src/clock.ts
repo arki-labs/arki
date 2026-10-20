@@ -1,4 +1,7 @@
-import { CLOCK_ERROR_CODES, ClockError } from './errors.js';
+import { UnexpectedDefect } from '@arki/failure';
+
+import type { SleepFailure } from './errors.js';
+import { CLOCK_ERROR_CODES, ClockError, SleepCancelled } from './errors.js';
 
 /** The longest delay every runtime's `setTimeout` honors (2^31 - 1 ms, about 24.8 days). */
 export const MAX_TIMER_MS = 2_147_483_647;
@@ -22,11 +25,11 @@ export type Clock = {
   setTimer(callback: () => void, ms: number): () => void;
   /**
    * Resolves `ms` milliseconds from now. Aborting `signal` clears the timer and
-   * rejects with `ClockError` (`ARKI_CLOCK_E003`) whose `cause` is `signal.reason`;
-   * an already-aborted signal rejects at once. An invalid `ms` rejects with
+   * returns `SleepCancelled` whose private `cause` is `signal.reason`;
+   * an already-aborted signal returns it at once. An invalid `ms` rejects with
    * `ClockError` (`ARKI_CLOCK_E002`).
    */
-  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+  sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure>;
 };
 
 function assertDelay(method: string, ms: number): void {
@@ -38,35 +41,82 @@ function assertDelay(method: string, ms: number): void {
   );
 }
 
-function abortedError(reason: unknown): ClockError {
-  return new ClockError(
-    CLOCK_ERROR_CODES.aborted,
-    'sleep was aborted before it finished',
-    'Catch ClockError with code ARKI_CLOCK_E003 where you abort, or check signal.aborted before you sleep.',
-    { cause: reason },
-  );
-}
-
 /** One `sleep` for every clock, built on its `setTimer`. */
-function sleepOn(clock: Clock, ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(abortedError(signal.reason));
-      return;
-    }
-    if (signal === undefined) {
-      clock.setTimer(resolve, ms);
-      return;
-    }
-    const onAbort = (): void => {
-      cancel();
-      reject(abortedError(signal.reason));
+async function sleepOn(clock: Clock, ms: number, signal: AbortSignal | undefined): Promise<void | SleepFailure> {
+  // Invalid timer definitions are programmer misuse; operational provider faults below are owned here.
+  assertDelay('Clock.sleep', ms);
+  return new Promise<void | SleepFailure>(resolve => {
+    let cancel: (() => void) | undefined;
+    const state = { settled: false, registering: false, pending: false };
+    let listenerAttached = false;
+    let pendingOutcome: SleepFailure | undefined;
+    const finish = (outcome?: SleepFailure): void => {
+      if (state.settled) return;
+      if (state.registering) {
+        if (!state.pending) pendingOutcome = outcome;
+        state.pending = true;
+        return;
+      }
+      state.settled = true;
+      let result = outcome;
+      const pendingCleanup: Promise<void>[] = [];
+      const observeCleanup = (cleanup: unknown): void => {
+        if (cleanup === undefined) return;
+        pendingCleanup.push(Promise.resolve(cleanup).then(
+          () => { /* Successful cleanup keeps the current outcome. */ },
+          (error: unknown) => { result = UnexpectedDefect({ cause: error }); },
+        ));
+      };
+      try {
+        if (listenerAttached) observeCleanup(signal?.removeEventListener('abort', onAbort));
+      } catch (error) {
+        result = UnexpectedDefect({ cause: error });
+      }
+      try {
+        observeCleanup(cancel?.());
+      } catch (error) {
+        result = UnexpectedDefect({ cause: error });
+      }
+      if (pendingCleanup.length === 0) resolve(result);
+      else void Promise.all(pendingCleanup).then(() => resolve(result));
     };
-    const cancel = clock.setTimer(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
+    const onAbort = (): void => {
+      try {
+        finish(SleepCancelled({ cause: signal?.reason }));
+      } catch (error) {
+        finish(UnexpectedDefect({ cause: error }));
+      }
+    };
+    try {
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      if (signal !== undefined) {
+        listenerAttached = true;
+        const registration: unknown = signal.addEventListener('abort', onAbort, { once: true });
+        if (registration !== undefined) {
+          // A late registration rejection is observed, but cannot undo completed sleep.
+          void Promise.resolve(registration).catch((error: unknown) => finish(UnexpectedDefect({ cause: error })));
+        }
+        if (signal.aborted) onAbort();
+      }
+      if (state.settled) return;
+      state.registering = true;
+      const registered = clock.setTimer(() => finish(), ms);
+      if (typeof registered !== 'function') {
+        // A malformed JS provider may return a rejecting promise instead of a handle.
+        void Promise.resolve(registered).catch(() => { /* The invalid handle is reported below. */ });
+        throw new TypeError('Clock.setTimer must return a cancellation function');
+      }
+      cancel = registered;
+      state.registering = false;
+      // A foreign clock may invoke the callback synchronously before returning its cancellation handle.
+      if (state.pending) finish(pendingOutcome);
+    } catch (error) {
+      state.registering = false;
+      finish(UnexpectedDefect({ cause: error }));
+    }
   });
 }
 
@@ -86,7 +136,7 @@ export class SystemClock implements Clock {
     };
   }
 
-  sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure> {
     return sleepOn(this, ms, signal);
   }
 }
@@ -131,7 +181,7 @@ export class MockClock implements Clock {
     };
   }
 
-  sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure> {
     return sleepOn(this, ms, signal);
   }
 
@@ -151,7 +201,7 @@ export class MockClock implements Clock {
   }
 
   /**
-   * Like {@link MockClock.advance}, but lets pending promise callbacks run
+   * Like {@link MockClock.advance}, but lets state.pending promise callbacks run
    * before the first timer and after each fired timer. So a timer that async
    * code sets after an `await` (a retry loop's next `sleep`, say) also fires
    * when it comes due within the step. To let them run it waits for one real
@@ -205,7 +255,7 @@ export class MockClock implements Clock {
   }
 }
 
-/** Resolves after one real macrotask, so every pending promise callback has run. */
+/** Resolves after one real macrotask, so every state.pending promise callback has run. */
 function nextMacrotask(): Promise<void> {
   return new Promise<void>(resolve => {
     setTimeout(resolve, 0);

@@ -1,3 +1,5 @@
+import type { SleepFailure } from '@arki/clock';
+
 import type { RetryPolicyOptions, TimeoutPolicyOptions } from './policies.js';
 import type { Policy, PolicyCallback } from './policy.js';
 import { createRetryPolicy, createTimeoutPolicy } from './policies.js';
@@ -7,7 +9,7 @@ import { createRetryPolicy, createTimeoutPolicy } from './policies.js';
  * wrap it in a second promise and add microtask hops to every call. A policy that throws instead of
  * rejecting still yields a rejected promise, as an `async` function would.
  */
-function run<T, F>(policy: Policy<F>, fn: PolicyCallback<T>): Promise<T | F> {
+function run<T, F, E>(policy: Policy<F, E>, fn: PolicyCallback<T>): Promise<T | F | E> {
   try {
     return policy.execute(fn);
   } catch (error) {
@@ -27,7 +29,7 @@ function run<T, F>(policy: Policy<F>, fn: PolicyCallback<T>): Promise<T | F> {
  * );
  * ```
  */
-export function withResilience<T, F = never>(fn: PolicyCallback<T>, policy: Policy<F>): Promise<T | F> {
+export function withResilience<T, F = never, E = never>(fn: PolicyCallback<T>, policy: Policy<F, E>): Promise<T | F | E> {
   return run(policy, fn);
 }
 
@@ -40,7 +42,7 @@ export function withResilience<T, F = never>(fn: PolicyCallback<T>, policy: Poli
 export function withRetry<T, Mapped = never>(
   fn: PolicyCallback<T>,
   options?: RetryPolicyOptions<Mapped>,
-): Promise<T | Mapped> {
+): Promise<T | Mapped | SleepFailure> {
   return run(createRetryPolicy(options), fn);
 }
 

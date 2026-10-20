@@ -12,6 +12,7 @@
  * account reaches the next: not data, not a fetch already in flight, not
  * table hints of the old grant, not a write queued by the old account.
  */
+import { orThrow } from '@arki/failure';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { ReactElement } from 'react';
 import { createElement } from 'react';
@@ -319,7 +320,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     // Back online: Alice's queued write is not sent under Bob's session.
     online.mockReturnValue(true);
     await queue.drain();
-    const dead = await queue.deadLetter.list();
+    const dead = orThrow(await queue.deadLetter.list());
     expect(dead.map(entry => entry.lastError?.code)).toEqual(['ACTOR_MISMATCH']);
     const row = await writer.query('select 1 from posts where id = $1', [`${app.run}queued`]);
     expect(row.rowCount).toBe(0);

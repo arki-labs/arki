@@ -7,6 +7,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Failure } from '@arki/failure';
+import type { SleepFailure } from '@arki/clock';
 import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure } from '@arki/failure';
 
@@ -185,7 +186,7 @@ describe('retry with returned failures', () => {
 
   it('keeps failures in the result type, so the caller must still check for them', () => {
     const charge = () => (Math.random() > 2 ? 'charged' : CardDeclined());
-    expectTypeOf(withRetry(charge)).toEqualTypeOf<Promise<'charged' | ReturnType<typeof CardDeclined>>>();
+    expectTypeOf(withRetry(charge)).toEqualTypeOf<Promise<'charged' | ReturnType<typeof CardDeclined> | SleepFailure>>();
     // The predicate sees both kinds of reason, so it can narrow to a failure by code.
     expectTypeOf<Parameters<Parameters<Backoff['while']>[0]>[0]>().toBeUnknown();
   });

@@ -9,7 +9,15 @@
 import type { IdDeclaration } from '@arki/contracts';
 import { z } from '@arki/contracts';
 
-import { accountId, organizationId, sessionId, teamId, userId, verificationId } from './id-declarations.js';
+import {
+  accountId,
+  authRequestId,
+  organizationId,
+  sessionId,
+  teamId,
+  userId,
+  verificationId,
+} from './id-declarations.js';
 
 /** A schema that takes a string and gives the declaration's id type, or fails with the prefix it wanted. */
 function idSchema<const P extends string>(declaration: IdDeclaration<NoInfer<P>> & { readonly prefix: P }) {
@@ -19,6 +27,9 @@ function idSchema<const P extends string>(declaration: IdDeclaration<NoInfer<P>>
     return z.NEVER;
   });
 }
+
+/** Restore an inbound correlation identity without changing its stored format. */
+export const authRequestIdSchema = z.string().pipe(authRequestId.schema);
 
 export const userIdSchema = idSchema(userId);
 export const sessionIdSchema = idSchema(sessionId);

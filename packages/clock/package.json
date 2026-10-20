@@ -61,6 +61,9 @@
     "test:docs": "arki-doc-examples"
   },
   "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/failure": "workspace:*"
+  },
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",

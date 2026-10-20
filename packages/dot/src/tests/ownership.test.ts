@@ -47,7 +47,7 @@ describe('plugin ownership', () => {
             boot: () => ({
               worker: child(async signal => {
                 started.release();
-                await clock.sleep(10_000, signal);
+                return clock.sleep(10_000, signal);
               }),
             }),
           }),

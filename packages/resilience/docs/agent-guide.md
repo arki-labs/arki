@@ -81,3 +81,7 @@ In an app that uses the `@arki/resilience/dot` plugin, check the wiring. `dot ex
 dot explain --json | jq '.data.plugins'
 dot doctor --json | jq '.data'
 ```
+
+## Typed retry waits
+
+Retry delay cancellation now returns `SleepCancelled` from `@arki/clock`; a clock provider fault returns `UnexpectedDefect`. These exact `SleepFailure` outcomes propagate through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without retrying or invoking a throw fallback. Check returned failures before using successful values. Other policy engine rejections retain their existing bridge during the A-33 migration; cancellation during an in-flight timeout is still `CancelledError`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no sleep failures.

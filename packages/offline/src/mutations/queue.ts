@@ -5,10 +5,19 @@
  * The queue itself is network-agnostic; the replay loop (replay.ts)
  * drives network I/O and event listener wiring.
  */
-import { nanoid } from 'nanoid';
+import { observeEnqueue, observeQueue } from './telemetry.ts';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import { mutationIdempotencyKey, queuedMutationId } from './identity.ts';
+import type { QueuedMutationId } from './identity.ts';
+import type { QueuedMutation, EnqueueReceipt } from './model.ts';
+import { QueueAcceptanceUnconfirmed, QueuePersistenceUnconfirmed } from './failures.ts';
+import type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.ts';
 
 import type { Identified, InputOf, Operation } from '@arki/contracts/orpc';
 import { operationOf } from '@arki/contracts/orpc';
+
+import { getLogger } from '@arki/log';
 
 import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.ts';
 
@@ -19,37 +28,29 @@ import type { DeadLetterStore } from './dead-letter.ts';
 import { createReplayLoop } from './replay.ts';
 import type { ReplayLoop } from './replay.ts';
 
+const log = getLogger('arki:offline:mutations');
+
+function reportListenerError(): void {
+  // Observer defects cannot replace the operation's reconciliation identity.
+  try {
+    void Promise.resolve(log.debug('Queue subscriber failed: {code}', { code: UnexpectedDefect.code })).catch(() => {
+      // Even an asynchronous logger defect stays outside the operation outcome.
+    });
+  } catch { /* Reporting cannot revoke acceptance. */ }
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface QueuedMutation {
-  id: string;
-  idempotencyKey: string;
-  procedurePath: readonly string[];
-  input: unknown;
-  /**
-   * Who was signed in when the call was queued (`actorId()` at enqueue). When
-   * the session was unknown (`null`), the last actor signed in on this device;
-   * `null` only when there was none. Replay sends the call only while this same actor
-   * is signed in, so a queued write never runs under another account.
-   */
-  actorId: string | null;
-  enqueuedAt: number;
-  attempts: number;
-  lastError?: { code: QueueErrorCode; message: string };
-}
-
-/**
- * Why a mutation last failed. `ACTOR_MISMATCH`: another account was signed in
- * at replay, so the call was dead-lettered unsent.
- */
-export type QueueErrorCode = 'RETRY' | 'MAX_RETRIES' | 'ACTOR_MISMATCH';
+export type { QueuedMutation, QueueErrorCode, EnqueueReceipt } from './model.ts';
 
 export type QueueEvent =
   | { type: 'enqueued'; entry: QueuedMutation }
   | { type: 'sent'; entry: QueuedMutation }
   | { type: 'dead-letter'; entry: QueuedMutation; error: Error }
+  | { type: 'failure'; failure: OfflineQueueFailure }
+  | { type: 'drained' }
   | { type: 'auth-required' }
   | { type: 'online' }
   | { type: 'offline' };
@@ -98,16 +99,16 @@ export interface OfflineMutationQueue {
   enqueue<Op extends OfflineSafeOperation>(
     carrier: Identified<Op>,
     input: InputOf<Op>,
-  ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }>;
+  ): Promise<EnqueueReceipt | EnqueueFailure>;
 
-  status(): { queued: number; sending: boolean; deadLettered: number };
+  status(): QueueSnapshot;
 
-  drain(): Promise<void>;
+  drain(): Promise<void | DrainFailure>;
 
   deadLetter: {
-    list(): Promise<readonly QueuedMutation[]>;
-    retry(id: string): Promise<void>;
-    discard(id: string): Promise<void>;
+    list(): Promise<readonly QueuedMutation[] | QueueStorageFailure>;
+    retry(id: QueuedMutationId): Promise<void | DrainFailure>;
+    discard(id: QueuedMutationId): Promise<void | QueueStorageFailure>;
   };
 
   subscribe(listener: (event: QueueEvent) => void): () => void;
@@ -119,10 +120,18 @@ export interface OfflineMutationQueue {
 // Internal state — not exported
 // ---------------------------------------------------------------------------
 
+export type QueueSnapshot = {
+  queued: number;
+  sending: boolean;
+  deadLettered: number;
+  failure: OfflineQueueFailure | null;
+};
+
 interface QueueState {
   sending: boolean;
   queuedCount: number;
   deadLetteredCount: number;
+  failure: OfflineQueueFailure | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,14 +157,14 @@ export function createOfflineMutationQueue(
   /** Who is signed in now. An id is remembered as this device's last actor; a sign-out forgets it. */
   function signedInActor(): string | null | undefined {
     const id = actorId();
-    if (typeof id === 'string') void lastActor.remember(id);
-    else if (id === null) void lastActor.forget();
+    if (typeof id === 'string') void lastActor.remember(id).then(reportOutcome);
+    else if (id === null) void lastActor.forget().then(reportOutcome);
     return id;
   }
   const dlStore: DeadLetterStore = createDeadLetterStore(deadLetterStorageKey);
 
   const listeners = new Set<(event: QueueEvent) => void>();
-  const state: QueueState = { sending: false, queuedCount: 0, deadLetteredCount: 0 };
+  const state: QueueState = { sending: false, queuedCount: 0, deadLetteredCount: 0, failure: null };
 
   // IDB access is browser-only. The factory may be evaluated during SSR
   // (e.g. when an app constructs the runtime at module top level) — in that
@@ -163,14 +172,24 @@ export function createOfflineMutationQueue(
   // before the request ends, so skipping the bootstrap reads is safe.
   const isBrowser = typeof window !== 'undefined';
 
+  function reportOutcome(result: void | OfflineQueueFailure): void {
+    if (isFailure(result)) emit({ type: 'failure', failure: result });
+  }
+
+  function reportStorageFailure(error: unknown): void {
+    emit({ type: 'failure', failure: UnexpectedDefect({ cause: error }) });
+  }
+
   // Sync counts on startup (fire-and-forget; acceptable startup race)
   if (isBrowser) {
     void storage.read().then((items) => {
-      state.queuedCount = items.length;
-    });
+      if (isFailure(items)) emit({ type: 'failure', failure: items });
+      else state.queuedCount = items.length;
+    }).catch(error => reportStorageFailure(error));
     void dlStore.list().then((items) => {
-      state.deadLetteredCount = items.length;
-    });
+      if (isFailure(items)) emit({ type: 'failure', failure: items });
+      else state.deadLetteredCount = items.length;
+    }).catch(error => reportStorageFailure(error));
   }
 
   // Keep dead-letter count in sync whenever the dead-letter store changes.
@@ -178,18 +197,22 @@ export function createOfflineMutationQueue(
   // definition IDB was reachable — no `isBrowser` guard needed here.
   const unsubscribeDL = dlStore.subscribe(() => {
     void dlStore.list().then((items) => {
-      state.deadLetteredCount = items.length;
-    });
+      if (isFailure(items)) emit({ type: 'failure', failure: items });
+      else state.deadLetteredCount = items.length;
+    }).catch(error => reportStorageFailure(error));
   });
 
   function emit(event: QueueEvent): void {
+    if (event.type === 'failure') state.failure = event.failure;
     // Update queued count based on observable events
     if (event.type === 'enqueued') state.queuedCount++;
     if (event.type === 'sent') state.queuedCount = Math.max(0, state.queuedCount - 1);
     if (event.type === 'dead-letter') state.queuedCount = Math.max(0, state.queuedCount - 1);
 
+
     for (const listener of listeners) {
-      listener(event);
+      try { void Promise.resolve(listener(event)).catch(reportListenerError); }
+      catch { reportListenerError(); }
     }
   }
 
@@ -220,51 +243,53 @@ export function createOfflineMutationQueue(
   async function enqueue<Op extends OfflineSafeOperation>(
     carrier: Identified<Op>,
     input: InputOf<Op>,
-  ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }> {
+  ): Promise<EnqueueReceipt | EnqueueFailure> {
     // Checked at run time too: plain JavaScript callers and forged objects get no compiler.
     const op = operationOf(carrier);
     const marked: unknown = op.meta.offlineSafe;
     if (marked !== true) {
       throw new TypeError(`${op.name} is not marked offlineSafe on its contract, so it cannot be queued offline.`);
     }
-    const id = nanoid();
-    // Session unknown (e.g. an offline reload): bind to this device's last
-    // actor. Replay still sends it only while that same actor is signed in.
-    // Signed out (`null`) binds to nobody, so no account can ever replay it.
+    const id = queuedMutationId.create();
+    if (isFailure(id)) return id;
+    const idempotencyKey = mutationIdempotencyKey.schema.parse(id);
     const now = signedInActor();
     const bound = now === undefined ? await lastActor.read() : now;
-    const entry: QueuedMutation = {
-      id,
-      idempotencyKey: id,
-      procedurePath: op.path,
-      input,
-      actorId: bound,
-      enqueuedAt: Date.now(),
-      attempts: 0,
-    };
-
+    if (isFailure(bound)) return bound;
     const current = await storage.read();
-    await storage.write([...current, entry]);
+    if (isFailure(current)) return current;
+    const entry: QueuedMutation = {
+      id, idempotencyKey, procedurePath: op.path, input, actorId: bound,
+      enqueuedAt: Date.now(), attempts: 0,
+    };
+    const persisted = await storage.write([...current, entry]);
+    if (isFailure(persisted)) {
+      if (!QueuePersistenceUnconfirmed.is(persisted)) return persisted;
+      // IDB can report failure after committing. Preserve the reconciliation identity.
+      return QueueAcceptanceUnconfirmed({ id, idempotencyKey }, { cause: persisted });
+    }
     emit({ type: 'enqueued', entry });
-
-    // Opportunistically drain if we are online
+    let status: EnqueueReceipt['status'] = 'queued';
+    const observeOutcome = (event: QueueEvent) => {
+      if ((event.type === 'sent' || event.type === 'dead-letter') && event.entry.id === id) status = event.type;
+    };
+    listeners.add(observeOutcome);
     if (typeof navigator !== 'undefined' && navigator.onLine) {
       try {
-        await loop.drainNow();
-        // After drain, check if this entry was sent (it won't be in storage)
-        const remaining = await storage.read();
-        const stillQueued = remaining.some((m) => m.id === id);
-        return { idempotencyKey: id, status: stillQueued ? 'queued' : 'sent' };
-      } catch {
-        // Drain failed — entry stays in queue
-        return { idempotencyKey: id, status: 'queued' };
+        const drained = await loop.drainNow();
+        if (isFailure(drained)) return QueueAcceptanceUnconfirmed({ id, idempotencyKey }, { cause: drained });
+      } catch (error) {
+        return QueueAcceptanceUnconfirmed({ id, idempotencyKey }, { cause: error });
+      } finally {
+        listeners.delete(observeOutcome);
       }
+    } else {
+      listeners.delete(observeOutcome);
     }
-
-    return { idempotencyKey: id, status: 'queued' };
+    return { idempotencyKey, status };
   }
 
-  function status(): { queued: number; sending: boolean; deadLettered: number } {
+  function status(): QueueSnapshot {
     // Returns an in-memory snapshot. Bootstrapped from IDB on startup,
     // then kept live via event tracking in emit().
     // The hooks use subscribe() + useSyncExternalStore for reactive updates.
@@ -272,20 +297,25 @@ export function createOfflineMutationQueue(
       queued: state.queuedCount,
       sending: state.sending,
       deadLettered: state.deadLetteredCount,
+      failure: state.failure,
     };
   }
 
-  async function drain(): Promise<void> {
-    return loop.drainNow();
+  async function drain(): Promise<void | DrainFailure> {
+    const result = await loop.drainNow();
+    if (isFailure(result)) reportOutcome(result);
+    else { state.failure = null; emit({ type: 'drained' }); }
+    return result;
   }
 
   const deadLetterApi = {
-    list(): Promise<readonly QueuedMutation[]> {
+    list(): Promise<readonly QueuedMutation[] | QueueStorageFailure> {
       return dlStore.list();
     },
 
-    async retry(id: string): Promise<void> {
+    async retry(id: QueuedMutationId): Promise<void | DrainFailure> {
       const items = await dlStore.list();
+      if (isFailure(items)) return items;
       const mutation = items.find((m) => m.id === id);
       if (!mutation) return;
 
@@ -293,17 +323,20 @@ export function createOfflineMutationQueue(
       // its actorId: a retry never rebinds a write to whoever is signed in now.
       const reset: QueuedMutation = { ...mutation, attempts: 0, lastError: undefined };
       const current = await storage.read();
-      await storage.write([...current, reset]);
-      await dlStore.remove(id);
+      if (isFailure(current)) return current;
+      const queued = await storage.write([...current.filter(entry => entry.id !== id), reset]);
+      if (isFailure(queued)) return queued;
+      const removed = await dlStore.remove(id);
+      if (isFailure(removed)) return removed;
       emit({ type: 'enqueued', entry: reset });
 
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        await loop.drainNow();
+        return drain();
       }
     },
 
-    async discard(id: string): Promise<void> {
-      await dlStore.remove(id);
+    async discard(id: QueuedMutationId): Promise<void | QueueStorageFailure> {
+      return dlStore.remove(id);
     },
   };
 
@@ -321,10 +354,23 @@ export function createOfflineMutationQueue(
   }
 
   return {
-    enqueue,
+    async enqueue(carrier, input) {
+      // Contract misuse remains a static definition error, before owned execution.
+      const op = operationOf(carrier);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- JavaScript callers can omit the static offline-safe declaration.
+      if (op.meta.offlineSafe !== true) throw new TypeError(`${op.name} is not marked offlineSafe on its contract, so it cannot be queued offline.`);
+      return observeEnqueue(async () => {
+        try { return await enqueue(carrier, input); }
+        catch (error) { return UnexpectedDefect({ cause: error }); }
+      });
+    },
     status,
     drain,
-    deadLetter: deadLetterApi,
+    deadLetter: {
+      list: () => deadLetterApi.list(),
+      retry: id => observeQueue('offline.queue.retry', () => deadLetterApi.retry(id)),
+      discard: id => observeQueue('offline.queue.discard', () => deadLetterApi.discard(id)),
+    },
     subscribe,
     dispose,
   };

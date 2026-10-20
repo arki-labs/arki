@@ -17,12 +17,14 @@ import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import type { Clock } from '@arki/clock';
+import { SleepCancelled } from '@arki/clock';
+import { UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
 import type { TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
-import { TransactionCancelled, TransactionConflict } from './errors.js';
+import { TransactionCancelled, TransactionConflict, TransactionDefect } from './errors.js';
 import { classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
 import { findDatabaseError } from './sql-state.js';
 import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
@@ -153,6 +155,8 @@ export async function runTransaction<Tx, T>(
       if (TransactionConflict.is(result.failure)) throw result.failure.cause;
       return { value: result.failure };
     }, signal);
+    if (SleepCancelled.is(outcome)) return TransactionCancelled({ cause: outcome });
+    if (UnexpectedDefect.is(outcome)) return TransactionDefect({ cause: outcome });
     return outcome.value;
   } catch (error) {
     if (error instanceof DbTransactionError) throw error;

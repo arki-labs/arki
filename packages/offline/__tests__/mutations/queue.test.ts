@@ -1,3 +1,6 @@
+import { QueueTransportUnavailable, QueueStorageCorrupt } from '../../src/mutations/failures.ts';
+import { orThrow } from '@arki/failure';
+import { queuedMutationId } from '../../src/mutations/identity.ts';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
@@ -28,9 +31,7 @@ vi.mock('idb-keyval', () => ({
 
 // We need nanoid to be deterministic in tests
 let nanoidCounter = 0;
-vi.mock('nanoid', () => ({
-  nanoid: vi.fn(() => `test-id-${++nanoidCounter}`),
-}));
+
 
 const { createOfflineMutationQueue } = await import('../../src/mutations/queue.ts');
 
@@ -66,7 +67,7 @@ function makeRpc(
         case 'fail-500':
           throw Object.assign(new Error('Internal Server Error'), { status: 500 });
         case 'network-error':
-          throw new Error('fetch failed');
+          return QueueTransportUnavailable();
       }
     }),
   };
@@ -77,10 +78,33 @@ function makeRpc(
 // ---------------------------------------------------------------------------
 
 describe('OfflineMutationQueue', () => {
+  it('keeps the original storage failure in status when a subscriber throws', async () => {
+    store['report-refusal'] = 'invalid storage bytes';
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'report-refusal' });
+    queue.subscribe(() => { throw new Error('private observer defect'); });
+
+    const result = await queue.drain();
+
+    expect(QueueStorageCorrupt.is(result)).toBe(true);
+    expect(queue.status().failure).toBe(result);
+    queue.dispose();
+  });
+
+  it('does not invent an operation failure when reporting accepted persistence fails', async () => {
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'report-success' });
+    queue.subscribe(() => { throw new Error('private observer defect'); });
+
+    expect(orThrow(await queue.enqueue(createPost, { title: 'accepted once' })).status).toBe('queued');
+    expect(queue.status().failure).toBeNull();
+    expect(store['report-success']).toContain('accepted once');
+    queue.dispose();
+  });
+
   beforeEach(() => {
     for (const k of Object.keys(store)) delete store[k];
     vi.clearAllMocks();
     nanoidCounter = 0;
+    vi.spyOn(queuedMutationId, 'create').mockImplementation(() => queuedMutationId.schema.parse(`test-id-${++nanoidCounter}`));
     // Ensure navigator.onLine = false so tests control drain behavior
     Object.defineProperty(globalThis, 'navigator', {
       value: { onLine: false },
@@ -127,7 +151,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q2', deadLetterStorageKey: 'dl2' });
 
-    const result = await queue.enqueue(createPost, { title: 'World' });
+    const result = orThrow(await queue.enqueue(createPost, { title: 'World' }));
 
     expect(result.idempotencyKey).toBe('test-id-1');
     expect(result.status).toBe('queued');
@@ -146,7 +170,7 @@ describe('OfflineMutationQueue', () => {
     // Read the stored state to verify order
     const { createQueueStorage } = await import('../../src/mutations/storage.ts');
     const storage = createQueueStorage('q3');
-    const entries = await storage.read();
+    const entries = orThrow(await storage.read());
 
     expect(entries).toHaveLength(3);
     expect((entries[0]?.input as { title: string }).title).toBe('First');
@@ -189,7 +213,7 @@ describe('OfflineMutationQueue', () => {
     });
 
     await queue.enqueue(createPost, { title: 'Will fail' });
-    await queue.drain();
+    orThrow(await queue.drain());
 
     // Wait for dead-letter count update (it's async via subscribe)
     await new Promise((r) => setTimeout(r, 10));
@@ -211,9 +235,9 @@ describe('OfflineMutationQueue', () => {
     });
 
     await queue.enqueue(createPost, { title: 'Permanent fail' });
-    await queue.drain();
+    orThrow(await queue.drain());
 
-    const items = await queue.deadLetter.list();
+    const items = orThrow(await queue.deadLetter.list());
     expect(items).toHaveLength(1);
     expect((items[0]?.input as { title: string }).title).toBe('Permanent fail');
 
@@ -231,14 +255,14 @@ describe('OfflineMutationQueue', () => {
     });
 
     await queue.enqueue(createPost, { title: 'Discard me' });
-    await queue.drain();
+    orThrow(await queue.drain());
 
-    const before = await queue.deadLetter.list();
+    const before = orThrow(await queue.deadLetter.list());
     expect(before).toHaveLength(1);
 
-    await queue.deadLetter.discard(before[0]!.id);
+    orThrow(await queue.deadLetter.discard(before[0]!.id));
 
-    const after = await queue.deadLetter.list();
+    const after = orThrow(await queue.deadLetter.list());
     expect(after).toHaveLength(0);
 
     queue.dispose();
@@ -263,9 +287,9 @@ describe('OfflineMutationQueue', () => {
     });
 
     await queue.enqueue(createPost, { title: 'Retry me' });
-    await queue.drain();
+    orThrow(await queue.drain());
 
-    const dlBefore = await queue.deadLetter.list();
+    const dlBefore = orThrow(await queue.deadLetter.list());
     expect(dlBefore).toHaveLength(1);
     const deadId = dlBefore[0]!.id;
 
@@ -275,9 +299,9 @@ describe('OfflineMutationQueue', () => {
       value: { onLine: true },
       configurable: true,
     });
-    await queue.deadLetter.retry(deadId);
+    orThrow(await queue.deadLetter.retry(deadId));
 
-    const dlAfter = await queue.deadLetter.list();
+    const dlAfter = orThrow(await queue.deadLetter.list());
     expect(dlAfter).toHaveLength(0);
 
     queue.dispose();
@@ -299,18 +323,18 @@ describe('OfflineMutationQueue', () => {
     expect(store['q-actor']).toContain(ALICE);
 
     signedIn = 'usr_bob';
-    await queue.drain();
+    orThrow(await queue.drain());
     expect(rpc.call).not.toHaveBeenCalled();
-    const [dead] = await queue.deadLetter.list();
+    const [dead] = orThrow(await queue.deadLetter.list());
     expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
 
     Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
-    await queue.deadLetter.retry(dead!.id);
+    orThrow(await queue.deadLetter.retry(dead!.id));
     expect(rpc.call).not.toHaveBeenCalled();
 
     signedIn = ALICE;
-    const [again] = await queue.deadLetter.list();
-    await queue.deadLetter.retry(again!.id);
+    const [again] = orThrow(await queue.deadLetter.list());
+    orThrow(await queue.deadLetter.retry(again!.id));
     expect(rpc.call).toHaveBeenCalledOnce();
 
     queue.dispose();
@@ -338,10 +362,10 @@ describe('OfflineMutationQueue', () => {
       const { queue, signIn } = await writeAfterReload(rpc, 'q-reload-a');
 
       signIn(ALICE);
-      await queue.drain();
+      orThrow(await queue.drain());
 
       expect(rpc.call).toHaveBeenCalledOnce();
-      expect(await queue.deadLetter.list()).toHaveLength(0);
+      expect(orThrow(await queue.deadLetter.list())).toHaveLength(0);
       queue.dispose();
     });
 
@@ -350,10 +374,10 @@ describe('OfflineMutationQueue', () => {
       const { queue, signIn } = await writeAfterReload(rpc, 'q-reload-b');
 
       signIn('usr_bob');
-      await queue.drain();
+      orThrow(await queue.drain());
 
       expect(rpc.call).not.toHaveBeenCalled();
-      const [dead] = await queue.deadLetter.list();
+      const [dead] = orThrow(await queue.deadLetter.list());
       expect(dead?.actorId).toBe(ALICE);
       expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
       queue.dispose();
@@ -366,7 +390,7 @@ describe('OfflineMutationQueue', () => {
       let signedIn: string | null = ALICE;
       const queue = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: 'q-signout', deadLetterStorageKey: 'dl-signout' });
       await queue.enqueue(createPost, { title: 'As Alice' });
-      await queue.drain();
+      orThrow(await queue.drain());
       expect(rpc.call).toHaveBeenCalledOnce();
 
       signedIn = null;
@@ -374,9 +398,9 @@ describe('OfflineMutationQueue', () => {
       expect(store['q-signout']).toContain('"actorId":null');
 
       signedIn = ALICE;
-      await queue.drain();
+      orThrow(await queue.drain());
       expect(rpc.call).toHaveBeenCalledOnce();
-      const [dead] = await queue.deadLetter.list();
+      const [dead] = orThrow(await queue.deadLetter.list());
       expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
       queue.dispose();
     });
@@ -440,7 +464,7 @@ describe('OfflineMutationQueue', () => {
 
       // Mock was reset in beforeEach, so any call counted here came from construction
       expect(vi.mocked(idbKeyval.get)).not.toHaveBeenCalled();
-      expect(queue.status()).toEqual({ queued: 0, sending: false, deadLettered: 0 });
+      expect(queue.status()).toEqual({ queued: 0, sending: false, deadLettered: 0, failure: null });
 
       queue.dispose();
     } finally {
@@ -449,4 +473,101 @@ describe('OfflineMutationQueue', () => {
       }
     }
   });
+});
+
+describe('enqueue exact outcomes', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    for (const key of Object.keys(store)) delete store[key];
+    Object.defineProperty(globalThis, 'navigator', { value: { onLine: false }, configurable: true });
+  });
+
+  it('returns the original entropy failure before touching persistence or RPC', async () => {
+    const { RandomSourceUnavailable } = await import('@arki/contracts');
+    const failure = RandomSourceUnavailable();
+    vi.spyOn(queuedMutationId, 'create').mockReturnValueOnce(failure);
+    const call = vi.fn(() => Promise.resolve());
+    const rpc = { call };
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'entropy' });
+    expect(await queue.enqueue(createPost, { title: 'safe' })).toBe(failure);
+    expect(store['entropy']).toBeUndefined();
+    expect(call).not.toHaveBeenCalled();
+    queue.dispose();
+  });
+
+  it('returns the reconciliation identity when IDB commits and then rejects', async () => {
+    const { QueueAcceptanceUnconfirmed } = await import('../../src/mutations/failures.ts');
+    const originalSet = vi.mocked(idbKeyval.set).getMockImplementation();
+    if (!originalSet) throw new Error('Missing test storage implementation');
+    vi.mocked(idbKeyval.set).mockImplementation(async (key, value) => {
+      if (key !== 'unconfirmed') return originalSet(key, value);
+      store['unconfirmed'] = String(value);
+      throw new Error('commit acknowledgement lost');
+    });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'unconfirmed' });
+    const result = await queue.enqueue(createPost, { title: 'once' });
+    expect(QueueAcceptanceUnconfirmed.is(result)).toBe(true);
+    if (!QueueAcceptanceUnconfirmed.is(result)) throw new Error('Expected unconfirmed outcome');
+    expect(store['unconfirmed']).toContain(result.data.idempotencyKey);
+    queue.dispose();
+    vi.mocked(idbKeyval.set).mockImplementation(originalSet);
+  });
+
+  it('reports a dead letter as a dead letter, rather than inferring sent from absence', async () => {
+    Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('fail-422'), storageKey: 'rejected', deadLetterStorageKey: 'rejected-dead' });
+    expect(orThrow(await queue.enqueue(createPost, { title: 'invalid' })).status).toBe('dead-letter');
+    queue.dispose();
+  });
+
+  it('never repeats an accepted RPC after local removal fails', async () => {
+    const { QueueAcceptanceUnconfirmed } = await import('../../src/mutations/failures.ts');
+    Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
+    const originalSet = vi.mocked(idbKeyval.set).getMockImplementation();
+    if (!originalSet) throw new Error('Missing test storage implementation');
+    let writes = 0;
+    vi.mocked(idbKeyval.set).mockImplementation(async (key, value) => {
+      if (key === 'accepted' && ++writes === 2) throw new Error('local removal refused');
+      return originalSet(key, value);
+    });
+    const call = vi.fn(() => Promise.resolve());
+    const rpc = { call };
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'accepted' });
+    expect(QueueAcceptanceUnconfirmed.is(await queue.enqueue(createPost, { title: 'once' }))).toBe(true);
+    orThrow(await queue.drain());
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(queue.status().queued).toBe(0);
+    queue.dispose();
+    vi.mocked(idbKeyval.set).mockImplementation(originalSet);
+  });
+});
+
+it('generates the secure legacy 21-character representation and supervises broken telemetry', async () => {
+  vi.restoreAllMocks();
+  Object.defineProperty(globalThis, 'navigator', { value: { onLine: false }, configurable: true });
+  const { trace, context } = await import('@opentelemetry/api');
+  const getTracer = vi.spyOn(trace, 'getTracer').mockImplementation(() => { throw new Error('reporter failed'); });
+  const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'secure-identity' });
+  const result = orThrow(await queue.enqueue(createPost, { title: 'secure' }));
+  expect(result.idempotencyKey).toMatch(/^[\w-]{21}$/);
+  expect(store['secure-identity']).toContain(result.idempotencyKey);
+  queue.dispose();
+  getTracer.mockRestore();
+  const withContext = vi.spyOn(context, 'with').mockImplementation(() => { throw new Error('context refused callback'); });
+  const other = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'context-refused' });
+  expect(orThrow(await other.enqueue(createPost, { title: 'still persisted' })).status).toBe('queued');
+  expect(store['context-refused']).toContain('still persisted');
+  other.dispose();
+  withContext.mockRestore();
+});
+
+
+it('preserves malformed stored state and refuses to overwrite it during enqueue', async () => {
+  vi.restoreAllMocks();
+  const { QueueStorageCorrupt } = await import('../../src/mutations/failures.ts');
+  store['corrupt-enqueue'] = 'unreadable original bytes';
+  const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc(), storageKey: 'corrupt-enqueue' });
+  expect(QueueStorageCorrupt.is(await queue.enqueue(createPost, { title: 'must not replace' }))).toBe(true);
+  expect(store['corrupt-enqueue']).toBe('unreadable original bytes');
+  queue.dispose();
 });

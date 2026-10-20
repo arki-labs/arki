@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MockClock } from '@arki/clock';
+import { orThrow } from '@arki/failure';
 
 import type { PageClient } from './load-pages.js';
 import { Deadline } from '../src/index.js';
@@ -9,7 +10,11 @@ import { loadPages } from './load-pages.js';
 function fakeClient(clock: MockClock, latencyMs: number): { client: PageClient; closed: () => boolean } {
   let closed = false;
   const client: PageClient = {
-    load: (url, signal) => clock.sleep(latencyMs, signal).then(() => `body of ${url}`),
+    load: async (url, signal) => {
+      // This fixture models a foreign page client with a rejection contract.
+      orThrow(await clock.sleep(latencyMs, signal));
+      return `body of ${url}`;
+    },
     close: () => {
       closed = true;
       return Promise.resolve();
@@ -44,7 +49,7 @@ describe('loadPages', () => {
     const events: string[] = [];
     const client = {
       async load() {
-        await clock.sleep(6000);
+        orThrow(await clock.sleep(6000));
         events.push('load settled');
         return 'page';
       },

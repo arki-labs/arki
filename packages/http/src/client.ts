@@ -29,6 +29,7 @@
  */
 
 import { z } from 'zod';
+import type { PolicyExecution, RetryWaitFailure } from '@arki/resilience';
 
 import {
   InvalidEnvelope,
@@ -129,9 +130,7 @@ export type ClientCall<TRoute> =
  * What the client needs from a retry policy: an `@arki/resilience` policy fits. A policy with a
  * fallback does not, because its result could be the fallback instead of a response.
  */
-export type ClientPolicy = {
-  execute<T>(fn: (context: { readonly signal: AbortSignal }) => PromiseLike<T> | T, signal?: AbortSignal): Promise<T>;
-};
+export type ClientPolicy = PolicyExecution<never, RetryWaitFailure>;
 
 /** One attempt's outcome, as `retryOn` sees it: the response, or the error `fetch` threw. */
 export type RetryOutcome = {
@@ -376,7 +375,7 @@ async function sendOnceOrRetry(
   signal: AbortSignal | undefined,
   repeatable: boolean,
   routeName: string,
-): Promise<Response> {
+): Promise<Response | HttpClientFailure> {
   const { policy, retryOn } = transport;
   const method = request.method ?? 'GET';
   const deadline = withDeadline(signal, transport.timeoutMs, routeName);
@@ -398,12 +397,16 @@ async function sendOnceOrRetry(
       previous = response;
       throw new RetryableResponse(response);
     };
-    let outcome: Attempt;
-    try {
-      outcome = await policy.execute(attempt, deadline.signal);
-    } catch (error) {
-      if (error instanceof RetryableResponse) return error.response;
+    const outcome = await policy.execute(attempt, deadline.signal).catch((error: unknown) => {
+      if (error instanceof RetryableResponse) return { response: error.response };
       throw error;
+    });
+    if (isFailure(outcome)) {
+      if (UnexpectedDefect.is(outcome)) return outcome;
+      if (deadline.signal?.reason instanceof HttpError && deadline.signal.reason.code === HTTP_ERROR_CODES.requestTimeout) {
+        return RequestTimeout({ cause: outcome });
+      }
+      return RequestCancelled({ cause: outcome });
     }
     if ('error' in outcome) throw outcome.error;
     return outcome.response;

@@ -17,6 +17,7 @@ import type {
   SocialMethod,
   SocialMethodsOf,
 } from '../definition.js';
+import type { AuthRequestId } from '../ids.js';
 import type {
   Principal,
   PrincipalSession,
@@ -232,12 +233,12 @@ export type AuthEvents<P, U> = {
   readonly signIn?: (event: {
     readonly principal: P;
     readonly method: AuthMethod;
-    readonly requestId: string;
+    readonly requestId: AuthRequestId;
   }) => void | Promise<void>;
   readonly signInFailed?: (event: {
     readonly method: AuthMethod;
     readonly reason: SignInFailure;
-    readonly requestId: string;
+    readonly requestId: AuthRequestId;
   }) => void | Promise<void>;
   readonly passwordChanged?: (event: {
     readonly userId: string;

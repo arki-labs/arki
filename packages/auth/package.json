@@ -150,6 +150,7 @@
     "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",
     "@noble/hashes": "^2.2.0",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "better-auth": "catalog:better-auth",
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"

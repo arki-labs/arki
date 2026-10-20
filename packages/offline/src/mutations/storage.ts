@@ -1,93 +1,91 @@
-/**
- * IDB-backed queue storage for OfflineMutationQueue.
- *
- * Wraps idb-keyval with a single key holding the full FIFO array.
- * Uses the package serializer (SuperJSON + Temporal) to preserve Date, Map, BigInt and Temporal values.
- */
 import { get, set, del } from 'idb-keyval';
+import type { z } from '@arki/contracts';
 
-import type { QueuedMutation } from './queue.ts';
-
-import { getLogger } from '@arki/log';
-
+import { queuedMutationSchema } from './model.ts';
+import type { QueuedMutation } from './model.ts';
+import { QueueStorageCorrupt, QueueStorageUnavailable, QueuePersistenceUnconfirmed, QueueEncodingFailure } from './failures.ts';
+import type { QueueStorageFailure } from './failures.ts';
+import { observeQueue } from './telemetry.ts';
 import { offlineSerializer } from '../serializer.ts';
 
-const log = getLogger('arki:offline:mutations');
+export type QueueStorage = {
+  read(): Promise<QueuedMutation[] | QueueStorageFailure>;
+  write(entries: QueuedMutation[]): Promise<void | QueueStorageFailure>;
+  clear(): Promise<void | QueueStorageFailure>;
+};
 
-export interface QueueStorage {
-  read(): Promise<QueuedMutation[]>;
-  write(entries: QueuedMutation[]): Promise<void>;
-  clear(): Promise<void>;
+/** Persistence decode boundary shared by the queue and dead-letter store. */
+export async function readOfflineState<Schema extends z.ZodType>(storageKey: string, schema: Schema, empty: z.output<Schema>): Promise<z.output<Schema> | QueueStorageFailure> {
+  return observeQueue('offline.storage.read', async () => {
+    let raw: unknown;
+    try { raw = await get<unknown>(storageKey); }
+    catch (error) { return QueueStorageUnavailable({ cause: error }); }
+    if (raw === undefined) return empty;
+    try {
+      if (typeof raw !== 'string') return QueueStorageCorrupt();
+      const parsed: unknown = offlineSerializer.parse(raw);
+      const result = schema.safeParse(parsed);
+      return result.success ? result.data : QueueStorageCorrupt({ cause: result.error });
+    } catch (error) { return QueueStorageCorrupt({ cause: error }); }
+  });
+}
+
+export async function writeOfflineState(storageKey: string, value: unknown, schema: z.ZodType): Promise<void | QueueStorageFailure> {
+  return observeQueue('offline.storage.write', async () => {
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) return QueueEncodingFailure({ cause: parsed.error });
+    let encoded: string;
+    try { encoded = offlineSerializer.stringify(parsed.data); }
+    catch (error) { return QueueEncodingFailure({ cause: error }); }
+    try { await set(storageKey, encoded); }
+    catch (error) { return QueuePersistenceUnconfirmed({ cause: error }); }
+    return;
+  });
 }
 
 export function createQueueStorage(storageKey: string): QueueStorage {
   return {
-    async read(): Promise<QueuedMutation[]> {
-      const raw = await get<string>(storageKey);
-      if (!raw) return [];
-      try {
-        return offlineSerializer.parse<QueuedMutation[]>(raw);
-      } catch {
-        // Corrupted storage — return empty to self-heal
-        return [];
-      }
-    },
-
-    async write(entries: QueuedMutation[]): Promise<void> {
-      await set(storageKey, offlineSerializer.stringify(entries));
-    },
-
-    async clear(): Promise<void> {
-      await del(storageKey);
-    },
+    read: () => readOfflineState(storageKey, queuedMutationSchema.array(), []),
+    write: entries => writeOfflineState(storageKey, entries, queuedMutationSchema.array()),
+    clear: () => observeQueue('offline.storage.clear', async () => {
+      try { await del(storageKey); }
+      catch (error) { return QueuePersistenceUnconfirmed({ cause: error }); }
+      return;
+    }),
   };
 }
 
-/**
- * The last actor signed in on this device: one string under its own key.
- * A write queued while the session is unknown (an offline reload) is bound
- * to it, so it can replay for that same user once they are signed in again.
- * A confirmed sign-out forgets it, so a later signed-out write is never bound
- * to the user who left.
- */
 export type LastActorStore = {
-  read(): Promise<string | null>;
-  remember(actorId: string): Promise<void>;
-  forget(): Promise<void>;
+  read(): Promise<string | null | QueueStorageFailure>;
+  remember(actorId: string): Promise<void | QueueStorageFailure>;
+  forget(): Promise<void | QueueStorageFailure>;
 };
 
 export function createLastActorStore(storageKey: string): LastActorStore {
-  // undefined: not read from storage yet.
   let known: string | null | undefined;
   return {
-    async read(): Promise<string | null> {
-      if (known === undefined) {
-        const raw = await get<unknown>(storageKey);
-        known ??= typeof raw === 'string' ? raw : null;
-      }
+    read: () => observeQueue('offline.actor.read', async () => {
+      if (known !== undefined) return known;
+      let raw: unknown;
+      try { raw = await get<unknown>(storageKey); }
+      catch (error) { return QueueStorageUnavailable({ cause: error }); }
+      if (raw !== undefined && typeof raw !== 'string') return QueueStorageCorrupt();
+      known ??= typeof raw === 'string' ? raw : null;
       return known;
-    },
-
-    async remember(actorId: string): Promise<void> {
+    }),
+    remember: actorId => observeQueue('offline.actor.remember', async () => {
       if (known === actorId) return;
       known = actorId;
-      try {
-        await set(storageKey, actorId);
-      } catch (error) {
-        // Memory still holds it for this page; only a reload forgets it.
-        log.debug('Could not store the last actor: {error}', { error: error instanceof Error ? error : String(error) });
-      }
-    },
-
-    async forget(): Promise<void> {
+      try { await set(storageKey, actorId); }
+      catch (error) { return QueuePersistenceUnconfirmed({ cause: error }); }
+      return;
+    }),
+    forget: () => observeQueue('offline.actor.forget', async () => {
       if (known === null) return;
       known = null;
-      try {
-        await del(storageKey);
-      } catch (error) {
-        // Memory already forgot it; a reload could bring the stored id back, so say so.
-        log.debug('Could not forget the last actor: {error}', { error: error instanceof Error ? error : String(error) });
-      }
-    },
+      try { await del(storageKey); }
+      catch (error) { return QueuePersistenceUnconfirmed({ cause: error }); }
+      return;
+    }),
   };
 }

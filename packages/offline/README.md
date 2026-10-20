@@ -147,10 +147,13 @@ export const orpc = createOrpcUtils(rpcContract, rpcClient);
 
 // Inside a component
 import { useOfflineMutation } from '@arki/offline/mutations';
+import { isFailure } from '@arki/failure';
 
-const { mutate, isQueued } = useOfflineMutation(orpc.posts.create);   // input typed from the contract
-await mutate({ title: 'Hello' });
-// Returns { idempotencyKey } — the replay sends the same key as the Idempotency-Key header
+const { mutate, isQueued, isPending, failure } = useOfflineMutation(orpc.posts.create);   // input typed from the contract
+const outcome = await mutate({ title: 'Hello' });
+if (isFailure(outcome)) return outcome;
+// outcome: { idempotencyKey, status: 'queued' | 'sent' | 'dead-letter' }
+// Replay sends the same key as the Idempotency-Key header.
 ```
 
 **TypeScript enforcement:** `useOfflineMutation(orpc.posts.create)` and `queue.enqueue(orpc.posts.create, input)` only compile when the contract marked the procedure with `offlineSafe(p)`. An unmarked procedure, an optional `offlineSafe?: true`, `offlineSafe: false`, or a raw `createTanstackQueryUtils` leaf (no identity) is a compile-time error. `enqueue` checks the mark at run time too, for plain JavaScript callers.
@@ -293,7 +296,7 @@ await queue.deadLetter.discard(entries[0].id);
 
 ### Idempotency key collision
 
-Each queued mutation gets a 21-character URL-safe Nano ID as its idempotency key. Cache records have a separate nominal `idempotencyKeyId`, with the same random-body format and an `idk_` prefix. Cache lookup is scoped by `(userId, procedurePath, idempotencyKey)`; tokens from different users or procedures address different records.
+Each queued mutation gets a securely generated 21-character URL-safe ID with the existing Nano ID representation. `queuedMutationId` and `mutationIdempotencyKey` give its queue identity and transport token separate nominal types; validated persistence restores both without changing stored strings. Cache records have a separate nominal `idempotencyKeyId`, with the same random-body format and an `idk_` prefix. Cache lookup is scoped by `(userId, procedurePath, idempotencyKey)`; tokens from different users or procedures address different records.
 
 ### How to write an idempotent handler
 
@@ -325,3 +328,17 @@ A handler is idempotent when running it twice produces the same observable state
 
 Full architecture, implementation phases, and decisions at:
 [`docs/2026-05-16-arki-offline-design.md`](./docs/2026-05-16-arki-offline-design.md)
+
+### Enqueue outcomes
+
+`queue.enqueue()` and `useOfflineMutation().mutate()` return `EnqueueReceipt | EnqueueFailure`. Check `isFailure` before reading receipt fields. The hook exposes `isPending` and the original `failure` for rendering. `ENQUEUE_FAILURES` is the canonical failure list. Entropy refusals retain their original identity and occur before persistence or RPC.
+
+`QueueStorageUnavailable` means existing local state could not be read. Corrupt or incompatible stored queue/dead-letter bytes are preserved and rejected; they no longer look like an empty queue. `QueueAcceptanceUnconfirmed` carries the original queue ID and idempotency token: a local write or remote effect may already have succeeded. Reconcile using that identity before retrying. A dead-letter receipt is never reported as sent.
+
+The enqueue boundary emits `offline.queue.enqueue` under the active OTel context, without requiring an SDK. Only canonical failure codes are exported; IDs, inputs, actors and causes stay out of spans. Reporting faults cannot suppress or repeat execution. After an accepted RPC, a local removal failure does not repeat the RPC on another drain of the same runtime. Across reloads, the server idempotency middleware remains required.
+
+`queue.drain()` and `ReplayLoop.drainNow()` return `void | DrainFailure`. `queue.deadLetter.retry()` preserves that same result; list/discard and the storage primitives return `QueueStorageFailure` alongside their normal values. Check every returned result with `isFailure`. `DRAIN_FAILURES` and `QUEUE_STORAGE_FAILURES` are the canonical definition tuples.
+
+`QueueStorageCorrupt` preserves invalid stored bytes. `QueuePersistenceUnconfirmed` requires reading local state before repeating a local write. `QueueEffectUnconfirmed` carries the identity of a remotely accepted effect whose cleanup needs reconciliation. Unknown adapter defects stop replay as `UnexpectedDefect`; mark a known network outage with `QueueTransportUnavailable()` so the queue can own its retries. HTTP status refusals retain auth/4xx/5xx policy. An explicit drain resumes an authentication halt.
+
+Background failures reach queue events and `queue.status().failure`; hooks and devtools preserve/display them. Storage, actor persistence, dead-letter operations and drain have default spans under the active context. Query persistence, collections, PWA and runtime capabilities remain separate T08 export audits. This is not package-wide completion.

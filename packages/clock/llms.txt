@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/clock`: A clock you inject instead of calling `Date` and `setTimeout`: `SystemClock` for production, `MockClock` for tests. `CLOCK_ERROR_CODES`, `ClockError`, `MAX_TIMER_MS`, `MockClock`, `SystemClock`; types `Clock`, `ClockErrorCode`.
+- `@arki/clock`: A clock you inject instead of calling `Date` and `setTimeout`: `SystemClock` for production, `MockClock` for tests. `CLOCK_ERROR_CODES`, `ClockError`, `MAX_TIMER_MS`, `MockClock`, `SLEEP_FAILURES`, `SleepCancelled`, `SystemClock`; types `Clock`, `ClockErrorCode`, `SleepFailure`.
 <!-- llms:end -->
 
 ## Start here

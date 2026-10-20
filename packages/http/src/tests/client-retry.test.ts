@@ -4,11 +4,12 @@
  * an outage hard to read. Each test runs a real `@arki/resilience` retry policy, which on its own
  * would retry any error, so they show that `retryOn`, not the policy, decides what is sent again.
  */
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { Policy } from '@arki/resilience';
-import { InvalidEnvelope, UnexpectedDefect } from '@arki/failure';
+import type { Policy, RetryWaitFailure } from '@arki/resilience';
+import { MockClock, SleepCancelled } from '@arki/clock';
+import { InvalidEnvelope, isFailure, UnexpectedDefect } from '@arki/failure';
 import { backoff, createRetryPolicy, withFallback } from '@arki/resilience';
 
 import type { ClientPolicy } from '../client.js';
@@ -178,7 +179,28 @@ describe('ClientPolicy', () => {
   it('accepts an @arki/resilience policy, but not one with a fallback: its result might not be a response', () => {
     expectTypeOf(policy).toExtend<ClientPolicy>();
     const cached = withFallback(policy, () => 'cached');
-    expectTypeOf<typeof cached>().toEqualTypeOf<Policy<string>>();
+    expectTypeOf(cached).toEqualTypeOf<Policy<string, RetryWaitFailure>>();
     expectTypeOf(cached).not.toExtend<ClientPolicy>();
   });
 });
+
+
+it.each([SleepCancelled({ cause: 'foreign cancellation' }), UnexpectedDefect({ cause: new Error('timer failed') })])(
+  'a refused retry wait ($code) cannot send another request',
+  async refusal => {
+    const clock = new MockClock();
+    const sleep = vi.spyOn(clock, 'sleep').mockResolvedValue(refusal);
+    const retry = createRetryPolicy({ backoff: backoff.constant(1000).upTo(2), clock });
+    const { calls, fetch } = scripted(unavailable, () => json(200, { id: 'o1' }));
+    const orders = createClient({ getOrder }, { baseUrl: 'https://api.test', fetch, policy: retry });
+    const result = await orders.getOrder({ params: { id: 'o1' } });
+    expect(result).toMatchObject({
+      code: SleepCancelled.is(refusal) ? RequestCancelled.code : UnexpectedDefect.code,
+    });
+    if (!isFailure(result)) throw new Error('expected request failure');
+    if (UnexpectedDefect.is(refusal)) expect(result).toBe(refusal);
+    else expect(result.cause).toBe(refusal);
+    expect(calls).toHaveLength(1);
+    expect(sleep).toHaveBeenCalledOnce();
+  },
+);

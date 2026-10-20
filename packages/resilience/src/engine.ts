@@ -13,10 +13,7 @@ import type { Policy, PolicyCallback, PolicyContext } from './policy.js';
 import { BulkheadRejectedError, CancelledError, CircuitOpenError, TimeoutError } from './errors.js';
 
 /** A cockatiel policy, whatever its context type. @internal */
-export type Engine = IPolicy<IDefaultPolicyContext>;
-
-/** The engine behind each policy this package created. */
-const engines = new WeakMap<Policy, Engine>();
+export type Engine<E = never> = IPolicy<IDefaultPolicyContext, E>;
 
 /** Retry supplies `attempt` in the context; the other policies do not. */
 function hasAttempt(context: IDefaultPolicyContext): context is PolicyContext {
@@ -45,46 +42,56 @@ export function toResilienceError(error: unknown, signal: AbortSignal | undefine
   return error;
 }
 
-/** Build one of our policies on top of an engine, adding the engine's extra event methods. @internal */
-export function fromEngine<Extra extends object>(engine: Engine, extra: Extra): Policy & Extra {
-  const policy: Policy & Extra = {
-    ...extra,
-    onSuccess: engine.onSuccess,
-    onFailure: engine.onFailure,
-    async execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T> {
-      try {
-        return await engine.execute(
-          context => fn(hasAttempt(context) ? context : { signal: context.signal, attempt: 0 }),
-          signal,
-        );
-      } catch (error) {
-        throw toResilienceError(error, signal);
-      }
-    },
+/** Runtime witness retains the engine's inferred alternate outcome without an erased WeakMap. */
+class EnginePolicy<E> implements Policy<never, E> {
+  readonly onSuccess: Engine<E>['onSuccess'];
+  readonly onFailure: Engine<E>['onFailure'];
+
+  constructor(readonly engine: Engine<E>) {
+    this.onSuccess = engine.onSuccess;
+    this.onFailure = engine.onFailure;
+  }
+
+  readonly execute = async <T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | E> => {
+    try {
+      return await this.engine.execute(
+        context => fn(hasAttempt(context) ? context : { signal: context.signal, attempt: 0 }),
+        signal,
+      );
+    } catch (error) {
+      throw toResilienceError(error, signal);
+    }
   };
-  engines.set(policy, engine);
-  return policy;
+}
+
+function isEnginePolicy<E>(policy: Policy<never, E>): policy is EnginePolicy<E> {
+  return policy instanceof EnginePolicy;
+}
+
+/** Build one of our policies on top of an engine, adding the engine's extra event methods. @internal */
+export function fromEngine<E, Extra extends object>(engine: Engine<E>, extra: Extra): Policy<never, E> & Extra {
+  return Object.assign(new EnginePolicy(engine), extra);
 }
 
 /** Lets a policy that was not created by this package take part in `wrap()`. */
-class ForeignEngine implements Engine {
-  declare readonly _altReturn: never;
+class ForeignEngine<E> implements Engine<E> {
+  declare readonly _altReturn: E;
   readonly onSuccess: Engine['onSuccess'];
   readonly onFailure: Engine['onFailure'];
-  readonly #policy: Policy;
+  readonly #policy: Policy<never, E>;
 
-  constructor(policy: Policy) {
+  constructor(policy: Policy<never, E>) {
     this.#policy = policy;
     this.onSuccess = policy.onSuccess;
     this.onFailure = policy.onFailure;
   }
 
-  execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal): Promise<T> {
+  execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal): Promise<T | E> {
     return this.#policy.execute(fn, signal);
   }
 }
 
 /** The engine behind a policy, or an adapter when the policy came from elsewhere. @internal */
-export function engineOf(policy: Policy): Engine {
-  return engines.get(policy) ?? new ForeignEngine(policy);
+export function engineOf<E>(policy: Policy<never, E>): Engine<E> {
+  return isEnginePolicy(policy) ? policy.engine : new ForeignEngine(policy);
 }

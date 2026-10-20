@@ -22,6 +22,7 @@ export {
 // Policy shape and event payloads
 export type {
   Policy,
+  PolicyExecution,
   PolicyContext,
   PolicyCallback,
   RetryPolicy,
@@ -77,3 +78,7 @@ export type { PolicyLogger } from './events.js';
 
 // Execution helpers
 export { withResilience, withRetry, withTimeout } from './execute.js';
+
+/** Exact operational outcomes from waiting between retry attempts. */
+export type { SleepFailure as RetryWaitFailure } from '@arki/clock';
+export { SLEEP_FAILURES as RETRY_WAIT_FAILURES } from '@arki/clock';

@@ -29,7 +29,7 @@ function makeQueueStub(overrides: Partial<Status> = {}): OfflineMutationQueue {
       subscribers.add(listener);
       return () => subscribers.delete(listener);
     },
-    status: () => ({ queued: 0, sending: false, deadLettered: 0, ...overrides }),
+    status: () => ({ queued: 0, sending: false, deadLettered: 0, failure: null, ...overrides }),
     dispose: vi.fn(),
   } satisfies OfflineMutationQueue;
 }

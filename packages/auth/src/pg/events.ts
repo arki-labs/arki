@@ -5,10 +5,14 @@
  *
  * Observers never change the response: a throwing observer is logged and the answer stays.
  */
+import { isFailure } from '@arki/failure';
+
 import type { AuthMethod } from '../definition.js';
 import type { AuthEvents, SignInFailure } from './types.js';
 import { isSocialMethod } from '../definition.js';
+import { authRequestId } from '../id-declarations.js';
 import { errorField, log } from '../log.js';
+import { observeAuth, observeSafely } from './telemetry.js';
 
 /** Where the engine's routes are mounted. */
 export const AUTH_BASE_PATH = '/api/auth';
@@ -70,8 +74,15 @@ export async function failureOf(response: Response): Promise<SignInFailure | und
   return undefined;
 }
 
-/** The request id events carry: the inbound `x-request-id`, else a fresh one. */
-export const requestIdOf = (headers: Headers): string => headers.get('x-request-id') ?? crypto.randomUUID();
+/** Generation failure suppresses only observation, never a completed business response. */
+export function requestIdOf(headers: Headers) {
+  const inbound = headers.get('x-request-id');
+  const requestId = inbound === null ? authRequestId.create() : authRequestId.schema.parse(inbound);
+  if (isFailure(requestId)) {
+    observeSafely(() => log.warn('Auth event correlation unavailable; the operation result is unchanged', { failure: requestId }));
+  }
+  return requestId;
+}
 
 type Events<P, U> = Required<AuthEvents<P, U>>;
 type EventOf<P, U, K extends keyof Events<P, U>> = Parameters<Events<P, U>[K]>[0];
@@ -79,9 +90,9 @@ type EventOf<P, U, K extends keyof Events<P, U>> = Parameters<Events<P, U>[K]>[0
 /** Calls one observer, logs its failure, never throws. */
 export async function runObserver(name: string, call: () => void | Promise<void> | undefined): Promise<void> {
   try {
-    await call();
+    await observeAuth(`auth.observer.${name}`, call);
   } catch (error) {
-    log.warn('The {name} observer threw; the response is unchanged', { name, error: errorField(error) });
+    observeSafely(() => log.warn('The {name} observer threw; the response is unchanged', { name, error: errorField(error) }));
   }
 }
 

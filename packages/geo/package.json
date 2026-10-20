@@ -25,26 +25,6 @@
       "import": "./src/maps/google/index.ts",
       "node": "./src/maps/google/index.ts"
     },
-    "./maps/apple": {
-      "types": "./dist/src/maps/apple/index.d.ts",
-      "import": "./src/maps/apple/index.ts",
-      "node": "./src/maps/apple/index.ts"
-    },
-    "./maps/mapbox": {
-      "types": "./dist/src/maps/mapbox/index.d.ts",
-      "import": "./src/maps/mapbox/index.ts",
-      "node": "./src/maps/mapbox/index.ts"
-    },
-    "./maps/leaflet": {
-      "types": "./dist/src/maps/leaflet/index.d.ts",
-      "import": "./src/maps/leaflet/index.ts",
-      "node": "./src/maps/leaflet/index.ts"
-    },
-    "./maps/here": {
-      "types": "./dist/src/maps/here/index.d.ts",
-      "import": "./src/maps/here/index.ts",
-      "node": "./src/maps/here/index.ts"
-    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -60,18 +40,6 @@
       ],
       "maps/google": [
         "src/maps/google/index.ts"
-      ],
-      "maps/apple": [
-        "src/maps/apple/index.ts"
-      ],
-      "maps/mapbox": [
-        "src/maps/mapbox/index.ts"
-      ],
-      "maps/leaflet": [
-        "src/maps/leaflet/index.ts"
-      ],
-      "maps/here": [
-        "src/maps/here/index.ts"
       ]
     }
   },

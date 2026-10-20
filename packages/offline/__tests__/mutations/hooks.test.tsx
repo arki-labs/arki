@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { mutationIdempotencyKey } from '../../src/mutations/identity.ts';
 
 import { createElement } from 'react';
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
@@ -36,7 +37,7 @@ function makeQueueStub(overrides: Partial<QueueStatus> = {}): OfflineMutationQue
         subscribers.delete(listener);
       };
     },
-    status: () => ({ queued: 0, sending: false, deadLettered: 0, ...overrides }),
+    status: () => ({ queued: 0, sending: false, deadLettered: 0, failure: null, ...overrides }),
     dispose: vi.fn(),
   } satisfies OfflineMutationQueue;
 }
@@ -66,15 +67,30 @@ describe('useOfflineMutation', () => {
     const contract = { highlights: { create: offlineSafe(oc.input(z.object({ text: z.string() }))) } };
     const carrier = { [OPERATION]: operations(contract).highlights.create };
     const queue = makeQueueStub();
-    vi.mocked(queue.enqueue).mockResolvedValue({ idempotencyKey: 'k1', status: 'queued' });
+    vi.mocked(queue.enqueue).mockResolvedValue({ idempotencyKey: mutationIdempotencyKey.schema.parse('k1'), status: 'queued' });
 
     const { result } = renderHook(() => useOfflineMutation(carrier), {
       wrapper: ({ children }) => createElement(OfflineQueueProvider, { queue, children }),
     });
     const sent = await act(() => result.current.mutate({ text: 'hi' }));
 
-    expect(sent).toEqual({ idempotencyKey: 'k1' });
+    expect(sent).toEqual({ idempotencyKey: 'k1', status: 'queued' });
     expect(queue.enqueue).toHaveBeenCalledWith(carrier, { text: 'hi' });
     expect(carrier[OPERATION].path).toEqual(['highlights', 'create']);
   });
+});
+
+it('preserves the exact failure for the caller and exposes it to the UI', async () => {
+  const { QueueStorageUnavailable } = await import('../../src/mutations/failures.ts');
+  const contract = { create: offlineSafe(oc.input(z.object({ text: z.string() }))) };
+  const carrier = { [OPERATION]: operations(contract).create };
+  const queue = makeQueueStub();
+  const failure = QueueStorageUnavailable();
+  vi.spyOn(queue, 'enqueue').mockResolvedValue(failure);
+  const { result } = renderHook(() => useOfflineMutation(carrier), {
+    wrapper: ({ children }) => createElement(OfflineQueueProvider, { queue, children }),
+  });
+  expect(await act(() => result.current.mutate({ text: 'hi' }))).toBe(failure);
+  expect(result.current.failure).toBe(failure);
+  expect(result.current.isPending).toBe(false);
 });

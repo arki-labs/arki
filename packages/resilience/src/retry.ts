@@ -8,7 +8,7 @@
 // failure is an expected outcome, so it is retried only when the backoff's `while` says
 // so, and when retrying stops the caller gets the last failure back as a value.
 
-import type { Clock } from '@arki/clock';
+import type { Clock, SleepFailure } from '@arki/clock';
 import { isFailure } from '@arki/failure';
 
 import type { Backoff } from './backoff.js';
@@ -21,7 +21,6 @@ import type {
   RetryPolicy,
   SuccessEvent,
 } from './policy.js';
-import { CancelledError } from './errors.js';
 
 /** Listeners of one event. Listening is rare and emitting is per call, so a plain array. */
 function createEvent<E>(): { readonly on: PolicyEvent<E>; emit(event: E): void; readonly listening: () => boolean } {
@@ -61,7 +60,7 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
   const retry = createEvent<RetryEvent>();
   const giveUp = createEvent<FailureReason>();
 
-  async function execute<T>(fn: PolicyCallback<T>, signal: AbortSignal = neverAborted): Promise<T> {
+  async function execute<T>(fn: PolicyCallback<T>, signal: AbortSignal = neverAborted): Promise<T | SleepFailure> {
     for (let attempt = 0; ; attempt++) {
       const started = success.listening() || failure.listening() ? nowMs() : 0;
       let failed: { readonly error: unknown } | { readonly value: Awaited<T> };
@@ -91,12 +90,9 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
         return failed.value;
       }
       retry.emit({ ...failed, attempt: attempt + 1, delay });
-      try {
-        await clock.sleep(delay, signal);
-      } catch (sleepError) {
-        if (!signal.aborted) throw sleepError;
-        throw new CancelledError('Operation cancelled by the caller', { cause: signal.reason });
-      }
+      const sleepResult = await clock.sleep(delay, signal);
+      if (sleepResult !== undefined) return sleepResult;
+
     }
   }
 

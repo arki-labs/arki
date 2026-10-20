@@ -1,3 +1,5 @@
+import type { SleepFailure } from '@arki/clock';
+
 // The public shape of a policy. Nothing here names the underlying engine, so the
 // engine can change without changing this file or anything built on it.
 
@@ -50,15 +52,22 @@ export type BreakEvent = FailureReason | { isolated: true };
 
 /** Type-only brand. Never set at runtime. Not `@internal`: the published `.d.ts` needs it. */
 declare const fallbackType: unique symbol;
+/** Type-only witness preserves owned outcomes through higher-rank execute callbacks. */
+declare const outcomeType: unique symbol;
 
 /**
  * Any policy: runs a function and reports how each call ended. `F` is what a fallback may
  * resolve instead of the function's own `T`; it is `never` for a plain policy.
  */
-export type Policy<F = never> = {
+export type PolicyExecution<F = never, E = never> = {
   /** Phantom: makes a policy with a fallback unassignable to a plain `Policy`, so `wrap` rejects it. */
   readonly [fallbackType]?: () => F;
-  execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F>;
+  readonly [outcomeType]?: () => E;
+  execute<T>(this: void, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E>;
+};
+
+/** Execution plus observable policy events. */
+export type Policy<F = never, E = never> = PolicyExecution<F, E> & {
   /** Fires once per call that ends well, even when that took retries. */
   readonly onSuccess: PolicyEvent<SuccessEvent>;
   /** Fires on every failed attempt the policy sees. */
@@ -66,7 +75,7 @@ export type Policy<F = never> = {
 };
 
 /** A retry policy. `F` is what its `onThrow` may answer instead of the function's own `T`; `never` without one. */
-export type RetryPolicy<F = never> = Policy<F> & {
+export type RetryPolicy<F = never> = Policy<F, SleepFailure> & {
   readonly onRetry: PolicyEvent<RetryEvent>;
   /**
    * Fires when the last attempt has failed and its error, or its failure after at least one

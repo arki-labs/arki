@@ -1,6 +1,6 @@
 /** Owned resources and child work with callback-inferred failure contracts. */
 import type { Failure, FailureDefinition, FailureIn, FailureOf } from '@arki/failure';
-import { CLOCK_ERROR_CODES, ClockError } from '@arki/clock';
+import { CLOCK_ERROR_CODES, ClockError, SleepCancelled } from '@arki/clock';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScopeAggregate, SupervisorFailure } from './errors.js';
@@ -243,7 +243,7 @@ function lifetimeRuntime(options: ScopeOptions) {
   let closing: Promise<ReturnType<typeof finish<void, Failure, Failure>>> | undefined;
   let quieting: Promise<ReturnType<typeof finish<void, Failure, never>>> | undefined;
   const abort = (failure: Failure) => {
-    if (Cancelled.is(failure) && failure.cause === ownedReason) return;
+    if ((Cancelled.is(failure) || SleepCancelled.is(failure)) && failure.cause === ownedReason) return;
     if (!primary.includes(failure)) primary.push(failure);
     controller.abort(ownedReason);
   };
@@ -309,7 +309,7 @@ function lifetimeRuntime(options: ScopeOptions) {
         .then(
           value => {
             if (refused(value)) {
-              if (Cancelled.is(value) && controller.signal.reason === ownedReason && value.cause === ownedReason)
+              if ((Cancelled.is(value) || SleepCancelled.is(value)) && controller.signal.reason === ownedReason && value.cause === ownedReason)
                 return;
               abort(value);
             }

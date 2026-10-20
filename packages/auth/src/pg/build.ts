@@ -7,6 +7,8 @@ import { APIError } from 'better-auth/api';
 import { makeSignature } from 'better-auth/crypto';
 import { getTableColumns } from 'drizzle-orm';
 
+import { isFailure } from '@arki/failure';
+
 import type { AuthDefinition, AuthMethod, IdTokenMethodsOf, ResolvedDefinition, SocialMethod } from '../definition.js';
 import type { AuthErrorCode } from '../errors.js';
 import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.js';
@@ -47,6 +49,7 @@ import { authMail } from './mail.js';
 import { assertAuthSecret } from './secret.js';
 import { kvRateLimitStorage } from './security/kv-storage.js';
 import { createSessions } from './sessions.js';
+import { observeAuth } from './telemetry.js';
 import { ENGINE_SESSION_COLUMNS } from './types.js';
 
 /** A working auth. Build it with {@link createAuth}. */
@@ -492,8 +495,8 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
             );
       if (signedIn === null) {
         const reason = await failureOf(response);
-        if (reason !== undefined) await emit.signInFailed({ method, reason, requestId });
-      } else {
+        if (reason !== undefined && !isFailure(requestId)) await emit.signInFailed({ method, reason, requestId });
+      } else if (!isFailure(requestId)) {
         await emit.signIn({ principal: signedIn, method, requestId });
       }
     }
@@ -519,7 +522,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     }
     const requestId = requestIdOf(headers);
     const refused = async (reason: SignInFailure) => {
-      await emit.signInFailed({ method: provider, reason, requestId });
+      if (!isFailure(requestId)) await emit.signInFailed({ method: provider, reason, requestId });
       return null;
     };
 
@@ -543,7 +546,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
       if (isAuthErrorCode(code)) throw new AuthError(code, typeof message === 'string' ? message : code);
       const reason = await failureOf(response);
       if (reason === 'rateLimited') {
-        await emit.signInFailed({ method: provider, reason, requestId });
+        if (!isFailure(requestId)) await emit.signInFailed({ method: provider, reason, requestId });
         const retryAfter = Number(response.headers.get('x-retry-after'));
         throw new AuthError(AUTH_ERROR_CODES.rateLimited, 'Too many sign-in attempts.', {
           ...(Number.isFinite(retryAfter) && retryAfter > 0 && { retryAfter }),
@@ -559,7 +562,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     if (token === null || signedIn === null) {
       throw new Error('[@arki/auth] The engine accepted the id token but returned no usable bearer token.');
     }
-    await emit.signIn({ principal: signedIn, method: provider, requestId });
+    if (!isFailure(requestId)) await emit.signIn({ principal: signedIn, method: provider, requestId });
     log.debug('Signed in with a {provider} id token', { provider: name });
     return { token, principal: signedIn };
   }
@@ -621,11 +624,11 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
 
   return {
     definition,
-    handler,
-    principal,
+    handler: request => observeAuth('auth.handler', () => handler(request)),
+    principal: headers => observeAuth('auth.principal', () => principal(headers)),
     sessions: createSessions<P, SessionIdOf<T>, UserIdOf<T>>(engineContext),
     supportsIdToken,
-    signInWithIdToken,
+    signInWithIdToken: input => observeAuth('auth.sign_in_with_id_token', () => signInWithIdToken(input)),
     engine,
     testing,
   };

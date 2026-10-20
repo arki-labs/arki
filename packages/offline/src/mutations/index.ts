@@ -36,3 +36,9 @@ export { OfflineQueueProvider, useOfflineQueue } from './OfflineQueueProvider.ts
 // React hooks
 export type { QueueStatus, UseOfflineMutationResult } from './hooks.ts';
 export { useQueueStatus, useOfflineMutation } from './hooks.ts';
+
+export { queuedMutationId, mutationIdempotencyKey } from './identity.ts';
+export type { QueuedMutationId, MutationIdempotencyKey } from './identity.ts';
+export { ENQUEUE_FAILURES, DRAIN_FAILURES, QUEUE_STORAGE_FAILURES, OFFLINE_QUEUE_FAILURES, QueueStorageUnavailable, QueueAcceptanceUnconfirmed, QueueStorageCorrupt, QueuePersistenceUnconfirmed, QueueEncodingFailure, QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.ts';
+export type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.ts';
+export type { EnqueueReceipt, QueueSnapshot } from './queue.ts';

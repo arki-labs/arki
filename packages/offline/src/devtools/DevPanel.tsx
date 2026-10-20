@@ -1,4 +1,7 @@
 /// <reference path="../query/vite-env.d.ts" />
+import { isFailure } from '@arki/failure';
+import type { OfflineQueueFailure } from '../mutations/failures.ts';
+
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { useOnlineStatus } from '../status/useOnlineStatus.ts';
@@ -20,6 +23,7 @@ export function OfflineDevPanel(): ReactNode {
 }
 
 function DevPanelImpl(): ReactNode {
+  const [failure, setFailure] = useState<OfflineQueueFailure | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [deadLettered, setDeadLettered] = useState<readonly QueuedMutation[]>([]);
   const { online } = useOnlineStatus();
@@ -30,7 +34,10 @@ function DevPanelImpl(): ReactNode {
     const { queue } = queueCtx;
 
     const refresh = (): void => {
-      void queue.deadLetter.list().then(setDeadLettered);
+      void queue.deadLetter.list().then(result => {
+        if (isFailure(result)) setFailure(result);
+        else { setDeadLettered(result); setFailure(null); }
+      });
     };
 
     refresh();
@@ -97,6 +104,8 @@ function DevPanelImpl(): ReactNode {
             </div>
           )}
 
+          {(failure ?? status?.failure) && <div role="alert">{(failure ?? status?.failure)?.message}</div>}
+
           {deadLettered.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <strong>Dead-letter:</strong>
@@ -108,13 +117,13 @@ function DevPanelImpl(): ReactNode {
                       {' '}
                       <button
                         style={{ fontSize: 10, cursor: 'pointer', marginLeft: 4 }}
-                        onClick={() => void queueCtx.queue.deadLetter.retry(m.id)}
+                        onClick={() => void queueCtx.queue.deadLetter.retry(m.id).then(result => setFailure(isFailure(result) ? result : null))}
                       >
                         retry
                       </button>
                       <button
                         style={{ fontSize: 10, cursor: 'pointer', marginLeft: 4 }}
-                        onClick={() => void queueCtx.queue.deadLetter.discard(m.id)}
+                        onClick={() => void queueCtx.queue.deadLetter.discard(m.id).then(result => setFailure(isFailure(result) ? result : null))}
                       >
                         discard
                       </button>

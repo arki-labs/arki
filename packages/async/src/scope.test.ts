@@ -1,7 +1,7 @@
 import { assert, it } from 'vitest';
 
 import type { Failure, FailureOf } from '@arki/failure';
-import { MockClock } from '@arki/clock';
+import { MockClock, SleepCancelled } from '@arki/clock';
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScopeAggregate } from './errors.js';
@@ -505,7 +505,7 @@ it('Clock.sleep owned cancellation uses trusted cause identity', async () => {
     {
       watcher: child(async signal => {
         started.resolve();
-        await clock.sleep(1000, signal);
+        return await clock.sleep(1000, signal);
       }),
     },
     async () => {
@@ -524,7 +524,7 @@ it('quiesces children before a dispose hook, then runs registered finalizers', a
   const clock = new MockClock();
   const started = gate<void>();
   const order: string[] = [];
-  const lifetime = createLifetime({});
+  const lifetime = createLifetime<FailureOf<typeof clock.sleep>>({});
   assert.equal(
     lifetime.defer(() => {
       order.push('finalizer');
@@ -534,7 +534,7 @@ it('quiesces children before a dispose hook, then runs registered finalizers', a
   const watcher = child(async signal => {
     started.resolve();
     try {
-      await clock.sleep(1000, signal);
+      return await clock.sleep(1000, signal);
     } finally {
       order.push('child');
     }
@@ -626,4 +626,10 @@ it('late-acquired resources stay open until admitted children settle', async () 
   childDone.resolve();
   assert.equal(await closing, undefined);
   assert.equal(finalized, true);
+});
+
+it('preserves foreign Clock cancellation instead of treating it as owned shutdown', async () => {
+  const refused = SleepCancelled({ cause: new Error('external cancellation') });
+  const result = await scoped({ worker: child(() => refused) }, () => 42);
+  assert.equal(result, refused);
 });

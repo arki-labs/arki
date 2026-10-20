@@ -14,15 +14,15 @@ export type PolicyLogger = {
 // Type guards for policy event detection
 // ---------------------------------------------------------------------------
 
-function hasRetryEvents(policy: Policy<unknown>): policy is RetryPolicy {
+function hasRetryEvents(policy: Policy<unknown, unknown>): policy is RetryPolicy {
   return 'onRetry' in policy;
 }
 
-function hasCircuitBreakerEvents(policy: Policy<unknown>): policy is CircuitBreakerPolicy {
+function hasCircuitBreakerEvents(policy: Policy<unknown, unknown>): policy is CircuitBreakerPolicy {
   return 'onBreak' in policy && 'onReset' in policy && 'onHalfOpen' in policy;
 }
 
-function hasTimeoutEvents(policy: Policy<unknown>): policy is TimeoutPolicy {
+function hasTimeoutEvents(policy: Policy<unknown, unknown>): policy is TimeoutPolicy {
   return 'onTimeout' in policy;
 }
 
@@ -45,7 +45,7 @@ export function describe(reason: FailureReason): string {
  * Returns a cleanup function that disposes all subscriptions.
  */
 export function attachPolicyLogger(
-  policy: Policy<unknown>,
+  policy: Policy<unknown, unknown>,
   logger: PolicyLogger,
   policyName = 'resilience',
 ): () => void {

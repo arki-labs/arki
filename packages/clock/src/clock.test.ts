@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type { SleepFailure } from './errors.js';
 import { MAX_TIMER_MS, MockClock, SystemClock } from './clock.js';
-import { CLOCK_ERROR_CODES, ClockError } from './errors.js';
+import { CLOCK_ERROR_CODES, ClockError, SLEEP_FAILURES, SleepCancelled } from './errors.js';
 
 describe('ClockError', () => {
   it('carries a stable code and a remediation, so callers match on the code and not the message', () => {
@@ -164,7 +167,8 @@ describe('MockClock timers', () => {
   it('resolves sleep only when advance reaches it', async () => {
     const clock = new MockClock();
     let done = false;
-    const sleeping = clock.sleep(5000).then(() => {
+    const sleeping = clock.sleep(5000).then(outcome => {
+      if (isFailure(outcome)) throw new Error('unexpected sleep failure');
       done = true;
     });
     clock.advance(4999);
@@ -175,27 +179,27 @@ describe('MockClock timers', () => {
     expect(done).toBe(true);
   });
 
-  it('rejects sleep with a coded error carrying the abort reason', async () => {
+  it('returns cancellation with the private abort reason without rejecting', async () => {
     const clock = new MockClock();
     const controller = new AbortController();
     const reason = new Error('stop');
     const sleeping = clock.sleep(5000, controller.signal);
     controller.abort(reason);
-    await expect(sleeping).rejects.toMatchObject({ code: CLOCK_ERROR_CODES.aborted, cause: reason });
+    await expect(sleeping).resolves.toMatchObject({ code: SleepCancelled.code, cause: reason });
     const already = new AbortController();
     already.abort(reason);
-    await expect(clock.sleep(10, already.signal)).rejects.toMatchObject({ code: 'ARKI_CLOCK_E003' });
+    await expect(clock.sleep(10, already.signal)).resolves.toMatchObject({ code: SleepCancelled.code, cause: reason });
   });
 
   it('advanceAsync fires timers that async code sets after each await', async () => {
     const clock = new MockClock();
     const wokeAt: number[] = [];
     const loop = async (): Promise<void> => {
-      await clock.sleep(1000);
+      if (isFailure(await clock.sleep(1000))) throw new Error('unexpected cancellation');
       wokeAt.push(clock.now().getTime());
-      await clock.sleep(2000);
+      if (isFailure(await clock.sleep(2000))) throw new Error('unexpected cancellation');
       wokeAt.push(clock.now().getTime());
-      await clock.sleep(4000);
+      if (isFailure(await clock.sleep(4000))) throw new Error('unexpected cancellation');
       wokeAt.push(clock.now().getTime());
     };
     const running = loop();
@@ -215,11 +219,202 @@ describe('SystemClock timers', () => {
     const clock = new SystemClock();
     const cancelled = vi.fn();
     clock.setTimer(cancelled, 1)();
-    await clock.sleep(5);
+    if (isFailure(await clock.sleep(5))) throw new Error('unexpected cancellation');
     expect(cancelled).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid delay', async () => {
     await expect(new SystemClock().sleep(-1)).rejects.toThrow(/ARKI_CLOCK_E002/);
   });
+});
+
+describe.each([SystemClock, MockClock])('%s cancellation ownership', ClockClass => {
+  it('clears its timer before returning cancellation', async () => {
+    const clock = new ClockClass();
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    vi.spyOn(clock, 'setTimer').mockReturnValue(cancel);
+    const sleeping = clock.sleep(100, controller.signal);
+    controller.abort('stop');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(SleepCancelled.is(await sleeping)).toBe(true);
+  });
+
+  it('does not allocate a timer or listener for an already cancelled wait', async () => {
+    const clock = new ClockClass();
+    const controller = new AbortController();
+    controller.abort('stop');
+    const timer = vi.spyOn(clock, 'setTimer');
+    const listener = vi.spyOn(controller.signal, 'addEventListener');
+    expect(SleepCancelled.is(await clock.sleep(100, controller.signal))).toBe(true);
+    expect(timer).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+it('exposes exactly the canonical cancellation outcome alongside ordinary void success', () => {
+  expectTypeOf<Awaited<ReturnType<SystemClock['sleep']>>>().toEqualTypeOf<void | SleepFailure>();
+  expectTypeOf<Awaited<ReturnType<MockClock['sleep']>>>().toEqualTypeOf<void | ReturnType<
+    (typeof SLEEP_FAILURES)[number]
+  >>();
+  expect(SLEEP_FAILURES).toEqual([SleepCancelled, UnexpectedDefect]);
+});
+
+it('supervises timer registration and cleanup defects without rejecting', async () => {
+  const clock = new MockClock();
+  const cause = new Error('timer provider failed');
+  const timer = vi.spyOn(clock, 'setTimer').mockImplementation(() => {
+    throw cause;
+  });
+  await expect(clock.sleep(1)).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+  timer.mockReturnValue(() => {
+    throw cause;
+  });
+  const controller = new AbortController();
+  const sleeping = clock.sleep(1, controller.signal);
+  controller.abort();
+  await expect(sleeping).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+});
+
+it('settles when a foreign timer calls back synchronously and cleans the handle', async () => {
+  const clock = new MockClock();
+  const cancel = vi.fn();
+  vi.spyOn(clock, 'setTimer').mockImplementation(callback => {
+    callback();
+    return cancel;
+  });
+  await expect(clock.sleep(1, new AbortController().signal)).resolves.toBeUndefined();
+  expect(cancel).toHaveBeenCalledOnce();
+});
+
+it('removes the abort listener after a successful wait', async () => {
+  const clock = new MockClock();
+  const controller = new AbortController();
+  const remove = vi.spyOn(controller.signal, 'removeEventListener');
+  const sleeping = clock.sleep(1, controller.signal);
+  clock.advance(1);
+  await expect(sleeping).resolves.toBeUndefined();
+  expect(remove).toHaveBeenCalledOnce();
+});
+
+it('owns cancellation that happens while a foreign timer is registering', async () => {
+  const clock = new MockClock();
+  const controller = new AbortController();
+  const cancel = vi.fn();
+  vi.spyOn(clock, 'setTimer').mockImplementation(() => {
+    controller.abort('stop');
+    return cancel;
+  });
+  await expect(clock.sleep(1, controller.signal)).resolves.toMatchObject({ code: SleepCancelled.code });
+  expect(cancel).toHaveBeenCalledOnce();
+});
+
+it('supervises abort listener registration and removal faults', async () => {
+  const clock = new MockClock();
+  const cause = new Error('signal provider failed');
+  const registration = new AbortController();
+  vi.spyOn(registration.signal, 'addEventListener').mockImplementation(() => {
+    throw cause;
+  });
+  const timer = vi.spyOn(clock, 'setTimer');
+  await expect(clock.sleep(1, registration.signal)).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+  expect(timer).not.toHaveBeenCalled();
+  const cleanup = new AbortController();
+  vi.spyOn(cleanup.signal, 'removeEventListener').mockImplementation(() => {
+    throw cause;
+  });
+  const sleeping = clock.sleep(1, cleanup.signal);
+  clock.advance(1);
+  await expect(sleeping).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+});
+
+it('supervises cleanup faults after synchronous foreign timer completion', async () => {
+  const clock = new MockClock();
+  const cause = new Error('cleanup failed');
+  const cancel = (): void => {
+    throw cause;
+  };
+  vi.spyOn(clock, 'setTimer').mockImplementation(callback => {
+    callback();
+    return cancel;
+  });
+  await expect(clock.sleep(1)).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+});
+
+
+it.each(['timer', 'listener'] as const)('waits for asynchronous %s cleanup and owns its rejection', async provider => {
+  const clock = new MockClock();
+  const controller = new AbortController();
+  const cause = new Error('async cleanup failed');
+  let rejectCleanup: ((reason: unknown) => void) | undefined;
+  const cleanup = new Promise<void>((_resolve, reject) => { rejectCleanup = reject; });
+  // Property descriptors model async functions at a JavaScript provider boundary.
+  const cancel = () => cleanup;
+  const timerProvider = () => cancel;
+  if (provider === 'timer') Reflect.set(clock, 'setTimer', timerProvider);
+  else Object.defineProperty(controller.signal, 'removeEventListener', { value: cancel });
+  let settled = false;
+  const sleeping = clock.sleep(1, controller.signal).then(result => { settled = true; return result; });
+  controller.abort('stop');
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  if (rejectCleanup === undefined) throw new Error('missing cleanup gate');
+  rejectCleanup(cause);
+  const result = await sleeping;
+  expect(UnexpectedDefect.is(result)).toBe(true);
+  expect(result?.cause).toBe(cause);
+  expect(JSON.stringify(result)).not.toContain(cause.message);
+});
+
+it('owns async cleanup after synchronous foreign completion', async () => {
+  const clock = new MockClock();
+  const cause = new Error('async cleanup failed');
+  const cancel = () => Promise.reject(cause);
+  const timerProvider = (callback: () => void) => {
+    callback();
+    return cancel;
+  };
+  Reflect.set(clock, 'setTimer', timerProvider);
+  const result = await clock.sleep(1);
+  expect(UnexpectedDefect.is(result)).toBe(true);
+  expect(result?.cause).toBe(cause);
+});
+
+it('rejects a malformed promise registration handle without leaking its rejection or hanging', async () => {
+  const clock = new MockClock();
+  const cause = new Error('async registration failed');
+  // Reflect models a JavaScript provider without asserting an invalid TypeScript type.
+  Reflect.set(clock, 'setTimer', () => Promise.reject(cause));
+  const result = await clock.sleep(1);
+  expect(UnexpectedDefect.is(result)).toBe(true);
+});
+
+
+it('owns async listener registration rejection while the timer is pending', async () => {
+  const clock = new MockClock();
+  const controller = new AbortController();
+  const cause = new Error('listener registration rejected');
+  const register = () => Promise.reject(cause);
+  Object.defineProperty(controller.signal, 'addEventListener', { value: register });
+  const result = await clock.sleep(1000, controller.signal);
+  expect(UnexpectedDefect.is(result)).toBe(true);
+  expect(result?.cause).toBe(cause);
+  expect(JSON.stringify(result)).not.toContain(cause.message);
+});
+
+it('observes late async listener rejection without changing a completed sleep', async () => {
+  const clock = new MockClock();
+  const controller = new AbortController();
+  const cause = new Error('late listener rejection');
+  let rejectRegistration: ((reason: unknown) => void) | undefined;
+  const registration = new Promise<void>((_resolve, reject) => { rejectRegistration = reject; });
+  const register = () => registration;
+  Object.defineProperty(controller.signal, 'addEventListener', { value: register });
+  const sleeping = clock.sleep(1, controller.signal);
+  clock.advance(1);
+  expect(await sleeping).toBeUndefined();
+  if (rejectRegistration === undefined) throw new Error('missing registration gate');
+  rejectRegistration(cause);
+  await Promise.resolve();
+  expect(await sleeping).toBeUndefined();
 });

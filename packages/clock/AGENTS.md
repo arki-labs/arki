@@ -11,9 +11,9 @@ The one place code asks "what time is it?" and "wake me later". Read [docs/agent
 3. Time moves forward on purpose only. `MockClock.advance` and `advanceAsync` reject negative and non-finite steps with `ARKI_CLOCK_E001`. `setNow` is the only way back, and it fires no timers.
 4. A delay must be finite, zero or more, and at most `MAX_TIMER_MS`. Anything else throws `ARKI_CLOCK_E002` at once, on every clock. A mock never accepts what a real clock refuses.
 5. `now()` returns a fresh `Date` each call. No caller can change the clock by changing the value it got.
-6. An aborted `sleep` rejects with `ARKI_CLOCK_E003` and `cause` set to `signal.reason`. The timer is cleared first.
-7. The package has no dependencies and no `node:*` import. It uses `Date` and `setTimeout` only at call time, so it runs on every engine.
-8. Errors are `ClockError` with a stable `code` and a `remediation` sentence. Match on `code`, never on the message.
+6. An aborted `sleep` returns `SleepCancelled` with private `cause` set to `signal.reason`. The timer is cleared first.
+7. The package depends only on portable `@arki/failure` and no `node:*` import. It uses `Date` and `setTimeout` only at call time, so it runs on every engine.
+8. Static setup misuse throws `ClockError`; operational sleep cancellation returns the canonical `SLEEP_FAILURES` outcome. Match definitions or codes, never messages.
 9. Never write benchmark numbers by hand. `bun run bench --write-readme` writes them from an idle machine.
 
 ## Changing this package
