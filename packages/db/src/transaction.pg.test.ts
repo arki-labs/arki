@@ -18,10 +18,19 @@ import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MockClock } from '@arki/clock';
+import { defineFailure, isFailure } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
 import type { TransactionalDb } from './transaction.js';
-import { DB_TRANSACTION_ERROR_CODES, retryableSqlState, runTransaction } from './transaction.js';
+import { createUnitOfWork } from './composition.js';
+import {
+  retryableSqlState,
+  runTransaction,
+  runTransactionOnce,
+  TransactionCommitUncertain,
+  TransactionConflict,
+  TransactionRejected,
+} from './transaction.js';
 
 type Db = NodePgDatabase;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -143,12 +152,22 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
   it('write skew: one caller gets 40001, reruns from a fresh transaction, and the invariant holds', async () => {
     using log = fakeLog();
     const bothRead = barrier(2);
-    const first = withdraw(dbA, 'a', 150, { bothRead });
-    const second = withdraw(dbB, 'b', 150, { bothRead });
+    const retries = 3;
+    const first = withdraw(dbA, 'a', 150, { bothRead, retries });
+    const second = withdraw(dbB, 'b', 150, { bothRead, retries });
     const results = await Promise.all([first.run, second.run]);
 
     expect(results.toSorted()).toEqual(['done', 'refused']);
-    expect([...first.attempts, ...second.attempts].toSorted()).toEqual([1, 1, 2]);
+    // Assert the retry contract, not one scheduling-dependent conflict count.
+    const conflicts = log.records.filter(
+      record => record.category === 'arki:db:transaction' && record.fields['sqlState'] === '40001',
+    );
+    expect(conflicts.length).toBeGreaterThanOrEqual(1);
+    expect(first.attempts.length + second.attempts.length).toBe(2 + conflicts.length);
+    for (const attempts of [first.attempts, second.attempts]) {
+      expect(attempts.length).toBeLessThanOrEqual(retries + 1);
+      expect(attempts).toEqual(Array.from({ length: attempts.length }, (_, index) => index + 1));
+    }
     expect(await total(dbA)).toBe(50);
     log.assertLogged({ category: 'arki:db:transaction', level: 'debug', fields: { sqlState: '40001' } });
   });
@@ -196,16 +215,15 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
 
   it('out of retries (retries: 0): the loser gets ARKI_DB_TX_E001, nothing it wrote is kept', async () => {
     const bothRead = barrier(2);
-    const settled = await Promise.allSettled([
+    const settled = await Promise.all([
       withdraw(dbA, 'a', 150, { bothRead, retries: 0 }).run,
       withdraw(dbB, 'b', 150, { bothRead, retries: 0 }).run,
     ]);
-    const rejected = settled.filter(result => result.status === 'rejected');
+    const rejected = settled.filter(result => TransactionConflict.is(result));
     expect(rejected).toHaveLength(1);
-    expect(rejected[0]?.reason).toMatchObject({
-      code: DB_TRANSACTION_ERROR_CODES.retriesExhausted,
-      attempts: 1,
-      sqlState: '40001',
+    expect(rejected[0]).toMatchObject({
+      code: TransactionConflict.code,
+      data: { attempts: 1, sqlState: '40001' },
     });
     expect(await total(dbA)).toBe(50);
   });
@@ -218,7 +236,7 @@ describe('runTransaction on PostgreSQL: conflicts are retried', () => {
     }).catch((error_: unknown) => error_);
     expect(runs).toBe(1);
     expect(retryableSqlState(error)).toBeUndefined();
-    expect(error).toMatchObject({ cause: { code: '23505' } });
+    expect(error).toMatchObject({ code: TransactionRejected.code, data: { sqlState: '23505' } });
   });
 
   it('the wait between attempts holds no connection: an unrelated call on a 1-connection pool completes', async () => {
@@ -270,7 +288,7 @@ describe('runTransaction on PostgreSQL: an uncertain commit is not retried', () 
     }).catch((error_: unknown) => error_);
 
     expect(runs).toBe(1);
-    expect(error).toMatchObject({ code: 'ECONNRESET' });
+    expect(TransactionCommitUncertain.is(error)).toBe(true);
     expect(await balanceOf(dbA, 'a')).toBe(105);
   });
 
@@ -285,8 +303,53 @@ describe('runTransaction on PostgreSQL: an uncertain commit is not retried', () 
     }).catch((error_: unknown) => error_);
 
     expect(runs).toBe(1);
-    expect(error).toBeInstanceOf(Error);
+    expect(TransactionCommitUncertain.is(error)).toBe(true);
     expect(retryableSqlState(error)).toBeUndefined();
     expect(await balanceOf(dbA, 'a')).toBe(100);
   });
+});
+
+const Refused = defineFailure('test.insert_refused');
+
+describe('returned outcomes on real PostgreSQL', () => {
+  it('insert then failure rolls back and returns the same object; success commits unchanged', async () => {
+    const failure = Refused();
+    const refused = await runTransaction(dbA, async tx => {
+      await tx.execute(sql`insert into accounts values ('refused', 20)`);
+      return failure;
+    });
+    expect(refused).toBe(failure);
+    expect(await balanceOf(dbA, 'refused')).toBeUndefined();
+    const value = { id: 'accepted' };
+    const accepted = await runTransaction(dbA, async tx => {
+      await tx.execute(sql`insert into accounts values ('accepted', 30)`);
+      return value;
+    });
+    expect(accepted).toBe(value);
+    expect(await balanceOf(dbA, 'accepted')).toBe(30);
+    expect(isFailure(accepted)).toBe(false);
+  });
+});
+
+it('single-attempt savepoints and unit-of-work roll back refusals without changing outer transaction policy', async () => {
+  const failure = Refused();
+  await dbA.transaction(async outer => {
+    await outer.execute(sql`insert into accounts values ('outer', 1)`);
+    expect(
+      await runTransactionOnce(outer, async inner => {
+        await inner.execute(sql`insert into accounts values ('inner', 2)`);
+        return failure;
+      }),
+    ).toBe(failure);
+  });
+  expect(await balanceOf(dbA, 'outer')).toBe(1);
+  expect(await balanceOf(dbA, 'inner')).toBeUndefined();
+  const unit = createUnitOfWork(dbA, { accounts: tx => tx });
+  expect(
+    await unit(async scope => {
+      await scope.accounts.execute(sql`insert into accounts values ('unit', 3)`);
+      return failure;
+    }),
+  ).toBe(failure);
+  expect(await balanceOf(dbA, 'unit')).toBeUndefined();
 });

@@ -1,5 +1,8 @@
 import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
 
+import type { TransactionFailure } from './transaction.js';
+import { runTransactionOnce } from './owned-transaction.js';
+
 export const DB_COMPOSITION_ERROR_CODES = {
   /**
    * Two features export a schema entry under the same key, so one would hide the other.
@@ -107,7 +110,9 @@ export type UnitOfWorkScopes<TFactories extends Record<string, (tx: never) => un
   readonly [K in keyof TFactories]: ReturnType<TFactories[K]>;
 };
 
-export type UnitOfWork<TScopes> = <TResult>(fn: (scopes: TScopes) => Promise<TResult> | TResult) => Promise<TResult>;
+export type UnitOfWork<TScopes> = <TResult>(
+  fn: (scopes: TScopes) => Promise<TResult> | TResult,
+) => Promise<TResult | TransactionFailure>;
 
 export function createUnitOfWork<TTransaction, const TFactories extends Record<string, (tx: TTransaction) => unknown>>(
   db: TransactionalDb<TTransaction>,
@@ -116,7 +121,7 @@ export function createUnitOfWork<TTransaction, const TFactories extends Record<s
   readonly [K in keyof TFactories]: ReturnType<TFactories[K]>;
 }> {
   return async fn =>
-    db.transaction(async tx => {
+    runTransactionOnce(db, async tx => {
       const scopes: Record<string, unknown> = {};
       for (const [name, factory] of Object.entries(factories)) {
         scopes[name] = factory(tx);

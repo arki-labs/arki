@@ -10,7 +10,7 @@
  * Per call it opens a transaction, binds the repositories to it with
  * `withTx(tx)` (once per attempt), and runs the handler. On `40001` / `40P01` it
  * runs the handler again in a fresh transaction (see `runTransaction`). Out of
- * retries, the client gets `ORPCError('CONFLICT')`, a 409.
+ * retries, the client gets the declared `db.transaction_conflict` error, a 409.
  *
  * The handler's output is validated inside the transaction, so a bad output
  * rolls back. That needs `transactionalProcedureConfig` on `implement`: the
@@ -18,33 +18,31 @@
  *
  * `@orpc/server` is an optional peer. Import this module only in an app that serves oRPC.
  */
-import type { Context, Meta, MiddlewareOptions } from '@orpc/server';
+import type { Context, Meta, MiddlewareOptions, ORPCErrorConstructorMap } from '@orpc/server';
 import { ORPCError } from '@orpc/server';
 
 import type { Clock } from '@arki/clock';
-import { getLogger } from '@arki/log';
+import type { Failure } from '@arki/failure';
+import type { ErrorMapOf } from '@arki/failure/orpc';
+import { isFailure } from '@arki/failure';
+import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
 import type { TransactionalDb } from './composition.js';
-import type { TransactionSettings } from './transaction.js';
+import type { TransactionFailure, TransactionSettings } from './transaction.js';
 import {
   DB_TRANSACTION_ERROR_CODES,
   DbTransactionError,
-  isDbTransactionError,
   parseTransactionSettings,
   runTransaction,
+  TRANSACTION_FAILURES,
+  TransactionDefect,
 } from './transaction.js';
 
-const log = getLogger('arki:db:transaction');
+/** Native contracts declare these errors without restating transaction schemas. */
+export const transactionErrorMap = errorMap(...TRANSACTION_FAILURES);
 
-/** The context key that marks "inside a transaction": the nesting check and the lint rule read it. */
+/** The context key that marks transactional work. */
 const MARKER = '~arkiTransaction';
-
-/**
- * Another request changed the same rows first, every time we tried. Nothing was
- * written. The client may send the same request again. Same wording family as
- * the journal's 409; the database error is not attached (it can name tables and values).
- */
-const CONFLICT_MESSAGE = 'This was changed by another request. Try again.';
 
 /**
  * Where the bound repositories come from: `Repos<F>` from `@arki/db/dot`, or anything with `withTx`.
@@ -77,7 +75,7 @@ export type TransactionalProcedureOptions<C extends Context, Tx, R extends objec
  * to every procedure of a feature, whatever each one returns.
  */
 export type TransactionalMiddleware<C extends Context, Tx, R extends object> = <TOutput>(
-  options: MiddlewareOptions<C, TOutput, Record<never, never>, Meta>,
+  options: MiddlewareOptions<C, TOutput, ORPCErrorConstructorMap<ErrorMapOf<typeof TRANSACTION_FAILURES>>, Meta>,
 ) => Promise<{ output: TOutput; context: TransactionContext<Tx, R> }>;
 
 /** The scope a transaction-aware usecase takes, read off the middleware. Never restated. */
@@ -151,7 +149,16 @@ export function transactionalProcedure<C extends Context = Record<never, never>,
   const settings = parseTransactionSettings(rest);
   const checked = new WeakSet<object>();
 
-  const transact: TransactionalMiddleware<C, Tx, R> = async ({ context, procedure, next, signal }) => {
+  async function transact<TOutput>({
+    context,
+    procedure,
+    next,
+    signal,
+    errors,
+  }: MiddlewareOptions<C, TOutput, ORPCErrorConstructorMap<ErrorMapOf<typeof TRANSACTION_FAILURES>>, Meta>): Promise<{
+    output: TOutput;
+    context: TransactionContext<Tx, R>;
+  }> {
     if (!checked.has(procedure)) {
       assertPipeline(procedure, transact);
       checked.add(procedure);
@@ -165,34 +172,42 @@ export function transactionalProcedure<C extends Context = Record<never, never>,
     }
     const root = typeof db === 'function' ? db(context) : db;
     const source = selectRepos(context);
-    try {
-      return await runTransaction(
-        root,
-        async tx => {
-          const scope: TransactionContext<Tx, R> = { tx, repos: source.withTx(tx), [MARKER]: true };
-          const result = await next({ context: scope });
-          if (isAsyncIterable(result.output)) {
-            throw new DbTransactionError({
-              code: DB_TRANSACTION_ERROR_CODES.unsupportedOutput,
-              message:
-                '[db] a transactional procedure returned a stream. It would be read after the transaction closed.',
-              remediation: 'Return plain data. Stream from a separate, non-transactional procedure.',
-            });
-          }
-          // An abort before the commit rolls back: the caller is gone and will not see the answer.
-          signal?.throwIfAborted();
-          return result;
-        },
-        { ...settings, clock, signal },
-      );
-    } catch (error) {
-      if (!isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)) throw error;
-      log.warn('transaction gave up after {attempts} attempts (SQLSTATE {sqlState})', {
-        attempts: error.attempts,
-        sqlState: error.sqlState,
-      });
-      throw new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE });
-    }
-  };
+    // Native oRPC expects a result wrapper. Keep it intact on rollback too.
+    let refusedResult: { output: TOutput; context: TransactionContext<Tx, R> } | undefined;
+    const outcome = await runTransaction(
+      root,
+      async tx => {
+        const scope: TransactionContext<Tx, R> = { tx, repos: source.withTx(tx), [MARKER]: true };
+        const result = await next({ context: scope });
+        if (isAsyncIterable(result.output)) {
+          throw new DbTransactionError({
+            code: DB_TRANSACTION_ERROR_CODES.unsupportedOutput,
+            message: '[db] a transactional procedure returned a stream. It would be read after the transaction closed.',
+            remediation: 'Return plain data. Stream from a separate, non-transactional procedure.',
+          });
+        }
+        // An abort before the commit rolls back: the caller is gone and will not see the answer.
+        signal?.throwIfAborted();
+        if (isFailure<unknown>(result.output)) {
+          refusedResult = result;
+          const failure: Failure = result.output;
+          return failure;
+        }
+        return result;
+      },
+      { ...settings, clock, signal },
+    );
+    if (!isFailure(outcome)) return outcome;
+    if (refusedResult !== undefined && refusedResult.output === outcome) return refusedResult;
+    // Exceptions belong only at this foreign framework boundary. Preserve native
+    // errors (including output validation), whose declared transport semantics own them.
+    if (outcome.cause instanceof ORPCError) throw outcome.cause;
+    if (isTransactionFailure(outcome)) return orThrowRpc(outcome, errors);
+    return orThrowRpc(TransactionDefect({ cause: outcome }), errors);
+  }
   return transact;
+}
+
+function isTransactionFailure(value: unknown): value is TransactionFailure {
+  return TRANSACTION_FAILURES.some(definition => definition.is(value));
 }

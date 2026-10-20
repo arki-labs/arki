@@ -18,7 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { TransactionalDb } from './composition.js';
-import { transactionalProcedure, transactionalProcedureConfig } from './orpc.js';
+import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from './orpc.js';
 
 type Db = PgliteDatabase;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -39,7 +39,10 @@ const gated: TransactionalDb<Tx> = {
 };
 
 const contract = {
-  credit: oc.input(z.object({ cents: z.int() })).output(z.object({ balance: z.number() })),
+  credit: oc
+    .errors(transactionErrorMap)
+    .input(z.object({ cents: z.int() }))
+    .output(z.object({ balance: z.number() })),
 };
 const transact = transactionalProcedure(gated, {
   retries: 0,
@@ -116,7 +119,10 @@ describe('HTTP and direct client agree', () => {
   it('rollback: both fail, and neither write is kept', async () => {
     // HTTP turns an unknown error into a 500; the direct client hands the server code the error itself.
     expect(await overHttp(-500)).toMatchObject({ status: 500 });
-    await expect(direct.credit({ cents: -500 })).rejects.toThrow('overdrawn');
+    await expect(direct.credit({ cents: -500 })).rejects.toMatchObject({
+      code: 'db.transaction_defect',
+      defined: true,
+    });
     expect(await balance()).toBe(100);
   });
 
@@ -124,8 +130,8 @@ describe('HTTP and direct client agree', () => {
     gate.conflict = true;
     const { status, body } = await overHttp(1);
     expect(status).toBe(409);
-    expect(body).toMatchObject({ json: { code: 'CONFLICT', status: 409 } });
-    await expect(direct.credit({ cents: 1 })).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect(body).toMatchObject({ json: { code: 'db.transaction_conflict', status: 409 } });
+    await expect(direct.credit({ cents: 1 })).rejects.toMatchObject({ code: 'db.transaction_conflict', status: 409 });
     expect(await balance()).toBe(100);
   });
 

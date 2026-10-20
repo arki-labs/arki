@@ -9,10 +9,13 @@
  * and `db.ts`.
  */
 import { oc } from '@orpc/contract';
-import { defineRelations, eq, sql } from '@arki/db/orm';
-import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { integer, pgEnum, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
+
+import { TRANSACTION_FAILURES } from '@arki/db/errors';
+import { defineRelations, eq, sql } from '@arki/db/orm';
+import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { errorMap } from '@arki/failure/orpc';
 
 // Tables: one feature's leaf `tables.ts` each, in an app.
 export const users = pgTable('users', {
@@ -142,7 +145,7 @@ export const transferInput = z.object({ from: z.string(), to: z.string(), cents:
 export type TransferInput = z.infer<typeof transferInput>;
 
 /** The accounts feature's oRPC contract. */
-export const contract = { transfer: oc.input(transferInput) };
+export const contract = { transfer: oc.errors(errorMap(...TRANSACTION_FAILURES)).input(transferInput) };
 
 /** The usecase: move cents between two accounts, inside the caller's transaction. */
 export async function moveMoney(repos: ReturnType<typeof repositories.withTx>, input: TransferInput): Promise<void> {

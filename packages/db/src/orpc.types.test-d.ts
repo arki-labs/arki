@@ -17,7 +17,7 @@ import { z } from 'zod';
 
 import type { Repos, RepoSet } from './dot.js';
 import type { TransactionContext, TransactionScopeOf } from './orpc.js';
-import { transactionalProcedure, transactionalProcedureConfig } from './orpc.js';
+import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from './orpc.js';
 
 type PgDb = NodePgDatabase;
 type PgTx = Parameters<Parameters<PgDb['transaction']>[0]>[0];
@@ -37,10 +37,14 @@ declare const pgRepositories: { withTx(tx: PgDb | PgTx): { readonly accounts: Ac
 
 const contract = {
   balance: oc
+    .errors(transactionErrorMap)
     .input(z.object({ id: z.string() }))
     .output(z.number())
     .errors({ FROZEN: { status: 423 } }),
-  rename: oc.input(z.object({ name: z.string() })).output(z.object({ name: z.string() })),
+  rename: oc
+    .errors(transactionErrorMap)
+    .input(z.object({ name: z.string() }))
+    .output(z.object({ name: z.string() })),
 };
 
 describe('inference', () => {
@@ -115,3 +119,7 @@ describe('the contract survives', () => {
     expectTypeOf(rename).not.toBeAny();
   });
 });
+
+const transactWithDeclaredFailures = transactionalProcedure(liteDb, { repos: () => repositories });
+// @ts-expect-error transaction middleware requires canonical transaction failures in the contract
+implement(oc.output(z.number()), transactionalProcedureConfig).use(transactWithDeclaredFailures);

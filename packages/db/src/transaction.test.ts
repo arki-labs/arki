@@ -15,16 +15,22 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MockClock } from '@arki/clock';
+import { defineFailure, isFailure } from '@arki/failure';
+import { configure, memorySink } from '@arki/log';
 import { fakeLog } from '@arki/log/testing';
-import { CancelledError } from '@arki/resilience';
 
 import type { TransactionalDb } from './transaction.js';
 import {
   DB_TRANSACTION_ERROR_CODES,
   DbTransactionError,
-  isDbTransactionError,
   retryableSqlState,
   runTransaction,
+  runTransactionOnce,
+  TransactionCancelled,
+  TransactionCommitUncertain,
+  TransactionConflict,
+  TransactionDefect,
+  TransactionUnavailable,
 } from './transaction.js';
 
 type FakeTx = { readonly attempt: number };
@@ -60,7 +66,7 @@ async function settle<T>(clock: MockClock, run: Promise<T>): Promise<T> {
 
 const caught = (promise: Promise<unknown>): Promise<unknown> =>
   promise.then(
-    () => 'resolved',
+    value => value,
     (error: unknown) => error,
   );
 
@@ -76,14 +82,14 @@ describe('runTransaction: settings', () => {
     );
     expect(configs).toHaveLength(4);
     expect(configs[0]).toEqual({ isolationLevel: 'serializable' });
-    expect(error).toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.retriesExhausted, attempts: 4 });
+    expect(error).toMatchObject({ code: TransactionConflict.code, data: { attempts: 4 } });
   });
 
   it('retries: 0 runs once', async () => {
     const { db, configs } = scriptedDb([sqlError('40001')]);
     const error = await caught(runTransaction(db, () => Promise.resolve('x'), { retries: 0 }));
     expect(configs).toHaveLength(1);
-    expect(isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)).toBe(true);
+    expect(TransactionConflict.is(error)).toBe(true);
   });
 
   it.each([11, -1, 1.5])('refuses retries %s before any database call: fail loud, never clamp', async retries => {
@@ -173,9 +179,9 @@ describe('runTransaction: what is retried', () => {
       Object.assign(new Error('reset', { cause: sqlError('40001') }), { code: 'ECONNRESET' }),
     ],
     ['a timeout', Object.assign(new Error('timeout'), { name: 'TimeoutError' })],
-  ])('%s runs once and reaches the caller unchanged', async (_name, failure) => {
+  ])('%s runs once and preserves its cause in a typed outcome', async (_name, failure) => {
     const { db, configs } = scriptedDb([failure]);
-    expect(await caught(runTransaction(db, () => Promise.resolve('x')))).toBe(failure);
+    expect(await runTransaction(db, () => Promise.resolve('x'))).toMatchObject({ cause: failure });
     expect(configs).toHaveLength(1);
   });
 
@@ -190,8 +196,12 @@ describe('runTransaction: what is retried', () => {
         runTransaction(db, () => Promise.resolve('x'), { clock, retries: 3 }),
       ),
     );
-    expect(error).toBeInstanceOf(DbTransactionError);
-    expect(error).toMatchObject({ code: 'ARKI_DB_TX_E001', attempts: 4, sqlState: '40P01', cause: failures[3] });
+    expect(isFailure(error)).toBe(true);
+    expect(error).toMatchObject({
+      code: TransactionConflict.code,
+      data: { attempts: 4, sqlState: '40P01' },
+      cause: failures[3],
+    });
     expect(sleep).toHaveBeenCalledTimes(3);
   });
 
@@ -211,9 +221,10 @@ describe('runTransaction: abort', () => {
     const { db, configs } = scriptedDb();
     const controller = new AbortController();
     controller.abort(new Error('client left'));
-    await expect(runTransaction(db, () => Promise.resolve('x'), { signal: controller.signal })).rejects.toThrow(
-      'client left',
-    );
+    await expect(runTransaction(db, () => Promise.resolve('x'), { signal: controller.signal })).resolves.toMatchObject({
+      code: TransactionCancelled.code,
+      cause: controller.signal.reason,
+    });
     expect(configs).toHaveLength(0);
   });
 
@@ -227,7 +238,7 @@ describe('runTransaction: abort', () => {
       expect(sleep).toHaveBeenCalledTimes(1);
     });
     controller.abort();
-    expect(await run).toBeInstanceOf(CancelledError);
+    expect(TransactionCancelled.is(await run)).toBe(true);
     expect(configs).toHaveLength(1);
   });
 });
@@ -278,3 +289,202 @@ describe('retryableSqlState: the nearest code decides', () => {
     expect(retryableSqlState(chain)).toBe('40001');
   });
 });
+
+const Refused = defineFailure('test.transaction_refused');
+
+describe('failure-aware transaction boundaries', () => {
+  it('a returned conflict failure is restored by identity and never retried', async () => {
+    const { db, configs } = scriptedDb();
+    const failure = TransactionConflict({ attempts: 1, sqlState: '40001' });
+    expect(await runTransaction(db, () => Promise.resolve(failure))).toBe(failure);
+    expect(configs).toHaveLength(1);
+  });
+
+  it('a callback defect is owned and a foreign lookalike carrier cannot become a business failure', async () => {
+    const { db } = scriptedDb();
+    const cause = new Error('Transaction callback returned a failure');
+    const result = await runTransaction(db, () => Promise.reject(cause));
+    expect(TransactionDefect.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause });
+  });
+
+  it('a failed rollback replaces the original refusal with an owned defect', async () => {
+    const cause = new Error('rollback failed');
+    const db: TransactionalDb<FakeTx> = {
+      async transaction(fn) {
+        try {
+          return await fn({ attempt: 1 });
+        } catch {
+          throw cause;
+        }
+      },
+    };
+    const failure = Refused();
+    const result = await runTransaction(db, () => Promise.resolve(failure));
+    expect(TransactionDefect.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause: { errors: [cause, failure] } });
+    expect(result).not.toBe(failure);
+  });
+
+  it('cancellation after work returns rolls back before COMMIT', async () => {
+    const controller = new AbortController();
+    let committed = false;
+    const db: TransactionalDb<FakeTx> = {
+      async transaction(fn) {
+        const value = await fn({ attempt: 1 });
+        committed = true;
+        return value;
+      },
+    };
+    const result = await runTransaction(
+      db,
+      () => {
+        controller.abort();
+        return Promise.resolve('done');
+      },
+      { signal: controller.signal },
+    );
+    expect(TransactionCancelled.is(result)).toBe(true);
+    expect(committed).toBe(false);
+  });
+
+  it('a cancellation received while COMMIT acknowledgement is lost remains uncertain', async () => {
+    const controller = new AbortController();
+    const db: TransactionalDb<FakeTx> = {
+      async transaction(fn) {
+        await fn({ attempt: 1 });
+        controller.abort();
+        throw controller.signal.reason;
+      },
+    };
+    expect(
+      TransactionCommitUncertain.is(
+        await runTransaction(db, () => Promise.resolve('done'), { signal: controller.signal }),
+      ),
+    ).toBe(true);
+  });
+
+  it('runTransactionOnce keeps the driver policy and does not retry a conflict', async () => {
+    const { db, configs } = scriptedDb([sqlError('40001')]);
+    expect(TransactionConflict.is(await runTransactionOnce(db, () => Promise.resolve('done')))).toBe(true);
+    expect(configs).toEqual([undefined]);
+  });
+});
+
+it.each(['08006', '08003', '57P01', '57P02', '57P03'])(
+  'SQLSTATE %s after work is uncertain and never retried',
+  async code => {
+    const { db, configs } = scriptedDb([sqlError(code)]);
+    const result = await runTransaction(db, () => Promise.resolve('done'));
+    expect(TransactionCommitUncertain.is(result)).toBe(true);
+    expect(configs).toHaveLength(1);
+  },
+);
+
+it('a failed rollback with 40001 does not replay a returned business failure', async () => {
+  let runs = 0;
+  const cause = sqlError('40001');
+  const failure = Refused();
+  const db: TransactionalDb<FakeTx> = {
+    async transaction(fn) {
+      try {
+        return await fn({ attempt: 1 });
+      } catch {
+        throw cause;
+      }
+    },
+  };
+  const result = await runTransaction(db, () => {
+    runs += 1;
+    return Promise.resolve(failure);
+  });
+  expect(TransactionDefect.is(result)).toBe(true);
+  expect(result).toMatchObject({ cause: { errors: [cause, failure] } });
+  expect(runs).toBe(1);
+});
+
+it.each(['40001', '40P01'] as const)('a business failure whose code is %s stays on the value channel', async code => {
+  const failure = defineFailure(code)();
+  const { db, configs } = scriptedDb();
+  expect(await runTransaction(db, () => Promise.resolve(failure), { retries: 1 })).toBe(failure);
+  expect(configs).toHaveLength(1);
+});
+
+it.each(['08006', '08003', '57P01', '57P02', '57P03'])(
+  'SQLSTATE %s before work is unavailable, without implying a statement rejection',
+  async code => {
+    let runs = 0;
+    const db: TransactionalDb<FakeTx> = {
+      transaction() {
+        return Promise.reject(sqlError(code));
+      },
+    };
+    expect(
+      TransactionUnavailable.is(
+        await runTransaction(db, () => {
+          runs += 1;
+          return Promise.resolve('done');
+        }),
+      ),
+    ).toBe(true);
+    expect(runs).toBe(0);
+  },
+);
+
+it('an aborted reason with code 40001 remains cancellation before the first attempt', async () => {
+  const { db, configs } = scriptedDb();
+  const controller = new AbortController();
+  controller.abort({ code: '40001' });
+  expect(
+    TransactionCancelled.is(await runTransaction(db, () => Promise.resolve('done'), { signal: controller.signal })),
+  ).toBe(true);
+  expect(configs).toHaveLength(0);
+});
+
+it('throwing telemetry context preserves refusal identity, driver outcomes and bounded retries', async () => {
+  const telemetry = configure({
+    channels: { records: memorySink() },
+    default: { level: 'debug', channels: ['records'] },
+    trace() {
+      throw new Error('telemetry context failed');
+    },
+  });
+  try {
+    const failure = Refused();
+    expect(await runTransactionOnce(scriptedDb().db, () => Promise.resolve(failure))).toBe(failure);
+    expect(await runTransaction(scriptedDb().db, () => Promise.resolve(failure))).toBe(failure);
+    const cause = new Error('callback defect');
+    expect(await runTransactionOnce(scriptedDb().db, () => Promise.reject(cause))).toMatchObject({
+      code: TransactionDefect.code,
+      cause,
+    });
+    const clock = new MockClock();
+    const { db, configs } = scriptedDb([sqlError('40001')]);
+    expect(
+      await settle(
+        clock,
+        runTransaction(db, () => Promise.resolve('done'), { clock }),
+      ),
+    ).toBe('done');
+    expect(configs).toHaveLength(2);
+  } finally {
+    await telemetry.close();
+  }
+});
+
+it('an arbitrary callback error code is a defect and the nearest code masks older connection failures', async () => {
+  const cause = Object.assign(new Error('business bug', { cause: sqlError('ECONNRESET') }), { code: 'business-bug' });
+  const result = await runTransaction(scriptedDb().db, () => Promise.reject(cause));
+  expect(TransactionDefect.is(result)).toBe(true);
+  expect(result).toMatchObject({ cause });
+});
+
+it.each(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN'])(
+  'host connection code %s is operational before work finishes',
+  async code => {
+    const cause = sqlError(code);
+    const result = await runTransaction(scriptedDb().db, () => Promise.reject(cause));
+    expect(TransactionUnavailable.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause });
+  },
+);

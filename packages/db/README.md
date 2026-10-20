@@ -55,13 +55,18 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 
 ## Runtime support
 
-| Entry | Node | Bun | Deno | Browser | Hermes |
-| --- | --- | --- | --- | --- | --- |
-| `@arki/db/transaction`, `@arki/db/orpc` | yes | yes | yes | yes | yes |
-| `@arki/db/init` (node-postgres) | yes | yes (Bun SQL via the `bun` condition) | no | no | no |
-| `@arki/db/runtime-local` (PGlite) | yes | yes | no | no | no |
+| Entry                                   | Node | Bun                                   | Deno | Browser | Hermes |
+| --------------------------------------- | ---- | ------------------------------------- | ---- | ------- | ------ |
+| `@arki/db/transaction`, `@arki/db/orpc` | yes  | yes                                   | yes  | yes     | blocked |
+| `@arki/db/init` (node-postgres)         | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no     |
+| `@arki/db/runtime-local` (PGlite)       | yes  | yes                                   | no   | no      | no     |
 
 `@arki/db/transaction` and `@arki/db/orpc` are portable: no driver. `bun run test:runtimes` runs them on each runtime. The driver entries need a server runtime with sockets or a file system.
+
+The combined Hermes smoke currently fails on rest-destructured parameters in the
+installed oRPC dependency. This is tracked as framework finding F35 for T11/T16.
+Use `test:runtimes --require-all` to expose the failure; a skipped Hermes leg is
+not evidence of support. Per-entry published-artifact proof remains separate.
 
 ## Usage
 
@@ -142,14 +147,20 @@ prefix is the one place the id kind is written; the type, the zod schema, the
 generator and the columns all come from it.
 
 ```ts
-// features/story/model/ids.ts (browser-safe)
-import { defineId, type IdOf } from '@arki/contracts';
-export const storyId = defineId('sty_');
-export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
+import { pgTable } from 'drizzle-orm/pg-core';
+
+import type { IdOf } from '@arki/contracts';
+import { defineId } from '@arki/contracts';
+// `sty_${string}`
 
 // features/story/model/tables.ts (server)
 import { idColumns } from '@arki/db/id';
-import { pgTable } from 'drizzle-orm/pg-core';
+
+// features/story/model/ids.ts (browser-safe)
+
+export const storyId = defineId('sty_');
+export type StoryId = IdOf<typeof storyId>;
+
 const story = idColumns(storyId);
 export const stories = pgTable('stories', {
   id: story.primaryColumn(), // varchar(256) PK, typed StoryId, defaults to storyId.create()
@@ -170,9 +181,10 @@ code — it re-exports Drizzle; the browser imports the declaration from the
 `@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:
 
 ```ts
+import { pgTable } from 'drizzle-orm/pg-core';
+
 import { now } from '@arki/date/clock';
 import { instant, plainDate } from '@arki/db/temporal';
-import { pgTable } from 'drizzle-orm/pg-core';
 
 export const bookings = pgTable('bookings', {
   day: plainDate('day').notNull(), // date ↔ PlainDate
@@ -299,6 +311,7 @@ transaction. The handler cannot forget the transaction: it never sees the pool.
 
 ```ts run
 import { call, implement } from '@orpc/server';
+
 import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
 
 import { balance, contract, db, moveMoney, repositories } from './fixture.ts';
@@ -312,6 +325,12 @@ export const transfer = implement(contract, transactionalProcedureConfig)
 await call(transfer, { from: 'acc_alice', to: 'acc_bob', cents: 500 });
 if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
 ```
+
+Declare `transactionErrorMap` on the contract: `oc.errors(transactionErrorMap)`.
+The middleware requires these canonical definitions at compile time. Browser-shared
+contracts import `TRANSACTION_FAILURES` from `@arki/db/errors` and declare
+`oc.errors(errorMap(...TRANSACTION_FAILURES))` using `@arki/failure/orpc`;
+`@arki/db/orpc` remains the native executor convenience entry.
 
 Two rules, both checked on the first call of each procedure (`ARKI_DB_TX_E004`):
 
@@ -347,8 +366,9 @@ await runTransaction(db, async (tx, attempt) => moveMoney(repositories.withTx(tx
 if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
 ```
 
-`@arki/db/transaction` and `@arki/db/orpc` are portable: no driver, and they
-run on Node, Bun, Deno, browsers and Hermes (`bun run test:runtimes`).
+`@arki/db/transaction` and `@arki/db/orpc` import no driver. Their combined smoke
+passes on Node, Bun, Deno and browser; see [Runtime support](#runtime-support)
+for the unresolved Hermes dependency limitation.
 
 ### What is retried
 
@@ -358,23 +378,27 @@ run on Node, Bun, Deno, browsers and Hermes (`bun run test:runtimes`).
 - `retries` counts extra attempts: `3` means at most 4 runs. Default 3, at
   most 10. The wait is about 10, 20, 40 … ms, varied ±25%, never above 250 ms.
   It starts only after the transaction rolled back and released its connection.
-- Out of retries: `runTransaction` throws `DbTransactionError`
-  (`ARKI_DB_TX_E001`, with `attempts`, `sqlState` and the last error as
-  `cause`). The middleware turns it into `ORPCError('CONFLICT')`, a 409 the
-  client may send again. The database error is not attached.
-- Everything else runs once and reaches the caller unchanged: `23505`, a lost
-  connection, a timeout, your own errors.
+- Out of retries: `runTransaction` returns `TransactionConflict` with `data.attempts`,
+  `data.sqlState` and the private driver cause. Native oRPC throws the declared
+  `db.transaction_conflict` transport error with status 409.
+- A returned Failure rolls back and returns the same object. It is never retried,
+  including when rollback itself fails; failed rollback returns `TransactionDefect`.
+- Known database rejections return `TransactionRejected`; connection failures before
+  work finishes return `TransactionUnavailable`; unexpected callback errors return
+  `TransactionDefect`; cancellation before COMMIT returns `TransactionCancelled`.
+- Once work finishes, a missing acknowledgement, SQLSTATE connection exception or
+  server shutdown returns `TransactionCommitUncertain`. Never automatically replay it.
 
 ### Guarantees
 
-| Promised | Not promised |
-| --- | --- |
-| Writes through `tx` and the bound repos commit or roll back together | Pool-bound services, external calls |
-| Each attempt starts at SERIALIZABLE (node-postgres and PGlite) | Other writers' isolation |
-| A conflict reruns the whole handler in a fresh transaction | Middlewares before `transact` do not rerun |
-| At most `1 + retries` handler runs per call | SQL time: use statement timeouts |
-| The middleware returns only after `COMMIT` succeeded | Delivery of the response |
-| A bad output rolls back (with `transactionalProcedureConfig`) | — |
+| Promised                                                             | Not promised                               |
+| -------------------------------------------------------------------- | ------------------------------------------ |
+| Writes through `tx` and the bound repos commit or roll back together | Pool-bound services, external calls        |
+| Each attempt starts at SERIALIZABLE (node-postgres and PGlite)       | Other writers' isolation                   |
+| A conflict reruns the whole handler in a fresh transaction           | Middlewares before `transact` do not rerun |
+| At most `1 + retries` handler runs per call                          | SQL time: use statement timeouts           |
+| The middleware returns only after `COMMIT` succeeded                 | Delivery of the response                   |
+| A bad output rolls back (with `transactionalProcedureConfig`)        | —                                          |
 
 - **Effects run per attempt.** A `fetch` in a retried handler runs twice. The
   lint rule below reports it; the runtime does not stop it.
@@ -501,8 +525,7 @@ export const compile =
 ```
 
 - **One function, nothing else.** The plugin publishes `transaction(fn)`:
-  `fn` runs inside one transaction of the feature's `db`, committed when it
-  returns and rolled back when it throws. No query builder and no `db`
+  `fn` runs inside one transaction of the feature's `db`, committed on ordinary values and rolled back on returned failures or thrown errors. No query builder and no `db`
   leave the plugin, so with `db` entrypoint-only a usecase can open a
   transaction and hand its `tx` on, but never run raw SQL.
 - **`db` is the feature's handle.** `transactions(database.provides.db)` is
@@ -597,7 +620,9 @@ that type-check:
    private fields, so an object literal cannot pose as it; a subclass can:
 
    ```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
-   const unused = async (): Promise<never> => { throw new Error('not used by this test'); };
+   const unused = async (): Promise<never> => {
+     throw new Error('not used by this test');
+   };
    class FakeHighlights extends HighlightRepository {
      override add = unused;
      override listByItem = async () => [fixture];
@@ -687,7 +712,7 @@ first null
 - `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers, and `idColumns(defineId(...))`.
 - `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()` for Dot apps.
 - `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
-- `@arki/db/transaction` — `runTransaction`, `retryableSqlState`, `DbTransactionError`: serializable retry on `40001` / `40P01`. Portable.
+- `@arki/db/transaction` — `runTransaction`, `runTransactionOnce`, `TRANSACTION_FAILURES`: typed rollback outcomes and serializable retry on `40001` / `40P01`. Portable.
 - `@arki/db/orpc` — `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`: the oRPC middleware. Portable; needs the optional peer `@orpc/server`.
 - `@arki/db/eslint` — the `db/no-effects-in-transaction` rule. Tooling only; needs `eslint`, `@typescript-eslint/utils` and `typescript`.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
@@ -698,23 +723,64 @@ first null
 
 ## Failure behaviour
 
-`runTransaction` and the `transactionalProcedure` middleware throw a `DbTransactionError` with a code from `DB_TRANSACTION_ERROR_CODES`. Match on `error.code`, never on the message. The middleware turns an exhausted retry into `ORPCError('CONFLICT')`, a 409 the client may send again.
+`runTransaction` returns the exact callback result union plus `TransactionFailure`,
+which is inferred from `TRANSACTION_FAILURES`. Ordinary values commit unchanged;
+a returned Failure rolls back and preserves identity. Driver errors and callback
+defects become typed outcomes. Static misuse still throws `DbTransactionError`.
 
 ```ts
-import { DB_TRANSACTION_ERROR_CODES, isDbTransactionError, runTransaction } from '@arki/db/transaction';
+import { runTransaction } from '@arki/db/transaction';
+import { isFailure } from '@arki/failure';
 
-async function transfer(db: Parameters<typeof runTransaction>[0]): Promise<'done' | 'busy'> {
-  try {
-    await runTransaction(db, async () => undefined, { retries: 3 });
-    return 'done';
-  } catch (error) {
-    if (isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)) return 'busy';
-    throw error;
-  }
+async function transfer(db: Parameters<typeof runTransaction>[0]) {
+  const result = await runTransaction(db, async () => 'done' as const, { retries: 3 });
+  if (isFailure(result)) return result;
+  return result;
 }
 ```
 
-Every other database error reaches the caller unchanged. A lost connection around `COMMIT` is never retried: use an idempotency key. See [Ambiguous commits and receipts](#ambiguous-commits-and-receipts).
+Use `runTransactionOnce(db, callback)` to preserve the driver's isolation/savepoint
+policy and execute once. `createUnitOfWork` and Dot's `transactions()` share this
+single-attempt boundary; they do not introduce retries or change isolation.
+
+Native oRPC keeps its framework exception protocol. Declare
+`oc.errors(transactionErrorMap)` from `@arki/db/orpc`; the map retains each original
+failure definition for client revival. The middleware classifies `next().output`,
+rolls back returned failures and restores the complete result wrapper with its
+context. Native oRPC errors and output-validation errors retain their identity.
+
+Browser-shared contracts use `errorMap(...TRANSACTION_FAILURES)` from
+`@arki/failure/orpc` and `@arki/db/errors`. Keep the native middleware import at
+the adapter boundary.
+
+For uncertain commits, reconcile using an idempotency key or durable receipt.
+See [Ambiguous commits and receipts](#ambiguous-commits-and-receipts).
+
+### Upgrade notes and remaining validation boundaries
+
+Replace transaction `try/catch` exhaustion handling with `TransactionConflict.is(result)`;
+read attempts and SQLSTATE from `result.data`. RPC clients now handle
+`db.transaction_conflict` rather than the generic `CONFLICT` code. Register
+`transactionErrorMap` before attaching the middleware.
+
+Translate a foreign API's documented exceptions into its canonical failures
+before the transaction owner supervises them. Journal's receipt API still throws
+its legacy conflict: the integration fixture maps that exact exception to the
+existing `CommandConflict` definition before `orThrowRpc`. Journal's full typed
+migration remains framework T07; arbitrary exceptions stay owned defects.
+
+`src/migrate.ts` still uses Zod `.parse()` for driver query rows. Migration decoding,
+repository/query failures, initialization and pool lifecycle need their own typed
+ownership migration; this transaction change does not silently redefine them.
+
+### Transaction observability
+
+Existing `@arki/log` retry events record attempt, SQLSTATE and delay; the shared
+boundary records rollback and classified attempt outcomes under `arki:db:outcome`.
+Driver/query instrumentation remains responsible for database calls. No duplicate
+query spans or application SDK are installed. Default transaction-level spans,
+context propagation and telemetry-failure proofs remain tracked by framework T08;
+these logs alone do not claim complete A-36 coverage.
 
 ## Limits
 
@@ -743,6 +809,7 @@ Every other database error reaches the caller unchanged. A lost connection aroun
 Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, your driver, and the error `code`.
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 ID creation against the common ID generators, and PGlite (in memory) queries through the @arki/db handle against raw Drizzle on the same PGlite instance.
@@ -753,38 +820,38 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 Contracts differ: @arki IDs are prefixed cuid2 strings typed as `usr_${string}`; the others return plain strings. uuid v7 is time-ordered; randomUUID is v4.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/db createIdFactory("usr_").create() | 173.90 µs | 2807.49× |
-| @arki/db createPrefixedId("usr_") | 237.20 µs | 3829.40× |
-| @paralleldrive/cuid2 createId (used directly) | 177.48 µs | 2865.26× |
-| nanoid | 61.9 ns | fastest |
-| uuid v7 | 2.01 µs | 32.37× |
-| crypto.randomUUID() | 261.2 ns | 4.22× |
+| Library                                       | Time / op | vs fastest |
+| --------------------------------------------- | --------: | ---------: |
+| @arki/db createIdFactory("usr_").create()     | 173.90 µs |   2807.49× |
+| @arki/db createPrefixedId("usr_")             | 237.20 µs |   3829.40× |
+| @paralleldrive/cuid2 createId (used directly) | 177.48 µs |   2865.26× |
+| nanoid                                        |   61.9 ns |    fastest |
+| uuid v7                                       |   2.01 µs |     32.37× |
+| crypto.randomUUID()                           |  261.2 ns |      4.22× |
 
 ### Insert one row (PGlite, in memory)
 
 The @arki table fills its id with the factory default; the raw table uses randomUUID().
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/db handle, id from ID factory | 364.83 µs | 1.93× |
-| raw drizzle() on same PGlite, id from randomUUID | 189.08 µs | fastest |
+| Library                                          | Time / op | vs fastest |
+| ------------------------------------------------ | --------: | ---------: |
+| @arki/db handle, id from ID factory              | 364.83 µs |      1.93× |
+| raw drizzle() on same PGlite, id from randomUUID | 189.08 µs |    fastest |
 
 ### Find one row by id
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/db handle, select().where(eq) | 272.58 µs | 1.24× |
-| @arki/db handle, relational query.findFirst | 240.83 µs | 1.09× |
-| raw drizzle() on same PGlite, select().where(eq) | 220.54 µs | fastest |
+| Library                                          | Time / op | vs fastest |
+| ------------------------------------------------ | --------: | ---------: |
+| @arki/db handle, select().where(eq)              | 272.58 µs |      1.24× |
+| @arki/db handle, relational query.findFirst      | 240.83 µs |      1.09× |
+| raw drizzle() on same PGlite, select().where(eq) | 220.54 µs |    fastest |
 
 ### List 50 rows
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/db handle, select().from() | 318.12 µs | 1.07× |
-| raw drizzle() on same PGlite, select().from() | 297.08 µs | fastest |
+| Library                                       | Time / op | vs fastest |
+| --------------------------------------------- | --------: | ---------: |
+| @arki/db handle, select().from()              | 318.12 µs |      1.07× |
+| raw drizzle() on same PGlite, select().from() | 297.08 µs |    fastest |
 
 Read the rows with the contracts in mind:
 

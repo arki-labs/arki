@@ -16,10 +16,13 @@ import type { Provided } from '@arki/dot/plugin';
 import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { plugin, rename } from '@arki/dot/plugin';
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, orThrow } from '@arki/failure';
 
 import type { OpenTransaction, TxOf } from './dot.js';
 import { db, repos, transactions } from './dot.js';
+import { TransactionDefect } from './transaction.js';
+
+const refusal = defineFailure('test.note_refused')();
 
 const notes = pgTable('notes', { id: text('id').primaryKey(), body: text('body').notNull() });
 const relations = defineRelations({ notes });
@@ -53,10 +56,11 @@ const ledger = ledgerDeps
     /** Two writes, one unit: `fail` throws after the first so the test can see it undone. */
     addPair:
       ({ transaction, repos }: Deps) =>
-      (first: string, second: string, fail: boolean) =>
+      (first: string, second: string, fail: boolean | 'return') =>
         transaction(async tx => {
           const bound = repos.withTx(tx);
           await bound.notes.add(first, 'one');
+          if (fail === 'return') return refusal;
           if (fail) throw new Error('after the first write');
           await bound.notes.add(second, 'two');
           return bound.notes.count();
@@ -99,7 +103,7 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
     try {
       const usecases = app.services['ledger.usecases'];
       const failure = await usecases.addPair('a', 'b', true);
-      expect(UnexpectedDefect.is(failure)).toBe(true);
+      expect(TransactionDefect.is(failure)).toBe(true);
       expect(failure).toMatchObject({ cause: new Error('after the first write') });
       expect(await usecases.count()).toBe(0);
     } finally {
@@ -140,4 +144,15 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
         .infra(transactions(reports.provides.reportsDb)),
     ).toThrow(/binds "db" to a handle other than the feature's/);
   });
+});
+
+it('Dot transaction returns the exact refusal and rolls back its earlier writes', async () => {
+  const app = await bootLedger();
+  try {
+    const usecases = app.services['ledger.usecases'];
+    expect(await usecases.addPair('a', 'b', 'return')).toBe(refusal);
+    expect(await usecases.count()).toBe(0);
+  } finally {
+    await orThrow(app.dispose());
+  }
 });

@@ -11,16 +11,18 @@
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import { eventIterator, oc } from '@orpc/contract';
-import { call, implement, ORPCError } from '@orpc/server';
+import { call, implement, ORPCError, os } from '@orpc/server';
 import { eq, sql } from 'drizzle-orm';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { defineFailure, isFailure } from '@arki/failure';
+
 import type { TransactionalDb } from './composition.js';
-import { transactionalProcedure, transactionalProcedureConfig } from './orpc.js';
-import { DB_TRANSACTION_ERROR_CODES } from './transaction.js';
+import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from './orpc.js';
+import { DB_TRANSACTION_ERROR_CODES, TransactionConflict } from './transaction.js';
 
 const accounts = pgTable('accounts', { id: text('id').primaryKey(), balance: integer('balance').notNull() });
 
@@ -62,11 +64,12 @@ const transferInput = z.object({ from: z.string(), to: z.string(), cents: z.int(
   return value;
 });
 
+const base = oc.errors(transactionErrorMap);
 const contract = {
-  transfer: oc.input(transferInput).output(z.object({ from: z.number(), to: z.number() })),
-  isolation: oc.output(z.string()),
-  capped: oc.output(z.object({ n: z.number().max(10) })),
-  stream: oc.output(eventIterator(z.number())),
+  transfer: base.input(transferInput).output(z.object({ from: z.number(), to: z.number() })),
+  isolation: base.output(z.string()),
+  capped: base.output(z.object({ n: z.number().max(10) })),
+  stream: base.output(eventIterator(z.number())),
 };
 
 const sqlError = (code: string): Error => Object.assign(new Error(`sqlstate ${code}`), { code });
@@ -184,7 +187,7 @@ describe('transactionalProcedure: retry', () => {
       (error_: unknown) => error_,
     );
     expect(error).toBeInstanceOf(ORPCError);
-    expect(error).toMatchObject({ code: 'CONFLICT', status: 409 });
+    expect(error).toMatchObject({ code: TransactionConflict.code, status: 409, defined: true });
     expect(error instanceof ORPCError ? error.cause : 'not an ORPCError').toBeUndefined();
     expect(runs).toBe(2);
     expect(await balanceOf('a')).toBe(100);
@@ -252,4 +255,49 @@ describe('transactionalProcedure: the pipeline is checked, fail closed', () => {
       expect.objectContaining({ code: DB_TRANSACTION_ERROR_CODES.invalidOptions }),
     );
   });
+});
+
+const Refused = defineFailure('test.rpc_refused');
+
+it('classifies next().output and preserves the native result metadata while rolling back', async () => {
+  const failure = Refused();
+  const transact = transactionalProcedure(db, { repos: () => repositories });
+  const procedure = implement(
+    base.output(z.custom<ReturnType<typeof Refused>>(isFailure)),
+    transactionalProcedureConfig,
+  )
+    .use(transact)
+    .handler(async ({ context }) => {
+      await context.tx.insert(accounts).values({ id: 'refused', balance: 7 });
+      return failure;
+    });
+  expect(await call(procedure, {})).toBe(failure);
+  expect(await balanceOf('refused')).toBeNull();
+});
+
+it('restores the exact native middleware wrapper, including extra metadata', async () => {
+  const failure = Refused();
+  const transact = transactionalProcedure(db, { repos: () => repositories });
+  let expected: object | undefined;
+  const observe = os.errors(transactionErrorMap).middleware(async options => {
+    const result = await transact({
+      ...options,
+      next: (...[forward]) => {
+        if (forward?.context === undefined) throw new Error('Transaction scope missing');
+        const wrapped = { output: failure, context: forward.context, metadata: { receipt: 'kept' } };
+        expected = wrapped;
+        return Promise.resolve(wrapped);
+      },
+    });
+    expect(result).toBe(expected);
+    return result;
+  });
+  const procedure = implement(
+    base.output(z.custom<ReturnType<typeof Refused>>(isFailure)),
+    transactionalProcedureConfig,
+  )
+    .use(observe)
+    .use(transact)
+    .handler(() => failure);
+  expect(await call(procedure, {})).toBe(failure);
 });

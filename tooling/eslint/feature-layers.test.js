@@ -35,12 +35,12 @@ test("a contract lists its failures with @arki/failure/orpc's errorMap (browser-
   assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { orThrow } from '@arki/failure';`), [RESTRICT]);
 });
 
-test('contracts may annotate browser-safe actions, auth failures and MCP policy without importing executors', () => {
+test('contracts may annotate browser-safe actions, canonical failures and MCP policy without importing executors', () => {
   const contractFile = 'src/features/demo/entrypoints/rpc.ts';
-  for (const source of ['@arki/dot/action', '@arki/auth', '@arki/mcp/contract']) {
+  for (const source of ['@arki/dot/action', '@arki/auth', '@arki/db/errors', '@arki/mcp/contract']) {
     assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), []);
   }
-  for (const source of ['@arki/dot/execute', '@arki/auth/http', '@arki/mcp']) {
+  for (const source of ['@arki/dot/execute', '@arki/auth/http', '@arki/db/orpc', '@arki/db/transaction', '@arki/mcp']) {
     assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), [RESTRICT]);
   }
 });

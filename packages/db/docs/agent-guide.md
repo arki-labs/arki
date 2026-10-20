@@ -19,7 +19,7 @@ The README has the setup. This page has the rules an agent needs to get them rig
 
 ### Make a procedure transactional
 
-1. Build the middleware once: `const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 })`.
+1. Browser-shared contracts use `oc.errors(errorMap(...TRANSACTION_FAILURES))` with `TRANSACTION_FAILURES` from `@arki/db/errors` and `errorMap` from `@arki/failure/orpc`. Native contracts may use `transactionErrorMap` from `@arki/db/orpc`. Then build the middleware once: `const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 })`.
 2. Implement the contract with `implement(contract, transactionalProcedureConfig)`.
 3. Put `.use(transact)` last. Read `context.tx` and `context.repos` in the handler.
 4. See `README.md` ("Transactional procedures").
@@ -27,7 +27,8 @@ The README has the setup. This page has the rules an agent needs to get them rig
 ### Retry a transaction outside oRPC
 
 1. Call `runTransaction(db, async (tx, attempt) => work(tx), { retries: 3 })` from `@arki/db/transaction`.
-2. Catch `DbTransactionError` with `isDbTransactionError(error, DB_TRANSACTION_ERROR_CODES.retriesExhausted)`.
+2. Return failures unchanged, or handle `TransactionConflict.is(result)`; attempts and SQLSTATE live in `result.data`.
+3. Use `runTransactionOnce` when preserving driver isolation/savepoints with no retries. Dot transactions and `createUnitOfWork` use this boundary.
 
 ### Handle a 409 from a transactional procedure
 
@@ -75,18 +76,20 @@ The receipt recipe for ambiguous commits is tested in `@arki/journal` (`src/orpc
 3. `transact` checks the pipeline (first call per procedure), then refuses a nested call.
 4. Attempt: `BEGIN` at SERIALIZABLE → `withTx(tx)` → handler → output validation → `COMMIT`.
 5. On `40001` / `40P01`: Drizzle has rolled back and released the connection. Wait 10–250 ms (jittered), go to 4.
-6. Out of retries: `DbTransactionError` `ARKI_DB_TX_E001` → `ORPCError('CONFLICT')`, 409.
+6. A returned Failure rolls back by a private carrier's exact identity; restore the full middleware result.
+7. Out of retries: return `TransactionConflict` → declared `db.transaction_conflict`, 409.
+8. Work completed but COMMIT unconfirmed: return `TransactionCommitUncertain`; never replay automatically.
 
 ## Decide what to do with a failure
 
-| What happened                                             | Who handles it                      | What the client sees                              |
-| --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
-| `40001` / `40P01` within the retry budget                 | `runTransaction`, silently          | Success                                           |
-| `40001` / `40P01` on every attempt                        | `transact`                          | 409 `CONFLICT`: send the same request again later |
-| A business rule says no (`ORPCError`, `CommandForbidden`) | Your code, once                     | That error                                        |
-| A journal version conflict (`JournalError` `CONFLICT`)    | `commandErrors()` before `transact` | 409 `CONFLICT`: reload, then retry                |
-| Connection lost around `COMMIT` (ambiguous commit)        | Nobody retries                      | 500. Repeat with the same idempotency key         |
-| Same idempotency key after a real commit (receipt replay) | The journal                         | The first result, no new writes                   |
+| What happened                                             | Who handles it                      | What the client sees                                               |
+| --------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------ |
+| `40001` / `40P01` within the retry budget                 | `runTransaction`, silently          | Success                                                            |
+| `40001` / `40P01` on every attempt                        | `transact`                          | 409 `db.transaction_conflict`: retry later                         |
+| A business rule says no (`ORPCError`, `CommandForbidden`) | Your code, once                     | That error                                                         |
+| A journal version conflict (`JournalError` `CONFLICT`)    | `commandErrors()` before `transact` | 409 `CONFLICT`: reload, then retry                                 |
+| Connection lost around `COMMIT` (ambiguous commit)        | Nobody retries                      | 503 `db.transaction_commit_uncertain`; reconcile with the same key |
+| Same idempotency key after a real commit (receipt replay) | The journal                         | The first result, no new writes                                    |
 
 Retry vs replay: a **retry** runs the handler again because the database said
 the attempt lost (nothing was committed). A **replay** returns a stored result
@@ -120,18 +123,47 @@ swallowed), `57014` (statement timeout), connection errors.
 - In a Dot feature, name the pool-bound repo source `repositories`. The bound set is `repos`.
 - A PGlite data directory has one owner. Two handles corrupt it.
 
+## Typed transaction outcomes
+
+`TRANSACTION_FAILURES` is the sole registry; `TransactionFailure` and
+`transactionErrorMap` derive from it. All callback failures keep their exact type.
+
+| Code                              | Definition                   | Policy                                                                              |
+| --------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
+| `db.transaction_conflict`         | `TransactionConflict`        | All bounded attempts lost; retry only under caller policy.                          |
+| `db.transaction_rejected`         | `TransactionRejected`        | Explicit SQLSTATE rejection; correct the operation.                                 |
+| `db.transaction_unavailable`      | `TransactionUnavailable`     | Driver connection failed before work completed; inspect private cause.              |
+| `db.transaction_commit_uncertain` | `TransactionCommitUncertain` | Work completed; missing acknowledgement or connection/shutdown SQLSTATE; reconcile. |
+| `db.transaction_cancelled`        | `TransactionCancelled`       | Cancelled before COMMIT or during retry delay.                                      |
+| `db.transaction_defect`           | `TransactionDefect`          | Callback defect or failed rollback; fix the implementation.                         |
+
+A returned failure never retries, even if rollback replaces its carrier with 40001.
+Do not claim rollback succeeded when cleanup fails. The private cause preserves
+both cleanup error and original returned failure.
+
+### Migration dependencies and instrumentation
+
+`migrate.ts` still parses database result rows with Zod `.parse()`; its typed
+validation/migration boundary is separate work, alongside initialization and
+repository/query ownership. No casts bypass those dependencies.
+
+Existing retry logs and `arki:db:outcome` classified attempt logs are the scoped
+observability surface. Driver query instrumentation owns query spans. Default
+transaction spans, propagation and failing-telemetry proof remain T08 work; do not
+claim full A-36 coverage from logs alone.
+
 ## Errors
 
 ID column metadata uses `ContractsError` code `ARKI_CONTRACTS_E008` when a Drizzle builder has no runtime config. Use a supported builder and matching Drizzle version.
 
-| Code              | Name                | When                                                                                         | Fix                                                                          |
-| ----------------- | ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `ARKI_DB_TX_E001` | `retriesExhausted`  | Every attempt failed with `40001` / `40P01`                                                  | Shorten the transaction; touch rows in a fixed order; raise `retries` (≤ 10) |
-| `ARKI_DB_TX_E002` | `invalidOptions`    | `isolation` is not `'serializable'`, `retries` is not a whole number 0–10, or an unknown key | Fix the options. Nothing is clamped                                          |
-| `ARKI_DB_TX_E003` | `nestedTransaction` | A transactional procedure was called with a context already inside one                       | One `transact` per call; call the usecase directly instead                   |
-| `ARKI_DB_TX_E004` | `invalidPipeline`   | `transact` is not the last `.use()`, or `implement` lacks `transactionalProcedureConfig`     | Move `.use(transact)` last; pass the config                                  |
-| `ARKI_DB_TX_E005` | `unsupportedOutput` | The handler returned a stream                                                                | Return plain data; stream from another procedure                             |
-| `ARKI_DB_TX_E006` | `transactionAsRoot` | The database given is a transaction                                                          | Pass the root database                                                       |
+| Code              | Name                      | When                                                                                         | Fix                                                                          |
+| ----------------- | ------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ARKI_DB_TX_E001` | legacy `retriesExhausted` | Retained static error constant; owned operations now return `TransactionConflict`            | Shorten the transaction; touch rows in a fixed order; raise `retries` (≤ 10) |
+| `ARKI_DB_TX_E002` | `invalidOptions`          | `isolation` is not `'serializable'`, `retries` is not a whole number 0–10, or an unknown key | Fix the options. Nothing is clamped                                          |
+| `ARKI_DB_TX_E003` | `nestedTransaction`       | A transactional procedure was called with a context already inside one                       | One `transact` per call; call the usecase directly instead                   |
+| `ARKI_DB_TX_E004` | `invalidPipeline`         | `transact` is not the last `.use()`, or `implement` lacks `transactionalProcedureConfig`     | Move `.use(transact)` last; pass the config                                  |
+| `ARKI_DB_TX_E005` | `unsupportedOutput`       | The handler returned a stream                                                                | Return plain data; stream from another procedure                             |
+| `ARKI_DB_TX_E006` | `transactionAsRoot`       | The database given is a transaction                                                          | Pass the root database                                                       |
 
 `isDbTransactionError(error, code?)` narrows an unknown error.
 

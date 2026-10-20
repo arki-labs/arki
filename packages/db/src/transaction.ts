@@ -5,8 +5,7 @@
  * Under SERIALIZABLE, PostgreSQL may abort a transaction with SQLSTATE `40001`
  * (serialization failure) or `40P01` (deadlock). Its documented answer is to run
  * the whole transaction again. `runTransaction` does exactly that, a bounded
- * number of times, with a short jittered wait between tries. Every other error
- * runs once and reaches the caller unchanged.
+ * number of times, with a short jittered wait between tries. Other failures run once and become typed transaction outcomes.
  *
  *   await runTransaction(db, async tx => moveMoney(tx, input), { retries: 3 });
  *
@@ -22,14 +21,30 @@ import { getLogger } from '@arki/log';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
 import type { TransactionalDb } from './composition.js';
+import type { TransactionFailure } from './errors.js';
+import { TransactionCancelled, TransactionConflict } from './errors.js';
+import { classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
 import { findDatabaseError } from './sql-state.js';
+import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
 
 export type { TransactionalDb } from './composition.js';
 
 const log = getLogger('arki:db:transaction');
 
 /** The SQLSTATEs PostgreSQL tells you to retry: serialization failure and deadlock. */
-export type RetryableSqlState = '40001' | '40P01';
+export type RetryableSqlState = ReturnType<typeof TransactionConflict>['data']['sqlState'];
+
+export {
+  TransactionConflict,
+  TransactionUnavailable,
+  TransactionRejected,
+  TransactionCommitUncertain,
+  TransactionCancelled,
+  TransactionDefect,
+  TRANSACTION_FAILURES,
+} from './errors.js';
+export { runTransactionOnce } from './owned-transaction.js';
+export type { TransactionFailure } from './errors.js';
 
 /** The wait before retry n is about 10 ms × 2^(n-1), varied ±25%, never above 250 ms. */
 const RETRY_BACKOFF = backoff.exponential({ base: 10, max: 250, jitter: 0.25 });
@@ -54,84 +69,8 @@ export type TransactionOptions = TransactionSettings & {
   readonly signal?: AbortSignal;
 };
 
-export const DB_TRANSACTION_ERROR_CODES = {
-  /**
-   * Every attempt failed with a retryable SQLSTATE (`40001` or `40P01`).
-   *
-   * @fix Shorten the transaction, touch rows in a fixed order, or raise `retries` (at most 10).
-   * @verify bun run test -- src/transaction.test.ts
-   */
-  retriesExhausted: 'ARKI_DB_TX_E001',
-  /**
-   * `isolation` is not `serializable`, `retries` is not a whole number from 0 to 10, or an option key is unknown.
-   *
-   * @fix Fix the options. Nothing is clamped.
-   * @verify bun run test -- src/transaction.test.ts
-   */
-  invalidOptions: 'ARKI_DB_TX_E002',
-  /**
-   * A transactional procedure was called with a context that is already inside a transaction.
-   *
-   * @fix Open one transaction per call. Call the usecase directly instead.
-   * @verify bun run test -- src/orpc.test.ts
-   */
-  nestedTransaction: 'ARKI_DB_TX_E003',
-  /**
-   * `transact` is not the last `.use()`, or `implement` was not given `transactionalProcedureConfig`.
-   *
-   * @fix Put `.use(transact)` last and pass `transactionalProcedureConfig` to `implement`.
-   * @verify bun run test -- src/orpc.test.ts
-   */
-  invalidPipeline: 'ARKI_DB_TX_E004',
-  /**
-   * The transactional handler returned a stream.
-   *
-   * @fix Return plain data. Stream from another procedure.
-   * @verify bun run test -- src/orpc.test.ts
-   */
-  unsupportedOutput: 'ARKI_DB_TX_E005',
-  /**
-   * The database handed to the transaction helper is already a transaction.
-   *
-   * @fix Pass the root database.
-   * @verify bun run test -- src/transaction.test.ts
-   */
-  transactionAsRoot: 'ARKI_DB_TX_E006',
-} as const;
-
-export type DbTransactionErrorCode = (typeof DB_TRANSACTION_ERROR_CODES)[keyof typeof DB_TRANSACTION_ERROR_CODES];
-
-/** An error of `@arki/db/transaction` or `@arki/db/orpc`. Same shape as `DbCompositionError`. */
-export class DbTransactionError extends Error {
-  readonly code: DbTransactionErrorCode;
-  /** How to fix it. */
-  readonly remediation: string;
-  /** How many times the work ran. Set for `retriesExhausted`. */
-  readonly attempts: number | undefined;
-  /** The SQLSTATE of the last failure. Set for `retriesExhausted`. */
-  readonly sqlState: RetryableSqlState | undefined;
-
-  constructor(args: {
-    readonly code: DbTransactionErrorCode;
-    readonly message: string;
-    readonly remediation: string;
-    readonly attempts?: number;
-    readonly sqlState?: RetryableSqlState;
-    readonly cause?: unknown;
-  }) {
-    super(args.message, args.cause === undefined ? undefined : { cause: args.cause });
-    this.name = 'DbTransactionError';
-    this.code = args.code;
-    this.remediation = args.remediation;
-    this.attempts = args.attempts;
-    this.sqlState = args.sqlState;
-  }
-}
-
-/** True when `error` is a `DbTransactionError`, and has `code` when one is given. */
-export function isDbTransactionError(error: unknown, code?: DbTransactionErrorCode): error is DbTransactionError {
-  return error instanceof DbTransactionError && (code === undefined || error.code === code);
-}
+export { DB_TRANSACTION_ERROR_CODES, DbTransactionError, isDbTransactionError } from './transaction-errors.js';
+export type { DbTransactionErrorCode } from './transaction-errors.js';
 
 /**
  * The retryable SQLSTATE of `error`, or `undefined`.
@@ -173,22 +112,17 @@ function assertTransactionRoot(db: object): void {
 }
 
 /**
- * Run `work` in one transaction at `isolation`. When it fails with `40001` or
- * `40P01`, run it again in a fresh transaction, up to `retries` more times.
- *
- * - `work` gets the transaction and the attempt number (1 for the first run).
- *   It runs again from the start, so it must not do anything a rerun repeats:
- *   no `fetch`, no queue writes (`db/no-effects-in-transaction` reports them).
- * - Waits only after Drizzle rolled back and released the connection.
- * - Out of retries: `DbTransactionError` `ARKI_DB_TX_E001`, with the last error as `cause`.
- * - Any other error, including a lost connection around `COMMIT`, runs once and
- *   reaches the caller unchanged: the commit may have happened.
+ * Run rollback-safe work at SERIALIZABLE isolation. Returning a Failure rolls
+ * back and restores that exact value. Ordinary values commit unchanged.
+ * Only SQLSTATE 40001/40P01 retries; COMMIT acknowledgement loss never does.
+ * External effects must remain outside the callback because an attempt may rerun.
+ * Static configuration misuse still throws DbTransactionError.
  */
 export async function runTransaction<Tx, T>(
   db: TransactionalDb<Tx>,
   work: (tx: Tx, attempt: number) => Promise<T>,
   options: TransactionOptions = {},
-): Promise<T> {
+): Promise<T | TransactionFailure> {
   const { clock, signal, ...settings } = options;
   const { isolation, retries } = parseTransactionSettings(settings);
   assertTransactionRoot(db);
@@ -198,33 +132,34 @@ export async function runTransaction<Tx, T>(
     clock,
   });
   const retried = policy.onRetry(event => {
-    log.debug('transaction conflict, running it again: attempt {attempt}, SQLSTATE {sqlState}, wait {delay} ms', {
-      attempt: event.attempt + 1,
-      sqlState: 'error' in event ? retryableSqlState(event.error) : undefined,
-      delay: event.delay,
-    });
+    try {
+      log.debug('transaction conflict, running it again: attempt {attempt}, SQLSTATE {sqlState}, wait {delay} ms', {
+        attempt: event.attempt + 1,
+        sqlState: 'error' in event ? retryableSqlState(event.error) : undefined,
+        delay: event.delay,
+      });
+    } catch {
+      // A broken context/trace source must not change the retry policy.
+    }
   });
 
   let attempts = 0;
   try {
-    return await policy.execute(() => {
+    const outcome = await policy.execute(async () => {
       signal?.throwIfAborted();
       attempts += 1;
-      const attempt = attempts;
-      return db.transaction(tx => work(tx, attempt), { isolationLevel: isolation });
+      const result = await transactionAttempt(db, tx => work(tx, attempts), { isolationLevel: isolation }, signal);
+      if ('value' in result) return result;
+      if (TransactionConflict.is(result.failure)) throw result.failure.cause;
+      return { value: result.failure };
     }, signal);
+    return outcome.value;
   } catch (error) {
+    if (error instanceof DbTransactionError) throw error;
+    if (signal?.aborted === true) return TransactionCancelled({ cause: error });
     const sqlState = retryableSqlState(error);
-    if (sqlState === undefined || attempts < retries + 1) throw error;
-    throw new DbTransactionError({
-      code: DB_TRANSACTION_ERROR_CODES.retriesExhausted,
-      message: `[db] the transaction failed with SQLSTATE ${sqlState} on all ${String(attempts)} attempts.`,
-      remediation:
-        'Another transaction kept winning the race. Keep the transaction short, touch rows in a fixed order, or raise `retries` (at most 10).',
-      attempts,
-      sqlState,
-      cause: error,
-    });
+    if (sqlState !== undefined) return TransactionConflict({ attempts, sqlState }, { cause: error });
+    return classifyTransactionFailure(error, false, signal);
   } finally {
     retried.dispose();
   }

@@ -20,11 +20,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { TransactionalDb } from '@arki/db/transaction';
-import { transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+import { transactionErrorMap, transactionalProcedure, transactionalProcedureConfig } from '@arki/db/orpc';
+import { TransactionCommitUncertain } from '@arki/db/transaction';
 import { AsyncSchema, InvalidInput, orThrow, ValidatorDefect } from '@arki/failure';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
-import { CommandForbidden, initJournal } from './index.js';
+import { CommandConflict, CommandForbidden, initJournal, isJournalError } from './index.js';
 import { commandErrors } from './orpc.js';
 import { journalTables } from './pg.js';
 import { openJournalDb } from './testing.js';
@@ -90,7 +91,10 @@ const contract = {
   deposit: oc
     .input(z.object({ id: accountIdSchema, amount: z.int().positive(), key: z.string() }))
     .output(z.object({ balance: z.number() }))
-    .errors(errorMap(CommandForbidden, InvalidInput, AsyncSchema, ValidatorDefect)),
+    .errors({
+      ...transactionErrorMap,
+      ...errorMap(CommandConflict, CommandForbidden, InvalidInput, AsyncSchema, ValidatorDefect),
+    }),
 };
 
 let client: PGlite;
@@ -107,13 +111,22 @@ function depositProcedure(root: TransactionalDb<Transaction>, afterRun?: (attemp
     .handler(async ({ context, input, errors }) => {
       attempt += 1;
       const result = await orThrowRpc(
-        journal.run(
-          context.tx,
-          deposit,
-          { id: input.id, amount: input.amount },
-          { actorId: context.actorId },
-          { idempotencyKey: receiptKey(context, input.key) },
-        ),
+        journal
+          .run(
+            context.tx,
+            deposit,
+            { id: input.id, amount: input.amount },
+            { actorId: context.actorId },
+            { idempotencyKey: receiptKey(context, input.key) },
+          )
+          .catch((error: unknown) => {
+            // The receipt API still throws this conflict. Translate it into a
+            // declared failure before the transaction owner supervises it.
+            if (isJournalError(error, 'CONFLICT')) {
+              return CommandConflict({ detail: 'This request key was already used for another operation.' });
+            }
+            throw error;
+          }),
         errors,
       );
       afterRun?.(attempt);
@@ -209,7 +222,8 @@ describe('ambiguous commit: recovered by the receipt, never by a blind retry', (
       { id, amount: 7, key: 'lost-ack-01' },
       { context: alice },
     ).catch((error_: unknown) => error_);
-    expect(error).toMatchObject({ code: 'ECONNRESET' });
+    expect(error).toMatchObject({ code: TransactionCommitUncertain.code, status: 503, defined: true });
+    expect(error).toMatchObject({ cause: undefined });
     expect(runs).toBe(1);
 
     // The client repeats the same logical action with the same key.
@@ -233,13 +247,14 @@ describe('ambiguous commit: recovered by the receipt, never by a blind retry', (
     expect(await rowsFor(id)).toMatchObject({ events: 1 });
   });
 
-  it('the same key with another input is a 409 CONFLICT, through the journal mapping', async () => {
+  it('the same key with another input is a declared conflict, never a database outage', async () => {
     const id = freshAccount();
     const procedure = depositProcedure(db);
     await call(procedure, { id, amount: 1, key: 'reused-key-1' }, { context: alice });
     await expect(call(procedure, { id, amount: 2, key: 'reused-key-1' }, { context: alice })).rejects.toMatchObject({
-      code: 'CONFLICT',
+      code: CommandConflict.code,
       status: 409,
+      defined: true,
     });
   });
 

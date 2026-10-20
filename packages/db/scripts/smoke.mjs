@@ -8,13 +8,14 @@
 import { call, os } from '@orpc/server';
 import { z } from 'zod';
 
-import { transactionalProcedure, transactionalProcedureConfig } from '../dist/orpc.js';
+import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from '../dist/orpc.js';
 import {
   DB_TRANSACTION_ERROR_CODES,
-  DbTransactionError,
   isDbTransactionError,
   retryableSqlState,
   runTransaction,
+  runTransactionOnce,
+  TransactionConflict,
 } from '../dist/transaction.js';
 
 const conflict = () => Object.assign(new Error('could not serialize access'), { code: '40001' });
@@ -42,12 +43,13 @@ const caught = promise =>
 async function main() {
   const retried = scriptedDb(1);
   const value = await runTransaction(retried, async (tx, attempt) => `${tx.attempt}/${attempt}`);
-  const exhausted = await caught(runTransaction(scriptedDb(9), async () => 'x', { retries: 1 }));
+  const exhausted = await runTransaction(scriptedDb(9), async () => 'x', { retries: 1 });
+  const refusal = TransactionConflict({ attempts: 1, sqlState: '40001' });
   const invalid = await caught(runTransaction(scriptedDb(0), async () => 'x', { retries: 11 }));
   const wrapped = new Error('query failed', { cause: conflict() });
 
   const repositories = { withTx: tx => ({ attempt: tx.attempt }) };
-  const builder = os.$config(transactionalProcedureConfig);
+  const builder = os.$config(transactionalProcedureConfig).errors(transactionErrorMap);
   const answer = builder
     .output(z.object({ attempt: z.number() }))
     .use(transactionalProcedure(scriptedDb(1), { repos: () => repositories }))
@@ -63,16 +65,22 @@ async function main() {
   const checks = [
     ['runs serializable', retried.configs[0]?.isolationLevel, 'serializable'],
     ['reruns on 40001 with a fresh transaction', value, '2/2'],
-    [
-      'gives up with a coded error',
-      isDbTransactionError(exhausted) && exhausted.code,
-      DB_TRANSACTION_ERROR_CODES.retriesExhausted,
-    ],
-    ['counts attempts', exhausted instanceof DbTransactionError && exhausted.attempts, 2],
+    ['gives up with a coded error', TransactionConflict.is(exhausted) && exhausted.code, TransactionConflict.code],
+    ['counts attempts', TransactionConflict.is(exhausted) && exhausted.data.attempts, 2],
     ['refuses bad options', isDbTransactionError(invalid) && invalid.code, DB_TRANSACTION_ERROR_CODES.invalidOptions],
     ['classifies a wrapped 40001', retryableSqlState(wrapped), '40001'],
     ['middleware reruns the handler', (await call(answer, {})).attempt, 2],
-    ['middleware maps exhaustion to CONFLICT', (await caught(call(lost, {})))?.code, 'CONFLICT'],
+    [
+      'middleware maps exhaustion to a canonical failure',
+      (await caught(call(lost, {})))?.code,
+      TransactionConflict.code,
+    ],
+    ['returned failure preserves identity', await runTransaction(scriptedDb(0), async () => refusal), refusal],
+    [
+      'single attempt preserves failure identity',
+      await runTransactionOnce(scriptedDb(0), async () => refusal),
+      refusal,
+    ],
     ['middleware must be last', (await caught(call(late, {})))?.code, DB_TRANSACTION_ERROR_CODES.invalidPipeline],
   ];
 

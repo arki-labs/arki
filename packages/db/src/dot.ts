@@ -62,9 +62,11 @@ import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
 import type { PgliteInitOptions } from './runtime-local.js';
+import type { TransactionFailure } from './transaction.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
 import { migrateDb, pendingMigrations } from './migrate.js';
+import { runTransactionOnce } from './owned-transaction.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 /**
@@ -405,11 +407,11 @@ export type TxOf<TDb> = TDb extends { transaction(fn: (tx: infer Tx) => never): 
 
 /**
  * The `transaction` service: run `fn` inside one transaction of the bound
- * database. It commits when `fn` returns and rolls back when `fn` throws.
+ * database. It commits ordinary values and rolls back returned failures or thrown errors.
  * The `tx` it hands out is the database's own transaction type, so
  * `repos.withTx(tx)` takes it with no cast.
  */
-export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
+export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T | TransactionFailure>;
 
 /**
  * A feature's transaction opener as one private infra plugin: it needs `db`
@@ -441,7 +443,7 @@ export function transactions<TDb extends Transactable<Tx>, K extends string, O e
       transaction:
         ({ db }): OpenTransaction<Tx> =>
         fn =>
-          db.transaction(fn),
+          runTransactionOnce(db, fn),
     },
   });
 }
