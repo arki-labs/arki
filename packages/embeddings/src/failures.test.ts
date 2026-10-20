@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { UnexpectedDefect, isFailure } from '@arki/failure';
 
+import type { EmbedFailure } from './index.js';
 import {
   Cancelled,
   ConfigurationFailure,
@@ -35,6 +36,8 @@ describe('failures', () => {
       Cancelled(),
       ConfigurationFailure({ message: 'nothing set' }),
     ];
+    // The public union must cover exactly the supported refusal values, without widening.
+    expectTypeOf<(typeof failures)[number]>().toEqualTypeOf<EmbedFailure>();
     for (const failure of failures) {
       expect(isFailure(failure)).toBe(true);
       expect(isEmbedFailure(failure)).toBe(true);
@@ -42,5 +45,15 @@ describe('failures', () => {
     expect(new Set(failures.map(failure => failure.code)).size).toBe(failures.length);
     expect(isEmbedFailure({ code: 'embeddings.cancelled' })).toBe(false);
     expect(isEmbedFailure(new Float32Array(2))).toBe(false);
+    expect(isEmbedFailure(UnexpectedDefect())).toBe(false);
+  });
+
+  it('narrows an untyped boundary to the public failure union', () => {
+    const value: unknown = Cancelled();
+    if (!isEmbedFailure(value)) throw new Error('Expected the canonical cancellation failure');
+    expectTypeOf(value).toEqualTypeOf<EmbedFailure>();
+    if (value.code === 'embeddings.rate_limited') {
+      expectTypeOf(value.data.retryAfterMs).toEqualTypeOf<number | undefined>();
+    }
   });
 });

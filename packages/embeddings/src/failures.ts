@@ -78,16 +78,6 @@ export type SpaceMismatch = ReturnType<typeof SpaceMismatch>;
 export type Cancelled = ReturnType<typeof Cancelled>;
 export type ConfigurationFailure = ReturnType<typeof ConfigurationFailure>;
 
-export type EmbedFailure =
-  | RateLimited
-  | InputTooLong
-  | ModelUnavailable
-  | UnsupportedInput
-  | InvalidOutput
-  | SpaceMismatch
-  | Cancelled
-  | ConfigurationFailure;
-
 const EMBED_FAILURES = [
   RateLimited,
   InputTooLong,
@@ -98,6 +88,8 @@ const EMBED_FAILURES = [
   Cancelled,
   ConfigurationFailure,
 ] as const;
+
+export type EmbedFailure = ReturnType<(typeof EMBED_FAILURES)[number]>;
 
 /** True for a failure this package defines; false for every other value, other failures included. */
 export function isEmbedFailure(value: unknown): value is EmbedFailure {
