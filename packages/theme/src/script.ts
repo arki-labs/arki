@@ -67,15 +67,23 @@ export function themeDetectionFn(input: string | ThemeDetectionOptions): void {
     const themes = options.themes ?? ['light', 'dark', 'system'];
     const enableSystem = options.enableSystem ?? true;
 
-    const theme = localStorage.getItem(storageKey);
+    let theme: string | null = null;
+    try {
+      theme = localStorage.getItem(storageKey);
+    } catch {
+      // Storage restrictions must still allow the default theme to apply.
+    }
     const storedTheme = theme !== null && themes.includes(theme) ? theme : defaultTheme;
     const selectedTheme = themes.includes(storedTheme) ? storedTheme : (themes[0] ?? defaultTheme);
-    const resolvedTheme =
-      selectedTheme === 'system' && enableSystem
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light'
-        : selectedTheme;
+    let resolvedTheme = selectedTheme;
+    if (selectedTheme === 'system' && enableSystem) {
+      resolvedTheme = 'light';
+      try {
+        resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      } catch {
+        // Match the provider's light fallback when system detection is unavailable.
+      }
+    }
     const isDark = resolvedTheme === 'dark';
 
     if (attribute === 'class') {
@@ -94,6 +102,6 @@ export function themeDetectionFn(input: string | ThemeDetectionOptions): void {
     }
     document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
   } catch {
-    // localStorage may not be available
+    // The host document may not be writable.
   }
 }

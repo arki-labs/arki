@@ -61,6 +61,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run --configLoader runner",
     "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -74,6 +75,14 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/react": "catalog:react"
+    "@testing-library/react": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:text-processing",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "vitest": "catalog:"
   }
 }

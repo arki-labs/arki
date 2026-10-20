@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildErrorIndex,
   checkErrorDocs,
+  duplicateErrorCodes,
   errorDocsUrl,
   errorIndexSchema,
   missingErrorDocs,
@@ -115,5 +116,53 @@ describe('errorDocsUrl', () => {
   it('uses the code as it is', () => {
     // Why: links already printed in errors must keep working, so the scheme is stable.
     expect(errorDocsUrl('post.not_found')).toBe('https://arki.dev/errors/post.not_found');
+  });
+});
+
+describe('canonical definitions', () => {
+  it('reads aliases of canonical factory imports', () => {
+    // Why: renaming an import must not silently remove a failure from public docs.
+    const entries = readErrorEntries(
+      `
+      import { defineFailure as failure } from '@arki/failure';
+      import * as failures from '@arki/failure';
+      const Missing = failure('post.missing');
+      const Locked = failures.defineFailure('post.locked');
+      const unrelated = other.defineFailure('not.a_failure');
+    `,
+      'src/errors.ts',
+      'p',
+    );
+    expect(entries.map(entry => entry.code)).toEqual(['post.missing', 'post.locked']);
+  });
+
+  it('reads original declarations without executing initialization or repeating re-exports', () => {
+    // Why: several barrels expose one definition and its module can have side effects.
+    const dir = mkdtempSync(path.join(tmpdir(), 'error-index-'));
+    mkdirSync(path.join(dir, 'src'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@arki/demo' }));
+    writeFileSync(path.join(dir, 'src', 'failures.ts'), `throw new Error('must never run');\n${FAILURE}`);
+    writeFileSync(path.join(dir, 'src', 'index.ts'), "export { PostNotFound } from './failures';");
+    writeFileSync(path.join(dir, 'src', 'alias.ts'), "export { PostNotFound as Missing } from './failures';");
+    const index = buildErrorIndex(dir);
+    expect(index).toHaveLength(2);
+    expect(index.every(entry => entry.source.startsWith('src/failures.ts:'))).toBe(true);
+    expect(duplicateErrorCodes(index)).toEqual([]);
+  });
+
+  it('reports one duplicate finding for colliding definitions even across error kinds', () => {
+    // Why: one public error URL cannot describe two different definitions, even with fixes.
+    const dir = mkdtempSync(path.join(tmpdir(), 'error-index-'));
+    mkdirSync(path.join(dir, 'src'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@arki/demo' }));
+    const doc = '/** Missing post. \n * @fix Create the post. \n * @verify bun run test \n */';
+    writeFileSync(path.join(dir, 'src', 'failure.ts'), `${doc}\nexport const Missing = defineFailure('post.missing');`);
+    writeFileSync(
+      path.join(dir, 'src', 'registry.ts'),
+      `export const DEMO_ERROR_CODES = {\n${doc}\nmissing: 'post.missing' };`,
+    );
+    writeFileSync(path.join(dir, 'src', 'other.ts'), `${doc}\nexport const Other = defineFailure('post.missing');`);
+    expect(buildErrorIndex(dir)).toHaveLength(3);
+    expect(checkErrorDocs(dir)).toEqual(['ERR_E002 error code has multiple definitions: post.missing']);
   });
 });

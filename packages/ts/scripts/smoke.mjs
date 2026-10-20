@@ -16,6 +16,7 @@ const lazy = lazyObject(() => {
   return { value: 7 };
 });
 const beforeRead = built;
+const frozen = lazyObject(() => Object.freeze({ value: 9 }));
 
 const checks = [
   ['once computes one time', calls, 1],
@@ -24,6 +25,10 @@ const checks = [
   ['lazyObject waits for first read', beforeRead, 0],
   ['lazyObject builds on read', lazy.value, 7],
   ['lazyObject builds once', built, 1],
+  ['lazyObject enumerates frozen instances', Object.keys(frozen).join(','), 'value'],
+  ['lazyObject spreads frozen instances', { ...frozen }.value, 9],
+  ['lazyObject preserves frozen writes', Reflect.set(frozen, 'value', 10), false],
+  ['lazyObject preserves frozen deletes', Reflect.deleteProperty(frozen, 'value'), false],
 ];
 
 let failed = 0;

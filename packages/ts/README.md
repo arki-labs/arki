@@ -126,7 +126,7 @@ The runtime helpers throw only what your code throws:
 - `DeepPartial` and `DeepRequired` recurse into every object, including functions and class instances. Wrap those in a leaf type if you need them left alone.
 - The casing helpers work on string keys. The snake-to-camel helpers keep number and symbol keys. The camel-to-snake helpers drop them: `CamelToSnake<{ userName: 1; 0: 2 }>` is `{ user_name: 1 }`.
 - Deep helpers have the compiler's recursion limit. A type with hundreds of nested levels reports TS2589.
-- `lazyObject` is for objects. Do not compare its result by identity with the built instance.
+- `lazyObject` is for objects. Do not compare its result by identity with the built instance. Reflected property descriptors are configurable views of the instance; writes and deletes still obey the real descriptors. Enumeration and spreads also work with frozen instances. Defining properties or freezing the proxy itself is unsupported.
 - `Lazy<T>` cannot hold a function type `T`, because a thunk cannot be told from the value.
 
 ## Documentation

@@ -110,4 +110,38 @@ describe('lazyObject', () => {
     expect({ ...value }).toEqual({ a: 1, b: 2 });
     expect(Object.keys(value).toSorted()).toEqual(['a', 'b']);
   });
+
+  it('enumerates frozen instances without violating the virtual target descriptors', () => {
+    const instance = Object.freeze({ endpoint: 'local' });
+    const build = vi.fn(() => instance);
+    const value = lazyObject(build);
+
+    expect(Object.keys(value)).toEqual(['endpoint']);
+    expect({ ...value }).toEqual(instance);
+    expect(Object.getOwnPropertyDescriptor(value, 'endpoint')).toEqual({
+      value: 'local',
+      writable: false,
+      enumerable: true,
+      configurable: true,
+    });
+    expect(Object.getOwnPropertyDescriptor(value, 'missing')).toBeUndefined();
+    expect(Reflect.set(value, 'endpoint', 'remote')).toBe(false);
+    expect(Reflect.deleteProperty(value, 'endpoint')).toBe(false);
+    expect(value.endpoint).toBe('local');
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it('enumerates nonconfigurable accessors without reading them during reflection', () => {
+    const read = vi.fn(() => 'ready');
+    const instance = Object.defineProperty({}, 'state', {
+      get: read,
+      enumerable: true,
+    });
+    const value = lazyObject(() => instance);
+
+    expect(Object.keys(value)).toEqual(['state']);
+    expect(read).not.toHaveBeenCalled();
+    expect({ ...value }).toEqual({ state: 'ready' });
+    expect(read).toHaveBeenCalledTimes(1);
+  });
 });

@@ -77,6 +77,32 @@ function unwrap(expression: ts.Expression): ts.Expression {
 export function readErrorEntries(sourceText: string, file: string, packageName: string): ErrorEntry[] {
   const sourceFile = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const entries: ErrorEntry[] = [];
+  const failureFactories = new Set(['defineFailure']);
+  const failureNamespaces = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== '@arki/failure' ||
+      statement.importClause?.isTypeOnly
+    )
+      continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings !== undefined && ts.isNamespaceImport(bindings)) failureNamespaces.add(bindings.name.text);
+    if (bindings !== undefined && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        if (!binding.isTypeOnly && (binding.propertyName ?? binding.name).text === 'defineFailure') {
+          failureFactories.add(binding.name.text);
+        }
+      }
+    }
+  }
+  const isFailureFactory = (expression: ts.Expression): boolean =>
+    (ts.isIdentifier(expression) && failureFactories.has(expression.text)) ||
+    (ts.isPropertyAccessExpression(expression) &&
+      ts.isIdentifier(expression.expression) &&
+      failureNamespaces.has(expression.expression.text) &&
+      expression.name.text === 'defineFailure');
   const at = (node: ts.Node): string =>
     `${file}:${String(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)}`;
 
@@ -98,11 +124,7 @@ export function readErrorEntries(sourceText: string, file: string, packageName: 
             }
           }
         }
-      } else if (
-        ts.isCallExpression(initializer) &&
-        ts.isIdentifier(initializer.expression) &&
-        initializer.expression.text === 'defineFailure'
-      ) {
+      } else if (ts.isCallExpression(initializer) && isFailureFactory(initializer.expression)) {
         const [code] = initializer.arguments;
         if (code !== undefined && ts.isStringLiteralLike(code)) {
           entries.push({ code: code.text, package: packageName, kind: 'failure', ...readDoc(node), source: at(node) });
@@ -148,19 +170,33 @@ export function missingErrorDocs(entries: readonly ErrorEntry[]): ErrorEntry[] {
 
 export const ERR_RULES = {
   ERR_E001: 'error code lacks @fix or @verify in its JSDoc',
+  ERR_E002: 'error code has multiple definitions',
 } as const;
 
+/** Codes with more than one original definition. Re-exports create no entries. */
+export function duplicateErrorCodes(entries: readonly ErrorEntry[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.code)) duplicates.add(entry.code);
+    seen.add(entry.code);
+  }
+  return [...duplicates].toSorted();
+}
+
 /**
- * ERR_E001 findings for `arki-library-check`, one per code. No line number:
+ * ERR_E001/ERR_E002 findings for `arki-library-check`, one per code. No line number:
  * the baseline matches findings by text, so moving a code must not unbaseline it.
  */
 export function checkErrorDocs(packageDir: string): string[] {
-  return missingErrorDocs(buildErrorIndex(packageDir)).map(entry => {
+  const entries = buildErrorIndex(packageDir);
+  const missing = missingErrorDocs(entries).map(entry => {
     const lacking = [entry.fix === null ? '@fix' : null, entry.verify === null ? '@verify' : null].filter(
       tag => tag !== null,
     );
     return `ERR_E001 ${ERR_RULES.ERR_E001}: ${entry.code} (no ${lacking.join(', ')})`;
   });
+  return [...missing, ...duplicateErrorCodes(entries).map(code => `ERR_E002 ${ERR_RULES.ERR_E002}: ${code}`)];
 }
 
 function main(): number {
@@ -173,7 +209,9 @@ function main(): number {
   const missing = missingErrorDocs(entries).length;
   say(`arki-error-index: ${String(entries.length)} code(s), ${String(missing)} without @fix/@verify -> ${out}`);
   if (entries.length === 0) complain('arki-error-index: no error codes found under src/');
-  return 0;
+  const duplicates = duplicateErrorCodes(entries);
+  for (const code of duplicates) complain(`ERR_E002 ${ERR_RULES.ERR_E002}: ${code}`);
+  return duplicates.length === 0 ? 0 : 1;
 }
 
 if (import.meta.main) process.exit(main());

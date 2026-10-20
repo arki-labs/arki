@@ -63,6 +63,7 @@ Nothing here throws.
 - `useTheme()` outside a `ThemeProvider` returns a no-op default: `theme` is `undefined` and `setTheme` does nothing. Server rendering and tests work without a provider.
 - If `localStorage` is blocked (private mode, a strict browser setting), reads return nothing and writes are dropped. The theme then lasts until the page reloads.
 - A stored value that is not in `themes` is replaced by `defaultTheme`.
+- If system preference detection is missing or throws, both the provider and inline script resolve `system` to `light`. A blocked media query subscription keeps the detected preference.
 
 ## Limits
 

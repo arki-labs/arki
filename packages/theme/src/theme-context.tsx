@@ -54,7 +54,11 @@ const defaultThemes = ['light', 'dark', 'system'];
  */
 function getSystemTheme(): ResolvedTheme {
   if (typeof window === 'undefined') return 'light';
-  return window.matchMedia(MEDIA).matches ? 'dark' : 'light';
+  try {
+    return window.matchMedia(MEDIA).matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
 }
 
 /**
@@ -187,18 +191,25 @@ export function ThemeProvider({
   useEffect(() => {
     if (!enableSystem) return;
 
-    const mediaQuery = window.matchMedia(MEDIA);
+    try {
+      const mediaQuery = window.matchMedia(MEDIA);
+      const handleChange = (e: MediaQueryListEvent) => {
+        setSystemTheme(e.matches ? 'dark' : 'light');
+      };
 
-    const handleChange = (e: MediaQueryListEvent) => {
-      setSystemTheme(e.matches ? 'dark' : 'light');
-    };
-
-    // Set initial value
-    setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
-
-    // Listen for changes
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
+      setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
+      mediaQuery.addEventListener('change', handleChange);
+      return () => {
+        try {
+          mediaQuery.removeEventListener('change', handleChange);
+        } catch {
+          // Restricted browser APIs must not break provider cleanup.
+        }
+      };
+    } catch {
+      // Keep the detected preference when subscription is unavailable.
+      return;
+    }
   }, [enableSystem]);
 
   // Apply theme to document when it changes
