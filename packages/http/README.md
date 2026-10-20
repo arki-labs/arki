@@ -458,10 +458,11 @@ http({
 `@arki/http/webhooks` checks that a webhook comes from the sender who holds the secret. It is portable (Web Crypto only), and `subtle.verify` compares in constant time.
 
 ```ts skip="needs a Postgres journal (the @arki/journal package), which this package does not depend on"
-import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
+import { standardWebhooks, verifyWebhook, WEBHOOK_FAILURES } from '@arki/http/webhooks';
 
 const partnerEvents = routes()
   .derive('webhook', verifyWebhook({ scheme: standardWebhooks({ secrets: [env.PARTNER_WEBHOOK_SECRET] }) }))
+  // orderShipped declares failures: WEBHOOK_FAILURES in its route contract.
   .bind(orderShipped, async ({ body }, { webhook }) => {
     // The event id is the journal key: a resent event commits nothing the second time,
     // and the receipt commits with the write, so there is no separate "seen" table.
@@ -475,7 +476,8 @@ const partnerEvents = routes()
 - **Replays.** The signed time must be within `tolerance` seconds of now, either way (default 300). Only a signed time stops a replay, so with `hmac` put the time in `bodyPrefix`. Past the window, the journal key stops a resent event.
 - **`webhook.id`** only ever comes from signed bytes, because it becomes the journal key. `standardWebhooks`: the signed `webhook-id`. `stripe`: the event's `id` in the body (`string | undefined`). `hmac`: the SHA-256 of the body, because those senders put their id in a header the signature does not cover (GitHub's `x-github-delivery`), and a resend under a forged id would otherwise run twice.
 - Every scheme also has `verify({ headers, body })` for use outside a route, and `sign(body, { id?, timestamp? })` for senders and tests.
-- Failures answer 401: headers missing or malformed (`E420`), no signature matches (`E421`), signed time outside the window (`E422`). A scheme with no secret, an empty one, or (Standard Webhooks) one that is not base64 throws `E012` when it is created.
+- `sign()` and `verify()` return their ordinary success value or exact canonical failures. Protected routes declare `WEBHOOK_FAILURES` so deriver failures are encoded and inferred by clients. Authentication refusals answer 401; unreadable/oversized bodies answer 400/413, unavailable crypto answers 503, and unexpected provider defects answer 500. See [migration guidance](docs/upgrade-webhooks.md). Static scheme definitions with no secret, an empty secret or invalid base64 still throw `E012`; owned application boot supervises definition defects.
+- Default `http.webhook.sign`, `http.webhook.verify` and `http.webhook.request` spans inherit caller context and record only safe failure codes. Libraries do not configure an SDK; failed reporting cannot change outcomes or repeat work.
 
 ## Streaming
 
@@ -712,7 +714,10 @@ Stable API — match on codes, never parse messages.
 | `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |
-| `ARKI_HTTP_E420` / `E421` / `E422` | webhook: signature headers missing or malformed, no signature matches, signed time outside the window (all 401) |
+| `ARKI_HTTP_E420` / `E421` / `E422` | legacy diagnostic constants; migrated webhook operations return the canonical failures below |
+| `http.webhook_malformed` / `http.webhook_signature_mismatch` / `http.webhook_stale` | malformed headers/time, invalid signature, authenticated time outside the window (401) |
+| `http.webhook_body_unreadable` / `http.webhook_body_too_large` | request bytes unreadable (400) or above the configured cap (413) |
+| `http.webhook_crypto_unavailable` | required Web Crypto operation unavailable (503); broken providers return `UnexpectedDefect` |
 | `ARKI_HTTP_E500` | handler crash or output-schema violation |
 | `ARKI_HTTP_E510` | a `Response` without `output: raw()`, or a plain value from a `raw()` route (answers 500) |
 | `ARKI_HTTP_E511` | a result that does not fit the contract: undeclared `reply` status, or a value on a no-output route (answers 500) |
@@ -726,7 +731,7 @@ error messages are redacted when `NODE_ENV=production`.
 
 - **Request bodies.** A body larger than the route allows answers 413 (`ARKI_HTTP_E413`). A webhook route reads at most `maxBodyBytes`.
 - **Idempotency.** A key is remembered by the store you give it. A key reused with a different body answers 422. A request still running answers 409.
-- **Webhooks.** A signed time outside the window answers 401 (`ARKI_HTTP_E422`). Keep your clock in sync.
+- **Webhooks.** A signed time outside the window returns `WebhookStale` (401). Keep your clock in sync.
 - **Drain.** `stop` waits `drainTimeoutMs` (10 s by default), then rejects with `ARKI_HTTP_E005`.
 - **Output.** Output is validated against the schema. A schema that keeps undeclared keys lets them out. Pick the fields you return.
 - **OpenAPI.** A schema without a JSON Schema form throws `ARKI_HTTP_E013`. Wrap it with `withJsonSchema`.

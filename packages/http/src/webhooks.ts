@@ -6,6 +6,7 @@
  * event id, the time and the signature, what the prefix is, and how the signature is written.
  *
  * ```ts
+ * // stripeEvent declares failures: WEBHOOK_FAILURES in its route contract.
  * const stripeEvents = routes()
  *   .derive('webhook', verifyWebhook({ scheme: stripe({ secrets: [env.STRIPE_WEBHOOK_SECRET] }) }))
  *   .bind(stripeEvent, async ({ body }, { webhook }) => {
@@ -19,8 +20,28 @@
  */
 import { z } from 'zod';
 
+import type { IdOf } from '@arki/contracts';
+import { defineId } from '@arki/contracts';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type { WebhookFailure, WebhookSignFailure, WebhookVerifyFailure } from './webhook-failures.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
-import { HTTP_ERROR_CODES, HttpConfigError, HttpError } from './error.js';
+import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
+import { RequestCancelled } from './failures.js';
+import {
+  WEBHOOK_VERIFY_FAILURES,
+  WebhookBodyTooLarge,
+  WebhookBodyUnreadable,
+  WebhookCryptoUnavailable,
+  WebhookMalformed,
+  WebhookSignatureMismatch,
+  WebhookStale,
+} from './webhook-failures.js';
+import { observeWebhook } from './webhook-telemetry.js';
+
+export * from './webhook-failures.js';
+export const webhookDeliveryId = defineId('', { kind: 'http.webhook.delivery', format: 'uuid' });
+export type WebhookDeliveryId = IdOf<typeof webhookDeliveryId>;
 
 // Re-exported so code that imports only this entry (not the server root) can match the codes.
 export { HTTP_ERROR_CODES, HttpConfigError, HttpError } from './error.js';
@@ -52,10 +73,16 @@ export type SignOptions = {
 
 /** One way of signing webhooks: how to check a request, and how a sender signs one. */
 export type WebhookScheme<TId extends string | undefined = string | undefined> = {
-  /** Resolves when a signature matches and the signed time is within tolerance. Rejects with a 401 `HttpError` otherwise. */
-  readonly verify: (message: WebhookMessage, options?: VerifyOptions) => Promise<VerifiedWebhook<TId>>;
+  /** Resolves when a signature matches and the signed time is within tolerance. Returns the exact canonical verification failure otherwise. */
+  readonly verify: (
+    message: WebhookMessage,
+    options?: VerifyOptions,
+  ) => Promise<VerifiedWebhook<TId> | WebhookVerifyFailure>;
   /** The headers a sender adds to `body`, signed with the first secret. */
-  readonly sign: (body: Uint8Array<ArrayBuffer> | string, options?: SignOptions) => Promise<Headers>;
+  readonly sign: (
+    body: Uint8Array<ArrayBuffer> | string,
+    options?: SignOptions,
+  ) => Promise<Headers | WebhookSignFailure>;
 };
 
 /** The hash behind the HMAC. */
@@ -63,6 +90,8 @@ export type WebhookAlgorithm = 'SHA-1' | 'SHA-256' | 'SHA-512';
 
 /** How a signature is written in its header. */
 export type WebhookEncoding = 'hex' | 'base64';
+
+const cancelled = (req: Request): boolean => req.signal.aborted;
 
 const DEFAULT_TOLERANCE_SECONDS = 300;
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
@@ -88,11 +117,14 @@ type Stamp = {
 
 type SchemeParts<TId extends string | undefined> = {
   readonly name: string;
+  readonly needsId: boolean;
   readonly keys: readonly Uint8Array<ArrayBuffer>[];
   readonly algorithm: WebhookAlgorithm;
   readonly encoding: WebhookEncoding;
   /** `undefined` when a header the scheme needs is missing or malformed. */
-  readonly read: (message: WebhookMessage) => Read<TId> | undefined | Promise<Read<TId> | undefined>;
+  readonly read: (
+    message: WebhookMessage,
+  ) => Read<TId> | WebhookVerifyFailure | undefined | Promise<Read<TId> | WebhookVerifyFailure | undefined>;
   readonly stamp: (id: string, timestamp: string) => Stamp;
 };
 
@@ -102,12 +134,6 @@ const invalidScheme = (name: string, problem: string): HttpConfigError =>
     message: `[http] ${name}() ${problem}.`,
     remediation:
       'Pass at least one non-empty secret. During a rotation pass both, the new one first: it is the one `sign` uses.',
-  });
-
-const rejected = (code: string, message: string): HttpError =>
-  new HttpError(401, code, message, {
-    remediation:
-      'Check that the sender and this route share the same secret and scheme, and that both clocks are right.',
   });
 
 const utf8Keys = (name: string, secrets: readonly string[]): Uint8Array<ArrayBuffer>[] => {
@@ -139,64 +165,115 @@ const withPrefix = (prefix: string, body: Uint8Array): Uint8Array<ArrayBuffer> =
   return signed;
 };
 
-function defineScheme<TId extends string | undefined>(parts: SchemeParts<TId>): WebhookScheme<TId> {
-  // Imported once, on first use; concurrent requests share the promise.
-  let imported: Promise<CryptoKey[]> | undefined;
-  const keys = (): Promise<CryptoKey[]> =>
-    (imported ??= Promise.all(
-      parts.keys.map(key =>
-        crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: parts.algorithm }, false, ['sign', 'verify']),
-      ),
-    ));
+/** Resolve a Web Crypto operation at its foreign boundary, retaining its receiver. */
+const cryptoOperation = async (operation: 'importKey' | 'verify' | 'sign' | 'digest', args: readonly unknown[]) => {
+  const provider: unknown = Reflect.get(globalThis, 'crypto');
+  if (typeof provider !== 'object' || provider === null) return WebhookCryptoUnavailable();
+  const subtle: unknown = Reflect.get(provider, 'subtle');
+  if (typeof subtle !== 'object' || subtle === null) return WebhookCryptoUnavailable();
+  const method: unknown = Reflect.get(subtle, operation);
+  if (typeof method !== 'function') return WebhookCryptoUnavailable();
+  const result: unknown = await Reflect.apply(method, subtle, args);
+  return { result };
+};
 
-  const matches = async (signatures: readonly string[], signed: Uint8Array<ArrayBuffer>): Promise<boolean> => {
-    const imported = await keys();
-    for (const signature of signatures) {
-      const bytes = decodeSignature(signature, parts.encoding);
-      if (bytes === undefined) continue;
-      for (const key of imported) if (await crypto.subtle.verify('HMAC', key, bytes, signed)) return true;
-    }
-    return false;
+/** Constructing a view checks real buffer slots and rejects detached buffers. */
+const cryptoBytes = (value: unknown, length: number): Uint8Array<ArrayBuffer> => {
+  if (!(value instanceof ArrayBuffer)) throw new TypeError('Web Crypto returned an invalid buffer.');
+  const bytes = new Uint8Array(value);
+  if (bytes.length !== length) throw new TypeError('Web Crypto returned an invalid buffer length.');
+  return bytes;
+};
+
+function defineScheme<TId extends string | undefined>(parts: SchemeParts<TId>): WebhookScheme<TId> {
+  const importKeys = () =>
+    Promise.resolve()
+      .then(async () => {
+        const result: CryptoKey[] = [];
+        for (const key of parts.keys) {
+          const outcome = await cryptoOperation('importKey', [
+            'raw',
+            key,
+            { name: 'HMAC', hash: parts.algorithm },
+            false,
+            ['sign', 'verify'],
+          ]);
+          if (isFailure(outcome)) return outcome;
+          if (typeof CryptoKey === 'undefined' || !(outcome.result instanceof CryptoKey))
+            throw new TypeError('Web Crypto returned an invalid key.');
+          result.push(outcome.result);
+        }
+        return result;
+      })
+      .catch((error: unknown) => UnexpectedDefect({ cause: error }));
+  let imported: ReturnType<typeof importKeys> | undefined;
+  const keys = () => {
+    if (imported !== undefined) return imported;
+    const attempt = importKeys();
+    imported = attempt;
+    void attempt.then(value => {
+      if (isFailure(value) && imported === attempt) imported = undefined;
+    });
+    return attempt;
   };
 
   return {
-    verify: async (message, options = {}) => {
-      const read = await parts.read(message);
-      if (read === undefined || read.signatures.length === 0) {
-        throw rejected(HTTP_ERROR_CODES.webhookMalformed, `${parts.name} signature headers are missing or malformed`);
-      }
-      if (!(await matches(read.signatures, withPrefix(read.prefix, message.body))))
-        throw rejected(HTTP_ERROR_CODES.webhookSignatureMismatch, `no ${parts.name} signature matches`);
-
-      // The time is checked after the signature: before it, the time is just a claim.
-      let timestamp: number | undefined;
-      if (read.timestamp !== undefined) {
-        if (!UNIX_SECONDS.test(read.timestamp)) {
-          throw rejected(HTTP_ERROR_CODES.webhookMalformed, `${parts.name} timestamp is not in Unix seconds`);
-        }
-        timestamp = Number(read.timestamp);
+    verify: (message, options = {}) =>
+      observeWebhook('http.webhook.verify', async () => {
         const tolerance = options.tolerance ?? DEFAULT_TOLERANCE_SECONDS;
-        if (Math.abs(Date.now() / 1000 - timestamp) > tolerance) {
-          throw rejected(
-            HTTP_ERROR_CODES.webhookStale,
-            `${parts.name} signed time is more than ${tolerance}s from now`,
-          );
+        if (!Number.isFinite(tolerance) || tolerance < 0) return WebhookMalformed();
+        const read = await parts.read(message);
+        if (isFailure(read)) return read;
+        if (read === undefined || read.signatures.length === 0) return WebhookMalformed();
+        const imported = await keys();
+        if (isFailure(imported)) return imported;
+        let matched = false;
+        const signed = withPrefix(read.prefix, message.body);
+        for (const signature of read.signatures) {
+          const bytes = decodeSignature(signature, parts.encoding);
+          if (bytes === undefined) continue;
+          for (const key of imported) {
+            const outcome = await cryptoOperation('verify', ['HMAC', key, bytes, signed]);
+            if (isFailure(outcome)) return outcome;
+            if (typeof outcome.result !== 'boolean')
+              throw new TypeError('Web Crypto returned an invalid verification result.');
+            if (outcome.result) {
+              matched = true;
+              break;
+            }
+          }
+          if (matched) break;
         }
-      }
-      return { id: read.id, timestamp, body: message.body };
-    },
-
-    sign: async (body, options = {}) => {
-      const id = options.id ?? crypto.randomUUID();
-      const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000));
-      const stamp = parts.stamp(id, timestamp);
-      const bytes = typeof body === 'string' ? textEncoder.encode(body) : body;
-      const [key] = await keys();
-      // `utf8Keys`/`standardWebhooks` refuse an empty secret list, so there is always a first key.
-      if (key === undefined) throw invalidScheme(parts.name, 'got no secrets');
-      const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, withPrefix(stamp.prefix, bytes)));
-      return stamp.headers(parts.encoding === 'hex' ? toHex(mac) : toBase64(mac));
-    },
+        if (!matched) return WebhookSignatureMismatch();
+        let timestamp: number | undefined;
+        if (read.timestamp !== undefined) {
+          timestamp = Number(read.timestamp);
+          if (!UNIX_SECONDS.test(read.timestamp) || !Number.isSafeInteger(timestamp)) return WebhookMalformed();
+          if (Math.abs(Date.now() / 1000 - timestamp) > tolerance) return WebhookStale();
+        }
+        return { id: read.id, timestamp, body: message.body };
+      }),
+    sign: (body, options = {}) =>
+      observeWebhook('http.webhook.sign', async () => {
+        const timestamp = options.timestamp ?? Math.floor(Date.now() / 1000);
+        if (!Number.isSafeInteger(timestamp) || timestamp < 0)
+          throw new TypeError('Webhook signing time must be Unix seconds.');
+        const id = options.id ?? (parts.needsId ? webhookDeliveryId.create() : '');
+        if (isFailure(id)) return id;
+        const stamp = parts.stamp(id, String(timestamp));
+        const bytes = typeof body === 'string' ? textEncoder.encode(body) : body;
+        const imported = await keys();
+        if (isFailure(imported)) return imported;
+        const [key] = imported;
+        if (key === undefined) throw new TypeError('Webhook signing key is missing.');
+        const outcome = await cryptoOperation('sign', ['HMAC', key, withPrefix(stamp.prefix, bytes)]);
+        if (isFailure(outcome)) return outcome;
+        const mac = cryptoBytes(
+          outcome.result,
+          parts.algorithm === 'SHA-1' ? 20 : parts.algorithm === 'SHA-256' ? 32 : 64,
+        );
+        return stamp.headers(parts.encoding === 'hex' ? toHex(mac) : toBase64(mac));
+      }),
   };
 }
 
@@ -220,6 +297,7 @@ export function standardWebhooks(options: { readonly secrets: readonly string[] 
   });
   return defineScheme({
     name,
+    needsId: true,
     keys,
     algorithm: 'SHA-256',
     encoding: 'base64',
@@ -259,6 +337,7 @@ const stripeEventId = (body: Uint8Array): string | undefined => {
 export function stripe(options: { readonly secrets: readonly string[] }): WebhookScheme {
   return defineScheme({
     name: 'stripe',
+    needsId: false,
     keys: utf8Keys('stripe', options.secrets),
     algorithm: 'SHA-256',
     encoding: 'hex',
@@ -326,6 +405,7 @@ export function hmac(options: HmacSchemeOptions): WebhookScheme<string> {
   const prefixFor = (id: string, timestamp: string): string => bodyPrefix?.({ id, timestamp }) ?? '';
   return defineScheme({
     name: 'hmac',
+    needsId: idHeader !== undefined,
     keys: utf8Keys('hmac', options.secrets),
     algorithm: options.algorithm ?? 'SHA-256',
     encoding: options.encoding ?? 'hex',
@@ -335,8 +415,10 @@ export function hmac(options: HmacSchemeOptions): WebhookScheme<string> {
       const timestamp = timestampHeader === undefined ? undefined : headers.get(timestampHeader);
       if (signature === null || id === null || timestamp === null) return;
       if (!signature.startsWith(headerPrefix)) return;
+      const digest = await cryptoOperation('digest', ['SHA-256', body]);
+      if (isFailure(digest)) return digest;
       return {
-        id: toHex(await crypto.subtle.digest('SHA-256', body)),
+        id: toHex(cryptoBytes(digest.result, 32)),
         timestamp,
         signatures: [signature.slice(headerPrefix.length)],
         prefix: prefixFor(id ?? '', timestamp ?? ''),
@@ -367,15 +449,41 @@ export type VerifyWebhookOptions<TId extends string | undefined = string | undef
  */
 export function verifyWebhook<TId extends string | undefined>(
   options: VerifyWebhookOptions<TId>,
-): (req: Request) => Promise<VerifiedWebhook<TId>> {
+): (req: Request) => Promise<VerifiedWebhook<TId> | WebhookFailure> {
   const { scheme, maxBodyBytes = DEFAULT_MAX_BODY_BYTES, tolerance } = options;
-  return async req => {
-    const body = await readCapped(req.clone().body, maxBodyBytes);
-    if (body === undefined) {
-      throw new HttpError(413, HTTP_ERROR_CODES.payloadTooLarge, `webhook body is larger than ${maxBodyBytes} bytes`, {
-        remediation: 'Raise `maxBodyBytes` on verifyWebhook if the sender really sends bodies this large.',
-      });
-    }
-    return scheme.verify({ headers: req.headers, body }, tolerance === undefined ? {} : { tolerance });
-  };
+  return req =>
+    observeWebhook('http.webhook.request', async () => {
+      if (cancelled(req)) return RequestCancelled();
+      if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)
+        throw new TypeError('Webhook body limit must be a nonnegative integer.');
+      let body: Uint8Array<ArrayBuffer> | undefined;
+      try {
+        body = await readCapped(req.clone().body, maxBodyBytes);
+      } catch (error) {
+        return cancelled(req) ? RequestCancelled() : WebhookBodyUnreadable({ cause: error });
+      }
+      if (cancelled(req)) return RequestCancelled();
+      if (body === undefined) return WebhookBodyTooLarge();
+      let verified: Awaited<ReturnType<typeof scheme.verify>>;
+      try {
+        verified = await scheme.verify({ headers: req.headers, body }, tolerance === undefined ? {} : { tolerance });
+      } catch (error) {
+        return cancelled(req) ? RequestCancelled() : UnexpectedDefect({ cause: error });
+      }
+      if (cancelled(req)) return RequestCancelled();
+      if (isFailure(verified)) {
+        if (WEBHOOK_VERIFY_FAILURES.some(definition => definition.is(verified))) return verified;
+        throw new TypeError('Webhook scheme returned an undeclared failure.');
+      }
+      if (
+        typeof verified !== 'object' ||
+        // Foreign custom schemes can violate their TypeScript contract.
+        Object.is(verified, null) ||
+        (verified.id !== undefined && typeof verified.id !== 'string') ||
+        (verified.timestamp !== undefined && (!Number.isSafeInteger(verified.timestamp) || verified.timestamp < 0)) ||
+        !(verified.body instanceof Uint8Array)
+      )
+        throw new TypeError('Webhook scheme returned an invalid result.');
+      return verified;
+    });
 }

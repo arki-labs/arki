@@ -143,9 +143,10 @@ describe('journal response cache (Postgres)', () => {
     expect(await stale.begin(key, 'fp', ownerOne)).toBe('started');
     await sleep(250);
     expect(await fresh.begin(key, 'fp', ownerTwo)).toBe('in-progress');
-    expect(await fresh.finish(key, ownerTwo, response, 100)).toMatchObject({ code: IdempotencyOwnershipLost.code });
+    // This case checks ownership, not expiry; its readbacks must survive a busy database.
+    expect(await fresh.finish(key, ownerTwo, response, 60_000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
     expect(await fresh.abandon(key, ownerTwo)).toBeUndefined();
-    expect(await stale.finish(key, ownerOne, response, 100)).toBeUndefined();
+    expect(await stale.finish(key, ownerOne, response, 60_000)).toBeUndefined();
     expect(await fresh.begin(key, 'fp', ownerTwo)).toEqual({ replay: response });
     expect(await fresh.abandon(key, ownerOne)).toBeUndefined();
     expect(await fresh.begin(key, 'fp', ownerTwo)).toEqual({ replay: response });

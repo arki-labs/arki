@@ -9,12 +9,24 @@ import { createHash, createHmac } from 'node:crypto';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import type { WebhookScheme } from '../webhooks.js';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../engine.js';
-import { HTTP_ERROR_CODES, HttpConfigError } from '../error.js';
-import { hmac, standardWebhooks, stripe, verifyWebhook } from '../webhooks.js';
+import { HttpConfigError } from '../error.js';
+import {
+  hmac,
+  standardWebhooks,
+  stripe,
+  verifyWebhook,
+  WEBHOOK_FAILURES,
+  WebhookBodyTooLarge,
+  WebhookMalformed,
+  WebhookSignatureMismatch,
+  WebhookStale,
+} from '../webhooks.js';
 
 const encoder = new TextEncoder();
 const bytes = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
@@ -42,32 +54,32 @@ describe('standardWebhooks', () => {
 
   it('refuses a tampered body, a stale time and an unknown secret', async () => {
     const scheme = standardWebhooks({ secrets: ['whsec_c2VjcmV0LWtleS1vbmU='] });
-    const headers = await scheme.sign('{"a":1}', { id: 'msg_1' });
+    const headers = orThrow(await scheme.sign('{"a":1}', { id: 'msg_1' }));
     await expect(scheme.verify({ headers, body: bytes('{"a":1}') })).resolves.toMatchObject({ id: 'msg_1' });
-    await expect(scheme.verify({ headers, body: bytes('{"a":2}') })).rejects.toMatchObject({
+    await expect(scheme.verify({ headers, body: bytes('{"a":2}') })).resolves.toMatchObject({
       status: 401,
-      code: HTTP_ERROR_CODES.webhookSignatureMismatch,
+      code: WebhookSignatureMismatch.code,
     });
 
-    const stale = await scheme.sign('{"a":1}', { id: 'msg_2', timestamp: nowSeconds() - 301 });
-    await expect(scheme.verify({ headers: stale, body: bytes('{"a":1}') })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookStale,
+    const stale = orThrow(await scheme.sign('{"a":1}', { id: 'msg_2', timestamp: nowSeconds() - 301 }));
+    await expect(scheme.verify({ headers: stale, body: bytes('{"a":1}') })).resolves.toMatchObject({
+      code: WebhookStale.code,
     });
     await expect(scheme.verify({ headers: stale, body: bytes('{"a":1}') }, { tolerance: 600 })).resolves.toMatchObject({
       id: 'msg_2',
     });
 
     const other = standardWebhooks({ secrets: ['whsec_b3RoZXItc2VjcmV0'] });
-    await expect(other.verify({ headers, body: bytes('{"a":1}') })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookSignatureMismatch,
+    await expect(other.verify({ headers, body: bytes('{"a":1}') })).resolves.toMatchObject({
+      code: WebhookSignatureMismatch.code,
     });
   });
 
   it('a signed time in the future is refused too: tolerance works both ways', async () => {
     const scheme = standardWebhooks({ secrets: ['whsec_c2VjcmV0LWtleS1vbmU='] });
-    const headers = await scheme.sign('{}', { timestamp: nowSeconds() + 301 });
-    await expect(scheme.verify({ headers, body: bytes('{}') })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookStale,
+    const headers = orThrow(await scheme.sign('{}', { timestamp: nowSeconds() + 301 }));
+    await expect(scheme.verify({ headers, body: bytes('{}') })).resolves.toMatchObject({
+      code: WebhookStale.code,
     });
   });
 
@@ -76,14 +88,14 @@ describe('standardWebhooks', () => {
     const newSecret = 'whsec_bmV3LXNlY3JldA==';
     const receiver = standardWebhooks({ secrets: [newSecret, oldSecret] });
     for (const sender of [standardWebhooks({ secrets: [oldSecret] }), standardWebhooks({ secrets: [newSecret] })]) {
-      const headers = await sender.sign('{}');
-      await expect(receiver.verify({ headers, body: bytes('{}') })).resolves.toBeDefined();
+      const headers = orThrow(await sender.sign('{}'));
+      await expect(receiver.verify({ headers, body: bytes('{}') })).resolves.toMatchObject({ body: bytes('{}') });
     }
   });
 
   it('reads only v1 signatures and finds the matching one among several', async () => {
     const scheme = standardWebhooks({ secrets: ['whsec_c2VjcmV0LWtleS1vbmU='] });
-    const signed = await scheme.sign('{}', { id: 'msg_3' });
+    const signed = orThrow(await scheme.sign('{}', { id: 'msg_3' }));
     const good = signed.get('webhook-signature') ?? '';
     signed.set('webhook-signature', `v2,AAAA v1,bm90LWl0 ${good}`);
     await expect(scheme.verify({ headers: signed, body: bytes('{}') })).resolves.toMatchObject({ id: 'msg_3' });
@@ -91,8 +103,8 @@ describe('standardWebhooks', () => {
 
   it('missing headers are malformed, and a scheme without a usable secret fails when created', async () => {
     const scheme = standardWebhooks({ secrets: ['whsec_c2VjcmV0LWtleS1vbmU='] });
-    await expect(scheme.verify({ headers: new Headers(), body: bytes('{}') })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookMalformed,
+    await expect(scheme.verify({ headers: new Headers(), body: bytes('{}') })).resolves.toMatchObject({
+      code: WebhookMalformed.code,
     });
     expect(() => standardWebhooks({ secrets: [] })).toThrow(HttpConfigError);
     expect(() => standardWebhooks({ secrets: ['whsec_'] })).toThrow(HttpConfigError);
@@ -121,20 +133,20 @@ describe('stripe', () => {
     });
     const scheme = stripe({ secrets: [secret] });
     await expect(scheme.verify({ headers, body: bytes(event) })).resolves.toMatchObject({ id: 'evt_1' });
-    await expect(scheme.verify({ headers, body: bytes(`${event} `) })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookSignatureMismatch,
+    await expect(scheme.verify({ headers, body: bytes(`${event} `) })).resolves.toMatchObject({
+      code: WebhookSignatureMismatch.code,
     });
 
     const old = t - 301;
     const stale = new Headers({ 'stripe-signature': `t=${old},v1=${hex(secret, `${old}.${event}`)}` });
-    await expect(scheme.verify({ headers: stale, body: bytes(event) })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookStale,
+    await expect(scheme.verify({ headers: stale, body: bytes(event) })).resolves.toMatchObject({
+      code: WebhookStale.code,
     });
   });
 
   it('signs what node:crypto computes', async () => {
     const t = nowSeconds();
-    const headers = await stripe({ secrets: [secret] }).sign(event, { timestamp: t });
+    const headers = orThrow(await stripe({ secrets: [secret] }).sign(event, { timestamp: t }));
     expect(headers.get('stripe-signature')).toBe(`t=${t},v1=${hex(secret, `${t}.${event}`)}`);
   });
 
@@ -143,7 +155,7 @@ describe('stripe', () => {
     for (const value of ['v1=abcd', `t=${nowSeconds()}`, 'garbage']) {
       await expect(
         scheme.verify({ headers: new Headers({ 'stripe-signature': value }), body: bytes(event) }),
-      ).rejects.toMatchObject({ code: HTTP_ERROR_CODES.webhookMalformed });
+      ).resolves.toMatchObject({ code: WebhookMalformed.code });
     }
     expect(() => stripe({ secrets: [''] })).toThrow(HttpConfigError);
   });
@@ -172,8 +184,8 @@ describe('hmac', () => {
     headers.set('x-github-delivery', 'd-forged');
     await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({ id: bodyHash });
     headers.delete('x-github-delivery');
-    await expect(scheme.verify({ headers, body: bytes(body) })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookMalformed,
+    await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({
+      code: WebhookMalformed.code,
     });
   });
 
@@ -194,16 +206,16 @@ describe('hmac', () => {
     await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({ timestamp: t });
     // Moving the time forward to dodge the tolerance breaks the signature, because the time is signed.
     headers.set('x-slack-request-timestamp', String(t + 1));
-    await expect(scheme.verify({ headers, body: bytes(body) })).rejects.toMatchObject({
-      code: HTTP_ERROR_CODES.webhookSignatureMismatch,
+    await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({
+      code: WebhookSignatureMismatch.code,
     });
   });
 
   it('base64 and SHA-512 round-trip through sign and verify', async () => {
     const scheme = hmac({ secrets: ['k'], header: 'x-sig', algorithm: 'SHA-512', encoding: 'base64' });
-    const headers = await scheme.sign('payload');
+    const headers = orThrow(await scheme.sign('payload'));
     expect(headers.get('x-sig')).toBe(createHmac('sha512', 'k').update('payload').digest('base64'));
-    await expect(scheme.verify({ headers, body: bytes('payload') })).resolves.toBeDefined();
+    await expect(scheme.verify({ headers, body: bytes('payload') })).resolves.toMatchObject({ body: bytes('payload') });
   });
 });
 
@@ -225,6 +237,7 @@ describe('verifyWebhook as a deriver', () => {
   const scheme = standardWebhooks({ secrets: [secret] });
   const orderEvent = route.post('/hooks/orders', {
     id: 'hooks.orders',
+    failures: WEBHOOK_FAILURES,
     body: z.object({ orderId: z.string() }),
     output: z.object({ id: z.string().optional(), orderId: z.string() }),
   });
@@ -246,7 +259,7 @@ describe('verifyWebhook as a deriver', () => {
   it('a signed request reaches the handler, and the body schema parses the same bytes', async () => {
     const { engine, seen } = serve();
     const body = '{"orderId":"ord_1"}';
-    const res = await engine.fetch(post(await scheme.sign(body, { id: 'msg_9' }), body));
+    const res = await engine.fetch(post(orThrow(await scheme.sign(body, { id: 'msg_9' })), body));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: 'msg_9', orderId: 'ord_1' });
     expect(seen).toEqual(['ord_1']);
@@ -254,19 +267,19 @@ describe('verifyWebhook as a deriver', () => {
 
   it('a bad signature answers 401 and the handler never runs', async () => {
     const { engine, seen } = serve();
-    const headers = await scheme.sign('{"orderId":"ord_1"}');
+    const headers = orThrow(await scheme.sign('{"orderId":"ord_1"}'));
     const res = await engine.fetch(post(headers, '{"orderId":"ord_2"}'));
     expect(res.status).toBe(401);
-    expect(envelope.parse(await res.json()).error.code).toBe(HTTP_ERROR_CODES.webhookSignatureMismatch);
+    expect(envelope.parse(await res.json()).error.code).toBe(WebhookSignatureMismatch.code);
     expect(seen).toEqual([]);
   });
 
   it('a body over maxBodyBytes answers 413 before any check', async () => {
     const { engine, seen } = serve(16);
     const body = JSON.stringify({ orderId: 'x'.repeat(64) });
-    const res = await engine.fetch(post(await scheme.sign(body), body));
+    const res = await engine.fetch(post(orThrow(await scheme.sign(body)), body));
     expect(res.status).toBe(413);
-    expect(envelope.parse(await res.json()).error.code).toBe(HTTP_ERROR_CODES.payloadTooLarge);
+    expect(envelope.parse(await res.json()).error.code).toBe(WebhookBodyTooLarge.code);
     expect(seen).toEqual([]);
   });
 });

@@ -49,7 +49,7 @@ Only `TransactionRejected` with SQLSTATE `23505` for the pending-refund index be
 - A refund after the window (90 days by default) returns `RefundWindowExceeded`.
 - A refund in another currency throws. It is bad input.
 - `rate_limited` and `unavailable` provider faults can pass on retry. `authentication` cannot.
-- The webhook handler throws a refused write on purpose. The provider's resend retries it.
+- The webhook handler throws a refused write on purpose. The provider's resend retries it. Stripe signature validation narrows canonical HTTP verification results; unavailable or defective crypto remains invalid and does not mark the event processed.
 - A journal command's `detail` is the message. Show it to the user.
 
 ## Errors

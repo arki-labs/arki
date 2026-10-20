@@ -12,7 +12,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
 import { UnsafeUrlError } from '@arki/http/public-fetch';
-import { standardWebhooks } from '@arki/http/webhooks';
+import { standardWebhooks, WebhookCryptoUnavailable } from '@arki/http/webhooks';
+import * as webhookSchemes from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 
 import type { JobRunner } from '../types.js';
@@ -163,13 +164,63 @@ describe('delivery', () => {
     if (request === undefined) throw new Error('no request');
     expect(request.url).toBe('https://hooks.example.com/deliver');
     expect(JSON.parse(request.body)).toMatchObject({ type: 'order.placed', data: { orderId: 'ord_1' } });
-    const verified = await standardWebhooks({ secrets: [secret] }).verify({
+    const verified = orThrow(await standardWebhooks({ secrets: [secret] }).verify({
       headers: request.headers,
       body: encoder.encode(request.body),
-    });
+    }));
     expect(verified.id).toBe(messageId);
     expect(await attemptsOf(id)).toEqual([{ status: 'delivered', attempt: 1, response: 204 }]);
     expect(await db.select().from(tables.jobs)).toEqual([]);
+  });
+
+  it.each([false, true])('keeps signing failure identity and explicit retry policy (retry=%s)', async retry => {
+    const target = endpoint(204);
+    const policy = backoff.constant(0).upTo(1);
+    const webhooks = sender(target.fetch, { retry: retry ? policy.while(WebhookCryptoUnavailable) : policy });
+    const { id, secret } = orThrow(await webhooks.subscribe(db, {
+      partner: `p-sign-refused-${retry}`,  url: 'https://hooks.example.com/refused', events: ['order.placed'],
+    }));
+    orThrow(await dispatchOne(webhooks, `p-sign-refused-${retry}`));
+    const refusal = WebhookCryptoUnavailable({ cause: new Error('private signing provider') });
+    const scheme = standardWebhooks({ secrets: [secret] });
+    vi.spyOn(scheme, 'sign').mockResolvedValue(refusal);
+    vi.spyOn(webhookSchemes, 'standardWebhooks').mockReturnValue(scheme);
+    const run = vi.spyOn(webhooks.runner, 'run');
+    await drainAll(webhooks.runner);
+    expect(target.received).toHaveLength(0);
+    expect(run).toHaveBeenCalledTimes(retry ? 2 : 1);
+    for (const result of run.mock.results) expect(await result.value).toBe(refusal);
+    expect(await attemptsOf(id)).toEqual(retry ? [
+      { status: 'failed', attempt: 1, response: null },
+      { status: 'dead', attempt: 2, response: null },
+    ] : [{ status: 'dead', attempt: 1, response: null }]);
+    const attempts = await db.select().from(hooks.attempts).where(eq(hooks.attempts.subscriptionId, id));
+    expect(attempts.every(attempt => attempt.error === refusal.code)).toBe(true);
+    const jobs = await db.select().from(tables.jobs);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.deadAt).not.toBeNull();
+  });
+
+  it('does not send a partial rotation signature when the second key refuses', async () => {
+    const target = endpoint(204);
+    const webhooks = sender(target.fetch);
+    const { id, secret: oldSecret } = orThrow(await webhooks.subscribe(db, {
+      partner: 'p-partial-sign', url: 'https://hooks.example.com/partial', events: ['order.placed'],
+    }));
+    const { secret: newSecret } = await webhooks.rotateSecret(db, id, { windowSeconds: 3600 });
+    orThrow(await dispatchOne(webhooks, 'p-partial-sign'));
+    const good = standardWebhooks({ secrets: [newSecret] });
+    const refused = standardWebhooks({ secrets: [oldSecret] });
+    const refusal = WebhookCryptoUnavailable();
+    const goodSign = vi.spyOn(good, 'sign');
+    vi.spyOn(refused, 'sign').mockResolvedValue(refusal);
+    vi.spyOn(webhookSchemes, 'standardWebhooks').mockReturnValueOnce(good).mockReturnValueOnce(refused);
+    const run = vi.spyOn(webhooks.runner, 'run');
+    await drainAll(webhooks.runner);
+    expect(goodSign).toHaveBeenCalledOnce();
+    expect(await run.mock.results[0]?.value).toBe(refusal);
+    expect(target.received).toHaveLength(0);
+    expect(await attemptsOf(id)).toEqual([{ status: 'dead', attempt: 1, response: null }]);
   });
 
   it('a failing endpoint: each try is appended, the last one is dead, and the job stays dead for the operator', async () => {
@@ -326,7 +377,7 @@ describe('secrets', () => {
           headers: request.headers,
           body: encoder.encode(request.body),
         }),
-      ).resolves.toBeDefined();
+      ).resolves.toHaveProperty('id');
     }
   });
 
@@ -351,7 +402,7 @@ describe('secrets', () => {
         headers: request.headers,
         body: encoder.encode(request.body),
       }),
-    ).rejects.toMatchObject({ status: 401 });
+    ).resolves.toMatchObject({ status: 401 });
   });
 
   it('are sealed at rest, and a sealed secret copied onto another subscription does not open', async () => {

@@ -192,7 +192,7 @@ const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
   Uint8Array.from(atob(text), char => char.codePointAt(0) ?? 0);
 
 const errorText = (error: unknown): string =>
-  (error instanceof Error ? error.message : String(error)).slice(0, ERROR_TEXT_LIMIT);
+  (isFailure(error) ? error.code : error instanceof Error ? error.message : String(error)).slice(0, ERROR_TEXT_LIMIT);
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   const parsed = schema.safeParse(value);
@@ -202,6 +202,27 @@ function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
 
 const requireRow = (found: readonly unknown[], what: string, id: string): void => {
   if (found.length === 0) throw new WebhookError(WEBHOOK_ERROR_CODES.notFound, `no ${what} ${id}`);
+};
+
+/** Each secret signs the same id and time; Standard Webhooks sends the signatures space-separated. */
+const signedHeaders = async (
+  secrets: readonly string[],
+  id: string,
+  payload: string,
+) => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signed: Headers[] = [];
+  for (const secret of secrets) {
+    const headers = await standardWebhooks({ secrets: [secret] }).sign(payload, { id, timestamp });
+    if (isFailure(headers)) return headers;
+    signed.push(headers);
+  }
+  return {
+    'content-type': 'application/json',
+    'webhook-id': id,
+    'webhook-timestamp': String(timestamp),
+    'webhook-signature': signed.flatMap(headers => headers.get('webhook-signature') ?? []).join(' '),
+  };
 };
 
 /** The sending side of webhooks. Build it once per app. */
@@ -279,23 +300,6 @@ export function webhookSender(options: WebhookSenderOptions) {
     return ids;
   };
 
-  /** Each secret signs the same id and time; Standard Webhooks sends the signatures space-separated. */
-  const signedHeaders = async (
-    secrets: readonly string[],
-    id: string,
-    payload: string,
-  ): Promise<Record<string, string>> => {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signed = await Promise.all(
-      secrets.map(secret => standardWebhooks({ secrets: [secret] }).sign(payload, { id, timestamp })),
-    );
-    return {
-      'content-type': 'application/json',
-      'webhook-id': id,
-      'webhook-timestamp': String(timestamp),
-      'webhook-signature': signed.flatMap(headers => headers.get('webhook-signature') ?? []).join(' '),
-    };
-  };
 
   type Delivery = z.output<typeof deliveryArgs>;
 
@@ -329,7 +333,7 @@ export function webhookSender(options: WebhookSenderOptions) {
       .where(eq(subscriptions.id, delivery.subscriptionId));
   };
 
-  const runner: JobRunner = {
+  const runner = {
     names: [DELIVER_JOB],
     run: async (job, { db, signal }) => {
       const delivery = deliveryArgs.parse(job.args);
@@ -360,6 +364,10 @@ export function webhookSender(options: WebhookSenderOptions) {
         secrets.push(await open(delivery.subscriptionId, previousSecret));
       }
       const headers = await signedHeaders(secrets, delivery.messageId, message.payload);
+      if (isFailure(headers)) {
+        await recordFailure(db, job, delivery, undefined, headers);
+        return headers;
+      }
 
       let response: Response;
       try {
@@ -393,7 +401,7 @@ export function webhookSender(options: WebhookSenderOptions) {
       throw error;
     },
     retryDelay: (job, error) => nextDelay(job.attempt, error),
-  };
+  } satisfies JobRunner;
 
   return {
     /** The runner for `journal.worker(db, { jobs })`; combine it with others through `combineRunners`. */

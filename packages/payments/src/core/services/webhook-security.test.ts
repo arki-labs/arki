@@ -30,6 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 function nowSeconds() {
@@ -66,6 +67,24 @@ describe('WebhookSecurityService: Stripe signatures', () => {
     expect(result.isValid).toBe(true);
     expect(result.eventType).toBe('subscription.created');
     expect(result.data?.['id']).toBe(EVENT_ID);
+  });
+
+  it.each(['absent', 'rejected', 'malformed'])('fails closed when crypto is %s without marking the event processed', async (kind) => {
+    const native = globalThis.crypto;
+    const payload = eventPayload();
+    const header = sign(payload);
+    vi.stubGlobal('crypto', kind === 'absent' ? undefined : {
+      subtle: {
+        importKey: native.subtle.importKey.bind(native.subtle),
+        verify: () => kind === 'rejected' ? Promise.reject(new Error('private provider credential')) : Promise.resolve('true'),
+      },
+    });
+    const refused = await validateStripe(payload, header);
+    expect(refused).toMatchObject({ isValid: false, error: 'Signature verification failed' });
+    expect(JSON.stringify(refused)).not.toContain('private provider credential');
+    vi.unstubAllGlobals();
+    const recovered = await validateStripe(payload, header);
+    expect(recovered.isValid).toBe(true);
   });
 
   it('rejects a delivery signed with another secret', async () => {

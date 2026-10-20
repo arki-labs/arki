@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import { orThrow } from '@arki/failure';
 import { buildEngine, route, routes } from '@arki/http';
-import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
+import { standardWebhooks, verifyWebhook, WEBHOOK_FAILURES } from '@arki/http/webhooks';
 
 import { j, openDb, order, OrderPlaced, tables } from './test-support.js';
 
@@ -38,6 +38,7 @@ const placeOrder = j.command(
 const scheme = standardWebhooks({ secrets: ['whsec_c2VjcmV0LWtleS1vbmU='] });
 const orderPlaced = route.post('/hooks/orders', {
   id: 'hooks.orders',
+  failures: WEBHOOK_FAILURES,
   body: z.object({ id: z.templateLiteral(['ord_', z.string()]), total: z.int().positive() }),
 });
 const engine = buildEngine([
@@ -52,7 +53,7 @@ const engine = buildEngine([
 
 const deliver = async (eventId: string, payload: unknown): Promise<Response> => {
   const body = JSON.stringify(payload);
-  const headers = await scheme.sign(body, { id: eventId });
+  const headers = orThrow(await scheme.sign(body, { id: eventId }));
   headers.set('content-type', 'application/json');
   return engine.fetch(new Request('http://test.local/hooks/orders', { method: 'POST', headers, body }));
 };

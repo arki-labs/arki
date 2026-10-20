@@ -749,6 +749,7 @@ journal.worker(db, { jobs: combineRunners(outboxRunner(...), webhooks.runner) })
 ```
 
 - **`dispatch(tx, …)`** needs a transaction. It writes the message once, as the body `{ type, timestamp, data }`, and one delivery row for each active subscription of that partner that lists the event. A payload over `maxPayloadBytes` (default 1 MiB) is refused.
+- **Signing failures** return the exact HTTP failure before delivery, record a failed/dead attempt with its safe code, and never acknowledge the job. Returned failures require an explicit retry predicate such as `.while(WebhookCryptoUnavailable)` on the configured backoff; unexpected defects remain fatal by default.
 - **Delivery** signs the stored bytes with [Standard Webhooks](https://www.standardwebhooks.com/). `webhook-id` is the message id, the same on every retry and replay, so a receiver dedupes on it (`verifyWebhook` with `standardWebhooks` from `@arki/http/webhooks` accepts it). It posts through `publicFetch()`, so an endpoint cannot reach a private address, even after a DNS change. Each try has `timeoutMs` (default 10 s). Any 2xx is delivered; anything else is retried.
 - **Retries are the worker's.** `retry` (a `Backoff`, default from 5 s doubling to 1 h, 10 retries) sets when the next try runs and when the delivery is dead. A dead delivery stays in `journal_jobs` like any dead job: `journal.jobs(db, { status: 'dead' })` lists it and `journal.retry(db, id, op)` runs it again.
 - **Every try is a row** in `webhook_attempts`: `delivered`, `failed` (with `next_at`), `dead`, or `skipped` (the subscription was disabled). Because delivery is at least once, a crash between the send and the ack can add a second row for one try.
@@ -767,7 +768,9 @@ A sender delivers a webhook at least once, and sends it again after a timeout. M
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 const scheme = standardWebhooks({ secrets: [process.env.WEBHOOK_SECRET] });
-const orderPlaced = route.post('/hooks/orders', { id: 'hooks.orders', body: placeOrderInput });
+const orderPlaced = route.post('/hooks/orders', {
+  id: 'hooks.orders', body: placeOrderInput, failures: WEBHOOK_FAILURES,
+});
 
 const engine = buildEngine([
   routes()
@@ -778,7 +781,7 @@ const engine = buildEngine([
 ]);
 ```
 
-`verifyWebhook` rejects an unsigned or wrongly signed request before it reaches the journal. Scope the key by sender if you take events from more than one (`${partner}:${webhook.id}`). The test `src/webhooks-inbox.test.ts` runs this end to end: a resent event writes one event row and keeps one receipt.
+`WEBHOOK_FAILURES` comes from `@arki/http/webhooks` and declares the exact deriver failures on the route. `verifyWebhook` returns a canonical failure for an unsigned or wrongly signed request before it reaches the journal. Scope the key by sender if you take events from more than one (`${partner}:${webhook.id}`). The test `src/webhooks-inbox.test.ts` runs this end to end: a resent event writes one event row and keeps one receipt.
 
 ## Relay recipe
 

@@ -239,6 +239,7 @@ Rules:
 - A sink gets rows at least once and dedupes on `row.id`. No row is pruned before it is exported. `ndjsonArchiveSink({ put, prefix })` writes one NDJSON file per batch; `@arki/fs` `put` fits.
 - Upgrading: generate the migration from `journalTables()` (three new tables, two new `journal_jobs` columns). Migrate first, then roll workers.
 - Foreman: `journalJobsModule({ journal, db })` from `@arki/journal/foreman`. Refusals are `ARKI_JOURNAL_E001` to `E005`.
+- Outbound webhook signing returns exact HTTP failures before sending. The worker keeps ownership and applies the configured retry predicate; use `.while(WebhookCryptoUnavailable)` only when retrying that refusal is intended. Attempts store the safe failure code.
 - Inbox: key a command with the webhook event id (`journal.run(db, cmd, input, meta, { idempotencyKey })`). Relay: an effect that calls `queue.add(name, data, { jobId })`. `kv.publish` is best-effort only.
 
 ### Find out why a write failed

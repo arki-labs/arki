@@ -54,7 +54,9 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 ### Receive a signed webhook
 
 1. Create a scheme from `@arki/http/webhooks` with the sender secrets.
-2. Bind the route with the scheme. A bad signature answers 401 before the handler runs.
+2. Declare `failures: WEBHOOK_FAILURES` on each protected route, then derive `verifyWebhook({ scheme })`. A returned failure stops the handler.
+3. Narrow direct `sign()`/`verify()` results with `isFailure`. Missing crypto or provider defects are refusals, never successful verification.
+4. Default sign/verify/request spans inherit caller context and record safe codes only. See [migration guidance](upgrade-webhooks.md).
 
 ### Publish OpenAPI
 

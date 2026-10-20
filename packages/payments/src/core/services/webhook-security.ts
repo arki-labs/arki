@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 
 import type { Instant } from '@arki/date';
 import { isBefore, now, sub } from '@arki/date';
-import { HTTP_ERROR_CODES, HttpError, stripe } from '@arki/http/webhooks';
+import { isFailure } from '@arki/failure';
+import { WebhookMalformed, WebhookStale, stripe } from '@arki/http/webhooks';
 
 import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
 import { mapStripeEventType } from '../providers/stripe-event-types.js';
@@ -27,10 +28,10 @@ const UNIX_SECONDS = /^\d+$/;
 /** The messages this service has always returned, by `@arki/http/webhooks` code. */
 function stripeFailure(code: string): string {
   switch (code) {
-    case HTTP_ERROR_CODES.webhookMalformed: {
+    case WebhookMalformed.code: {
       return 'Invalid signature format';
     }
-    case HTTP_ERROR_CODES.webhookStale: {
+    case WebhookStale.code: {
       return 'Signature timestamp is outside the allowed window';
     }
     default: {
@@ -274,16 +275,14 @@ export class WebhookSecurityService {
     secret: string,
   ): Promise<WebhookValidationResult> {
     const body = typeof payload === 'string' ? new TextEncoder().encode(payload) : new Uint8Array(payload);
-    try {
-      await stripe({ secrets: [secret] }).verify(
-        { headers: new Headers({ 'stripe-signature': signature }), body },
-        { tolerance: this.config.replayWindowSeconds },
-      );
-      return { isValid: true, provider: 'stripe' };
-    } catch (error) {
-      if (!(error instanceof HttpError)) throw error;
-      return { isValid: false, provider: 'stripe', error: stripeFailure(error.code) };
+    const result = await stripe({ secrets: [secret] }).verify(
+      { headers: new Headers({ 'stripe-signature': signature }), body },
+      { tolerance: this.config.replayWindowSeconds },
+    );
+    if (isFailure(result)) {
+      return { isValid: false, provider: 'stripe', error: stripeFailure(result.code) };
     }
+    return { isValid: true, provider: 'stripe' };
   }
 
   private validatePayPalSignature(
