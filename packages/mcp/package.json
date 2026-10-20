@@ -67,6 +67,20 @@
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  },
+  "dependencies": {
+    "@arki/auth": "workspace:*",
+    "@arki/failure": "workspace:*",
+    "@modelcontextprotocol/server": "catalog:ai",
+    "@orpc/client": "catalog:backend",
+    "@orpc/contract": "catalog:backend"
+  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/library-tooling": "workspace:*",
@@ -80,12 +94,5 @@
     "vitest": "catalog:",
     "zod": "catalog:"
   },
-  "prettier": "@arki/prettier-config",
-  "dependencies": {
-    "@arki/auth": "workspace:*",
-    "@arki/failure": "workspace:*",
-    "@modelcontextprotocol/server": "catalog:ai",
-    "@orpc/client": "catalog:backend",
-    "@orpc/contract": "catalog:backend"
-  }
+  "prettier": "@arki/prettier-config"
 }

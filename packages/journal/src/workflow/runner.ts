@@ -38,12 +38,14 @@ import type {
   Needs,
   RecordedOf,
   RootDb,
+  Services,
   TransactionSource,
 } from '../types.js';
 import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
 import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
+import { givenServices } from '../handlers.js';
 import { workflowRunId, workflowSignalId } from '../id.js';
 import { createManagedJobOps } from '../outbox.js';
 import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retention.js';
@@ -2457,12 +2459,16 @@ export function createWorkflows<
       }
     }
 
-    async function runNode(event: NodeScheduledEvent, ctx: StepEffectContext): Promise<unknown> {
+    async function runNode(
+      event: NodeScheduledEvent,
+      outer: EffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
+      servicesById: ReadonlyMap<string, Services> | undefined,
+    ): Promise<unknown> {
       const { data } = event;
       const runId = event.entityId;
-      const [row] = await ctx.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
+      const [row] = await outer.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
       if (row === undefined || row.finishedAt !== null) return undefined;
-      const [step] = await ctx.db
+      const [step] = await outer.db
         .select()
         .from(workflowSteps)
         .where(
@@ -2477,6 +2483,8 @@ export function createWorkflows<
         warnStranded(row, def);
         return strandedFailure(row, def);
       }
+      // This definition's own services win over the flat set the effect was bound with.
+      const ctx: StepEffectContext = { ...outer, ...servicesById?.get(`${def.name}@${def.version}`) };
       const index = def.nodes.findIndex(candidate => candidate.name === data.path);
       const node = def.nodes[index];
       if (node === undefined) {
@@ -2564,13 +2572,33 @@ export function createWorkflows<
      */
     const strandedRetry = defaultEffectRetry.while(reason => !isFailure(reason) && !isStrandedError(reason));
 
-    const effect = j
-      .effect(STEP_EFFECT, machine.run, needs, { NodeScheduled: (event, ctx) => runNode(event, ctx) })
-      .withSchedule({
-        // A retry is due at the time its event names; a first try is due now.
-        runAt: event => new Date(dueAtOf(event.data)),
-        retry: strandedRetry,
-      });
+    const stepEffect = <N extends Needs>(needsOf: N, servicesById: ReadonlyMap<string, Services> | undefined) =>
+      j
+        .effect(STEP_EFFECT, machine.run, needsOf, {
+          NodeScheduled: (event, ctx) => runNode(event, ctx, servicesById),
+        })
+        .withSchedule({
+          // A retry is due at the time its event names; a first try is due now.
+          runAt: event => new Date(dueAtOf(event.data)),
+          retry: strandedRetry,
+        });
+    const effect = {
+      ...stepEffect(needs, undefined),
+      // Each workflow reads the services of its own feature (or the one flat set a static `services` gives).
+      bindPerWorkflow: (servicesOf: (workflow: string) => Services) =>
+        stepEffect(
+          {},
+          new Map(
+            defs.map(def => {
+              const id = `${def.name}@${def.version}`;
+              return [
+                id,
+                givenServices('effect', { name: `${STEP_EFFECT} of ${id}`, needs: def.needs }, servicesOf(id)),
+              ];
+            }),
+          ),
+        ),
+    };
 
     /** A stranded timer returns the same permanent diagnostic as a step, without changing the pinned run. */
     const refuseStranded = async (runId: string, db: StepEffectContext['db']) => {

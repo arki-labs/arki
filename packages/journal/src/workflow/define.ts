@@ -110,6 +110,7 @@ export type WorkflowDef<
   Input extends StandardSchemaV1 = StandardSchemaV1,
   Output = unknown,
   Signals extends AnySignals = AnySignals,
+  N extends Needs = Needs,
 > = {
   readonly name: string;
   readonly version: number;
@@ -134,7 +135,7 @@ export type WorkflowDef<
   readonly nodes: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
-  readonly types?: { readonly output: Output; readonly signals: Signals };
+  readonly types?: { readonly output: Output; readonly signals: Signals; readonly needs: N };
 };
 
 export type WorkflowOptions<
@@ -283,7 +284,7 @@ export type WorkflowBuilder<
   finish<Returned = Last>(
     run?: (ctx: FinishContext<Input, Results>) => Returned,
     ...check: FinishCheck<Declared, Returned>
-  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals> & ApplyExtension<Ext, Signals>;
+  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals, N> & ApplyExtension<Ext, Signals>;
 };
 
 type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
@@ -396,14 +397,20 @@ function refuseUndo(workflowName: string, kind: string, name: string, options: o
   }
 }
 
-function finishDef<Input extends StandardSchemaV1, Output, Signals extends AnySignals, Ext extends DefExtension>(
+function finishDef<
+  Input extends StandardSchemaV1,
+  Output,
+  Signals extends AnySignals,
+  N extends Needs,
+  Ext extends DefExtension,
+>(
   state: BuilderState<Input, Ext>,
   finish: WorkflowDef['finish'],
-): WorkflowDef<Input, Output, Signals> & ApplyExtension<Ext, Signals> {
+): WorkflowDef<Input, Output, Signals, N> & ApplyExtension<Ext, Signals> {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
-  const plain: WorkflowDef<Input, Output, Signals> = {
+  const plain: WorkflowDef<Input, Output, Signals, N> = {
     ...state.header,
     shape: Object.freeze({ nodes: Object.freeze(shape.nodes.map(entry => Object.freeze(entry))) }),
     shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => [entry.name, entry.kind, entry.undo]))),

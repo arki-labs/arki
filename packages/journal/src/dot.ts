@@ -27,7 +27,7 @@
  */
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
 import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/plugin';
-import type { StandardSchemaV1 } from '@arki/schema';
+import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { driven, driver, entrypointsOf, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
@@ -47,6 +47,7 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
+import type { WorkflowDef } from './workflow/define.js';
 import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
@@ -63,7 +64,8 @@ export type JournalDotAction = {
   readonly direction: 'in';
   readonly address: string;
   readonly metaSchema: typeof JOURNAL_ACTION_META_SCHEMA;
-  readonly meta: { readonly entities: string[]; readonly events: string[] };
+  /** `signals` is set on a workflow's action only: the signal names its `waitFor` nodes wait for. */
+  readonly meta: { readonly entities: string[]; readonly events: string[]; readonly signals?: string[] };
 };
 
 /** What one feature hands to the journal, as declared: an effect or a tap may still have needs. */
@@ -71,6 +73,7 @@ export type JournalDeclarations<Meta = unknown, Tx = DbHandle, AppDb = RootDb> =
   readonly projections: readonly Projection<Meta, Tx>[];
   readonly effects: readonly Effect<Meta, AppDb, unknown, Needs>[];
   readonly taps: readonly Tap<Meta, AppDb, Needs>[];
+  readonly workflows: readonly WorkflowDef[];
 };
 
 /** What a feature's `journal` slice publishes at boot: its services, for its effects and taps. */
@@ -119,8 +122,30 @@ function effectAction(
   };
 }
 
+/** The needs a workflow definition declared, read from its type: written once, in `workflow(name, { needs })`. */
+type NeedsOfDef<D> = D extends { readonly types?: { readonly needs: infer N extends Needs } } ? N : Needs;
+
+/** What a list of workflows needs, as one object of services, like `ServicesFor` does for effects. */
+type WorkflowServices<W extends readonly WorkflowDef[]> = ServicesFor<{
+  readonly [K in keyof W]: { readonly needs: NeedsOfDef<W[K]> };
+}>;
+
+/** A workflow's manifest action: `<name>@<version>.run`, with the signals its `waitFor` nodes wait for. */
+function workflowAction(def: WorkflowDef): JournalDotAction {
+  const signals = new Set<string>();
+  for (const node of def.nodes) if (node.kind === 'waitFor') signals.add(node.signal);
+  return {
+    id: `${def.name}@${def.version}.run`,
+    binding: 'journal',
+    direction: 'in',
+    address: def.name,
+    metaSchema: JOURNAL_ACTION_META_SCHEMA,
+    meta: { entities: [], events: [], signals: [...signals] },
+  };
+}
+
 /**
- * Declare a feature's projections, effects and taps
+ * Declare a feature's projections, effects, taps and workflows
  * (`feature('orders', { use: [journalHandlers({ projections, effects })] })`).
  * `journal({ j })` reads them from the feature value and composes the journal.
  *
@@ -130,7 +155,12 @@ function effectAction(
  * type-check otherwise, and throws at the feature's boot when the types were bypassed.
  * Two features may use the same need name for two different services.
  *
- * Actions: one per effect. Projections add none: they run inside the write, not
+ * A workflow's needs (`workflow(name, { needs: { provider: need<P>() } })`) come the same way: each
+ * workflow gets the services of the feature that lists it, even when another feature's workflow uses
+ * the same need name. A missing one fails the feature's boot. The app's `journal({ j, workflowMeta })` needs the
+ * meta the runner records its checkpoints with. A workflow name and version can be listed by one feature only.
+ *
+ * Actions: one per effect and one per workflow (`<name>@<version>.run`, its signals in the meta). Projections add none: they run inside the write, not
  * at an app boundary.
  */
 export function journalHandlers<
@@ -139,17 +169,19 @@ export function journalHandlers<
   AppDb = RootDb,
   const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
   const T extends readonly Tap<Meta, AppDb, Needs>[] = readonly [],
+  const W extends readonly WorkflowDef[] = readonly [],
 >(handlers: {
   readonly projections?: readonly Projection<Meta, Tx>[];
   readonly effects?: E;
   readonly taps?: T;
-}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E> & ServicesFor<T>> {
-  const { projections = [], effects = [], taps = [] } = handlers;
+  readonly workflows?: W;
+}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>> {
+  const { projections = [], effects = [], taps = [], workflows = [] } = handlers;
   return {
     key: 'journal',
-    actions: effects.map(effect => effectAction(effect)),
-    handlers: { projections, effects, taps },
-    resolve: resolveServices(effects, taps),
+    actions: [...effects.map(effect => effectAction(effect)), ...workflows.map(workflowAction)],
+    handlers: { projections, effects, taps, workflows },
+    resolve: resolveServices(effects, taps, workflows),
   };
 }
 
@@ -159,6 +191,7 @@ const isServices = (value: unknown): value is Services => typeof value === 'obje
 function resolveServices(
   effects: readonly { readonly name: string; readonly needs: Needs }[],
   taps: readonly { readonly name: string; readonly needs: Needs }[],
+  workflows: readonly WorkflowDef[],
 ): (services: unknown) => JournalSlicePayload {
   // The kernel hands the feature's services over untyped, so they are read by name here.
   return services => {
@@ -166,6 +199,8 @@ function resolveServices(
     // Checked at the feature's boot, so a missing service never waits for the first job.
     for (const effect of effects) givenServices('effect', effect, given);
     for (const tap of taps) givenServices('tap', tap, given);
+    for (const def of workflows)
+      givenServices('effect', { name: `workflow.step of ${def.name}@${def.version}`, needs: def.needs }, given);
     return { services: given };
   };
 }
@@ -195,7 +230,7 @@ export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = ReturnType
 export function journalProjections<Meta = unknown, Tx = DbHandle>(...projections: readonly Projection<Meta, Tx>[]) {
   return Object.assign(plugin({ name: 'journal-projections', provides: {} }), {
     kind: JOURNAL_PROJECTIONS_KIND,
-    handlers: { projections, effects: [], taps: [] },
+    handlers: { projections, effects: [], taps: [], workflows: [] },
   } as const);
 }
 
@@ -254,8 +289,34 @@ export function journalEffects<
     key: 'journal',
     actions: [],
     actionsOf: feature => effects.map(effect => effectAction(effect, qualifyBy(feature))),
-    handlers: { projections: [], effects, taps },
-    resolve: resolveServices(effects, taps),
+    handlers: { projections: [], effects, taps, workflows: [] },
+    resolve: resolveServices(effects, taps, []),
+  };
+}
+
+/**
+ * A `defineFeature` feature's workflows, for its `.entrypoints(...)`, like `journalEffects`:
+ *
+ * ```ts
+ * export const orderWorkflows = (c: typeof core) => journalWorkflows(c, [refundOrder]);
+ * ```
+ *
+ * Each workflow's needs (`workflow(name, { needs: { provider: need<P>() } })`) come from the feature, by
+ * name, and a workflow's steps get this feature's services. A missing one is a compile error, and fails the feature's boot for callers that skip the types; the types
+ * checks them against the feature's own needs. A feature has one `journal`
+ * entrypoint, so a feature with both effects and workflows lists the workflows with `journalHandlers` instead.
+ */
+export function journalWorkflows<C extends AnyFeatureCore, const W extends readonly WorkflowDef[]>(
+  _core: C,
+  workflows: W & CoversNeeds<DepsOf<C>, WorkflowServices<W>>,
+): JournalEffectsEntrypoint<unknown, RootDb, WorkflowServices<W>> {
+  return {
+    kind: 'journal',
+    key: 'journal',
+    actions: [],
+    actionsOf: () => workflows.map(workflowAction),
+    handlers: { projections: [], effects: [], taps: [], workflows },
+    resolve: resolveServices([], [], workflows),
   };
 }
 
@@ -275,6 +336,8 @@ export type JournalFeatureOptions<
   AppDb extends RootDb,
 > = {
   readonly j: Pick<JournalDefinitions<Meta, Tx, AppDb>, 'compose'>;
+  /** The meta the workflow runner records its checkpoints with. Required when a feature declares workflows. */
+  readonly workflowMeta?: SchemaInput<Meta>;
 };
 
 /**
@@ -308,6 +371,18 @@ const isHandler = (value: unknown): boolean =>
 
 const isHandlerList = (value: unknown): boolean => Array.isArray(value) && value.every(item => isHandler(item));
 
+const isWorkflow = (value: unknown): boolean =>
+  typeof value === 'object' &&
+  value !== null &&
+  'name' in value &&
+  typeof value.name === 'string' &&
+  'version' in value &&
+  typeof value.version === 'number' &&
+  'nodes' in value &&
+  Array.isArray(value.nodes);
+
+const isWorkflowList = (value: unknown): boolean => Array.isArray(value) && value.every(item => isWorkflow(item));
+
 /** A slice's static `handlers` are read untyped from the feature, so their shape is checked here. */
 function isJournalDeclarations(value: unknown): value is JournalDeclarations {
   return (
@@ -318,7 +393,9 @@ function isJournalDeclarations(value: unknown): value is JournalDeclarations {
     'effects' in value &&
     isHandlerList(value.effects) &&
     'taps' in value &&
-    isHandlerList(value.taps)
+    isHandlerList(value.taps) &&
+    'workflows' in value &&
+    isWorkflowList(value.workflows)
   );
 }
 
@@ -327,7 +404,7 @@ function badSlice(feature: MountedFeature, what: string): DotPluginError {
     code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
     message: `[journal] feature "${feature.name}" has a \`journal\` slice whose ${what}.`,
     remediation:
-      'Declare handlers with journalHandlers({ projections, effects, taps }), journalEffects(core, { effects, taps }) or journalProjections(...) from @arki/journal/dot.',
+      'Declare handlers with journalHandlers({ projections, effects, taps, workflows }), journalEffects(core, { effects, taps }), journalWorkflows(core, defs) or journalProjections(...) from @arki/journal/dot.',
     docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/journal/docs/agent-guide.md#dot-boot-errors',
   });
 }
@@ -338,7 +415,7 @@ function badSlice(feature: MountedFeature, what: string): DotPluginError {
  * one flat list and cannot say which feature a handler came from.
  */
 function claimName(
-  kind: 'effect' | 'projection' | 'tap',
+  kind: 'effect' | 'projection' | 'tap' | 'workflow',
   owners: Map<string, MountedFeature>,
   name: string,
   feature: MountedFeature,
@@ -388,6 +465,7 @@ function readDeclarations(features: readonly MountedFeature[]): {
   const projections: Projection[] = [];
   const effects: Effect<unknown, RootDb, unknown, Needs>[] = [];
   const taps: Tap<unknown, RootDb, Needs>[] = [];
+  const workflows: WorkflowDef[] = [];
   const owners = new Map<string, MountedFeature>();
   for (const feature of features) {
     const qualify = qualifyBy(feature.name);
@@ -408,12 +486,15 @@ function readDeclarations(features: readonly MountedFeature[]): {
       const ownTaps = declared.taps.map(tap => ({ ...tap, name: qualify(tap.name) }));
       for (const { name } of ownEffects) claimName('effect', owners, name, feature);
       for (const { name } of ownTaps) claimName('tap', owners, name, feature);
+      // A workflow is keyed by name and version, not renamed per instance: its commands and stored runs use the plain name.
+      for (const def of declared.workflows) claimName('workflow', owners, `${def.name}@${def.version}`, feature);
       projections.push(...declared.projections);
+      workflows.push(...declared.workflows);
       effects.push(...ownEffects);
       taps.push(...ownTaps);
     }
   }
-  return { declarations: { projections, effects, taps }, owners };
+  return { declarations: { projections, effects, taps, workflows }, owners };
 }
 
 function journalPlugin<
@@ -466,11 +547,15 @@ export function journal<
     const composed = options.journal;
     return journalPlugin(() => composed);
   }
-  const { j } = options;
+  const { j, workflowMeta } = options;
   return driven(features =>
     journalPlugin(() =>
       // `'worker'`: the effects' services exist only once the features boot, after this journal.
-      j.compose({ ...readDeclarations(features).declarations, services: 'worker' }),
+      j.compose({
+        ...readDeclarations(features).declarations,
+        ...(workflowMeta === undefined ? {} : { workflowMeta }),
+        services: 'worker',
+      }),
     ),
   );
 }
@@ -558,8 +643,9 @@ export function journalWorker(
           if (handler.startsWith('projection:') || byFeature.has(feature)) continue;
           byFeature.set(feature, sliceServices(ctx, feature));
         }
-        const services: HandlerServices = ({ kind, name }) => {
-          const owner = owners.get(`${kind}:${name}`);
+        const services: HandlerServices = ({ kind, name, workflow }) => {
+          // `workflow.step` asks once per workflow: that workflow's feature answers, not a shared set.
+          const owner = owners.get(workflow === undefined ? `${kind}:${name}` : `workflow:${workflow}`);
           return (owner === undefined ? undefined : byFeature.get(owner)) ?? {};
         };
         const jobs = await source?.build(features, ctx);

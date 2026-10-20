@@ -348,7 +348,15 @@ export type Needed<N extends Needs> = { readonly [K in keyof N]: N[K] extends Ne
 /** Real services by name, as an app or a Dot feature hands them over. */
 export type Services = Readonly<Record<string, unknown>>;
 /** Names one effect or one tap. Effect names and tap names are two separate sets. */
-export type HandlerRef = { readonly kind: 'effect' | 'tap'; readonly name: string };
+export type HandlerRef = {
+  readonly kind: 'effect' | 'tap';
+  readonly name: string;
+  /**
+   * Set only when `workflow.step` asks: the `name@version` of one registered workflow. Each workflow
+   * gets the services of the feature that declared it, so a need name may mean two services.
+   */
+  readonly workflow?: string;
+};
 /**
  * The services of each effect and tap, given where they run instead of where the journal
  * is composed: `j.compose({ ..., services: 'worker' })`, then `journal.worker(db, { services })`.
@@ -420,6 +428,11 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
     [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>],
     Promise<unknown>
   >;
+  /**
+   * Only `workflow.step` has it. It is the same effect with each registered workflow's services read from
+   * `servicesOf(name@version)`, instead of one flat set shared by every workflow.
+   */
+  readonly bindPerWorkflow?: (servicesOf: (workflow: string) => Services) => Effect<Meta, AppDb, Run>;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };

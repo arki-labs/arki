@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { SchemaInput, SchemaOutput } from '@arki/schema';
 
 import type { CommandConflict } from '../errors.js';
+import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
 import { j } from '../test-support.js';
@@ -75,7 +76,7 @@ describe('def.start, as types', () => {
   it('a workflow keeps its output type next to start', () => {
     expectTypeOf(refund.name).toBeString();
     expectTypeOf(refund.types).toEqualTypeOf<
-      { readonly output: { holdId: string }; readonly signals: NoSignals } | undefined
+      { readonly output: { holdId: string }; readonly signals: NoSignals; readonly needs: NoNeeds } | undefined
     >();
   });
 });

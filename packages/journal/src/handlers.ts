@@ -6,6 +6,7 @@ import type {
   EffectContext,
   EffectHandlers,
   EffectSchedule,
+  HandlerRef,
   HandlerServices,
   Need,
   Needed,
@@ -269,6 +270,19 @@ export function bindEffect<Meta, AppDb, Run>(
  * A handler `j.compose` already bound needs nothing, so it gets nothing. Throws on the first
  * missing service, so a worker refuses to start instead of failing job after job.
  */
+/**
+ * Give one effect its services from `from`, which answers per handler ref. An effect with `bindPerWorkflow`
+ * (`workflow.step`) is asked once per workflow; any other effect is asked once, as `bindEffect` does.
+ */
+export function bindEffectFrom<Meta, AppDb, Run>(
+  effect: Effect<Meta, AppDb, Run, Needs>,
+  from: (ref: HandlerRef) => Services,
+): Effect<Meta, AppDb, Run> {
+  return effect.bindPerWorkflow === undefined
+    ? bindEffect(effect, from({ kind: 'effect', name: effect.name }))
+    : effect.bindPerWorkflow(workflow => from({ kind: 'effect', name: effect.name, workflow }));
+}
+
 export function bindHandlers<Meta, AppDb, Run>(
   handlers: {
     readonly effects: readonly Effect<Meta, AppDb, Run, Needs>[];
@@ -278,7 +292,7 @@ export function bindHandlers<Meta, AppDb, Run>(
 ): { readonly effects: readonly Effect<Meta, AppDb, Run>[]; readonly taps: readonly Tap<Meta, AppDb>[] } {
   const of = (kind: 'effect' | 'tap', name: string): Services => services?.({ kind, name }) ?? {};
   return {
-    effects: handlers.effects.map(effect => bindEffect(effect, of('effect', effect.name))),
+    effects: handlers.effects.map(effect => bindEffectFrom(effect, ref => services?.(ref) ?? {})),
     taps: handlers.taps.map(tap => bindTap(tap, of('tap', tap.name))),
   };
 }

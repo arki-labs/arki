@@ -37,7 +37,7 @@ import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
 import { JournalError } from './errors.js';
 import { defineEvent } from './event.js';
-import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
+import { bindEffectFrom, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
 import { createJobOps } from './outbox.js';
@@ -186,7 +186,7 @@ function createInit<
       // `'worker'`: the handlers keep their needs, and each worker or drain gives the services.
       const services = config.services === 'worker' ? undefined : (config.services ?? {});
       const effects = [...(config.effects ?? []), ...(runner === undefined ? [] : runner.effects)].map(declared =>
-        services === undefined ? declared : bindEffect(declared, services),
+        services === undefined ? declared : bindEffectFrom(declared, () => services),
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
