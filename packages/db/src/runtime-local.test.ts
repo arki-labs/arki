@@ -2,19 +2,22 @@
  * The PGlite owner lock. PGlite has no lock of its own, and two handles on
  * one data directory corrupt it. These tests prove the lock turns a second
  * opener into a loud error with the owner's pid, and that a lock never
- * outlives its owner: closing, a failed start and a dead process all give
- * the directory back.
+ * outlives its owner: confirmed close and a dead process give the directory
+ * back. Unconfirmed failed-start cleanup conservatively retains ownership.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Extension } from '@electric-sql/pglite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { lockableDataDir } from './owner-lock.js';
-import { DB_RUNTIME_LOCAL_ERROR_CODES, DbRuntimeLocalError, initDbRuntimeLocal } from './runtime-local.js';
+import { RandomSourceUnavailable } from '@arki/contracts';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
+
+import { lockableDataDir, ownerId } from './owner-lock.js';
+import { DataDirInUse, initDbRuntimeLocal, LocalRuntimeCleanupFailed } from './runtime-local.js';
 
 const relations = {};
 let dir: string;
@@ -24,6 +27,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -45,28 +50,25 @@ function deadPid(): number {
 
 describe('initDbRuntimeLocal owner lock', () => {
   it('refuses a second handle on a directory that is open, naming the pid, until the first one closes', async () => {
-    const first = await initDbRuntimeLocal({ dataDir: dir }, { relations });
+    const first = await orThrow(initDbRuntimeLocal({ dataDir: dir }, { relations }));
 
-    const second = initDbRuntimeLocal({ dataDir: dir }, { relations });
-    await expect(second).rejects.toBeInstanceOf(DbRuntimeLocalError);
-    await expect(second).rejects.toMatchObject({
-      code: DB_RUNTIME_LOCAL_ERROR_CODES.dataDirInUse,
-      pid: process.pid,
-    });
+    const second = await initDbRuntimeLocal({ dataDir: dir }, { relations });
+    expect(DataDirInUse.is(second)).toBe(true);
+    expect(second).toMatchObject({ data: { pid: process.pid } });
 
     await first.pglite.close();
     expect(await lockExists()).toBe(false);
 
-    const reopened = await initDbRuntimeLocal({ dataDir: dir }, { relations });
+    const reopened = await orThrow(initDbRuntimeLocal({ dataDir: dir }, { relations }));
     await reopened.pglite.close();
   });
 
   it('refuses a directory held by another live process and leaves its lock alone', async () => {
     await plantLock({ pid: process.ppid, at: Date.now() });
 
-    await expect(initDbRuntimeLocal({ dataDir: dir }, { relations })).rejects.toMatchObject({
-      code: DB_RUNTIME_LOCAL_ERROR_CODES.dataDirInUse,
-      pid: process.ppid,
+    expect(await initDbRuntimeLocal({ dataDir: dir }, { relations })).toMatchObject({
+      code: DataDirInUse.code,
+      data: { pid: process.ppid },
     });
     expect(JSON.parse(await readFile(lockFile(), 'utf8'))).toMatchObject({ pid: process.ppid });
   });
@@ -74,7 +76,7 @@ describe('initDbRuntimeLocal owner lock', () => {
   it('takes over a lock left by a process that is gone', async () => {
     await plantLock({ pid: deadPid(), at: Date.now() });
 
-    const opened = await initDbRuntimeLocal({ dataDir: dir }, { relations });
+    const opened = await orThrow(initDbRuntimeLocal({ dataDir: dir }, { relations }));
     expect(JSON.parse(await readFile(lockFile(), 'utf8'))).toMatchObject({ pid: process.pid });
     await opened.pglite.close();
     expect(await lockExists()).toBe(false);
@@ -83,18 +85,25 @@ describe('initDbRuntimeLocal owner lock', () => {
   it('takes over our own pid from before this process started (a container restarts as the same pid)', async () => {
     await plantLock({ pid: process.pid, at: 0 });
 
-    const opened = await initDbRuntimeLocal({ dataDir: dir }, { relations });
+    const opened = await orThrow(initDbRuntimeLocal({ dataDir: dir }, { relations }));
     await opened.pglite.close();
   });
 
-  it('gives the lock back when PGlite fails to start', async () => {
+  it('retains ownership when failed readiness cannot confirm extension cleanup', async () => {
     const broken: Extension = {
       name: 'broken',
       setup: () => Promise.reject(new Error('extension setup failed')),
     };
 
-    await expect(initDbRuntimeLocal({ dataDir: dir, extensions: { broken } }, { relations })).rejects.toThrow();
-    expect(await lockExists()).toBe(false);
+    const failure = await initDbRuntimeLocal({ dataDir: dir, extensions: { broken } }, { relations });
+    expect(failure).toMatchObject({ code: LocalRuntimeCleanupFailed.code });
+    if (!LocalRuntimeCleanupFailed.is(failure) || !(failure.cause instanceof AggregateError))
+      throw new Error('Expected startup and cleanup causes');
+    expect(failure.cause.errors).toMatchObject([
+      { code: UnexpectedDefect.code, cause: { message: 'extension setup failed' } },
+      { code: LocalRuntimeCleanupFailed.code },
+    ]);
+    expect(await lockExists()).toBe(true);
   });
 
   it('takes no lock for memory:// and browser storage', async () => {
@@ -108,7 +117,22 @@ describe('initDbRuntimeLocal owner lock', () => {
       initDbRuntimeLocal({ memory: true }, { relations }),
       initDbRuntimeLocal({ memory: true }, { relations }),
     ]);
-    await Promise.all([a.pglite.close(), b.pglite.close()]);
+    await Promise.all([orThrow(orThrow(a).close()), orThrow(orThrow(b).close())]);
+  });
+
+  it('returns the original entropy failure before creating a data directory', async () => {
+    const failure = RandomSourceUnavailable();
+    vi.spyOn(ownerId, 'create').mockReturnValue(failure);
+    const nested = path.join(dir, 'not-created');
+    expect(await initDbRuntimeLocal({ dataDir: nested }, { relations })).toBe(failure);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('memory explicitly bypasses owner entropy even when a disk path is provided', async () => {
+    vi.stubGlobal('crypto', void 0);
+    const opened = await orThrow(initDbRuntimeLocal({ memory: true, dataDir: dir }, { relations }));
+    expect(await lockExists()).toBe(false);
+    await orThrow(opened.close());
   });
 
   it('lets exactly one of several processes take over the same stale lock', async () => {
@@ -120,7 +144,8 @@ describe('initDbRuntimeLocal owner lock', () => {
       [
         `import { acquireOwnerLock } from ${JSON.stringify(ownerLock)};`,
         'try {',
-        '  await acquireOwnerLock(process.argv[2]);',
+        '  const lock = await acquireOwnerLock(process.argv[2]);',
+        "  if (typeof lock !== 'function') { process.stdout.write(lock.code); process.exit(0); }",
         "  process.stdout.write('owner');",
         '  await new Promise(resolve => setTimeout(resolve, 1500));',
         '} catch (error) {',
@@ -148,6 +173,6 @@ describe('initDbRuntimeLocal owner lock', () => {
     );
 
     expect(outcomes.filter(outcome => outcome === 'owner')).toHaveLength(1);
-    expect(outcomes.filter(outcome => outcome === DB_RUNTIME_LOCAL_ERROR_CODES.dataDirInUse)).toHaveLength(3);
+    expect(outcomes.filter(outcome => outcome === DataDirInUse.code)).toHaveLength(3);
   }, 20_000);
 });

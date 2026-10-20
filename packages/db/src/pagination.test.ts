@@ -4,13 +4,13 @@
  * a last page that is exactly full, and mixed sort directions. Paging
  * through must return every row once — no repeats, no gaps.
  */
-import type { PGlite } from '@electric-sql/pglite';
 import { oc } from '@orpc/contract';
 import { call, implement, ORPCError } from '@orpc/server';
 import { and, defineRelations, eq, sql } from 'drizzle-orm';
 import { integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { SuccessOf } from '@arki/failure';
 import { CURSOR_FAILURES, InvalidCursor, InvalidCursorValue, keyset, z } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
 import { errorMap, orThrowRpc, reviveRpcError, rpcFailureDefinitions } from '@arki/failure/orpc';
@@ -27,14 +27,14 @@ const stories = pgTable('stories', {
 });
 const relations = defineRelations({ stories });
 
-let client: PGlite;
-let db: Awaited<ReturnType<typeof initDbRuntimeLocal<typeof relations>>>['db'];
+let closeRuntime: SuccessOf<typeof initDbRuntimeLocal<typeof relations>>['close'];
+let db: SuccessOf<typeof initDbRuntimeLocal<typeof relations>>['db'];
 
 const SAME_MOMENT = new Date('2026-10-15T08:00:00.000Z');
 const LATER = new Date('2026-10-15T09:00:00.000Z');
 
 beforeAll(async () => {
-  ({ db, pglite: client } = await initDbRuntimeLocal({ memory: true }, { relations }));
+  ({ db, close: closeRuntime } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations })));
   await db.execute(
     sql`create table stories (id text primary key, user_id text not null, created_at timestamp(3) not null, rank integer not null)`,
   );
@@ -54,7 +54,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await client.close();
+  await orThrow(closeRuntime());
 });
 
 const newestFirst = keyset({ createdAt: 'desc', id: 'desc' });

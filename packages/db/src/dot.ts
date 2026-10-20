@@ -58,7 +58,9 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
 import type { Handle } from '@arki/dot/plugin';
+import type { SuccessOf } from '@arki/failure';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
+import { isFailure } from '@arki/failure';
 
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
 import type { PgliteInitOptions } from './runtime-local.js';
@@ -161,15 +163,15 @@ function createPglitePlugin<TRelations extends AnyRelations>(options: PgliteDbDo
   // We capture the raw PGlite client in the factory so `dispose` can close
   // it deterministically. `services.db` is the Drizzle handle only —
   // exposing the PGlite client would leak driver-specific surface.
-  let pgliteHandle: { close: () => Promise<void> } | undefined;
+  let close: SuccessOf<typeof initDbRuntimeLocal<TRelations>>['close'] | undefined;
   return plugin({
     name: 'db',
-    configure(ctx) {
+    configure(ctx): undefined {
       ctx.registerService('db', 'db');
     },
     provides: {
-      db: async (): Promise<DbServices<TRelations, 'pglite'>['db']> => {
-        const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
+      db: async () => {
+        const local = await initDbRuntimeLocal<TRelations>(
           {
             ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
             ...(options.memory === undefined ? {} : { memory: options.memory }),
@@ -180,15 +182,18 @@ function createPglitePlugin<TRelations extends AnyRelations>(options: PgliteDbDo
             ...(options.logger === undefined ? {} : { logger: options.logger }),
           },
         );
-        pgliteHandle = pglite;
-        return handle;
+        if (isFailure(local)) return local;
+        close = local.close;
+        return local.db;
       },
     },
     async dispose() {
-      if (pgliteHandle !== undefined) {
-        await pgliteHandle.close();
-        pgliteHandle = undefined;
+      if (close !== undefined) {
+        const outcome = await close();
+        if (isFailure(outcome)) return outcome;
+        close = undefined;
       }
+      return;
     },
   });
 }

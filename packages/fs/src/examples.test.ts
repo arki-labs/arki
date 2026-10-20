@@ -2,11 +2,11 @@
  * The examples compile with the package (`tsconfig` includes `examples/`),
  * and the schedule handler really drains: it loops while the sweep says `more`.
  */
-import type { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
 import { defineRelations, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import type { SuccessOf } from '@arki/failure';
 import type { Locker } from '@arki/schedule';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { orThrow } from '@arki/failure';
@@ -16,13 +16,13 @@ import { cleanupSchedule, drain, files, userId } from '../examples/files/server.
 import { fileStorage } from './pg/index.js';
 import { memoryUploadAdapter } from './testing.js';
 
-let pglite: PGlite;
+let closeRuntime: SuccessOf<typeof initDbRuntimeLocal>['close'];
 let db: FilesDb;
 let storage: FileStorage<typeof files>;
 
 beforeAll(async () => {
-  const local = await initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ files }) });
-  pglite = local.pglite;
+  const local = await orThrow(initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ files }) }));
+  closeRuntime = local.close;
   db = local.db;
   const push = await pushSchema({ files }, local.db);
   await push.apply();
@@ -34,7 +34,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pglite.close();
+  await orThrow(closeRuntime());
 });
 
 async function staleTickets(count: number) {

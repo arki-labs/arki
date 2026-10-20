@@ -50,9 +50,8 @@ const sharedEnvironment = (() => {
 })();
 
 async function createEnvironment() {
-  const { db, pglite } = await initDbRuntimeLocal(
-    { memory: true },
-    { relations: defineRelations({ readItems, writeItems }) },
+  const { db, pglite } = await orThrow(
+    initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ readItems, writeItems }) }),
   );
   await pglite.exec(`
     create table read_items (id varchar(256) primary key, name text not null);

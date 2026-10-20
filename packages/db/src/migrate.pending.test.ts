@@ -39,7 +39,7 @@ afterEach(() => {
 
 describe('pendingMigrations', () => {
   it('lists every migration on a fresh database, none when up to date, then only a new one', async () => {
-    const { db: handle, pglite } = await initDbRuntimeLocal({ memory: true }, { relations });
+    const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     try {
       expect(await pendingMigrations(handle, { migrationsFolder })).toEqual([
         '20260101000000_widgets',
@@ -51,7 +51,7 @@ describe('pendingMigrations', () => {
       addMigration('20260103000000_doohickeys', 'doohickeys');
       expect(await pendingMigrations(handle, { migrationsFolder })).toEqual(['20260103000000_doohickeys']);
     } finally {
-      await pglite.close();
+      await orThrow(close());
     }
   });
 

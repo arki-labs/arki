@@ -31,12 +31,12 @@ function recordingLogger(): { logger: Logger; queries: string[] } {
 describe('pglite driver + logger', () => {
   it('initDbRuntimeLocal passes a custom logger to drizzle', async () => {
     const { logger, queries } = recordingLogger();
-    const { db: handle, pglite } = await initDbRuntimeLocal({ memory: true }, { relations, logger });
+    const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations, logger }));
     try {
       await handle.execute(sql`select 1 as one`);
       expect(queries).toEqual(['select 1 as one']);
     } finally {
-      await pglite.close();
+      await orThrow(close());
     }
   });
 

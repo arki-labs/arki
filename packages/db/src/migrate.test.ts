@@ -44,7 +44,7 @@ afterAll(() => {
 
 describe('migrateDb', () => {
   it('applies pending migrations and does nothing the second time', async () => {
-    const { db: handle, pglite } = await initDbRuntimeLocal({ memory: true }, { relations });
+    const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     try {
       await migrateDb(handle, { migrationsFolder });
       await migrateDb(handle, { migrationsFolder });
@@ -53,7 +53,7 @@ describe('migrateDb', () => {
       const applied = await handle.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`);
       expect(applied.rows[0]).toEqual({ n: 1 });
     } finally {
-      await pglite.close();
+      await orThrow(close());
     }
   });
 });
@@ -64,14 +64,14 @@ describe('migrateDb with in-memory migrations', () => {
     expect(migrations).toHaveLength(1);
     expect(migrations[0]?.sql).toHaveLength(2);
 
-    const { db: handle, pglite } = await initDbRuntimeLocal({ memory: true }, { relations });
+    const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     try {
       await migrateDb(handle, { migrations });
       await migrateDb(handle, { migrations });
       const rows = await handle.select().from(widgets);
       expect(rows).toEqual([{ id: 'w1', label: 'first' }]);
     } finally {
-      await pglite.close();
+      await orThrow(close());
     }
   });
 });

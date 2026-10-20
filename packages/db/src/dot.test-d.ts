@@ -5,9 +5,10 @@ import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { expectTypeOf } from 'vitest';
 
-import type { PluginCloseFailure, PluginOpenFailure, Provided } from '@arki/dot/plugin';
+import type { PluginCloseFailure, PluginOpenFailure, PluginPhaseFailures, Provided } from '@arki/dot/plugin';
 import { defineApp } from '@arki/dot/plugin';
 
+import type { LocalRuntimeCloseFailure, LocalRuntimeFailure } from './runtime-local.js';
 import { db } from './dot.js';
 
 type IsAny<Value> = 0 extends 1 & Value ? true : false;
@@ -25,7 +26,7 @@ expectTypeOf<typeof database.factories>().toEqualTypeOf<{
   readonly db: (ctx: never) => NodePgDatabase<typeof relations>;
 }>();
 expectTypeOf<typeof embedded.factories>().toEqualTypeOf<{
-  readonly db: (ctx: never) => Promise<PgliteDatabase<typeof relations>>;
+  readonly db: (ctx: never) => Promise<PgliteDatabase<typeof relations> | LocalRuntimeFailure>;
 }>();
 expectTypeOf<IsAny<typeof database.factories.db>>().toEqualTypeOf<false>();
 expectTypeOf<IsAny<typeof embedded.factories.db>>().toEqualTypeOf<false>();
@@ -40,12 +41,12 @@ expectTypeOf<Driver['name']>().toEqualTypeOf<string>();
 expectTypeOf<Driver['provides']['db']['provider']>().toEqualTypeOf<'db'>();
 expectTypeOf<Awaited<ReturnType<NonNullable<Driver['hooks']['boot']>>>>().toEqualTypeOf<undefined>();
 expectTypeOf<ReturnType<NonNullable<Driver['hooks']['configure']>>>().toEqualTypeOf<undefined>();
-expectTypeOf<NonNullable<Driver['hooks']['dispose']>>().toEqualTypeOf<(ctx: never) => undefined | Promise<undefined>>();
 expectTypeOf<IsAny<Driver['hooks']['dispose']>>().toEqualTypeOf<false>();
 // @ts-expect-error -- disposal cannot resolve to an unrelated value
 const _invalidDispose: Driver['hooks']['dispose'] = () => Promise.resolve(42);
-expectTypeOf<PluginOpenFailure<Driver>>().toEqualTypeOf<never>();
+expectTypeOf<PluginOpenFailure<Driver>>().toEqualTypeOf<LocalRuntimeFailure>();
 expectTypeOf<PluginCloseFailure<Driver>>().toEqualTypeOf<never>();
+expectTypeOf<PluginPhaseFailures<typeof embedded>['dispose']>().toEqualTypeOf<LocalRuntimeCloseFailure>();
 
 // The source guard must see precise hooks, rather than an erased Plugin boot callback.
 defineApp('pg-types').use(database);

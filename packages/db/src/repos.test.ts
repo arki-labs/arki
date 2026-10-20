@@ -323,7 +323,7 @@ describe('repos(): test fakes that type-check', () => {
       throw new Error('not used by this test');
     };
     // The fake never queries; it only needs a real handle to construct.
-    const { db: handle, pglite } = await initDbRuntimeLocal({ memory: true }, { relations });
+    const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     // `NoteRepository` has a private field, so an object literal cannot pose as it;
     // a subclass that overrides every method can, and keeps the type exact.
     class FakeNotes extends NoteRepository {
@@ -346,7 +346,7 @@ describe('repos(): test fakes that type-check', () => {
       expect(failure).toMatchObject({ cause: new Error('not used by this test') });
     } finally {
       await orThrow(app.dispose());
-      await pglite.close();
+      await orThrow(close());
     }
   });
 });

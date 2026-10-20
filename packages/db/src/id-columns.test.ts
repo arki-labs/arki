@@ -4,12 +4,12 @@
  * the default id comes from the declaration, and the contracts select schema
  * checks the prefix at runtime.
  */
-import type { PGlite } from '@electric-sql/pglite';
 import { defineRelations, sql } from 'drizzle-orm';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
+import type { SuccessOf } from '@arki/failure';
 import { defineId, RandomSourceUnavailable, z } from '@arki/contracts';
 import { createInsertSchema, createSelectSchema, jsonColumn } from '@arki/contracts/drizzle';
 import { orThrow, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
@@ -55,11 +55,11 @@ const nominalRows = pgTable('nominal_rows', {
   paymentId: idColumns(paymentId).reference('payment_id'),
 });
 
-let client: PGlite;
-let db: Awaited<ReturnType<typeof initDbRuntimeLocal<typeof relations>>>['db'];
+let closeRuntime: SuccessOf<typeof initDbRuntimeLocal<typeof relations>>['close'];
+let db: SuccessOf<typeof initDbRuntimeLocal<typeof relations>>['db'];
 
 beforeAll(async () => {
-  ({ db, pglite: client } = await initDbRuntimeLocal({ memory: true }, { relations }));
+  ({ db, close: closeRuntime } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations })));
   await db.execute(
     sql`create table stories (id varchar(256) primary key, universe_id varchar(256) not null, parent_id varchar(256), title text not null)`,
   );
@@ -71,7 +71,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await client.close();
+  await orThrow(closeRuntime());
 });
 
 describe('idColumns', () => {

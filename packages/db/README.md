@@ -26,8 +26,9 @@ import { sql } from 'drizzle-orm';
 
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { runTransaction } from '@arki/db/transaction';
+import { orThrow } from '@arki/failure';
 
-const { db, pglite } = await initDbRuntimeLocal({ dataDir: 'memory://' }, { relations: {} });
+const { db, close } = orThrow(await initDbRuntimeLocal({ dataDir: 'memory://' }, { relations: {} }));
 
 await db.execute(sql`create table note (id serial primary key, body text not null)`);
 await runTransaction(db, async tx => {
@@ -36,7 +37,7 @@ await runTransaction(db, async tx => {
 
 const result = await db.execute(sql`select body from note`);
 console.log(result.rows[0]?.body);
-await pglite.close();
+orThrow(await close());
 ```
 
 ```text
@@ -94,18 +95,35 @@ export const db = createDb({
 
 ```ts
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { isFailure } from '@arki/failure';
 
 import { relations } from './fixture.ts';
 
-const { db, pglite } = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
+const local = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
+if (!isFailure(local)) {
+  const { db, pglite } = local;
+  // Use db for queries; share pglite with the local queue.
+  const cleanup = await local.close();
+  if (isFailure(cleanup)) {
+    // Reconcile cleanup before reopening the directory.
+    console.error(cleanup.code);
+  }
+}
 ```
 
 A data directory has one owner. PGlite has no lock of its own, and two handles on one directory corrupt it, so `initDbRuntimeLocal` writes `<dataDir>/.arki-owner` (the pid) before it opens PGlite:
 
-- A second open while the first handle lives, in another process or in this one, throws `DbRuntimeLocalError` with code `ARKI_DB_LOCAL_E001` and the owner's `pid`.
+- A second open while the first handle lives returns `DataDirInUse` with the owner's `data.pid`.
 - A lock left by a process that is gone is taken over. There is no age-based takeover.
-- `pglite.close()` gives the lock back. So does a PGlite that fails to start.
+- Owned `close()` returns `undefined` after closing and releasing ownership, or `LocalRuntimeCleanupFailed`. Failed release remains retryable. Failed startup releases ownership only when resource cleanup is confirmed.
+- Raw `pglite.close()` keeps PGlite's throwing foreign contract. Prefer owned `close()` for typed cleanup.
 - `memory://` and `idb://` take no lock, and `node:fs` loads only for file paths.
+
+File-backed initialization generates its nominal UUID owner ID before filesystem
+mutation. Missing entropy returns `RandomSourceUnavailable`; provider defects
+return `UnexpectedDefect`. Existing stored owner IDs remain readable.
+See [local runtime migration](docs/upgrades/local-runtime.md) for the exact
+failure definitions and cleanup policy.
 
 `dbMigrations({ migrationsFolder })` applies pending migrations at boot. It also provides `migrations: { pending }`, the names it found pending and applied, read before applying (`pendingMigrations(db, options)` from `@arki/db/migrate` gives the same list on demand). `dot dev` prints it.
 
@@ -806,7 +824,7 @@ these logs alone do not claim complete A-36 coverage.
 ## Limits
 
 - **Retries.** At most 10 extra attempts. The default is 3. `retries: 11` throws `ARKI_DB_TX_E002`. Nothing is clamped.
-- **One data directory, one owner.** A second `initDbRuntimeLocal` on an open directory throws `ARKI_DB_LOCAL_E001`.
+- **One data directory, one owner.** A second `initDbRuntimeLocal` on an open directory returns `DataDirInUse`.
 - **PGlite has one connection.** It never produces `40001`. Prove retry behaviour on real PostgreSQL.
 - **Keyset timestamps.** Declare them with `{ precision: 3 }` or `mode: 'string'`. A JS `Date` keeps milliseconds. Postgres keeps microseconds.
 - **Effects.** A call inside transactional code runs once per attempt and is not rolled back.

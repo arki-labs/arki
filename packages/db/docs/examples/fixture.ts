@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { TRANSACTION_FAILURES } from '@arki/db/errors';
 import { defineRelations, eq, sql } from '@arki/db/orm';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
+import { orThrow } from '@arki/failure';
 import { errorMap } from '@arki/failure/orpc';
 
 // Tables: one feature's leaf `tables.ts` each, in an app.
@@ -81,7 +82,7 @@ const DDL = `
   CREATE TABLE invoices (id text PRIMARY KEY, cents integer NOT NULL);
 `;
 
-const local = await initDbRuntimeLocal({ memory: true }, { relations });
+const local = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
 await local.pglite.exec(DDL);
 
 // Close PGlite when the script is done, as an app does at shutdown. Without
@@ -91,7 +92,7 @@ process.once('beforeExit', () => {
   const guard = setTimeout(() => {
     throw new Error('the docs fixture: PGlite did not close within 10 s');
   }, 10_000);
-  void local.pglite.close().finally(() => clearTimeout(guard));
+  void orThrow(local.close()).finally(() => clearTimeout(guard));
 });
 
 /** The app's database: in-memory PGlite, tables created, rows seeded. */

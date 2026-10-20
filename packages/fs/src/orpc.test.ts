@@ -3,7 +3,6 @@
  * with the memory adapter. Outputs carry no bucket, key or owner, and the
  * client output types come from the contract alone.
  */
-import type { PGlite } from '@electric-sql/pglite';
 import type { ContractRouterClient } from '@orpc/contract';
 import { createRouterClient, implement, ORPCError } from '@orpc/server';
 import { pushSchema } from 'drizzle-kit/api-postgres';
@@ -11,6 +10,7 @@ import { defineRelations } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
+import type { SuccessOf } from '@arki/failure';
 import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
@@ -33,7 +33,7 @@ type AppContext = { userId: UserId | null };
 const appContract = { files: filesContract };
 const implementer = implement(appContract).$context<AppContext>();
 
-let pglite: PGlite;
+let closeRuntime: SuccessOf<typeof initDbRuntimeLocal>['close'];
 let storage: FileStorage<typeof files>;
 const adapter = memoryUploadAdapter();
 
@@ -49,8 +49,8 @@ const router = implementer.router({
 const clientFor = (user: UserId | null) => createRouterClient(router, { context: { userId: user } });
 
 beforeAll(async () => {
-  const local = await initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ files }) });
-  pglite = local.pglite;
+  const local = await orThrow(initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ files }) }));
+  closeRuntime = local.close;
   const push = await pushSchema({ files }, local.db);
   await push.apply();
   storage = fileStorage(local.db, adapter, {
@@ -62,7 +62,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   vi.unstubAllGlobals();
-  await pglite.close();
+  await orThrow(closeRuntime());
 });
 
 afterEach(() => vi.restoreAllMocks());

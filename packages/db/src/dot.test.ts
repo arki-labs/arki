@@ -13,6 +13,7 @@ import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { RandomSourceUnavailable } from '@arki/contracts';
 import { defineApp, rename } from '@arki/dot/plugin';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
@@ -44,8 +45,17 @@ async function importDotWithoutDbUrl(): Promise<{
 
 describe('@arki/db/dot', () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.doUnmock('./env.js');
     vi.resetModules();
+  });
+
+  it('returns entropy refusal from the PGlite provider before opening a file database', async () => {
+    vi.stubGlobal('crypto', {});
+    const result = await defineApp('db-no-entropy')
+      .use(db({ driver: 'pglite', dataDir: './must-not-open-without-entropy', relations }))
+      .boot();
+    expect(RandomSourceUnavailable.is(result)).toBe(true);
   });
 
   it('contributes a db-kind service to the manifest', () => {

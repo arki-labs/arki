@@ -4,13 +4,12 @@
  * Postgres live in `files.pg.test.ts`. Time passing is simulated by moving a
  * row's deadlines into the past.
  */
-import type { PGlite } from '@electric-sql/pglite';
 import { generateDrizzleJson, generateMigration, pushSchema } from 'drizzle-kit/api-postgres';
 import { count, defineRelations, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdOf } from '@arki/contracts';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, SuccessOf } from '@arki/failure';
 import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
@@ -38,14 +37,14 @@ type UserId = IdOf<typeof userId>;
 const files = filesTable({ owner: userId });
 const relations = defineRelations({ files });
 
-let pglite: PGlite;
+let closeRuntime: SuccessOf<typeof initDbRuntimeLocal>['close'];
 let db: FilesDb;
 let migration: string[];
 let drift: string[];
 
 beforeAll(async () => {
-  const local = await initDbRuntimeLocal({ memory: true }, { relations });
-  pglite = local.pglite;
+  const local = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
+  closeRuntime = local.close;
   db = local.db;
   // The app's path: `drizzle-kit generate` from the table, then apply the SQL.
   migration = await generateMigration(await generateDrizzleJson({}), await generateDrizzleJson({ files }));
@@ -55,7 +54,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pglite.close();
+  await orThrow(closeRuntime());
 });
 
 afterEach(() => vi.restoreAllMocks());

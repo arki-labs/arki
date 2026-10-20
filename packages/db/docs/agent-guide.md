@@ -126,6 +126,25 @@ swallowed), `57014` (statement timeout), connection errors.
 - In a Dot feature, name the pool-bound repo source `repositories`. The bound set is `repos`.
 - A PGlite data directory has one owner. Two handles corrupt it.
 
+## Typed local runtime
+
+`initDbRuntimeLocal()` returns a handle or a canonical failure. Check
+`isFailure` before using the handle; its owned `close()` also returns failures.
+The PGlite Dot provider propagates both unions. File-backed startup generates a
+nominal UUID owner ID before filesystem mutation. Existing stored owner IDs
+remain valid. Unconfirmed close retains ownership; failed release is retryable.
+
+| Code                              | Definition                  |
+| --------------------------------- | --------------------------- |
+| `db.local_data_dir_in_use`        | `DataDirInUse`              |
+| `db.local_owner_lock_contended`   | `OwnerLockContended`        |
+| `db.local_runtime_unavailable`    | `LocalRuntimeUnavailable`   |
+| `db.local_runtime_refused`        | `LocalRuntimeRefused`       |
+| `db.local_runtime_cleanup_failed` | `LocalRuntimeCleanupFailed` |
+
+The canonical `LOCAL_RUNTIME_FAILURES` tuple also includes Contracts entropy
+failures and `UnexpectedDefect`. See [migration and recovery](upgrades/local-runtime.md).
+
 ## Typed transaction outcomes
 
 `TRANSACTION_FAILURES` is the sole registry; `TransactionFailure` and

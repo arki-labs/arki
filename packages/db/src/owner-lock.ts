@@ -23,9 +23,20 @@
  */
 import type * as fsPromises from 'node:fs/promises';
 
-import { z } from '@arki/contracts';
+import type { IdOf } from '@arki/contracts';
+import { defineId, z } from '@arki/contracts';
+import { isFailure, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 
+import type { LocalRuntimeCloseFailure, OwnerLockFailure } from './runtime-local-failures.js';
 import { debugInit } from './debug.js';
+import {
+  DataDirInUse,
+  LocalRuntimeCleanupFailed,
+  LocalRuntimeRefused,
+  LocalRuntimeUnavailable,
+  OWNER_LOCK_FAILURES,
+  OwnerLockContended,
+} from './runtime-local-failures.js';
 
 /** Stable error codes of `@arki/db/runtime-local`. Match on them, never on the message. */
 export const DB_RUNTIME_LOCAL_ERROR_CODES = {
@@ -40,7 +51,7 @@ export const DB_RUNTIME_LOCAL_ERROR_CODES = {
 
 export type DbRuntimeLocalErrorCode = (typeof DB_RUNTIME_LOCAL_ERROR_CODES)[keyof typeof DB_RUNTIME_LOCAL_ERROR_CODES];
 
-/** An error of `@arki/db/runtime-local`. Same shape as `DbTransactionError`. */
+/** Historical thrown diagnostic. Owned runtime operations now return canonical failures. */
 export class DbRuntimeLocalError extends Error {
   readonly code: DbRuntimeLocalErrorCode;
   /** How to fix it. */
@@ -68,7 +79,9 @@ const RECLAIM_WAIT_MS = 20;
 /** Give up after this many rounds (about two seconds of reclaim contention). */
 const MAX_ROUNDS = 100;
 
-const holderSchema = z.object({ pid: z.number().int().positive(), at: z.number(), id: z.string() });
+/** Internal ownership identity; restored lock bytes remain compatible with older owners. */
+export const ownerId = defineId('', { kind: 'db.owner', format: 'uuid' });
+const holderSchema = z.object({ pid: z.int().positive(), at: z.number(), id: ownerId.schema });
 type Holder = z.infer<typeof holderSchema>;
 /** What a lock file holds: a holder, nothing (it is gone), or something that is not a lock. */
 type LockRead = Holder | 'missing' | 'invalid';
@@ -136,17 +149,36 @@ async function createWhole(fs: FsPromises, file: string, holder: Holder): Promis
   const text = JSON.stringify(holder);
   const temp = `${file}.${holder.id}.tmp`;
   await fs.writeFile(temp, text, { flag: 'wx' });
+  let operationCause: { cause: unknown } | undefined;
+  let created = false;
   try {
-    await fs.link(temp, file);
-    return true;
+    try {
+      await fs.link(temp, file);
+      created = true;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code !== 'EEXIST') {
+        if (code === undefined || !NO_HARD_LINKS.has(code)) throw error;
+        created = await writeExclusive(fs, file, text);
+      }
+    }
   } catch (error) {
-    const code = errorCode(error);
-    if (code === 'EEXIST') return false;
-    if (code === undefined || !NO_HARD_LINKS.has(code)) throw error;
-    return writeExclusive(fs, file, text);
-  } finally {
-    await fs.rm(temp, { force: true });
+    operationCause = { cause: error };
   }
+  try {
+    await fs.rm(temp, { force: true });
+  } catch (error) {
+    throw new UnexpectedFailure(
+      LocalRuntimeCleanupFailed({
+        cause:
+          operationCause === undefined
+            ? error
+            : new AggregateError([operationCause.cause, error], 'Owner lock creation and temporary cleanup failed.'),
+      }),
+    );
+  }
+  if (operationCause !== undefined) throw operationCause.cause;
+  return created;
 }
 
 async function writeExclusive(fs: FsPromises, file: string, text: string): Promise<boolean> {
@@ -166,18 +198,28 @@ async function removeIfUnchanged(fs: FsPromises, file: string, expected: LockRea
   if (same && now !== 'missing') await fs.rm(file, { force: true });
 }
 
-function inUse(dataDir: string, holder: Holder): DbRuntimeLocalError {
-  const self = holder.pid === process.pid;
-  return new DbRuntimeLocalError({
-    code: DB_RUNTIME_LOCAL_ERROR_CODES.dataDirInUse,
-    pid: holder.pid,
-    message: self
-      ? `[db] PGlite data directory ${dataDir} is already open in this process (pid ${String(holder.pid)}).`
-      : `[db] PGlite data directory ${dataDir} is in use by pid ${String(holder.pid)}.`,
-    remediation: self
-      ? 'Close the first handle (pglite.close() or app.dispose()) before opening the directory again.'
-      : `Stop process ${String(holder.pid)}, or give this process its own dataDir.`,
-  });
+/** Filesystem refusals are distinct from temporary resource exhaustion and unknown defects. */
+export function classifyLocalRuntimeFailure(cause: unknown): OwnerLockFailure {
+  try {
+    const returned = cause instanceof UnexpectedFailure ? cause.failure : cause;
+    for (const definition of OWNER_LOCK_FAILURES) {
+      if (definition.is(returned)) return returned;
+    }
+    const code = errorCode(cause);
+    if (
+      code !== undefined &&
+      ['EACCES', 'EPERM', 'EROFS', 'ENOTDIR', 'EISDIR', 'EINVAL', 'EEXIST', 'ELOOP', 'ENAMETOOLONG'].includes(code)
+    )
+      return LocalRuntimeRefused({ cause });
+    if (
+      code !== undefined &&
+      ['ENOSPC', 'EDQUOT', 'EMFILE', 'ENFILE', 'EIO', 'ESTALE', 'EBUSY', 'ENOENT'].includes(code)
+    )
+      return LocalRuntimeUnavailable({ cause });
+    return UnexpectedDefect({ cause });
+  } catch {
+    return UnexpectedDefect({ cause });
+  }
 }
 
 /**
@@ -185,31 +227,53 @@ function inUse(dataDir: string, holder: Holder): DbRuntimeLocalError {
  * Resolves to the release function; release is idempotent and removes the
  * lock only while it is still ours.
  *
- * @throws DbRuntimeLocalError `ARKI_DB_LOCAL_E001` when a live process holds it.
+ * Returns canonical failures; a failed release may be retried without giving up ownership.
  */
-export async function acquireOwnerLock(dataDir: string): Promise<() => Promise<void>> {
+export async function acquireOwnerLock(
+  dataDir: string,
+): Promise<(() => Promise<void | LocalRuntimeCloseFailure>) | OwnerLockFailure> {
+  try {
+    const id = ownerId.create();
+    if (isFailure(id)) return id;
+    return await takeOwnerLock(dataDir, id);
+  } catch (error) {
+    return classifyLocalRuntimeFailure(error);
+  }
+}
+
+async function takeOwnerLock(dataDir: string, id: IdOf<typeof ownerId>) {
   const fs = await import('node:fs/promises');
   const { default: path } = await import('node:path');
   await fs.mkdir(dataDir, { recursive: true });
   const lockFile = path.join(dataDir, LOCK_FILE);
   const reclaimFile = `${lockFile}.reclaim`;
-  const me: Holder = { pid: process.pid, at: Date.now(), id: crypto.randomUUID() };
+  const me: Holder = { pid: process.pid, at: Date.now(), id };
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     if (await createWhole(fs, lockFile, me)) {
-      debugInit.debug('[runtime-local] owner lock taken: {lockFile}', { lockFile });
       let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await removeIfUnchanged(fs, lockFile, me);
-        debugInit.debug('[runtime-local] owner lock released: {lockFile}', { lockFile });
+      let releasing: Promise<void | LocalRuntimeCloseFailure> | undefined;
+      return (): Promise<void | LocalRuntimeCloseFailure> => {
+        if (released) return Promise.resolve();
+        if (releasing !== undefined) return releasing;
+        releasing = (async () => {
+          try {
+            await removeIfUnchanged(fs, lockFile, me);
+            released = true;
+            return;
+          } catch (error) {
+            return LocalRuntimeCleanupFailed({ cause: error });
+          } finally {
+            releasing = undefined;
+          }
+        })();
+        return releasing;
       };
     }
 
     const holder = await readLock(fs, lockFile);
     if (holder === 'missing') continue; // released between our attempt and the read
-    if (holder !== 'invalid' && !isStale(holder)) throw inUse(dataDir, holder);
+    if (holder !== 'invalid' && !isStale(holder)) return DataDirInUse({ pid: holder.pid });
 
     // Stale or unreadable: take it over under the reclaim lock.
     if (!(await createWhole(fs, reclaimFile, me))) {
@@ -221,15 +285,29 @@ export async function acquireOwnerLock(dataDir: string): Promise<() => Promise<v
       }
       continue;
     }
+    let reclaimCause: { cause: unknown } | undefined;
     try {
       debugInit.debug('[runtime-local] reclaiming a stale owner lock: {lockFile}', { lockFile });
       await removeIfUnchanged(fs, lockFile, holder);
-    } finally {
-      await fs.rm(reclaimFile, { force: true });
+    } catch (error) {
+      reclaimCause = { cause: error };
     }
+    try {
+      await fs.rm(reclaimFile, { force: true });
+    } catch (error) {
+      throw new UnexpectedFailure(
+        LocalRuntimeCleanupFailed({
+          cause:
+            reclaimCause === undefined
+              ? error
+              : new AggregateError([reclaimCause.cause, error], 'Owner reclaim and reclaim cleanup failed.'),
+        }),
+      );
+    }
+    if (reclaimCause !== undefined) throw reclaimCause.cause;
   }
 
   const last = await readLock(fs, lockFile);
-  if (typeof last !== 'string') throw inUse(dataDir, last);
-  throw new Error(`[db] could not take the owner lock of ${dataDir}: it kept changing.`);
+  if (typeof last !== 'string') return DataDirInUse({ pid: last.pid });
+  return OwnerLockContended();
 }
