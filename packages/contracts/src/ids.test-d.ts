@@ -1,5 +1,5 @@
-import { z } from 'zod';
 import { expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
 
 import type { FailureOf, UnexpectedDefect } from '@arki/failure';
 
@@ -75,4 +75,30 @@ it('requires a finite literal kind rather than an open template pattern', () => 
     defineId('id_', { kind: numeric });
   };
   expectTypeOf(_rejectPatterns).toBeFunction();
+});
+
+it('UUID generation retains exact domain types and literal kind guards', () => {
+  const _jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
+  const _otherId = defineId('', { kind: 'queue.other', format: 'uuid' });
+  type JobId = IdOf<typeof _jobId>;
+  expectTypeOf<JobId>().toEqualTypeOf<z.output<typeof _jobId.schema>>();
+  expectTypeOf<ReturnType<typeof _jobId.create>>().toEqualTypeOf<JobId | IdGenerationFailure>();
+  expectTypeOf<JobId>().not.toExtend<IdOf<typeof _otherId>>();
+  expectTypeOf<string>().not.toExtend<JobId>();
+  expectTypeOf<JobId>().toExtend<string>();
+  expectTypeOf<typeof _jobId>().toExtend<IdDeclaration<''>>();
+  // @ts-expect-error Unsupported format is static misuse.
+  defineId('', { kind: 'queue.job', format: 'cuid' });
+  // @ts-expect-error UUID generation cannot erase the literal kind guard.
+  defineId('', { kind: String('queue.job'), format: 'uuid' });
+  const multipleKinds: 'queue.job' | 'queue.other' = Math.random() ? 'queue.job' : 'queue.other';
+  // @ts-expect-error UUID generation cannot brand one value as multiple kinds.
+  defineId('', { kind: multipleKinds, format: 'uuid' });
+  const _rejectUuidPattern = (kind: `queue.${string}`) => {
+    // @ts-expect-error Open template patterns cannot name one UUID domain.
+    defineId('', { kind, format: 'uuid' });
+  };
+  expectTypeOf(_rejectUuidPattern).toBeFunction();
+  // @ts-expect-error Empty kinds cannot establish a UUID domain.
+  defineId('', { kind: '', format: 'uuid' });
 });

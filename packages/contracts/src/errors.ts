@@ -71,6 +71,13 @@ export const CONTRACTS_ERROR_CODES = {
    * @verify bun run test -- src/ids.test.ts
    */
   invalidIdKind: 'ARKI_CONTRACTS_E009',
+  /**
+   * `defineId` received an unsupported generation format.
+   *
+   * @fix Use `format: 'uuid'` or omit format for the default 24-character body.
+   * @verify bun run test -- src/ids.test.ts
+   */
+  invalidIdFormat: 'ARKI_CONTRACTS_E010',
 } as const;
 
 /** The code of a {@link ContractsError}. */
@@ -87,6 +94,7 @@ const REMEDIATIONS: Record<ContractsErrorCode, string> = {
   ARKI_CONTRACTS_E008: 'Use a supported Drizzle column builder and matching Drizzle version.',
   ARKI_CONTRACTS_E007: 'Pass a leaf of createOrpcUtils, or an object built by operations().',
   ARKI_CONTRACTS_E009: 'Supply a non-empty literal domain name, such as billing.refund.',
+  ARKI_CONTRACTS_E010: "Use format: 'uuid' or omit format for the default 24-character body.",
 };
 
 /** A coded failure of an `@arki/contracts` function. */
@@ -124,11 +132,11 @@ export const InvalidCursorValue = defineFailure('contracts.invalid_cursor_value'
 });
 
 /** Secure ID generation has no usable Web Crypto provider.
- * @fix Provide globalThis.crypto.getRandomValues; install the React Native crypto polyfill when needed.
+ * @fix Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; install a secure polyfill when needed.
  * @verify bun run test -- src/ids.test.ts
  */
 export const RandomSourceUnavailable = defineFailure('contracts.random_source_unavailable', {
   status: 500,
   message: 'Secure random generation is unavailable.',
-  remediation: 'Provide globalThis.crypto.getRandomValues; install the React Native crypto polyfill when needed.',
+  remediation: 'Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; install a secure polyfill when needed.',
 });

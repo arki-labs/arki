@@ -281,3 +281,95 @@ describe('ID generation failures', () => {
     }
   });
 });
+
+describe('UUID generation format', () => {
+  const jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
+  const uuid = '01234567-89ab-4cde-8f01-23456789abcd';
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('generates UUID v4 and restores external keys without changing default generation', () => {
+    expect(orThrow(jobId.create())).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(jobId.schema.parse('customer:job/42')).toBe('customer:job/42');
+    expect(jobId.is('')).toBe(true);
+    expect(jobId.schema.safeParse(42).success).toBe(false);
+    expect(orThrow(defineId('', { kind: 'default' }).create())).toMatch(/^[a-z][a-z0-9]{23}$/);
+  });
+
+  it('retains the receiver, reads once, and preserves UUID bytes and prefixes', () => {
+    const randomUUID = vi.fn(function (this: unknown) {
+      expect(this).toBe(provider);
+      return uuid;
+    });
+    const readMethod = vi.fn(() => randomUUID);
+    const provider = Object.defineProperty({}, 'randomUUID', { get: readMethod });
+    vi.stubGlobal('crypto', provider);
+    expect(defineId('job_', { kind: 'queue.job', format: 'uuid' }).create()).toBe(`job_${uuid}`);
+    expect(readMethod).toHaveBeenCalledTimes(1);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, null, false, {}, { randomUUID: 1 }, { getRandomValues: () => new Uint8Array(48) }])(
+    'returns canonical unavailability for missing UUID provider %j',
+    crypto => {
+      vi.stubGlobal('crypto', crypto);
+      const weakRandom = vi.spyOn(Math, 'random');
+      expect(RandomSourceUnavailable.is(jobId.create())).toBe(true);
+      expect(weakRandom).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['global getter', 'method getter', 'provider'])('keeps thrown UUID %s defects private', location => {
+    const cause = new Error('private UUID details');
+    const fail = () => {
+      throw cause;
+    };
+    if (location === 'global getter') vi.spyOn(globalThis, 'crypto', 'get').mockImplementation(fail);
+    else
+      vi.stubGlobal(
+        'crypto',
+        location === 'method getter' ? Object.defineProperty({}, 'randomUUID', { get: fail }) : { randomUUID: fail },
+      );
+    const result = jobId.create();
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    if (!isFailure(result)) throw new Error('Expected UUID defect');
+    expect(result.cause).toBe(cause);
+    expect(JSON.stringify(result)).not.toContain('private UUID');
+    expect({ ...result }).not.toHaveProperty('cause');
+  });
+
+  it.each([
+    undefined,
+    null,
+    42,
+    'invalid',
+    '01234567-89ab-1cde-8f01-23456789abcd',
+    '01234567-89ab-4cde-7f01-23456789abcd',
+  ])('rejects invalid UUID output %j', output => {
+    vi.stubGlobal('crypto', { randomUUID: () => output });
+    expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+  });
+
+  it('observes rejected promises and hostile thenables as synchronous protocol defects', async () => {
+    const readThen = vi.fn(() => {
+      throw new Error('private then getter');
+    });
+    for (const output of [
+      Promise.reject(new Error('private UUID rejection')),
+      Promise.resolve(uuid),
+      // eslint-disable-next-line unicorn/no-thenable -- Intentional malformed foreign protocol fixture.
+      Object.defineProperty({}, 'then', { get: readThen }),
+    ]) {
+      vi.stubGlobal('crypto', { randomUUID: () => output });
+      expect(UnexpectedDefect.is(jobId.create())).toBe(true);
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(readThen).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['cuid', null, 42])('rejects unsupported static generation format %j', format => {
+    expect(() => Reflect.apply(defineId, null, ['', { kind: 'queue.job', format }])).toThrow('ARKI_CONTRACTS_E010');
+  });
+});

@@ -60,6 +60,19 @@ if (typeof globalThis.crypto?.getRandomValues === 'function') {
   check(RandomSourceUnavailable.is(generatedId), 'create() without crypto returns canonical unavailability');
 }
 
+// UUID generation uses randomUUID specifically; Hermes may lack that capability.
+const jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
+check(jobId.schema.parse('customer:job/42') === 'customer:job/42', 'UUID domains restore external job keys');
+const generatedJobId = jobId.create();
+if (typeof globalThis.crypto?.randomUUID === 'function') {
+  check(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(orThrow(generatedJobId)),
+    'UUID generation returns native UUID v4',
+  );
+} else {
+  check(RandomSourceUnavailable.is(generatedJobId), 'UUID generation without randomUUID returns canonical unavailability');
+}
+
 // zod-form-data loads on every engine. Plain Hermes has no FormData class (React Native adds one), so parsing runs where it exists.
 const formSchema = formData.formData({ title: formData.text(), count: formData.numeric() });
 check(typeof formSchema.parse === 'function', 'zod-form-data builds a schema');

@@ -158,3 +158,6 @@ export type { JobTriggerFailure, JobTriggerResult } from './trigger.ts';
 
 export { FLOW_ENQUEUE_FAILURES } from './flow-jobs.ts';
 export type { FlowEnqueueFailure } from './flow-jobs.ts';
+
+export { queueJobId } from './job-id.ts';
+export type { QueueJobId } from './job-id.ts';

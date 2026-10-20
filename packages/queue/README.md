@@ -886,3 +886,14 @@ MIT
 Middleware refusals must be returned directly. `next().output` is observational and readonly; returning a protocol object with substituted output now fails with `UnexpectedDefect` instead of silently dropping the substitution. A middleware may call `next()` once.
 
 Runtime-local accepts arbitrary stable string `jobId` keys. Triggers generate a UUID key when none is supplied; the returned key can be reused as `jobId` to suppress duplicate delivery, including after restart, while the provider retains the job. pg-boss stores a deterministic UUID v5 identity scoped by queue name and key, while the message retains the original key for handler context and trigger results. Configure `pgBossFailedJobSource({ pglite, name: jobName })` to inspect/retry by that queue's external keys; an unscoped source keeps native UUID identifiers and includes the external `key` field for inspection.
+
+## Job identity upgrade
+
+Single-job enqueue now returns `QueueJobId | JobTriggerFailure`. Restore persisted keys with
+`queueJobId.schema.parse(key)` from `@arki/queue`; arbitrary existing string keys keep their bytes.
+Automatic keys remain UUID v4. Explicit `jobId` keys bypass secure randomness; BullMQ's nested
+`bullmqOptions.jobId` takes precedence. pg-boss still maps the external key to its deterministic UUID v5.
+
+Handle `RandomSourceUnavailable` and `UnexpectedDefect` before retrying: these failures happen before
+submission. `QueueAcceptanceUnknown` still means a provider acknowledgement could not be confirmed;
+inspect the existing key before replaying. Native worker IDs and flow IDs retain their existing types.

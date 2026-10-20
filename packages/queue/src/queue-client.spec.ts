@@ -8,16 +8,17 @@
 import type { StartedTestContainer } from 'testcontainers';
 import { Queue } from 'bullmq';
 import { GenericContainer, Wait } from 'testcontainers';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { z } from '@arki/contracts';
+import { RandomSourceUnavailable, z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { jobs, queue, queueWorker } from './dot.ts';
 import { initQueue } from './init.ts';
+import { createQueueClient } from './queue-client.ts';
 import { parseRedisConnection } from './redis-connection.ts';
 
 let redisContainer: StartedTestContainer;
@@ -46,6 +47,40 @@ async function waitFor(done: () => boolean): Promise<void> {
 }
 
 describe('queue() client + queueWorker() in separate apps', () => {
+  it('does not open a producer queue on entropy failure and honors the effective explicit BullMQ key', async () => {
+    const q = initQueue.context<Record<string, never>>().create();
+    const job = q.job
+      .name(`client-entropy-${crypto.randomUUID()}`)
+      .input(z.object({ n: z.number() }))
+      .handler(() => Promise.resolve('done'));
+    const handle = createQueueClient({ connection: redisUrl, keyPrefix: `entropy-${crypto.randomUUID()}` });
+    const add = vi.spyOn(Queue.prototype, 'add');
+    const close = vi.spyOn(Queue.prototype, 'close');
+    try {
+      vi.stubGlobal('crypto', null);
+      expect(await handle.client.enqueue(job, { n: 1 })).toMatchObject({ code: RandomSourceUnavailable.code });
+      expect(add).not.toHaveBeenCalled();
+      vi.stubGlobal('crypto', {
+        randomUUID: () => {
+          throw new Error('entropy');
+        },
+      });
+      expect(await handle.client.enqueue(job, { n: 1 })).toMatchObject({ code: UnexpectedDefect.code });
+      expect(add).not.toHaveBeenCalled();
+      await handle.close();
+      expect(close).not.toHaveBeenCalled();
+      expect(
+        orThrow(await handle.client.enqueue(job, { n: 1 }, { jobId: 'outer', bullmqOptions: { jobId: 'nested' } })),
+      ).toBe('nested');
+      expect(add).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      add.mockRestore();
+      await handle.close();
+      close.mockRestore();
+    }
+  });
+
   it('a job enqueued by the API app runs in the worker app, with the job retry defaults', async () => {
     const q = initQueue.context<{ readonly worker: string }>().create();
     const received: string[] = [];

@@ -2,6 +2,9 @@
   "extends": "@arki/tsconfig/internal-package.json",
   "include": ["src"],
   "files": [
+    "src/runtime-local/enqueue-ack.spec.ts",
+    "src/trigger.spec.ts",
+    "src/job-id.types.spec.ts",
     "src/builder-guards.spec.ts",
     "src/standard-schema.spec.ts",
     "src/dot.spec.ts",

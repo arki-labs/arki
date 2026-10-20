@@ -22,6 +22,11 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 5. In one test, call `assertUniqueIdPrefixes(...allIds)`.
 6. Parse raw IDs at boundaries with the owning schema; infer stored types with `IdOf`. The one-argument form preserves prefix-only compatibility. See [domain ID migration](upgrades/domain-ids.md) for brands, external/numeric IDs and wire-format limits.
 
+For UUID-v4 generation, use `defineId('', { kind: 'queue.job', format: 'uuid' })`.
+Only generation changes: the prefix-only schema still accepts external job keys.
+The default remains a 24-character body. UUID generation requires native
+`crypto.randomUUID`; no alternate source or fallback is used.
+
 ### Paginate a list with a keyset
 
 1. Declare the order once: `export const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });`.
@@ -81,6 +86,7 @@ Static misuse throws `ContractsError` (a `TypeError`). Cursor codecs return `Inv
 | `ARKI_CONTRACTS_E006` | A contract key contains `.` or a reserved name.             | Rename the key.                                            |
 | `ARKI_CONTRACTS_E008` | A Drizzle builder has no runtime metadata config.           | Use a supported Drizzle builder and matching version.      |
 | `ARKI_CONTRACTS_E009` | `defineId` got a missing, empty or non-string domain kind. | Supply one non-empty literal domain name. |
+| `ARKI_CONTRACTS_E010` | `defineId` got an unsupported generation format. | Use `format: 'uuid'` or omit format. |
 | `ARKI_CONTRACTS_E007` | The value carries no operation.                             | Pass a `createOrpcUtils` leaf or an `operations()` result. |
 
 | Definition | Meaning | What to do |

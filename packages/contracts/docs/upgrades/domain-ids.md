@@ -55,3 +55,24 @@ if (id !== 42) throw new Error('Provider ID changed');
 
 Apply the same schema-first pattern to meaningful domain strings. Free text and
 existing literal unions do not need invented identity brands.
+
+UUID-v4 domains use the same declaration and failure union:
+
+```ts run
+import { defineId } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
+
+const jobId = defineId('', { kind: 'queue.job', format: 'uuid' });
+const generated = orThrow(jobId.create());
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(generated)) {
+  throw new Error('Expected UUID v4');
+}
+if (jobId.schema.parse('customer:job/42') !== 'customer:job/42') throw new Error('External key changed');
+```
+
+`format` controls generation only; schemas keep prefix-only validation so explicit
+external job keys remain valid. Existing UUID bytes are unchanged. Native Web
+Crypto `randomUUID` is required; missing providers return `RandomSourceUnavailable`,
+while thrown faults, invalid UUID-v4 output and asynchronous protocol violations
+return `UnexpectedDefect` with private causes. Omitting format preserves the
+existing 24-character generation algorithm.

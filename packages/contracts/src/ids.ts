@@ -65,10 +65,17 @@ type SingleKind<Kind extends string, All = Kind> = Kind extends ''
  * ```
  */
 export function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>;
-/** Give same-format IDs distinct domain types without changing their stored values. */
+/**
+ * Give same-format IDs distinct domain types without changing their stored values.
+ * `format: 'uuid'` generates UUID v4 with native Web Crypto; omitting it keeps
+ * the default 24-character body. Schemas still validate only the stored prefix.
+ */
 export function defineId<const P extends string, const Kind extends string>(
   prefix: P,
-  options: { readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>) },
+  options: {
+    readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>);
+    readonly format?: 'uuid';
+  },
 ): ReturnType<typeof brandedId<P, Kind>>;
 export function defineId(prefix: string, options?: unknown) {
   if (typeof prefix !== 'string') {
@@ -85,7 +92,14 @@ export function defineId(prefix: string, options?: unknown) {
       'defineId: kind must be a non-empty domain name. Use one literal name for each identity kind.',
     );
   }
-  return brandedId(prefix, kind);
+  const format: unknown = typeof options === 'object' && options !== null ? Reflect.get(options, 'format') : undefined;
+  if (format !== undefined && format !== 'uuid') {
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidIdFormat,
+      "defineId: format must be 'uuid' or omitted for the default 24-character body.",
+    );
+  }
+  return brandedId(prefix, kind, format);
 }
 
 function prefixedIdSchema<const P extends string>(prefix: P) {
@@ -98,11 +112,15 @@ function prefixedId<const P extends string>(prefix: P) {
   return idDeclaration(prefix, prefixedIdSchema(prefix));
 }
 
-function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind) {
-  return idDeclaration(prefix, prefixedIdSchema(prefix).brand<Kind>());
+function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind, format?: 'uuid') {
+  return idDeclaration(prefix, prefixedIdSchema(prefix).brand<Kind>(), format);
 }
 
-function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${string}`>>(prefix: P, schema: TSchema) {
+function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${string}`>>(
+  prefix: P,
+  schema: TSchema,
+  format?: 'uuid',
+) {
   return {
     /** The stored prefix, unchanged. */
     prefix,
@@ -110,7 +128,7 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
     schema,
     /** A new prefixed ID, or a canonical failure when secure generation cannot finish. */
     create: (): z.output<typeof schema> | IdGenerationFailure => {
-      const body = createIdBody();
+      const body = format === 'uuid' ? createUuidBody() : createIdBody();
       if (isFailure(body)) return body;
       try {
         const result = schema.safeParse(`${prefix}${body}`);
@@ -174,6 +192,30 @@ export function createIdBody(): string | IdGenerationFailure {
       }
     }
     return UnexpectedDefect({ cause: new Error('Random provider exhausted the rejection sampling budget.') });
+  } catch (error) {
+    return UnexpectedDefect({ cause: error });
+  }
+}
+
+// Generation format does not constrain schemas: restored external keys keep their bytes.
+function createUuidBody(): string | IdGenerationFailure {
+  try {
+    const source: unknown = Reflect.get(globalThis, 'crypto');
+    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    const randomUUID: unknown = Reflect.get(source, 'randomUUID');
+    if (typeof randomUUID !== 'function') return RandomSourceUnavailable();
+    const result: unknown = Reflect.apply(randomUUID, source, []);
+    if (
+      typeof result === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result)
+    ) {
+      return result;
+    }
+    // Observe asynchronous protocol violations while returning the synchronous failure.
+    void Promise.resolve(result).catch(() => {
+      // The synchronous protocol failure below already owns this outcome.
+    });
+    return UnexpectedDefect({ cause: new TypeError('Random UUID provider returned an invalid UUID v4.') });
   } catch (error) {
     return UnexpectedDefect({ cause: error });
   }

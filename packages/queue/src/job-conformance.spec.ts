@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi 
 
 import type { FailureOf } from '@arki/failure';
 import { Cancelled, Deadline } from '@arki/async';
-import { z } from '@arki/contracts';
+import { RandomSourceUnavailable, z } from '@arki/contracts';
 import { defineFailure, InvalidInput, orThrow, UnexpectedDefect } from '@arki/failure';
 import { configure } from '@arki/log';
 import { backoff } from '@arki/resilience';
@@ -23,6 +23,7 @@ import type { AnyJobDefinition } from './types/job.ts';
 import { bullmqFailedJobSource } from './foreman/bullmq-source.ts';
 import { pgBossFailedJobSource } from './foreman/pg-boss-source.ts';
 import { initQueue } from './init.ts';
+import { queueJobId } from './job-id.ts';
 import { executeJob } from './job-outcome.ts';
 import { createRuntimeLocalQueueInstance } from './runtime-local/create-queue.ts';
 import { pgBossJobId } from './runtime-local/identity.ts';
@@ -324,6 +325,47 @@ describe.each(['bullmq', 'pg-boss'] as const)('job outcome conformance: %s', { t
       await rm(directory, { recursive: true, force: true });
     }
   }, 40_000);
+
+  it('fails before transport when entropy is unavailable, while explicit keys bypass entropy', async () => {
+    const job = q.job
+      .name(`entropy-${crypto.randomUUID()}`)
+      .input(schema)
+      .handler(() => Promise.resolve('done'));
+    await start(job);
+    const expected = '4c7af380-f188-4acd-b439-11f098a43261';
+    try {
+      vi.stubGlobal('crypto', null);
+      expect(await job.trigger({ n: 1 })).toMatchObject({ code: RandomSourceUnavailable.code });
+      vi.stubGlobal('crypto', {
+        randomUUID: () => {
+          throw new Error('entropy failed');
+        },
+      });
+      expect(await job.trigger({ n: 1 })).toMatchObject({ code: UnexpectedDefect.code });
+      if (bull === undefined) {
+        const rows = await db?.query('select id from infra_pg_boss.job where name = $1', [name]);
+        expect(rows?.rows).toEqual([]);
+      } else expect(await bull.queues().get(name)?.count()).toBe(0);
+      const sourceFailure = RandomSourceUnavailable();
+      const create = vi.spyOn(queueJobId, 'create').mockReturnValueOnce(sourceFailure);
+      expect(await job.trigger({ n: 1 })).toBe(sourceFailure);
+      create.mockRestore();
+      expect(orThrow(await job.trigger({ n: 1 }, { jobId: 'external-key' }))).toBe('external-key');
+      vi.stubGlobal('crypto', { randomUUID: () => expected });
+      expect(orThrow(await job.trigger({ n: 1 }))).toBe(expected);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    expect(await until(() => stored(expected))).toMatchObject({ state: 'completed' });
+    if (db !== undefined) {
+      const rows = await db.query<{ id: string }>(
+        "select id from infra_pg_boss.job where name = $1 and data->>'key' = $2",
+        [name, expected],
+      );
+      expect(rows.rows).toEqual([{ id: pgBossJobId(name, expected) }]);
+    }
+  });
 
   it('suppresses duplicate delivery ids while retaining the stable handler id', async () => {
     const seen: (string | undefined)[] = [];

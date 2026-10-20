@@ -191,17 +191,17 @@ export async function triggerJob<TInput, TOutput, TDeps>(
     })),
   );
 
-  return triggerValidated(internal.inputSchema, data, async () => {
+  return triggerValidated(internal.inputSchema, data, options?.bullmqOptions?.jobId ?? options?.jobId, async key => {
     const job = await queue.add(jobName, data, {
       ...jobTraceOptions(),
       priority: options?.priority,
       delay: options?.delay,
-      jobId: options?.jobId ?? crypto.randomUUID(),
       ...options?.bullmqOptions,
+      jobId: key,
       ...jobRetryOptions(internal.options),
     });
 
     observeQueue(() => debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id }));
-    return job.id ?? '';
+    return job.id;
   });
 }

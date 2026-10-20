@@ -88,19 +88,26 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
       );
     }
     const name = target._internal.name;
-    return triggerValidated(target._internal.inputSchema, data, async () => {
-      const queue = queueFor(name, target._internal.options);
-      const added = await queue.add(name, data, {
-        ...jobTraceOptions(),
-        priority: triggerOptions?.priority,
-        delay: triggerOptions?.delay,
-        jobId: triggerOptions?.jobId ?? crypto.randomUUID(),
-        ...triggerOptions?.bullmqOptions,
-        ...jobRetryOptions(target._internal.options),
-      });
-      observeQueue(() => debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' }));
-      return added.id ?? '';
-    });
+    return triggerValidated(
+      target._internal.inputSchema,
+      data,
+      triggerOptions?.bullmqOptions?.jobId ?? triggerOptions?.jobId,
+      async key => {
+        const queue = queueFor(name, target._internal.options);
+        const added = await queue.add(name, data, {
+          ...jobTraceOptions(),
+          priority: triggerOptions?.priority,
+          delay: triggerOptions?.delay,
+          ...triggerOptions?.bullmqOptions,
+          jobId: key,
+          ...jobRetryOptions(target._internal.options),
+        });
+        observeQueue(() =>
+          debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' }),
+        );
+        return added.id;
+      },
+    );
   }
 
   const client: QueueClient = {

@@ -99,9 +99,8 @@ export function createRuntimeLocalQueueInstance<TContext>(
     def._internal._trigger = (data, opts): Promise<JobTriggerResult> => {
       const activeBoss = boss;
       if (activeBoss === null) return Promise.resolve(QueueUnavailable());
-      return triggerValidated(def._internal.inputSchema, data, async () => {
-        const key = opts?.jobId ?? crypto.randomUUID();
-        await activeBoss.send(
+      return triggerValidated(def._internal.inputSchema, data, opts?.jobId, async key => {
+        const acknowledged = await activeBoss.send(
           name,
           { version: 1, input: data, trace: captureJobTrace(), key },
           {
@@ -111,6 +110,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
             id: pgBossJobId(name, key),
           },
         );
+        if (acknowledged === null && !(await activeBoss.getJobById(name, pgBossJobId(name, key)))) return;
         return key;
       });
     };
