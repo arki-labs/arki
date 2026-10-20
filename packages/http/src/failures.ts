@@ -123,6 +123,25 @@ export const IdempotencyRequestTooLarge = defineFailure('http.idempotency_reques
   remediation: 'Reduce the request body size or raise the configured limit before retrying.',
 });
 
+/** Request bytes could not be read before idempotency ownership or application work.
+ * @fix Send a fresh request with a readable body.
+ * @verify bun run test -- src/tests/idempotency-preparation.test.ts
+ */
+export const IdempotencyRequestUnreadable = defineFailure('http.idempotency_request_unreadable', {
+  status: 400,
+  message: 'The request body could not be read for idempotency protection.',
+  remediation: 'Send a fresh request with a readable body and the same idempotency key.',
+});
+/** The runtime cannot securely fingerprint a protected request.
+ * @fix Provide Web Crypto SHA-256 before retrying the same request.
+ * @verify bun run test -- src/tests/idempotency-preparation.test.ts
+ */
+export const IdempotencyHashUnavailable = defineFailure('http.idempotency_hash_unavailable', {
+  status: 503,
+  message: 'Secure request hashing is unavailable.',
+  remediation: 'Provide Web Crypto SHA-256 before retrying the same request and key.',
+});
+
 export const RESPONSE_CACHE_BEGIN_FAILURES = [IdempotencyClaimUnconfirmed, IdempotencyReplayInvalid] as const;
 export const RESPONSE_CACHE_FINISH_FAILURES = [IdempotencyWriteUnconfirmed, IdempotencyOwnershipLost] as const;
 export const RESPONSE_CACHE_ABANDON_FAILURES = [IdempotencyReleaseUnconfirmed] as const;
@@ -135,6 +154,9 @@ export const IDEMPOTENCY_FAILURES = [
   ...RESPONSE_CACHE_FINISH_FAILURES,
   IdempotencyResponseUnavailable,
   IdempotencyRequestTooLarge,
+  IdempotencyRequestUnreadable,
+  IdempotencyHashUnavailable,
+  RequestCancelled,
   ...ID_GENERATION_FAILURES,
 ] as const;
 

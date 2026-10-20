@@ -437,7 +437,7 @@ http({
         route.post('/orders', { id: 'orders.create', failures: IDEMPOTENCY_FAILURES }),
         route.post('/orders/:id/pay', { id: 'orders.pay', failures: IDEMPOTENCY_FAILURES }),
       ], // use the same descriptors the server binds; include any mount prefix
-      ttl: 24 * 60 * 60 * 1000, // milliseconds, counted from the first request
+      ttl: 24 * 60 * 60 * 1000, // milliseconds, counted from confirmed response persistence
       replayHeaders: ['content-type', 'location'], // a replay carries only these
     }),
   ],
@@ -445,6 +445,8 @@ http({
 ```
 
 - The fingerprint is method + path + sorted query + a SHA-256 of the body. The cache key is the scope plus the header value.
+- Scope callbacks may return canonical failures. Each protected route must declare those inferred failures alongside `IDEMPOTENCY_FAILURES`. `undefined` still delegates authentication to the handler without caching. Thrown scope errors become `UnexpectedDefect`; private messages stay off the wire.
+- Unreadable request bodies return `IdempotencyRequestUnreadable`. Missing Web Crypto SHA-256 returns `IdempotencyHashUnavailable`; a broken hashing provider returns `UnexpectedDefect`. These stop before cache acquisition or the handler. Cancellation observed during preparation returns `RequestCancelled`. Scope callbacks should observe `req.signal` to stop pending work.
 - No header on a listed route: 400 (`http.idempotency_key_required`). Same key, different request: 422 (`http.idempotency_key_reused`). Same key while the first is running: 409 with `Retry-After` (`http.idempotency_in_progress`). A replay has the stored status and body, the allowlisted headers, and `Idempotent-Replayed: true`.
 - **What is stored.** Every bounded response, including 5xx, 409 and 429. A status or exception does not prove that application effects never happened. Pending reservations never expire automatically; replay retention (`ttl`, milliseconds) starts at confirmed `finish`.
 - **Size.** Requests over `maxBodyBytes` (default 1 MiB) are refused with 413 before execution. Streaming, oversized or unreadable responses return `http.idempotency_response_unavailable` and retain the unresolved reservation. A thrown handler also retains its reservation.
@@ -705,6 +707,8 @@ Stable API — match on codes, never parse messages.
 | `http.idempotency_release_unconfirmed` | explicit reconciled release unconfirmed (503); query the reservation |
 | `http.idempotency_replay_invalid` / `http.idempotency_response_unavailable` | invalid stored replay or completed response cannot be retained (500); reservation stays held |
 | `http.idempotency_request_too_large` | body exceeds protection limit (413); handler does not run |
+| `http.idempotency_request_unreadable` | request body cannot be read (400); no cache acquisition or handler execution |
+| `http.idempotency_hash_unavailable` | runtime has no Web Crypto SHA-256 (503); no cache acquisition or handler execution |
 | `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
 | `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |

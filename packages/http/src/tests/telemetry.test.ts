@@ -172,6 +172,42 @@ describe('default HTTP telemetry', () => {
     for (const span of spans) expect(span.attributes).toEqual({ 'http.response.status_code': 200 });
   });
 
+  it('records pre-dispatch scope defects without private causes or request data', async () => {
+    const exporter = installTelemetry();
+    const cache = {
+      begin: vi.fn<ResponseCache['begin']>(() => Promise.resolve('started')),
+      finish: vi.fn(() => Promise.resolve()),
+      abandon: vi.fn(() => Promise.resolve()),
+    } satisfies ResponseCache;
+    const handler = vi.fn(() => Promise.resolve(new Response('ok')));
+    const endpoint = route.post('/write', { id: 'telemetry.preparation', failures: IDEMPOTENCY_FAILURES });
+    const fetch = composeMiddleware(handler, [
+      idempotent({
+        cache,
+        routes: [endpoint],
+        ttl: 100,
+        scope: () => {
+          throw new Error('private scope credentials');
+        },
+      }),
+    ]);
+    const response = await fetch(
+      new Request('https://private.example/write', {
+        method: 'POST',
+        headers: { 'idempotency-key': 'private-key' },
+        body: 'private-body',
+      }),
+    );
+    expect(response.status).toBe(500);
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes).toEqual({ 'failure.code': 'failure.unexpected_defect' });
+    expect(spans[0]?.events).toEqual([]);
+    expect(JSON.stringify(spans[0]?.attributes)).not.toContain('private');
+    expect(vi.mocked(cache.begin)).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('executes once when a defective context callback reenters and then throws', async () => {
     installTelemetry();
     let calls = 0;

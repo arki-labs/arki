@@ -15,3 +15,27 @@ Postgres uses the existing nullable expiry column for unresolved claims. Journal
 Upgrade all writers together. Stop old writers and drain in-flight operations before migration. Reconcile legacy pending records, especially Redis keys whose old TTL can still expire. Do not change the cache namespace to bypass unresolved work. A reservation that expired before the upgrade cannot be reconstructed from this cache alone.
 
 This response cache does not commit with the business transaction. After replay expiry, storage loss or operator deletion the key can run again. For durable business idempotency, persist an application receipt in the same transaction as its effects. Recovery must use that authoritative receipt before releasing an uncertain HTTP reservation.
+
+## Request preparation
+
+Keep `IDEMPOTENCY_FAILURES` on every protected descriptor. It now includes
+`IdempotencyRequestUnreadable`, `IdempotencyHashUnavailable` and
+`RequestCancelled`. Existing `UnexpectedDefect` admission also covers scope
+throws/rejections and malformed or rejecting crypto providers. All these
+failures stop before cache acquisition and application execution; their fixed
+public messages do not disclose the scope, key, request bytes or private cause.
+This does not prove that an earlier request with the same key never ran.
+
+Scope callbacks can return an exact canonical failure union. List the original
+definitions on each protected route alongside `IDEMPOTENCY_FAILURES`; no
+separate failure union or callback error map is needed. The matched route's
+definitions control serialization. Clients infer these failures from the same
+descriptor. Existing string scopes and `undefined` bypass keep their meaning.
+
+Request body bytes, scope/key encoding, SHA-256 fingerprints and stored records
+remain compatible. Supply Web Crypto SHA-256 in every server runtime. No
+noncryptographic fallback is used. A broken provider is a defect, not permission
+to retry automatically. Preparation checks cancellation before and after
+awaited work; asynchronous scopes must use `req.signal` to stop their own
+pending work. Native `fetch` middleware still exposes responses through its
+explicit HTTP exception bridge.

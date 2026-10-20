@@ -41,6 +41,8 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 4. Cache adapters implement `begin(key, fingerprint, owner)` and `finish(key, owner, response, ttl)`. Infer exact failures from the exported method-specific tuples. Pending claims have no expiry; `finish` starts replay retention. Never discard a claim merely because a handler throws or returns an error status.
 5. Every bounded response is replayed, including 5xx/409/429. Unsupported response bodies retain the claim and return a canonical failure; oversized requests stop before the handler. Use `abandon` only after application reconciliation proves repetition safe. See [persistence migration](upgrade-idempotency.md) for coordinated store upgrades and retention limits.
+6. Return a canonical failure from `scope` to refuse preparation. Include its original definition on every protected route alongside `IDEMPOTENCY_FAILURES`; the callback's exact union is inferred. Thrown callbacks and malformed hashing providers become `UnexpectedDefect`. Unreadable request bytes and unavailable SHA-256 have distinct canonical failures. These stop before cache or application work, and existing spans record their safe codes.
+7. Observe `req.signal` inside asynchronous scope work. Preparation checks cancellation between awaited steps; it does not interrupt a callback that ignores the signal. `undefined` retains the existing unauthenticated bypass, so the handler must still enforce authentication.
 
 ### Correlate and trace a request
 

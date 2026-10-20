@@ -100,6 +100,8 @@ export {
   IdempotencyReplayInvalid,
   IdempotencyResponseUnavailable,
   IdempotencyRequestTooLarge,
+  IdempotencyRequestUnreadable,
+  IdempotencyHashUnavailable,
   RESPONSE_CACHE_BEGIN_FAILURES,
   RESPONSE_CACHE_FINISH_FAILURES,
   RESPONSE_CACHE_ABANDON_FAILURES,
