@@ -1,6 +1,6 @@
 # Design principles
 
-DOT is built around five principles. They are the standard every API,
+DOT is built around six principles. They are the standard every API,
 error message, and PR is measured against. When two paths exist, pick the
 one that honors the principles. When a principle and a convenience
 conflict, **the principle wins**.
@@ -129,8 +129,9 @@ What this principle _forbids_:
 
 ## 5. The kernel has zero optional dependencies
 
-`@arki/dot` ships with `@arki/assert`, `@arki/contracts`, `@arki/log`,
-and `zod`. That is the entire dependency surface. Adapters (database,
+`@arki/dot` ships with `@arki/async`, `@arki/cli`, `@arki/clock`,
+`@arki/contracts`, `@arki/failure`, `@arki/log`, `@arki/schema`,
+`@opentelemetry/api` and `zod`. That is the entire dependency surface. Adapters (database,
 queue, auth, event-sourcing) live in their own packages and depend on
 `@arki/dot` as an _optional peer_.
 
@@ -150,6 +151,39 @@ What this principle _forbids_:
   optional but ships as part of the package.
 - Cross-adapter deps (e.g., `@arki/db` requiring `@arki/kv`). Adapters are
   composed at the _app_ layer, not chained in source.
+
+---
+
+## 6. Schemas own validation
+
+Every check that turns an unknown value into a typed one comes from a
+schema. Zod is the default; any Standard Schema validator (Valibot, ArkType)
+works. Dot adds no validation vocabulary of its own. The schema is also the
+source of the type: Dot infers it, never restates it.
+
+This means we:
+
+- Validate **every boundary with a schema**: oRPC and HTTP input, config and
+  env, job and workflow payloads, storage reads, AI tool arguments and model
+  output, and anything typed `unknown`.
+- Use **one schema for both failure channels.** Expected bad input returns
+  a typed failure with `parse(schema, value)` (`InvalidInput`, HTTP 400). A
+  bad value that means a bug throws with `assert(value, schema)` or
+  `ensure(value, schema)` from `@arki/schema` (a defect, HTTP 500).
+- Write **structural checks as schemas too**: `is(value, recordSchema)`,
+  never a hand-written guard.
+
+What this principle _forbids_:
+
+- Hand-written type guards on unknown values (`typeof x === 'object' && x !== null`,
+  ad-hoc `isX(value: unknown)` helpers).
+- Validator helpers outside a schema (`validator.isEmail`, custom regex checks
+  on raw input).
+- A type declared next to its schema instead of inferred from it.
+
+Preconditions on values that are already typed use `invariant`, and
+exhaustive switches use `unreachable` (both from `@arki/failure`). Arki
+decision A-39 records this principle for every `@arki/*` package.
 
 ---
 

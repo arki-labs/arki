@@ -50,6 +50,32 @@ storage/transport round trips prove that brands survive composition and are
 restored at boundaries. Existing prefix-only IDs and plain-string domain values
 remain migration work until those checks pass.
 
+## Schemas own validation
+
+Every check that turns an unknown value into a typed one comes from a schema.
+Zod (the default), Valibot, ArkType and any other Standard Schema validator are
+the authority. Arki adds no validation vocabulary of its own. This covers HTTP and
+RPC input, config and env, JSON, storage reads, queue and workflow payloads, AI
+tool arguments and model output, and any parameter typed `unknown`.
+
+The schema is also the type's source: the type is inferred from it, never restated.
+One schema serves both failure channels with the same issues:
+
+- Expected bad input returns a typed failure: `parse(schema, value)` gives `InvalidInput`.
+- A bad value that means a bug throws: `assert(value, schema)` narrows in place, and
+  `ensure(value, schema)` returns the schema's output.
+- Small structural checks are schemas too: `is(value, recordSchema)`, never a
+  hand-written `typeof value === 'object'` guard. A zero-dependency package that
+  cannot take Zod writes a hand-written Standard Schema.
+
+Out of scope: preconditions on values that are already typed, such as finite or
+range checks on a `number` parameter in a hot path, use `invariant` or plain code.
+Exhaustive switches use `unreachable`. Only schema implementations and
+`@arki/schema` itself inspect raw shapes by hand. See [A-39](decisions.md#framework-consolidation-2026-10-19).
+
+Verification rejects hand-written type guards, validator helpers and ad-hoc
+`isX(value: unknown)` functions on unknown values. Existing copies are migration work.
+
 ## Own failures and execution
 
 Every fallible public operation exposes typed outcomes. Owned boundaries supervise
