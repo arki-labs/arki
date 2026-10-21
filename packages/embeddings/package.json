@@ -1,7 +1,6 @@
 {
   "name": "@arki/embeddings",
   "version": "0.0.0",
-  "private": true,
   "description": "Text → vectors and rerank for ARKI: one Embedder shape over Ollama, OpenAI, Voyage, Google, Cohere, Mistral, Jina, Bedrock, OpenAI-compatible servers and in-process Transformers.js; failures as values; a fake embedder for tests.",
   "keywords": [
     "arki",
