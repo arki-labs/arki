@@ -2,7 +2,8 @@
  * File edits behind `dot env init | set | encrypt | decrypt | rotate`. Each write goes to a temp file
  * first and is renamed into place, so an interrupted command never leaves half a file.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -172,8 +173,13 @@ function decryptWithAny(value: string, privateKeys: readonly string[], key: stri
   throw new Error(`${key} cannot be decrypted with the available private key`);
 }
 
+/**
+ * Write through a temp file with an unguessable name, created exclusively (never through a symlink
+ * planted at that name) with the original file's mode, or owner-only for a new file, then rename.
+ */
 function atomicWrite(file: string, text: string): void {
-  const temp = `${file}.${String(process.pid)}.tmp`;
-  writeFileSync(temp, text);
+  const mode = existsSync(file) ? statSync(file).mode & 0o777 : 0o600;
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
+  writeFileSync(temp, text, { flag: 'wx', mode });
   renameSync(temp, file);
 }

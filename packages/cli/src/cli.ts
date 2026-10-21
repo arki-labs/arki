@@ -301,6 +301,8 @@ export function defineCli(def: Cli): Program {
       }
       if (aborted()) return fail(Cancelled());
       if (isFailure(result)) return fail(result);
+      // The child already wrote the output; an envelope after it would corrupt a pipe.
+      if (node.passthrough === true && !dryRun && typeof result === 'number') return result;
       const fields = stringValue(globals['fields']);
       const data = fields === undefined ? result : pickFields(result, parseFields(fields));
       return finish(context => okEnvelope(data, context));

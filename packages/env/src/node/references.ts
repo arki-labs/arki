@@ -18,14 +18,14 @@ export const DEFAULT_RESOLVERS: Readonly<Record<string, ReferenceResolver>> = {
     const [environment, ...rest] = pathOf(reference);
     const name = rest.pop();
     if (environment === undefined || name === undefined) throw new Error('expected infisical://<env>/<path>/<NAME>');
-    return runProvider('infisical', ['secrets', 'get', name, '--plain', '--silent', `--env=${environment}`, `--path=/${rest.join('/')}`]);
+    return runProvider('infisical', ['secrets', 'get', '--plain', '--silent', `--env=${environment}`, `--path=/${rest.join('/')}`, '--', name]);
   },
   doppler: reference => {
     const [project, config, name, ...extra] = pathOf(reference);
     if (project === undefined || config === undefined || name === undefined || extra.length > 0) {
       throw new Error('expected doppler://<project>/<config>/<NAME>');
     }
-    return runProvider('doppler', ['secrets', 'get', name, '--plain', '--project', project, '--config', config]);
+    return runProvider('doppler', ['secrets', 'get', '--plain', `--project=${project}`, `--config=${config}`, '--', name]);
   },
 };
 
@@ -49,9 +49,15 @@ function runProvider(command: string, args: readonly string[]): string {
   }
 }
 
+/** Path segments may never start with `-` (they would read as flags) or hold shell-ish characters. */
+const SEGMENT = /^\w[\w.-]*$/;
+
 function pathOf(reference: string): string[] {
-  return reference
+  const parts = reference
     .slice(reference.indexOf('://') + 3)
     .split('/')
     .filter(part => part !== '');
+  const bad = parts.find(part => !SEGMENT.test(part));
+  if (bad !== undefined) throw new Error(`reference segment "${bad}" must match ${String(SEGMENT)}`);
+  return parts;
 }

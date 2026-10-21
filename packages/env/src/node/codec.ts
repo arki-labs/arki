@@ -13,12 +13,12 @@ import { Config } from 'eciesjs/config';
 
 import { ENCRYPTED_PREFIX } from '../core/define-env.js';
 
-export { ENCRYPTED_PREFIX };
+export { ENCRYPTED_PREFIX } from '../core/define-env.js';
 
 /** Pinned so a process that changes the global `ECIES_CONFIG` cannot change our bytes. */
 const DOTENVX_ECIES = new Config();
 
-const KEY_PATTERN = /^[ \t]*(?:export[ \t]+)?([\w.-]+)[ \t]*=[ \t]*(.*)$/;
+const KEY_PATTERN = /^[ \t]*(?:export[ \t]+)?([\w.-]+)[ \t]*=(.*)$/;
 const QUOTES = ['"', "'", '`'] as const;
 
 /** One `KEY=value` assignment: its decoded value and the lines it spans (`end` exclusive). */
@@ -51,7 +51,7 @@ export function parseEnv(text: string): EnvDocument {
     const match = KEY_PATTERN.exec(lines[index] ?? '');
     if (match === null) continue;
     const key = match[1] ?? '';
-    let raw = match[2] ?? '';
+    let raw = (match[2] ?? '').trimStart();
     const start = index;
     const quote = QUOTES.find(candidate => raw.startsWith(candidate));
     if (quote !== undefined) {
@@ -174,9 +174,16 @@ function decodeValue(raw: string, quote: string | undefined): string {
   return quote === '"' ? inner.replaceAll('\\n', '\n').replaceAll('\\r', '\r') : inner;
 }
 
-/** Double quotes unless the value needs another quote to survive a round trip through `dotenv`. */
+/**
+ * The first quoting that reads back as exactly `value`, in one entry: double quotes (newlines as
+ * `\n`), then single, then backticks. A value no quoting can carry (it holds every quote character
+ * and a line break, say) is refused rather than written in a form that could inject other keys.
+ */
 function encodeValue(value: string): string {
-  if (!value.includes('"')) return `"${value.replaceAll('\r', '\\r').replaceAll('\n', '\\n')}"`;
-  if (!value.includes("'") && !value.includes('\n')) return `'${value}'`;
-  return `\`${value}\``;
+  const candidates = [`"${value.replaceAll('\r', '\\r').replaceAll('\n', '\\n')}"`, `'${value}'`, `\`${value}\``];
+  for (const candidate of candidates) {
+    const document = parseEnv(`K=${candidate}`);
+    if (document.entries.length === 1 && document.entries[0]?.value === value) return candidate;
+  }
+  throw new Error('this value cannot be stored in a .env file: it holds every quote character together with a line break or an escape sequence');
 }

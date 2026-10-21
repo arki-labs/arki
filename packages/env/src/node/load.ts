@@ -9,6 +9,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { z } from 'zod';
+
 import { decryptValue, envValues, isEncrypted, isKeyName, keyNamesFor, parseEnv } from './codec.js';
 import { findPrivateKey, keysFileCandidates } from './keys.js';
 import type { ReferenceResolver } from './references.js';
@@ -87,10 +89,18 @@ export type EnvFilesReport = {
   readonly applied: readonly string[];
   /** Keys the real environment set to a different value, so the file value was not used. */
   readonly shadowed: readonly { readonly key: string; readonly file: string; readonly line: number }[];
+  /** File entries never applied: loader-hijacking keys (`NODE_OPTIONS`, `LD_*`, `DYLD_*`) and references into public keys. */
+  readonly refused: readonly { readonly key: string; readonly file: string; readonly line: number; readonly reason: string }[];
   readonly errors: readonly EnvFilesError[];
 };
 
 const loadedSecrets = new Set<string>();
+
+/** Keys a file may never set: they make every process started with this environment load other code. */
+const REFUSED_KEY = /^(?:NODE_OPTIONS|LD_\w+|DYLD_\w+)$/;
+
+/** Keys bundlers inline into browser code. */
+const PUBLIC_KEY = /^(?:VITE_|NEXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)/;
 
 /** Load the env files. Never throws for bad files: problems are in `report.errors`. */
 export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport {
@@ -106,9 +116,15 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport 
     .filter(file => existsSync(file));
 
   const winners = new Map<string, { readonly file: string; readonly line: number; readonly raw: string }>();
+  const refused: { key: string; file: string; line: number; reason: string }[] = [];
   for (const file of files) {
     for (const [key, entry] of envValues(parseEnv(readFileSync(file, 'utf8')))) {
-      if (!isKeyName(key)) winners.set(key, { file, line: entry.start + 1, raw: entry.value });
+      if (isKeyName(key)) continue;
+      if (REFUSED_KEY.test(key)) {
+        refused.push({ key, file, line: entry.start + 1, reason: 'changes how every child process loads code' });
+        continue;
+      }
+      winners.set(key, { file, line: entry.start + 1, raw: entry.value });
     }
   }
 
@@ -153,6 +169,10 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport 
       values.push({ key, file, line, kind: 'plain', value: raw });
       continue;
     }
+    if (PUBLIC_KEY.test(key)) {
+      refused.push({ key, file, line, reason: 'a public (browser-bundled) key cannot hold a secret-manager reference' });
+      continue;
+    }
     try {
       values.push({ key, file, line, kind: 'reference', value: resolvers[scheme]?.(raw) ?? '' });
     } catch (error) {
@@ -182,7 +202,7 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport 
     }
   }
 
-  return { root, environment, files, values, applied, shadowed, errors };
+  return { root, environment, files, values, applied, shadowed, refused, errors };
 }
 
 /** Every value this process loaded from an encrypted or referenced entry: what log masking hides. */
@@ -200,8 +220,7 @@ export function findRoot(cwd: string): string {
   let workspace: string | undefined;
   for (let dir = cwd; ; dir = path.dirname(dir)) {
     if (existsSync(path.join(dir, '.git'))) return dir;
-    const manifest = path.join(dir, 'package.json');
-    if (workspace === undefined && existsSync(manifest) && readFileSync(manifest, 'utf8').includes('"workspaces"')) workspace = dir;
+    if (workspace === undefined && isWorkspaceRoot(path.join(dir, 'package.json'))) workspace = dir;
     if (path.dirname(dir) === dir) return workspace ?? cwd;
   }
 }
@@ -212,6 +231,17 @@ export function envDirs(root: string, cwd: string): readonly string[] {
   if (relative.startsWith('..') || path.isAbsolute(relative)) return [cwd];
   const parts = relative === '' ? [] : relative.split(path.sep);
   return [root, ...parts.map((_, index) => path.join(root, ...parts.slice(0, index + 1)))];
+}
+
+const workspaceManifest = z.object({ workspaces: z.union([z.array(z.string()), z.object({ packages: z.array(z.string()) })]) });
+
+function isWorkspaceRoot(manifest: string): boolean {
+  if (!existsSync(manifest)) return false;
+  try {
+    return workspaceManifest.safeParse(JSON.parse(readFileSync(manifest, 'utf8'))).success;
+  } catch {
+    return false;
+  }
 }
 
 function tryDecrypt(raw: string, keys: readonly string[]): string | undefined {

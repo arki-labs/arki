@@ -10,6 +10,9 @@ import { capture, json } from './__fixtures__/capture.js';
 import { fixtureCli } from './__fixtures__/tree.js';
 import { defineCli } from './cli.js';
 import { defineCommand } from './command.js';
+import { defineFailure } from '@arki/failure';
+
+const Unavailable = defineFailure('app.unavailable', { message: 'unavailable' });
 
 /** Stdin in two chunks, a string and bytes, the way a pipe may deliver it. */
 async function* chunks(): AsyncGenerator<string | Uint8Array> {
@@ -100,6 +103,28 @@ describe('--dry-run', () => {
     const { exitCode, stdout } = await capture(program, ['ping', 'now', '--dry-run']);
     expect(exitCode).toBe(2);
     expect(json(stdout)['error']).toMatchObject({ code: 'cli.preview_unsupported', outcome: 'unchanged' });
+  });
+});
+
+describe('passthrough', () => {
+  const exec = defineCommand({
+    describe: 'Run a child',
+    input: z.object({ code: z.number(), fail: z.boolean().default(false) }),
+    passthrough: true,
+    run: ({ input }) => (input.fail ? Unavailable() : input.code),
+  });
+  const program = defineCli({ name: 'app', version: '1.0.0', commands: { exec } });
+
+  it('writes no envelope and exits with the child code, so a pipe carries only the child output', async () => {
+    // WHY: `dot env run -- bun test | jq` must see the test output, not a JSON envelope after it.
+    const { exitCode, stdout } = await capture(program, ['exec', '--code', '7']);
+    expect({ exitCode, stdout }).toEqual({ exitCode: 7, stdout: '' });
+  });
+
+  it('still writes a failure returned before the child starts', async () => {
+    const { exitCode, stdout } = await capture(program, ['exec', '--code', '0', '--fail']);
+    expect(exitCode).toBe(3);
+    expect(json(stdout)['ok']).toBe(false);
   });
 });
 

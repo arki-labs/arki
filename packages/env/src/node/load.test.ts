@@ -178,3 +178,30 @@ describe('editing', () => {
     expect(env['K']).toBe('v-demo');
   });
 });
+
+describe('refused entries', () => {
+  it('never applies loader-hijacking keys from a file', () => {
+    // WHY: a committed NODE_OPTIONS=--require would run code in every process started with this env.
+    write(app, '.env.development', ['NODE_OPTIONS=--require ./evil.js', 'DYLD_INSERT_LIBRARIES=x', 'OK=1']);
+    const { env, report } = load();
+    expect([env['NODE_OPTIONS'], env['DYLD_INSERT_LIBRARIES'], env['OK']]).toEqual([undefined, undefined, '1']);
+    expect(report.refused.map(entry => entry.key)).toEqual(['NODE_OPTIONS', 'DYLD_INSERT_LIBRARIES']);
+  });
+
+  it('never resolves a reference into a public key', () => {
+    // WHY: a VITE_ key is inlined into the browser bundle; a secret must never reach it.
+    write(app, '.env.development', ['VITE_TOKEN=vault://x']);
+    let called = false;
+    const env: Record<string, string | undefined> = {};
+    const report = loadEnvFiles({ cwd: app, environment: 'development', env, references: { vault: () => { called = true; return 's'; } } });
+    expect({ called, value: env['VITE_TOKEN'], refused: report.refused.map(entry => entry.key) }).toEqual({ called: false, value: undefined, refused: ['VITE_TOKEN'] });
+  });
+});
+
+describe('reference paths', () => {
+  it('rejects a segment that would read as a CLI flag', async () => {
+    const { DEFAULT_RESOLVERS } = await import('./references.js');
+    expect(() => DEFAULT_RESOLVERS['doppler']?.('doppler://--token=x/cfg/NAME')).toThrow(/must match/);
+  });
+});
+

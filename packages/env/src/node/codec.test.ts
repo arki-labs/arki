@@ -121,3 +121,16 @@ describe('edits touch one entry only', () => {
     expect(removeEnvValue('A=1\nB=2\nA=3\n', 'A')).toBe('B=2\n');
   });
 });
+
+describe('values cannot inject other keys', () => {
+  it('keeps a literal backslash-n as written', () => {
+    // WHY: double quotes would turn it into a line break; the value must come back byte for byte.
+    expect(readEnvValue(parseEnv(setEnvValue('', 'K', 'a\\nb')), 'K')).toBe('a\\nb');
+  });
+
+  it('refuses a value no quoting can carry instead of writing a second key', () => {
+    // WHY: a value holding every quote plus a newline could otherwise end the quote and start `EVIL=`.
+    expect(() => setEnvValue('', 'K', 'a"b\'c`\nEVIL=1')).toThrow(/cannot be stored/);
+  });
+});
+

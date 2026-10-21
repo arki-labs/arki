@@ -83,6 +83,12 @@ export type Command<TInput extends SchemaWithJson | undefined, TResult, TService
   readonly hidden?: boolean;
   /** Offered to MCP clients. Accepted now; the MCP server is not built yet. */
   readonly mcp?: boolean;
+  /**
+   * The command hands stdout to a child process (`dot env run -- <cmd>`, like `op run`): `run`
+   * returns the child's exit code, and on success no envelope is written in any mode, so the child's
+   * output is the whole output. A returned failure is written as usual.
+   */
+  readonly passthrough?: boolean;
 };
 
 /** The context the framework passes to any command: input validated by that command's own schema. */
@@ -104,6 +110,7 @@ export type AnyCommand<TServices = unknown> = {
   readonly aliases?: readonly string[];
   readonly hidden?: boolean;
   readonly mcp?: boolean;
+  readonly passthrough?: boolean;
 };
 
 /** A command's success value: what `run` returns, awaited, without its failures. */
