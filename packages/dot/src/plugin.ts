@@ -6,7 +6,7 @@
  * `defineApp`, `testApp` / `bootTestApp`, plus lifecycle / manifest /
  * diagnostics types.
  *
- * Adapter packages (e.g. `@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`)
+ * Adapter packages (e.g. `@arki/dot/env`, `@arki/kv/dot`, `@arki/db/dot`)
  * import from this subpath so their `*.d.ts` graphs stay tight.
  *
  * @example

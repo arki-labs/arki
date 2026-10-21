@@ -1,5 +1,5 @@
 /**
- * DOT adapter for `@arki/env`.
+ * Env adapter for Dot (`@arki/dot/env`), built on `@arki/env`.
  *
  * Wraps `defineEnv()` as a DOT plugin so a DOT app validates its
  * environment at boot. The `env` factory builds the env and forces
@@ -10,7 +10,7 @@
  * @example
  * ```ts
  * import { defineApp } from '@arki/dot';
- * import { env } from '@arki/env/dot';
+ * import { env } from '@arki/dot/env';
  * import { z } from 'zod';
  *
  * const app = await defineApp('my-app')
@@ -30,15 +30,15 @@
  * .use(rename(env({ schema: publicSchema }), { env: 'publicEnv' }, 'public-env'))
  * ```
  *
- * The `@arki/dot` package is an OPTIONAL peer of `@arki/env`. Importing
+ * `@arki/dot` depends on `@arki/env`, so this adapter needs no extra install. Importing
  * this adapter without `@arki/dot` installed will fail at module load —
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { DotPluginError, plugin } from '@arki/dot/plugin';
+import { DotPluginError, plugin } from './plugin.js';
 
-import { defineEnv, formatIssues } from './core/define-env.js';
+import { defineEnv, formatIssues } from '@arki/env/core';
 
 export const ENV_PLUGIN_ERROR_CODES = {
   /**

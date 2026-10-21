@@ -42,11 +42,6 @@
       "import": "./dist/contracts/index.js",
       "default": "./dist/contracts/index.js"
     },
-    "./dot": {
-      "types": "./dist/dot.d.ts",
-      "import": "./dist/dot.js",
-      "default": "./dist/dot.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -85,17 +80,8 @@
     "@t3-oss/env-core": "catalog:env",
     "zod": "catalog:"
   },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@arki/bench": "workspace:*",
-    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",

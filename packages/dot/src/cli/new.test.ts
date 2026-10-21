@@ -7,7 +7,7 @@
  * generated `app.ts` parses + imports.
  *
  * No `npm install` is ever executed; integration with adapter packages
- * is exercised through the existing in-repo `@arki/env/dot` adapter.
+ * is exercised through the existing in-repo `@arki/dot/env` adapter.
  */
 
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -417,7 +417,7 @@ describe('generated app content', () => {
     const appTs = await readFile(join(workDir, 'fixture', 'src', 'app.ts'), 'utf-8');
     expect(appTs).toContain("defineApp('fixture')");
     expect(appTs).toContain('@arki/dot');
-    expect(appTs).toContain('@arki/env/dot');
+    expect(appTs).toContain('@arki/dot/env');
     expect(appTs).not.toContain('TODO');
   });
 
@@ -440,7 +440,7 @@ describe('generated app content', () => {
 describe('generated app boots', () => {
   it('the generated app.ts boots via bun and reports a `booted` manifest', async () => {
     // Use a scratch dir UNDER the workspace so the generated `app.ts`
-    // can resolve `@arki/dot` and `@arki/env/dot` via the workspace's
+    // can resolve `@arki/dot` and `@arki/dot/env` via the workspace's
     // node_modules. A tmpdir() outside the workspace has no module
     // resolution path back to the installed adapters.
     const workspaceRoot = resolve(__dirname, '..', '..', '..', '..');

@@ -792,7 +792,7 @@ const PUBLIC_README = [
   '',
   '```ts',
   "import { defineApp } from '@arki/dot';",
-  "import { env }       from '@arki/env/dot';",
+  "import { env }       from '@arki/dot/env';",
   "import { db }        from '@arki/db/dot';",
   "import { kv }        from '@arki/kv/dot';",
   '',

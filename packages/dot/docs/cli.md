@@ -124,7 +124,7 @@ starting point with `--template`:
   Postgres, a production `Dockerfile`, tests on in-memory PGlite (no
   Docker), and a README + AGENTS.md. Run it with `bun install`,
   `cp .env.example .env`, `docker compose up -d`, `bun run dev`.
-- **`minimal`** — a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
+- **`minimal`** — a `defineApp(...)` entrypoint wired to `@arki/dot/env`,
   a vitest that boots the app and asserts the manifest shape, and an
   `AGENTS.md` documenting verification commands.
 

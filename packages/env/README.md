@@ -43,14 +43,13 @@ Leave out `runtimeEnv` in a server app. `defineEnv` then reads `globalThis.proce
 
 ## Runtime support
 
-`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. `@arki/env/dot` needs `@arki/dot`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
+`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. The Dot adapter lives in `@arki/dot/env`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
 
 ## Public imports
 
 - `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`.
 - `@arki/env/contracts`: `contracts` and the per-category namespaces `commonContracts`, `urlContracts`, `parseContracts`.
 - `@arki/env`: re-exports `contracts`.
-- `@arki/env/dot`: `env()` plugin, `ENV_PLUGIN_ERROR_CODES`, `EnvDotOptions`, `EnvServices`.
 
 ## Secrets
 
@@ -134,7 +133,7 @@ try {
 invalid environment
 ```
 
-The Dot plugin (`@arki/env/dot`) validates at boot. A bad environment stops `boot()` with `ARKI_ENV_PLUGIN_E001`. Its `remediation` tells you to set the listed variables. `dot explain` never validates.
+The Dot adapter (`env()` from `@arki/dot/env`) validates at boot. A bad environment stops `boot()` with `ARKI_ENV_PLUGIN_E001`. Its `remediation` tells you to set the listed variables. `dot explain` never validates.
 
 Handle it by fixing the variables. Do not catch the error and continue with defaults.
 
@@ -150,7 +149,8 @@ Handle it by fixing the variables. Do not catch the error and continue with defa
 
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.
 - [Upgrade 0.0.11 to 0.1.0](docs/upgrades/0.0.11-to-0.1.0.md): what broke and how to migrate.
-- The `@arki/env/dot` plugin publishes `env` through `provides`. Consumers write `needs: { env: envPlugin.provides.env }`. See the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) package for plugin authoring and lifecycle.
+- [Upgrade 0.1.0 to 0.2.0](docs/upgrades/0.1.0-to-0.2.0.md): the Dot adapter moved to `@arki/dot/env`.
+- The Dot adapter `@arki/dot/env` publishes `env` through `provides`. Consumers write `needs: { env: envPlugin.provides.env }`. See the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) package for plugin authoring and lifecycle.
 
 ## Support
 

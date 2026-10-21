@@ -448,7 +448,7 @@ This minimises what the adapter pulls in.
 
 See the official adapters for reference:
 
-- `@arki/env/dot` — env validation via Zod (sync provides, no cleanup).
+- `@arki/dot/env` — env validation via Zod (sync provides, no cleanup).
 - `@arki/kv/dot` — Redis-backed KV (async provides, dispose closes the client).
 - `@arki/db/dot` — Drizzle ORM (async provides, dispose closes the pool).
 

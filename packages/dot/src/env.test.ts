@@ -14,14 +14,14 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { program } from '@arki/dot/cli';
-import { defineApp, DotPluginError, rename } from '@arki/dot/plugin';
+import { program } from './cli/index.js';
+import { defineApp, DotPluginError, rename } from './plugin.js';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
-import type { EnvServices } from './dot.js';
-import { env, ENV_PLUGIN_ERROR_CODES } from './dot.js';
+import type { EnvServices } from './env.js';
+import { env, ENV_PLUGIN_ERROR_CODES } from './env.js';
 
-describe('@arki/env/dot', () => {
+describe('@arki/dot/env', () => {
   it('boots and exposes the validated env service', async () => {
     // eslint-disable-next-line turbo/no-undeclared-env-vars -- test-only variable, set and removed by this test
     process.env['ADAPTER_TEST_PORT'] = '4242';
@@ -98,7 +98,7 @@ describe('@arki/env/dot', () => {
   });
 });
 
-describe('@arki/env/dot validation at boot', () => {
+describe('@arki/dot/env validation at boot', () => {
   const schema = { ENV_PLUGIN_T1_A: z.string(), ENV_PLUGIN_T1_B: z.url() };
 
   beforeEach(() => {
@@ -157,7 +157,7 @@ describe('@arki/env/dot validation at boot', () => {
     const appDir = await mkdtemp(path.join(cacheDir, 'explain-'));
     try {
       const appFile = path.join(appDir, 'app.ts');
-      const envModule = JSON.stringify(fileURLToPath(new URL('dot.ts', import.meta.url)));
+      const envModule = JSON.stringify(fileURLToPath(new URL('env.ts', import.meta.url)));
       await writeFile(
         appFile,
         [

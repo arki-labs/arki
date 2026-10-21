@@ -1,6 +1,5 @@
 /**
- * Worked example from `packages/dot/docs/quickstart.md`. It lives in `@arki/env` because it
- * imports `@arki/env/dot`, and `@arki/dot` must not depend on `@arki/env`.
+ * The smallest Dot app with a typed env: `defineApp` plus the `@arki/dot/env` adapter.
  *
  * This file is intentionally minimal and dependency-light:
  *
@@ -21,7 +20,7 @@
  */
 
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 import { z } from 'zod';
 
 export const app = await defineApp('my-app')

@@ -135,7 +135,7 @@ const MINIMAL_FILE_REASONS: Record<string, string> = {
   'AGENTS.md': 'Agent-readable conventions (verification commands, public/private boundaries, DOT artifact locations)',
   '.gitignore': 'Standard ignores for node_modules, dist, env files',
   'src/app.ts': 'App entrypoint composing defineApp + env adapter',
-  'src/env.ts': 'Env schema (zod) consumed by @arki/env/dot',
+  'src/env.ts': 'Env schema (zod) consumed by @arki/dot/env',
   'tests/boot.test.ts': 'Vitest that boots the app and asserts manifest shape',
 };
 
@@ -153,7 +153,7 @@ const STACK_FILE_REASONS: Record<string, string> = {
   'vite.config.ts': 'Vite + TanStack Start + Nitro + Tailwind',
   'vitest.config.ts': 'Vitest config (tests use in-memory PGlite, no Docker)',
   'src/app.ts': 'The DOT app: log, env, db, migrations, journal',
-  'src/env.ts': 'Env schema (zod) consumed by @arki/env/dot',
+  'src/env.ts': 'Env schema (zod) consumed by @arki/dot/env',
 };
 
 const FILE_REASONS: Record<TemplateName, Record<string, string>> = {

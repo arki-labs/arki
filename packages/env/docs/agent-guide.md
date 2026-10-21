@@ -8,7 +8,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 2. A schema is any Standard Schema. Each value is typed as the schema's output, so defaults and coercions apply.
 3. `contracts` holds ready-made shapes: ports, URLs, comma lists and JSON.
 4. `secret(schema)` makes a `Redacted` value. It prints as `[redacted]`. `reveal(value)` returns the raw string.
-5. `@arki/env/dot` turns the same options into a Dot plugin that validates at boot.
+5. `env()` from `@arki/dot/env` turns the same options into a Dot plugin that validates at boot.
 6. The package reads no environment at import and does not need `process`.
 
 ## Task map
@@ -49,11 +49,11 @@ Set `SKIP_ENV_VALIDATION=1` in the build stage only. Do not set it in the run st
 
 ### Validate at boot in a Dot app
 
-```ts skip="needs a Dot app; see the plugin tests in src/dot.test.ts"
+```ts skip="needs a Dot app; see the adapter tests in packages/dot/src/env.test.ts"
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 
 const app = await defineApp('my-app')
   .use(env({ schema: { PORT: z.coerce.number().default(3000) } }))

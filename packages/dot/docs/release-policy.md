@@ -70,7 +70,7 @@ modules at any time.
 
 ## Adapter versioning
 
-Adapters (`@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`) declare
+Adapters (`@arki/dot/env`, `@arki/kv/dot`, `@arki/db/dot`) declare
 `@arki/dot` as an **optional peer** with a `^` range. They follow their
 own SemVer line independent of the kernel.
 

@@ -217,7 +217,7 @@ own packages and consume `@arki/dot` as a peer dependency:
 
 ```ts skip="adapter packages depend on @arki/dot, so dot cannot import them"
 import { db } from '@arki/db/dot';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 import { journal } from '@arki/journal/dot';
 import { kv } from '@arki/kv/dot';
 ```

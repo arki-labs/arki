@@ -17,7 +17,7 @@
 
 import { defineApp } from '@arki/dot';
 import { db } from '@arki/db/dot';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 import { kv } from '@arki/kv/dot';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';

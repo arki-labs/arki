@@ -249,7 +249,7 @@ binding, direction, address })` in `configure`. `rpc()` from
 
 ### Add an env var
 
-1. Add the key to the env schema of the env plugin (`@arki/env/dot`).
+1. Add the key to the env schema of the env plugin (`@arki/dot/env`).
 2. `npx dot explain --json | jq '.data.services[] | select(.kind == "env")'`:
    the env service is still registered.
 3. `npx dot doctor --json | jq '.data.issues'`: empty unless the var is
@@ -308,7 +308,7 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 - `dot doctor` never calls `start()`. Workers and servers in `start` are not
   checked by doctor; test them in your app's tests.
 - `@orpc/server` is an optional peer. Only `@arki/dot/orpc` loads it.
-- Adapters (`@arki/env/dot`, `@arki/db/dot`, `@arki/kv/dot`,
+- Adapters (`@arki/dot/env`, `@arki/db/dot`, `@arki/kv/dot`,
   `@arki/journal/dot`) live in their own packages. `@arki/dot` never imports
   them.
 

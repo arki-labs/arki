@@ -46,7 +46,7 @@ plugins **are** the app — not optional add-ons to a hidden core.
 ```ts skip="uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
 import { db } from '@arki/db/dot'; // db plugin
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot'; // env plugin
+import { env } from '@arki/dot/env'; // env plugin
 
 import { kv } from '@arki/kv/dot'; // kv plugin
 

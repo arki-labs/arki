@@ -37,6 +37,11 @@
       "import": "./dist/plugin.js",
       "default": "./dist/plugin.js"
     },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
     "./feature": {
       "types": "./dist/feature.d.ts",
       "import": "./dist/feature.js",
@@ -123,6 +128,7 @@
     "@arki/cli": "workspace:*",
     "@arki/clock": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",

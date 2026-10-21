@@ -5,7 +5,7 @@ import type { EmptyShape, NeedsShape, Plugin, PluginOwnership, PluginPhases } fr
 import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 import { journal, journalWorker } from '@arki/journal/dot';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 

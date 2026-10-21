@@ -39,7 +39,7 @@ import { z } from 'zod';
 import { db } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { program } from '@arki/dot/cli';
-import { env } from '@arki/env/dot';
+import { env } from '@arki/dot/env';
 import { isFailure } from '@arki/failure';
 import { kv } from '@arki/kv/dot';
 

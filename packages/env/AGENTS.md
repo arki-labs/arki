@@ -11,7 +11,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 5. Nothing reads the environment at import. Keep it lazy: the first property read validates.
 6. The package must run without `process` (Hermes, browsers). Read `globalThis.process?.env`, never the bare `process` global.
 7. A bad environment fails loud: a thrown `Error` from `defineEnv`, or `ARKI_ENV_PLUGIN_E001` from the Dot plugin. Never fall back to defaults after a failure.
-8. `@arki/env/dot` is a plugin: `configure` stays synchronous and validates nothing, so `dot explain` needs no secrets. The factory validates at boot.
+8. The Dot adapter (`@arki/dot/env`) is a plugin: `configure` stays synchronous and validates nothing, so `dot explain` needs no secrets. The factory validates at boot.
 9. Never put benchmark numbers in prose. The `bench` block in the README is generated.
 
 ## Changing this package
