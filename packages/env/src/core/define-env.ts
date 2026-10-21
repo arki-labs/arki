@@ -5,6 +5,8 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, orThrow } from '@arki/failure';
 import { parse, pathOf } from '@arki/schema';
 
+import { registerEnvDescription } from './describe.js';
+
 /**
  * The process environment, or `undefined` on engines with no `process` (Hermes, browsers, Deno without
  * Node compat). Reads through `globalThis` so a missing global is not a ReferenceError. Called only when
@@ -15,6 +17,12 @@ export function processEnv(): Record<string, string | undefined> | undefined {
   const scope: { process?: { env: Record<string, string | undefined> } } = globalThis;
   return scope.process?.env;
 }
+
+/** The prefix of a value encrypted in a dotenvx-format env file (`@arki/env/node`). */
+export const ENCRYPTED_PREFIX = 'encrypted:';
+
+const STILL_ENCRYPTED_MESSAGE =
+  'still encrypted: start the process with `dot env run -- <cmd>`, or import `@arki/env/node/register` first';
 
 /** The issue shape t3-oss hands to `onValidationError`, derived so it stays in sync with the lib. */
 type ValidationIssues = Parameters<NonNullable<Parameters<typeof createEnv>[0]['onValidationError']>>[0];
@@ -141,6 +149,16 @@ export function defineEnv<
         throw new Error(message);
       });
 
+    // A value that is still `encrypted:` means the env files were not loaded (Bun auto-loads them
+    // as they are, ciphertext included). A string schema would accept it, so refuse it here, by name.
+    if (!skipValidation) {
+      const stillEncrypted = Object.keys(runtimeEnv).filter(key => {
+        const value = runtimeEnv[key];
+        return typeof value === 'string' && value.startsWith(ENCRYPTED_PREFIX);
+      });
+      if (stillEncrypted.length > 0) onValidationError(stillEncrypted.map(key => ({ message: STILL_ENCRYPTED_MESSAGE, path: [key] })));
+    }
+
     // `createEnv`'s `server`/`client` params are conditional on `clientPrefix` being a *concrete*
     // string literal; inside a generic wrapper `TPrefix` is abstract, so the body cannot be verified
     // for all prefixes and the call argument must be asserted once. The PUBLIC contract stays exact:
@@ -169,7 +187,15 @@ export function defineEnv<
     return { env, isPrivate };
   };
 
-  return lazyEnv(build);
+  const env = lazyEnv(build);
+  registerEnvDescription(env, {
+    ...(config.name === undefined ? {} : { name: config.name }),
+    server: config.server,
+    ...(config.client === undefined ? {} : { client: config.client }),
+    ...(config.shared === undefined ? {} : { shared: config.shared }),
+    ...(config.extends === undefined ? {} : { extends: config.extends }),
+  });
+  return env;
 }
 
 /**

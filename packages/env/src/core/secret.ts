@@ -52,9 +52,20 @@ export type SecretSchema<Schema extends StandardSchemaV1> = StandardSchemaV1<
   SchemaInput<Schema>,
   Redacted<SchemaOutput<Schema>>
 > & {
+  readonly [SECRET_SCHEMA]: true;
   /** Accepts a missing variable. `undefined` passes through as `undefined`, never redacted. */
-  optional(): StandardSchemaV1<SchemaInput<Schema> | undefined, Redacted<SchemaOutput<Schema>> | undefined>;
+  optional(): StandardSchemaV1<SchemaInput<Schema> | undefined, Redacted<SchemaOutput<Schema>> | undefined> & {
+    readonly [SECRET_SCHEMA]: true;
+  };
 };
+
+/** Marks a schema built by {@link secret}, so `describeEnv` can tell secrets apart. */
+export const SECRET_SCHEMA: unique symbol = Symbol.for('arki.env.secret');
+
+/** True for a schema built by {@link secret} (or its `.optional()`). */
+export function isSecretSchema(schema: StandardSchemaV1): boolean {
+  return SECRET_SCHEMA in schema;
+}
 
 /**
  * What every issue of a rejected secret says. Vendors such as valibot put the received value in
@@ -93,8 +104,10 @@ export function secret<Schema extends StandardSchemaV1>(schema: Schema): SecretS
     return result instanceof Promise ? result.then(seal) : seal(result);
   };
   return {
+    [SECRET_SCHEMA]: true,
     '~standard': { version, vendor, validate: redact },
     optional: () => ({
+      [SECRET_SCHEMA]: true,
       '~standard': {
         version,
         vendor,

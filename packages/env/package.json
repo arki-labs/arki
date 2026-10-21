@@ -25,7 +25,10 @@
   "publishConfig": {
     "access": "public"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/node/register.js",
+    "./src/node/register.ts"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -41,6 +44,16 @@
       "types": "./dist/contracts/index.d.ts",
       "import": "./dist/contracts/index.js",
       "default": "./dist/contracts/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
+    },
+    "./node/register": {
+      "types": "./dist/node/register.d.ts",
+      "import": "./dist/node/register.js",
+      "default": "./dist/node/register.js"
     },
     "./package.json": "./package.json"
   },
@@ -78,6 +91,7 @@
     "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
+    "eciesjs": "catalog:env",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -87,6 +101,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@dotenvx/primitives": "3.3.1",
     "@types/node": "catalog:node",
     "arktype": "catalog:",
     "envalid": "^8.2.0",

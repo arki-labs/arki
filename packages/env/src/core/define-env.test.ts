@@ -231,3 +231,26 @@ describe('defineEnv() on an engine with no `process`', () => {
     expect(env.PORT).toBe(9000);
   });
 });
+
+describe('defineEnv() with a value that is still encrypted', () => {
+  it('fails validation by name instead of accepting ciphertext as a string', () => {
+    // WHY: Bun auto-loads .env files as written; without `dot env run` a Stripe key would be `encrypted:...`.
+    const env = defineEnv({
+      name: 'enc',
+      server: { STRIPE_KEY: z.string(), PORT: z.coerce.number() },
+      runtimeEnv: { STRIPE_KEY: 'encrypted:BDx1', PORT: '1' },
+      options: {
+        onValidationError: issues => {
+          throw new Error(formatIssues('enc', issues));
+        },
+      },
+    });
+    expect(() => env.STRIPE_KEY).toThrow(/STRIPE_KEY: still encrypted: start the process with `dot env run/);
+  });
+
+  it('lets skipped validation through, as for every other value', () => {
+    const env = defineEnv({ server: { K: z.string() }, runtimeEnv: { K: 'encrypted:x' }, options: { skipValidation: true } });
+    expect(env.K).toBe('encrypted:x');
+  });
+});
+
