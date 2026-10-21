@@ -1,6 +1,5 @@
 ---
 '@arki/fs': minor
-'@arki/waitlist': minor
 ---
 
 Return exact ID generation failures from `defineId` and Auth generators, preserving
