@@ -12,22 +12,30 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
-import type { WorkflowShape } from './shape.js';
+import type { StepPhase, STEP_VIEW_STATUSES } from './states.js';
+import { STEP_PHASES } from './states.js';
 
 const at = z.iso.datetime();
-const phase = z.enum(['do', 'undo']);
+const phase = z.enum(STEP_PHASES);
 const nodePath = z.string().min(1);
-const shapeSchema: z.ZodType<WorkflowShape> = z.object({
-  nodes: z.array(
-    z.object({
-      name: z.string().min(1),
-      kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map']),
-      undo: z.boolean(),
-      onCancel: z.enum(['cancel', 'detach']).optional(),
-      signal: z.string().min(1).optional(),
-    }),
-  ),
-});
+/** Checks a stored `WorkflowShape`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
+export const shapeSchema = z
+  .object({
+    nodes: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map']),
+            undo: z.boolean(),
+            onCancel: z.enum(['cancel', 'detach']).optional(),
+            signal: z.string().min(1).optional(),
+          })
+          .readonly(),
+      )
+      .readonly(),
+  })
+  .readonly();
 /** When the run row is pruned; null keeps it. Resolved by the runner from `retention.workflows`. */
 const keepUntil = z.iso.datetime().nullable();
 /** Who asked, why, and from which Foreman execution, on an event an operator verb wrote. The run's events are the audit. */
@@ -224,7 +232,7 @@ export function workflowMachine<
     .on(RunFailed, (_row, e) => ({ state: 'failed', ...finished(e.data) }))
     .on(RunCancelled, (_row, e) => ({ state: 'cancelled', ...finished(e.data) }));
 
-  const stepRow = (runId: string, path: string, stepPhase: 'do' | 'undo') => ({ runId, path, phase: stepPhase });
+  const stepRow = (runId: string, path: string, stepPhase: StepPhase) => ({ runId, path, phase: stepPhase });
 
   /** Keeps `workflow_steps` equal to what the events say. Inline, so a read in the same transaction is exact. */
   const steps = j.projection('workflow-steps', run, {
@@ -332,7 +340,7 @@ export function workflowMachine<
 }
 
 /** What a step row stores, plus `running`, which is never stored: it is derived from the step's job. */
-export type StepStatus = JournalTables['workflowSteps']['$inferSelect']['status'] | 'running';
+export type StepStatus = (typeof STEP_VIEW_STATUSES)[number];
 
 /**
  * The status of a step as a SQL expression, for a query on `workflow_steps`. A `scheduled` step is `running` while

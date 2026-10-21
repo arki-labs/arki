@@ -11,6 +11,8 @@ import type { AsyncSchemaFailure } from '@arki/failure';
 import type { JobOperationInput, PageOptions } from '../outbox.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
+import type { StepStatus } from './machine.js';
+import type { StepPhase } from './states.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
 import type { CommandFailure, WorkflowStranded } from '../errors.js';
 import { JournalError } from '../errors.js';
@@ -64,7 +66,7 @@ export type StepView = Pick<
   'path' | 'phase' | 'attempt' | 'key' | 'jobId' | 'result' | 'error' | 'reason' | 'startedAt' | 'finishedAt'
 > & {
   /** `running` while the step's job holds a live lease; otherwise what the row stores. */
-  readonly status: StepRow['status'] | 'running';
+  readonly status: StepStatus;
   readonly stuck: boolean;
 };
 
@@ -126,7 +128,7 @@ export type WorkflowVerbs<Tx> = {
    */
   retryStep(
     source: TransactionSource<Tx>,
-    args: { readonly runId: string; readonly path: string; readonly phase: 'do' | 'undo' },
+    args: { readonly runId: string; readonly path: string; readonly phase: StepPhase },
     op: JobOperationInput,
   ): Promise<{ readonly how: 'rescheduled' | 'childrenRestarted' | 'jobRetried' } | CommandFailure>;
   /**

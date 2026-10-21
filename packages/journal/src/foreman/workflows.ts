@@ -23,6 +23,7 @@ import { findCause, isFailure, orThrow } from '@arki/failure';
 
 import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
+import { CANCEL_STATES, RUN_STATES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
 
 const isIdGenerationFailure = <Value>(value: Value): value is Extract<Value, IdGenerationFailure> =>
@@ -99,7 +100,7 @@ export type JournalWorkflowsModuleOptions<
 
 // ---- output schemas ---------------------------------------------------------------------------------------------
 
-const RunState = z.enum(['running', 'parked', 'compensating', 'completed', 'failed', 'cancelled']);
+const RunState = z.enum(RUN_STATES);
 const StrandedCode = z.enum(['WORKFLOW_UNKNOWN', 'WORKFLOW_SHAPE_CHANGED']);
 const timeOrNull = z.iso.datetime().nullable();
 
@@ -127,11 +128,11 @@ const RunSummary = z
 const StepSummary = z
   .object({
     path: z.string(),
-    phase: z.enum(['do', 'undo']),
+    phase: z.enum(STEP_PHASES),
     attempt: z.number().int(),
     key: z.string().nullable(),
     jobId: z.string().nullable(),
-    status: z.enum(['scheduled', 'running', 'done', 'skipped', 'failed']),
+    status: z.enum(STEP_VIEW_STATUSES),
     stuck: z.boolean(),
     error: z.string().nullable(),
     reason: z.string().nullable(),
@@ -633,7 +634,7 @@ export function journalWorkflowsModule<
       .object({
         runId: runIdField,
         path: pathField,
-        phase: z.enum(['do', 'undo']).default('do'),
+        phase: z.enum(STEP_PHASES).default('do'),
         reason: optionalReason,
       })
       .strict(),
@@ -642,7 +643,7 @@ export function journalWorkflowsModule<
         revision: z.string(),
         runId: z.string(),
         path: z.string(),
-        phase: z.enum(['do', 'undo']),
+        phase: z.enum(STEP_PHASES),
         how: z.enum(['rescheduled', 'childrenRestarted', 'jobRetried']),
         /** The number of children restarted, or of dead jobs retried. 1 for a step. */
         count: z.number().int(),
@@ -848,7 +849,7 @@ export function journalWorkflowsModule<
         consequence: z.string(),
       })
       .strict(),
-    output: z.object({ runId: z.string(), state: z.enum(['compensating', 'cancelled']) }).strict(),
+    output: z.object({ runId: z.string(), state: z.enum(CANCEL_STATES) }).strict(),
     preview: async ({ runId }, _ctx: Record<string, never>) => {
       const detail = await openRun(runId);
       if (detail.run.state === 'compensating') throw compensating(runId);

@@ -17,6 +17,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import type { WorkflowShape } from './workflow/shape.js';
+import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js';
 
 /**
  * The journal tables. Call this once in the app's schema module so
@@ -255,7 +256,7 @@ export function journalTables(schema?: PgSchema) {
       input: jsonb('input').notNull(),
       state: varchar('state', { length: 16 })
         .notNull()
-        .$type<'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled'>(),
+        .$type<(typeof RUN_STATES)[number]>(),
       /** The node the run is at. Null once finished. */
       node: varchar('node', { length: 256 }),
       /** Done step results by node path. `null` for a node a `when` skipped. A projection of the events, bounded by `limits.payload`. */
@@ -298,8 +299,8 @@ export function journalTables(schema?: PgSchema) {
       /** The node's path inside the run. */
       path: varchar('path', { length: 256 }).notNull(),
       /** `undo` rows are compensation: their own key, attempts and retry. */
-      phase: varchar('phase', { length: 4 }).notNull().$type<'do' | 'undo'>(),
-      status: varchar('status', { length: 16 }).notNull().$type<'scheduled' | 'done' | 'skipped' | 'failed'>(),
+      phase: varchar('phase', { length: 4 }).notNull().$type<StepPhase>(),
+      status: varchar('status', { length: 16 }).notNull().$type<(typeof STEP_STATUSES)[number]>(),
       attempt: integer('attempt').notNull().default(0),
       /** The step's idempotency key. Null on a step that was skipped before it was ever scheduled. */
       key: varchar('key', { length: 512 }),

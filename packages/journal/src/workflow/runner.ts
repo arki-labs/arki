@@ -34,6 +34,7 @@ import type {
   TransactionSource,
 } from '../types.js';
 import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import type { CANCEL_STATES, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
@@ -45,6 +46,7 @@ import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
 import { workflowWith } from './define.js';
 import { workflowMachine } from './machine.js';
+import { STEP_PHASES } from './states.js';
 import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
 
 /** The library-owned effect that runs one node attempt. */
@@ -71,29 +73,35 @@ const SKIP_UNDO_COMMAND = 'workflow.skipUndo';
 const SIGNAL_COMMAND = 'workflow.signal';
 const CANCEL_COMMAND = 'workflow.cancel';
 /** Who asked, why, and from which Foreman execution: the `op` of every operator verb, as the job verbs take it. */
-const operationSchema = z.object({
-  actor: z.string(),
-  reason: z.string().optional(),
-  executionId: z.string().optional(),
-});
+export const operationSchema = z
+  .object({
+    actor: z.string(),
+    reason: z.string().optional(),
+    executionId: z.string().optional(),
+  })
+  .readonly();
 type OperationInput = z.infer<typeof operationSchema>;
 /** The node a job's event names: `path` on a step, `node` on a park, neither on the deadline. */
 const jobNodeSchema = z
   .object({ path: z.string().optional(), node: z.string().optional() })
   .transform(data => data.path ?? data.node ?? null);
 const nodeVerbSchema = z.object({ runId: z.string().min(1), path: z.string().min(1), op: operationSchema });
-const retryStepSchema = nodeVerbSchema.extend({ phase: z.enum(['do', 'undo']) });
-const resolveStepSchema = nodeVerbSchema.extend({ result: z.unknown() });
-const skipUndoSchema = nodeVerbSchema;
+export const retryStepSchema = nodeVerbSchema.extend({ phase: z.enum(STEP_PHASES) }).readonly();
+export const resolveStepSchema = nodeVerbSchema.extend({ result: z.unknown() }).readonly();
+export const skipUndoSchema = nodeVerbSchema.readonly();
 /** The operator's signal: the payload is unknown here and checked by the run's own version. */
-const operatorSignalSchema = z.object({
-  runId: z.string().min(1),
-  name: z.string().min(1),
-  deliveryId: z.string().min(1),
-  payload: z.unknown(),
-  op: operationSchema,
-});
-const operatorCancelSchema = z.object({ runId: z.string().min(1), reason: z.string().min(1), op: operationSchema });
+export const operatorSignalSchema = z
+  .object({
+    runId: z.string().min(1),
+    name: z.string().min(1),
+    deliveryId: z.string().min(1),
+    payload: z.unknown(),
+    op: operationSchema,
+  })
+  .readonly();
+export const operatorCancelSchema = z
+  .object({ runId: z.string().min(1), reason: z.string().min(1), op: operationSchema })
+  .readonly();
 /** The text before a retried child's `~n`: `run/fan[2]~3` came from `run/fan[2]`. */
 const RETRIED_CHILD = /^(.*)~(\d+)$/;
 
@@ -208,13 +216,18 @@ function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<
 /** The arguments of `def.cancel`. `executionId` is the Foreman execution that asked, kept on the job operation of a step job the cancel stops. */
 export type CancelArgs = { readonly runId: string; readonly reason: string; readonly executionId?: string | undefined };
 export type CancelSchema = StandardSchemaV1<CancelArgs>;
-const cancelSchema: CancelSchema = z.object({
-  runId: z.string().min(1),
-  reason: z.string().min(1),
-  executionId: z.string().min(1).optional(),
-});
+/** Checks `CancelArgs`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
+export const cancelArgsSchema = z
+  .object({
+    runId: z.string().min(1),
+    reason: z.string().min(1),
+    executionId: z.string().min(1).optional(),
+  })
+  .readonly();
+/** `cancelArgsSchema` with the type `def.cancel` shows: a Standard Schema, not zod's own. */
+const cancelSchema: CancelSchema = cancelArgsSchema;
 /** `compensating`: the run is undoing its steps now (or waits for a step in flight). `cancelled`: there was nothing to undo, so it ended at once. */
-export type CancelOutcome = { readonly state: 'compensating' | 'cancelled' } | CommandNotFound | CommandConflict;
+export type CancelOutcome = { readonly state: (typeof CANCEL_STATES)[number] } | CommandNotFound | CommandConflict;
 
 const isoTime = z.iso.datetime();
 /** Where a run goes after a node: to another node, or to its end with the output already worked out. */
@@ -234,7 +247,7 @@ type ChildrenPlan = z.infer<typeof childrenPlanSchema>;
 const nodeCheckpointSchema = z.object({
   runId: z.string().min(1),
   path: z.string().min(1),
-  phase: z.enum(['do', 'undo']),
+  phase: z.enum(STEP_PHASES),
   /** The attempt of the node this checkpoint answers. A checkpoint for any other attempt is stale. */
   attempt: z.int().positive(),
   outcome: z.discriminatedUnion('kind', [
@@ -272,11 +285,13 @@ const timerCheckpointSchema = z.object({
 const checkpointSchema = z.union([nodeCheckpointSchema, timerCheckpointSchema]);
 
 /** The arguments of `def.signal(name)`. `deliveryId` is the sender's own id: a repeat of it changes nothing. */
-const signalEnvelope = z.object({
-  runId: z.string().min(1),
-  deliveryId: z.string().min(1),
-  payload: z.unknown(),
-});
+export const signalEnvelope = z
+  .object({
+    runId: z.string().min(1),
+    deliveryId: z.string().min(1),
+    payload: z.unknown(),
+  })
+  .readonly();
 export type SignalArgs<Payload> = { readonly runId: string; readonly deliveryId: string; readonly payload: Payload };
 /** The schema of a signal command. `payload` is typed with the input of the signal's schema; the handler checks it. */
 export type SignalSchema<Payload extends StandardSchemaV1> = StandardSchemaV1<
@@ -372,7 +387,7 @@ const COMPENSATING = 'the run began compensating';
 /** `path` and `phase` (and the result of a completed node) in the data of a settled node event. */
 const settledNodeSchema = z.object({
   path: z.string().min(1),
-  phase: z.enum(['do', 'undo']),
+  phase: z.enum(STEP_PHASES),
   result: z.unknown().optional(),
 });
 const failedNodeSchema = z.object({ error: z.string().min(1) });
@@ -518,7 +533,7 @@ export function createWorkflows<
   const linkJobs = async (
     tx: Tx,
     runId: string,
-    scheduled: readonly { readonly seq: number; readonly path: string; readonly phase: 'do' | 'undo' }[],
+    scheduled: readonly { readonly seq: number; readonly path: string; readonly phase: StepPhase }[],
   ) => {
     if (scheduled.length === 0) return;
     const queued = await tx
@@ -1761,7 +1776,7 @@ export function createWorkflows<
     }
     return row;
   };
-  const stepRowOf = async (tx: Tx, runId: string, path: string, phase: 'do' | 'undo') => {
+  const stepRowOf = async (tx: Tx, runId: string, path: string, phase: StepPhase) => {
     const [step] = await tx
       .select()
       .from(workflowSteps)
