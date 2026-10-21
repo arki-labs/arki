@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import {
   excerptCaption,
+  FEATURE_NEEDS,
+  FEATURE_USECASE,
   WIRE_ERROR,
   WIRE_ERROR_SOURCE,
   WIRE_FIX,
@@ -94,6 +96,157 @@ export function DrawingSheet({ headingId, sheet, title, block, children }: Reado
         </p>
       </aside>
     </article>
+  );
+}
+
+type DrawingIndexProps = {
+  /** The index's own sheet name, such as `A-000 · Guide index`. */
+  label: string;
+  /** The right-hand note in the head. */
+  meta: string;
+  /** One `<tr>` per sheet: number, title, what it shows. */
+  children: ReactNode;
+};
+
+/** Sheet A-000 of a drawing set: the index, read as a table of contents. */
+export function DrawingIndex({ label, meta, children }: Readonly<DrawingIndexProps>) {
+  return (
+    <nav className="home-index" aria-label={label}>
+      <h2 className="home-index-head">
+        <span>{label}</span>
+        <span>{meta}</span>
+      </h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Sheet</th>
+            <th scope="col">Title</th>
+            <th scope="col">Shows</th>
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </nav>
+  );
+}
+
+/**
+ * The four rooms of the avocabo waitlist feature, top floor first, as sheet A-201 cuts them. Every name is a file or
+ * an export in `apps/avocabo/backend/src/features/waitlist`.
+ */
+const FEATURE_SECTION_ROOMS = [
+  {
+    name: 'entrypoints',
+    rows: [
+      ['files', 'procedures.ts, rpc.ts'],
+      ['sees', 'usecases, db, kv'],
+    ],
+    text: 'The oRPC contract and its procedures. bind(waitlistLogic) puts the usecases on the handler context.',
+  },
+  {
+    name: 'usecases',
+    rows: [
+      ['files', 'signup, counts, markInvited…'],
+      ['sees', 'repos, limiter, turnstile, mailer'],
+    ],
+    text: 'The rules: signup, counts, listEntries, markInvited, publicCount, unsubscribeByToken. Each one picks the services it uses by key, never db or kv.',
+  },
+  {
+    name: 'infra',
+    rows: [
+      ['files', 'store, repository, signup-limiter, turnstile'],
+      ['binds', 'db, kv'],
+    ],
+    text: 'The store binds db, the signup limiter binds kv, turnstile checks the bot token. Private to the feature.',
+  },
+  {
+    name: 'model',
+    rows: [
+      ['files', 'tables, schemas, statuses'],
+      ['sees', 'nothing above'],
+    ],
+    text: 'Tables, schemas, statuses. Nothing here reads upward.',
+  },
+] as const;
+
+type SectionRoom = (typeof FEATURE_SECTION_ROOMS)[number];
+
+/** One floor of the section. Until the page is interactive it is drawn, not pressed: a button that does nothing is worse. */
+function Room({ room, pressed, onPress }: Readonly<{ room: SectionRoom; pressed: boolean; onPress?: () => void }>) {
+  const body = (
+    <>
+      <span className="home-seat" aria-hidden="true" />
+      <h4>{room.name}</h4>
+      <dl>
+        {room.rows.map(([label, value]) => (
+          <Fragment key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </>
+  );
+  return onPress === undefined ? (
+    <div className="home-room">{body}</div>
+  ) : (
+    <button className="home-room" type="button" aria-pressed={pressed} onClick={onPress}>
+      {body}
+    </button>
+  );
+}
+
+/**
+ * Sheet A-201: one feature cut open, four rooms from the contract down to the tables. It reads in full without
+ * JavaScript (the infra room is described); pressing a room once the page is interactive describes that one.
+ */
+export function FeatureSheet() {
+  const hydrated = useHydrated();
+  // The design opens on infra, the room `entrypointOnly` is about.
+  const [shown, setShown] = useState<SectionRoom>(FEATURE_SECTION_ROOMS[2]);
+  return (
+    <DrawingSheet
+      headingId="a-201-title"
+      sheet="A-201"
+      title="Section A–A: cut the waitlist feature open."
+      block={[
+        ['Project', 'arki'],
+        ['Drawing', 'Section A–A'],
+        ['Step', 'Feature'],
+        ['Subject', 'waitlist'],
+        ['Source', 'feature.ts, signup.ts'],
+      ]}
+    >
+      <p className="home-ctext">
+        A feature names what it needs. <code>entrypointOnly</code> hides the database from usecases. A usecase picks its
+        own dependencies by key.{hydrated ? ' Press a room to see what it holds.' : null}
+      </p>
+      <div className="home-secgrid">
+        <Code excerpt={FEATURE_NEEDS} />
+        <figure className="home-xsec" aria-label="The waitlist feature, four rooms from top to bottom">
+          <div className="home-xb">
+            <p className="home-xroof">
+              <b>rpc</b> · the oRPC contract, mounted by the app&apos;s gateway
+            </p>
+            {FEATURE_SECTION_ROOMS.map(room => (
+              <div key={room.name} className="home-xfloor">
+                <Room
+                  room={room}
+                  pressed={room === shown}
+                  onPress={hydrated ? () => setShown(room) : undefined}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="home-xearth" aria-hidden="true" />
+          <figcaption className="home-xnote" aria-live="polite">
+            <b>{shown.name}</b>
+            {shown.text}
+          </figcaption>
+        </figure>
+      </div>
+      <Code excerpt={FEATURE_USECASE} />
+    </DrawingSheet>
   );
 }
 

@@ -57,6 +57,7 @@ import { Route as DocsGuidesIndexRouteImport } from './routes/docs/guides/index'
 import { Route as DocsGuidesSlugRouteImport } from './routes/docs/guides/$slug';
 import { Route as PackagesNameIndexRouteImport } from './routes/packages/$name/index';
 import { Route as PackagesNameApiDotjsonRouteImport } from './routes/packages/$name/api[.]json';
+import { Route as PackagesJournalIndexRouteImport } from './routes/packages/journal/index';
 import { Route as BackofficeBackofficeEventSourcingIndexRouteImport } from './routes/backoffice/_backoffice/event-sourcing/index';
 import { Route as BackofficeBackofficeEventSourcingProjectionsRouteImport } from './routes/backoffice/_backoffice/event-sourcing/projections';
 import { Route as PackagesNameVersionIndexRouteImport } from './routes/packages/$name/$version/index';
@@ -302,6 +303,11 @@ const PackagesNameApiDotjsonRoute = PackagesNameApiDotjsonRouteImport.update({
   path: '/$name/api.json',
   getParentRoute: () => PackagesRouteRoute,
 } as any);
+const PackagesJournalIndexRoute = PackagesJournalIndexRouteImport.update({
+  id: '/journal/',
+  path: '/journal/',
+  getParentRoute: () => PackagesRouteRoute,
+} as any);
 const BackofficeBackofficeEventSourcingIndexRoute =
   BackofficeBackofficeEventSourcingIndexRouteImport.update({
     id: '/event-sourcing/',
@@ -374,6 +380,7 @@ export interface FileRoutesByFullPath {
   '/backoffice/': typeof BackofficeBackofficeIndexRoute;
   '/docs/guides/': typeof DocsGuidesIndexRoute;
   '/packages/$name/': typeof PackagesNameIndexRoute;
+  '/packages/journal/': typeof PackagesJournalIndexRoute;
   '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
   '/packages/$name/$version/$': typeof PackagesNameVersionSplatRoute;
   '/backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute;
@@ -418,6 +425,7 @@ export interface FileRoutesByTo {
   '/backoffice': typeof BackofficeBackofficeIndexRoute;
   '/docs/guides': typeof DocsGuidesIndexRoute;
   '/packages/$name': typeof PackagesNameIndexRoute;
+  '/packages/journal': typeof PackagesJournalIndexRoute;
   '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
   '/packages/$name/$version/$': typeof PackagesNameVersionSplatRoute;
   '/backoffice/event-sourcing': typeof BackofficeBackofficeEventSourcingIndexRoute;
@@ -473,6 +481,7 @@ export interface FileRoutesById {
   '/backoffice/_backoffice/': typeof BackofficeBackofficeIndexRoute;
   '/docs/guides/': typeof DocsGuidesIndexRoute;
   '/packages/$name/': typeof PackagesNameIndexRoute;
+  '/packages/journal/': typeof PackagesJournalIndexRoute;
   '/backoffice/_backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
   '/packages/$name/$version/$': typeof PackagesNameVersionSplatRoute;
   '/backoffice/_backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute;
@@ -527,6 +536,7 @@ export interface FileRouteTypes {
     | '/backoffice/'
     | '/docs/guides/'
     | '/packages/$name/'
+    | '/packages/journal/'
     | '/backoffice/event-sourcing/projections'
     | '/packages/$name/$version/$'
     | '/backoffice/event-sourcing/'
@@ -571,6 +581,7 @@ export interface FileRouteTypes {
     | '/backoffice'
     | '/docs/guides'
     | '/packages/$name'
+    | '/packages/journal'
     | '/backoffice/event-sourcing/projections'
     | '/packages/$name/$version/$'
     | '/backoffice/event-sourcing'
@@ -625,6 +636,7 @@ export interface FileRouteTypes {
     | '/backoffice/_backoffice/'
     | '/docs/guides/'
     | '/packages/$name/'
+    | '/packages/journal/'
     | '/backoffice/_backoffice/event-sourcing/projections'
     | '/packages/$name/$version/$'
     | '/backoffice/_backoffice/event-sourcing/'
@@ -995,6 +1007,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PackagesNameApiDotjsonRouteImport;
       parentRoute: typeof PackagesRouteRoute;
     };
+    '/packages/journal/': {
+      id: '/packages/journal/';
+      path: '/journal';
+      fullPath: '/packages/journal/';
+      preLoaderRoute: typeof PackagesJournalIndexRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
+    };
     '/backoffice/_backoffice/event-sourcing/': {
       id: '/backoffice/_backoffice/event-sourcing/';
       path: '/event-sourcing';
@@ -1109,6 +1128,7 @@ interface PackagesRouteRouteChildren {
   PackagesIndexRoute: typeof PackagesIndexRoute;
   PackagesNameApiDotjsonRoute: typeof PackagesNameApiDotjsonRoute;
   PackagesNameIndexRoute: typeof PackagesNameIndexRoute;
+  PackagesJournalIndexRoute: typeof PackagesJournalIndexRoute;
   PackagesNameVersionSplatRoute: typeof PackagesNameVersionSplatRoute;
   PackagesNameVersionIndexRoute: typeof PackagesNameVersionIndexRoute;
 }
@@ -1118,6 +1138,7 @@ const PackagesRouteRouteChildren: PackagesRouteRouteChildren = {
   PackagesIndexRoute: PackagesIndexRoute,
   PackagesNameApiDotjsonRoute: PackagesNameApiDotjsonRoute,
   PackagesNameIndexRoute: PackagesNameIndexRoute,
+  PackagesJournalIndexRoute: PackagesJournalIndexRoute,
   PackagesNameVersionSplatRoute: PackagesNameVersionSplatRoute,
   PackagesNameVersionIndexRoute: PackagesNameVersionIndexRoute,
 };

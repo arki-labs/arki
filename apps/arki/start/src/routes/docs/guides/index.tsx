@@ -9,6 +9,8 @@ import {
   listPackagesFn,
 } from '~/features/site-data/site-data';
 import { getDefaultMeta } from '~/shared-metadata';
+import { DrawingIndex, FeatureSheet } from '~/shared/marketing/drawing-sheet';
+import { DrawingSet } from '~/shared/marketing/drawing-set';
 import { lastShellCommand } from '../-guide-check';
 
 /** Where Stack packages keep task recipes in their docs. */
@@ -81,7 +83,7 @@ function GuidesIndexPage() {
         </nav>
         <h1 className="dd-h1">Guides</h1>
         <p className="dd-lead">Step-by-step recipes. Each one ends with a command that checks the result.</p>
-        {guides.length === 0 ? (
+        {guides.length === 0 && (
           <div className="gd-empty" data-testid="guides-empty">
             <p>
               <strong>No guides yet.</strong>
@@ -94,27 +96,46 @@ function GuidesIndexPage() {
               <a href="/packages">Browse packages</a>
             </p>
           </div>
-        ) : (
-          <ul className="gd-list">
-            {guides.map(guide => (
-              <li key={guide.href} className="gd-row">
-                <a href={guide.href} className="gd-title" data-testid="guide-link">
-                  {guide.title}
-                </a>
-                {guide.forPackage !== null && (
-                  <span className="gd-meta">
-                    for <code>{guide.forPackage}</code>
-                  </span>
-                )}
-                {guide.check !== null && (
-                  <span className="gd-check" data-testid="guide-check">
-                    ends with <code>{guide.check}</code>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
         )}
+        {/* A drawing set: the A-000 index is the table of contents, then a sheet that cuts a feature open. */}
+        <DrawingSet>
+          <DrawingIndex label="A-000 · Guide index" meta="Every guide ends with its check">
+            {guides.map((guide, index) => (
+              <tr key={guide.href} data-testid="guide-row">
+                <td className="home-index-no">G-{101 + index}</td>
+                <td className="home-index-title">
+                  <a href={guide.href} data-testid="guide-link">
+                    {guide.title}
+                  </a>
+                </td>
+                <td className="home-index-shows">
+                  {guide.forPackage === null ? null : (
+                    <>
+                      for <code>{guide.forPackage}</code>{' '}
+                    </>
+                  )}
+                  {guide.check !== null && (
+                    <span data-testid="guide-check">
+                      ends with <code>{guide.check}</code>
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td className="home-index-no">
+                <a href="#a-201">A-201</a>
+              </td>
+              <td className="home-index-title">Section · Feature</td>
+              <td className="home-index-shows">
+                The waitlist feature cut open: model, usecases, infra, entrypoints
+              </td>
+            </tr>
+          </DrawingIndex>
+          <div id="a-201">
+            <FeatureSheet />
+          </div>
+        </DrawingSet>
         <p className="dd-agents">
           For agents: <a href="/llms.txt">/llms.txt</a> lists every guide with its check command.
         </p>

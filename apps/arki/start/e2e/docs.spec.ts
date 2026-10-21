@@ -1,4 +1,8 @@
+import { existsSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+
+/** The feature sheet A-201 cuts open, in the app that has it. */
+const WAITLIST = new URL('../../../avocabo/backend/src/features/waitlist/', import.meta.url);
 
 /** The jobs `/docs` is ordered by (plan T3.3): readers arrive with a task, not a package name. */
 const JOBS = ['Create an app', 'Add a feature', 'Inspect a failure', 'Deploy', 'Upgrade'];
@@ -35,7 +39,7 @@ test.describe('docs: jobs index, guides and glossary', () => {
     const hrefs = await links.evaluateAll(anchors => anchors.map(anchor => anchor.getAttribute('href') ?? ''));
 
     // The "ends with" column shows the command a reader runs to check they are done: the last command of the guide.
-    const checks = await page.locator('.gd-row').evaluateAll(rows =>
+    const checks = await page.getByTestId('guide-row').evaluateAll(rows =>
       rows.map(row => ({
         href: row.querySelector('a')?.getAttribute('href') ?? '',
         check: row.querySelector('[data-testid="guide-check"] code')?.textContent ?? null,
@@ -82,6 +86,42 @@ test.describe('docs: jobs index, guides and glossary', () => {
   test('an unknown guide is a 404', async ({ page }) => {
     const response = await page.goto('/docs/guides/no-such-guide');
     expect(response?.status()).toBe(404);
+  });
+
+  // WHY: the guides index is a drawing set. Its A-000 index is the table of contents, so every sheet it lists must be
+  // reachable, and the A-201 section must describe the room a reader presses, using the feature's real folders.
+  test('/docs/guides: the A-000 index lists every guide and A-201, whose rooms describe themselves', async ({ page }) => {
+    await page.goto('/docs/guides');
+    const index = page.getByRole('navigation', { name: 'A-000 · Guide index' });
+    await expect(index.locator('tbody tr')).toHaveCount((await page.getByTestId('guide-row').count()) + 1);
+    await index.getByRole('link', { name: 'A-201' }).click();
+    await expect(page).toHaveURL(/#a-201$/);
+    const sheet = page.getByRole('article', { name: /cut the waitlist feature open/ });
+    await expect(sheet).toBeInViewport();
+
+    const rooms = sheet.locator('.home-room h4');
+    await expect(rooms).toHaveText(['entrypoints', 'usecases', 'infra', 'model']);
+    for (const room of await rooms.allTextContents()) expect(existsSync(new URL(room, WAITLIST)), room).toBe(true);
+
+    const note = sheet.locator('.home-xnote');
+    await expect(sheet.getByRole('button', { name: /^infra files/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(note).toContainText('The store binds db');
+    await sheet.getByRole('button', { name: /^usecases files/ }).click();
+    await expect(sheet.getByRole('button', { name: /^usecases files/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /^infra files/ })).toHaveAttribute('aria-pressed', 'false');
+    await expect(note).toContainText('never db or kv');
+  });
+
+  // WHY: without JavaScript the sheet is a drawing, not a set of dead buttons, and it still names one room.
+  test.describe('with JavaScript disabled', () => {
+    test.use({ javaScriptEnabled: false });
+    test('/docs/guides draws A-201 with no buttons', async ({ page }) => {
+      await page.goto('/docs/guides');
+      const sheet = page.getByRole('article', { name: /cut the waitlist feature open/ });
+      await expect(sheet.locator('.home-room')).toHaveCount(4);
+      await expect(sheet.getByRole('button')).toHaveCount(0);
+      await expect(sheet.locator('.home-xnote')).toContainText('The store binds db');
+    });
   });
 
   test('/docs/glossary gives every term an anchor that resolves, and links only to site pages', async ({

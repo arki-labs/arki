@@ -73,6 +73,40 @@ test.describe('/packages', () => {
     await expect(page.getByRole('link', { name: `All docs for @arki/dot@${dot?.nextVersion}` })).toBeVisible();
   });
 
+  // WHY: the journal's package page carries the homepage's journal chapter, working, and drawn with home.css's
+  // own look inside the docs chrome. No other package page pays for its code or its stylesheet.
+  test('/packages/journal shows the working journal chapter; /packages/dot loads none of it', async ({ page }) => {
+    await page.goto('/packages/journal');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('@arki/journal');
+    await expect(page.getByRole('complementary').getByRole('link', { name: 'How it works' })).toHaveAttribute(
+      'href',
+      '#walkthrough',
+    );
+    const chapter = page.locator('#walkthrough').getByRole('region', { name: 'The journal chapter' });
+    const part = chapter.getByRole('group', { name: /A refund that waits/ });
+    const rows = part.locator('tbody tr');
+    await part.getByRole('button', { name: 'Reset' }).click();
+    await expect(rows).toHaveText([/No rows yet/]);
+    await part.getByRole('button', { name: 'Approve refund' }).click();
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText('RefundApproved');
+    // site.css's base table look (12px cells) must not reach into the drawing.
+    await expect(rows.first().locator('td').first()).toHaveCSS('padding-left', '10px');
+
+    await page.goto('/packages/dot');
+    await expect(page.locator('.home-chapter')).toHaveCount(0);
+    const chapterRules = await page.evaluate(() =>
+      [...document.styleSheets].some(sheet => {
+        try {
+          return [...sheet.cssRules].some(rule => rule.cssText.includes('.home-chapter'));
+        } catch {
+          return false;
+        }
+      }),
+    );
+    expect(chapterRules, 'the chapter stylesheet loads only on /packages/journal').toBe(false);
+  });
+
   test('/packages/dot/api.json returns the API index as JSON', async ({ request }) => {
     const response = await request.get('/packages/dot/api.json');
     expect(response.status()).toBe(200);

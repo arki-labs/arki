@@ -51,8 +51,10 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.site p code,
-.site li code {
+/* `:where(:not(.home *))` keeps these base looks out of a home.css drawing set inside a page (drawing-set.css) and
+   adds no specificity, so every other rule that overrides them still does. */
+.site p code:where(:not(.home *)),
+.site li code:where(:not(.home *)) {
   font-size: 0.88em;
   background: var(--muted);
   padding: 1px 5px;
@@ -457,13 +459,13 @@
   font-size: 14px;
 }
 
-/* Table: base look. Add `cards` to turn rows into cards at 767px and below. */
-.site table {
+/* Table: base look. Add `cards` to turn rows into cards at 767px and below. Not inside a home.css drawing (see above). */
+.site table:where(:not(.home *)) {
   width: 100%;
   border-collapse: collapse;
   font-size: 15px;
 }
-.site thead th {
+.site thead th:where(:not(.home *)) {
   text-align: left;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -474,8 +476,8 @@
   padding: 0 12px 10px;
   border-bottom: 1px solid var(--border);
 }
-.site tbody th,
-.site tbody td {
+.site tbody th:where(:not(.home *)),
+.site tbody td:where(:not(.home *)) {
   text-align: left;
   vertical-align: top;
   padding: 12px;
@@ -1051,41 +1053,6 @@
 .site .gd-wrap {
   max-width: 760px;
 }
-.site .gd-list {
-  list-style: none;
-  margin: 40px 0 0;
-  padding: 0;
-  border-top: 1px solid var(--border);
-}
-.site .gd-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 16px;
-  padding: 16px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.site .gd-row:hover {
-  background: var(--muted);
-}
-.site .gd-title {
-  font-size: 18px;
-  font-weight: 500;
-}
-.site .gd-meta {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-.site .gd-check {
-  margin-left: auto;
-  min-width: 0;
-  max-width: 100%;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted-foreground);
-  overflow-wrap: anywhere;
-}
 .site .gd-empty {
   margin-top: 40px;
   border: 1px dashed var(--border);
@@ -1104,12 +1071,6 @@
 }
 .site .gd-article {
   max-width: 720px;
-}
-@media (max-width: 767px) {
-  .site .gd-check {
-    margin-left: 0;
-    flex-basis: 100%;
-  }
 }
 
 /* /docs/glossary: term table with a #anchor highlight, stacked rows at 767px and below */

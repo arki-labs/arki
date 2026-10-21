@@ -1,7 +1,5 @@
 import { dehydrate, hydrate, QueryClientProvider } from '@tanstack/react-query';
-import { createRouter as createTanStackRouter } from '@tanstack/react-router';
-
-import { RootErrorComponent } from '@arki/tanstack-start/error';
+import { createRouter as createTanStackRouter, lazyRouteComponent } from '@tanstack/react-router';
 
 import { createQueryClient } from './lib/orpc/query-client';
 import { routeTree } from './routeTree.gen';
@@ -23,7 +21,9 @@ export function createRouter() {
     // @arki/ui/styles/nav.css (imported in styles/global.css).
     // Falls back to instant swap in browsers without View Transitions.
     defaultViewTransition: { types: ['nav'] },
-    defaultErrorComponent: RootErrorComponent,
+    // Loaded when a page first fails, not up front: its Button and `cn` pull tailwind-merge (~8 KB gzip) into every
+    // page's JavaScript otherwise.
+    defaultErrorComponent: lazyRouteComponent(() => import('@arki/tanstack-start/error'), 'RootErrorComponent'),
     // Exposes the queryClient to every loader / beforeLoad via `context.queryClient`.
     // Routes that prefetch into this client during SSR populate the cache that
     // the dehydrate/hydrate callbacks below carry across the SSR boundary.

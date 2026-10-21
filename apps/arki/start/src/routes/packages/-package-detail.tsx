@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { packageDocHref, packageHref } from '~/features/site-data/package-urls';
 import { CodeBlock, Pill } from '~/shared/site-chrome';
 
@@ -41,16 +43,23 @@ function latestFolder({ package: entry }: PackageDetail): string | null {
   return entry.status === 'none' ? null : entry.npmVersion;
 }
 
+type PackageDetailPageProps = Section & {
+  inVersion: boolean;
+  /** A package's own walkthrough, drawn after its release health. Only `/packages/journal` has one. */
+  walkthrough?: ReactNode;
+};
+
 /**
  * One package page: the latest snapshot or a chosen one. `inVersion` is true on `/packages/<name>/<version>`, which
  * adds the version to the breadcrumb.
  */
-export function PackageDetailPage({ detail, inVersion }: Section & { inVersion: boolean }) {
+export function PackageDetailPage({ detail, inVersion, walkthrough }: PackageDetailPageProps) {
   const { package: entry, snapshot, readme } = detail;
   const hasDocs = detail.folder !== null && detail.docs.length > 0;
   const toc = [
     { href: '#install', label: 'Install' },
     { href: `#health-${entry.short}`, label: 'Release health' },
+    ...(walkthrough === undefined ? [] : [{ href: '#walkthrough', label: 'How it works' }]),
     ...(readme === null ? [] : [{ href: '#readme', label: 'README' }]),
     ...(hasDocs ? [{ href: '#docs', label: 'Docs' }] : []),
     ...(snapshot === null ? [] : [{ href: '#imports', label: 'Public imports' }]),
@@ -79,6 +88,12 @@ export function PackageDetailPage({ detail, inVersion }: Section & { inVersion: 
           {snapshot !== null && <BannerNote detail={detail} />}
           <Install detail={detail} />
           <Health detail={detail} />
+          {walkthrough !== undefined && (
+            <section className="sec" id="walkthrough" aria-labelledby="walkthrough-title">
+              <h2 id="walkthrough-title">How it works</h2>
+              {walkthrough}
+            </section>
+          )}
           {snapshot === null ? (
             <p className="none pd-nodocs" role="note">
               No version of this package is on npm or in a release candidate yet, so it has no docs here.

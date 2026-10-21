@@ -17,6 +17,7 @@ const DOCS_PAGES = [
   '/docs/upgrade-story',
   '/packages',
   '/packages/dot',
+  '/packages/journal',
   '/packages/dot/next/docs/quickstart',
   '/errors',
   '/errors/ARKI_ASYNC_E001',
@@ -27,6 +28,8 @@ const DOCS_PAGES = [
 /** Pages with code blocks or wide tables, the ones most likely to break a 320px screen. */
 const WIDE_CONTENT_PAGES = [
   '/packages/dot',
+  '/packages/journal',
+  '/docs/guides',
   '/packages/dot/next/docs/quickstart',
   '/docs/dot-new',
   '/docs/glossary',
