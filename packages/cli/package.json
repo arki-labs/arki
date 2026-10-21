@@ -1,6 +1,6 @@
 {
   "name": "@arki/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Typed command-line programs from one defineCommand: schema-driven flags, a JSON envelope when piped, text on a TTY, stable exit codes, and help that never loads a handler.",
   "license": "MIT",

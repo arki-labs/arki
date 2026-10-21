@@ -1,5 +1,165 @@
 # @arki/dot
 
+## 0.7.0
+
+### Minor Changes
+
+- afecc7a: `dot` now runs on `@arki/cli`. Breaking for scripts and agents that read its output:
+
+  - Output is the `arki.cli/1` envelope: `{ ok, command, data, error, meta }`. It is JSON by default when stdout is piped; `--json` or `-o json` forces it, `-o text` forces text.
+  - Exit codes: `0` ok, `1` bug, `2` usage (`cli.unknown_command`, `cli.invalid_input`), `3` a returned failure.
+  - `dot.*` failure codes replace `DOT_CLI_E001`–`E011`: `dot.app_not_found`, `dot.app_invalid_export`, `dot.app_import_failed`, `dot.app_lifecycle_failed`, `dot.observability_no_sdk`, `dot.projection_not_found`, `dot.projection_import_failed`, `dot.projection_execution_failed`, `dot.projection_conflict`, and new `dot.doctor_failed`, `dot.target_not_empty`, `dot.template_missing`, `dot.write_failed`. `E004`/`E005` are the framework's `cli.unknown_command` / `cli.invalid_input`.
+  - `dot doctor` returns the snapshot plus `.data.status` (`success` or `warning`); error issues return `dot.doctor_failed` (exit 3) with the report in `.error.data`.
+  - `dot new` returns `.data.app`, `.data.operations[]` and `.data.nextSteps`.
+  - `--openapi` is removed; use `--as openapi`.
+  - Removed exports: `DotCliError`, `DotCliErrorCode`, `dotCliDocsUrl`, `DotCliEnvelope`, `DotCliEnvelopeStatus`, `DotNewEnvelope`, `main`, `parseArgs`. `runExplain`, `runDoctor` and `runNew` return their data or a failure and print nothing; `program` is the CLI.
+
+- 5bc6390: Breaking: `plugin()` publishes through `provides` factories, exactly like `feature()` (`provides: { db: () => openDb() }`). Each factory gets the plugin's needs plus `$app`/`$plugin`/`$config` and may be async; the kernel awaits them in key order. `boot` is side effects only: a value-returning plugin `boot` no longer compiles, and `InferredProvides` is removed. Every plugin now carries typed handles before boot: `database.provides.db` is a `Handle<T, 'db'>` (a `Token` plus `provider` and `.lazy`), so consumers write `needs: { db: database.provides.db }` and name the type once with `Provided<typeof database.provides.db>`. `Handle`, `LazyHandle`, `Handles`, `Provided` and `ProvidesFactories` now live in the plugin contract (re-exported from `@arki/dot`, `@arki/dot/plugin` and `@arki/dot/feature`). `Plugin.provides` is required (wire-keyed handles) and `Plugin.factories` holds the factories. `rename()` rebuilds the handles on the new keys and name; a handle taken before the rename keeps the old key and fails the builder guard. The kernel checks every plugin's needs against every plugin's static provides at `configure()`: `DOT_LIFECYCLE_E020` names a provider mounted after its consumer, with a role-aware fix ("Move X before Y in .features([...])" or "Mount X with .use() before Y"), and a ring through adapters is `DOT_LIFECYCLE_E019`; `E012` remains only for needs no plugin declares. `dot explain` prints one labelled edge per capability for adapters too, without booting. A feature's slice record is one of its plugin's provides entries. `providesOf()` accepts plugins as well as features. `handle.lazy` needs receive a `Lazy<T>` in `resolveNeeds()` as in hook contexts. New `fake(handle, value)` in `@arki/dot/test-harness` mounts a fake under a real handle, type-checked against it.
+- 899d0a9: Adds the chain form of a feature and contract-first composition, next to the existing API (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`). The old `feature()`, `.use()`, `.serve()`, `plug`, `composeRouter` and `composeRepos` stay for now; a later changeset removes them.
+
+  - `defineFeature(name).needs().infra().usecases().provides().entrypoints()` in `@arki/dot/feature`. Stage order is a compile error; usecases get `{ ...needs, ...infra }`; provides factories and entrypoints also get `usecases`, built once per boot. Feature infra is private: keys are published as `<feature>.<key>` from units named `<feature>/<plugin>`, and sibling needs follow the qualified key. `session`, `headers`, `services` and `usecases` are reserved; infra/need and entrypoint/provides collisions are compile errors and `FEATURE_E006` at runtime.
+  - A finished feature has `plugins()` (a typed tuple the app builder guard checks), `override(values)` (swaps infra services in place, keeps entrypoints; `FEATURE_E007` for an unknown key), `handles`, `provides`, `entrypoints`, and `contract` / `router` from its `rpc` entrypoint.
+  - Entrypoint descriptor protocol `{ kind, key, actions, resolve }` (`Entrypoint`, `RpcEntrypoint`, `DepsOf<typeof core>`) for adapter packages.
+  - `routerFor(appContract, features)`: mount keys written once in the app contract, features found by contract identity; unmatched keys and contracts are compile errors and `FEATURE_E008` / `FEATURE_E009` at runtime.
+  - `defineApp(...).infra(...units)` and `.entrypoints(...adapters)` (variadic, checked like `.useAll()`); `.features()` accepts `defineFeature` features next to `feature()` values and mounts their infra units.
+  - `servicesOf` accepts any unit with `provides` (features or plugins). `handleOf` and `AnyHandle` are exported from `@arki/dot/plugin`. `FeatureError` and its codes move to an internal module (same exports).
+
+- ce8d707: New command `dot dev`. It picks the app's `dev` export, then resolves the database: embedded PGlite, or a local Postgres it can start with `docker compose up -d`. A non-local `DB_URL` / `DATABASE_URL` in the process env or any `.env*` file is refused, under PGlite too, unless you pass `--allow-remote-db`. A PGlite runner starts without any database URL. A preflight boot then validates env and applies the committed `drizzle/` migrations, and prints which ones it applied. After that it runs Vite (or `--run`, or the hidden `dot _serve`) in its own process group, and restarts when `drizzle/`, `.env*` or the app file change. `--once` stops after the preflight: it is the boot check for CI and agents.
+
+  New in `@arki/dot/cli`: `runDev`, `devEventSchema` / `DevEvent`, `devStateSchema` / `DevState`, `DEV_STATE_PATH`, and the failures `DevDbUnreachable`, `DevRunnerFailed`, `DevPortInUse`, `DevAlreadyRunning`, `DevRemoteDbRefused`, `DevAppStarted`. Discovery takes `prefer: 'dev'`, and `DiscoveryResult` carries `exportName`. `DoctorOptions.onBooted` hands the booted app to the caller before it is disposed.
+
+- 92b38ed: Wiring errors land on the argument, with the `DOT:` label in the message. `.use()`, `.serve()`, `.useAll()` and `.features()` no longer demand a phantom second argument when a unit cannot mount (`Expected 2 arguments, but got 1`); the plugin or list itself fails to type-check, and the error names the missing or colliding keys. `testPlugin(...).boot()` does the same through a `this` type. `ListGuard` is exported.
+
+  `testApp(plugins)` and `bootTestApp(plugins)` infer `app.services` from the plugin tuple and refuse a tuple that would not mount; a runtime-built array gives the open record. Breaking: the explicit `testApp<TServices>()` type argument is gone — drop it, the services are read off the plugins.
+
+- 80a4aa5: `feature.instance(name, rebind?)`: a second copy of a finished feature, named `<feature>#<instance>` (`reports#eu`), with its own infra units, usecases, services and entrypoints, publishing under `<feature>#<instance>.<key>` so two copies mount side by side (next to the original or not). `rebind` swaps a need's handle for another provider's handle of the same service type (`{ db: databaseEu.provides.dbEu }`); a nested child is re-derived under the copy and a child need on the same handle follows, lazy form included. Each copy's rpc entrypoint has its own contract identity, so the app contract mounts `eu.contract` and `us.contract` under their own keys. `#` is reserved in a declared feature name. New `instanceOf(name)` (`'reports#eu.audit'` → `'eu'`) for adapters, and the types `RebindOf`, `RebindNeeds`, `InstanceChildren`, `FeatureParams`. `WireNeeds` now reads a need's wire key from `key` alone: a handle whose key holds `#` has one wire key, not two.
+- 232d3e8: RPC error maps retain their original failure definitions for exact revival by another contract adapter. Use `rpcFailureDefinitions` to read these references; wire JSON remains unchanged.
+
+  Add reusable browser-safe action contracts, server execution ownership and scoped
+  OpenTelemetry helpers. Native RPC/HTTP adapters parse and encode once while
+  sharing canonical failures and explicit exposure, principal and approval policies.
+
+  Breaking: HTTP boundaries and auth policies return typed canonical failure values;
+  update callers that inspect legacy strings or expect thrown refusals. Retry
+  ownership is explicit. MCP adds browser-safe contract annotations and callable
+  tools that reuse the gateway's typed native client, preserve canonical failures,
+  and enforce access, approval and result budgets. Hosts provide approval authority;
+  the full MCP server and durable confirmation store remain separate work.
+
+- cbefc52: Plugins no longer take a `version` field. `plugin({ version })` and `PluginManifest.version` are gone, `dot explain` has no VERSION column, the graph labels show only the plugin name, and the `dot.plugin.version` span attribute is no longer set. Migrate: delete `version` from your `plugin()` calls. The app `version` in `defineApp(name, { version })` stays.
+- 01400a0: `.usecases()` infers inline factories: `({ repos }) => () => repos.all()` gets the feature's deps type (needs + infra + children) with no annotation, so a usecase file no longer has to spell `Pick<Deps, 'repos'>`; annotated factories still fit. A factory that asks for a dep the feature lacks still fails with the `DOT: a usecase asks for a dep the feature does not provide` label, naming the usecase and the dep — the inferring signature is the first overload, the labelled one its fallback. New type export: `UsecaseFactoriesOf<D>`.
+- 0ab11d8: Handles carry the identity of the service they name, and the feature builder reads it. `Plugin` gains two type parameters: `TShape` (the `needs` record as written, alias → witness) and `TOwner` (the plugin's name as a literal); `plugin()` infers both, so `database.provides.db.provider` is `'database'`, not `string`. `rename()` is generic over the plugin and keeps the shape; without a new name the handles keep the original provider. New type exports: `PluginProviderIdentities<P>`, `PluginOwner<P>`.
+
+  Two graphs that compiled and failed at runtime are compile errors now: a nested feature whose need names a global handle is no longer remapped onto a same-shaped private infra of its parent (`UnsatisfiedNeed` at boot before), and an infra plugin bound to another plugin's same-shaped handle is refused at `.infra()` in the types (`E026` at runtime before). An infra plugin whose shape is known is checked by need alias, as the runtime resolves it, so a bound need whose alias differs from its key (`clusters: dedup.provides.clusterDetails`) compiles. Plugins annotated `Plugin<N, P>` erase shape and name and keep the previous wire-key checks. Migrate: `expectTypeOf(...).toEqualTypeOf<Handle<T, K>>()` assertions on `plugin()` handles need the third argument (`Handle<T, K, 'name'>`); `ChildUnits` takes the parent's infra owners as its third type parameter.
+
+- a531063: `dot explain` text output prints each rpc action's contract meta under it, one `key: value` per line (`↳ policy: order.refund`, `↳ auth: admin`). `--json` already carried it as `meta.meta`.
+- 9b35520: Breaking: `feature()` publishes through `provides` factories, one per capability (`provides: { entitlements: ({ db }) => createEntitlements(db) }`). Each factory gets the feature's needs; `boot` is now side effects only (it returns `void` and sees the factories' values), and a value-returning `boot` no longer compiles. Handles are static plain objects that carry `provider` (the feature name), so `Object.keys(billing.provides)` is known before boot. New in `@arki/dot/feature`: `Handle`, `ProvidedOf`, `ServicesOf`, `ServicesBag`, `providesOf(features)`, `servicesOf(ctx, features)` and `resolveNeeds(bag, needs)` (throws `FEATURE_E005` naming the missing capability), for carrying capabilities in a request context. The kernel checks feature capabilities at `configure()`: `DOT_LIFECYCLE_E019` prints a capability ring, `DOT_LIFECYCLE_E020` names a provider mounted after its consumer. `Plugin.provides` lists a feature's static publish keys; manifest `provides` is filled before boot and `DependencyEdge` gains an optional `key`, so `dot explain` draws `consumer --[key]--> provider` edges (Mermaid `-->|key|`) without booting.
+- 5721742: Breaking: every kernel error now has one stable code in one namespace, `ARKI_DOT_E001` to `ARKI_DOT_E032`, and carries `remediation` and `docsUrl` like `DotPluginError`.
+
+  - `DOT_LIFECYCLE_E0nn` is now `ARKI_DOT_E0nn` (same number). `FEATURE_E0nn` is now `ARKI_DOT_E0(21+nn)`: `FEATURE_E001` is `ARKI_DOT_E022`, up to `FEATURE_E010` as `ARKI_DOT_E031`. The constants (`DotLifecycleErrorCode`, `FEATURE_ERROR_CODES`) keep their names, so code that uses them needs no change. Code that matches the old strings must switch to the new ones.
+  - `DotLifecycleError` and `FeatureError` gain `remediation` and `docsUrl`. New `DotManifestError` (`ARKI_DOT_E032`, still a `TypeError`) replaces the bare `TypeError` from `toJsonObject`.
+  - The README has an "Errors" table with all codes.
+
+- 9192d0e: `dot explain` prints each action's summary, and a plugin can finish its own summaries after boot.
+
+  - New hook `$describeAction(actionId, { summary })` (configure twin: `describeAction`). A plugin calls it after boot to complete the summary of its own actions, or of actions in a binding it registered a projection for. The post-boot manifest and `dot doctor` show the completed text.
+  - New error `DOT_LIFECYCLE_E021`, raised when a plugin describes an action it may not amend (an unknown id, or one that is not its own).
+
+- 232d3e8: Carry inferred failures through configure, boot, start, stop and dispose, with atomic service publication, rollback aggregation and supervised usecase invocation even without tracing. Configure now returns a typed outcome and remains synchronous with no I/O; logging activates during boot. Detached lifecycle callbacks must prove an undefined or concrete failure return rather than void.
+
+  Breaking: check configure before accessing the manifest, inspect stop/dispose outcomes, and handle managed CLI preflight failures under `dot.preflight_failed` in `.error.data.{app,migrations,report,failure}` (exit 3). Successful JSON paths remain unchanged. See `docs/upgrade-phases.md` for phase-specific outcomes and migration steps.
+
+  Cron oRPC adapters route canonical supervised defects through the existing failure policy before success mapping; business refusals keep their explicit responders.
+
+  Database, mail, queue, resilience and Journal adapters retain their authored factory and lifecycle return types, including driver-specific service types.
+
+- 932c9e4: Adds `@arki/dot/orpc` and lets adapters read `defineFeature` features directly (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, phase 1b).
+
+  - `@arki/dot/orpc` (optional peer `@orpc/server`): `needsMiddleware<RequestContext>()` makes the app's `bind`; `bind(core)` puts a feature's needs, private infra and `usecases` on the handler context from `context.services` (an alias that shadows a request-context key does not compile). `rpc(contract, router)` is the oRPC entrypoint descriptor; the router must implement the contract (`Router<C, never>`), so a bare router, a missing procedure or another contract's router do not compile.
+  - Breaking for adapter authors: `driver(...)` / `driven(...)` now receive `MountedFeature[]` — object-form and chain features as mounted, no longer an object-form view of chain features. Read declarations with the new `entrypointsOf(f)` (chain `entrypoints` or object-form `use`), slice records with `sliceOf(ctx, f)` as before, and a chain feature's units with `f.plugins()`.
+
+- 232d3e8: Make failure the acyclic validation foundation. Schema parsing now returns exact typed validation failures, and failure revival returns typed protocol/validator defects instead of throwing. Add validated versioned JSON envelopes; retain legacy envelope reads while rejecting non-JSON data and changing output transforms. oRPC error maps validate output-only wire data.
+
+  Migrate consumers to check failures, propagate them through Journal event/write/replay and queue/mail operations, and use explicit exception bridges at foreign callbacks. Journal rejects invalid event entries before inserting them. See `@arki/failure/docs/upgrade-typed-validation.md` for breaking API and stored-data migration details.
+
+- cc656e3: Every hook and `provides` factory gets `$signal` in its kernel context: one `AbortSignal` per hook call that aborts when the hook exceeds `defineApp(name, { hookTimeoutMs })`, with the `DOT_LIFECYCLE_E015` error as its reason. A promise cannot be killed, so before this a hung hook (a connect that never settles) kept running after the kernel gave up on it; a hook that passes `$signal` to its I/O now stops. `$signal` joins the reserved `$` keys.
+- ce8d707: New entry `@arki/dot/runtime`: `createAppRuntime(app, { hot: import.meta.hot, onStarted })` keeps one started app per server process, also under Vite hot updates. `get()` starts the app once and retries a failed start. On a hot update the old app is disposed, and the replacing module starts its app only after that disposal finished, so two apps never hold the same pool or PGlite directory (`import.meta.hot.dispose` alone does not wait). The started app is hooked to SIGTERM / SIGINT with `hookSignals`. The `dot new` stack template and the monorepo app template use it.
+- 232d3e8: Own resources and child work through typed descriptors. Replace imperative `scoped` registration with `resource`, `cleanup`, `child`, `scoped(plan, body)`, `openScope` and checked dynamic scopes. Preserve exact callback failures and canonical cancellation, deadline and defect outcomes; keep cleanup members private when serializing aggregate failures.
+
+  Dot owns partial plugin construction, publishes services atomically, joins children before disposal and retains finalizer failures. Lazy services coalesce initialization, retry only on a later explicit get, and expose only successful values through peek. Lifecycle callers, HMR and CLI supervision now inspect resolved ownership failures. Existing static/configure and legacy start/stop exception migration continues separately.
+
+  Breaking upgrade: see `@arki/dot/docs/upgrade-ownership.md` and `@arki/async/README.md`. Check boot/start/get/dispose results before using them; deadlines request cancellation and wait for admitted work to settle before releasing resources.
+
+  `ProvidesFactories` now describes raw callback returns, including promises. Infer factory records at their definitions; handles and lifecycle callbacks continue to receive resolved service values.
+
+- d9864f3: Every usecase from `defineFeature(...).usecases(...)` now runs in an OpenTelemetry span named `feature.<feature>.<usecase>`. A returned `@arki/failure` failure sets the span status to ERROR with `failure.code` and `failure.status`, and records no exception. A throw or rejection is recorded as an exception, sets ERROR, and is rethrown unchanged. Anything else sets OK. The span is active, so spans started inside the usecase nest under it. With no SDK registered, calls go straight through with the same `this`, arguments and return value. Usecase types do not change. `rpc()` adds no span: oRPC's own `call_procedure` span covers each procedure once `@orpc/otel` is registered. `@arki/dot` now depends on `@arki/failure`.
+- 115aa87: Nested features and infra that receives the feature's needs.
+
+  - `.features(...children)` after `.infra()`: a child is named by its path (`digest.compile`), its provides are scoped (`digest.compile.ranker`) and private to the parent's scope, and the parent sees them by identity in `.needs()`. `allFeatures`, `ownUnits`, `mountFeatures` (assembly ownership check, `FEATURE_E005`), `override('compile.ranker')` by path, depth-aware `fake()`, and shutdown in reverse boot order.
+  - Infra plugins declare their needs unbound (`service<T>()`); `.infra()` binds each alias to a sibling's key first, then to the feature's own need of that alias. An infra need the feature does not declare, or binds to another handle, is a compile error and a runtime refusal.
+  - `entrypointOnly(handle)` in `.needs()`: entrypoints see it, usecases never do.
+  - Breaking: `.needs()` takes a record of aliases only (a bare handle is refused); feature services are published under one bag key, `<name>.services`, and `needsMiddleware` reads that key.
+  - `rpc()` mounts a declared child's router once, at the path the parent's contract gives it.
+
+- 6e4d7da: One file per usecase, one procedure tree per feature (`entrypoints/procedures.ts`). Breaking (pre-1.0):
+
+  - `.usecases()` now takes an object of factories, `{ signup, markInvited }`, each `(deps) => usecase`. Each factory may ask for any subset of the deps (`Pick<Deps, 'repos'>`); one that asks for a dep the feature lacks is a compile error naming it (`'DOT: a usecase asks for a dep the feature does not provide'`). The single-factory form `.usecases(create)` is removed. New types: `UsecaseFactories`, `Usecases`, `UsecaseGuard`.
+  - `DepsOf<typeof waitlistDeps>` on the stage before `.usecases()` is now exactly what a usecase may ask for (needs + infra), without an empty `usecases` key.
+  - `rpc(contract, router)` becomes `rpc(contract, implementer, factories)`: a tree of factories shaped like the contract (a group is a nested object), each leaf `(impl) => impl.<path>.handler(…)`. Keep the whole tree in one `entrypoints/procedures.ts`; each leaf takes the implementer as a typed parameter (`import type`), so it never imports the feature at runtime. Keys must match the contract exactly: an extra key is `'DOT: a procedure key is not in the contract'`; a missing key or a procedure that does not implement its key does not compile. New types: `ProcedureFactories`, `BuiltRouter`, `ContractKeysGuard`.
+
+  Migrate: split `createUsecases` into one exported factory per key (one file each) and pass `{ a, b }`; turn `procedures(os)` into one tree `export const waitlistProcedures = { name: (impl: typeof rpcImplementer) => impl.name.handler(…) }` and pass `rpc(waitlistRpcContract, rpcImplementer, waitlistProcedures)`.
+
+- 8b3cc80: `rpc(contract, router)` now emits one manifest action per procedure (binding `rpc`, id `<feature>.<path>`), so `dot explain` lists a feature's procedures with their HTTP route, declared errors and contract `meta` (where a policy such as `{ auth: 'admin' }` is declared). Contract meta that is not plain JSON throws `FEATURE_E010` at `rpc()`. Entrypoint descriptors may declare `actionsOf(feature)` for actions whose ids need the feature name. `RPC_ACTION_META_SCHEMA` names the meta layout.
+
+### Patch Changes
+
+- dcf2cef: Docs standard: the README now opens with install, quick start, when not to use Dot, runtime support, public imports, failure behaviour and limits. The dependency-injection material moved to `docs/di.md`, the complex setup to `docs/complex-setup.md`, and the CLI, testing and operations sections to their own pages. The quickstart is a task-first tutorial whose command output is checked by the doc tests. New: `AGENTS.md`, `docs/recipes/deploy.md`, `docs/recipes/upgrade.md`, `@fix`/`@verify` on every error code. Internal plans under `docs/plans/` no longer ship in the tarball.
+
+  The `dot.app_lifecycle_failed` remediation now says to read `error.data.underlyingCode` and apply that code's remediation. It used to blame a `configure` hook that throws or returns a Promise, which was wrong when the cause is `ARKI_DOT_E020` (a provider mounted after its consumer).
+
+  no demo impact: documentation and doc-example changes, plus one CLI remediation string; no runtime behaviour changes
+
+- 9a4babb: `.usecases()` no longer rejects an inline factory whose returned function has an untyped or defaulted parameter, such as `({ repos }: Pick<Deps, 'repos'>) => (fail = false) => …`. Such a factory is context-sensitive, so TypeScript checks the call twice; in the first pass `F` is still its constraint and the guard wrongly flagged every key as "a usecase asks for a dep the feature does not provide". A factory that asks for `never` now counts as asking for nothing. A factory that really asks for a dep the feature lacks is still a compile error, inline or not.
+- 69d054f: `feature()` now exposes typed `provides` handles: `billing.provides.entitlements` is a `Token` on the wire key that
+  billing's `boot` returns, typed from that implementation. A consumer declares `needs: { access: billing.provides.entitlements }`
+  and never restates the service type. `dot new` templates now pin `@arki/env` 0.0.11, `@arki/db` 0.3.1 and
+  `@arki/journal` 0.2.1.
+- 7b19289: `.infra()` refuses two plugins that provide the same service key at compile time (`DOT: two infra plugins provide the same key`, naming the key). The runtime already threw `ARKI_DOT_E027` for the pair; the types used to intersect the two records silently.
+- 923124f: The app builder's list checks (`.features()`, `.useAll()`, `.infra()`, `.entrypoints()`) walk the list by index instead of re-slicing it at every step, which made type-checking quadratic in the number of units. Mounting 100 chained features costs 0.94M type instantiations instead of 2.65M; 200 features type-check instead of hitting the compiler's limit. A list longer than 1024 units is refused with a `DOT:` label. New `src/tests/typecheck-budget.test.ts` keeps the ceilings (400k at 50 features, 1.1M at 100).
+- 5721742: `@arki/dot`, `/plugin`, `/feature`, `/log` and `/test-harness` now run on Node, Bun, Deno, browsers and Hermes. `bun run test:runtimes` proves it.
+
+  - Durations use `Date.now()` where the runtime has no `performance` (bare Hermes).
+  - `hookSignals` reads the global `process` at call time and hooks nothing where there is none. The `SignalTarget` listener type is now `() => void`.
+  - `./cli` is an adapter entry (Node only). Lint now runs with the shared library preset, and the existing lint errors in the package are fixed.
+
+- 232d3e8: Cursor encoding and decoding return canonical failures. Database pagination
+  preserves those outcomes before building SQL or returning a page. Check codec
+  results and declare the original cursor failures at RPC boundaries.
+
+  Failure lint rules now catch discarded callback returns, nested aggregate and
+  iterator results, and blind acceptance through aliases or generic failure guards.
+  Handle each outcome or forward it to its owner.
+  Browser contract linting admits canonical failure definitions while keeping
+  exception bridges in implementations.
+  The exported lock conformance suite now checks each queued task's acquisition
+  outcome before accepting its completion counts.
+
+  Dot acquires telemetry instruments inside guarded execution, so importing before
+  SDK setup works and broken reporters cannot replace application outcomes.
+
+- 3230f02: `errorCaptureMiddleware({ report })` in `@arki/dot/orpc`: an oRPC middleware that reports a procedure's unexpected failures to `report(error, { path })` and rethrows every error unchanged. An `ORPCError` below 500 is not reported; a reporter that throws is logged at warn on `arki:dot:orpc` and never replaces the procedure's error. Written on an empty context, so it fits any implementer. New type `ErrorCaptureInfo`.
+- 232d3e8: Propagate exact Clock sleep failures through retry policies, composition, fallback helpers and Dot services. Retry stops on a failed wait. Owned scopes recognize canonical Clock cancellation only with their private cancellation cause. Callers must inspect retry outcomes; success remains unwrapped.
+
+  Transactions and HTTP clients map wait refusals to their existing cancellation/defect contracts without repeating the operation.
+
+- ff8e384: The `app-stack` template's `.gitignore` now ignores `.local/`, so a new app's local PGlite data (`./.local/db`) can no longer be committed.
+- 847f025: docs describe `dot new --json`; correct JSON paths; ship agent docs
+- 742f4c3: `dot dev` runs every preflight in a fresh process (hidden `dot _preflight`, same runtime and env as the runner) and reads back one JSON report: the plugin counts, the migrations the boot applied, and the doctor verdict or failure. A restart now checks the app file and env as they are now, not the module cached at the first import, and the supervisor never configures the app itself. A preflight process that crashes, hangs past `preflightTimeoutMs` (default 120 s) or prints no valid report fails with `dot.dev_preflight_failed` (`DevPreflightFailed`); stopping `dot dev` kills it.
+- Updated dependencies [2faafcb]
+- Updated dependencies [dcf2cef]
+- Updated dependencies [232d3e8]
+  - @arki/cli@0.1.0
+
 ## 0.6.1
 
 ### Patch Changes

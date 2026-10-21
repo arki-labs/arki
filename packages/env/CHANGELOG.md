@@ -1,5 +1,72 @@
 # @arki/env
 
+## 0.1.0
+
+### Minor Changes
+
+- 1e15576: `defineEnv()` `server`, `client` and `shared` take records of any Standard Schema (Zod, Valibot, ArkType, hand-written), not only `ZodType`; values are typed as each schema's output.
+  `@arki/env/dot`: `EnvDotOptions`, `EnvServices` and `env()` take `Record<string, StandardSchemaV1>` instead of `Record<string, ZodType>`.
+- 75d6fb9: **Validation now runs in production by default.** `defineEnv` used to skip validation whenever `NODE_ENV !== 'development'`, so an app without an explicit `skipValidation` booted production on an unchecked config. The default now skips only when `CI` is set (Docker build stages) or during `lint` runs, the same rule most apps already passed by hand. Apps that set `options.skipValidation` are unaffected.
+
+  New `secret(schema)`, `reveal(value)` and `Redacted` (from `@arki/env/core`): a secret variable becomes a `Redacted` value that prints as `[redacted]` in logs, JSON, template strings and `util.inspect`, and is read with a deliberate `reveal(env.KEY)`. `reveal` also accepts the raw string, for runs where validation is skipped.
+
+- cc7facf: Breaking: `defineEnv` now validates in every environment. `CI` and `lint` runs no longer skip validation. The only implicit opt-out is `SKIP_ENV_VALIDATION=1` (exactly `1`); set it only in build stages that run without secrets. `options.skipValidation` still overrides it. The `@arki/env/dot` plugin now validates at boot and fails with `ARKI_ENV_PLUGIN_E001` (new `ENV_PLUGIN_ERROR_CODES`), and `EnvServices['env']` is derived from `defineEnv` without a cast.
+- a67cd66: `secret()` takes any Standard Schema (zod, valibot, arktype, hand-written) and returns a Standard Schema, not a zod schema. `.optional()` is still there: it accepts a missing variable and leaves `undefined` unwrapped. The result no longer has zod methods such as `.parse`; use `secret(schema)['~standard'].validate(value)`.
+
+  A rejected secret's issues keep their path but get a fixed message, because some validators (valibot) repeat the received value in theirs and `defineEnv` logs issues.
+
+### Patch Changes
+
+- 064e096: Make failure the acyclic validation foundation. Schema parsing now returns exact typed validation failures, and failure revival returns typed protocol/validator defects instead of throwing. Add validated versioned JSON envelopes; retain legacy envelope reads while rejecting non-JSON data and changing output transforms. oRPC error maps validate output-only wire data.
+
+  Migrate consumers to check failures, propagate them through Journal event/write/replay and queue/mail operations, and use explicit exception bridges at foreign callbacks. Journal rejects invalid event entries before inserting them. See `@arki/failure/docs/upgrade-typed-validation.md` for breaking API and stored-data migration details.
+
+- 652eb4b: `env()`, `resilience()`, `auth()`, `journal()`, `journalProjections()`, `queue()`, `durableScheduler()` and `outboxPlugin()` keep their plugin name in the type, so their handles carry `provider: 'env' | 'resilience' | …` instead of `string` and the feature builder's handle-identity checks apply around them. The three queue plugins gain an overload: with no `name` option the type carries the default name (`'queue'`, `'durable-scheduler'`, `'outbox'`); with `name: 'jobs'` it carries `'jobs'`.
+- cbefc52: Dot plugins no longer pass a hard-coded `version` (the field was removed from `@arki/dot`).
+- 5bc6390: `env()` publishes through a `provides` factory, so `envPlugin.provides.env` is a typed handle before boot (`@arki/dot` plugin handles).
+- fd18765: `defineEnv` reads `globalThis.process?.env` instead of the bare `process` global, so it no longer throws a ReferenceError on engines without `process` (React Native Hermes, browsers). It still reads nothing at import. Pass `runtimeEnv` on those engines. Added the library lint preset and a cross-runtime smoke test.
+- fe5a391: README follows the docs standard (install, quick start, limits, failure behaviour), with `llms.txt`, an agent guide, `AGENTS.md`, `test:docs` and the 0.0.11 to 0.1.0 upgrade guide. `ARKI_ENV_PLUGIN_E001` gains `@fix` and `@verify` tags.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- Updated dependencies [dcf2cef]
+- Updated dependencies [afecc7a]
+- Updated dependencies [5bc6390]
+- Updated dependencies [899d0a9]
+- Updated dependencies [ce8d707]
+- Updated dependencies [92b38ed]
+- Updated dependencies [9a4babb]
+- Updated dependencies [80a4aa5]
+- Updated dependencies [232d3e8]
+- Updated dependencies [69d054f]
+- Updated dependencies [cbefc52]
+- Updated dependencies [7b19289]
+- Updated dependencies [923124f]
+- Updated dependencies [5721742]
+- Updated dependencies [01400a0]
+- Updated dependencies [0ab11d8]
+- Updated dependencies [a531063]
+- Updated dependencies [9b35520]
+- Updated dependencies [5721742]
+- Updated dependencies [232d3e8]
+- Updated dependencies [9192d0e]
+- Updated dependencies [3230f02]
+- Updated dependencies [232d3e8]
+- Updated dependencies [232d3e8]
+- Updated dependencies [932c9e4]
+- Updated dependencies [232d3e8]
+- Updated dependencies [cc656e3]
+- Updated dependencies [ff8e384]
+- Updated dependencies [ce8d707]
+- Updated dependencies [847f025]
+- Updated dependencies [232d3e8]
+- Updated dependencies [d9864f3]
+- Updated dependencies [742f4c3]
+- Updated dependencies [115aa87]
+- Updated dependencies [6e4d7da]
+- Updated dependencies [8b3cc80]
+  - @arki/dot@0.7.0
+
 ## 0.0.11
 
 ### Patch Changes
