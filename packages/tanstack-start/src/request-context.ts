@@ -7,7 +7,7 @@
  * names its type once, in `server.ts`, through {@link RequestContextOf}:
  *
  * ```ts
- * declare module '@tanstack/react-router' {
+ * declare module '@tanstack/react-start' {
  *   interface Register {
  *     server: { requestContext: RequestContextOf<typeof app> };
  *   }
@@ -129,7 +129,7 @@ export type StartApp = DotAppLifecycle<StartServices, Failure, Failure, PluginPh
  * `options.session` return. Never written by hand.
  *
  * @example
- * declare module '@tanstack/react-router' {
+ * declare module '@tanstack/react-start' {
  *   interface Register {
  *     server: { requestContext: RequestContextOf<typeof app> };
  *   }

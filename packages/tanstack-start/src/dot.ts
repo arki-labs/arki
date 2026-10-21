@@ -8,28 +8,33 @@
  * context to Start.
  *
  * ```ts
+ * // A driver such as `schedule()` has no `provides` handles: name its service by key.
+ * const scheduler = token<SchedulerProvides['scheduler']>()('scheduler');
+ *
  * export const app = defineApp('shop')
  *   .infra(database, authn)
  *   .features([...features, gateway])
  *   .entrypoints(
  *     schedule({ clock: 'host' }),
  *     tanstackStart({
- *       needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler: scheduler.provides.scheduler },
+ *       needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler },
  *       session: ({ auth }, request) => auth.principal(request.headers),
  *       rpc: ({ rpc }, request) => rpc.client(request.headers),
  *       mounts: {
  *         rpc: { at: '/api/rpc', serve: ({ rpc }, request, prefix) => rpc.handle(request, prefix) },
  *         auth: { at: '/api/auth', serve: ({ auth }, request) => auth.handler(request) },
- *         cron: { at: '/api/cron', router: cronRouter, secret: env.CRON_SECRET, schedules: ({ scheduler }) => scheduler },
+ *         cron: { at: '/api/cron', router: cronRouter, secret: () => env.CRON_SECRET, schedules: ({ scheduler }) => scheduler },
  *         health: { at: '/api/health' },
  *       },
- *       cors: { origins: [env.VITE_URL], extensions: true },
+ *       cors: () => ({ origins: [env.VITE_URL], extensions: true }),
  *     }),
  *   );
  * ```
  *
  * The needs are checked against the builder: placing `tanstackStart()`
- * before the plugins that provide them is a compile error.
+ * before the plugins that provide them is a compile error. The cron secret
+ * and the CORS options are functions, read when the app boots and never at
+ * import, so `vite build` runs without the server's env.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
@@ -37,11 +42,13 @@ import { z } from 'zod';
 
 import type { CtxOf, NeedsShape, NoReservedKeys } from '@arki/dot';
 import type { ActionDeclaration } from '@arki/dot/plugin';
+import type { SchemaFailure } from '@arki/failure';
 import type { CronContext } from '@arki/schedule/orpc';
 import { plugin } from '@arki/dot';
-import { isFailure } from '@arki/failure';
+import { DotPluginError } from '@arki/dot/plugin';
+import { InvalidInput, isFailure } from '@arki/failure';
 import { cronErrorBody } from '@arki/schedule/orpc';
-import { parse } from '@arki/schema';
+import { formatIssues, parse } from '@arki/schema';
 
 import type {
   CorsOptions,
@@ -69,6 +76,41 @@ const mountPathsSchema = z
 
 const cronSecretSchema = z.string().min(1, 'The cron secret must not be empty.');
 
+/**
+ * Stable error codes thrown when `tanstackStart()` boots. Match on the code,
+ * never on the message.
+ */
+export const TANSTACK_START_PLUGIN_ERROR_CODES = {
+  /**
+   * The cron mount's `secret()` returned an empty or missing value at boot.
+   *
+   * @fix Set the env var `secret` reads (such as `CRON_SECRET`) on the server, not at build time.
+   * @verify bun run test -- src/dot.test.ts
+   */
+  cronSecretInvalid: 'ARKI_TANSTACK_START_PLUGIN_E001',
+  /**
+   * `cors()` returned an origin that is not a bare `scheme://host[:port]`.
+   *
+   * @fix Remove any path or trailing slash from each origin, such as `https://shop.example`.
+   * @verify bun run test -- src/dot.test.ts
+   */
+  corsInvalid: 'ARKI_TANSTACK_START_PLUGIN_E002',
+} as const;
+
+/** The coded error that stops the boot when a value read at boot fails its schema. */
+function bootError(
+  failure: SchemaFailure,
+  error: { readonly code: string; readonly what: string; readonly remediation: string },
+): DotPluginError {
+  const reason = InvalidInput.is(failure) ? formatIssues(failure.data.issues) : failure.message;
+  return new DotPluginError({
+    code: error.code,
+    message: `[tanstack-start] ${error.what}: ${reason}`,
+    remediation: error.remediation,
+    docsUrl: `https://arki.dev/dot/errors/${error.code.toLowerCase().replaceAll('_', '-')}`,
+  });
+}
+
 /** A router whose procedures run on the cron context — the app's `cronRouter`. */
 export type CronRouter = ConstructorParameters<typeof OpenAPIHandler<CronContext>>[0];
 
@@ -93,11 +135,14 @@ export type MountOptions<Needs> = {
     readonly at: MountPrefix;
     readonly serve: (needs: Needs, request: Request) => Response | Promise<Response>;
   };
-  /** The cron mount: the app's cron router, the bearer secret the host sends, the scheduler that runs it. */
+  /**
+   * The cron mount: the app's cron router, the bearer secret the host sends
+   * (read at boot, such as `() => env.CRON_SECRET`), the scheduler that runs it.
+   */
   readonly cron?: {
     readonly at: MountPrefix;
     readonly router: CronRouter;
-    readonly secret: string;
+    readonly secret: () => string;
     readonly schedules: (needs: Needs) => CronContext['schedules'];
   };
   /** The health probe: `GET` answers `{ status: 'ok' }` once the app has started. */
@@ -125,8 +170,8 @@ export type TanstackStartOptions<Needs extends NeedsShape, RpcResult, SessionRes
   readonly rpc: (needs: CtxOf<Needs>, request: Request) => RpcResult;
   /** The server routes this entrypoint serves. Only declared mounts reach the manifest. */
   readonly mounts?: { readonly [Name in Declared]: NonNullable<MountOptions<CtxOf<Needs>>[Name]> };
-  /** Which cross-origin callers the rpc mount answers. No option: same origin only. */
-  readonly cors?: CorsOptions;
+  /** Which cross-origin callers the rpc mount answers, read at boot. No option: same origin only. */
+  readonly cors?: () => CorsOptions;
 };
 
 const MOUNT_SUMMARIES: Readonly<Record<MountName, string>> = {
@@ -159,9 +204,17 @@ function mountActions<Needs>(mounts: MountOptions<Needs> | undefined): readonly 
 /** Only `chrome-extension://` origins count as extensions, as Chromium sends them. */
 const EXTENSION_ORIGIN = 'chrome-extension://';
 
-function corsPolicy(options: CorsOptions | undefined): CorsPolicy {
-  const origins = new Set(options?.origins);
-  const extensions = options?.extensions ?? false;
+function corsPolicy(read: (() => CorsOptions) | undefined): CorsPolicy {
+  const options = parse(corsSchema, read?.() ?? { origins: [] });
+  if (isFailure(options)) {
+    throw bootError(options, {
+      code: TANSTACK_START_PLUGIN_ERROR_CODES.corsInvalid,
+      what: 'the CORS options are invalid',
+      remediation: 'List each origin as scheme://host[:port], with no path and no trailing slash.',
+    });
+  }
+  const origins = new Set(options.origins);
+  const extensions = options.extensions ?? false;
   return {
     allows: (origin): origin is string =>
       origin !== null && (origins.has(origin) || (extensions && origin.startsWith(EXTENSION_ORIGIN))),
@@ -191,12 +244,20 @@ function cronAuthError(request: Request, secret: string): Response | undefined {
 }
 
 function cronMount<Needs>(cron: NonNullable<MountOptions<Needs>['cron']>, needs: Needs): MountHandles['cron'] {
+  const secret = parse(cronSecretSchema, cron.secret());
+  if (isFailure(secret)) {
+    throw bootError(secret, {
+      code: TANSTACK_START_PLUGIN_ERROR_CODES.cronSecretInvalid,
+      what: 'the cron secret is missing',
+      remediation: 'Set the env var the cron secret() reads (such as CRON_SECRET) on the server before booting.',
+    });
+  }
   // Built once per app: the router is static data.
   const handler = new OpenAPIHandler(cron.router, { customErrorResponseBodyEncoder: cronErrorBody });
   return {
     at: cron.at,
     async serve(request) {
-      const denied = cronAuthError(request, cron.secret);
+      const denied = cronAuthError(request, secret);
       if (denied !== undefined) return denied;
       const carry: CronContext['carry'] = {};
       // No cron takes input: a stray body is never parsed.
@@ -227,8 +288,9 @@ function mountHandles<Needs>(mounts: MountOptions<Needs> | undefined, needs: Nee
  * The TanStack Start entrypoint of a Dot app. Provides `tanstackStart`: the
  * per-request context builder, the CORS policy and the declared mounts.
  * Declares one manifest action per declared mount, at its `at`, so
- * `dot explain` lists them. `configure` rejects a bad CORS origin, a bad or
- * repeated mount path and an empty cron secret (no I/O).
+ * `dot explain` lists them. `configure` rejects a bad or repeated mount
+ * path (no I/O). Booting reads the cron secret and the CORS options, and
+ * throws a coded `DotPluginError` when either is bad.
  *
  * @example
  * defineApp('shop')
@@ -254,16 +316,11 @@ export function tanstackStart<
     needs: options.needs,
     actions: mountActions(mounts),
     configure() {
-      const cors = parse(corsSchema, options.cors ?? { origins: [] });
-      if (isFailure(cors)) return cors;
       const paths = parse(
         mountPathsSchema,
         declared(mounts).map(mount => mount.at),
       );
-      if (isFailure(paths)) return paths;
-      if (mounts?.cron === undefined) return;
-      const secret = parse(cronSecretSchema, mounts.cron.secret);
-      return isFailure(secret) ? secret : undefined;
+      return isFailure(paths) ? paths : undefined;
     },
     provides: {
       tanstackStart: (needs): StartService<Awaited<RpcResult>, Awaited<SessionResult>, Declared> => ({

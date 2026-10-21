@@ -8,16 +8,17 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
-import { isFailure } from '@arki/failure';
+import { DotPluginError } from '@arki/dot/plugin';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
-import { tanstackStart } from './dot';
+import { TANSTACK_START_PLUGIN_ERROR_CODES, tanstackStart } from './dot';
 
 type AppOptions = {
   readonly cors?: { origins: string[]; extensions?: boolean };
   readonly rpcAt?: `/${string}`;
   readonly authAt?: `/${string}`;
-  readonly secret?: string;
+  readonly secret?: () => string;
 };
 
 const schedules = { trigger: async (name: string) => ({ name, status: 'ran' as const, value: undefined }) };
@@ -32,10 +33,10 @@ function makeApp(options: AppOptions = {}) {
     mounts: {
       rpc: { at: options.rpcAt ?? '/api/orpc', serve: ({ api }, request, prefix) => api.handle(request, prefix) },
       auth: { at: options.authAt ?? '/api/auth', serve: ({ auth }, request) => auth.handler(request) },
-      cron: { at: '/api/cron', router: {}, secret: options.secret ?? 'cron-secret', schedules: () => schedules },
+      cron: { at: '/api/cron', router: {}, secret: options.secret ?? (() => 'cron-secret'), schedules: () => schedules },
       health: { at: '/api/health' },
     },
-    ...(options.cors === undefined ? {} : { cors: options.cors }),
+    ...(options.cors === undefined ? {} : { cors: () => options.cors ?? { origins: [] } }),
   });
   return { app: defineApp('shop').use(authn).use(gateway).entrypoints(start), calls };
 }
@@ -108,9 +109,21 @@ describe('tanstackStart() manifest', () => {
   });
 });
 
+/** The coded error a boot stopped on, or a test failure when the boot did not stop that way. */
+async function bootError(app: ReturnType<typeof makeApp>['app']) {
+  const caught = await app.start();
+  if (!UnexpectedDefect.is(caught)) throw new Error('boot should stop on a defect');
+  if (!(caught.cause instanceof DotPluginError)) throw new Error('the defect should carry a DotPluginError');
+  return caught.cause;
+}
+
 describe('tanstackStart() configure', () => {
-  it('rejects a CORS origin with a path, so a typo cannot silently block every caller', () => {
-    expect(isFailure(makeApp({ cors: { origins: ['https://shop.example/'] } }).app.configure())).toBe(true);
+  it('never reads the env-backed options, so `vite build` runs without the server env', () => {
+    const unread = () => {
+      throw new Error('read during configure');
+    };
+    const { app } = makeApp({ secret: unread, cors: undefined });
+    expect(isFailure(app.configure())).toBe(false);
   });
 
   it('rejects two mounts at one path, since one route file would shadow the other', () => {
@@ -121,8 +134,18 @@ describe('tanstackStart() configure', () => {
     expect(isFailure(makeApp({ rpcAt: '/api/rpc/' }).app.configure())).toBe(true);
   });
 
-  it('rejects an empty cron secret, which would let anyone trigger schedules', () => {
-    expect(isFailure(makeApp({ secret: '' }).app.configure())).toBe(true);
+});
+
+describe('tanstackStart() boot', () => {
+  it('stops on an empty cron secret, which would let anyone trigger schedules', async () => {
+    const error = await bootError(makeApp({ secret: () => '' }).app);
+    expect(error.code).toBe(TANSTACK_START_PLUGIN_ERROR_CODES.cronSecretInvalid);
+    expect(error.message).toMatch(/cron secret/);
+  });
+
+  it('stops on a CORS origin with a path, so a typo cannot silently block every caller', async () => {
+    const error = await bootError(makeApp({ cors: { origins: ['https://shop.example/'] } }).app);
+    expect(error.code).toBe(TANSTACK_START_PLUGIN_ERROR_CODES.corsInvalid);
   });
 
   it('accepts listed origins and resolves the policy', async () => {

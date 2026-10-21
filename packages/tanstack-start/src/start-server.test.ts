@@ -5,13 +5,14 @@
  * forever, everything else briefly. A `%2F` probe must be a 404, not a 500.
  * The context Start sees must be the one the app built for this request.
  * A hot update must dispose the old app before the new one opens the same
- * resources.
+ * resources. With `eager`, a production server boots before its first
+ * request, so a boot failure shows at process start.
  */
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { defineApp, plugin } from '@arki/dot';
 
@@ -172,6 +173,32 @@ describe('startServer() client files', () => {
     await server.fetch(new Request('https://shop.example/assets/missing.js'));
     await server.fetch(page());
     expect(handled()).toBe(2);
+  });
+});
+
+/** A plugin that records when the app starts. */
+const booting = (events: string[]) =>
+  plugin({
+    name: 'extra',
+    start() {
+      events.push('start');
+    },
+  });
+
+describe('startServer() eager', () => {
+  it('boots the app before the first request when eager', async () => {
+    const events: string[] = [];
+    startServer(makeApp(booting(events)).app, { eager: true, handler: ok });
+    await vi.waitFor(() => expect(events).toEqual(['start']));
+  });
+
+  it('waits for the first request otherwise', async () => {
+    const events: string[] = [];
+    const server = startServer(makeApp(booting(events)).app, { handler: ok });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(events).toEqual([]);
+    await server.fetch(page());
+    expect(events).toEqual(['start']);
   });
 });
 

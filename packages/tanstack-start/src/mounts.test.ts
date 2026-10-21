@@ -49,10 +49,10 @@ async function startedApp(options: { readonly extensions?: boolean } = {}) {
     mounts: {
       rpc: { at: '/api/orpc', serve: ({ api }, request, prefix) => api.handle(request, prefix) },
       auth: { at: '/api/auth', serve: ({ auth }, request) => auth.handler(request) },
-      cron: { at: '/api/cron', router: cronRouter, secret: 'cron-secret', schedules: ({ timers }) => timers },
+      cron: { at: '/api/cron', router: cronRouter, secret: () => 'cron-secret', schedules: ({ timers }) => timers },
       health: { at: '/api/health' },
     },
-    cors: { origins: ['https://shop.example'], extensions: options.extensions ?? false },
+    cors: () => ({ origins: ['https://shop.example'], extensions: options.extensions ?? false }),
   });
   const app = await defineApp('shop').use(authn).use(gateway).use(timers).entrypoints(start).start();
   if (isFailure(app)) throw new Error(`app did not start: ${app.code}`);

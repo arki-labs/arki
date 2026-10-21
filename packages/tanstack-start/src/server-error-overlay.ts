@@ -10,6 +10,9 @@
  *     produced the opaque `[object Response]` body when @sentry/node's
  *     OTel http instrumentation corrupted the response stream).
  *   - Production returns a minimal HTML 500 page — no stack leakage.
+ *   - Every argument after the request reaches the inner handler unchanged,
+ *     so Start's `{ context }` survives:
+ *     `startServer(app, { handler: withServerErrorOverlay(createStartHandler(defaultStreamHandler)) })`.
  *
  * The wrapper is best-applied as the OUTER layer in `entry-server.ts`:
  * ```ts
@@ -25,14 +28,17 @@
  */
 import { captureException } from './sentry-bridge';
 
-type FetchHandler = (request: Request) => Promise<Response> | Response;
+/** A fetch handler; whatever follows the request (Start's `{ context }`) passes through untouched. */
+type FetchHandler<Rest extends readonly unknown[]> = (request: Request, ...rest: Rest) => Promise<Response> | Response;
 
 const isDev = process.env.NODE_ENV !== 'production';
 
-export function withServerErrorOverlay(handler: FetchHandler): FetchHandler {
-  return async (request: Request): Promise<Response> => {
+export function withServerErrorOverlay<Rest extends readonly unknown[]>(
+  handler: FetchHandler<Rest>,
+): (request: Request, ...rest: Rest) => Promise<Response> {
+  return async (request, ...rest) => {
     try {
-      const result = await handler(request);
+      const result = await handler(request, ...rest);
       if (!(result instanceof Response)) {
         const fakeError = new Error(
           `entry-server fetch handler returned ${describe(result)}, expected Response`,

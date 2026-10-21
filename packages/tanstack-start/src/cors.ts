@@ -1,5 +1,5 @@
 /**
- * The `cors` option of `tanstackStart()`: its source type and the schema `configure` checks it with.
+ * The `cors` option of `tanstackStart()`: its source type and the schema boot checks it with.
  * Internal on purpose: `./dot` re-exports the type only, so no Zod type reaches the public API.
  */
 import { z } from 'zod';
@@ -9,7 +9,7 @@ function isOrigin(value: string): boolean {
   return URL.canParse(value) && new URL(value).origin === value;
 }
 
-/** Checks a `CorsOptions` value at `configure`; `dot.test-d.ts` proves it accepts exactly that type. */
+/** Checks a `CorsOptions` value at boot; `dot.test-d.ts` proves it accepts exactly that type. */
 export const corsSchema = z
   .object({
     /** Origins the rpc mount reflects, such as the app's own URL. */

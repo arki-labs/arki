@@ -10,7 +10,7 @@
  * export const server = startServer(app, { hot: import.meta.hot });
  * export default createServerEntry(server);
  *
- * declare module '@tanstack/react-router' {
+ * declare module '@tanstack/react-start' {
  *   interface Register {
  *     server: { requestContext: RequestContextOf<typeof app> };
  *   }
@@ -41,18 +41,25 @@ export type StartHandler<Context> = (
   options: { readonly context: Context },
 ) => Response | Promise<Response>;
 
-/** The `import.meta.hot` shape `createAppRuntime` accepts. */
-type HotContext = NonNullable<Parameters<typeof createAppRuntime>[1]>['hot'];
+/** The options `createAppRuntime` accepts; `hot` and `eager` pass through unchanged. */
+type RuntimeOptions = NonNullable<Parameters<typeof createAppRuntime>[1]>;
 
 /**
  * Options of {@link startServer}.
  *
  * @example
- * startServer(app, { hot: import.meta.hot, client: new URL('../client/', import.meta.url) });
+ * startServer(app, { hot: import.meta.hot, eager: env.NODE_ENV === 'production', client: new URL('../client/', import.meta.url) });
  */
 export type StartServerOptions<Context> = {
   /** `import.meta.hot`: dispose the old app before a hot update starts the new one. */
-  readonly hot?: HotContext;
+  readonly hot?: RuntimeOptions['hot'];
+  /**
+   * Boot the app when the server is created, not on the first request
+   * (`createAppRuntime`'s `eager`). Pass `env.NODE_ENV === 'production'`: a
+   * production server pays no boot on its first request and shows a boot
+   * failure at process start. Leave it off in dev, where Vite re-runs the module.
+   */
+  readonly eager?: RuntimeOptions['eager'];
   /** Start's handler. Defaults to `createStartHandler(defaultStreamHandler)`. */
   readonly handler?: StartHandler<Context>;
   /**
@@ -148,7 +155,7 @@ export function startServer<Services extends ServiceRecord, Rpc, Session>(
   app: DotAppLifecycle<WithStart<Services, Rpc, Session>, Failure, Failure, PluginPhases>,
   options: StartServerOptions<StartRequestContext<WithStart<Services, Rpc, Session>, Rpc, Session>> = {},
 ): StartServer {
-  const runtime = createAppRuntime(app, { hot: options.hot });
+  const runtime = createAppRuntime(app, { hot: options.hot, eager: options.eager });
   const handler: StartHandler<StartRequestContext<WithStart<Services, Rpc, Session>, Rpc, Session>> =
     options.handler ?? createStartHandler<{ server: { requestContext: AnyStartContext } }>(defaultStreamHandler);
   const client = options.client ?? defaultClientDir();
