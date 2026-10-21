@@ -40,9 +40,28 @@ describe('resolveEmbeddingModel', () => {
     expect(!isFailure(second) && second.provider).toBe('openai');
     const { OPENAI_API_KEY: _openai, ...laterHosted } = hosted;
     const third = resolveEmbeddingModel(undefined, laterHosted);
-    expect(ConfigurationFailure.is(third) && third.data.message).toContain('voyage');
+    expect(!isFailure(third) && third.provider).toBe('voyage');
     const fourth = resolveEmbeddingModel(undefined, { GOOGLE_GENERATIVE_AI_API_KEY: 'g-test' });
-    expect(ConfigurationFailure.is(fourth) && fourth.data.message).toContain('google');
+    expect(!isFailure(fourth) && fourth.provider).toBe('google');
+  });
+
+  // Cohere, Mistral and self-hosted servers are never picked by order (founder decision B1), only named.
+  it('a named cohere, mistral or openai-compatible ref resolves from its variables', () => {
+    expect(isFailure(resolveEmbeddingModel(undefined, { COHERE_API_KEY: 'co-test' }))).toBe(true);
+    const cohere = resolveEmbeddingModel('cohere:embed-v4.0', { COHERE_API_KEY: 'co-test' });
+    expect(!isFailure(cohere) && cohere.provider).toBe('cohere');
+    const mistral = resolveEmbeddingModel(undefined, { EMBEDDING_MODEL: 'mistral:mistral-embed', MISTRAL_API_KEY: 'm-test' });
+    expect(!isFailure(mistral) && mistral.provider).toBe('mistral');
+    const noKey = resolveEmbeddingModel('mistral:mistral-embed', {});
+    expect(ConfigurationFailure.is(noKey) && noKey.data.message).toContain('MISTRAL_API_KEY');
+    const compatible = resolveEmbeddingModel('openai-compatible:Qwen/Qwen3-Embedding-8B', {
+      OPENAI_COMPATIBLE_BASE_URL: 'http://tei:8080/v1',
+      OPENAI_COMPATIBLE_DIMENSIONS: '4096',
+    });
+    expect(!isFailure(compatible) && [compatible.id, compatible.dimensions]).toEqual(['Qwen/Qwen3-Embedding-8B', 4096]);
+    // The server does not say its size; a guessed one would make every vector fail validation.
+    const sizeless = resolveEmbeddingModel('openai-compatible:x', { OPENAI_COMPATIBLE_BASE_URL: 'http://tei:8080/v1' });
+    expect(ConfigurationFailure.is(sizeless) && sizeless.data.message).toContain('OPENAI_COMPATIBLE_DIMENSIONS');
   });
 
   // A changed env under a live index must stop the app, not quietly write vectors from another space.
@@ -116,6 +135,10 @@ describe('resolveEmbeddingModel', () => {
     resolveEmbeddingModel(undefined, { OLLAMA_BASE_URL: 'http://127.0.0.1:11434' });
     resolveEmbeddingModel(undefined, { OPENAI_API_KEY: 'sk-test' });
     resolveEmbeddingModel('ollama:qwen3-embedding:0.6b');
+    resolveEmbeddingModel(undefined, { VOYAGE_API_KEY: 'pa-test' });
+    resolveEmbeddingModel(undefined, { GOOGLE_GENERATIVE_AI_API_KEY: 'g-test' });
+    resolveEmbeddingModel('cohere:embed-v4.0', { COHERE_API_KEY: 'co-test' });
+    resolveEmbeddingModel('mistral:mistral-embed', { MISTRAL_API_KEY: 'm-test' });
     expect(fetchSpy).toHaveBeenCalledTimes(0);
   });
 });

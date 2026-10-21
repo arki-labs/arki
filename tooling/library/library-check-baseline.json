@@ -191,6 +191,41 @@
       "reason": "Now-tier baseline 2026-10-17"
     },
     {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./voyage\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./cohere\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./google\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./mistral\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./kv\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
+      "package": "@arki/embeddings",
+      "error": "TYPES_E001 export \"./transformers\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
+    },
+    {
       "package": "@arki/env",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."

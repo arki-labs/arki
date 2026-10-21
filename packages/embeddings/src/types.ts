@@ -3,24 +3,27 @@ import type { getLogger } from '@arki/log';
 import type { EmbedFailure } from './failures.js';
 
 /** Every provider this package can build a model record for. `fake` is the deterministic test embedder. */
-export type EmbeddingProviderName =
-  | 'ollama'
-  | 'openai'
-  | 'voyage'
-  | 'google'
-  | 'cohere'
-  | 'mistral'
-  | 'jina'
-  | 'bedrock'
-  | 'transformers'
-  | 'openai-compatible'
-  | 'fake';
+export const EMBEDDING_PROVIDERS = [
+  'ollama',
+  'openai',
+  'voyage',
+  'google',
+  'cohere',
+  'mistral',
+  'jina',
+  'bedrock',
+  'transformers',
+  'openai-compatible',
+  'fake',
+] as const;
+export type EmbeddingProviderName = (typeof EMBEDDING_PROVIDERS)[number];
 
 /** `provider:model`, e.g. `'ollama:qwen3-embedding:0.6b'`. Everything after the first `:` is the model id. */
 export type EmbeddingModelRef = `${EmbeddingProviderName}:${string}`;
 
 /** Why a text is embedded. Asymmetric models prefix queries and documents differently. */
-export type Purpose = 'query' | 'document' | 'similarity' | 'classification' | 'clustering';
+export const PURPOSES = ['query', 'document', 'similarity', 'classification', 'clustering'] as const;
+export type Purpose = (typeof PURPOSES)[number];
 
 /** Prefix per purpose; `''` or absent = no prefix. `version` goes into the space id, so changing a prompt is a new space. */
 export type Instruction = Readonly<Partial<Record<Purpose, string>>> & { readonly version: number };
@@ -42,7 +45,8 @@ export type Usage = {
 };
 
 /** The output dtype of a vector. `float32` is every provider's default. */
-export type Quantization = 'float32' | 'int8' | 'binary';
+export const QUANTIZATIONS = ['float32', 'int8', 'binary'] as const;
+export type Quantization = (typeof QUANTIZATIONS)[number];
 
 /**
  * Everything that must match for two vectors to be comparable. Stored next to every index
@@ -76,6 +80,11 @@ export type NativeEmbeddings = {
 /** What `createEmbedder` asks a model record for: prepared texts (instruction already applied) and output options. */
 export type NativeRequest = {
   readonly texts: readonly string[];
+  /**
+   * The call's purpose, for providers that take it as a field (Voyage `input_type`, Cohere
+   * `input_type`, Google `taskType`). Its prefix, if the model has one, is already in `texts`.
+   */
+  readonly purpose?: Purpose;
   /** Set only when it differs from the model's native size. */
   readonly dimensions?: number;
   /** Set only for a provider-native dtype listed in `model.quantizations`. */

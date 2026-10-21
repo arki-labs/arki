@@ -5,14 +5,18 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 44 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`; and 52 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
+- `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`). `createVoyageModel`; types `VoyageModelOptions`.
+- `@arki/embeddings/cohere`: Cohere over plain `fetch` (`POST /v2/embed`). `createCohereModel`; types `CohereModelOptions`.
+- `@arki/embeddings/google`: Gemini embedding models through the AI SDK. `createGoogleModel`; types `GoogleModelOptions`.
+- `@arki/embeddings/mistral`: Mistral embedding models through the AI SDK. `createMistralModel`; types `MistralModelOptions`.
 - `@arki/embeddings/env`: validates the embedding variables with `@arki/env`. `resolveEmbeddingConfig`.
-- `@arki/embeddings/testing`: a deterministic fake embedder for tests. `fakeEmbedder`; types `FakeEmbedderOptions`.
+- `@arki/embeddings/testing`: a deterministic fake embedder for tests, and real vectors recorded once and replayed offline. `fakeEmbedder`, `fixtureEmbedder`, `recordEmbedder`; types `FakeEmbedderOptions`.
 - `@arki/embeddings/kv`: a `CacheStore` over an `@arki/kv` client (or anything with its `get` and `set`), so `withCache` shares vectors across processes through Redis. `kvCacheStore`.
-- `@arki/embeddings/dot`: the app's one embedder as a Dot plugin. `embeddings`.
+- `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `embeddings`.
 - `@arki/embeddings/transformers`: a model run in process by Transformers.js (ONNX Runtime), no server. `createTransformersModel`; types `TransformersModelOptions`.
 <!-- llms:end -->
 
@@ -39,5 +43,5 @@
 - The embedder never changes input text (call `normalizeText` yourself), and `fakeEmbedder` is not semantic.
 - Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
 - A cache key covers the space and the exact text; `embeddings()` from `./dot` publishes `null` when nothing resolves.
-- `resolveEmbeddingModel` never touches the network. Voyage and Google are `ConfigurationFailure` in this release.
+- `resolveEmbeddingModel` never touches the network. Cohere, Mistral and OpenAI-compatible servers resolve only when named in the ref.
 - `resolveSpace(embedder)` learns Ollama's digest before stale-row checks. Int8 needs one shared `calibrateInt8` range; binary packs MSB first.

@@ -62,17 +62,21 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                                                                                                | none                                   |
 | `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                                                                                                | `@ai-sdk/openai`, `ai` (optional)      |
 | `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                                                                                  | none                                   |
+| `@arki/embeddings/voyage`            | `createVoyageModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `voyage-3.5` by default, `input_type` from the purpose, native int8 and binary                                                                                                                                                              | none                                   |
+| `@arki/embeddings/cohere`            | `createCohereModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `embed-v4.0` by default, `input_type` from the purpose (always sent), native int8 and binary                                                                                                                                                | none                                   |
+| `@arki/embeddings/google`            | `createGoogleModel({ id?, apiKey, baseURL?, fetch? })` through the AI SDK: `gemini-embedding-001` (`taskType` from the purpose) or `gemini-embedding-2` (prefixes)                                                                                                                                               | `@ai-sdk/google`, `ai` (optional)      |
+| `@arki/embeddings/mistral`           | `createMistralModel({ id?, apiKey, baseURL?, fetch? })` through the AI SDK: `mistral-embed`                                                                                                                                                                                                                      | `@ai-sdk/mistral`, `ai` (optional)     |
 | `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                                                                                                | none                                   |
 | `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                                    | none                                   |
 | `@arki/embeddings/dot`               | `embeddings({ model?, cache?, resilience?, env? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                          | `@arki/dot` (optional)                 |
 | `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default                                                                                                                                               | `@huggingface/transformers` (optional) |
-| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                                                                                                                                       | none                                   |
+| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline                                                                                                                                                                                                                                                    | none                                   |
 
 `resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
 ### Variables
 
-`EMBEDDING_MODEL` (`provider:model`, e.g. `ollama:qwen3-embedding:0.6b`), `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`. Without `EMBEDDING_MODEL`, the first configured provider in the order `ollama → openai → voyage → google` wins. Nothing configured is `ConfigurationFailure`. Voyage and Google records arrive in a later release; until then they resolve to `ConfigurationFailure`.
+`EMBEDDING_MODEL` (`provider:model`, e.g. `ollama:qwen3-embedding:0.6b`), `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`, and for a self-hosted server `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_DIMENSIONS` (the server does not report its size) and `OPENAI_COMPATIBLE_API_KEY`. Without `EMBEDDING_MODEL`, the first configured provider in the order `ollama → openai → voyage → google` wins. Cohere, Mistral and OpenAI-compatible servers are used only when named, e.g. `EMBEDDING_MODEL=cohere:embed-v4.0` or `openai-compatible:BAAI/bge-m3`. Nothing configured is `ConfigurationFailure`.
 
 ## Failure behaviour
 
@@ -269,6 +273,24 @@ console.log('4 000 001 characters:', InputTooLong.is(overLimit) ? overLimit.code
 ## Testing
 
 `fakeEmbedder` is seeded and deterministic, and **not semantic**: equal text gives an identical unit vector, different text gives an unrelated one. A test that asserts ranking by meaning passes or fails for the wrong reason with it. A text listed in `failures` fails the whole call with that failure, so all-or-nothing behaviour is visible in tests.
+
+To test ranking with real vectors but no network, record a real model once and replay it. `recordEmbedder(embedder, path)` writes every text call to one JSON file (Node, Bun and Deno); commit the file. `fixtureEmbedder(JSON.parse(text))` answers exactly the recorded calls, with the recorded space and the same chunking. A call that was not recorded is `InvalidOutput { reason: 'no fixture …' }`, and a file that does not parse is `ConfigurationFailure`.
+
+```ts
+import { readFileSync } from 'node:fs';
+
+import type { Embedder } from '@arki/embeddings';
+import { embedMany } from '@arki/embeddings';
+import { fixtureEmbedder, recordEmbedder } from '@arki/embeddings/testing';
+
+// Once, against the real model; commit the file it writes.
+export async function record(real: Embedder, corpus: readonly string[]) {
+  return embedMany(recordEmbedder(real, '__fixtures__/qwen3.json'), corpus, { purpose: 'document' });
+}
+
+// In every test run after that: the same calls answer the same vectors, offline.
+export const replay = fixtureEmbedder(JSON.parse(readFileSync('__fixtures__/qwen3.json', 'utf8')));
+```
 
 ## Benchmarks
 

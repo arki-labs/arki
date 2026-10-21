@@ -2,20 +2,9 @@ import { isFailure } from '@arki/failure';
 
 import type { EmbeddingModelRef, EmbeddingProviderName } from './types.js';
 import { ConfigurationFailure } from './failures.js';
+import { EMBEDDING_PROVIDERS } from './types.js';
 
-const PROVIDERS = new Set<string>([
-  'ollama',
-  'openai',
-  'voyage',
-  'google',
-  'cohere',
-  'mistral',
-  'jina',
-  'bedrock',
-  'transformers',
-  'openai-compatible',
-  'fake',
-] satisfies EmbeddingProviderName[]);
+const PROVIDERS = new Set<string>(EMBEDDING_PROVIDERS);
 
 const isProviderName = (value: string): value is EmbeddingProviderName => PROVIDERS.has(value);
 

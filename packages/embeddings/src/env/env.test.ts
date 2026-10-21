@@ -20,5 +20,21 @@ describe('./env resolveEmbeddingConfig', () => {
     const bad = resolveEmbeddingConfig({ EMBEDDING_MODEL: 'qwen3', OLLAMA_BASE_URL: 'not a url' });
     expect(isFailure(bad) && bad.code).toBe('embeddings.configuration');
     expect(isFailure(bad) && bad.data.message).toContain('OLLAMA_BASE_URL');
+    const size = resolveEmbeddingConfig({ OPENAI_COMPATIBLE_DIMENSIONS: '1024.5' });
+    expect(isFailure(size) && size.data.message).toContain('OPENAI_COMPATIBLE_DIMENSIONS');
+  });
+
+  it('carries the cohere, mistral and openai-compatible variables through', () => {
+    const config = resolveEmbeddingConfig({
+      EMBEDDING_MODEL: 'openai-compatible:BAAI/bge-m3',
+      OPENAI_COMPATIBLE_BASE_URL: 'http://tei:8080/v1',
+      OPENAI_COMPATIBLE_DIMENSIONS: '1024',
+      COHERE_API_KEY: 'co-test',
+      MISTRAL_API_KEY: 'm-test',
+    });
+    if (isFailure(config)) throw new Error(config.message);
+    const model = resolveEmbeddingModel(undefined, config);
+    expect(!isFailure(model) && [model.provider, model.dimensions]).toEqual(['openai-compatible', 1024]);
+    expect([config.COHERE_API_KEY, config.MISTRAL_API_KEY]).toEqual(['co-test', 'm-test']);
   });
 });

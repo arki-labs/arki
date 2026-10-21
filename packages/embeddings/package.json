@@ -44,6 +44,26 @@
       "import": "./dist/openai-compatible/index.js",
       "default": "./dist/openai-compatible/index.js"
     },
+    "./voyage": {
+      "types": "./dist/voyage/index.d.ts",
+      "import": "./dist/voyage/index.js",
+      "default": "./dist/voyage/index.js"
+    },
+    "./cohere": {
+      "types": "./dist/cohere/index.d.ts",
+      "import": "./dist/cohere/index.js",
+      "default": "./dist/cohere/index.js"
+    },
+    "./google": {
+      "types": "./dist/google/index.d.ts",
+      "import": "./dist/google/index.js",
+      "default": "./dist/google/index.js"
+    },
+    "./mistral": {
+      "types": "./dist/mistral/index.d.ts",
+      "import": "./dist/mistral/index.js",
+      "default": "./dist/mistral/index.js"
+    },
     "./env": {
       "types": "./dist/env/index.d.ts",
       "import": "./dist/env/index.js",
@@ -108,6 +128,8 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@ai-sdk/google": "catalog:ai",
+    "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
@@ -127,12 +149,20 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@ai-sdk/google": "catalog:ai",
+    "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@arki/dot": "workspace:*",
     "@huggingface/transformers": "catalog:ai",
     "ai": "catalog:ai"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/google": {
+      "optional": true
+    },
+    "@ai-sdk/mistral": {
+      "optional": true
+    },
     "@ai-sdk/openai": {
       "optional": true
     },

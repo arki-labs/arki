@@ -1,9 +1,16 @@
+import { z } from 'zod';
+
 import { isFailure } from '@arki/failure';
 
 import type { Embedder, EmbeddingModelRef, EmbeddingProviderName, EmbeddingSpace, EnvSource } from './types.js';
 import { Cancelled, ConfigurationFailure, SpaceMismatch } from './failures.js';
+import { createCohereModel } from './cohere/index.js';
+import { createGoogleModel } from './google/index.js';
+import { createMistralModel } from './mistral/index.js';
 import { createOllamaModel } from './ollama/index.js';
+import { createOpenAICompatibleModel } from './openai-compatible/index.js';
 import { createOpenAIModel } from './openai/index.js';
+import { createVoyageModel } from './voyage/index.js';
 import { parseModelRef } from './ref.js';
 import { isSameSpace, spaceOf } from './space.js';
 
@@ -13,14 +20,25 @@ function read(env: EnvSource, name: string): string | undefined {
   return value === undefined || value === '' ? undefined : value;
 }
 
+/** The key each hosted provider reads. */
+const KEYS = {
+  voyage: 'VOYAGE_API_KEY',
+  cohere: 'COHERE_API_KEY',
+  google: 'GOOGLE_GENERATIVE_AI_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+} as const;
+
 /** Founder decision B1: local first, then hosted `openai → voyage → google`. Nothing set chooses nothing. */
 function chooseProvider(env: EnvSource): EmbeddingProviderName | undefined {
   if (read(env, 'OLLAMA_BASE_URL') !== undefined) return 'ollama';
   if (read(env, 'OPENAI_API_KEY') !== undefined) return 'openai';
-  if (read(env, 'VOYAGE_API_KEY') !== undefined) return 'voyage';
-  if (read(env, 'GOOGLE_GENERATIVE_AI_API_KEY') !== undefined) return 'google';
+  if (read(env, KEYS.voyage) !== undefined) return 'voyage';
+  if (read(env, KEYS.google) !== undefined) return 'google';
   return undefined;
 }
+
+/** A size from an env string: the server will not say what it serves, so the operator must. */
+const SIZE = z.coerce.number().int().positive();
 
 function buildModel(provider: EmbeddingProviderName, id: string | undefined, env: EnvSource) {
   if (provider === 'ollama') {
@@ -37,8 +55,27 @@ function buildModel(provider: EmbeddingProviderName, id: string | undefined, env
       ...(baseURL === undefined ? {} : { baseURL }),
     });
   }
-  if (provider === 'voyage' || provider === 'google') {
-    return ConfigurationFailure({ message: `provider ${provider} arrives in slice 5` });
+  if (provider === 'voyage' || provider === 'cohere' || provider === 'google' || provider === 'mistral') {
+    const name = KEYS[provider];
+    const apiKey = read(env, name);
+    if (apiKey === undefined) return ConfigurationFailure({ message: `${provider} needs ${name}` });
+    const options = { apiKey, ...(id === undefined ? {} : { id }) };
+    if (provider === 'voyage') return createVoyageModel(options);
+    if (provider === 'cohere') return createCohereModel(options);
+    if (provider === 'google') return createGoogleModel(options);
+    return createMistralModel(options);
+  }
+  if (provider === 'openai-compatible') {
+    const baseURL = read(env, 'OPENAI_COMPATIBLE_BASE_URL');
+    const dimensions = SIZE.safeParse(read(env, 'OPENAI_COMPATIBLE_DIMENSIONS'));
+    if (id === undefined || baseURL === undefined || !dimensions.success) {
+      return ConfigurationFailure({
+        message:
+          'openai-compatible needs a ref with the model (openai-compatible:<id>), OPENAI_COMPATIBLE_BASE_URL and OPENAI_COMPATIBLE_DIMENSIONS (a positive integer)',
+      });
+    }
+    const apiKey = read(env, 'OPENAI_COMPATIBLE_API_KEY');
+    return createOpenAICompatibleModel({ id, baseURL, dimensions: dimensions.data, ...(apiKey === undefined ? {} : { apiKey }) });
   }
   if (provider === 'fake') {
     return ConfigurationFailure({ message: 'the fake model is built with fakeEmbedder from @arki/embeddings/testing' });

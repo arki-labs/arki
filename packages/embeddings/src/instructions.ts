@@ -37,6 +37,20 @@ export const EMBEDDINGGEMMA_INSTRUCTION: Instruction = {
 };
 
 /**
+ * Gemini Embedding 2's prefixes (ai.google.dev/gemini-api/docs/embeddings, read 2026-10-21). Today
+ * they equal EmbeddingGemma's, but each model keeps its own `version`, so one model card changing a
+ * prefix re-embeds only that model's corpora.
+ */
+export const GEMINI_EMBEDDING_2_INSTRUCTION: Instruction = {
+  query: 'task: search result | query: ',
+  document: 'title: none | text: ',
+  classification: 'task: classification | query: ',
+  clustering: 'task: clustering | query: ',
+  similarity: 'task: sentence similarity | query: ',
+  version: 1,
+};
+
+/**
  * nomic-embed-text's task prefixes. It has none for similarity, so that purpose goes in as it is.
  *
  * @example

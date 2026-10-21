@@ -48,6 +48,7 @@ export { resolveEmbeddingModel, resolveSpace } from './resolve.js';
 export {
   E5_INSTRUCTION,
   EMBEDDINGGEMMA_INSTRUCTION,
+  GEMINI_EMBEDDING_2_INSTRUCTION,
   NO_INSTRUCTION,
   NOMIC_INSTRUCTION,
   QWEN3_INSTRUCTION,

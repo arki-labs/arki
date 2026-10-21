@@ -8,7 +8,7 @@ import { is, recordSchema } from '@arki/schema';
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import { mentionsContextLength, retryAfterMs, vectorsByIndex } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
 
@@ -35,29 +35,6 @@ export type OpenAICompatibleModelOptions = {
   readonly label?: string;
   readonly fetch?: FetchLike;
 };
-
-/**
- * Puts each row at its `index`. A row missing, repeated or out of range would attach a vector to
- * the wrong document, so any of those is an error message instead of a reordered list.
- */
-function vectorsByIndex(data: readonly unknown[], count: number): readonly (readonly unknown[])[] | string {
-  if (data.length !== count) return `expected ${count} rows, got ${data.length}`;
-  const rows: { readonly index: number; readonly embedding: readonly unknown[] }[] = [];
-  const seen = new Set<number>();
-  for (const row of data) {
-    const index = is(row, recordSchema) ? row['index'] : undefined;
-    const embedding = is(row, recordSchema) ? row['embedding'] : undefined;
-    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= count) {
-      return `row index ${String(index)} is not in 0..${count - 1}`;
-    }
-    if (seen.has(index)) return `row index ${index} appears twice`;
-    if (!Array.isArray(embedding)) return `row ${index} has no embedding array`;
-    seen.add(index);
-    rows.push({ index, embedding });
-  }
-  // `count` distinct indices in 0..count-1: sorting by index is exactly input order.
-  return rows.toSorted((left, right) => left.index - right.index).map(row => row.embedding);
-}
 
 /** `usage.prompt_tokens` when the server reports it. */
 function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {

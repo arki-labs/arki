@@ -13,7 +13,8 @@ import { isModelRef } from '../ref.js';
 
 /**
  * Reads and checks `EMBEDDING_MODEL`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
- * `VOYAGE_API_KEY` and `GOOGLE_GENERATIVE_AI_API_KEY` from `env`. A bad value is `ConfigurationFailure`.
+ * `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY` and
+ * `OPENAI_COMPATIBLE_{BASE_URL,API_KEY,DIMENSIONS}` from `env`. A bad value is `ConfigurationFailure`.
  *
  * `OLLAMA_BASE_URL` has no default here: its presence is what picks Ollama in the provider order.
  * The default `http://127.0.0.1:11434` is applied by `createOllamaModel`.
@@ -32,6 +33,12 @@ export function resolveEmbeddingConfig(env: EnvSource) {
       OPENAI_BASE_URL: z.url().optional(),
       VOYAGE_API_KEY: z.string().min(1).optional(),
       GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+      COHERE_API_KEY: z.string().min(1).optional(),
+      MISTRAL_API_KEY: z.string().min(1).optional(),
+      OPENAI_COMPATIBLE_BASE_URL: z.url().optional(),
+      OPENAI_COMPATIBLE_API_KEY: z.string().min(1).optional(),
+      // Kept as text: the record goes straight to `resolveEmbeddingModel`, which reads strings.
+      OPENAI_COMPATIBLE_DIMENSIONS: z.string().regex(/^[1-9]\d*$/, 'expected a positive integer').optional(),
     },
     runtimeEnv: { ...env },
     options: {
@@ -52,6 +59,11 @@ export function resolveEmbeddingConfig(env: EnvSource) {
       OPENAI_BASE_URL: parsed.OPENAI_BASE_URL,
       VOYAGE_API_KEY: parsed.VOYAGE_API_KEY,
       GOOGLE_GENERATIVE_AI_API_KEY: parsed.GOOGLE_GENERATIVE_AI_API_KEY,
+      COHERE_API_KEY: parsed.COHERE_API_KEY,
+      MISTRAL_API_KEY: parsed.MISTRAL_API_KEY,
+      OPENAI_COMPATIBLE_BASE_URL: parsed.OPENAI_COMPATIBLE_BASE_URL,
+      OPENAI_COMPATIBLE_API_KEY: parsed.OPENAI_COMPATIBLE_API_KEY,
+      OPENAI_COMPATIBLE_DIMENSIONS: parsed.OPENAI_COMPATIBLE_DIMENSIONS,
     };
   } catch (error) {
     return ConfigurationFailure({ message: problem ?? (error instanceof Error ? error.message : String(error)) });

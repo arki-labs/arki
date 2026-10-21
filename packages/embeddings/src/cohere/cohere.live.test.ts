@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+
+import { isFailure } from '@arki/failure';
+
+import { embed, embedMany } from '../embed.js';
+import { createEmbedder } from '../embedder.js';
+import { hamming, quantize } from '../quantize.js';
+import { createCohereModel } from './index.js';
+
+// Opt-in: spends a few tokens on the real API. Run with COHERE_LIVE=1 and COHERE_API_KEY set.
+describe.skipIf(process.env['COHERE_LIVE'] !== '1')('./cohere live', () => {
+  it('one real embed of two strings returns 1536 dims', async () => {
+    const model = createCohereModel({ apiKey: process.env['COHERE_API_KEY'] ?? '' });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const batch = await embedMany(embedder, ['the rain in Spain', 'ploaia din Spania'], { purpose: 'document' });
+    if (isFailure(batch)) throw new Error(batch.message);
+    expect(batch.vectors).toHaveLength(2);
+    for (const vector of batch.vectors) expect(vector).toHaveLength(1536);
+    expect(batch.usage.tokens.basis).toBe('reported');
+  });
+
+  // The provider's packed bits must match our MSB-first packing of its own floats. LSB-first packing
+  // would disagree on about half the bits; a few sign flips near 0 are rounding, not order.
+  it('native binary uses our bit order', async () => {
+    const model = createCohereModel({ apiKey: process.env['COHERE_API_KEY'] ?? '' });
+    if (isFailure(model)) throw new Error(model.message);
+    const floats = createEmbedder(model);
+    const bits = createEmbedder(model, { quantization: 'binary' });
+    if (isFailure(floats) || isFailure(bits)) throw new Error('refused');
+    const text = 'the rain in Spain stays mainly in the plain';
+    const float = await embed(floats, text, { purpose: 'document' });
+    const packed = await embed(bits, text, { purpose: 'document' });
+    if (isFailure(float) || isFailure(packed)) throw new Error('embed failed');
+    if (!(float.vector instanceof Float32Array) || !(packed.vector instanceof Uint8Array)) throw new Error('dtypes');
+    const ours = quantize(float.vector, 'binary');
+    if (isFailure(ours)) throw new Error(ours.message);
+    expect(hamming(ours, packed.vector)).toBeLessThanOrEqual(1536 * 0.02);
+  });
+});

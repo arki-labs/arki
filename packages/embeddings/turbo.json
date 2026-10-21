@@ -11,7 +11,15 @@
         "OLLAMA_LIVE",
         "OLLAMA_BASE_URL",
         "TRANSFORMERS_LIVE",
-        "TRANSFORMERS_CACHE_DIR"
+        "TRANSFORMERS_CACHE_DIR",
+        "VOYAGE_LIVE",
+        "VOYAGE_API_KEY",
+        "COHERE_LIVE",
+        "COHERE_API_KEY",
+        "GOOGLE_LIVE",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "MISTRAL_LIVE",
+        "MISTRAL_API_KEY"
       ]
     },
     "test:runtimes": {

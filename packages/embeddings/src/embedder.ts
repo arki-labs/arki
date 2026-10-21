@@ -135,6 +135,7 @@ export function buildEmbedder(
 
     const native = await model.embedTexts({
       texts,
+      ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
       ...(callDimensions === model.dimensions ? {} : { dimensions: callDimensions }),
       ...(plan.native === undefined ? {} : { quantization: plan.native }),
       ...(truncate ? { truncate } : {}),
