@@ -152,7 +152,7 @@ describe('runCandidate', () => {
     // Why: npm drops files `files` does not list; the indexes must ship without editing packages/*/package.json.
     await build();
     expect(packed.get('a')?.['manifest']).toMatchObject({ files: ['dist/**', 'src/**'] });
-    expect(packed.get('b')?.['manifest']).toMatchObject({ files: ['dist/index.js', 'README.md', 'dist/api.json', 'dist/errors.json'] });
+    expect(packed.get('b')?.['manifest']).toMatchObject({ files: ['dist/index.js', 'README.md', 'dist/api.json', 'dist/errors.json', 'dist/api-names/**'] });
     expect(JSON.parse(readFileSync(path.join(root, 'packages', 'b', 'package.json'), 'utf8')).files).toBeUndefined();
     expect(withIndexFiles(['./dist', 'README.md'])).toEqual(['./dist', 'README.md']);
     expect(withIndexFiles(['dist/'])).toEqual(['dist/']);

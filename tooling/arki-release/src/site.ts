@@ -149,6 +149,8 @@ function snapshotPathOf(file: string, archive: boolean): string | null {
   if (/^changelog\.md$/i.test(normalized)) return 'CHANGELOG.md';
   if (archive) return null;
   if (TOP_LEVEL_DOCS.has(normalized) || normalized.startsWith('docs/')) return normalized;
+  // Names of grouped same-shape exports sit next to api.json (`api-names/*.json`).
+  if (normalized.startsWith('dist/api-names/')) return normalized.slice('dist/'.length);
   return INDEX_TARGETS[normalized] ?? null;
 }
 

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { apiIndexSchema, buildApiIndex } from './api-index';
+import { GROUP_THRESHOLD, apiIndexSchema, buildApiIndex, namesReaderFor, writeApiIndex } from './api-index';
 
 function builtPackage(files: Readonly<Record<string, string>>, exports: object): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'arki-api-index-'));
@@ -90,5 +90,39 @@ describe('buildApiIndex', () => {
     const { index, skipped } = buildApiIndex(dir);
     expect(index.entries.map(e => e.name)).toEqual(['a']);
     expect(skipped).toEqual(['./missing']);
+  });
+
+  it('groups same-type variables at the threshold and writes their names to a sibling file', () => {
+    // Why: an icon set is 22,000 `declare const X: Icon` lines; one row plus a names file keeps api.json small without losing a name.
+    const icons = Array.from({ length: GROUP_THRESHOLD }, (_, i) => `export declare const Icon${String(i).padStart(3, '0')}: Icon;`);
+    const dir = builtPackage(
+      {
+        'dist/index.d.ts': [
+          'export interface Icon { path: string }',
+          ...icons,
+          'export declare const other: string;',
+          '/** Documented, so it stays a row. */',
+          'export declare const Documented: Icon;',
+        ].join('\n'),
+      },
+      { '.': entry('index') },
+    );
+    const built = buildApiIndex(dir);
+    expect(built.index.entries.map(e => e.name)).toEqual(['Documented', 'Icon', 'other']);
+    expect(built.index.groups).toEqual([
+      { subpath: '.', kind: 'variable', signature: 'Icon', count: GROUP_THRESHOLD, namesFile: 'api-names/_root-1.json' },
+    ]);
+    writeApiIndex(built, path.join(dir, 'dist', 'api.json'));
+    const [group] = built.index.groups;
+    expect(group && namesReaderFor(path.join(dir, 'dist', 'api.json'))(group)).toEqual(icons.map(line => /const (\w+)/.exec(line)?.[1]));
+  });
+
+  it('keeps one row per export below the threshold', () => {
+    // Why: for a handful of names the extra file costs more than the rows it saves.
+    const lines = Array.from({ length: GROUP_THRESHOLD - 1 }, (_, i) => `export declare const v${String(i)}: string;`);
+    const dir = builtPackage({ 'dist/index.d.ts': lines.join('\n') }, { '.': entry('index') });
+    const { index } = buildApiIndex(dir);
+    expect(index.groups).toEqual([]);
+    expect(index.entries).toHaveLength(GROUP_THRESHOLD - 1);
   });
 });

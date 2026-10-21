@@ -56,6 +56,7 @@ describe('upgrade-guide', () => {
         added: [{ subpath: './client', name: 'strict', kind: 'function', signature: 'x', jsdocSummary: '' }],
         removed: [{ subpath: '.', name: 'old', kind: 'variable', signature: 'y', jsdocSummary: '' }],
         changed: [{ subpath: '.', name: 'defineEnv', from: '(a)', to: '(a, b)' }],
+        changedGroups: [],
       },
     });
     expect(text).toContain('- `old` from `@arki/env` (variable)');

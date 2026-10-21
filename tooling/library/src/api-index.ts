@@ -11,6 +11,12 @@
  * `arki-api-diff` read the result (`apiIndexSchema`). Without `--out` the JSON
  * goes to stdout; `--json` is accepted for symmetry with the other tools.
  *
+ * Same-shape exports are grouped. When {@link GROUP_THRESHOLD} or more
+ * undocumented variables of one subpath share one declared type (an icon set:
+ * `export declare const X: Icon;` times 22,000), `entries` gets no row per name.
+ * `groups` gets one row with the shared type and a count, and the sorted names
+ * go to a sibling file (`api-names/<subpath>-<n>.json`, next to `api.json`).
+ *
  * Wildcard subpaths (`./*`) and `package.json` are skipped: they have no fixed
  * list of names. A subpath whose types file is not built is skipped and
  * reported on stderr.
@@ -34,16 +40,41 @@ export const apiEntrySchema = z.object({
   jsdocSummary: z.string(),
 });
 
+/**
+ * A group is only worth its extra file at this size: 50 rows are about 10 KB of
+ * `api.json`, less than a second file and a pointer to it. Icon sets are in the
+ * thousands, so the threshold only needs to be well below them.
+ */
+export const GROUP_THRESHOLD = 50;
+
+/**
+ * Many exports of one kind and one declared type. `signature` is the shared
+ * type text (`Icon`), `namesFile` is relative to the folder of `api.json` and
+ * holds the sorted names as a JSON string array.
+ */
+export const apiGroupSchema = z.object({
+  subpath: z.string(),
+  kind: z.enum(API_KINDS),
+  signature: z.string(),
+  count: z.number().int().positive(),
+  namesFile: z.string(),
+});
+
 /** `errorCodes` are the codes of `buildErrorIndex` for the same package (`dist/errors.json` holds the details). */
 export const apiIndexSchema = z.object({
   package: z.string(),
   version: z.string(),
   entries: z.array(apiEntrySchema),
+  /** Absent in `api.json` files written before grouping existed. */
+  groups: z.array(apiGroupSchema).default([]),
   errorCodes: z.array(z.string()),
 });
 
 export type ApiEntry = z.infer<typeof apiEntrySchema>;
+export type ApiGroup = z.infer<typeof apiGroupSchema>;
 export type ApiIndex = z.infer<typeof apiIndexSchema>;
+/** Names of one group, as stored in its `namesFile`. */
+export type NamesReader = (group: ApiGroup) => readonly string[];
 
 const versionSchema = z.object({ version: z.string().optional() });
 
@@ -78,8 +109,27 @@ function typesFileOf(dir: string, target: Parameters<typeof leaves>[0]): string 
   return found ? path.resolve(dir, found.value) : undefined;
 }
 
-/** Entries for one built package folder. Skipped subpaths are returned in `skipped`. */
-export function buildApiIndex(dir: string): { index: ApiIndex; skipped: string[] } {
+/** Declared type of a plain `declare const X: T;`, or undefined for any other declaration. */
+function sharedTypeOf(declarations: readonly ts.Declaration[]): string | undefined {
+  const [only] = declarations;
+  if (declarations.length !== 1 || only === undefined || !ts.isVariableDeclaration(only) || only.type === undefined) {
+    return undefined;
+  }
+  return only.type.getText().replace(/\s+/g, ' ').trim();
+}
+
+const namesFileOf = (subpath: string, position: number): string =>
+  `api-names/${subpath === '.' ? '_root' : subpath.replace(/^\.\//, '').replaceAll('/', '__')}-${position}.json`;
+
+/**
+ * Entries for one built package folder. Skipped subpaths are returned in
+ * `skipped`; `names` maps each group's `namesFile` to its sorted names.
+ */
+export function buildApiIndex(dir: string): {
+  index: ApiIndex;
+  skipped: string[];
+  names: ReadonlyMap<string, readonly string[]>;
+} {
   const manifest = readManifest(dir);
   const { version } = versionSchema.parse(JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')));
   const skipped: string[] = [];
@@ -104,7 +154,7 @@ export function buildApiIndex(dir: string): { index: ApiIndex; skipped: string[]
   );
   const checker = program.getTypeChecker();
 
-  const entries: ApiEntry[] = [];
+  const all: { entry: ApiEntry; sharedType: string | undefined }[] = [];
   for (const { subpath, file } of targets) {
     const source = program.getSourceFile(file);
     const moduleSymbol = source ? checker.getSymbolAtLocation(source) : undefined;
@@ -113,34 +163,80 @@ export function buildApiIndex(dir: string): { index: ApiIndex; skipped: string[]
       const symbol = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
       const declarations = symbol.declarations ?? [];
       const first = declarations[0];
-      entries.push({
+      const entry: ApiEntry = {
         subpath,
         name: exported.name,
         kind: first ? kindOf(first) : 'unknown',
         signature: declarations.map(signatureOf).join(' ; '),
         jsdocSummary: summaryOf(symbol, checker),
-      });
+      };
+      // A documented export is never grouped: its summary would be lost.
+      all.push({ entry, sharedType: entry.jsdocSummary === '' ? sharedTypeOf(declarations) : undefined });
     }
   }
-  entries.sort((a, b) => a.subpath.localeCompare(b.subpath) || a.name.localeCompare(b.name));
+
+  const byShape = new Map<string, string[]>();
+  for (const { entry, sharedType } of all) {
+    if (sharedType === undefined) continue;
+    const key = `${entry.subpath}\u0000${sharedType}`;
+    byShape.set(key, [...(byShape.get(key) ?? []), entry.name]);
+  }
+  const grouped = new Set([...byShape].filter(([, found]) => found.length >= GROUP_THRESHOLD).map(([key]) => key));
+  const entries = all
+    .filter(({ entry, sharedType }) => sharedType === undefined || !grouped.has(`${entry.subpath}\u0000${sharedType}`))
+    .map(({ entry }) => entry)
+    .toSorted((a, b) => a.subpath.localeCompare(b.subpath) || a.name.localeCompare(b.name));
+
+  const groups: ApiGroup[] = [];
+  const names = new Map<string, readonly string[]>();
+  const perSubpath = new Map<string, number>();
+  for (const key of [...grouped].toSorted()) {
+    const [subpath = '', signature = ''] = key.split('\u0000');
+    const position = (perSubpath.get(subpath) ?? 0) + 1;
+    perSubpath.set(subpath, position);
+    const sorted = (byShape.get(key) ?? []).toSorted((a, b) => a.localeCompare(b));
+    const namesFile = namesFileOf(subpath, position);
+    groups.push({ subpath, kind: 'variable', signature, count: sorted.length, namesFile });
+    names.set(namesFile, sorted);
+  }
   const errorCodes = buildErrorIndex(dir).map(entry => entry.code);
-  return { index: { package: manifest.name, version: version ?? '0.0.0', entries, errorCodes }, skipped };
+  return { index: { package: manifest.name, version: version ?? '0.0.0', entries, groups, errorCodes }, skipped, names };
 }
+
+/** Writes `api.json` and, next to it, the names file of every group. */
+export function writeApiIndex(built: ReturnType<typeof buildApiIndex>, apiFile: string): void {
+  mkdirSync(path.dirname(apiFile), { recursive: true });
+  writeFileSync(apiFile, `${JSON.stringify(built.index, null, 2)}\n`);
+  for (const [namesFile, names] of built.names) {
+    const target = path.join(path.dirname(apiFile), namesFile);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, `${JSON.stringify(names)}\n`);
+  }
+}
+
+const namesSchema = z.array(z.string());
+
+/** Reads group names from the folder that holds `api.json`. */
+export const namesReaderFor =
+  (apiFile: string): NamesReader =>
+  group =>
+    namesSchema.parse(JSON.parse(readFileSync(path.join(path.dirname(apiFile), group.namesFile), 'utf8')));
 
 async function main(): Promise<number> {
   const { values } = parseArgs({
     options: { dir: { type: 'string' }, out: { type: 'string' }, json: { type: 'boolean' } },
   });
   const dir = path.resolve(values.dir ?? process.cwd());
-  const { index, skipped } = buildApiIndex(dir);
+  const built = buildApiIndex(dir);
+  const { index, skipped } = built;
   for (const subpath of skipped) process.stderr.write(`arki-api-index: "${subpath}" skipped (types not built)\n`);
-  const text = `${JSON.stringify(index, null, 2)}\n`;
   if (values.out === undefined) {
-    process.stdout.write(text);
+    process.stdout.write(`${JSON.stringify(index, null, 2)}\n`);
   } else {
-    mkdirSync(path.dirname(path.resolve(values.out)), { recursive: true });
-    writeFileSync(values.out, text);
-    process.stdout.write(`arki-api-index: ${index.entries.length} entries -> ${values.out}\n`);
+    writeApiIndex(built, path.resolve(values.out));
+    process.stdout.write(
+      `arki-api-index: ${index.entries.length} entries, ${index.groups.length} groups -> ${values.out}\n`,
+    );
   }
   return 0;
 }

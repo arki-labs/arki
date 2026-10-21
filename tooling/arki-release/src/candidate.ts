@@ -15,7 +15,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { buildApiIndex } from '@arki/library-tooling/src/api-index';
+import { buildApiIndex, writeApiIndex } from '@arki/library-tooling/src/api-index';
 import { buildErrorIndex } from '@arki/library-tooling/src/error-index';
 import debugFactory from 'debug';
 import { z } from 'zod';
@@ -437,9 +437,10 @@ async function pickSeeds(
 
 /**
  * Shipped in every tarball: `dist/api.json` (the public surface; the next
- * minor's upgrade guide diffs against it) and `dist/errors.json` (the error codes).
+ * minor's upgrade guide diffs against it), `dist/errors.json` (the error codes)
+ * and `dist/api-names/**` (the names of grouped same-shape exports).
  */
-export const INDEX_FILES = ['dist/api.json', 'dist/errors.json'] as const;
+export const INDEX_FILES = ['dist/api.json', 'dist/errors.json', 'dist/api-names/**'] as const;
 
 const DIST_WHOLE = /^(?:\.\/)?dist(?:\/|\/\*\*)?$/;
 
@@ -457,8 +458,7 @@ const filesFieldSchema = z.object({ files: z.array(z.string()).optional() }).loo
 /** Writes both indexes into one exported package folder; returns the problem, or null. */
 async function writeIndexes(folder: string): Promise<string | null> {
   try {
-    const { index } = buildApiIndex(folder);
-    await writeFile(path.join(folder, INDEX_FILES[0]), `${JSON.stringify(index, null, 2)}\n`);
+    writeApiIndex(buildApiIndex(folder), path.join(folder, INDEX_FILES[0]));
     await writeFile(path.join(folder, INDEX_FILES[1]), `${JSON.stringify(buildErrorIndex(folder), null, 2)}\n`);
     const manifestFile = path.join(folder, 'package.json');
     const manifest = filesFieldSchema.parse(JSON.parse(await readFile(manifestFile, 'utf8')));

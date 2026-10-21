@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { diffApi, type ApiDiff } from '@arki/library-tooling/src/api-diff';
-import { apiIndexSchema, buildApiIndex } from '@arki/library-tooling/src/api-index';
+import { apiIndexSchema, buildApiIndex, type ApiGroup } from '@arki/library-tooling/src/api-index';
+import { z } from 'zod';
 
 import { npmPackOutputSchema, readTarballText } from './candidate';
 import { loadChangesets, type Changeset } from './impact';
@@ -82,6 +83,16 @@ function apiDiffSection(pkg: string, diff: ApiDiff | undefined): string {
   if (diff.changed.length > 0) {
     parts.push(`Changed:\n${diff.changed.map(c => `- ${where(c)}\n  - before: \`${c.from}\`\n  - after: \`${c.to}\``).join('\n')}`);
   }
+  if (diff.changedGroups.length > 0) {
+    parts.push(
+      `Changed (each name below has the same change):\n${diff.changedGroups
+        .map(
+          c =>
+            `- ${c.count.toString()} ${c.kind} exports from \`${importPath(pkg, c.subpath)}\`\n  - before: \`${c.from}\`\n  - after: \`${c.to}\``,
+        )
+        .join('\n')}`,
+    );
+  }
   if (diff.added.length > 0) parts.push(`Added:\n${diff.added.map(e => `- ${where(e)} (${e.kind})`).join('\n')}`);
   return parts.length > 0 ? parts.join('\n\n') : 'No public API changes.';
 }
@@ -117,7 +128,19 @@ export async function publishedApiDiff(input: {
     if (filename === undefined) return null;
     const text = await readTarballText(path.join(temp, path.basename(filename)), 'dist/api.json');
     const before = text === null ? null : apiIndexSchema.safeParse(JSON.parse(text));
-    return before?.success === true ? diffApi(before.data, built.index) : null;
+    if (before?.success !== true) return null;
+    // Group names live in sibling files of the same tarball; a missing one means no trustworthy diff.
+    const namesByFile = new Map<string, readonly string[]>();
+    for (const group of before.data.groups) {
+      const namesText = await readTarballText(path.join(temp, path.basename(filename)), `dist/${group.namesFile}`);
+      if (namesText === null) return null;
+      namesByFile.set(group.namesFile, z.array(z.string()).parse(JSON.parse(namesText)));
+    }
+    const oldNames = (group: ApiGroup): readonly string[] => namesByFile.get(group.namesFile) ?? [];
+    return diffApi(
+      { index: before.data, namesOf: oldNames },
+      { index: built.index, namesOf: group => built.names.get(group.namesFile) ?? [] },
+    );
   } catch {
     return null;
   } finally {

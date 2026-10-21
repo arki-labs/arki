@@ -149,7 +149,8 @@ Lists every public export of a built package as `api.json`: subpath, name, kind,
 
 - It reads `exports`, takes each subpath's `types` file, and asks the TypeScript compiler for its exports. Run it after `build`.
 - Wildcard subpaths and `package.json` are skipped. A subpath whose types are not built is skipped and named on stderr.
-- `candidate` writes `dist/api.json` into every tarball, so each published version carries its API.
+- Same-shape exports are grouped. Fifty or more undocumented variables of one subpath that share one declared type (an icon set: `export declare const X: Icon;` times 22,000) become one `groups` row: `{ subpath, kind, signature, count, namesFile }`. The sorted names go to `api-names/<subpath>-<n>.json` next to `api.json`. Fewer than fifty rows are smaller than the extra file, so they stay as entries. A documented export is never grouped. Without `--out` the names files are not written.
+- `candidate` writes `dist/api.json` and `dist/api-names/` into every tarball, so each published version carries its API.
 
 ```sh
 arki-api-index [--dir <packageDir>] [--out <file>]   # JSON to stdout without --out
@@ -159,8 +160,9 @@ arki-api-index [--dir <packageDir>] [--out <file>]   # JSON to stdout without --
 
 Compares two `api.json` files. An entry is subpath plus name. It is added or removed when only one side has it, and changed when its signature differs.
 
+- Grouped exports are expanded through their names files, so a removed or added name inside a group is still reported. A change of the shared type is reported once per group (`changedGroups`), not once per name.
 - `--docs <packageDir>` searches `README.md`, `docs/**/*.md` and `llms.txt` for each removed or changed name, as a whole word, and prints `file:line`. A rename then cannot leave stale pages.
-- `--json` prints `{ added, removed, changed, docMentions }`. `apiDiffSchema` reads it back; the upgrade guide uses it.
+- `--json` prints `{ added, removed, changed, changedGroups, docMentions }`. `apiDiffSchema` reads it back; the upgrade guide uses it.
 
 ```sh
 arki-api-diff --from old/api.json --to dist/api.json [--docs .] [--json]
