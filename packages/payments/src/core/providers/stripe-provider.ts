@@ -7,6 +7,7 @@ import { isFailure } from '@arki/failure';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
 
+import type { RefundId } from '../../refunds/primitives.js';
 import type {
   BillingInterval,
   Customer,
@@ -891,12 +892,23 @@ export class StripeProvider extends BasePaymentProvider {
 
   /**
    * Refunds the payment's Stripe charge. `paymentId` is our payment id; the Stripe payment intent comes
-   * from its row. The answer holds the Stripe refund id and the payment with what Stripe now reports as
-   * refunded in total (earlier refunds included). A refund Stripe fails or cancels throws.
+   * from its row. `idempotencyKey` goes to Stripe, so a retry with the same key gets the first refund back
+   * instead of a second one. Stripe forgets a key after 24 hours: look the refund up with `findRefund` first.
+   *
+   * `refundId` is stored as `metadata.refundId`, over any `refundId` in `metadata`, so `findRefund` can match it.
+   * The answer holds the Stripe refund id, its status and Stripe's `failure_reason`. A `pending`, `requires_action`, `failed` or
+   * `canceled` refund is returned, not thrown. A key reused with different parameters returns
+   * `IdempotencyConflict`; any other Stripe error throws a `PaymentProviderError`.
    */
   async refundPayment(
     paymentId: PaymentId,
-    params: { amount?: Money; reason?: string; metadata?: Record<string, unknown> },
+    params: {
+      refundId: RefundId;
+      idempotencyKey: string;
+      amount?: Money;
+      reason?: string;
+      metadata?: Record<string, unknown>;
+    },
   ) {
     const row = await this.paymentRef(paymentId);
     if (isFailure(row)) return row;
@@ -907,27 +919,46 @@ export class StripeProvider extends BasePaymentProvider {
       );
     }
 
-    const refund = await this.call(() =>
-      this.stripe.refunds.create({
-        payment_intent: row.providerPaymentId,
-        // Stripe's own units: JPY is sent as yen, not yen x 100
-        amount: params.amount === undefined ? undefined : toStripeAmount(params.amount),
-        reason: this.mapRefundReasonToStripe(params.reason),
-        metadata: toStripeMetadata({ ...params.metadata, paymentId: row.id }),
-      }),
+    const refund = await this.call(
+      () =>
+        this.stripe.refunds.create(
+          {
+            payment_intent: row.providerPaymentId,
+            // Stripe's own units: JPY is sent as yen, not yen x 100
+            amount: params.amount === undefined ? undefined : toStripeAmount(params.amount),
+            reason: this.mapRefundReasonToStripe(params.reason),
+            // Ours win over the caller's: `findRefund` matches on `refundId`
+            metadata: toStripeMetadata({ ...params.metadata, paymentId: row.id, refundId: params.refundId }),
+          },
+          { idempotencyKey: params.idempotencyKey },
+        ),
+      idempotencyConflictOf,
     );
-    if (refund.status === 'failed' || refund.status === 'canceled') {
-      throw new PaymentProviderError(
-        'unknown',
-        `Stripe refund ${refund.id} ${refund.status}${refund.failure_reason ? `: ${refund.failure_reason}` : ''}`,
-      );
-    }
+    if (isFailure(refund)) return refund;
+    return this.toRefundResult(refund);
+  }
 
-    // The refund only knows its own amount; the payment's total refunded sits on the charge
-    const intent = await this.call(() =>
-      this.stripe.paymentIntents.retrieve(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
-    );
-    return { providerRefundId: refund.id, payment: this.toPayment(intent, row) };
+  /**
+   * The Stripe refund of our payment whose `metadata.refundId` is `refundId`, or null when Stripe has none.
+   * Use it before `refundPayment` once its idempotency key may be older than Stripe's 24 hours, so a late
+   * retry never refunds twice. Reads the payment intent's refunds page by page and stops at the match.
+   */
+  async findRefund(paymentId: PaymentId, refundId: RefundId) {
+    const row = await this.paymentRef(paymentId);
+    if (isFailure(row)) return row;
+
+    return this.call(async () => {
+      // Stripe has no metadata filter on refunds, and a payment can have many partial refunds: read every page
+      for await (const refund of this.stripe.refunds.list({ payment_intent: row.providerPaymentId, limit: 100 })) {
+        if (refund.metadata?.['refundId'] === refundId) return this.toRefundResult(refund);
+      }
+      return null;
+    });
+  }
+
+  /** A Stripe refund as `refundPayment` and `findRefund` answer it. */
+  private toRefundResult(refund: Stripe.Refund) {
+    return { providerRefundId: refund.id, status: refund.status, failureReason: refund.failure_reason ?? null };
   }
 
   private toPaymentMethodInfo(method: Stripe.PaymentMethod, defaultMethodId: string | null): PaymentMethodInfo {

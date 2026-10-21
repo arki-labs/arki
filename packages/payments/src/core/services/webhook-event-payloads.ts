@@ -7,6 +7,8 @@
  * are checked; any other field is ignored.
  */
 
+import type Stripe from 'stripe';
+
 import type { Instant } from '@arki/date';
 import { z } from '@arki/contracts';
 import { fromUnix } from '@arki/date';
@@ -161,8 +163,8 @@ export type StripeChargeSnapshot = {
 
 /** One refund of a charge, with the id our `RefundService` put in its metadata, if it made it. */
 export type StripeChargeRefund = {
-  providerRefundId: string;
-  status: string | null;
+  providerRefundId: Stripe.Refund['id'];
+  status: Stripe.Refund['status'];
   /** `metadata.refundId`: set when `RefundService` made the refund; null for a refund made at Stripe. */
   refundId: string | null;
 };

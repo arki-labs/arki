@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
-import { instant, isInstant } from '@arki/date';
+import { isInstant } from '@arki/date';
 import {
   TransactionCancelled,
   TransactionCommitUncertain,
@@ -34,14 +34,12 @@ import type { AppDb } from '../test-support.js';
 import type { RefundWrites } from './journal.js';
 import type { RefundReason } from './primitives.js';
 import type { RefundAutoApproveLimits } from './service.js';
-import { toMinorColumn } from '../core/money.js';
 import { createPaymentId } from '../core/primitives.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
 import {
   adminId,
   countEvents,
-  customerId,
   eventTypesOf,
   openDb,
   refundsTables,
@@ -70,41 +68,15 @@ let writes: RefundWrites;
 
 /** The Stripe refund id the provider gives. The service stores it as `providerRefundId`. */
 const refundedAs = 're_test';
-const refundedOn = instant('2026-01-10T00:00:00.000Z');
 
 /** Every amount the provider was asked to pay back, in order. */
 const askedToRefund: (Money | undefined)[] = [];
 
 /** A provider that pays the refund back. */
 const providerThatRefunds: Provider = {
-  refundPayment: (paymentId, params) => {
+  refundPayment: (_paymentId, params) => {
     askedToRefund.push(params.amount);
-    const refunded = params.amount ?? money(0, 'USD');
-
-    return Promise.resolve({
-      providerRefundId: refundedAs,
-      payment: {
-        id: paymentId,
-        userId,
-        customerId,
-        subscriptionId: null,
-        providerPaymentId: 'pi_test',
-        amountMinor: toMinorColumn(refunded),
-        currency: refunded.currency.code,
-        status: 'succeeded',
-        paymentMethod: 'card',
-        description: null,
-        failureReason: null,
-        receiptUrl: null,
-        refunded: true,
-        refundedAmountMinor: toMinorColumn(refunded),
-        disputeId: null,
-        disputeStatus: null,
-        metadata: null,
-        createdAt: refundedOn,
-        updatedAt: refundedOn,
-      },
-    });
+    return Promise.resolve({ providerRefundId: refundedAs, status: 'succeeded', failureReason: null });
   },
 };
 

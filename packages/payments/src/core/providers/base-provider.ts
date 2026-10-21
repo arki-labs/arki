@@ -2,6 +2,7 @@ import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result } from '@arki/failure';
 import type { Money } from '@arki/money';
 
+import type { RefundId } from '../../refunds/primitives.js';
 import type {
   BillingInterval,
   Customer,
@@ -34,10 +35,16 @@ export type PaymentProviderConfig = {
   environment: 'sandbox' | 'production';
 }
 
-/** What a refund call answers: the provider's refund id, and the payment as the provider now has it. */
+/**
+ * What a refund call answers: the provider's refund id and where the refund stands. A refund the
+ * provider failed or canceled is an answer, not an error: the caller reads `status`.
+ */
 export type ProviderRefundResult = {
   providerRefundId: string;
-  payment: Payment;
+  /** As the provider reports it. Stripe: `pending`, `requires_action`, `succeeded`, `failed` or `canceled`. */
+  status: string | null;
+  /** Why the provider failed the refund, in its own words (Stripe: `insufficient_funds`, `declined`, ...). Null otherwise. */
+  failureReason: string | null;
 };
 
 export abstract class BasePaymentProvider {
@@ -163,12 +170,16 @@ export abstract class BasePaymentProvider {
   abstract refundPayment(
     paymentId: PaymentId,
     params: {
+      /** Our refund id. Stored on the provider's refund as `metadata.refundId`, so it can be found again. */
+      refundId: RefundId;
+      /** Sent to the provider, so a retry with the same key makes no second refund. */
+      idempotencyKey: string;
       /** Left out: the whole payment. */
       amount?: Money;
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<ProviderRefundResult, NotFound>>;
+  ): Promise<Result<ProviderRefundResult, NotFound | Conflict>>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {

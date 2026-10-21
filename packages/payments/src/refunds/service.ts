@@ -235,14 +235,19 @@ export class RefundService {
 
     // The provider resolves its own payment from our payment id
     const providerResult = await this.paymentProvider.refundPayment(payment.id, {
+      // The refund row id: a retry of this refund sends the same key, so Stripe pays it back once
+      idempotencyKey: refund.id,
+      refundId: refund.id,
       amount: refundAmountOf(refund),
       reason: refund.reason,
-      metadata: {
-        refundId: refund.id,
-        internalReason: refund.reason,
-      },
+      metadata: { internalReason: refund.reason },
     });
     if (isFailure(providerResult)) return providerResult;
+    // The provider returns a failed or canceled refund as data; here it still fails the refund
+    if (providerResult.status === 'failed' || providerResult.status === 'canceled') {
+      const why = providerResult.failureReason === null ? '' : `: ${providerResult.failureReason}`;
+      throw new Error(`Stripe refund ${providerResult.providerRefundId} ${providerResult.status}${why}`);
+    }
 
     const completedRefund = await this.writes.completeRefund({
       refundId: refund.id,
