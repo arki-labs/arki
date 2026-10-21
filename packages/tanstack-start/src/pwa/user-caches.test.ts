@@ -53,8 +53,7 @@ describe('clearCachesOnUserChange', () => {
     await clearCachesOnUserChange('usr_a');
     storage.fill();
 
-    await clearCachesOnUserChange('usr_a');
-
+    expect(await clearCachesOnUserChange('usr_a')).toBe(false);
     expect(await storage.keys()).toContain('app-navigations');
     expect(await storage.keys()).toContain('app-api');
   });
@@ -63,8 +62,8 @@ describe('clearCachesOnUserChange', () => {
     await clearCachesOnUserChange('usr_a');
     storage.fill();
 
-    await clearCachesOnUserChange('usr_b');
-
+    // `true` tells the app to drop A's other offline data (its persisted query cache) as well.
+    expect(await clearCachesOnUserChange('usr_b')).toBe(true);
     const names = await storage.keys();
     expect(names).not.toContain('app-navigations');
     expect(names).not.toContain('app-api');
@@ -76,16 +75,16 @@ describe('clearCachesOnUserChange', () => {
     await clearCachesOnUserChange('usr_a');
     storage.fill();
 
-    await clearCachesOnUserChange(null);
-
+    // An expired session seen as signed out: A's other offline data must go too.
+    expect(await clearCachesOnUserChange(null)).toBe(true);
     expect(await storage.keys()).not.toContain('app-navigations');
   });
 
   it('drops pages nobody is recorded for when a user signs in, since they could be anyone\'s', async () => {
     storage.fill();
 
-    await clearCachesOnUserChange('usr_b');
-
+    // Nobody recorded: the caches go, but the page already showing is this user's, so the app keeps it.
+    expect(await clearCachesOnUserChange('usr_b')).toBe(false);
     expect(await storage.keys()).not.toContain('app-navigations');
   });
 

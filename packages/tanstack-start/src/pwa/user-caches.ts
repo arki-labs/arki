@@ -27,13 +27,19 @@ const PRECACHE_PREFIX = 'workbox-precache';
  * a sign-out and lives and dies with the caches it describes. It holds only
  * the user id. Without Cache Storage (no service worker support, insecure
  * origin) there is nothing to delete, and this does nothing.
+ *
+ * Resolves `true` when the caches belonged to another known user, so the app
+ * drops that user's other offline data (such as a persisted query cache) on
+ * the same decision. A sign-in with no user recorded resolves `false`: the
+ * caches are dropped (they could be anyone's), but the page already showing
+ * belongs to the user who is signed in, so it must not be blanked.
  */
-export async function clearCachesOnUserChange(userId: string | null): Promise<void> {
-  if (typeof caches === 'undefined') return;
+export async function clearCachesOnUserChange(userId: string | null): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
   const ownerCache = await caches.open(CACHE_OWNER_CACHE);
   const ownerEntry = await ownerCache.match(CACHE_OWNER_KEY);
   const owner = ownerEntry === undefined ? null : await ownerEntry.text();
-  if (owner === userId) return;
+  if (owner === userId) return false;
 
   const names = await caches.keys();
   await Promise.all(
@@ -43,6 +49,7 @@ export async function clearCachesOnUserChange(userId: string | null): Promise<vo
   );
   if (userId === null) await ownerCache.delete(CACHE_OWNER_KEY);
   else await ownerCache.put(CACHE_OWNER_KEY, new Response(userId));
+  return owner !== null;
 }
 
 /**
