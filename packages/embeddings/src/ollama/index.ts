@@ -112,13 +112,18 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
 
   let digest: string | undefined;
   let digestRequest: Promise<void> | undefined;
+  /** Why the last read found no digest, for `loadRevision`. */
+  let digestMiss: 'unreachable' | 'not-pulled' = 'unreachable';
 
   /** Reads the digest once. A failed read leaves it unknown and is retried on the next call. */
   const learnDigest = (signal: AbortSignal | undefined): Promise<void> => {
     digestRequest ??= (async () => {
+      digestMiss = 'unreachable';
       try {
         const response = await send(`${baseURL}/api/tags`, { method: 'GET', ...(signal ? { signal } : {}) });
         const body: unknown = response.ok ? await response.json() : undefined;
+        // The server answered its model list, so a missing entry means the model is not pulled.
+        if (response.ok) digestMiss = 'not-pulled';
         const models = is(body, recordSchema) && Array.isArray(body['models']) ? body['models'] : [];
         const entry = models.find(
           (model: unknown) => is(model, recordSchema) && (model['name'] === withTag(id) || model['model'] === withTag(id)),
@@ -194,6 +199,10 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
     id,
     get revision() {
       return digest;
+    },
+    async loadRevision(signal) {
+      if (digest === undefined) await learnDigest(signal);
+      return digest === undefined ? ModelUnavailable({ model: id, reason: digestMiss }) : undefined;
     },
     assurance: 'operator-pinned',
     local: true,

@@ -17,6 +17,7 @@ export type {
   EmbeddingsLogger,
   EnvSource,
   Instruction,
+  Int8Calibration,
   NativeEmbeddings,
   NativeRequest,
   Purpose,
@@ -43,7 +44,7 @@ export { createEmbedder } from './embedder.js';
 export { embed, embedMany } from './embed.js';
 export { embedStream } from './stream.js';
 export type { EmbedStreamOptions } from './stream.js';
-export { resolveEmbeddingModel } from './resolve.js';
+export { resolveEmbeddingModel, resolveSpace } from './resolve.js';
 export {
   E5_INSTRUCTION,
   EMBEDDINGGEMMA_INSTRUCTION,
@@ -51,7 +52,8 @@ export {
   NOMIC_INSTRUCTION,
   QWEN3_INSTRUCTION,
 } from './instructions.js';
-export { cosine, l2Normalize, norm } from './vector.js';
+export { cosine, l2Normalize, norm, truncate } from './vector.js';
+export { calibrateInt8, hamming, quantize, unpackBits } from './quantize.js';
 export { countTokens } from './tokens.js';
 export { normalizeText } from './normalize.js';
 export type { NormalizeTextOptions } from './normalize.js';

@@ -1,3 +1,6 @@
+import type { EmbeddingModel } from './types.js';
+import { UnsupportedInput } from './failures.js';
+
 /**
  * Euclidean length.
  *
@@ -45,4 +48,20 @@ export function l2Normalize(vector: Float32Array): Float32Array {
   if (length === 0) return out;
   for (let index = 0; index < vector.length; index++) out[index] = (vector[index] ?? 0) / length;
   return out;
+}
+
+/**
+ * The first `dimensions` values of a Matryoshka vector, re-normalised when the model's vectors are
+ * unit length. A size the model was not trained to cut to (not its native size, not in
+ * `model.matryoshka`) is `UnsupportedInput { part: 'dimensions' }`: a plain prefix of any other
+ * model loses most of its meaning.
+ *
+ * @example
+ * const short = truncate(batch.vectors[0], 256, embedder.model); // Float32Array of 256, or UnsupportedInput
+ */
+export function truncate(vector: Float32Array, dimensions: number, model: EmbeddingModel) {
+  const allowed = dimensions === model.dimensions || model.matryoshka.includes(dimensions);
+  if (!allowed || dimensions > vector.length) return UnsupportedInput({ index: -1, part: 'dimensions' });
+  const prefix = vector.slice(0, dimensions);
+  return model.normalized ? l2Normalize(prefix) : prefix;
 }

@@ -40,3 +40,4 @@
 - Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
 - A cache key covers the space and the exact text; `embeddings()` from `./dot` publishes `null` when nothing resolves.
 - `resolveEmbeddingModel` never touches the network. Voyage and Google are `ConfigurationFailure` in this release.
+- `resolveSpace(embedder)` learns Ollama's digest before stale-row checks. Int8 needs one shared `calibrateInt8` range; binary packs MSB first.

@@ -58,7 +58,7 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 
 | Entry                                | What it is                                                                                                                                                                                                                                                                                                       | Peers                                  |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `embedStream`, `withResilience`, `withCache`, `memoryCacheStore`, `withTelemetry`, `withMiddleware`, `resolveEmbeddingModel`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                                   |
+| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `embedStream`, `withResilience`, `withCache`, `memoryCacheStore`, `withTelemetry`, `withMiddleware`, `resolveEmbeddingModel`, `resolveSpace`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `truncate`, `quantize`, `calibrateInt8`, `unpackBits`, `hamming`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                                   |
 | `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                                                                                                | none                                   |
 | `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                                                                                                | `@ai-sdk/openai`, `ai` (optional)      |
 | `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                                                                                  | none                                   |
@@ -68,7 +68,7 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default                                                                                                                                               | `@huggingface/transformers` (optional) |
 | `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                                                                                                                                       | none                                   |
 
-`resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side.
+`resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
 ### Variables
 
@@ -200,6 +200,41 @@ Asymmetric models were trained with a prefix per purpose. The model record appli
 | `NO_INSTRUCTION`             | OpenAI, the fake                         | none                             | none                    |
 
 EmbeddingGemma and nomic also have `classification` and `clustering` prefixes; EmbeddingGemma has `similarity`.
+
+## Smaller vectors
+
+Three ways to shrink a vector, from most to least faithful:
+
+- **Matryoshka sizes.** `createEmbedder(model, { dimensions: 256 })` asks for a size from `model.matryoshka`. `truncate(vector, 256, model)` does the same to a vector you already have: it keeps the first 256 values and re-normalises them when the model's vectors are unit length. Any other size is `UnsupportedInput`.
+- **Int8**, one byte per dimension. Each value is mapped from a per-dimension `[min, max]` onto -128…127. The range comes from `calibrateInt8(sample)` over a sample of *your corpus*, and the whole corpus must share it: vectors scaled differently are not comparable. With `createEmbedder(model, { quantization: 'int8', calibration })` the space id names the calibration (`…/i8@<16 hex>/…`), so an index made with another range is a different space. Without a calibration, int8 works only when the provider makes it natively.
+- **Binary**, one bit per dimension, set when the value is above 0. `quantize(vector, 'binary')` and `createEmbedder(model, { quantization: 'binary' })` pack eight dimensions per byte, **most significant bit first**: dimension 0 is bit 7 of byte 0, as in sentence-transformers, Transformers.js, Qdrant and pgvector `bit`. The size must be a multiple of 8. `hamming(a, b)` counts differing bits for a cheap first pass; rescore the best candidates with float vectors. `unpackBits(bits, dimensions)` turns bits back into ±1 floats.
+
+A dtype the provider makes natively is asked of the provider; otherwise the embedder validates the floats first and quantizes them itself.
+
+```ts run expect
+import { calibrateInt8, hamming, quantize, unpackBits } from '@arki/embeddings';
+import { isFailure } from '@arki/failure';
+
+const a = Float32Array.of(0.3, -0.1, 0, 0.2, -0.5, -0.4, 0.9, 0.1);
+const b = Float32Array.of(0.2, 0.4, -0.3, 0.2, -0.5, -0.4, 0.9, -0.1);
+
+const bitsA = quantize(a, 'binary');
+const bitsB = quantize(b, 'binary');
+if (isFailure(bitsA) || isFailure(bitsB)) throw new Error('8 dimensions always pack');
+console.log('a packed:', (bitsA[0] ?? 0).toString(2).padStart(8, '0'));
+console.log('bits that differ:', hamming(bitsA, bitsB));
+console.log('unpacked:', Array.from(unpackBits(bitsA, 8)).join(' '));
+
+const int8 = quantize(a, 'int8', calibrateInt8([a, b]));
+console.log('a as int8:', isFailure(int8) ? int8.code : Array.from(int8).join(' '));
+```
+
+```text
+a packed: 10010011
+bits that differ: 2
+unpacked: 1 -1 -1 1 -1 -1 1 1
+a as int8: 127 -128 127 0 0 0 0 127
+```
 
 ## Limits
 

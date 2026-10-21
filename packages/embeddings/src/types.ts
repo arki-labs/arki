@@ -55,8 +55,16 @@ export type EmbeddingSpace = {
   readonly dimensions: number;
   readonly normalized: boolean;
   readonly quantization: Quantization;
+  /** Fingerprint of the {@link Int8Calibration} for int8 made by this package; absent for provider-native int8. */
+  readonly calibration?: string;
   readonly instructionVersion: number;
 };
+
+/**
+ * The value range per dimension that client-side int8 maps onto -128…127. One calibration is shared
+ * by a whole corpus: vectors scaled with different ranges are not comparable.
+ */
+export type Int8Calibration = { readonly min: Float32Array; readonly max: Float32Array };
 
 /** What a model record's native call answers: one raw vector per text, unchecked, plus what the provider said it cost. */
 export type NativeEmbeddings = {
@@ -86,6 +94,8 @@ export type EmbeddingModel = {
   readonly id: string;
   /** Ollama digest, HF commit, provider snapshot. Ollama learns it on the first call. */
   readonly revision?: string;
+  /** Learns a lazy `revision` without embedding (Ollama). Absent when the revision is known up front or never. */
+  loadRevision?(signal?: AbortSignal): Promise<EmbedFailure | undefined>;
   readonly assurance: 'immutable' | 'operator-pinned' | 'mutable';
   readonly local: boolean;
   /** Native output size. */
@@ -141,6 +151,8 @@ export type Embedder = {
   readonly model: EmbeddingModel;
   /** At the embedder's default dimensions and quantization; carries the revision once the model knows it. */
   readonly space: EmbeddingSpace;
+  /** The space a call with these options answers in, e.g. for a cache key before the call. */
+  spaceFor(options: Pick<EmbedOptions, 'dimensions' | 'quantization'>): EmbeddingSpace;
   embed(inputs: readonly EmbedInput[], options: EmbedOptions): Promise<EmbeddingBatch | EmbedFailure>;
 };
 

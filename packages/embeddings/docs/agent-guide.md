@@ -125,7 +125,8 @@ The source is read only as fast as the loop runs. Stop early with `break`: that 
 - The same text is the same input only byte for byte. The embedder never normalises text; call `normalizeText` yourself, the same way on documents and queries.
 - Retry only through `withResilience`. It retries `RateLimited` and an unreachable model, nothing else; never wrap `embed` in a loop of your own.
 - An instruction's prefixes are frozen per `version`. Changing one without bumping `version` mixes two spaces under one space id.
-- `resolveEmbeddingModel` returns before the network is touched, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call.
+- `resolveEmbeddingModel` returns before the network is touched, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call, or `await resolveSpace(embedder)` before comparing with stored space ids.
+- Client-side int8 needs one `calibrateInt8` range for the whole corpus; keep it with the index. Binary packs most significant bit first and needs a size that is a multiple of 8.
 - Voyage and Google resolve to `ConfigurationFailure` in this release.
 - Never catch to hide a thrown error from a custom `embed`. It is a bug in that code.
 - `embeddings()` publishes `null` when nothing resolves. A feature that embeds must handle `null`, not assume a model.

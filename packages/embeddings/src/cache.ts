@@ -129,12 +129,8 @@ async function write(store: CacheStore, key: string, value: Uint8Array, ttlMs: n
 function cache(store: CacheStore, options: CacheOptions): EmbedMiddleware {
   const { strict = true, namespace = '', ttlMs } = options;
   return (next, embedder) => async (inputs, callOptions) => {
-    const base = embedder.space;
-    const space: EmbeddingSpace = {
-      ...base,
-      dimensions: callOptions.dimensions ?? base.dimensions,
-      quantization: callOptions.quantization ?? base.quantization,
-    };
+    // The embedder's own rule: a per-call dtype changes the calibration the space names, too.
+    const space = embedder.spaceFor(callOptions);
     const texts = inputs.map(input => cacheableText(input));
     const stored = await Promise.all(
       texts.map(async text =>

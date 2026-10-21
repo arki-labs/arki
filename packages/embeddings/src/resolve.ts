@@ -1,7 +1,7 @@
 import { isFailure } from '@arki/failure';
 
-import type { EmbeddingModelRef, EmbeddingProviderName, EmbeddingSpace, EnvSource } from './types.js';
-import { ConfigurationFailure, SpaceMismatch } from './failures.js';
+import type { Embedder, EmbeddingModelRef, EmbeddingProviderName, EmbeddingSpace, EnvSource } from './types.js';
+import { Cancelled, ConfigurationFailure, SpaceMismatch } from './failures.js';
 import { createOllamaModel } from './ollama/index.js';
 import { createOpenAIModel } from './openai/index.js';
 import { parseModelRef } from './ref.js';
@@ -74,10 +74,28 @@ export function resolveEmbeddingModel(
 
   const required = options.requiredSpace;
   if (required !== undefined) {
-    // A required size the model can shrink to (Matryoshka) is that model's space at that size.
+    // A required size the model can shrink to (Matryoshka) is that model's space at that size. The
+    // dtype is the embedder's choice, not the model's, so the required one is taken as given.
     const dimensions = model.matryoshka.includes(required.dimensions) ? required.dimensions : model.dimensions;
-    const actual = spaceOf(model, dimensions, 'float32');
+    const actual = spaceOf(model, dimensions, required.quantization, required.calibration);
     if (!isSameSpace(required, actual)) return SpaceMismatch({ expected: required, actual });
   }
   return model;
+}
+
+/**
+ * The embedder's space with its revision known, to compare with a stored space id before anything
+ * is embedded. Ollama reads its model digest (one metadata request, no embedding); other models
+ * answer at once. A digest it cannot read is `ModelUnavailable` (`unreachable` or `not-pulled`).
+ *
+ * @example
+ * const space = await resolveSpace(embedder);
+ * if (!isFailure(space)) await db.select().from(rows).where(ne(rows.spaceId, spaceId(space)));
+ */
+export async function resolveSpace(embedder: Embedder, options: { readonly signal?: AbortSignal } = {}) {
+  if (options.signal?.aborted) return Cancelled();
+  const missing = await embedder.model.loadRevision?.(options.signal);
+  if (options.signal?.aborted) return Cancelled();
+  if (missing !== undefined) return missing;
+  return embedder.space;
 }

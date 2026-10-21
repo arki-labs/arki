@@ -4,7 +4,10 @@ import type { EmbedFailure } from './failures.js';
 import type { CacheStore, Embedder, EmbeddingBatch } from './types.js';
 import { memoryCacheStore, withCache } from './cache.js';
 import { InvalidOutput, isEmbedFailure } from './failures.js';
+import { createEmbedder } from './embedder.js';
 import { withMiddleware } from './middleware.js';
+import { calibrateInt8 } from './quantize.js';
+import { echoTexts, stubModel } from './tests/stub-model.js';
 import { sha256Hex } from './sha256.js';
 import { spaceId } from './space.js';
 import { fakeEmbedder } from './testing/index.js';
@@ -247,5 +250,43 @@ describe('withCache', () => {
 
     expect(batch.vectors[0]).toHaveLength(8);
     expect(batch.usage.cacheHits).toBe(0);
+  });
+});
+
+describe('withCache with a calibrated embedder', () => {
+  // Native size 8 (binary needs a multiple of 8); the stub answers 4 values unless told the size.
+  const model = stubModel(request => echoTexts({ ...request, dimensions: 8 }), { dimensions: 8, matryoshka: [] });
+  const calibrated = (low: number) => {
+    const embedder = createEmbedder(model, {
+      calibration: calibrateInt8([new Float32Array(8).fill(low), new Float32Array(8).fill(9)]),
+    });
+    if (isEmbedFailure(embedder)) throw new Error(embedder.message);
+    return embedder;
+  };
+
+  // The key is looked up before the call and written after it; if the two disagree, every call misses.
+  it('a per-call binary on an int8 embedder hits on the second call', async () => {
+    const int8 = createEmbedder(model, { quantization: 'int8', calibration: calibrateInt8([new Float32Array(8).fill(-1)]) });
+    if (isEmbedFailure(int8)) throw new Error(int8.message);
+    const { embedder, calls } = spied(int8);
+    const cached = withCache(embedder, memoryCacheStore());
+    await ok(cached.embed(['t1'], { quantization: 'binary' }));
+    const second = await ok(cached.embed(['t1'], { quantization: 'binary' }));
+    expect(calls).toHaveLength(1);
+    expect(second.usage.cacheHits).toBe(1);
+  });
+
+  // Int8 values only mean something under their own calibration: the same range must hit, another
+  // range must never read them.
+  it('a per-call int8 hits under its own calibration and not under another', async () => {
+    const store = memoryCacheStore();
+    const own = withCache(calibrated(-1), store);
+    await ok(own.embed(['t1'], { quantization: 'int8' }));
+    const again = await ok(own.embed(['t1'], { quantization: 'int8' }));
+    expect(again.usage.cacheHits).toBe(1);
+    const { embedder, calls } = spied(calibrated(-2));
+    const other = await ok(withCache(embedder, store).embed(['t1'], { quantization: 'int8' }));
+    expect(calls).toHaveLength(1);
+    expect(other.usage.cacheHits).toBe(0);
   });
 });

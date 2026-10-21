@@ -7,6 +7,7 @@ import { is, recordSchema } from '@arki/schema';
 
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
+import { resolveSpace } from '../resolve.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { createOllamaModel } from './index.js';
 
@@ -148,5 +149,39 @@ describe('./ollama', () => {
     if (isFailure(embedder)) throw new Error(embedder.message);
     await embedMany(embedder, ['who is the shepherd'], { purpose: 'query' });
     expect(stub.embedCalls()[0]?.body).toMatchObject({ input: ['who is the shepherd'] });
+  });
+});
+
+describe('resolveSpace with Ollama', () => {
+  // A job that asks "which rows are stale?" before it embeds anything must compare against the
+  // digest, or every stored row (written with the digest) looks stale.
+  it('learns the digest without embedding', async () => {
+    const stub = stubFetch(recorded);
+    const { embedder } = ollama(stub.fetch);
+    const space = await resolveSpace(embedder);
+    if (isFailure(space)) throw new Error(space.message);
+    const digest = (JSON.parse(TAGS) as { models: { digest: string }[] }).models[0]?.digest;
+    expect(space.revision).toBe(digest);
+    expect(stub.embedCalls()).toHaveLength(0);
+  });
+
+  it('a model the server has not pulled is ModelUnavailable not-pulled', async () => {
+    const fetch = vi.fn((): Promise<Response> => Promise.resolve(Response.json({ models: [] })));
+    const model = createOllamaModel({ fetch });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const space = await resolveSpace(embedder);
+    expect(isFailure(space) && space.data).toEqual({ model: 'qwen3-embedding:0.6b', reason: 'not-pulled' });
+  });
+
+  it('an unreachable server is ModelUnavailable unreachable', async () => {
+    const refused = vi.fn((): Promise<Response> => Promise.reject(new TypeError('fetch failed')));
+    const model = createOllamaModel({ fetch: refused });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const space = await resolveSpace(embedder);
+    expect(isFailure(space) && space.data).toEqual({ model: 'qwen3-embedding:0.6b', reason: 'unreachable' });
   });
 });

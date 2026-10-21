@@ -85,6 +85,21 @@ describe('resolveEmbeddingModel', () => {
     expect(isFailure(notASize) && notASize.code).toBe('embeddings.space_mismatch');
   });
 
+  // The dtype is chosen by the embedder, so a binary index must not refuse the model that made it.
+  it('requiredSpace of a quantized index resolves the same model', () => {
+    const stored: EmbeddingSpace = {
+      provider: 'openai',
+      model: 'text-embedding-3-small',
+      dimensions: 1536,
+      normalized: true,
+      quantization: 'int8',
+      calibration: '0123456789abcdef',
+      instructionVersion: 0,
+    };
+    const model = resolveEmbeddingModel(undefined, { OPENAI_API_KEY: 'sk-test' }, { requiredSpace: stored });
+    expect(!isFailure(model) && model.id).toBe('text-embedding-3-small');
+  });
+
   it('nothing configured is ConfigurationFailure', () => {
     const result = resolveEmbeddingModel(undefined, {});
     expect(isFailure(result) && result.code).toBe('embeddings.configuration');

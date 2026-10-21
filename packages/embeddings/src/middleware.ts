@@ -18,6 +18,7 @@ export function withMiddleware(embedder: Embedder, ...middleware: readonly Embed
     get space() {
       return embedder.space;
     },
+    spaceFor: options => embedder.spaceFor(options),
     embed,
   };
 }
