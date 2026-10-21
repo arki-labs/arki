@@ -334,6 +334,10 @@
   padding: 0 14px;
   white-space: pre;
 }
+/* The blank line between a proof's imports and its code keeps its height. */
+.in-ln:empty {
+  min-height: 1lh;
+}
 
 /* ---------- phone: rows become cards, the index a scrolling chip row ---------- */
 @media (max-width: 639px) {

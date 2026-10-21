@@ -7,6 +7,7 @@ import {
   ALL_EXCERPTS,
   BUILD_STEPS,
   DEFINE_APP,
+  gapBefore,
   WAVES,
   WIRE_ERROR,
   WIRE_ERROR_SOURCE,
@@ -57,9 +58,13 @@ test.describe('/ build path', () => {
 
   // WHY: the sheet quotes a compiler error and the file that makes it; both must still say what the sheet says.
   test('the Wire error and the mistake come from the quickstart and define-app.ts', () => {
-    expect(fileLines(WIRE_ERROR.path)[WIRE_ERROR.line - 1]).toBe(WIRE_ERROR.text);
+    const errorLines = fileLines(WIRE_ERROR.path).slice(
+      WIRE_ERROR.from - 1,
+      WIRE_ERROR.from - 1 + WIRE_ERROR.lines.length,
+    );
+    expect(errorLines).toEqual(WIRE_ERROR.lines);
     expect(workspaceFile(WIRE_ERROR_SOURCE.path)).toContain(WIRE_ERROR_SOURCE.message);
-    expect(WIRE_ERROR.text).toContain(WIRE_ERROR_SOURCE.message);
+    expect(WIRE_ERROR.lines.join('\n')).toContain(WIRE_ERROR_SOURCE.message);
     expect(linesOf(WIRE_MISTAKE).join('\n')).toContain(WIRE_MISTAKE_MARK);
     expect(workspaceFile('packages/dot/src/lifecycle.ts')).toContain("ProviderMountedLater: 'ARKI_DOT_E020'");
   });
@@ -402,18 +407,25 @@ test.describe('/ build path', () => {
     // WHY: selecting and copying code must give the exact source lines, buttons and colours included.
     test('copying a code block gives the excerpt text', async ({ page }) => {
       await page.goto('/');
-      const copied = await page.locator('#step-define .home-code').nth(1).locator('pre').evaluate(pre => {
-        const range = document.createRange();
-        range.selectNodeContents(pre);
-        const selection = getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        return selection?.toString() ?? '';
-      });
-      // The gap between the chain's start and its end is drawn, and copied, as one blank line (a lone space in the
-      // markup, which the browser copies as a no-break space; both trim away).
+      const copied = await page
+        .locator('#step-define .home-code')
+        .nth(1)
+        .locator('pre')
+        .evaluate(pre => {
+          const range = document.createRange();
+          range.selectNodeContents(pre);
+          const selection = getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          return selection?.toString() ?? '';
+        });
+      // A gap in the source (imports to code, the chain's start to its end) is drawn, and copied, as one blank line (a
+      // lone space in the markup, which the browser copies as a no-break space; both trim away). Imports run together.
       const lines = copied.split('\n').map(line => line.trimEnd());
-      expect(lines.join('\n').trimEnd()).toBe(DEFINE_APP.parts.map(part => part.lines.join('\n')).join('\n\n'));
+      const expected = DEFINE_APP.parts
+        .map((part, index) => (gapBefore(DEFINE_APP.parts[index - 1], part) ? '\n' : '') + part.lines.join('\n'))
+        .join('\n');
+      expect(lines.join('\n').trimEnd()).toBe(expected);
     });
   });
 
@@ -425,7 +437,7 @@ test.describe('/ build path', () => {
       const sheet = page.getByRole('article', { name: 'Elevation: providers below consumers.' });
       const toggle = sheet.getByRole('button', { name: 'Put the database first' });
       await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-      await expect(sheet).toContainText('.use(orders).use(database)');
+      await expect(sheet).toContainText(WIRE_MISTAKE_MARK);
       await expect(sheet).toContainText(WIRE_ERROR_SOURCE.message);
       await expect(sheet.getByRole('complementary', { name: 'Title block A-101' })).toContainText('1 · clouded');
       await toggle.click();
@@ -540,7 +552,7 @@ test.describe('/ build path', () => {
         }
       }
       const sheet = page.locator('article.home-drawing');
-      await expect(sheet).toContainText('.use(orders).use(database)');
+      await expect(sheet).toContainText(WIRE_MISTAKE_MARK);
       await expect(sheet).toContainText(WIRE_ERROR_SOURCE.message);
       await expect(sheet.getByRole('button')).toHaveCount(0);
       const journal = page.getByRole('region', { name: 'The journal chapter' });

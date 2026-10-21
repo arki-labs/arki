@@ -257,6 +257,10 @@
   white-space: pre;
   scroll-margin: 96px 0 150px;
 }
+/* An empty source line keeps its height, so a blank line in the file stays blank on the page. */
+.home-ln:empty {
+  min-height: 1lh;
+}
 .home-ln.is-on {
   background: var(--home-tint);
   border-left-color: var(--primary);
@@ -558,6 +562,9 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.home-callout .home-chain-key + .home-code {
+  border-top: 1px solid var(--home-line);
+}
 .home-callout .home-code + .home-code {
   margin-top: 0;
   border-top: 1px solid var(--home-line);
@@ -678,6 +685,8 @@
 .home-rev {
   position: relative;
   display: inline-block;
+  /* The text starts where a .home-ln line's text starts (14px padding + 3px border); the top room is for the tag. */
+  margin: 6px 9px;
   padding: 6px 8px;
 }
 .home-cloud {
@@ -697,7 +706,8 @@
 .home-revtag {
   position: absolute;
   top: -18px;
-  right: -4px;
+  /* On the left, where it stays in view: a long mistake line scrolls its right end out of the box. */
+  left: 4px;
   width: 22px;
   height: 18px;
 }

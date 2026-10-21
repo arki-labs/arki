@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -19,9 +19,22 @@ describe('inside data', () => {
   // has a release candidate, would tell the reader the wrong thing about what they can install.
   it('shows the state that packages.json records', () => {
     for (const row of rows) {
+      if ('changeset' in row) continue;
       const entry = byShort.get(row.short);
       const actual = entry?.npmVersion ? 'shipped' : entry?.nextVersion ? 'candidate' : 'planned';
       expect(row.state, `${row.feature}: ${row.short}`).toBe(actual);
+    }
+  });
+
+  // WHY: a package on npm can still have features that are not: they wait in a changeset for the next release. Such a
+  // row must say "in the next release", and only while its changeset is still waiting.
+  it('marks a feature that waits in a changeset as in the next release', () => {
+    const waiting = rows.filter(row => 'changeset' in row);
+    expect(waiting.map(row => row.feature)).toContain('A workflow starts from a domain event');
+    for (const row of waiting) {
+      const changeset = 'changeset' in row ? row.changeset : '';
+      expect(existsSync(path.resolve(repoRoot, changeset)), `${row.feature}: ${changeset}`).toBe(true);
+      expect(row.state, row.feature).toBe('candidate');
     }
   });
 
@@ -30,7 +43,11 @@ describe('inside data', () => {
   it('copies every proof exactly from its source lines', () => {
     const proofs = rows.flatMap(row => (row.proof === null ? [] : [row.proof]));
     expect(proofs.length).toBeGreaterThan(30);
-    for (const { path: file, lines, code } of proofs) {
+    const parts = proofs.flatMap(proof => [
+      ...('imports' in proof ? proof.imports.map(part => ({ ...part, path: proof.path })) : []),
+      proof,
+    ]);
+    for (const { path: file, lines, code } of parts) {
       const [from = 0, to = from] = lines.split('-').map(Number);
       const source = readFileSync(path.resolve(repoRoot, file), 'utf8').split('\n');
       expect(source.slice(from - 1, to).join('\n'), `${file}:${lines}`).toBe(code);

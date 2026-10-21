@@ -5,7 +5,7 @@ import { cn } from '@arki/ui/cn';
 import type { Excerpt } from './build-steps';
 import type { Token } from './highlight';
 import type { Lit } from './journal-model';
-import { excerptCaption } from './build-steps';
+import { excerptCaption, gapBefore } from './build-steps';
 import { glossaryEntry } from './glossary';
 import { GlossaryTerm } from './glossary-term';
 import { tokenizeLines } from './highlight';
@@ -64,13 +64,10 @@ export function Code({ excerpt, lit, caption }: Readonly<CodeProps>) {
       <pre>
         <code>
           {excerpt.parts.map((part, index) => {
-            const before = excerpt.parts[index - 1];
-            const joined =
-              before !== undefined && before.path === part.path && before.from + before.lines.length === part.from;
             const light = lit?.[part.id];
             return (
               <Fragment key={part.id}>
-                {index > 0 && !joined ? (
+                {gapBefore(excerpt.parts[index - 1], part) ? (
                   <span className="home-ln" aria-hidden="true">
                     {' '}
                   </span>

@@ -5,11 +5,13 @@ import {
   excerptCaption,
   FEATURE_NEEDS,
   FEATURE_USECASE,
+  gapBefore,
   WIRE_ERROR,
   WIRE_ERROR_SOURCE,
   WIRE_FIX,
   WIRE_MISTAKE,
   WIRE_MISTAKE_MARK,
+  WIRE_UNITS,
 } from './build-steps';
 import { Code, HighlightedText } from './code';
 import { useHydrated } from './use-hydrated';
@@ -214,7 +216,7 @@ export function FeatureSheet() {
         ['Drawing', 'Section A–A'],
         ['Step', 'Feature'],
         ['Subject', 'waitlist'],
-        ['Source', 'feature.ts, signup.ts'],
+        ['Source', 'feature.ts, public-count.ts'],
       ]}
     >
       <p className="home-ctext">
@@ -230,11 +232,7 @@ export function FeatureSheet() {
             </p>
             {FEATURE_SECTION_ROOMS.map(room => (
               <div key={room.name} className="home-xfloor">
-                <Room
-                  room={room}
-                  pressed={room === shown}
-                  onPress={hydrated ? () => setShown(room) : undefined}
-                />
+                <Room room={room} pressed={room === shown} onPress={hydrated ? () => setShown(room) : undefined} />
               </div>
             ))}
           </div>
@@ -250,23 +248,47 @@ export function FeatureSheet() {
   );
 }
 
-/** The mistake line, marked: a wavy underline under the part the compiler refuses, a cloud around the line. */
+/** One line of the mistake. The line with the refused part gets a wavy underline under it and a cloud around it. */
+function MistakeLine({ line }: Readonly<{ line: string }>) {
+  if (!line.includes(WIRE_MISTAKE_MARK)) {
+    return (
+      <span className="home-ln">
+        <HighlightedText text={line} />
+      </span>
+    );
+  }
+  const [before = '', after = ''] = line.split(WIRE_MISTAKE_MARK);
+  return (
+    <span className="home-rev">
+      <RevisionMark number={1} />
+      <HighlightedText text={before} />
+      <span className="home-wrong">
+        <HighlightedText text={WIRE_MISTAKE_MARK} />
+      </span>
+      <HighlightedText text={after} />
+    </span>
+  );
+}
+
+/** The mistake file: its imports, then the marked line. */
 function Mistake() {
-  const [{ lines }] = WIRE_MISTAKE.parts;
-  const [before = '', after = ''] = lines[0].split(WIRE_MISTAKE_MARK);
   return (
     <figure className="home-code">
       <figcaption>{excerptCaption(WIRE_MISTAKE)}</figcaption>
       <pre>
         <code>
-          <span className="home-rev">
-            <RevisionMark number={1} />
-            <HighlightedText text={before} />
-            <span className="home-wrong">
-              <HighlightedText text={WIRE_MISTAKE_MARK} />
-            </span>
-            <HighlightedText text={after} />
-          </span>
+          {WIRE_MISTAKE.parts.map((part, index) => (
+            <Fragment key={part.id}>
+              {gapBefore(WIRE_MISTAKE.parts[index - 1], part) ? (
+                <span className="home-ln" aria-hidden="true">
+                  {' '}
+                </span>
+              ) : null}
+              {part.lines.map(line => (
+                <MistakeLine key={line} line={line} />
+              ))}
+            </Fragment>
+          ))}
         </code>
       </pre>
     </figure>
@@ -294,6 +316,11 @@ export function WireSheet() {
         ['Rev', fixed ? '0 · as drawn' : '1 · clouded'],
       ]}
     >
+      <p className="home-ctext">
+        <code>sessions</code> and <code>orders</code> both need <code>db</code>. The <code>database</code> unit provides
+        it, so it must come first.
+      </p>
+      <Code excerpt={WIRE_UNITS} />
       {hydrated ? (
         <button
           className="home-toggle"
@@ -318,18 +345,18 @@ export function WireSheet() {
             <Mistake />
             <div className="home-err">
               <p className="home-err-head">TypeScript · {WIRE_ERROR_SOURCE.path}</p>
-              <pre>{WIRE_ERROR.text}</pre>
+              <pre>{WIRE_ERROR.lines.join('\n')}</pre>
             </div>
             <p className="home-ok">
-              No type check? The kernel catches it at configure, before any boot hook runs: ARKI_DOT_E020, and its
-              message names both positions.
+              Plain JavaScript has no type check, so the kernel checks too. It stops the app at configure, before any
+              boot hook runs. Its error, ARKI_DOT_E020, names both units and their positions.
             </p>
           </>
         )}
       </div>
       <p className="home-note">
-        <code>.use()</code> adds one unit; <code>.infra()</code>, <code>.features()</code> and{' '}
-        <code>.entrypoints()</code> add a group.
+        Every list boots left to right: <code>.infra()</code> first, then <code>.features([…])</code>, then{' '}
+        <code>.entrypoints()</code>.
       </p>
     </DrawingSheet>
   );

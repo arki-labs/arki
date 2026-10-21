@@ -14,8 +14,14 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/src/define-app.ts',
-          lines: '99-104',
-          code: "type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {\n  readonly 'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)': {\n    readonly missing: MissingKeys<TAvail, TNeeds>;\n    readonly mismatched: MismatchedKeys<TAvail, TNeeds>;\n  };\n};",
+          lines: '93-98',
+          code: "type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {\n  readonly 'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.infra \u2192 .features \u2192 .entrypoints)': {\n    readonly missing: MissingKeys<TAvail, TNeeds>;\n    readonly mismatched: MismatchedKeys<TAvail, TNeeds>;\n  };\n};",
+          imports: [
+            {
+              lines: '42-56',
+              code: "import type {\n  AnyUnit,\n  EmptyPhases,\n  EmptyShape,\n  MergePhases,\n  RuntimeUnit,\n  ServiceRecord,\n  UnitCloseFailure,\n  UnitOpenFailure,\n  UnitPhaseFailures,\n  UnitPhases,\n  UnitRole,\n  UnitSourceGuard,\n  UnitWiring,\n} from './unit-contract.js';",
+            },
+          ],
         },
       },
       {
@@ -26,7 +32,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/src/define-app.ts',
-          lines: '106-109',
+          lines: '100-103',
           code: "type CollisionError<TAvail, TProvides> = {\n  readonly 'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()': keyof TAvail &\n    keyof TProvides;\n};",
         },
       },
@@ -38,8 +44,8 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/docs/di.md',
-          lines: '543-547',
-          code: '  needs: {\n    db: database.provides.db, // typed from the provider\n    cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager\n  },\n  provides: { reports: ({ db }) => makeReports(db) },',
+          lines: '547-551',
+          code: '  .needs({\n    db: database.provides.db, // typed from the provider\n    cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager\n  })\n  .provides({ reports: ({ db }) => makeReports(db) })',
         },
       },
       {
@@ -52,6 +58,13 @@ export const insideGroups = [
           path: 'apps/avocabo/backend/src/features/waitlist/feature.ts',
           lines: '34-39',
           code: "  .needs({\n    db: entrypointOnly(database.provides.db),\n    kv: entrypointOnly(cache.provides.kv),\n    // The app's outbound email client; a test fakes the plugin.\n    mailer: emailClient.provides.emailClient,\n  })",
+          imports: [
+            { lines: '12', code: "import { defineFeature, entrypointOnly } from '@arki/dot/feature';" },
+            {
+              lines: '17-19',
+              code: "import { database } from '../../infra/db';\nimport { cache } from '../../infra/kv';\nimport { emailClient } from '../../infra/mail/client';",
+            },
+          ],
         },
       },
       {
@@ -74,7 +87,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/docs/diagnostics.md',
-          lines: '214-216',
+          lines: '218-220',
           code: 'at `configure()`:\n\n- `ARKI_DOT_E020` — a provider is mounted after its consumer. The fix',
         },
       },
@@ -124,6 +137,11 @@ export const insideGroups = [
           path: 'apps/avocabo/backend/src/app.ts',
           lines: '42-47',
           code: '  .entrypoints(\n    hostClock,\n    tanstackStart({\n      needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler },\n      session: ({ auth }, request) => auth.principal(request.headers),\n      rpc: ({ rpc }, request) => rpc.client(request.headers),',
+          imports: [
+            { lines: '18', code: "import { tanstackStart } from '@arki/tanstack-start/dot';" },
+            { lines: '23', code: "import { gateway } from './entrypoints/gateway';" },
+            { lines: '26', code: "import { authn } from './infra/auth';" },
+          ],
         },
       },
     ],
@@ -156,6 +174,12 @@ export const insideGroups = [
           path: 'packages/journal/README.md',
           lines: '85-90',
           code: "    write(order, input.orderId, row => {\n      if (!row) return CommandNotFound({ detail: 'Order not found' });\n      if (row.status !== 'placed') return CommandConflict({ detail: `Order is already ${row.status}` });\n      return [OrderPaid({ amount: input.amount })]; // [] means: write nothing\n    }),\n);",
+          imports: [
+            {
+              lines: '46',
+              code: "import { CommandConflict, CommandNotFound, initJournal, need } from '@arki/journal';",
+            },
+          ],
         },
       },
       {
@@ -204,13 +228,15 @@ export const insideGroups = [
           path: 'packages/journal/src/write.ts',
           lines: '410',
           code: '          sql`select pg_notify(${deps.wakeChannel}, ${JSON.stringify({ from: Math.min(...seqs), to: Math.max(...seqs) })})`,',
+          imports: [{ lines: '7', code: "import { and, eq, sql } from 'drizzle-orm';" }],
         },
       },
       {
         feature: 'Durable workflows are journal entities',
         what: 'A workflow run is an entity; every step, wait and undo is an event in journal_events, and each step runs as a job that survives a restart.',
         short: 'journal',
-        state: 'shipped',
+        state: 'candidate',
+        changeset: '.changeset/journal-workflows.md',
         new: true,
         proof: {
           path: 'packages/journal/README.md',
@@ -222,7 +248,8 @@ export const insideGroups = [
         feature: 'A workflow starts from a domain event',
         what: 'startOn ties a run to an entity event; the run id and its input come from that event, in the transaction that recorded it.',
         short: 'journal',
-        state: 'shipped',
+        state: 'candidate',
+        changeset: '.changeset/journal-workflows.md',
         new: true,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
@@ -234,19 +261,22 @@ export const insideGroups = [
         feature: 'Steps carry an idempotency key',
         what: 'A step gets a key that is the same on every try, so a provider answers a repeat with the first result instead of acting twice.',
         short: 'journal',
-        state: 'shipped',
+        state: 'candidate',
+        changeset: '.changeset/journal-workflows.md',
         new: false,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
           lines: '173-177',
           code: '            (await provider.refundPayment(paymentId, {\n              refundId: input.refundId,\n              // The same on every try of this step: Stripe answers a repeat with the first refund\n              idempotencyKey: key,\n              amount: fromMinorColumn(amountMinor, currency),',
+          imports: [{ lines: '38', code: "import { fromMinorColumn } from '../core/money.js';" }],
         },
       },
       {
         feature: 'waitFor a signal, with a timeout',
         what: 'A run can wait days for an outside signal, check it against a schema, and carry on or stop when the time runs out.',
         short: 'journal',
-        state: 'shipped',
+        state: 'candidate',
+        changeset: '.changeset/journal-workflows.md',
         new: true,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
@@ -276,7 +306,7 @@ export const insideGroups = [
         proof: {
           path: 'packages/journal/src/dot.ts',
           lines: '612-617',
-          code: ' * The driving part, for `.serve()`: one worker between `start` and `stop`, for the\n * journal that `journal(...)` published. Each effect and tap of a feature gets the\n * services of that feature. A process that serves no worker still writes: its jobs\n * wait for a process that does. With `jobs`, the worker also runs queue rows\n * (`@arki/queue/outbox`) through the runner the source builds at boot.\n */',
+          code: ' * The entrypoint, for `.entrypoints()`: one worker between `start` and `stop`, for the\n * journal that `journal(...)` published. Each effect and tap of a feature gets the\n * services of that feature. A process that serves no worker still writes: its jobs\n * wait for a process that does. With `jobs`, the worker also runs queue rows\n * (`@arki/queue/outbox`) through the runner the source builds at boot.\n */',
         },
       },
     ],
@@ -365,6 +395,7 @@ export const insideGroups = [
           path: 'packages/http/README.md',
           lines: '39-41',
           code: "const engine = buildEngine([routes().bind(getOrder, ({ params }) => ({ id: params.id, total: 12 }))]);\n\nconst response = await engine.fetch(new Request('http://localhost/orders/ord_1'));",
+          imports: [{ lines: '28', code: "import { buildEngine, route, routes } from '@arki/http';" }],
         },
       },
       {
@@ -441,6 +472,10 @@ export const insideGroups = [
           path: 'packages/failure/README.md',
           lines: '28-32',
           code: "const EmailTaken = defineFailure('user.email_taken', {\n  status: 409,\n  data: z.object({ email: z.string() }),\n  message: 'email {email} is taken',\n});",
+          imports: [
+            { lines: '24', code: "import { z } from 'zod';" },
+            { lines: '26', code: "import { defineFailure, isFailure } from '@arki/failure';" },
+          ],
         },
       },
       {
@@ -542,3 +577,20 @@ export const insideGroups = [
     ],
   },
 ] as const;
+
+type Proof = NonNullable<(typeof insideGroups)[number]['rows'][number]['proof']>;
+
+/** The import lines a proof shows above its code, copied from the top of the same file (or the same code block). */
+const proofImports = (proof: Proof) => ('imports' in proof ? proof.imports : []);
+
+/** Every range a proof shows, imports first: `["12", "17-19", "34-39"]`. */
+export const proofRanges = (proof: Proof): readonly string[] => [
+  ...proofImports(proof).map(part => part.lines),
+  proof.lines,
+];
+
+/** The text a proof shows: the imports run together, then a blank line, then the code. */
+export function proofText(proof: Proof): string {
+  const imports = proofImports(proof);
+  return imports.length === 0 ? proof.code : `${imports.map(part => part.code).join('\n')}\n\n${proof.code}`;
+}

@@ -12,6 +12,8 @@ export type ExcerptPart = {
   path: string;
   /** The line number, in that file, of the first line. */
   from: number;
+  /** Import lines from the top of the file. No blank line is drawn between two import parts. */
+  imports?: true;
   lines: readonly string[];
 };
 
@@ -21,6 +23,13 @@ export type Excerpt = {
   note?: string;
   parts: readonly ExcerptPart[];
 };
+
+/** Whether a blank line is drawn before `part`: it is, when lines between it and the part before are left out. */
+export function gapBefore(before: ExcerptPart | undefined, part: ExcerptPart): boolean {
+  if (before === undefined) return false;
+  if (before.imports === true && part.imports === true) return false;
+  return before.path !== part.path || before.from + before.lines.length !== part.from;
+}
 
 type LineRange = { from: number; to: number };
 type CaptionGroup = { path: string; ranges: LineRange[] };
@@ -51,7 +60,11 @@ export function excerptCaption({ note, parts }: Excerpt): string {
 const APP_FILE = 'apps/avocabo/backend/src/app.ts';
 const DOT_README = 'packages/dot/README.md';
 const QUICKSTART_FILE = 'packages/dot/docs/quickstart.md';
+const QUICKSTART_APP = 'packages/dot/docs/examples/quickstart.ts';
+const QUICKSTART_WRONG = 'packages/dot/docs/examples/quickstart-wrong-order.mjs';
 const WAITLIST = 'apps/avocabo/backend/src/features/waitlist';
+const SERVER_FILE = 'apps/avocabo/start/src/server.ts';
+const UNSUBSCRIBE_ROUTE = 'apps/avocabo/start/src/routes/waitlist/unsubscribe.tsx';
 const README_FILE = 'packages/journal/README.md';
 const REFUND_WORKFLOW_FILE = 'packages/payments/src/refunds/workflow.ts';
 
@@ -59,6 +72,13 @@ const REFUND_WORKFLOW_FILE = 'packages/payments/src/refunds/workflow.ts';
 export const DEFINE_UNIT = {
   note: 'the quick start, runnable',
   parts: [
+    {
+      id: 'imports',
+      path: DOT_README,
+      from: 33,
+      imports: true,
+      lines: ["import { defineApp, infra } from '@arki/dot';"],
+    },
     {
       id: 'unit',
       path: DOT_README,
@@ -98,6 +118,41 @@ export const DEFINE_APP = {
   note: 'a real app',
   parts: [
     {
+      id: 'import-dot',
+      path: APP_FILE,
+      from: 16,
+      imports: true,
+      lines: ["import { defineApp, token } from '@arki/dot';"],
+    },
+    {
+      id: 'import-start',
+      path: APP_FILE,
+      from: 18,
+      imports: true,
+      lines: ["import { tanstackStart } from '@arki/tanstack-start/dot';"],
+    },
+    {
+      id: 'import-features',
+      path: APP_FILE,
+      from: 21,
+      imports: true,
+      lines: ["import { features } from './features';"],
+    },
+    {
+      id: 'import-units',
+      path: APP_FILE,
+      from: 23,
+      imports: true,
+      lines: [
+        "import { gateway } from './entrypoints/gateway';",
+        "import { database } from './infra/db';",
+        "import { cache } from './infra/kv';",
+        "import { authn } from './infra/auth';",
+        "import { locking } from './infra/locks';",
+        "import { appMail, emailClient } from './infra/mail/client';",
+      ],
+    },
+    {
       id: 'app',
       path: APP_FILE,
       from: 39,
@@ -114,49 +169,131 @@ export const DEFINE_APP = {
   ],
 } as const satisfies Excerpt;
 
-/** The line the reader swaps: `.use(orders)` is the part the compiler refuses. */
+/** Two units that need `db`: the session store and the orders feature of the quickstart app. */
+export const WIRE_UNITS = {
+  note: 'two units that need db',
+  parts: [
+    {
+      id: 'imports',
+      path: QUICKSTART_APP,
+      from: 9,
+      imports: true,
+      lines: ["import { defineApp, infra } from '@arki/dot';", "import { defineFeature } from '@arki/dot/feature';"],
+    },
+    {
+      id: 'sessions',
+      path: QUICKSTART_APP,
+      from: 32,
+      lines: [
+        'export const sessions = infra({',
+        "  name: 'sessions',",
+        '  needs: { db: database.provides.db }, // the handle, not a string: a typo cannot compile',
+      ],
+    },
+    {
+      id: 'orders',
+      path: QUICKSTART_APP,
+      from: 47,
+      lines: ["export const orders = defineFeature('orders')", '  .needs({ db: database.provides.db })'],
+    },
+  ],
+} as const satisfies Excerpt;
+
+/** The line the reader swaps: `.infra(sessions, database)` is the part the compiler refuses. */
 export const WIRE_MISTAKE = {
   note: 'the mistake',
   parts: [
     {
+      id: 'import-dot',
+      path: QUICKSTART_WRONG,
+      from: 8,
+      imports: true,
+      lines: ["import { defineApp } from '@arki/dot';"],
+    },
+    {
+      id: 'import-units',
+      path: QUICKSTART_WRONG,
+      from: 10,
+      imports: true,
+      lines: ["import { database, orders, sessions } from './quickstart.js';"],
+    },
+    {
       id: 'wrong-order',
-      path: QUICKSTART_FILE,
-      from: 76,
-      lines: ["export default defineApp('shop').use(orders).use(database);"],
+      path: QUICKSTART_WRONG,
+      from: 13,
+      lines: ["export default defineApp('shop').infra(sessions, database).features([orders]);"],
     },
   ],
 } as const satisfies Excerpt;
 
 /** The piece of the mistake the compiler points at. */
-export const WIRE_MISTAKE_MARK = '.use(orders)';
+export const WIRE_MISTAKE_MARK = '.infra(sessions, database)';
 
 export const WIRE_FIX = {
   parts: [
     {
+      id: 'imports',
+      path: QUICKSTART_APP,
+      from: 9,
+      imports: true,
+      lines: ["import { defineApp, infra } from '@arki/dot';"],
+    },
+    {
       id: 'right-order',
-      path: QUICKSTART_FILE,
-      from: 64,
-      lines: ["export default defineApp('shop').use(database).use(orders);"],
+      path: QUICKSTART_APP,
+      from: 62,
+      lines: ["export default defineApp('shop').infra(database, sessions).features([orders]);"],
     },
   ],
 } as const satisfies Excerpt;
 
-/** The last line of the type error, as the quickstart prints it. */
+/** The type error, as the quickstart prints it: the guard's name, then the need nothing provides yet. */
 export const WIRE_ERROR = {
   path: QUICKSTART_FILE,
-  line: 83,
-  text: "Property ''DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)'' is missing in type ...",
+  from: 113,
+  lines: [
+    "Property ''DOT: a unit in this list cannot be mounted at its position'' is missing in type ...",
+    '  ... NeedsError<EmptyShape, WireNeeds<{ db: Handle<..., "db", "database">; }>> ...',
+  ],
 } as const;
 
 /** The type that makes the compiler say it: `define-app.ts` holds the message as a property name. */
 export const WIRE_ERROR_SOURCE = {
   path: 'packages/dot/src/define-app.ts',
-  message:
-    'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)',
+  message: 'DOT: a unit in this list cannot be mounted at its position',
 } as const;
 
 export const FEATURE_NEEDS = {
   parts: [
+    {
+      id: 'import-dot',
+      path: `${WAITLIST}/feature.ts`,
+      from: 12,
+      imports: true,
+      lines: ["import { defineFeature, entrypointOnly } from '@arki/dot/feature';"],
+    },
+    {
+      id: 'import-app',
+      path: `${WAITLIST}/feature.ts`,
+      from: 17,
+      imports: true,
+      lines: [
+        "import { database } from '../../infra/db';",
+        "import { cache } from '../../infra/kv';",
+        "import { emailClient } from '../../infra/mail/client';",
+      ],
+    },
+    {
+      id: 'import-own',
+      path: `${WAITLIST}/feature.ts`,
+      from: 22,
+      imports: true,
+      lines: [
+        "import { limiter } from './infra/signup-limiter';",
+        "import { store } from './infra/store';",
+        "import { turnstile } from './infra/turnstile';",
+      ],
+    },
     {
       id: 'needs',
       path: `${WAITLIST}/feature.ts`,
@@ -176,15 +313,31 @@ export const FEATURE_NEEDS = {
   ],
 } as const satisfies Excerpt;
 
+/** A whole usecase: it picks `repos` by key and never sees the database. */
 export const FEATURE_USECASE = {
   parts: [
     {
+      id: 'imports',
+      path: `${WAITLIST}/usecases/public-count.ts`,
+      from: 1,
+      imports: true,
+      lines: ["import type { Deps } from '../feature';"],
+    },
+    {
       id: 'usecase',
-      path: `${WAITLIST}/usecases/signup.ts`,
-      from: 68,
+      path: `${WAITLIST}/usecases/public-count.ts`,
+      from: 7,
       lines: [
-        'export const signup =',
-        "  ({ repos, signupLimiter, turnstile, mailer }: Pick<Deps, 'repos' | 'signupLimiter' | 'turnstile' | 'mailer'>) =>",
+        'export const publicCount =',
+        "  ({ repos: { entries } }: Pick<Deps, 'repos'>) =>",
+        '  async () => {',
+        '    const [pending, invited, activated] = await Promise.all([',
+        "      entries.countByStatus('pending'),",
+        "      entries.countByStatus('invited'),",
+        "      entries.countByStatus('activated'),",
+        '    ]);',
+        '    return { total: pending + invited + activated };',
+        '  };',
       ],
     },
   ],
@@ -282,8 +435,62 @@ export const REFUND_WORKFLOW = {
   ],
 } as const satisfies Excerpt;
 
+/** The process's front door: one call starts the app and hands every request to TanStack Start. */
+export const SERVE_SERVER = {
+  parts: [
+    {
+      id: 'import-app',
+      path: SERVER_FILE,
+      from: 9,
+      imports: true,
+      lines: [
+        "import { app } from '@avocabo/backend/app';",
+        "import { createStartHandler, defaultStreamHandler } from '@tanstack/react-start/server';",
+      ],
+    },
+    {
+      id: 'import-server',
+      path: SERVER_FILE,
+      from: 16,
+      imports: true,
+      lines: [
+        "import { startServer } from '@arki/tanstack-start/server';",
+        "import { withServerErrorOverlay } from '@arki/tanstack-start/server-error-overlay';",
+      ],
+    },
+    { id: 'import-env', path: SERVER_FILE, from: 19, imports: true, lines: ["import { env } from '~/env';"] },
+    {
+      id: 'serve',
+      path: SERVER_FILE,
+      from: 47,
+      lines: [
+        'export const server = startServer(app, {',
+        '  hot: import.meta.hot,',
+        "  eager: env.NODE_ENV === 'production',",
+        '  handler: withServerErrorOverlay(createStartHandler(defaultStreamHandler)),',
+        '});',
+      ],
+    },
+  ],
+} as const satisfies Excerpt;
+
 export const SERVE_APP = {
   parts: [
+    {
+      id: 'import-start',
+      path: APP_FILE,
+      from: 18,
+      imports: true,
+      lines: ["import { tanstackStart } from '@arki/tanstack-start/dot';"],
+    },
+    {
+      id: 'import-gateway',
+      path: APP_FILE,
+      from: 23,
+      imports: true,
+      lines: ["import { gateway } from './entrypoints/gateway';"],
+    },
+    { id: 'import-auth', path: APP_FILE, from: 26, imports: true, lines: ["import { authn } from './infra/auth';"] },
     {
       id: 'serve',
       path: APP_FILE,
@@ -298,13 +505,94 @@ export const SERVE_APP = {
   ],
 } as const satisfies Excerpt;
 
+/** A Start route that calls a service the waitlist feature provides, through the request context. */
+export const SERVE_ROUTE = {
+  parts: [
+    {
+      id: 'import-router',
+      path: UNSUBSCRIBE_ROUTE,
+      from: 1,
+      imports: true,
+      lines: ["import { createFileRoute } from '@tanstack/react-router';"],
+    },
+    {
+      id: 'import-failure',
+      path: UNSUBSCRIBE_ROUTE,
+      from: 3,
+      imports: true,
+      lines: ["import { orThrow } from '@arki/failure';"],
+    },
+    {
+      id: 'route',
+      path: UNSUBSCRIBE_ROUTE,
+      from: 38,
+      lines: [
+        "export const Route = createFileRoute('/waitlist/unsubscribe')({",
+        '  server: {',
+        '    handlers: {',
+        '      GET: async ({ request, context }) => {',
+      ],
+    },
+    {
+      id: 'services',
+      path: UNSUBSCRIBE_ROUTE,
+      from: 53,
+      lines: [
+        '          const { waitlistUnsubscribe } = context.services;',
+        '          const outcome = orThrow(await waitlistUnsubscribe.byToken(token));',
+      ],
+    },
+  ],
+} as const satisfies Excerpt;
+
+/** `dot explain` on the quickstart app, and what it printed: every unit, what it needs, what it provides. */
 export const EXPLAIN_COMMAND = {
+  note: 'the command, then its real output',
   parts: [
     {
       id: 'explain',
       path: QUICKSTART_FILE,
-      from: 133,
+      from: 167,
       lines: ["dot explain --app src/app.ts --json | jq -c '.data.plugins[], .data.dependencies[]'"],
+    },
+    {
+      id: 'output',
+      path: QUICKSTART_FILE,
+      from: 189,
+      lines: [
+        '{"name":"database","role":"infra","dependencies":[],"provides":["db"]}',
+        '{"name":"sessions","role":"infra","dependencies":["db"],"provides":["sessions"]}',
+        '{"name":"orders","role":"feature","dependencies":["db"],"provides":["orders.usecases","orders.services","feature.orders","orders"]}',
+        '{"from":"sessions","to":"database","kind":"requires","key":"db"}',
+        '{"from":"orders","to":"database","kind":"requires","key":"db"}',
+      ],
+    },
+  ],
+} as const satisfies Excerpt;
+
+/** `dot doctor` on the same app: it boots every unit, reports each one, and shuts the app down. */
+export const DOCTOR_COMMAND = {
+  note: 'the command, then its real output',
+  parts: [
+    {
+      id: 'doctor',
+      path: QUICKSTART_FILE,
+      from: 205,
+      lines: [
+        "dot doctor --app src/app.ts --json | jq -c '.data.status, (.data.plugins[] | {plugin, status}), .data.issues'",
+      ],
+    },
+    {
+      id: 'output',
+      path: QUICKSTART_FILE,
+      from: 230,
+      lines: [
+        '"success"',
+        '{"plugin":"database","status":"ok"}',
+        '{"plugin":"sessions","status":"ok"}',
+        '{"plugin":"orders","status":"ok"}',
+        '[]',
+      ],
     },
   ],
 } as const satisfies Excerpt;
@@ -335,13 +623,53 @@ export const EXPLAIN_GRAPH_OUTPUT = {
   ],
 } as const;
 
+/** A test boots the real app before the tests and disposes it after them. */
 export const START_IN_TEST = {
   parts: [
     {
+      id: 'import-vitest',
+      path: 'demos/faultline/backend/src/delivery.test.ts',
+      from: 1,
+      imports: true,
+      lines: ["import { afterAll, beforeAll, describe, expect, it } from 'vitest';"],
+    },
+    {
+      id: 'import-arki',
+      path: 'demos/faultline/backend/src/delivery.test.ts',
+      from: 4,
+      imports: true,
+      lines: ["import { isFailure, orThrow } from '@arki/failure';", "import { listen } from '@arki/http';"],
+    },
+    {
+      id: 'import-app',
+      path: 'demos/faultline/backend/src/delivery.test.ts',
+      from: 10,
+      imports: true,
+      lines: ["import { app } from './app';"],
+    },
+    {
+      id: 'import-hooks',
+      path: 'demos/faultline/backend/src/delivery.test.ts',
+      from: 14,
+      imports: true,
+      lines: ["import { hooksEngine } from './hooks';"],
+    },
+    {
       id: 'start',
       path: 'demos/faultline/backend/src/delivery.test.ts',
-      from: 25,
-      lines: ['  started = orThrow(await app.start());'],
+      from: 24,
+      lines: [
+        'beforeAll(async () => {',
+        '  started = orThrow(await app.start());',
+        "  // The worker's HTTP calls (reports, partner webhook, mail provider) reach this server (WEB_ORIGIN).",
+        "  server = await listen(hooksEngine(started.services.db), { port: 3576, hostname: '127.0.0.1' });",
+        '});',
+        '',
+        'afterAll(async () => {',
+        '  server.forceClose();',
+        '  await started.dispose();',
+        '});',
+      ],
     },
   ],
 } as const satisfies Excerpt;
@@ -350,14 +678,18 @@ export const START_IN_TEST = {
 export const ALL_EXCERPTS = [
   DEFINE_UNIT,
   DEFINE_APP,
+  WIRE_UNITS,
   WIRE_MISTAKE,
   WIRE_FIX,
   FEATURE_NEEDS,
   FEATURE_USECASE,
   PAY_ORDER,
   REFUND_WORKFLOW,
+  SERVE_SERVER,
   SERVE_APP,
+  SERVE_ROUTE,
   EXPLAIN_COMMAND,
+  DOCTOR_COMMAND,
   START_IN_TEST,
 ] as const satisfies readonly Excerpt[];
 
@@ -392,16 +724,16 @@ const STEP_LIST = [
     number: 'F2',
     verb: 'Wire',
     kicker: 'the compiler checks the order',
-    title: 'Swap two lines. The compiler refuses.',
+    title: 'Put a unit before what it needs. It will not compile.',
     sheet: 'A-101',
-    excerpts: [WIRE_MISTAKE, WIRE_FIX],
+    excerpts: [WIRE_UNITS, WIRE_MISTAKE, WIRE_FIX],
   },
   {
     id: 'feature',
     number: 'F3',
     verb: 'Feature',
     kicker: 'model · usecases · infra · entrypoints',
-    title: 'A feature names what it needs. Usecases get only what they pick.',
+    title: 'A feature is one folder. Its rules never touch the database.',
     excerpts: [FEATURE_NEEDS, FEATURE_USECASE],
   },
   {
@@ -418,16 +750,16 @@ const STEP_LIST = [
     number: 'F5',
     verb: 'Serve',
     kicker: 'TanStack Start',
-    title: 'TanStack Start is the front door. Every route gets typed services.',
-    excerpts: [SERVE_APP],
+    title: 'One call serves the app. Every route gets its services, typed.',
+    excerpts: [SERVE_SERVER, SERVE_APP, SERVE_ROUTE],
   },
   {
     id: 'inspect',
     number: 'F6',
     verb: 'Inspect',
     kicker: 'and test',
-    title: 'Read the graph before boot. Boot the same graph in a test.',
-    excerpts: [EXPLAIN_COMMAND, START_IN_TEST],
+    title: 'See every unit before it runs. Then start the real app in a test.',
+    excerpts: [EXPLAIN_COMMAND, DOCTOR_COMMAND, START_IN_TEST],
   },
 ] as const satisfies readonly BuildStep[];
 

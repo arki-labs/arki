@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
-import { insideGroups } from '../src/features/inside/inside-data';
+import { insideGroups, proofRanges, proofText } from '../src/features/inside/inside-data';
 
 const workspaceRoot = new URL('../../../../', import.meta.url);
 const rows = insideGroups.flatMap(group => [...group.rows]);
@@ -57,17 +57,22 @@ test.describe('/inside', () => {
     const proof = row?.proof;
     expect(proof).toBeTruthy();
     if (!proof) return;
-    const [from = 0, to = from] = proof.lines.split('-').map(Number);
-    const source = readFileSync(new URL(proof.path, workspaceRoot), 'utf8')
-      .split('\n')
-      .slice(from - 1, to)
-      .join('\n');
+    // The imports and the code, each range read from the file; the imports run together, a blank line ends them.
+    const file = readFileSync(new URL(proof.path, workspaceRoot), 'utf8').split('\n');
+    const read = (range: string) => {
+      const [from = 0, to = from] = range.split('-').map(Number);
+      return file.slice(from - 1, to).join('\n');
+    };
+    const ranges = proofRanges(proof);
+    const code = read(ranges.at(-1) ?? '');
+    const imports = ranges.slice(0, -1).map(range => read(range));
+    const source = imports.length === 0 ? code : `${imports.join('\n')}\n\n${code}`;
     const details = page.locator('.in-proof', { hasText: proof.path }).first();
     await expect(details).not.toHaveAttribute('open', '');
     await details.locator('summary').click();
     await expect(details).toHaveAttribute('open', '');
     expect(await details.locator('code').evaluate(code => code.textContent)).toBe(source.replaceAll('\n', ''));
-    expect(source).toBe(proof.code);
+    expect(source).toBe(proofText(proof));
   });
 
   // WHY: the founder asked that this row say plainly that no app uses the Dot plugin yet, so nobody reads it as proven.

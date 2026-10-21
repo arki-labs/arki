@@ -10,7 +10,7 @@ import { HeroMark } from '~/shared/marketing/wordmark';
 
 import '~/styles/inside.css';
 
-import { insideGroups } from './inside-data';
+import { insideGroups, proofRanges, proofText } from './inside-data';
 
 /** `?show=`: one filter. Any other value, or none, shows every row. */
 const insideSearch = z.object({
@@ -54,6 +54,10 @@ function ProofCode({ code }: Readonly<{ code: string }>) {
   );
 }
 
+/** "line 9", or "lines 12, 34-39" when there is more than one line. */
+const linesLabel = (ranges: readonly string[]) =>
+  ranges.length === 1 && !ranges[0]?.includes('-') ? `line ${ranges.join('')}` : `lines ${ranges.join(', ')}`;
+
 function RowView({ row }: Readonly<{ row: Row }>) {
   const { proof } = row;
   const note = 'note' in row ? row.note : undefined;
@@ -85,9 +89,9 @@ function RowView({ row }: Readonly<{ row: Row }>) {
         <details className="in-proof">
           <summary>
             <b>{proof.path}</b>
-            <span>{proof.lines.includes('-') ? `lines ${proof.lines}` : `line ${proof.lines}`}</span>
+            <span>{linesLabel(proofRanges(proof))}</span>
           </summary>
-          <ProofCode code={proof.code} />
+          <ProofCode code={proofText(proof)} />
         </details>
       )}
     </li>
