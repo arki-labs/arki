@@ -1,13 +1,14 @@
-import type { ProjectKey } from '@fleet/sitekit/projects.ts';
+import type { ProjectKey } from '@fleet/sitekit/project-data.ts';
 import type { AppContextType } from '@fleet/sitekit/types.ts';
-import { getProjectByKey } from '@fleet/sitekit/projects.ts';
+import { CubeIcon } from '@arki/icons/phosphor';
+import { getProjectDataByKey } from '@fleet/sitekit/project-data.ts';
 
 import packageJSON from '../package.json';
 import { env } from './env';
 
 const projectName = packageJSON.name.split('/').shift()?.replace('@', '');
 
-const project = getProjectByKey(projectName as ProjectKey);
+const project = getProjectDataByKey(projectName as ProjectKey);
 
 if (!project) {
   throw new Error(`Project "${projectName}" not found`);
@@ -28,7 +29,8 @@ const config = {
   appLocales: project.i18n?.locales ?? [],
   appDefaultLocale: project.i18n?.defaultLocale ?? 'en',
   appLocalePrefix: project.i18n?.localePrefix ?? 'as-needed',
-  appIcon: project.icon,
+  // Imported here rather than read from `@fleet/sitekit/projects`, which imports every fleet project's icon.
+  appIcon: CubeIcon,
 } satisfies AppContextType;
 
 export default config;
