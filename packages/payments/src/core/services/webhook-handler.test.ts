@@ -22,8 +22,9 @@ import { afterAll, assert, beforeAll, beforeEach, describe, expect, it, vi } fro
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { add, fromUnix, now, sub } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
+import { initJournal } from '@arki/journal';
 
-import type { AppDb } from '../../test-support.js';
+import type { AppDb, AppTx } from '../../test-support.js';
 import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
 import type {
   WebhookEventStore,
@@ -33,8 +34,22 @@ import type {
   WebhookWrites,
 } from './webhook-handler.js';
 import type { WebhookValidationOptions } from './webhook-security.js';
-import { refundReads, refundRow, runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
-import { adminId, core, countEvents, eventTypesOf, openDb, typed, userId } from '../../test-support.js';
+import { createRefundsJournal } from '../../refunds/journal.js';
+import { createRefundWorkflow } from '../../refunds/workflow.js';
+import { refundRow, runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
+import {
+  adminId,
+  core,
+  countEvents,
+  eventTypesOf,
+  journalTablesInSchema,
+  meta,
+  metaSchema,
+  openDb,
+  refundsTables,
+  typed,
+  userId,
+} from '../../test-support.js';
 import { createWebhookId } from '../primitives.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from '../webhook-claims.js';
 import { WebhookHandler } from './webhook-handler.js';
@@ -582,136 +597,185 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
-const refundsOn = (): WebhookRefunds => ({ reads: refundReads(db), writes: typed.refunds.writes(runnerOn(db)) });
-
-/** A collected payment of 25 and a refund of 10 of it that was handed to Stripe and not yet completed. */
-async function refundInFlight() {
-  const payment = await seedPayment(writesOn(db), null, '25');
-  await orThrow(writesOn(db).completePayment({ paymentId: payment.id }));
-  const refundWrites = typed.refunds.writes(runnerOn(db));
-  const refund = await orThrow(
-    refundWrites.requestRefund({
-      paymentId: payment.id,
-      originalAmount: { amount: '25', currency: 'USD' },
-      refundAmount: { amount: '10', currency: 'USD' },
-      reason: 'customer_request',
-      requestedBy: userId,
-    }),
-  );
-  await orThrow(refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId }));
-  await orThrow(refundWrites.processRefund({ refundId: refund.id }));
-  return { payment, refund };
-}
-
-function chargeWithRefund(providerPaymentId: string, refund: Record<string, unknown>) {
-  return stripeCharge(providerPaymentId, {
-    amount_refunded: 1000,
-    currency: 'usd',
-    refunds: { data: [{ status: 'succeeded', ...refund }] },
-  });
-}
-
-  describe('payment.refunded and the refunds table', () => {
-    it('completes the refund the service started but never saw finish, with the Stripe refund id', async () => {
-      const { payment, refund } = await refundInFlight();
-      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_lost', metadata: { refundId: refund.id } });
-
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
-        success: true,
-      });
-
-      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'completed', providerRefundId: 're_lost' });
-      expect(await eventTypesOf(db, 'refund', refund.id)).toEqual([
-        'RefundRequestedV2',
-        'RefundApproved',
-        'RefundProcessed',
-        'RefundCompleted',
-      ]);
+  /**
+   * The app's journal with the refund workflow composed: the run a refund webhook signals. Its own
+   * `initJournal` on the same tables, because a journal composes workflows once. No step runs here.
+   */
+  const refundRuntime = (() => {
+    const j = initJournal.tx<AppTx>().db<AppDb>().create({ tables: journalTablesInSchema, meta: metaSchema });
+    const refund = createRefundWorkflow(
+      j,
+      createRefundsJournal(j, { refunds: refundsTables.refunds, payments: core.payments }),
+    );
+    const journal = j.compose({
+      workflows: [refund],
+      workflowMeta: { actorId: 'system:workflow' },
+      services: {
+        stripe: () => {
+          throw new Error('the webhook tests run no workflow step');
+        },
+        notifications: {},
+      },
     });
+    return { journal, refund };
+  })();
 
-    it('a resent event changes nothing: the refund is found by its Stripe id', async () => {
-      const { payment, refund } = await refundInFlight();
-      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_twice', metadata: { refundId: refund.id } });
-      await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId());
-      const eventsBefore = await countEvents(db);
+  /** What each signal the handler sent was answered with, in order. */
+  let signalled: string[] = [];
 
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
-        success: true,
-      });
+  /** The app's `signal`: the workflow's settled signal on the test database. `dropAnswer`: the first call throws after it was delivered. */
+  function refundsOn(dropAnswer = false): WebhookRefunds {
+    return {
+      signal: async input => {
+        const outcome = await refundRuntime.journal.run(
+          db,
+          refundRuntime.refund.signal('stripe.refund.settled'),
+          input,
+          meta,
+        );
+        if (!isFailure(outcome)) signalled.push(outcome.status);
+        if (dropAnswer && signalled.length === 1) throw new Error('connection lost after the signal was stored');
+        return outcome;
+      },
+    };
+  }
 
-      expect(await countEvents(db)).toBe(eventsBefore);
-    });
-
-    it('a refund the service already completed is left as it is', async () => {
-      const { payment, refund } = await refundInFlight();
-      await orThrow(
-        typed.refunds.writes(runnerOn(db)).completeRefund({ refundId: refund.id, providerRefundId: 're_done' }),
+  /** A collected payment of 25 and an approved refund of 10 of it; with `run`, its workflow run has started. */
+  async function approvedRefund({ run }: { run: boolean }) {
+    const payment = await seedPayment(writesOn(db), null, '25');
+    await orThrow(writesOn(db).completePayment({ paymentId: payment.id }));
+    const refundWrites = typed.refunds.writes(runnerOn(db));
+    const refund = await orThrow(
+      refundWrites.requestRefund({
+        paymentId: payment.id,
+        originalAmount: { amount: '25', currency: 'USD' },
+        refundAmount: { amount: '10', currency: 'USD' },
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
+    await orThrow(refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId }));
+    if (run) {
+      orThrow(
+        await refundRuntime.journal.run(
+          db,
+          refundRuntime.refund.start,
+          { id: `refund:${refund.id}`, input: { refundId: refund.id } },
+          meta,
+        ),
       );
-      const eventsBefore = await eventTypesOf(db, 'refund', refund.id);
-      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_done', metadata: { refundId: refund.id } });
+    }
+    return { payment, refund };
+  }
 
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+  function chargeWithRefund(providerPaymentId: string, refund: Record<string, unknown>) {
+    return stripeCharge(providerPaymentId, {
+      amount_refunded: 1000,
+      currency: 'usd',
+      refunds: { data: [{ status: 'succeeded', ...refund }] },
+    });
+  }
+
+  describe('refund webhooks signal the refund workflow', () => {
+    beforeEach(() => {
+      signalled = [];
+    });
+
+    it('a settled refund the service made is signalled to its run, and the handler writes no refund itself', async () => {
+      const { payment, refund } = await approvedRefund({ run: true });
+      const charge = chargeWithRefund(payment.providerPaymentId, {
+        id: 're_settled',
+        metadata: { refundId: refund.id },
+      });
+
+      expect(
+        await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
+      ).toMatchObject({
         success: true,
       });
 
-      expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(eventsBefore);
+      // `kept`: the run has not reached its wait yet, and takes the signal when it does
+      expect(signalled).toEqual(['kept']);
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'approved', providerRefundId: null });
     });
 
-    it('a refund made at Stripe, outside the service, is acknowledged and gets no refunds row', async () => {
-      const { payment, refund } = await refundInFlight();
+    it('a resent charge.refunded is a duplicate signal', async () => {
+      const { payment, refund } = await approvedRefund({ run: true });
+      const charge = chargeWithRefund(payment.providerPaymentId, {
+        id: 're_resent',
+        metadata: { refundId: refund.id },
+      });
+      const refunds = refundsOn(true);
+      const eventId = freshEventId();
+
+      // The signal was stored, then the answer was lost: Stripe resends the same event
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).toMatchObject({
+        success: false,
+        retryable: true,
+      });
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).toMatchObject({
+        success: true,
+      });
+
+      // The run holds one signal: the resend changed nothing
+      expect(signalled).toEqual(['kept', 'duplicate']);
+    });
+
+    it('a refund made outside the service answers 2xx and signals nothing', async () => {
+      const { payment } = await approvedRefund({ run: true });
       const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_dashboard', metadata: {} });
 
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+      expect(
+        await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
+      ).toMatchObject({
         success: true,
       });
 
-      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing', providerRefundId: null });
+      expect(signalled).toEqual([]);
     });
 
-    it('refund.updated alone completes a refund the service lost, and a resend changes nothing', async () => {
-      const { refund } = await refundInFlight();
-      const object = { id: 're_alone', object: 'refund', status: 'succeeded', metadata: { refundId: refund.id } };
+    it('a refund whose run does not exist answers 2xx, so Stripe stops resending', async () => {
+      const { payment, refund } = await approvedRefund({ run: false });
+      const charge = chargeWithRefund(payment.providerPaymentId, {
+        id: 're_no_run',
+        metadata: { refundId: refund.id },
+      });
 
-      expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+      expect(
+        await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
+      ).toMatchObject({
         success: true,
       });
-      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'completed', providerRefundId: 're_alone' });
-      const eventsBefore = await countEvents(db);
 
-      expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
-        success: true,
-      });
-      expect(await countEvents(db)).toBe(eventsBefore);
+      expect(signalled).toEqual(['no-run']);
     });
 
-    it('refund.updated for a refund Stripe has not succeeded, or one made at Stripe, changes nothing', async () => {
-      const { refund } = await refundInFlight();
-      const eventsBefore = await countEvents(db);
+    it('refund.updated alone signals the run, for Stripe API versions that list no refunds on the charge', async () => {
+      const { refund } = await approvedRefund({ run: true });
+      const object = { id: 're_alone', object: 'refund', status: 'failed', metadata: { refundId: refund.id } };
 
-      for (const object of [
-        { id: 're_p', status: 'pending', metadata: { refundId: refund.id } },
-        { id: 're_dash', status: 'succeeded', metadata: {} },
-      ]) {
-        expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+      expect(
+        await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId()),
+      ).toMatchObject({
+        success: true,
+      });
+
+      expect(signalled).toEqual(['kept']);
+    });
+
+    it('a refund Stripe has not settled yet signals nothing: a later event settles it', async () => {
+      const { refund } = await approvedRefund({ run: true });
+
+      for (const status of ['pending', 'requires_action']) {
+        const object = { id: `re_${status}`, object: 'refund', status, metadata: { refundId: refund.id } };
+        expect(
+          await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId()),
+        ).toMatchObject({
           success: true,
         });
       }
 
-      expect(await countEvents(db)).toBe(eventsBefore);
-      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing' });
-    });
-
-    it('a refund Stripe has not succeeded yet is not completed', async () => {
-      const { payment, refund } = await refundInFlight();
-      const charge = chargeWithRefund(payment.providerPaymentId, {
-        id: 're_pending',
-        status: 'pending',
-        metadata: { refundId: refund.id },
-      });
-
-      await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId());
-
-      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing' });
+      expect(signalled).toEqual([]);
     });
   });
 

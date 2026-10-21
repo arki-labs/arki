@@ -336,6 +336,11 @@
       "import": "./dist/refunds/types.js",
       "default": "./dist/refunds/types.js"
     },
+    "./refunds/workflow": {
+      "types": "./dist/refunds/workflow.d.ts",
+      "import": "./dist/refunds/workflow.js",
+      "default": "./dist/refunds/workflow.js"
+    },
     "./tax/contracts": {
       "types": "./dist/tax/contracts.d.ts",
       "import": "./dist/tax/contracts.js",

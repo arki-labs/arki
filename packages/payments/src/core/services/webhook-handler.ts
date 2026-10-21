@@ -5,15 +5,16 @@ import { now, sub } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { fromStripeAmount } from '@arki/money/stripe';
+import type { SchemaInput } from '@arki/schema';
 
 import type { CoreWrites } from '../journal.js';
-import type { RefundWrites } from '../../refunds/journal.js';
-import type { RefundRepository } from '../../refunds/repository.js';
+import type { RefundWorkflow } from '../../refunds/workflow.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, PaymentStatus, WebhookEventType, WebhookId } from '../types.js';
 import type { StripeChargeRefund } from './webhook-event-payloads.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { refundIdSchema } from '../../refunds/primitives.js';
+import { REFUND_SETTLED_STATUSES, refundRunId } from '../../refunds/workflow.js';
 import { createWebhookId } from '../primitives.js';
 import {
   parseStripeCharge,
@@ -52,13 +53,15 @@ export type WebhookWrites = Pick<
   | 'recordPaymentDispute'
 >;
 
+/** The `stripe.refund.settled` signal of the refund workflow. */
+type RefundSettled = ReturnType<RefundWorkflow['signal']>;
+
 /**
- * What the handler needs to line a provider refund up with a `refunds` row. A `RefundRepository`
- * and `refundsJournal.writes(run)` satisfy it. Apps without the refunds module leave it out.
+ * How the handler tells a refund's workflow run that Stripe settled the refund: the app runs
+ * `refundWorkflow.signal('stripe.refund.settled')` with its journal. Apps without the refunds module leave it out.
  */
 export type WebhookRefunds = {
-  reads: Pick<RefundRepository, 'findById' | 'findByProviderRefundId'>;
-  writes: Pick<RefundWrites, 'completeRefund'>;
+  signal: (input: SchemaInput<RefundSettled['input']>) => Promise<Awaited<ReturnType<RefundSettled['handler']>>>;
 };
 
 /** What a payment event says happened at the provider. */
@@ -548,7 +551,7 @@ export class WebhookHandler extends EventEmitter {
 
       const refundedAmount = fromStripeAmount(charge.amountRefunded, charge.currency).toJSON();
       await orThrow(this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount }));
-      await this.reconcileRefunds(charge.refunds);
+      await this.reconcileRefunds(charge.refunds, data.webhookId);
 
       this.emit('payment:refunded', { paymentData: data.data, webhookId: data.webhookId });
     } catch (error) {
@@ -559,51 +562,45 @@ export class WebhookHandler extends EventEmitter {
   }
 
   /**
-   * Lines each refund Stripe lists on the charge up with our `refunds` row:
-   * - one we hold by its Stripe id is already linked, nothing to do (a resent event lands here);
-   * - one `RefundService` made (its `metadata.refundId`) that is still `processing` is completed
-   *   with Stripe's id: the service asked Stripe but died before it stored the answer;
-   * - one made at Stripe, outside the service, has no row, and none is invented for it.
-   * Refunds Stripe has not succeeded yet are left for the next event.
+   * Tells the workflow run of each refund `RefundService` made (its `metadata.refundId`) where Stripe settled it.
+   * The run completes or fails the row; the handler writes no refund itself.
+   * - `deliveryId` is `<webhookId>:<Stripe refund id>`: a resend of this event is the same delivery, so the run
+   *   reports it `duplicate` and changes nothing.
+   * - A refund made at Stripe, outside the service, has no `refundId` and is not signalled.
+   * - No run for the refund (`no-run`) or a finished one is still a 2xx: a throw would make Stripe resend forever.
+   * Refunds Stripe has not settled yet (`pending`, `requires_action`) wait for a later event.
    */
-  private async reconcileRefunds(listed: readonly StripeChargeRefund[]): Promise<void> {
+  private async reconcileRefunds(listed: readonly StripeChargeRefund[], webhookId: WebhookId): Promise<void> {
     if (!this.refunds) {
       return;
     }
 
-    for (const listedRefund of listed) {
-      if (listedRefund.status !== 'succeeded') {
+    for (const { providerRefundId, status, refundId } of listed) {
+      const settled = REFUND_SETTLED_STATUSES.find(final => final === status);
+      if (settled === undefined) {
         continue;
       }
 
-      if (await this.refunds.reads.findByProviderRefundId(listedRefund.providerRefundId)) {
-        continue;
-      }
-
-      const parsed = refundIdSchema.safeParse(listedRefund.refundId);
-      const ours = parsed.success ? await this.refunds.reads.findById(parsed.data) : null;
-      if (!ours) {
-        logger.debug('Refund {providerRefundId} was made outside RefundService; no refunds row to complete', {
-          providerRefundId: listedRefund.providerRefundId,
+      const parsed = refundIdSchema.safeParse(refundId);
+      if (!parsed.success) {
+        logger.debug('Refund {providerRefundId} was made outside RefundService; nothing to signal', {
+          providerRefundId,
         });
         continue;
       }
 
-      if (ours.status !== 'processing') {
-        logger.warn('Refund {refundId} is {status} but Stripe refunded it as {providerRefundId}; left as it is', {
-          refundId: ours.id,
-          status: ours.status,
-          providerRefundId: listedRefund.providerRefundId,
-        });
-        continue;
-      }
-
-      await orThrow(
-        this.refunds.writes.completeRefund({
-          refundId: ours.id,
-          providerRefundId: listedRefund.providerRefundId,
+      const delivered = await orThrow(
+        this.refunds.signal({
+          runId: refundRunId(parsed.data),
+          deliveryId: `${webhookId}:${providerRefundId}`,
+          payload: { providerRefundId, status: settled },
         }),
       );
+      logger.debug('Refund {refundId} settled as {status}; its run answered {delivery}', {
+        refundId: parsed.data,
+        status,
+        delivery: delivered.status,
+      });
     }
   }
 
@@ -613,7 +610,7 @@ export class WebhookHandler extends EventEmitter {
    */
   private async handleRefundUpdated(data: WebhookEventData): Promise<void> {
     try {
-      await this.reconcileRefunds([parseStripeRefund(data.data)]);
+      await this.reconcileRefunds([parseStripeRefund(data.data)], data.webhookId);
     } catch (error) {
       throw new Error(`Failed to handle refund update: ${error instanceof Error ? error.message : 'Unknown error'}`, {
         cause: error,

@@ -6,17 +6,17 @@
  *       in one transaction per step.
  *
  * A refund moves money back to a customer. The service decides who may get
- * one (a known payment, inside the window, not more than was paid), asks the
- * provider, and stores each step. These tests pin that every step leaves an
- * event, that a refund the provider refused ends `failed` and not `completed`,
- * and that a request the service turns down writes nothing.
+ * one (a known payment, inside the window, not more than was paid) and stores
+ * each step. It never calls the provider: an approval answers `approved` at
+ * once, and the `payments.refund` workflow pays the money back (see
+ * `workflow.test.ts`). These tests pin that every step leaves an event, and
+ * that a request the service turns down writes nothing.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
-import { isInstant } from '@arki/date';
 import {
   TransactionCancelled,
   TransactionCommitUncertain,
@@ -35,7 +35,6 @@ import type { RefundWrites } from './journal.js';
 import type { RefundReason } from './primitives.js';
 import type { RefundAutoApproveLimits } from './service.js';
 import { createPaymentId } from '../core/primitives.js';
-import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
 import {
   adminId,
@@ -59,33 +58,13 @@ import { createRefundId } from './primitives.js';
 import { RefundService } from './service.js';
 import { pendingRefundIndexName } from './tables.js';
 
-type Provider = ConstructorParameters<typeof RefundService>[2];
-
 let db: AppDb;
 let client: PGlite;
 let coreWrites: CoreWrites;
 let writes: RefundWrites;
 
-/** The Stripe refund id the provider gives. The service stores it as `providerRefundId`. */
-const refundedAs = 're_test';
-
-/** Every amount the provider was asked to pay back, in order. */
-const askedToRefund: (Money | undefined)[] = [];
-
-/** A provider that pays the refund back. */
-const providerThatRefunds: Provider = {
-  refundPayment: (_paymentId, params) => {
-    askedToRefund.push(params.amount);
-    return Promise.resolve({ providerRefundId: refundedAs, status: 'succeeded', failureReason: null });
-  },
-};
-
-const providerThatRefuses: Provider = {
-  refundPayment: () => Promise.reject(new Error('charge already refunded')),
-};
-
-function serviceWith(provider: Provider, autoApproveLimits?: RefundAutoApproveLimits) {
-  return new RefundService(refundReads(db), writes, provider, coreReads(db), {
+function serviceWith(autoApproveLimits?: RefundAutoApproveLimits) {
+  return new RefundService(refundReads(db), writes, coreReads(db), {
     systemUserId: adminId,
     ...(autoApproveLimits === undefined ? {} : { autoApproveLimits }),
   });
@@ -100,7 +79,7 @@ async function askFor(
   const payment = await seedPayment(coreWrites, null, '5000', amount.currency.code);
 
   return orThrow(
-    serviceWith(providerThatRefunds, autoApproveLimits).requestRefund({
+    serviceWith(autoApproveLimits).requestRefund({
       paymentId: payment.id,
       amount,
       reason,
@@ -130,18 +109,18 @@ afterAll(async () => {
 
 describe('requestRefund', () => {
   it('a request that needs approval is stored as pending, with its event', async () => {
-    const refund = await pendingRefund(serviceWith(providerThatRefunds));
+    const refund = await pendingRefund(serviceWith());
 
     expect(refund).toMatchObject({ status: 'pending', refundAmountMinor: 4000, requestedBy: userId });
     expect(await refundRow(db, refund.id)).toMatchObject({ status: 'pending', refundAmountMinor: 4000 });
     expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequestedV2']);
   });
 
-  it('a small refund is approved by the system and paid back at once: four steps, four events', async () => {
+  it('a small refund is approved by the system at once and answers approved: its workflow pays it back later', async () => {
     const payment = await seedPayment(coreWrites, null, '100');
 
     const refund = await orThrow(
-      serviceWith(providerThatRefunds).requestRefund({
+      serviceWith().requestRefund({
         paymentId: payment.id,
         amount: money(5, 'USD'),
         reason: 'customer_request',
@@ -149,21 +128,15 @@ describe('requestRefund', () => {
       }),
     );
 
-    expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
-    expect(refund.providerRefundId).toBe(refundedAs);
-    expect(await eventTypesOf(db, 'refund', refund.id)).toEqual([
-      'RefundRequestedV2',
-      'RefundApproved',
-      'RefundProcessed',
-      'RefundCompleted',
-    ]);
+    expect(refund).toMatchObject({ status: 'approved', approvedBy: adminId, providerRefundId: null });
+    expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequestedV2', 'RefundApproved']);
   });
 
   it('a refund for a payment we do not know is an answer the caller branches on, and writes nothing', async () => {
     const eventsBefore = await countEvents(db);
     const paymentId = orThrow(createPaymentId());
 
-    const refused = await serviceWith(providerThatRefunds).requestRefund({
+    const refused = await serviceWith().requestRefund({
       paymentId,
       amount: money(5, 'USD'),
       reason: 'customer_request',
@@ -178,8 +151,7 @@ describe('requestRefund', () => {
   it('a refund for a payment past the refund window is returned as RefundWindowExceeded and pays nothing back', async () => {
     const payment = await seedPayment(coreWrites, null, '100');
     const eventsBefore = await countEvents(db);
-    const asked = askedToRefund.length;
-    const noWindow = new RefundService(refundReads(db), writes, providerThatRefunds, coreReads(db), {
+    const noWindow = new RefundService(refundReads(db), writes, coreReads(db), {
       systemUserId: adminId,
       refundWindowMs: -1,
     });
@@ -193,7 +165,6 @@ describe('requestRefund', () => {
 
     expect(RefundWindowExceeded.is(refused)).toBe(true);
     expect(refused).toMatchObject({ status: 422, data: { paymentId: payment.id } });
-    expect(askedToRefund).toHaveLength(asked);
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -201,7 +172,7 @@ describe('requestRefund', () => {
     const payment = await seedPayment(coreWrites, null, '30');
     const eventsBefore = await countEvents(db);
 
-    const refused = await serviceWith(providerThatRefunds).requestRefund({
+    const refused = await serviceWith().requestRefund({
       paymentId: payment.id,
       amount: money('30.01', 'USD'),
       reason: 'customer_request',
@@ -217,7 +188,7 @@ describe('requestRefund', () => {
   });
 
   it('refunds add up exactly: 0.10 then 0.20 of a 0.30 payment is all of it, not a cent over by float drift', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const payment = await seedPayment(coreWrites, null, '0.30');
 
     await orThrow(
@@ -235,13 +206,13 @@ describe('requestRefund', () => {
       requestedBy: userId,
     });
 
-    expect(second).toMatchObject({ status: 'completed', refundAmountMinor: 20 });
+    expect(second).toMatchObject({ status: 'approved', refundAmountMinor: 20 });
   });
 
   it("a refund keeps the payment's currency: a EUR payment is refunded in EUR, not stored as USD", async () => {
     const payment = await seedPayment(coreWrites, null, '50', 'EUR');
 
-    const eurRefund = await serviceWith(providerThatRefunds).requestRefund({
+    const eurRefund = await serviceWith().requestRefund({
       paymentId: payment.id,
       amount: money(40, 'EUR'),
       reason: 'customer_request',
@@ -256,7 +227,7 @@ describe('requestRefund', () => {
     const eventsBefore = await countEvents(db);
 
     const error = await rejectionOf(
-      serviceWith(providerThatRefunds).requestRefund({
+      serviceWith().requestRefund({
         paymentId: payment.id,
         amount: money(40, 'USD'),
         reason: 'customer_request',
@@ -267,21 +238,6 @@ describe('requestRefund', () => {
     expect(error).toMatchObject({ message: 'Refund currency USD differs from the payment currency EUR' });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
-
-  it('a JPY refund reaches the provider as 1500 JPY, never divided by 100', async () => {
-    const payment = await seedPayment(coreWrites, null, '5000', 'JPY');
-
-    await orThrow(
-      serviceWith(providerThatRefunds).requestRefund({
-        paymentId: payment.id,
-        amount: money(1500, 'JPY'),
-        reason: 'billing_error',
-        requestedBy: userId,
-      }),
-    );
-
-    expect(askedToRefund.at(-1)?.toString()).toBe('1500 JPY');
-  });
 });
 
 /**
@@ -291,9 +247,9 @@ describe('requestRefund', () => {
  */
 describe('auto-approval limits per currency', () => {
   it.each([
-    ['10.00', 'USD', 'completed'],
+    ['10.00', 'USD', 'approved'],
     ['10.01', 'USD', 'pending'],
-    ['1500', 'JPY', 'completed'],
+    ['1500', 'JPY', 'approved'],
     ['1501', 'JPY', 'pending'],
   ])(
     'under the default limits, %s %s ends %s: at the limit is small, a unit above is not',
@@ -325,79 +281,30 @@ describe('auto-approval limits per currency', () => {
       const atLimit = await askFor(money('10.00', 'USD'), undefined, reason);
 
       expect(above.status).toBe('pending');
-      expect(atLimit.status).toBe('completed');
+      expect(atLimit.status).toBe('approved');
     },
   );
 
   it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
-    expect(() => serviceWith(providerThatRefunds, { USD: '10.001' })).toThrow();
-    expect(() => serviceWith(providerThatRefunds, { NOPE: '10' })).toThrow();
+    expect(() => serviceWith({ USD: '10.001' })).toThrow();
+    expect(() => serviceWith({ NOPE: '10' })).toThrow();
   });
 });
 
 describe('approveRefund', () => {
-  it('an approved refund is paid back through the provider and ends completed', async () => {
-    const service = serviceWith(providerThatRefunds);
+  it('an approval answers at once with the refund approved: the workflow it starts pays it back', async () => {
+    const service = serviceWith();
     const pending = await pendingRefund(service);
 
     const refund = await orThrow(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
 
-    expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
-    expect(isInstant(refund.completedAt)).toBe(true);
-    expect(await refundRow(db, pending.id)).toMatchObject({ status: 'completed', approvedBy: adminId });
-    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
-      'RefundRequestedV2',
-      'RefundApproved',
-      'RefundProcessed',
-      'RefundCompleted',
-    ]);
-  });
-
-  it('when the provider refuses, the refund ends failed with the reason, and the error reaches the caller', async () => {
-    const service = serviceWith(providerThatRefuses);
-    const pending = await pendingRefund(service);
-
-    const error = await rejectionOf(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
-
-    expect(error).toMatchObject({ message: 'charge already refunded' });
-    expect(await refundRow(db, pending.id)).toMatchObject({
-      status: 'failed',
-      providerResponse: JSON.stringify({ error: 'charge already refunded' }),
-    });
-    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
-      'RefundRequestedV2',
-      'RefundApproved',
-      'RefundProcessed',
-      'RefundFailed',
-    ]);
-  });
-
-  /** A returned "no" from the provider must leave the refund exactly where a thrown one did: failed, not processing. */
-  it('when the provider returns a failure, the refund ends failed with its message, and the failure reaches the caller', async () => {
-    const providerWithoutThePayment: Provider = {
-      refundPayment: paymentId =>
-        Promise.resolve(ReferenceNotFound({ kind: 'payment', id: paymentId, missing: 'row' })),
-    };
-    const service = serviceWith(providerWithoutThePayment);
-    const pending = await pendingRefund(service);
-
-    const result = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
-
-    expect(ReferenceNotFound.is(result)).toBe(true);
-    expect(await refundRow(db, pending.id)).toMatchObject({
-      status: 'failed',
-      providerResponse: JSON.stringify({ error: `payment ${pending.paymentId} not found` }),
-    });
-    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
-      'RefundRequestedV2',
-      'RefundApproved',
-      'RefundProcessed',
-      'RefundFailed',
-    ]);
+    expect(refund).toMatchObject({ status: 'approved', approvedBy: adminId, completedAt: null });
+    expect(await refundRow(db, pending.id)).toMatchObject({ status: 'approved', approvedBy: adminId });
+    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual(['RefundRequestedV2', 'RefundApproved']);
   });
 
   it('a refund that was already decided cannot be approved again: refused, nothing written', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const pending = await pendingRefund(service);
     await orThrow(service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' }));
     const eventsBefore = await countEvents(db);
@@ -413,7 +320,7 @@ describe('approveRefund', () => {
 
 describe('rejectRefund', () => {
   it('a rejected refund keeps who rejected it and why, with its event', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const pending = await pendingRefund(service);
 
     const refund = await orThrow(
@@ -427,7 +334,7 @@ describe('rejectRefund', () => {
 
 describe('approval notes, missing refunds, empty reasons and double requests', () => {
   it("the approver's notes are kept on the refund and in its event", async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const pending = await pendingRefund(service);
 
     const refund = await orThrow(
@@ -438,12 +345,12 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
       }),
     );
 
-    expect(refund).toMatchObject({ status: 'completed', approvalNotes: 'checked with the customer' });
+    expect(refund).toMatchObject({ status: 'approved', approvalNotes: 'checked with the customer' });
     expect(await refundRow(db, pending.id)).toMatchObject({ approvalNotes: 'checked with the customer' });
   });
 
   it('an approval without notes leaves them empty', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const pending = await pendingRefund(service);
 
     const refund = await orThrow(service.approveRefund({ refundId: pending.id, approvedBy: adminId }));
@@ -455,7 +362,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     const eventsBefore = await countEvents(db);
     const refundId = orThrow(createRefundId());
 
-    const refused = await serviceWith(providerThatRefunds).approveRefund({ refundId, approvedBy: adminId });
+    const refused = await serviceWith().approveRefund({ refundId, approvedBy: adminId });
 
     expect(RefundNotFound.is(refused)).toBe(true);
     expect(refused).toMatchObject({ status: 404, data: { refundId } });
@@ -463,7 +370,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
   });
 
   it('rejecting a refund that does not exist returns RefundNotFound', async () => {
-    const refused = await serviceWith(providerThatRefunds).rejectRefund({
+    const refused = await serviceWith().rejectRefund({
       refundId: orThrow(createRefundId()),
       rejectedBy: adminId,
       reason: 'no',
@@ -473,7 +380,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
   });
 
   it.each(['', '   '])('a rejection with the reason %j is refused and the refund stays pending', async reason => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const pending = await pendingRefund(service);
     const eventsBefore = await countEvents(db);
 
@@ -485,7 +392,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
   });
 
   it('a second request for a payment that already has a pending refund is refused', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const payment = await seedPayment(coreWrites, null, '100');
     await orThrow(
       service.requestRefund({
@@ -510,7 +417,7 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
   });
 
   it('once the first refund is decided, the payment can be refunded again', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const payment = await seedPayment(coreWrites, null, '100');
     const first = await orThrow(
       service.requestRefund({
@@ -553,7 +460,7 @@ describe('what a payment can still refund', () => {
       }
       const eventsBefore = await countEvents(db);
 
-      const refused = await serviceWith(providerThatRefunds).requestRefund({
+      const refused = await serviceWith().requestRefund({
         paymentId: payment.id,
         amount: money(30, 'USD'),
         reason: 'customer_request',
@@ -566,7 +473,7 @@ describe('what a payment can still refund', () => {
   );
 
   it('a rejected or failed refund frees its amount again', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const payment = await seedPayment(coreWrites, null, '100');
     const first = await orThrow(
       service.requestRefund({
@@ -602,7 +509,6 @@ describe('two requests at once for one payment', () => {
     const blind = new RefundService(
       { ...refundReads(db), findByPaymentId: () => Promise.resolve([]) },
       writes,
-      providerThatRefunds,
       coreReads(db),
       { systemUserId: adminId },
     );
@@ -625,7 +531,7 @@ describe('two requests at once for one payment', () => {
    * on the payment's row lock. The lock itself needs a real Postgres.
    */
   it('of two simultaneous requests exactly one is stored', async () => {
-    const service = serviceWith(providerThatRefunds);
+    const service = serviceWith();
     const payment = await seedPayment(coreWrites, null, '100');
 
     const results = await Promise.all([
@@ -659,7 +565,7 @@ describe('transaction failures before a refund is requested', () => {
       },
     ),
     TransactionRejected({ sqlState: '23505' }),
-  ])('preserves $code and its cause without retrying or calling the provider', async failure => {
+  ])('preserves $code and its cause without retrying', async failure => {
     let attempts = 0;
     const service = new RefundService(
       refundReads(db),
@@ -670,13 +576,11 @@ describe('transaction failures before a refund is requested', () => {
           return Promise.resolve(failure);
         },
       },
-      providerThatRefunds,
       coreReads(db),
       { systemUserId: adminId },
     );
     const payment = await seedPayment(coreWrites, null, '100');
     const eventsBefore = await countEvents(db);
-    const providerCallsBefore = askedToRefund.length;
 
     const result = await service.requestRefund({
       paymentId: payment.id,
@@ -687,7 +591,6 @@ describe('transaction failures before a refund is requested', () => {
 
     expect(result).toBe(failure);
     expect(attempts).toBe(1);
-    expect(askedToRefund).toHaveLength(providerCallsBefore);
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(
       await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id)),

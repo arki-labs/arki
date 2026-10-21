@@ -74,35 +74,38 @@ export const typed = {
   journal: typedDefinitions.compose({}),
 };
 
-/** `extra`: more tables or enums of the same schema, pushed in the same call (a second push would drop these). */
-export async function openDb(extra: Record<string, unknown> = {}) {
-  const client = new PGlite('memory://');
-  await client.waitReady;
-  const db = drizzle({ client });
-  const { apply } = await pushSchema(
-    {
-      schema,
-      users,
-      ...core.enums,
-      plans: core.plans,
-      customers: core.customers,
-      subscriptions: core.subscriptions,
-      payments: core.payments,
-      webhookEvents: core.webhookEvents,
-      ...refundsTables.enums,
-      refunds: refundsTables.refunds,
-      ...journalTablesInSchema,
-      ...extra,
-    },
-    db,
-  );
-  await apply();
+/** Every table and enum of the test schema, pushed in one call (a second push would drop the first's). */
+export const pushedSchema = {
+  schema,
+  users,
+  ...core.enums,
+  plans: core.plans,
+  customers: core.customers,
+  subscriptions: core.subscriptions,
+  payments: core.payments,
+  webhookEvents: core.webhookEvents,
+  ...refundsTables.enums,
+  refunds: refundsTables.refunds,
+  ...journalTablesInSchema,
+};
 
+/** The user, admin, plan and customer every scenario points at. */
+export async function seedFixture(db: AppDb) {
   await db.insert(users).values([{ id: userId }, { id: adminId }]);
   await db.insert(core.plans).values({ id: planId, name: 'Pro', priceMinor: 1000 });
   await db
     .insert(core.customers)
     .values({ id: customerId, userId, providerCustomerId: 'cus_test', email: 'buyer@example.com' });
+}
+
+/** `extra`: more tables or enums of the same schema, pushed in the same call (a second push would drop these). */
+export async function openDb(extra: Record<string, unknown> = {}) {
+  const client = new PGlite('memory://');
+  await client.waitReady;
+  const db = drizzle({ client });
+  const { apply } = await pushSchema({ ...pushedSchema, ...extra }, db);
+  await apply();
+  await seedFixture(db);
 
   return { db, client };
 }

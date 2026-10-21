@@ -5,11 +5,11 @@ import { z } from '@arki/contracts';
 import { toMillis } from '@arki/date';
 import { TransactionRejected } from '@arki/db/errors';
 import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 
 import type { NotificationService } from '../core/notifications/service.js';
-import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PaymentId } from '../core/types.js';
 import type { RefundWrites } from './journal.js';
@@ -29,6 +29,9 @@ import {
 import { createRefundRepository, refundAmountOf } from './repository.js';
 import { pendingRefundIndexName } from './tables.js';
 import { RefundError } from './types.js';
+
+/** Logs ids only, never refund data. */
+const logger = getLogger('arki:payments');
 
 /**
  * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.
@@ -63,7 +66,7 @@ export const DEFAULT_REFUND_AUTO_APPROVE_LIMITS: RefundAutoApproveLimits = {
 
 export type RefundServiceConfig = {
   /** User ID attributed for system-driven auto-approvals (e.g. small-amount refunds). */
-  systemUserId: UserId | string;
+  systemUserId: UserId;
   /** Refund window in milliseconds. Defaults to 90 days. */
   refundWindowMs?: number;
   /** Small refunds approved without a person. Defaults to `DEFAULT_REFUND_AUTO_APPROVE_LIMITS`. */
@@ -93,25 +96,24 @@ type RefundReads = Pick<
   'findById' | 'findByPaymentId' | 'getRefundMetrics' | 'getAverageProcessingTime' | 'searchRefunds'
 >;
 
-/** The provider call the service makes. A `StripeProvider` fits. */
-type RefundProvider = Pick<StripeProvider, 'refundPayment'>;
-
 /** The payment read the service makes. A `PaymentRepository` fits. */
 type PaymentReads = Pick<PaymentRepository, 'findPaymentById'>;
 
 /**
  * Reads come from the repositories. Every change of a `refunds` row goes
  * through `writes`: one journal command per step, so each step leaves an event.
+ *
+ * The service never calls the provider. Approval records `RefundApproved`, and that event starts the
+ * `payments.refund` workflow (`createRefundWorkflow`), which pays the money back after the request has answered.
  */
 export class RefundService {
   private readonly refundWindow: number;
-  private readonly systemUserId: UserId | string;
+  private readonly systemUserId: UserId;
   private readonly autoApproveLimits: ReadonlyMap<string, Money>;
 
   constructor(
     private readonly refundRepository: RefundReads,
     private readonly writes: RefundWrites,
-    private readonly paymentProvider: RefundProvider,
     private readonly paymentRepository: PaymentReads,
     config: RefundServiceConfig,
     private readonly notificationService?: NotificationService,
@@ -144,7 +146,7 @@ export class RefundService {
     if (isFailure(refund)) return refund;
 
     if (await this.shouldAutoApprove(refund)) {
-      return this.approveRefund({ refundId: refund.id, approvedBy: this.systemUserId as UserId });
+      return this.approveRefund({ refundId: refund.id, approvedBy: this.systemUserId });
     }
 
     if (this.notificationService) {
@@ -163,9 +165,8 @@ export class RefundService {
       approvedBy: data.approvedBy,
       notes: data.notes ?? null,
     });
-    if (isFailure(approvedRefund)) return approvedRefund;
-
-    return this.processRefund(approvedRefund);
+    // `approved`: the workflow the approval started pays it back after this answer
+    return approvedRefund;
   }
 
   async rejectRefund(data: RefundRejectionData) {
@@ -202,76 +203,6 @@ export class RefundService {
     }
 
     return refund;
-  }
-
-  /**
-   * Pays an approved refund back. Whether the provider throws or returns a failure, the refund
-   * ends `failed` and support is told; a thrown error is thrown again, a failure is returned.
-   */
-  private async processRefund(refund: Refund) {
-    // Before the payback: a refund that could not start has nothing to mark as failed
-    const processing = await this.writes.processRefund({ refundId: refund.id });
-    if (isFailure(processing)) return processing;
-
-    const outcome = await this.payBack(refund).catch(async (error: unknown) => {
-      const marked = await this.markFailed(refund, error instanceof Error ? error.message : 'Unknown error', error);
-      if (isFailure(marked)) return marked;
-      throw error;
-    });
-    if (isFailure(outcome)) {
-      const marked = await this.markFailed(refund, outcome.message, outcome);
-      if (isFailure(marked)) return marked;
-    }
-
-    return outcome;
-  }
-
-  /** Refunds the money through the provider, then completes the refund. */
-  private async payBack(refund: Refund) {
-    const payment = await this.paymentRepository.findPaymentById(refund.paymentId as PaymentId);
-    if (!payment) {
-      throw new Error(`Payment ${refund.paymentId} not found`);
-    }
-
-    // The provider resolves its own payment from our payment id
-    const providerResult = await this.paymentProvider.refundPayment(payment.id, {
-      // The refund row id: a retry of this refund sends the same key, so Stripe pays it back once
-      idempotencyKey: refund.id,
-      refundId: refund.id,
-      amount: refundAmountOf(refund),
-      reason: refund.reason,
-      metadata: { internalReason: refund.reason },
-    });
-    if (isFailure(providerResult)) return providerResult;
-    // The provider returns a failed or canceled refund as data; here it still fails the refund
-    if (providerResult.status === 'failed' || providerResult.status === 'canceled') {
-      const why = providerResult.failureReason === null ? '' : `: ${providerResult.failureReason}`;
-      throw new Error(`Stripe refund ${providerResult.providerRefundId} ${providerResult.status}${why}`);
-    }
-
-    const completedRefund = await this.writes.completeRefund({
-      refundId: refund.id,
-      providerRefundId: providerResult.providerRefundId,
-      providerResponse: JSON.stringify(providerResult),
-    });
-    if (isFailure(completedRefund)) return completedRefund;
-
-    if (this.notificationService) {
-      await this.notifyCustomer(completedRefund, 'completed');
-    }
-
-    return completedRefund;
-  }
-
-  /** Nothing when the refund is marked `failed`, or the failure of the write that would mark it. */
-  private async markFailed(refund: Refund, errorMessage: string, cause: unknown) {
-    const failed = await this.writes.failRefund({ refundId: refund.id, errorMessage });
-    if (isFailure(failed)) return failed;
-
-    if (this.notificationService) {
-      await this.notifySupportTeam(refund, cause);
-    }
-    return;
   }
 
   /** Nothing when the payment can give back `amount`, or the failure that says why not. */
@@ -332,27 +263,24 @@ export class RefundService {
       try {
         await this.notificationService.sendRefundApprovalRequest(refund);
       } catch (error) {
-        console.error('Failed to send refund approval notification:', error);
+        logger.error('Refund approval request for {refundId} was not sent: {error}', {
+          refundId: refund.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
 
-  private async notifyCustomer(refund: Refund, event: 'completed' | 'rejected'): Promise<void> {
+  private async notifyCustomer(refund: Refund, event: 'rejected'): Promise<void> {
     if (this.notificationService?.sendRefundStatusUpdate) {
       try {
         await this.notificationService.sendRefundStatusUpdate(refund, event);
       } catch (error) {
-        console.error('Failed to send customer notification:', error);
-      }
-    }
-  }
-
-  private async notifySupportTeam(refund: Refund, error: unknown): Promise<void> {
-    if (this.notificationService?.sendRefundFailureAlert) {
-      try {
-        await this.notificationService.sendRefundFailureAlert(refund, error);
-      } catch (error_) {
-        console.error('Failed to send support team alert:', error_);
+        logger.error('Refund {event} mail for {refundId} was not sent: {error}', {
+          refundId: refund.id,
+          event,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -375,17 +303,9 @@ export function createRefundService(
   db: RefundsDatabase,
   tables: Pick<RefundsTables, 'refunds'>,
   writes: RefundWrites,
-  paymentProvider: StripeProvider,
   paymentRepository: PaymentRepository,
   config: RefundServiceConfig,
   notificationService?: NotificationService,
 ) {
-  return new RefundService(
-    createRefundRepository(db, tables),
-    writes,
-    paymentProvider,
-    paymentRepository,
-    config,
-    notificationService,
-  );
+  return new RefundService(createRefundRepository(db, tables), writes, paymentRepository, config, notificationService);
 }
