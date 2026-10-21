@@ -106,6 +106,22 @@ describe('the workflow builder, as types', () => {
     base().step('hold', () => ({ holdId: 'h1' }), { output: z.object({ holdId: z.number() }) });
   });
 
+  // Most real steps return a promise: the result is its awaited value, and the schema is only checked against it.
+  it('a step that returns a promise takes an output schema, which must produce the awaited result', () => {
+    base()
+      .step('charge', () => Promise.resolve({ chargeId: 'c1' }), { output: z.object({ chargeId: z.string() }) })
+      .step('notify', ({ results }) => {
+        expectTypeOf(results.charge).toEqualTypeOf<{ chargeId: string }>();
+        return null;
+      });
+    base().step('charge', ({ input }) => Promise.resolve({ chargeId: input.paymentId }), {
+      output: z.object({ chargeId: z.string() }),
+      undo: ({ result }) => expectTypeOf(result).toEqualTypeOf<{ chargeId: string }>(),
+    });
+    // @ts-expect-error the schema says chargeId is a number, the body resolves to a string
+    base().step('charge', () => Promise.resolve({ chargeId: 'c1' }), { output: z.object({ chargeId: z.number() }) });
+  });
+
   it('services listed in needs are on the context', () => {
     type Provider = { refund(id: string): Promise<{ id: string }> };
     workflow('t', { version: 1, input: z.object({ id: z.string() }), needs: { provider: need<Provider>() } }).step(

@@ -94,7 +94,8 @@ const routed = j
   .step('first', () => ++bodies.first)
   .step(
     'pick',
-    () => {
+    // The body only throws, so its result type comes from this annotation; the schema must match it.
+    (): { again: boolean } => {
       bodies.pick++;
       throw new Error('pick down');
     },

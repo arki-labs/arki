@@ -47,7 +47,7 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
-import type { WorkflowDef } from './workflow/define.js';
+import type { WorkflowDef, WorkflowServices } from './workflow/define.js';
 import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
@@ -127,14 +127,6 @@ function effectAction(
     meta: { entities: effect.entities.map(entity => entity.kind), events: [...effect.types] },
   };
 }
-
-/** The needs a workflow definition declared, read from its type: written once, in `workflow(name, { needs })`. */
-type NeedsOfDef<D> = D extends { readonly types?: { readonly needs: infer N extends Needs } } ? N : Needs;
-
-/** What a list of workflows needs, as one object of services, like `ServicesFor` does for effects. */
-type WorkflowServices<W extends readonly WorkflowDef[]> = ServicesFor<{
-  readonly [K in keyof W]: { readonly needs: NeedsOfDef<W[K]> };
-}>;
 
 /** A workflow's manifest action: `<name>@<version>.run`, with the signals its `waitFor` nodes wait for. */
 function workflowAction(def: WorkflowDef): JournalDotAction {

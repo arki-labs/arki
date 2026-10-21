@@ -103,7 +103,7 @@ function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
 /**
  * `initJournal({ tables, meta })` types `write`'s `tx`, `events`' `{ tx }` and
  * projection handlers with the structural `DbHandle`. `initJournal.tx<AppTx>()
- * .create({ meta })` uses the app's own Drizzle transaction type instead, so
+ * .create({ tables, meta })` uses the app's own Drizzle transaction type instead, so
  * repositories typed against it fit. `initJournal.db<AppDb>()` names the
  * app's root database type: effects get it as `ctx.db`, and `drain` and
  * `worker` then need it. Both are type-only steps and chain in either order.

@@ -9,10 +9,12 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import type { StandardSchemaV1 } from '@arki/schema';
 import { isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
-import type { WorkflowDef } from './define.js';
+import type { NoNeeds } from '../types.js';
+import type { AnySignals, WorkflowDef } from './define.js';
 import { JournalError } from '../errors.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
@@ -119,12 +121,16 @@ const withNodeUndo = j
   .waitFor('confirm', { signal: 'confirm', schema: Go })
   .finish();
 
-/** `nest0` has `nest1` as a child, and so on down to a leaf: the run at the bottom has nine ancestors. */
-let chain: WorkflowDef = j
+/**
+ * `nest0` has `nest1` as a child, and so on down to a leaf: the run at the bottom has nine ancestors. The chain is
+ * built in a loop, so its type is a workflow that needs no services: `compose` asks for `services` for any other.
+ */
+type ServiceFreeDef = WorkflowDef<StandardSchemaV1, unknown, AnySignals, NoNeeds>;
+let chain: ServiceFreeDef = j
   .workflow('test.nest.leaf', { version: 1, input: z.object({}) })
   .step('work', () => 'leaf')
   .finish();
-const chainDefs: WorkflowDef[] = [chain];
+const chainDefs: ServiceFreeDef[] = [chain];
 for (let level = 8; level >= 1; level--) {
   chain = j
     .workflow(`test.nest.${level}`, { version: 1, input: z.object({}) })

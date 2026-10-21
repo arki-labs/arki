@@ -11,7 +11,7 @@ import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { RetentionAge, RunRetention } from '../retention.js';
-import type { AcceptFailure, BivariantFn, Needed, Needs, NoNeeds, RootDb } from '../types.js';
+import type { AcceptFailure, BivariantFn, Needed, Needs, NoNeeds, RootDb, ServicesFor } from '../types.js';
 import type { RunDetail } from './read.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
@@ -183,6 +183,17 @@ export type WorkflowDef<
   };
 };
 
+/** The needs a workflow definition declared, read from its type: written once, in `workflow(name, { needs })`. */
+type NeedsOfDef<D> = D extends { readonly types?: { readonly needs: infer N extends Needs } } ? N : Needs;
+
+/**
+ * What a list of workflows needs, as one object of services, like `ServicesFor` does for effects. `compose` and the
+ * Dot adapter both check a workflow's services with it.
+ */
+export type WorkflowServices<W extends readonly WorkflowDef[]> = ServicesFor<{
+  readonly [K in keyof W]: { readonly needs: NeedsOfDef<W[K]> };
+}>;
+
 export type WorkflowOptions<
   Input extends StandardSchemaV1,
   N extends Needs,
@@ -253,7 +264,9 @@ export type WorkflowBuilder<
   >(
     name: Fresh<Results, Name>,
     run: (ctx: Ctx<Input, Results, N, Where>) => Returned,
-    options?: StepOptions<Ctx<Input, Results, N, Where>, Resolved<Returned>, keyof Results & string> & {
+    // `NoInfer`: the result comes from the body alone. Inferred from `output` as well, the schema would win and an
+    // async body (a promise of the result) would no longer match it.
+    options?: StepOptions<Ctx<Input, Results, N, Where>, NoInfer<Resolved<Returned>>, keyof Results & string> & {
       /** When it returns false the step is skipped and its result is `null`. */
       readonly when?: When;
       readonly output?: Output;

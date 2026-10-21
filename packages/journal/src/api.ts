@@ -51,7 +51,7 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
-import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions } from './workflow/define.js';
+import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions, WorkflowServices } from './workflow/define.js';
 import type { WorkflowOps } from './workflow/read.js';
 import type { StarterOf } from './workflow/runner.js';
 
@@ -472,7 +472,8 @@ export type Journal<
   archiveStatus: JobOps['archiveStatus'];
   /**
    * Workflow runs, read and operated on: `runs`, `run`, `counts`, `stranded`, `history`, and the operator verbs
-   * `retryStep`, `resolveStep` and `skipUndo`. The verbs need `compose({ workflows, workflowMeta })`.
+   * `retryStep`, `resolveStep`, `skipUndo`, `signal`, `cancel` and `checkResult`. The verbs need
+   * `compose({ workflows, workflowMeta })`.
    */
   readonly workflows: WorkflowOps<Tx>;
   /** A dead job back to pending: attempts and lease cleared, due now, workers woken. `JOB_NOT_DEAD` otherwise. */
@@ -633,16 +634,17 @@ export type JournalDefinitions<
   compose<
     const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
     const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
+    const W extends readonly WorkflowDef[] = readonly [],
   >(
     config: {
       readonly projections?: readonly Projection<SchemaOutput<Meta>, Tx>[];
       readonly effects?: E;
       readonly taps?: T;
       /** Workflows to run. Adds the `workflow.step` effect and the `workflow-steps` projection; their needs come from `services`. */
-      readonly workflows?: readonly WorkflowDef[];
+      readonly workflows?: W;
       /** The meta recorded on the checkpoints the workflow runner commits, such as `{ actorId: 'system:workflow' }`. Required with `workflows`. */
       readonly workflowMeta?: SchemaInput<Meta>;
-    } & ServicesOption<ServicesFor<E> & ServicesFor<T>>,
+    } & ServicesOption<ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>>,
   ): Journal<Meta, Tx, AppDb>;
 };
 /**

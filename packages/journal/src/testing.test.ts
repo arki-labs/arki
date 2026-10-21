@@ -2,6 +2,7 @@
  * `workflowHarness`: a test moves time with `tick`, runs due work with `drain`, and restarts the process with `crash`.
  * A crash keeps the rows and loses the runtime, so these tests prove a run survives a restart the way production needs.
  */
+import { readFileSync } from 'node:fs';
 import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -247,5 +248,16 @@ describe('workflowHarness', () => {
     expect(await stepRow(id, 'c', 'undo')).toMatchObject({ status: 'done' });
     expect(await stepRow(id, 'b', 'undo')).toMatchObject({ status: 'done' });
     expect(orThrow(await h.three.read(h.db, id))?.run.state).toBe('cancelled');
+  });
+});
+
+// The published types, not the source: declaration emit once printed the inferred return as `Promise<never>`, so every
+// member of a user's harness was `never` and any misuse compiled. `turbo test` builds first, so `dist` is current here;
+// `testing.test-d.ts` proves the named type itself is right.
+describe('workflowHarness, as published', () => {
+  it('declares its named return type, not an inferred one', () => {
+    const published = readFileSync(new URL('../dist/testing.d.ts', import.meta.url), 'utf8');
+    expect(published).toContain('): Promise<WorkflowHarness<S>>;');
+    expect(published).not.toContain('Promise<never>');
   });
 });

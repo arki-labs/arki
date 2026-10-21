@@ -12,10 +12,14 @@ const kid = j
   .workflow('kid', { version: 1, input: z.object({}) })
   .step('k', () => 1)
   .finish();
-/** `hold` and `bonus` declare an `output` schema; `notify` does not; `approve` is a wait that may time out. */
+/**
+ * `hold`, `charge` (which returns a promise) and `bonus` declare an `output` schema; `notify` does not; `approve` is a
+ * wait that may time out.
+ */
 const payment = j
   .workflow('payment', { version: 1, input: z.object({ amount: z.number() }), output: z.object({ total: z.number() }) })
   .step('hold', () => ({ holdId: 'h' }), { output: z.object({ holdId: z.string() }) })
+  .step('charge', () => Promise.resolve({ chargeId: 'c' }), { output: z.object({ chargeId: z.string() }) })
   .step('notify', () => ({ sent: true }))
   .step('bonus', () => ({ points: 1 }), {
     output: z.object({ points: z.number() }),
@@ -36,6 +40,7 @@ describe('def.read, as types', () => {
     expectTypeOf(input).toEqualTypeOf<{ amount: number }>();
     expectTypeOf(output).toEqualTypeOf<{ total: number } | null>();
     expectTypeOf(results.hold).toEqualTypeOf<{ holdId: string } | undefined>();
+    expectTypeOf(results.charge).toEqualTypeOf<{ chargeId: string } | undefined>();
     expectTypeOf(results.notify).toBeUnknown();
     expectTypeOf(results.bonus).toEqualTypeOf<{ points: number } | null | undefined>();
     expectTypeOf(results.approve).toEqualTypeOf<{ by: string } | null | undefined>();
