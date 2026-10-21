@@ -150,6 +150,15 @@ describe('dot env run', () => {
     expect({ status: exit.status, stdout: exit.stdout }).toEqual({ status: 7, stdout: '' });
   });
 
+  it('redacts an inherited value of an encrypted key too', () => {
+    // WHY: when the environment already sets the key, the child gets that value, not the file one.
+    const result = spawnSync('bun', [CLI, 'env', 'run', '--cwd', app, '--', 'node', '-e', 'console.log(process.env.TOKEN)'], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: 'development', TOKEN: 'inherited-secret-value' },
+    });
+    expect(result.stdout).toBe('[redacted]\n');
+  });
+
   it('never hands the private key to the child', () => {
     // WHY: `dot env run -- <agent>` must not give the agent the key that decrypts everything.
     const keys = readFileSync(path.join(root, '.env.keys'), 'utf8');

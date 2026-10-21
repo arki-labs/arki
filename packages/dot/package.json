@@ -90,10 +90,11 @@
     }
   },
   "bin": {
-    "dot": "./dist/cli/index.js"
+    "dot": "./bin/dot.js"
   },
   "files": [
     "dist/**",
+    "bin/**",
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",

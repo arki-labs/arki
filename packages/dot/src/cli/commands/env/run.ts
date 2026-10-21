@@ -50,9 +50,11 @@ export default defineCommand({
 
     const redact = input.redact ?? process.stdout.isTTY !== true;
     const declaredSecret = await secretKeysOf(target.cwd);
+    // Redact what the child actually gets: the file value and, when the environment wins or no key
+    // was needed, the inherited value too.
     const secrets = [
       ...privateKeys,
-      ...report.values.flatMap(value => (value.value !== undefined && (value.kind !== 'plain' || declaredSecret.has(value.key)) ? [value.value] : [])),
+      ...report.values.flatMap(value => (value.kind === 'plain' && !declaredSecret.has(value.key) ? [] : [value.value ?? '', env[value.key] ?? ''])),
     ].filter(secret => secret !== '');
     if (redact) {
       for (const value of report.values) {
