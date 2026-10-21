@@ -135,3 +135,23 @@ overwrites pre-existing files in the target directory.
 
 Templates live in [`templates/`](../templates) and ship with the published
 tarball. Generated apps depend only on published `@arki/*` packages.
+
+## Other `dot.*` failures and helpers
+
+Every failure below is exported from `@arki/dot/cli` and comes back in the
+`error` field of the JSON envelope.
+
+- `DoctorFailed` (`dot.doctor_failed`): `dot doctor` found error issues. The whole report is in `.error.data`.
+- `PreflightFailed` (`dot.preflight_failed`): a managed preflight reported a lifecycle failure. The report is in `.error.data`.
+- `ObservabilityNoSdk` (`dot.observability_no_sdk`): `dot doctor --observability` found no OpenTelemetry SDK. It shows up as a warning issue, not as a returned failure.
+- `ProjectionNotFound` (`dot.projection_not_found`): no plugin registers the `--as` format you asked for.
+- `ProjectionImportFailed` (`dot.projection_import_failed`): the projection module could not be resolved or imported, or it exports no `project(manifest)`.
+- `ProjectionExecutionFailed` (`dot.projection_execution_failed`): `project(manifest)` threw, or returned output that does not survive a JSON round trip.
+- `ProjectionConflict` (`dot.projection_conflict`): two plugins register different modules for the same projection format.
+- `TargetNotEmpty` (`dot.target_not_empty`): `dot new` would overwrite files in a target directory that is not empty. Use an empty directory or `--force`.
+- `TemplateMissing` (`dot.template_missing`): the template folder shipped with `@arki/dot` is empty or missing. Reinstall the package.
+- `WriteFailed` (`dot.write_failed`): `dot new` could not write some files. `.error.data.written` lists the files that did land.
+
+Two schemas parse the files `dot dev` produces. `devEventSchema` parses one
+`dot dev` event. `devStateSchema` parses `.local/dot/dev.json`, the state file
+at `DEV_STATE_PATH`.

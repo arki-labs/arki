@@ -455,6 +455,12 @@ See the official adapters for reference:
 Each of these is fewer than 100 lines and demonstrates a different
 combination of the hooks.
 
+## Helpers for adapter code
+
+- `ownUnits(feature)` (from `@arki/dot/feature`) returns the plugins that belong to one feature node only, never those of its nested features.
+- `requestServices(features)` (from `@arki/dot/feature`) returns the `provides` a gateway needs to serve requests for those features: their public handles and the `<name>.services` bag of every node.
+- `toJsonObject(value)` (from `@arki/dot`) checks that manifest metadata survives a JSON round trip. It throws `DotManifestError` for dates, functions, `NaN` and cycles.
+
 ## See also
 
 - [Plugin authoring](./plugin-authoring.md) — the general `Plugin`
