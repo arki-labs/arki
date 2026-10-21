@@ -12,7 +12,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ExecRunner, NpmRunner, RunOutput } from './runners';
 import type { ReleaseConfig } from './types';
-import { compareVersions, runSite, SITE_CONTENT_DIR, SITE_ERROR_CODES, SITE_GENERATED_DIR } from './site';
+import {
+  compareVersions,
+  REPO_DOC_COPIES,
+  runSite,
+  SITE_APP_CONTENT_DIR,
+  SITE_CONTENT_DIR,
+  SITE_ERROR_CODES,
+  SITE_GENERATED_DIR,
+} from './site';
 import {
   demosFileSchema,
   dotNewFileSchema,
@@ -68,10 +76,19 @@ let packCalls: string[];
 /** What `npm pack <name>@<version>` returns, keyed `name@version`. */
 let registry: Map<string, Files>;
 
+/** The repo docs every run copies; tests that are not about them get them all. */
+function writeRepoDocs(root: string): void {
+  for (const doc of REPO_DOC_COPIES) {
+    mkdirSync(path.dirname(path.join(root, doc.from)), { recursive: true });
+    writeFileSync(path.join(root, doc.from), `# ${doc.from}\n`);
+  }
+}
+
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'arki-site-'));
   packCalls = [];
   registry = new Map();
+  writeRepoDocs(root);
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -275,6 +292,41 @@ describe('site --channel next', () => {
       ['minimal', 'arki-app'],
       ['stack', 'arki-app'],
     ]);
+  });
+});
+
+describe('site repo docs', () => {
+  const appContent = (...parts: string[]): string => path.join(root, SITE_APP_CONTENT_DIR, ...parts);
+
+  // The Docker image is built from `turbo prune` output, which has no repo-root `docs/` or `SECURITY.md`. The site
+  // can only show these files if `site` keeps copies inside the app.
+  it('copies the glossary (with its source line), the bench protocol and SECURITY.md into the app', async () => {
+    const envelope = await runSite({ cwd: root, config, channel: 'published', npmRunner: npm });
+    expect(envelope.summary.repoDocs).toBe(REPO_DOC_COPIES.length);
+    expect(readFileSync(appContent('glossary', 'glossary.md'), 'utf8')).toBe(
+      '---\nsource: docs/arki/glossary.md\n---\n\n# docs/arki/glossary.md\n',
+    );
+    expect(readFileSync(appContent('agent-bench', 'PROTOCOL.md'), 'utf8')).toBe(
+      '# docs/arki/agent-bench/PROTOCOL.md\n',
+    );
+    expect(readFileSync(appContent('security', 'SECURITY.md'), 'utf8')).toBe('# SECURITY.md\n');
+  });
+
+  // results.json exists only after a benchmark run; a stale copy would show numbers the repo no longer has.
+  it('removes the results copy when the repo has none', async () => {
+    await runSite({ cwd: root, config, channel: 'published', npmRunner: npm });
+    rmSync(path.join(root, 'docs/arki/agent-bench/results.json'));
+    const envelope = await runSite({ cwd: root, config, channel: 'published', npmRunner: npm });
+    expect(envelope.status).toBe('success');
+    expect(existsSync(appContent('agent-bench', 'results.json'))).toBe(false);
+  });
+
+  // A page with no glossary must stop the run, not ship an empty one.
+  it('fails when a required repo doc is missing', async () => {
+    rmSync(path.join(root, 'docs/arki/glossary.md'));
+    const envelope = await runSite({ cwd: root, config, channel: 'published', npmRunner: npm });
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => e.code)).toContain(SITE_ERROR_CODES.repoDocMissing);
   });
 });
 

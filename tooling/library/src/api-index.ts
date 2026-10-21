@@ -27,18 +27,12 @@ import { parseArgs } from 'node:util';
 import ts from 'typescript';
 import { z } from 'zod';
 
+import type { ApiEntry, ApiGroup, ApiIndex } from './api-index-schema';
 import { buildErrorIndex } from './error-index';
 import { leaves, readManifest } from './manifest';
 
-export const API_KINDS = ['function', 'class', 'interface', 'type', 'enum', 'variable', 'namespace', 'unknown'] as const;
-
-export const apiEntrySchema = z.object({
-  subpath: z.string(),
-  name: z.string(),
-  kind: z.enum(API_KINDS),
-  signature: z.string(),
-  jsdocSummary: z.string(),
-});
+export type { ApiEntry, ApiGroup, ApiIndex } from './api-index-schema';
+export { API_KINDS, apiEntrySchema, apiGroupSchema, apiIndexSchema } from './api-index-schema';
 
 /**
  * A group is only worth its extra file at this size: 50 rows are about 10 KB of
@@ -47,32 +41,6 @@ export const apiEntrySchema = z.object({
  */
 export const GROUP_THRESHOLD = 50;
 
-/**
- * Many exports of one kind and one declared type. `signature` is the shared
- * type text (`Icon`), `namesFile` is relative to the folder of `api.json` and
- * holds the sorted names as a JSON string array.
- */
-export const apiGroupSchema = z.object({
-  subpath: z.string(),
-  kind: z.enum(API_KINDS),
-  signature: z.string(),
-  count: z.number().int().positive(),
-  namesFile: z.string(),
-});
-
-/** `errorCodes` are the codes of `buildErrorIndex` for the same package (`dist/errors.json` holds the details). */
-export const apiIndexSchema = z.object({
-  package: z.string(),
-  version: z.string(),
-  entries: z.array(apiEntrySchema),
-  /** Absent in `api.json` files written before grouping existed. */
-  groups: z.array(apiGroupSchema).default([]),
-  errorCodes: z.array(z.string()),
-});
-
-export type ApiEntry = z.infer<typeof apiEntrySchema>;
-export type ApiGroup = z.infer<typeof apiGroupSchema>;
-export type ApiIndex = z.infer<typeof apiIndexSchema>;
 /** Names of one group, as stored in its `namesFile`. */
 export type NamesReader = (group: ApiGroup) => readonly string[];
 
@@ -200,7 +168,11 @@ export function buildApiIndex(dir: string): {
     names.set(namesFile, sorted);
   }
   const errorCodes = buildErrorIndex(dir).map(entry => entry.code);
-  return { index: { package: manifest.name, version: version ?? '0.0.0', entries, groups, errorCodes }, skipped, names };
+  return {
+    index: { package: manifest.name, version: version ?? '0.0.0', entries, groups, errorCodes },
+    skipped,
+    names,
+  };
 }
 
 /** Writes `api.json` and, next to it, the names file of every group. */

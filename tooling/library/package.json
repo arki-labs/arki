@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./api-index-schema": {
+      "default": "./src/api-index-schema.ts"
+    },
+    "./src/*": {
+      "default": "./src/*.ts"
+    }
+  },
   "bin": {
     "arki-api-diff": "./src/api-diff.ts",
     "arki-api-index": "./src/api-index.ts",

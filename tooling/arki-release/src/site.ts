@@ -72,12 +72,29 @@ export const SITE_ERROR_CODES = {
   dotNewFailed: 'SITE_E005',
   /** A snapshot folder has no valid `snapshot.json`. */
   badSnapshot: 'SITE_E006',
+  /** A repo doc the site copies (`REPO_DOC_COPIES`) is missing. */
+  repoDocMissing: 'SITE_E007',
 } as const;
 
 /** Where `site` writes, relative to the repo root. */
 export const SITE_CONTENT_DIR = path.join('apps', 'arki', 'start', 'src', 'content', 'packages');
 export const SITE_GENERATED_DIR = path.join('apps', 'arki', 'start', 'src', 'generated');
 export const SNAPSHOT_META_FILE = 'snapshot.json';
+export const SITE_APP_CONTENT_DIR = path.join('apps', 'arki', 'start', 'src', 'content');
+
+/**
+ * Repo docs the site shows, copied into the app's content folder. The Docker image is built from `turbo prune`
+ * output, which holds workspaces only, so the app must never read a file outside its own folder. `from` is relative
+ * to the repo root, `to` to `SITE_APP_CONTENT_DIR`. `sourceLine` adds a `source:` frontmatter line naming the
+ * original (the glossary is a content collection and shows where it comes from). An optional file that is gone
+ * has its copy removed.
+ */
+export const REPO_DOC_COPIES = [
+  { from: 'docs/arki/glossary.md', to: 'glossary/glossary.md', optional: false, sourceLine: true },
+  { from: 'docs/arki/agent-bench/PROTOCOL.md', to: 'agent-bench/PROTOCOL.md', optional: false, sourceLine: false },
+  { from: 'docs/arki/agent-bench/results.json', to: 'agent-bench/results.json', optional: true, sourceLine: false },
+  { from: 'SECURITY.md', to: 'security/SECURITY.md', optional: false, sourceLine: false },
+] as const;
 const READINESS_BASELINE = path.join('tooling', 'arki-release', 'readiness-baseline.json');
 const MIRROR_ORG = 'https://github.com/arki-labs';
 
@@ -121,6 +138,8 @@ export interface SiteSummary {
   readonly archived: number;
   readonly errorCodes: number;
   readonly examples: number;
+  /** Repo docs copied into the app (`REPO_DOC_COPIES`). */
+  readonly repoDocs: number;
   readonly dotNew: 'written' | 'skipped' | 'failed' | 'not-run';
   readonly wavesWithoutCandidate: readonly string[];
 }
@@ -660,6 +679,33 @@ async function writeGenerated(
   return { packages: packages.length, versions, archived, errorCodes: errorRows.length, examples: exampleRows.length };
 }
 
+/** Copies `REPO_DOC_COPIES` into the app; returns how many were written. */
+async function copyRepoDocs(cwd: string, errors: ReleaseError[]): Promise<number> {
+  let written = 0;
+  for (const doc of REPO_DOC_COPIES) {
+    const target = path.join(cwd, SITE_APP_CONTENT_DIR, doc.to);
+    const text = await readFile(path.join(cwd, doc.from), 'utf8').catch(() => null);
+    if (text === null) {
+      if (doc.optional) {
+        await rm(target, { force: true });
+      } else {
+        errors.push({
+          code: SITE_ERROR_CODES.repoDocMissing,
+          severity: 'error',
+          message: `${doc.from} is missing, so the site has no copy of it.`,
+          target: doc.from,
+          remediation: `Restore ${doc.from}, or remove it from REPO_DOC_COPIES and from the routes that read it.`,
+        });
+      }
+      continue;
+    }
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, doc.sourceLine ? `---\nsource: ${doc.from}\n---\n\n${text}` : text);
+    written += 1;
+  }
+  return written;
+}
+
 // ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
@@ -702,6 +748,7 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
   }
 
   const counts = await writeGenerated(options, contentRoot, generatedRoot, errors);
+  const repoDocs = await copyRepoDocs(options.cwd, errors);
   const count = (action: SiteItem['action']): number => items.filter(i => i.action === action).length;
   const status = errors.some(e => e.severity === 'error') ? 'failure' : errors.length > 0 ? 'warning' : 'success';
   const created = count('created');
@@ -717,6 +764,7 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
       rewritten,
       removed: count('removed'),
       ...counts,
+      repoDocs,
       dotNew,
       wavesWithoutCandidate: missing,
     },

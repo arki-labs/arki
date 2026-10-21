@@ -36,6 +36,7 @@ import { defaultGitRunner, defaultNpmRunner } from './runners';
 import { renderScorecardText, runScorecard } from './scorecard';
 import { runShip, type ShipMode } from './ship';
 import { runSite } from './site';
+import { checkSiteLinks } from './site-links';
 import { runSmoke } from './smoke';
 import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
 import { runUpgradeGuide } from './upgrade-guide';
@@ -146,7 +147,8 @@ const SUBCOMMANDS: ReadonlyArray<{
   {
     name: 'site',
     task: 'T3.1',
-    description: 'Docs + data for apps/arki/start: --channel published | --channel next [--candidate <dir>].',
+    description:
+      'Docs + data for apps/arki/start: --channel published | --channel next [--candidate <dir>] | --check-links [--base-url <url>].',
   },
   {
     name: 'demo-check',
@@ -747,8 +749,15 @@ async function runShipHandler(args: ParsedCliArgs): Promise<number> {
 /**
  * `site --channel published`: npm versions not yet on disk become immutable snapshots.
  * `site --channel next [--candidate <dir>]`: the newest candidate per wave (or `<dir>`) into `<name>/next/`.
+ * `site --check-links [--base-url <url>]`: crawls the running site and fails on a link that does not resolve.
  */
 async function runSiteHandler(args: ParsedCliArgs): Promise<number> {
+  if (args.rest.includes('--check-links')) {
+    const baseUrl = extractOption(args.rest, 'base-url') ?? `http://localhost:${process.env.ARKI_DEV_PORT ?? '5181'}`;
+    const envelope = await checkSiteLinks({ baseUrl, repoRoot: process.cwd() });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  }
   const channel = extractOption(args.rest, 'channel');
   const candidateDir = extractOption(args.rest, 'candidate');
   if (channel !== 'published' && channel !== 'next') return usageError('site', 'site needs `--channel published` or `--channel next`.', args.json);
