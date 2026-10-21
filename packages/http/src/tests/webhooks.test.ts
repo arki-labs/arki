@@ -14,7 +14,7 @@ import { orThrow } from '@arki/failure';
 import type { WebhookScheme } from '../webhooks.js';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HttpConfigError } from '../error.js';
 import {
   hmac,

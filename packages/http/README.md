@@ -48,7 +48,7 @@ console.log(JSON.stringify(await response.json()));
 {"id":"ord_1","total":12}
 ```
 
-To serve it, pass `engine.fetch` to `listen`. See [Without DOT](#without-dot).
+To serve it, pass the engine to `listen`. See [Without DOT](#without-dot).
 
 ## When not to use this
 
@@ -66,7 +66,7 @@ To serve it, pass `engine.fetch` to `listen`. See [Without DOT](#without-dot).
 | `@arki/http` (server) | yes | yes | no | no | no |
 | `@arki/http/dot` | yes | yes | no | no | no |
 
-`listen` uses `Bun.serve` under Bun and `@hono/node-server` under Node. The server entry loads `node:async_hooks`. `bun run test:runtimes` runs the client smoke test on every runtime, and `scripts/server-smoke.mjs` runs the engine on Node and Bun.
+`listen` uses `Bun.serve` under Bun (with the engine's route table, so Bun matches those routes natively) and `@hono/node-server` under Node. The server entry loads `node:async_hooks`. `bun run test:runtimes` runs the client smoke test on every runtime, and `scripts/server-smoke.mjs` runs the engine on Node and Bun.
 
 ## The model
 
@@ -416,7 +416,7 @@ http({ port: 3000, bundles: [OrdersRoutes], middleware: [requestLog(logger), cor
 
 Middleware wraps the whole engine and is untyped by design; anything that
 produces a per-request *value* belongs in a deriver instead. Standalone
-users compose the same way with `composeMiddleware(engine.fetch, [...])`.
+users compose the same way with `composeMiddleware(engine, [...])`, which returns an engine for `listen`.
 
 ## Idempotency keys
 
@@ -644,17 +644,33 @@ import { buildEngine, listen } from '@arki/http';
 import { bundle } from './fixture.ts';
 
 const engine = buildEngine([bundle]);
-const handle = await listen(engine.fetch, { port: 3000 });
+const handle = await listen(engine, { port: 3000 });
 ```
 
-`listen` uses `Bun.serve` under Bun and `@hono/node-server` under Node.
-Routing is Hono internally; no Hono type appears in the public API.
+`listen` uses `Bun.serve` under Bun and `@hono/node-server` under Node. It
+takes the engine (so Bun gets the engine's native route table) or a bare
+fetch handler.
+
+### Engines
+
+`buildEngine` is the compiled engine: a route whose path is static segments
+and `:name` segments is matched by a `Map` or a segment trie built once, and
+runs without any framework object in between. Mounts, rpc mounts, routes
+under a mount prefix, optional placeholders (`:x?`) and wildcards go to Hono
+behind it; the 404 is Hono's. Every route runs the same pipeline whichever
+router matched it, so responses and error envelopes do not depend on the
+engine. `buildHonoEngine` builds the Hono-only engine, for running the two
+side by side. No Hono type appears in the public API.
+
+`composeMiddleware(engine, middleware)` wraps an engine and returns one, so
+Bun's natively matched routes run the same layers as `fetch`; the Dot
+`http()` plugin does this for its drain gauge and your middleware.
 
 ## Public imports
 
 | Import | What it holds |
 | --- | --- |
-| `@arki/http` | `route`, `routes`, `buildEngine`, `listen`, `derive`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
+| `@arki/http` | `route`, `routes`, `buildEngine`, `buildHonoEngine`, `listen`, `composeMiddleware`, `derive`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
 | `@arki/http/dot` | `http()`, the Dot driver, and `endpoints()` |
 | `@arki/http/client` | the typed fetch client |
 | `@arki/http/idempotency` | `idempotent(...)`, an idempotency-key middleware |
@@ -796,6 +812,10 @@ Read the rows with the contracts in mind:
 
 Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
 <!-- bench:end -->
+
+### Over a socket
+
+`bun run bench:server` runs the same three routes end to end, on Bun and on Node, against hand-written `Bun.serve` and `node:http` ceilings and against hono, elysia, h3, srvx and fastify, and reports server CPU microseconds per request next to requests per second (see `bench/server/README.md`). On a 12-core M2 Max, Bun 1.4.2 and Node 26.11, the default engine costs about 0.7 µs of server CPU per request over a bare `Response.json` on Bun and lands within 10 % of the raw `Bun.serve` ceiling; the Hono engine is 15 % to 20 % behind it on routes with parameters or a body.
 
 ## License
 

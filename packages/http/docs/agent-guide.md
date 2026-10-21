@@ -6,7 +6,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. A route has two halves. The **contract** is plain data at module scope: method, path, schemas and a stable id. The **binding** is the handler, attached with `routes().bind(contract, handler)`.
 2. Any Standard Schema validates input and output (zod, valibot, arktype). Input is checked before the handler. Output is checked on the way out.
-3. `buildEngine([bundles])` composes bundles into one `fetch` handler. `listen(engine.fetch, { port })` serves it. Routing is Hono inside. No Hono type is public.
+3. `buildEngine([bundles])` composes bundles into one engine (`fetch` + `routeIds` + `bunRoutes`). `listen(engine, { port })` serves it. Routing is the compiled router for plain routes, Hono for mounts, `:x?` and `*` paths; `buildHonoEngine` is Hono alone. No Hono type is public.
 4. Derivers build the request scope (the user, the tenant). They run before the handler. Throwing an `HttpError` from one short-circuits the request.
 5. Failures are values or `HttpError`s. Both become a coded envelope: `{ "error": { "code", "message", ... } }`.
 6. `@arki/http/dot` is the Dot driver. It mounts the bundles of every feature and drains requests on shutdown.

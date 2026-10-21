@@ -1,10 +1,14 @@
 /**
- * The request engine — builds one fetch handler from a list of bundles.
+ * The Hono engine — builds one fetch handler from a list of bundles, with
+ * Hono doing the routing — and the per-route pipeline every engine shares
+ * (`executeBinding`: request context, input decoding, the handler, the
+ * response, the error envelope).
  *
- * Hono does the routing internally; no Hono type appears in the public
- * API, so the engine stays a swappable implementation detail. The route
- * table order is bundle order then binding order — declaration order,
- * deterministically, per DOT principle 3.
+ * `buildEngine` (compiled.ts) is the default engine: its own router for the
+ * routes it can match, this engine for the rest. No Hono type appears in
+ * the public API, so routing stays a swappable implementation detail. The
+ * route table order is bundle order then binding order — declaration
+ * order, deterministically, per DOT principle 3.
  */
 
 import { Hono } from 'hono';
@@ -37,19 +41,32 @@ function andThen<T, U>(value: MaybePromise<T>, next: (value: T) => MaybePromise<
   return value instanceof Promise ? value.then(next) : next(value);
 }
 
+/** What `Bun.serve` passes a `routes` handler: the request with its matched path parameters. */
+export type BunRequestLike = Request & { readonly params: Readonly<Record<string, string>> };
+
+/** A `Bun.serve` `routes` table: path → method → handler. */
+export type BunRoutes = Readonly<
+  Record<string, Readonly<Record<string, (req: BunRequestLike) => Response | Promise<Response>>>>
+>;
+
 /** A built engine: the composed fetch handler plus its route inventory. */
 export type Engine = {
   readonly fetch: (req: Request) => Promise<Response>;
+  /**
+   * The routes Bun can match natively, when the engine has any. `listen`
+   * hands them to `Bun.serve({ routes })`; a request they match never
+   * reaches `fetch`. Both answer the same.
+   */
+  readonly bunRoutes?: BunRoutes;
   /** Contract ids + mount ids, in registration order. */
   readonly routeIds: readonly string[];
 };
 
-/**
- * Compose bundles into a single fetch handler. Throws
- * `ARKI_HTTP_E002`/`E006` on route collisions and malformed mounts —
- * callers (the `http()` plugin's `boot`) let these bubble as boot failures.
- */
-export function buildEngine(bundles: readonly RouteBundle[]): Engine {
+/** The Hono app behind {@link buildHonoEngine}: its fetch without the request span, and the route ids. */
+export function buildHonoApp(bundles: readonly RouteBundle[]): {
+  readonly fetch: (req: Request) => Response | Promise<Response>;
+  readonly routeIds: readonly string[];
+} {
   const app = new Hono();
   const claimed = new Map<string, string>();
   const routeIds: string[] = [];
@@ -74,8 +91,18 @@ export function buildEngine(bundles: readonly RouteBundle[]): Engine {
   );
   app.onError((error, _c) => toErrorResponse(error));
 
+  return { fetch: req => app.fetch(req), routeIds };
+}
+
+/**
+ * Compose bundles into a single fetch handler. Throws
+ * `ARKI_HTTP_E002`/`E006` on route collisions and malformed mounts —
+ * callers (the `http()` plugin's `boot`) let these bubble as boot failures.
+ */
+export function buildHonoEngine(bundles: readonly RouteBundle[]): Engine {
+  const { fetch, routeIds } = buildHonoApp(bundles);
   return {
-    fetch: req => observeHttp('http.request', () => app.fetch(req)),
+    fetch: req => observeHttp('http.request', () => fetch(req)),
     routeIds,
   };
 }
@@ -114,16 +141,28 @@ function registerRpc(app: Hono, claimed: Map<string, string>, bundle: RouteBundl
   app.mount(rpc.path, req => executeRpc(bundle, rpc, req), { replaceRequest: false });
 }
 
+/** The request context; `url` is parsed on first read, so a route that never reads it never pays for it. */
+class RequestCtx implements BaseRequestCtx {
+  readonly req: Request;
+  readonly requestId: BaseRequestCtx['requestId'];
+  #url: URL | undefined;
+  constructor(req: Request, id: BaseRequestCtx['requestId']) {
+    this.req = req;
+    this.requestId = id;
+  }
+  get url(): URL {
+    return (this.#url ??= new URL(this.req.url));
+  }
+  get signal(): AbortSignal {
+    return this.req.signal;
+  }
+}
+
 function createBaseCtx(req: Request): BaseRequestCtx | IdGenerationFailure {
   const supplied = req.headers.get('x-request-id');
   const id = requestId.is(supplied) ? supplied : requestId.create();
   if (isFailure(id)) return id;
-  return {
-    req,
-    url: new URL(req.url),
-    requestId: id,
-    signal: req.signal,
-  };
+  return new RequestCtx(req, id);
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
@@ -157,9 +196,12 @@ async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): P
   });
 }
 
-function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteBundle, binding: RouteBinding): void {
-  const { contract } = binding;
-  // An optional placeholder ("/a/:x?") serves two paths and claims both.
+/**
+ * Claim a route's method and path(s) for its contract id; a second claim
+ * on the same key is a duplicate route. An optional placeholder ("/a/:x?")
+ * serves two paths and claims both.
+ */
+export function claimRoute(claimed: Map<string, string>, contract: ContractLike): void {
   const keys = openApiPaths(contract.path).map(({ path }) => `${contract.method} ${path}`);
   for (const key of keys) {
     const prior = claimed.get(key);
@@ -173,6 +215,11 @@ function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteB
     }
   }
   for (const key of keys) claimed.set(key, contract.id);
+}
+
+function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteBundle, binding: RouteBinding): void {
+  const { contract } = binding;
+  claimRoute(claimed, contract);
   app.on(contract.method, contract.path, c => executeBinding(bundle, binding, c.req.raw, c.req.param()));
 }
 
@@ -182,13 +229,14 @@ function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteB
  * synchronously and returns the Response itself when the handler does — no
  * promise, no extra microtask. Anything that needs an await goes through
  * `executeBindingAsync`. Both paths give the same responses and the same
- * error envelopes.
+ * error envelopes. Every engine calls this once per matched route; only
+ * the match (and so `params`) is the engine's own.
  */
-function executeBinding(
+export function executeBinding(
   bundle: RouteBundle,
   binding: RouteBinding,
   req: Request,
-  params: Record<string, string>,
+  params: Readonly<Record<string, string>>,
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
@@ -210,7 +258,7 @@ async function executeBindingAsync(
   binding: RouteBinding,
   req: Request,
   base: BaseRequestCtx,
-  params: Record<string, string>,
+  params: Readonly<Record<string, string>>,
 ): Promise<Response> {
   try {
     let ctx: BaseRequestCtx & Record<string, unknown> = base;
@@ -346,6 +394,20 @@ async function readJson(req: Request): Promise<unknown> {
   }
 }
 
+/** A field record's entries, split once: the same record is read on every request. */
+const fieldEntries = new WeakMap<Readonly<Record<string, Field>>, readonly (readonly [string, Wire, boolean])[]>();
+function entriesOf(fields: Readonly<Record<string, Field>>): readonly (readonly [string, Wire, boolean])[] {
+  let entries = fieldEntries.get(fields);
+  if (entries === undefined) {
+    entries = Object.entries(fields).map(([key, field]) => {
+      const { wire, optional } = fieldParts(field);
+      return [key, wire, optional] as const;
+    });
+    fieldEntries.set(fields, entries);
+  }
+  return entries;
+}
+
 /** One decode job per declared field. A missing optional field gets no job: it stays `undefined`. */
 function fieldJobs(
   where: Where,
@@ -353,8 +415,7 @@ function fieldJobs(
   read: (key: string) => string | undefined,
 ): Job[] {
   const jobs: Job[] = [];
-  for (const [key, field] of Object.entries(fields)) {
-    const { wire, optional } = fieldParts(field);
+  for (const [key, wire, optional] of entriesOf(fields)) {
     const value = read(key);
     if (value === undefined && optional) continue;
     // The `optional(...)` marker decides presence, even for a schema that accepts `undefined`.
@@ -375,7 +436,7 @@ function lastQueryValue(base: BaseRequestCtx, key: string): string | undefined {
  */
 function decodeInput(
   contract: ContractLike,
-  params: Record<string, string>,
+  params: Readonly<Record<string, string>>,
   base: BaseRequestCtx,
   body?: unknown,
 ): MaybePromise<ErasedInput> {
@@ -389,7 +450,7 @@ function decodeInput(
   return andThen(runJobs(jobs), runs => assemble(contract, params, runs));
 }
 
-function assemble(contract: ContractLike, params: Record<string, string>, runs: readonly Ran[]): ErasedInput {
+function assemble(contract: ContractLike, params: Readonly<Record<string, string>>, runs: readonly Ran[]): ErasedInput {
   rejectIssues(issuesOf(runs));
   const decoded: Record<Exclude<Where, 'body'>, Record<string, unknown>> = { params: {}, headers: {}, query: {} };
   let body: unknown;
@@ -434,20 +495,15 @@ function encodeOutput(contract: ContractLike, wire: Wire, result: unknown): Mayb
 }
 
 /**
- * Same response as `Response.json(value)` — the body is `JSON.stringify(value)`
- * and the content type `application/json` — built from a string body, which
- * costs less per request than `Response.json` in undici.
+ * `Response.json(value)` with the status and extra headers. Measured on Bun
+ * 1.4 and Node 26 (undici 8): cheaper than `new Response(JSON.stringify(value))`
+ * on both, the reverse of older undici. `Response.json` throws a `TypeError`
+ * for a value with no JSON form (undefined, a function).
  */
 function jsonResponse(value: unknown, status = 200, headers?: Readonly<Record<string, string>>): Response {
-  const text = JSON.stringify(value);
-  // `Response.json` refuses a value with no JSON form (undefined, a function).
-  if (text === undefined) throw new TypeError('Value is not JSON serializable');
-  return new Response(text, {
+  return Response.json(value, {
     status,
-    headers:
-      headers === undefined
-        ? { 'content-type': 'application/json' }
-        : { ...headers, 'content-type': 'application/json' },
+    ...(headers === undefined ? {} : { headers: { ...headers, 'content-type': 'application/json' } }),
   });
 }
 
@@ -466,6 +522,35 @@ export type HttpMiddleware = (req: Request, next: (req: Request) => Promise<Resp
  * its status, anything else is a 500.
  */
 export function composeMiddleware(
+  fetch: (req: Request) => Promise<Response>,
+  middleware: readonly HttpMiddleware[],
+): (req: Request) => Promise<Response>;
+/**
+ * Wrap a whole engine: its `fetch` and, when it has them, every Bun route
+ * handler, so a request Bun matches natively still runs the same layers.
+ * A layer that forwards a different `Request` loses the native match; the
+ * engine then routes that request itself.
+ */
+export function composeMiddleware(engine: Engine, middleware: readonly HttpMiddleware[]): Engine;
+export function composeMiddleware(
+  target: Engine | ((req: Request) => Promise<Response>),
+  middleware: readonly HttpMiddleware[],
+): Engine | ((req: Request) => Promise<Response>) {
+  if (typeof target === 'function') return composeFetch(target, middleware);
+  const fetch = composeFetch(target.fetch, middleware);
+  if (target.bunRoutes === undefined) return { ...target, fetch };
+  const bunRoutes: Record<string, Record<string, (req: BunRequestLike) => Promise<Response>>> = {};
+  for (const [path, byMethod] of Object.entries(target.bunRoutes)) {
+    bunRoutes[path] = {};
+    for (const [method, handler] of Object.entries(byMethod)) {
+      const composed = composeFetch(async req => await handler(req as BunRequestLike), middleware);
+      bunRoutes[path][method] = composed;
+    }
+  }
+  return { ...target, fetch, bunRoutes };
+}
+
+function composeFetch(
   fetch: (req: Request) => Promise<Response>,
   middleware: readonly HttpMiddleware[],
 ): (req: Request) => Promise<Response> {

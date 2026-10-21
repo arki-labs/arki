@@ -8,6 +8,8 @@
  * the request may leave out; the marker, not the schema, decides `?:`.
  */
 
+import { z } from 'zod';
+
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { UnexpectedFailure, ValidatorDefect } from '@arki/failure';
 import { isStandardSchema, pathOf } from '@arki/schema';
@@ -94,14 +96,32 @@ export type FieldsOf<TFields extends Fields> = Flatten<
   }
 >;
 
-/** The schema that reads `wire` (decode direction). */
-export function decoderOf(wire: Wire): StandardSchemaV1 {
-  return isStandardSchema(wire) ? wire : wire.decode;
+/**
+ * The schema with its generated fast path, built once per schema. A zod
+ * schema becomes its `z.compile()` clone (same results, same issues, a
+ * generated parser instead of the interpreter; zod falls back to the
+ * interpreter for a schema it cannot model). Any other Standard Schema is
+ * used as is. Keyed by identity, so a schema shared by many routes compiles
+ * once.
+ */
+const compiled = new WeakMap<StandardSchemaV1, StandardSchemaV1>();
+function compiledOf(schema: StandardSchemaV1): StandardSchemaV1 {
+  let fast = compiled.get(schema);
+  if (fast === undefined) {
+    fast = schema instanceof z.ZodType ? z.compile(schema) : schema;
+    compiled.set(schema, fast);
+  }
+  return fast;
 }
 
-/** The schema that writes `wire` (encode direction). A bare schema is its own encoder. */
+/** The schema that reads `wire` (decode direction), with its fast path (see {@link compiledOf}). */
+export function decoderOf(wire: Wire): StandardSchemaV1 {
+  return compiledOf(isStandardSchema(wire) ? wire : wire.decode);
+}
+
+/** The schema that writes `wire` (encode direction), with its fast path. A bare schema is its own encoder. */
 export function encoderOf(wire: Wire): StandardSchemaV1 {
-  return isStandardSchema(wire) ? wire : wire.encode;
+  return compiledOf(isStandardSchema(wire) ? wire : wire.encode);
 }
 
 /** A field's wire and whether the request may leave it out. */

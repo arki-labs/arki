@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { routes, rpcMount } from '../bundle.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES, HttpConfigError, HttpError } from '../error.js';
 
 const BASE = 'http://test.local';

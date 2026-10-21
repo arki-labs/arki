@@ -9,7 +9,8 @@ import { z } from 'zod';
 import type { ResponseCache } from '../idempotency.js';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { buildEngine, composeMiddleware } from '../engine.js';
+import { buildEngine } from '../compiled.js';
+import { composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 import { IDEMPOTENCY_FAILURES, idempotent } from '../idempotency.js';
 import { observeHttp } from '../telemetry.js';
@@ -103,6 +104,19 @@ describe('default HTTP telemetry', () => {
     expect(span?.events).toEqual([]);
     expect(trace.getActiveSpan()).toBeUndefined();
     parent.end();
+  });
+
+  it('exports the same request span for a route Bun matched natively', async () => {
+    const exporter = installTelemetry();
+    const engine = successEngine();
+    const handler = engine.bunRoutes?.['/secret']?.['GET'];
+    if (handler === undefined) throw new Error('no Bun route for GET /secret');
+    const res = await handler(Object.assign(request(), { params: {} }));
+    expect(res.status).toBe(200);
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.name).toBe('http.request');
+    expect(spans[0]?.attributes).toEqual({ 'http.response.status_code': 200 });
   });
 
   it('records canonical validation failure codes without private input', async () => {

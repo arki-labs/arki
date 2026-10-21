@@ -50,9 +50,10 @@ import { resolveLazy } from '@arki/ts';
 
 import type { RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
-import type { HttpMiddleware } from './engine.js';
+import type { Engine, HttpMiddleware } from './engine.js';
 import type { ListenHandle } from './listen.js';
-import { buildEngine, composeMiddleware } from './engine.js';
+import { buildEngine } from './compiled.js';
+import { composeMiddleware } from './engine.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { listen } from './listen.js';
 
@@ -180,7 +181,8 @@ export const HTTP_PLUGIN_ERROR_CODES = {
 const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 
 type PluginState = {
-  tracked: ((req: Request) => Promise<Response>) | undefined;
+  /** The engine with the in-flight gauge and the app middleware around every route. */
+  served: Engine | undefined;
   handle: ListenHandle | undefined;
 };
 
@@ -310,7 +312,7 @@ function bindHttp(
   needs: Record<string, BundleToken>,
   features: readonly MountedFeature[],
 ): Plugin<EmptyShape, HttpServices> {
-  const state: PluginState = { tracked: undefined, handle: undefined };
+  const state: PluginState = { served: undefined, handle: undefined };
   const gauge: InflightGauge = { count: 0, waiters: [] };
 
   return plugin<EmptyShape, HttpServices>({
@@ -356,12 +358,12 @@ function bindHttp(
           );
         }
 
-        const engine = buildEngine(bundles);
-        const composed = composeMiddleware(engine.fetch, options.middleware ?? []);
-        const tracked = async (req: Request): Promise<Response> => {
+        // The gauge is the outermost layer, so drain-on-shutdown counts every
+        // request, including those Bun matches natively.
+        const tracking: HttpMiddleware = async (req, next) => {
           gauge.count += 1;
           try {
-            return await composed(req);
+            return await next(req);
           } finally {
             gauge.count -= 1;
             if (gauge.count === 0) {
@@ -370,10 +372,11 @@ function bindHttp(
             }
           }
         };
-        state.tracked = tracked;
+        const served = composeMiddleware(buildEngine(bundles), [tracking, ...(options.middleware ?? [])]);
+        state.served = served;
 
         const httpServer: HttpServer = {
-          fetch: tracked,
+          fetch: served.fetch,
           port: () => state.handle?.port,
           url: () => {
             const handle = state.handle;
@@ -387,8 +390,8 @@ function bindHttp(
       },
     },
     async start() {
-      const tracked = state.tracked;
-      if (tracked === undefined) {
+      const served = state.served;
+      if (served === undefined) {
         throw new DotPluginError({
           code: HTTP_PLUGIN_ERROR_CODES.bundleMissing,
           message: '[http] start ran without a booted engine — kernel contract violation.',
@@ -396,7 +399,7 @@ function bindHttp(
           docsUrl: 'https://arki.dev/http/errors/arki-http-e008',
         });
       }
-      state.handle = await listen(tracked, {
+      state.handle = await listen(served, {
         port: resolveLazy(options.port),
         ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
       });

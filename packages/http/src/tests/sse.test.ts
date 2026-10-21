@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 import { codec } from '../wire.js';
 

@@ -7,7 +7,7 @@ import { routes, rpcMount } from '../bundle.js';
 import { createClient } from '../client.js';
 import { requestContext } from '../context.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HTTP_SERVER_FAILURES } from '../failures.js';
 import { idempotencyOwnerId, requestId } from '../ids.js';
 

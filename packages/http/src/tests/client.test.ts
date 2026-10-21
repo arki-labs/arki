@@ -12,7 +12,7 @@ import { InvalidEnvelope, InvalidInput, isFailure } from '@arki/failure';
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 import { raw } from '../raw.js';
 import { codec, optional } from '../wire.js';

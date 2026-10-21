@@ -8,7 +8,7 @@ import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import type { WEBHOOK_VERIFY_FAILURES } from '../webhooks.js';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { RequestCancelled } from '../failures.js';
 import {
   hmac,

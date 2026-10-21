@@ -8,7 +8,8 @@ import { routes, rpcMount } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { derive } from '../derive.js';
-import { buildEngine, composeMiddleware } from '../engine.js';
+import { buildEngine } from '../compiled.js';
+import { composeMiddleware } from '../engine.js';
 import { IDEMPOTENCY_FAILURES, IdempotencyKeyRequired, idempotent } from '../idempotency.js';
 
 const SignIn = defineFailure('test.sign_in', { status: 401 });

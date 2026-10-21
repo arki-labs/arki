@@ -1,4 +1,4 @@
-// Request dispatch: @arki/http against hono (the library it wraps) and itty-router.
+// Request dispatch: @arki/http (its default compiled engine, and its Hono engine) against hono and itty-router.
 // Run: `bun run bench` (explore) or `bun run bench --profile publish --write-readme`.
 //
 // Every row receives a real `Request` and returns a `Response`, in process.
@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import type { CaseBuilder, CaseSpec } from '@arki/bench';
 import { compare, defineSuite, scenario } from '@arki/bench';
-import { buildEngine, route, routes } from '@arki/http';
+import { buildEngine, buildHonoEngine, route, routes } from '@arki/http';
 
 const BASE = 'http://localhost';
 
@@ -26,8 +26,8 @@ const statics = Array.from({ length: 8 }, (_, index) => `/static${index}`);
 const params = Array.from({ length: 8 }, (_, index): `/res${number}/:id` => `/res${index}/:id`);
 const posts = Array.from({ length: 4 }, (_, index) => `/create${index}`);
 
-// ---- @arki/http: contracts as data, handlers bound to them.
-const arki = buildEngine([
+// ---- @arki/http: contracts as data, handlers bound to them. Both engines serve the same bundles.
+const arkiBundles = [
   ...statics.map((path, index) =>
     routes().bind(route.get(path, { id: `static.${index}`, output: z.object({ ok: z.boolean() }) }), () => ({
       ok: true,
@@ -45,7 +45,9 @@ const arki = buildEngine([
       name: body.name,
     })),
   ),
-]);
+];
+const arki = buildEngine(arkiBundles);
+const arkiHono = buildHonoEngine(arkiBundles);
 
 // ---- hono: routes registered by hand, body validated with @hono/zod-validator.
 const hono = new Hono();
@@ -93,9 +95,14 @@ const post = (value: unknown): Call => ({ path: '/create2', body: JSON.stringify
 /** The three routers, each answering one call with "<status> <body text>". */
 const routers = {
   arki: {
-    label: '@arki/http (route contracts)',
+    label: '@arki/http (compiled engine, the default)',
     package: '@arki/http',
     send: (call: Call) => reply(arki.fetch(toRequest(call))),
+  },
+  arkiHono: {
+    label: '@arki/http (Hono engine)',
+    package: '@arki/http',
+    send: (call: Call) => reply(arkiHono.fetch(toRequest(call))),
   },
   hono: {
     label: 'hono (+ @hono/zod-validator)',
@@ -113,6 +120,7 @@ const routers = {
 function rows(c: CaseBuilder<Call>): Record<string, CaseSpec<Call, unknown, unknown>> {
   return {
     arki: c({ label: routers.arki.label, package: routers.arki.package, run: routers.arki.send }),
+    arkiHono: c({ label: routers.arkiHono.label, package: routers.arkiHono.package, run: routers.arkiHono.send }),
     hono: c({ label: routers.hono.label, package: routers.hono.package, run: routers.hono.send }),
     itty: c({ label: routers.itty.label, package: routers.itty.package, run: routers.itty.send }),
   };
@@ -137,9 +145,9 @@ for (const call of invalidCalls) {
 export default defineSuite({
   id: '@arki/http',
   intro:
-    'Each router receives a real `Request` and returns a `Response`, in process, with no network. `@arki/http` is built on hono, so hono is the direct reference; itty-router is the small, hand-wired alternative. All three serve the same 20 routes and validate bodies with the same zod schema. Each table only ranks routers that returned the same status and body on every checked request.',
+    'Each router receives a real `Request` and returns a `Response`, in process, with no network. `@arki/http` rows are the same package on its two engines: the default compiled router (hono behind it for what it does not match) and hono alone. hono is the direct reference; itty-router is the small, hand-wired alternative. All four serve the same 20 routes and validate bodies with the same zod schema. Each table only ranks routers that returned the same status and body on every checked request.',
   notes: [
-    '`@arki/http` runs on hono. The gap to plain hono is the price of the contract layer: every handler input (params, query, body) is validated against its contract, and every handler output is validated against the contract output schema, so a wrong response fails loudly instead of leaving the process.',
+    'The gap from `@arki/http` to plain hono is the price of the contract layer: every handler input (params, query, body) is validated against its contract, and every handler output is validated against the contract output schema, so a wrong response fails loudly instead of leaving the process.',
     'The hono and itty-router rows do not validate handler output and have no route ids, no error envelope and no OpenAPI generation. Their `Request` and `Response` work is the same.',
     'itty-router has no validation hook, so its rows parse the JSON and run the zod schema by hand, the way its docs suggest. itty-router v5 also leaves path parameters percent-encoded (`caf%C3%A9`); its row decodes them by hand so it returns the same id as the others.',
     'Every row builds the `Request` and reads the response body inside the timed call.',
@@ -177,7 +185,7 @@ export default defineSuite({
     compare<Call>({
       id: 'post-valid',
       title: 'POST with a valid JSON body',
-      note: 'Body parsed and checked with the same zod schema in all three. `@arki/http` also checks the output.',
+      note: 'Body parsed and checked with the same zod schema in every row. `@arki/http` also checks the output.',
       contract: {
         id: 'http-post-valid/v1',
         description: 'status 200 and {"ok":true,"name":<the body name>} for a body the schema accepts',

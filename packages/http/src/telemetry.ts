@@ -20,6 +20,18 @@ export async function observeHttp(name: string, run: () => Response | Promise<Re
   observe(() => {
     span = trace.getTracer('@arki/http').startSpan(name);
   });
+  // Nothing records this span (no provider, or the sampler dropped it):
+  // there is no context to propagate and no attribute anyone will read,
+  // so run directly — no extra microtask, no context switch.
+  if (span === undefined || !span.isRecording()) {
+    try {
+      return await run();
+    } finally {
+      observe(() => {
+        span?.end();
+      });
+    }
+  }
   let execution: Promise<Response> | undefined;
   // Reserve ownership before any handler/provider/reporter can reenter the callback.
   const execute = () => (execution ??= Promise.resolve().then(run));

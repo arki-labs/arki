@@ -23,7 +23,7 @@ import type { RouteFailure } from '../contract.js';
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 
 const BASE = 'http://test.local';

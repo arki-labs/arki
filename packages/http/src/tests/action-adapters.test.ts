@@ -8,7 +8,7 @@ import { defineFailure } from '@arki/failure';
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { codec } from '../wire.js';
 
 const Missing = defineFailure('catalog.missing', { status: 404, data: z.object({ id: z.string() }) });

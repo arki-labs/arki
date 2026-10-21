@@ -6,7 +6,7 @@ import { defineFailure, InvalidEnvelope, InvalidInput, reviveJson, serialize } f
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine } from '../compiled.js';
 import { orThrowHttp, toErrorResponse } from '../error.js';
 import { IdempotencyInProgress, NetworkFailure } from '../failures.js';
 

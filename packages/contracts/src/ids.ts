@@ -143,6 +143,9 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
   schema: TSchema,
   format?: IdFormat,
 ) {
+  // The same schema with zod's generated fast path; parsing an id is on every
+  // request path (`requestId.is(header)`, `requestId.create()`).
+  const fast = z.compile(schema);
   return {
     /** The stored prefix, unchanged. */
     prefix,
@@ -158,14 +161,15 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
             : createRandomBody(format.length, format.alphabet, format.alphabet);
       if (isFailure(body)) return body;
       try {
-        const result = schema.safeParse(`${prefix}${body}`);
+        const result = fast.safeParse(`${prefix}${body}`);
         return result.success ? result.data : UnexpectedDefect({ cause: result.error });
       } catch (error) {
         return UnexpectedDefect({ cause: error });
       }
     },
     /** Validates the canonical schema and narrows to its success-only domain type. */
-    is: (value: unknown): value is z.output<typeof schema> => schema.safeParse(value).success,
+    is: (value: unknown): value is z.output<typeof schema> =>
+      typeof value === 'string' && fast.safeParse(value).success,
   } as const;
 }
 
