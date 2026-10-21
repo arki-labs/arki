@@ -265,6 +265,32 @@ export const EXPLAIN_COMMAND = {
   ],
 } as const satisfies Excerpt;
 
+/**
+ * The first lines of what `dot explain --app src/app.ts --graph` printed for avocabo's app (apps/avocabo/backend,
+ * prelaunch, built with arki). The command prints Mermaid flowchart source; the full graph is 449 lines. The lines are
+ * cut at a whole line and are not edited.
+ */
+export const EXPLAIN_GRAPH_OUTPUT = {
+  command: 'dot explain --app src/app.ts --graph',
+  lines: [
+    'flowchart TD',
+    '  %% numbers = boot order',
+    '  subgraph infra["infra · what features need"]',
+    '    p0["1 · db"]',
+    '    p1["2 · kv"]',
+    '    p2["3 · mail"]',
+    '    p3["4 · email-client"]',
+    '    p4["5 · auth"]',
+    '    p5["6 · locks"]',
+    '    p7["8 · vector-index/embeddings"]',
+    '    p8["9 · vector-index/vectorIndex"]',
+    '    p10["11 · account/repos"]',
+    '    p11["12 · account/outboundMail"]',
+    '    p13["14 · billing/repos"]',
+    '…',
+  ],
+} as const;
+
 export const START_IN_TEST = {
   parts: [
     {

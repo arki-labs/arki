@@ -535,13 +535,6 @@
   margin-top: 0;
   border-top: 1px solid var(--home-line);
 }
-.home-placeholder {
-  margin: 12px;
-  padding: 14px 16px;
-  border: 1.5px dashed var(--home-line);
-  color: var(--muted-foreground);
-  font: 12px/1.5 var(--font-mono);
-}
 .home-rooms {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

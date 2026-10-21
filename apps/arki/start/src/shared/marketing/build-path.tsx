@@ -5,6 +5,7 @@ import {
   DEFINE_APP,
   DEFINE_STEP,
   EXPLAIN_COMMAND,
+  EXPLAIN_GRAPH_OUTPUT,
   FEATURE_NEEDS,
   FEATURE_ROOMS,
   FEATURE_STEP,
@@ -116,9 +117,21 @@ export function BuildPath() {
         </p>
         <Callout step={INSPECT_STEP}>
           <Code excerpt={EXPLAIN_COMMAND} />
-          <p className="home-placeholder">
-            Note · this page prints no sample graph. Run the command in your app to read its own.
-          </p>
+          <figure className="home-code">
+            <figcaption>
+              Real output · <code>{EXPLAIN_GRAPH_OUTPUT.command}</code> run on avocabo (prelaunch). Built with arki. The
+              first lines of 449.
+            </figcaption>
+            <pre>
+              <code>
+                {EXPLAIN_GRAPH_OUTPUT.lines.map((line, index) => (
+                  <span key={index} className="home-ln">
+                    {line}
+                  </span>
+                ))}
+              </code>
+            </pre>
+          </figure>
           <Code excerpt={START_IN_TEST} />
         </Callout>
       </Step>
