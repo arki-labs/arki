@@ -79,7 +79,7 @@ export type { OpenApiInfo, RouteMeta } from './openapi.js';
 
 export { buildEngine } from './compiled.js';
 export { buildHonoEngine, composeMiddleware } from './engine.js';
-export type { BunRequestLike, BunRoutes, Engine, HttpMiddleware } from './engine.js';
+export type { BunRequestLike, BunRoutes, Engine, EngineOptions, HttpMiddleware } from './engine.js';
 
 export { listen } from './listen.js';
 export type { ListenHandle, ListenOptions } from './listen.js';

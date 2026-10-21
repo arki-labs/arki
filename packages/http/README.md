@@ -397,7 +397,11 @@ Request scope is function application over the compile-time-wired
 singleton graph — no per-request container resolution, no infectious
 scopes. For code deep in a call stack you don't control, the fenced-off
 `@arki/http/context` entry exposes `requestContext()` (AsyncLocalStorage).
-It is a last resort; prefer the explicit `ctx`.
+It is a last resort; prefer the explicit `ctx`. It is also opt-in: build
+the engine with `buildEngine(bundles, { requestContext: true })` (or pass
+`requestContext: true` to `http()`), because entering the store costs
+every request. Calling `requestContext()` when engines exist but none
+opted in throws `ARKI_HTTP_E014`.
 
 ## App-wide middleware
 

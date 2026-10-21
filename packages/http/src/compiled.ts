@@ -18,8 +18,8 @@
  */
 
 import type { RouteBinding, RouteBundle } from './bundle.js';
-import type { BunRequestLike, Engine } from './engine.js';
-import { buildHonoApp, claimRoute, executeBinding } from './engine.js';
+import type { BunRequestLike, Engine, EngineOptions } from './engine.js';
+import { buildHonoApp, claimRoute, executeBinding, requestScopeOf } from './engine.js';
 import { observeHttp } from './telemetry.js';
 
 type Params = Readonly<Record<string, string>>;
@@ -146,7 +146,8 @@ function match(table: MethodTable, path: string): Hit | undefined {
  * Hono engine for the rest, one fetch in front of both. Duplicate routes
  * fail here, across both engines, with the same error as before.
  */
-export function buildEngine(bundles: readonly RouteBundle[]): Engine {
+export function buildEngine(bundles: readonly RouteBundle[], options?: EngineOptions): Engine {
+  const scope = requestScopeOf(options);
   const claimed = new Map<string, string>();
   const prefixes = bundles.flatMap(bundle => [
     ...bundle.mounts.map(mount => mount.path),
@@ -174,7 +175,7 @@ export function buildEngine(bundles: readonly RouteBundle[]): Engine {
         table = { exact: new Map(), root: trieNode() };
         tables.set(contract.method, table);
       }
-      const run: Run = (req, params) => executeBinding(bundle, binding, req, params);
+      const run: Run = (req, params) => executeBinding(bundle, binding, req, params, scope);
       insert(table, contract.path, run);
       // Bun matched the route: run it under the same request span as `fetch`.
       // A layer that forwarded a different Request has no params; route it here.
@@ -184,7 +185,7 @@ export function buildEngine(bundles: readonly RouteBundle[]): Engine {
     honoBundles.push({ ...bundle, bindings: honoBindings });
   }
 
-  const hono = buildHonoApp(honoBundles);
+  const hono = buildHonoApp(honoBundles, options);
   const dispatch = (req: Request): Response | Promise<Response> => {
     const table = tables.get(req.method);
     if (table !== undefined) {

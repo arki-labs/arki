@@ -103,6 +103,11 @@ export type HttpOptions<TBundles extends readonly BundleToken[] = readonly []> =
    * they are typed into handler contexts; middleware is not.
    */
   readonly middleware?: readonly HttpMiddleware[];
+  /**
+   * Run every request inside the ambient store so `requestContext()`
+   * (`@arki/http/context`) works. Off by default; it costs every request.
+   */
+  readonly requestContext?: boolean;
   /** Milliseconds `stop` waits for in-flight requests. Default 10 000. */
   readonly drainTimeoutMs?: number;
   /**
@@ -372,7 +377,8 @@ function bindHttp(
             }
           }
         };
-        const served = composeMiddleware(buildEngine(bundles), [tracking, ...(options.middleware ?? [])]);
+        const engine = buildEngine(bundles, { requestContext: options.requestContext === true });
+        const served = composeMiddleware(engine, [tracking, ...(options.middleware ?? [])]);
         state.served = served;
 
         const httpServer: HttpServer = {

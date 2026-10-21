@@ -28,7 +28,7 @@ describe('request identities', () => {
         },
         { id: 'raw' },
       ),
-    ]);
+    ], { requestContext: true });
 
     const response = await engine.fetch(new Request('http://test/raw'));
     expect(response.status).toBe(200);
@@ -47,7 +47,7 @@ describe('request identities', () => {
         expect(requestContext()?.requestId).toBe(ctx.requestId);
         return ctx.requestId;
       }),
-    ]);
+    ], { requestContext: true });
 
     const response = await engine.fetch(new Request('http://test/request'));
     expect(response.status).toBe(200);
@@ -73,7 +73,7 @@ describe('request identities', () => {
         context: (_req, ctx) => ({ requestId: ctx.requestId }),
         handle: (_req, ctx) => Response.json(ctx.requestId),
       }),
-    ]);
+    ], { requestContext: true });
 
     for (const path of ['/sync', '/async', '/rpc']) {
       const response = await engine.fetch(new Request(`http://test${path}`, { headers: { 'x-request-id': supplied } }));

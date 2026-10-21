@@ -248,12 +248,15 @@ describe('buildEngine', () => {
 
   it('honors inbound x-request-id and exposes the ambient request context', async () => {
     const whoami = route.get('/whoami', { id: 'whoami', output: z.object({ rid: z.string() }) });
-    const engine = buildEngine([
-      routes().bind(whoami, (_input, ctx) => {
-        expect(requestContext()?.requestId).toBe(ctx.requestId);
-        return { rid: ctx.requestId };
-      }),
-    ]);
+    const engine = buildEngine(
+      [
+        routes().bind(whoami, (_input, ctx) => {
+          expect(requestContext()?.requestId).toBe(ctx.requestId);
+          return { rid: ctx.requestId };
+        }),
+      ],
+      { requestContext: true },
+    );
     const res = await engine.fetch(new Request(`${BASE}/whoami`, { headers: { 'x-request-id': 'req-7' } }));
     expect(await res.json()).toEqual({ rid: 'req-7' });
     expect(requestContext()).toBeUndefined();
@@ -283,7 +286,7 @@ describe('buildEngine', () => {
           if (params.id === 'boom') throw new HttpError(409, HTTP_ERROR_CODES.badRequest, 'nope');
           return { id: params.id };
         }),
-    ]);
+    ], { requestContext: true });
     const send = (path: string) => engine.fetch(new Request(`${BASE}${path}`, { headers: { 'x-request-id': 'r-1' } }));
 
     it('serializes the output with the same body and content type', async () => {

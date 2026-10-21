@@ -24,7 +24,7 @@ import type { ContractLike, ErasedInput } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
 import type { Field, Job, Ran, Where, Wire } from './wire.js';
 import { isReply } from './bundle.js';
-import { runWithRequestContext } from './context.js';
+import { registerEngineContext, runWithRequestContext } from './context.js';
 import { errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
 import { HTTP_SERVER_FAILURES } from './failures.js';
 import { requestId } from './ids.js';
@@ -49,6 +49,28 @@ export type BunRoutes = Readonly<
   Record<string, Readonly<Record<string, (req: BunRequestLike) => Response | Promise<Response>>>>
 >;
 
+/** What `buildEngine` and `buildHonoEngine` take besides the bundles. */
+export type EngineOptions = {
+  /**
+   * Run every request inside the ambient store, so `requestContext()`
+   * (`@arki/http/context`) answers from anywhere in the call stack. Off by
+   * default: entering the store costs every request, and the explicit `ctx`
+   * parameter covers almost every need.
+   */
+  readonly requestContext?: boolean;
+};
+
+/** How an engine runs one request's work: inside the ambient store, or as is. */
+export type RequestScope = <T>(ctx: BaseRequestCtx, fn: () => T) => T;
+const noRequestScope: RequestScope = (_ctx, fn) => fn();
+
+/** The scope the options ask for; records with the context module whether this engine opted in. */
+export function requestScopeOf(options: EngineOptions | undefined): RequestScope {
+  const enabled = options?.requestContext === true;
+  registerEngineContext(enabled);
+  return enabled ? runWithRequestContext : noRequestScope;
+}
+
 /** A built engine: the composed fetch handler plus its route inventory. */
 export type Engine = {
   readonly fetch: (req: Request) => Promise<Response>;
@@ -63,10 +85,14 @@ export type Engine = {
 };
 
 /** The Hono app behind {@link buildHonoEngine}: its fetch without the request span, and the route ids. */
-export function buildHonoApp(bundles: readonly RouteBundle[]): {
+export function buildHonoApp(
+  bundles: readonly RouteBundle[],
+  options?: EngineOptions,
+): {
   readonly fetch: (req: Request) => Response | Promise<Response>;
   readonly routeIds: readonly string[];
 } {
+  const scope = requestScopeOf(options);
   const app = new Hono();
   const claimed = new Map<string, string>();
   const routeIds: string[] = [];
@@ -77,11 +103,11 @@ export function buildHonoApp(bundles: readonly RouteBundle[]): {
       routeIds.push(mount.id);
     }
     for (const rpc of bundle.rpcs ?? []) {
-      registerRpc(app, claimed, bundle, rpc);
+      registerRpc(app, claimed, bundle, rpc, scope);
       routeIds.push(rpc.id);
     }
     for (const binding of bundle.bindings) {
-      registerBinding(app, claimed, bundle, binding);
+      registerBinding(app, claimed, bundle, binding, scope);
       routeIds.push(binding.contract.id);
     }
   }
@@ -99,8 +125,8 @@ export function buildHonoApp(bundles: readonly RouteBundle[]): {
  * `ARKI_HTTP_E002`/`E006` on route collisions and malformed mounts —
  * callers (the `http()` plugin's `boot`) let these bubble as boot failures.
  */
-export function buildHonoEngine(bundles: readonly RouteBundle[]): Engine {
-  const { fetch, routeIds } = buildHonoApp(bundles);
+export function buildHonoEngine(bundles: readonly RouteBundle[], options?: EngineOptions): Engine {
+  const { fetch, routeIds } = buildHonoApp(bundles, options);
   return {
     fetch: req => observeHttp('http.request', () => fetch(req)),
     routeIds,
@@ -121,7 +147,13 @@ function registerMount(app: Hono, claimed: Map<string, string>, mount: MountBind
   app.mount(mount.path, mount.handler);
 }
 
-function registerRpc(app: Hono, claimed: Map<string, string>, bundle: RouteBundle, rpc: RpcBinding): void {
+function registerRpc(
+  app: Hono,
+  claimed: Map<string, string>,
+  bundle: RouteBundle,
+  rpc: RpcBinding,
+  scope: RequestScope,
+): void {
   // Rpc mounts share the mount claim namespace: an rpc prefix colliding
   // with a raw mount (or another rpc) is the same routing bug.
   const key = `MOUNT ${rpc.path}`;
@@ -138,7 +170,7 @@ function registerRpc(app: Hono, claimed: Map<string, string>, bundle: RouteBundl
   // request. oRPC/tRPC fetch adapters take the mount path as their own
   // `prefix`/`endpoint` option, and derivers/`context` read `req.url`;
   // Hono's default mount rewrite (prefix-stripped URL) breaks both.
-  app.mount(rpc.path, req => executeRpc(bundle, rpc, req), { replaceRequest: false });
+  app.mount(rpc.path, req => executeRpc(bundle, rpc, req, scope), { replaceRequest: false });
 }
 
 /** The request context; `url` is parsed on first read, so a route that never reads it never pays for it. */
@@ -173,10 +205,15 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): Promise<Response> {
+async function executeRpc(
+  bundle: RouteBundle,
+  rpc: RpcBinding,
+  req: Request,
+  scope: RequestScope,
+): Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
-  return runWithRequestContext(base, async () => {
+  return scope(base, async () => {
     try {
       let ctx: BaseRequestCtx & Record<string, unknown> = base;
       for (const deriver of rpc.derivers ?? bundle.derivers) {
@@ -217,10 +254,16 @@ export function claimRoute(claimed: Map<string, string>, contract: ContractLike)
   for (const key of keys) claimed.set(key, contract.id);
 }
 
-function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteBundle, binding: RouteBinding): void {
+function registerBinding(
+  app: Hono,
+  claimed: Map<string, string>,
+  bundle: RouteBundle,
+  binding: RouteBinding,
+  scope: RequestScope,
+): void {
   const { contract } = binding;
   claimRoute(claimed, contract);
-  app.on(contract.method, contract.path, c => executeBinding(bundle, binding, c.req.raw, c.req.param()));
+  app.on(contract.method, contract.path, c => executeBinding(bundle, binding, c.req.raw, c.req.param(), scope));
 }
 
 /**
@@ -230,20 +273,21 @@ function registerBinding(app: Hono, claimed: Map<string, string>, bundle: RouteB
  * promise, no extra microtask. Anything that needs an await goes through
  * `executeBindingAsync`. Both paths give the same responses and the same
  * error envelopes. Every engine calls this once per matched route; only
- * the match (and so `params`) is the engine's own.
+ * the match (and so `params`) and the `scope` are the engine's own.
  */
 export function executeBinding(
   bundle: RouteBundle,
   binding: RouteBinding,
   req: Request,
   params: Readonly<Record<string, string>>,
+  scope: RequestScope,
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
   if ((binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined) {
-    return runWithRequestContext(base, () => executeBindingAsync(bundle, binding, req, base, params));
+    return scope(base, () => executeBindingAsync(bundle, binding, req, base, params));
   }
-  return runWithRequestContext(base, () => {
+  return scope(base, () => {
     try {
       const response = andThen(decodeInput(binding.contract, params, base), input => respond(binding, input, base));
       return response instanceof Promise ? response.catch(toErrorResponse) : response;

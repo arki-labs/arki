@@ -70,6 +70,13 @@ export const HTTP_ERROR_CODES = {
    */
   duplicateDeriverKey: 'ARKI_HTTP_E007',
   /**
+   * `requestContext()` was called, but every engine in this process was built without `requestContext: true`.
+   *
+   * @fix Pass `{ requestContext: true }` to `buildEngine` or `buildHonoEngine` (or `requestContext: true` to `http()`), or read the explicit `ctx` instead.
+   * @verify bun run test -- src/tests/context.test.ts
+   */
+  requestContextDisabled: 'ARKI_HTTP_E014',
+  /**
    * A Dot HTTP action carries missing or incompatible projection metadata.
    *
    * @fix Build the action with the route helpers, not by hand, so its metadata is complete.
