@@ -44,14 +44,14 @@ type CodeProps = {
 /** An excerpt in a box: the file and lines it was copied from, then the lines. */
 export function Code({ excerpt, lit, caption }: Readonly<CodeProps>) {
   const figure = useRef<HTMLElement>(null);
-  const mounted = useRef(false);
   const litKey = lit === undefined ? '' : Object.keys(lit).join(',');
+  const shownKey = useRef(litKey);
   // When a stepper lights another line, keep that line in view: on a phone the code sits above the controls.
+  // Compare with the lines already shown, not "first run or not": StrictMode runs effects twice on mount, and a
+  // scroll then would pull the whole page down to this code on load.
   useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
+    if (shownKey.current === litKey) return;
+    shownKey.current = litKey;
     const line = figure.current?.querySelector('.home-ln.is-on, .home-ln.is-bad');
     if (!(line instanceof HTMLElement)) return;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
