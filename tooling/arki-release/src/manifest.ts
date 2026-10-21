@@ -291,7 +291,11 @@ function resolveBucket(
     if (isCatalogRef(version)) {
       const result = resolveCatalogRef(version, depName, ctx.catalogs);
       if ('resolved' in result) {
-        out[depName] = result.resolved;
+        // A peer pinned to the workspace's exact catalog version makes npm
+        // refuse any other patch the consumer has (react 19.3.0 vs react-dom
+        // 19.3.1 wanting ^19.3.1). Peers get a caret, as workspace peers do.
+        const exact = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(result.resolved);
+        out[depName] = bucket === 'peerDependencies' && exact ? `^${result.resolved}` : result.resolved;
       } else {
         errors.push(result.error);
       }

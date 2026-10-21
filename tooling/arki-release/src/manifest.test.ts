@@ -197,6 +197,21 @@ describe('materializeManifest — boundary cases', () => {
     expect(result.manifest.peerDependencies).toEqual({ '@arki/clock': '^0.2.1' });
   });
 
+  it('carets an exact catalog version in `peerDependencies`, keeps ranges and dependencies as they are', () => {
+    // Why: an exact peer (react 19.3.0) refuses the consumer's newer patch;
+    // npm install failed once react-dom 19.3.1 wanted react ^19.3.1.
+    const result = materializeManifest(
+      fixture({
+        dependencies: { zod: 'catalog:' },
+        peerDependencies: { react: 'catalog:react', zod: 'catalog:' },
+      }),
+      ctx({ catalogs: { default: { zod: '^4.0.0' }, named: { react: { react: '19.3.0' } } } }),
+    );
+    expect(result.errors).toHaveLength(0);
+    expect(result.manifest.peerDependencies).toEqual({ react: '^19.3.0', zod: '^4.0.0' });
+    expect(result.manifest.dependencies).toEqual({ zod: '^4.0.0' });
+  });
+
   it('also accepts workspace:^ / workspace:~ forms', () => {
     const result = materializeManifest(
       fixture({
