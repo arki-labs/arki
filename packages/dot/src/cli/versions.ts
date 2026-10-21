@@ -41,7 +41,6 @@ export const TEMPLATE_VERSIONS = {
   journal: '0.3.0',
   failure: '0.1.0',
   ui: '0.1.6',
-  'design-systems': '0.1.3',
 } as const;
 
 /** Third-party versions the templates inline through a placeholder. */

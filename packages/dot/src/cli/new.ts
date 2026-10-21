@@ -120,7 +120,6 @@ export type RunNewOptions = {
     readonly journal?: string;
     readonly failure?: string;
     readonly ui?: string;
-    readonly designSystems?: string;
   };
 };
 
@@ -266,7 +265,6 @@ export async function planOperations(opts: RunNewOptions): Promise<NewPlan | Fai
     journalVersion: opts.versions?.journal ?? TEMPLATE_VERSIONS.journal,
     failureVersion: opts.versions?.failure ?? TEMPLATE_VERSIONS.failure,
     uiVersion: opts.versions?.ui ?? TEMPLATE_VERSIONS.ui,
-    designSystemsVersion: opts.versions?.designSystems ?? TEMPLATE_VERSIONS['design-systems'],
   };
 
   const operations: FileOperation[] = [];
