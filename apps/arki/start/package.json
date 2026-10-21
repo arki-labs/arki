@@ -13,6 +13,7 @@
     "format": "prettier --check . --ignore-path ../../../.gitignore",
     "lint": "eslint",
     "preview": "bun run with-env vite preview",
+    "test": "vitest run --configLoader runner",
     "test:e2e": "bunx playwright test",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "with-env": "dotenv -e ../../../.env -e ../.env --"
@@ -75,6 +76,7 @@
     "@vitejs/plugin-react": "catalog:",
     "dotenv-cli": "catalog:env",
     "nitro": "catalog:tanstack/start",
-    "vite": "catalog:build-tools"
+    "vite": "catalog:build-tools",
+    "vitest": "catalog:"
   }
 }
