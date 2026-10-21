@@ -1,19 +1,21 @@
 import { createStore, Provider } from 'jotai';
 import { DevTools } from 'jotai-devtools';
+import { NuqsAdapter } from 'nuqs/adapters/tanstack-router';
 
 import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
 import { FullscreenProvider } from '@arki/react-fullscreen';
 import { useIsClient } from '@arki/react-hooks/is-client';
-import { AppProvider } from '@fleet/sitekit/app-context.tsx';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
 import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
 import { useTheme } from '@arki/theme';
+import { Toaster } from '@arki/ui/sonner';
 import { TooltipProvider } from '@arki/ui/tooltip';
 
-import config from '~/config';
 import { env } from './env';
 import { authClient } from './features/auth/client';
 import { DBProvider } from './lib/db/provider';
+import { ORPCReactProvider } from './lib/orpc/client';
+import { LocaleProvider } from './shared/locale-provider';
 
 const customStore = createStore();
 
@@ -40,22 +42,31 @@ const nav = [
   },
 ] satisfies NavContextType['nav'];
 
-// designSystemId: set to 'atelier', 'workbench', or 'arena' based on the app's design system
-export function Providers({ children }: { children: React.ReactNode }) {
+/**
+ * Providers only signed-in pages need: auth, the oRPC query client, translations, the workspace nav, toasts and tooltips. Mounted
+ * by the signed-in layouts (`_app`, `auth/$pathname`), not by `__root`, so public pages (docs, packages, errors,
+ * marketing) do not download them.
+ */
+export function SignedInProviders({ children }: { children: React.ReactNode }) {
   return (
-    <AppProvider appContext={config} designSystemId="atelier">
-      <ArkiAuthProvider authClient={authClient} capabilities={authClient.capabilities}>
-        <NavContextProvider nav={nav}>
-          <Provider store={customStore}>
-            <TooltipProvider>
-              <FullscreenProvider>
-                <DevToolsWrapper />
-                <DBProvider>{children}</DBProvider>
-              </FullscreenProvider>
-            </TooltipProvider>
-          </Provider>
-        </NavContextProvider>
-      </ArkiAuthProvider>
-    </AppProvider>
+    <LocaleProvider>
+      <ORPCReactProvider>
+        <NuqsAdapter>
+          <ArkiAuthProvider authClient={authClient} capabilities={authClient.capabilities}>
+            <NavContextProvider nav={nav}>
+              <Provider store={customStore}>
+                <TooltipProvider>
+                  <FullscreenProvider>
+                    <DevToolsWrapper />
+                    <DBProvider>{children}</DBProvider>
+                    <Toaster />
+                  </FullscreenProvider>
+                </TooltipProvider>
+              </Provider>
+            </NavContextProvider>
+          </ArkiAuthProvider>
+        </NuqsAdapter>
+      </ORPCReactProvider>
+    </LocaleProvider>
   );
 }

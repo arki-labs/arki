@@ -61,9 +61,9 @@ async function unreachedByTab(page: Page, limit = 60): Promise<string[]> {
 }
 
 test.describe('site acceptance', () => {
-  // WHY: a reader who cannot use a mouse must still reach every place the header offers. `/docs` is left out: its
-  // header holds only a breadcrumb naming the current page, with no link.
-  for (const path of ['/', '/packages/dot', '/packages/dot/next/docs/quickstart', '/docs/glossary']) {
+  // WHY: a reader who cannot use a mouse must still reach every place the header offers, including the site nav
+  // (Docs, Packages, Errors, Compare) at the top of every reference page.
+  for (const path of ['/', '/docs', '/errors', '/packages/dot', '/packages/dot/next/docs/quickstart', '/docs/glossary']) {
     test(`keyboard alone reaches every top-nav item on ${path}`, async ({ page }) => {
       await page.goto(path);
       expect(await topNavLinks(page).count(), 'the page has a top nav').toBeGreaterThan(0);
@@ -107,6 +107,23 @@ test.describe('site acceptance', () => {
         const box = await link.boundingBox();
         expect(box, 'nav link is on screen').not.toBeNull();
         expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
+      }
+      const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+      expect(pageWidth).toBeLessThanOrEqual(375);
+    });
+  }
+
+  // WHY: on a phone the breadcrumb hides its parent links, so a reader deep in the reference would be stuck on the
+  // page. The site nav must stay on screen at 375px and lead back to the docs and the package list.
+  for (const path of DOCS_PAGES.filter(page => /^\/(?:docs|packages|errors)(?:\/|$)/.test(page))) {
+    test(`a phone reader on ${path} can reach /docs and /packages`, async ({ page }) => {
+      await page.setViewportSize({ width: 375, height: 740 });
+      await page.goto(path);
+      for (const href of ['/docs', '/packages']) {
+        const link = topNavLinks(page).and(page.locator(`a[href="${href}"]`)).first();
+        await expect(link, `a visible header link to ${href}`).toBeVisible();
+        const box = await link.boundingBox();
+        expect((box?.x ?? 0) + (box?.width ?? 0), `the ${href} link is on screen`).toBeLessThanOrEqual(375);
       }
       const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(pageWidth).toBeLessThanOrEqual(375);

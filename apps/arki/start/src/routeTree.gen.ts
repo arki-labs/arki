@@ -11,9 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as AppRouteImport } from './routes/_app';
 import { Route as MarketingRouteImport } from './routes/_marketing';
+import { Route as AgentsRouteRouteImport } from './routes/agents/route';
+import { Route as ChangelogRouteRouteImport } from './routes/changelog/route';
+import { Route as CompareRouteRouteImport } from './routes/compare/route';
+import { Route as DocsRouteRouteImport } from './routes/docs/route';
+import { Route as ErrorsRouteRouteImport } from './routes/errors/route';
 import { Route as LlmsFullDottxtRouteImport } from './routes/llms-full[.]txt';
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt';
 import { Route as ManifestDotwebmanifestRouteImport } from './routes/manifest[.]webmanifest';
+import { Route as PackagesRouteRouteImport } from './routes/packages/route';
+import { Route as PostsRouteRouteImport } from './routes/posts/route';
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt';
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml';
 import { Route as DotwellKnownSecurityDottxtRouteImport } from './routes/[.]well-known/security[.]txt';
@@ -63,6 +70,31 @@ const MarketingRoute = MarketingRouteImport.update({
   id: '/_marketing',
   getParentRoute: () => rootRouteImport,
 } as any);
+const AgentsRouteRoute = AgentsRouteRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ChangelogRouteRoute = ChangelogRouteRouteImport.update({
+  id: '/changelog',
+  path: '/changelog',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const CompareRouteRoute = CompareRouteRouteImport.update({
+  id: '/compare',
+  path: '/compare',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const DocsRouteRoute = DocsRouteRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ErrorsRouteRoute = ErrorsRouteRouteImport.update({
+  id: '/errors',
+  path: '/errors',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const LlmsFullDottxtRoute = LlmsFullDottxtRouteImport.update({
   id: '/llms-full.txt',
   path: '/llms-full.txt',
@@ -76,6 +108,16 @@ const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
 const ManifestDotwebmanifestRoute = ManifestDotwebmanifestRouteImport.update({
   id: '/manifest.webmanifest',
   path: '/manifest.webmanifest',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PackagesRouteRoute = PackagesRouteRouteImport.update({
+  id: '/packages',
+  path: '/packages',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PostsRouteRoute = PostsRouteRouteImport.update({
+  id: '/posts',
+  path: '/posts',
   getParentRoute: () => rootRouteImport,
 } as any);
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
@@ -105,9 +147,9 @@ const AboutIndexRoute = AboutIndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any);
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
-  id: '/agents/',
-  path: '/agents/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => AgentsRouteRoute,
 } as any);
 const ApiFleetRoute = ApiFleetRouteImport.update({
   id: '/api/fleet',
@@ -130,59 +172,59 @@ const BackofficeBackofficeRoute = BackofficeBackofficeRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any);
 const ChangelogIndexRoute = ChangelogIndexRouteImport.update({
-  id: '/changelog/',
-  path: '/changelog/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => ChangelogRouteRoute,
 } as any);
 const ChangelogSlugRoute = ChangelogSlugRouteImport.update({
-  id: '/changelog/$slug',
-  path: '/changelog/$slug',
-  getParentRoute: () => rootRouteImport,
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => ChangelogRouteRoute,
 } as any);
 const ChangelogFeedDotxmlRoute = ChangelogFeedDotxmlRouteImport.update({
-  id: '/changelog/feed.xml',
-  path: '/changelog/feed.xml',
-  getParentRoute: () => rootRouteImport,
+  id: '/feed.xml',
+  path: '/feed.xml',
+  getParentRoute: () => ChangelogRouteRoute,
 } as any);
 const CompareIndexRoute = CompareIndexRouteImport.update({
-  id: '/compare/',
-  path: '/compare/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => CompareRouteRoute,
 } as any);
 const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: '/docs/',
-  path: '/docs/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const DocsDotNewRoute = DocsDotNewRouteImport.update({
-  id: '/docs/dot-new',
-  path: '/docs/dot-new',
-  getParentRoute: () => rootRouteImport,
+  id: '/dot-new',
+  path: '/dot-new',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const DocsGlossaryRoute = DocsGlossaryRouteImport.update({
-  id: '/docs/glossary',
-  path: '/docs/glossary',
-  getParentRoute: () => rootRouteImport,
+  id: '/glossary',
+  path: '/glossary',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const DocsUpgradeStoryRoute = DocsUpgradeStoryRouteImport.update({
-  id: '/docs/upgrade-story',
-  path: '/docs/upgrade-story',
-  getParentRoute: () => rootRouteImport,
+  id: '/upgrade-story',
+  path: '/upgrade-story',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const ErrorsIndexRoute = ErrorsIndexRouteImport.update({
-  id: '/errors/',
-  path: '/errors/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => ErrorsRouteRoute,
 } as any);
 const ErrorsCodeRoute = ErrorsCodeRouteImport.update({
-  id: '/errors/$code',
-  path: '/errors/$code',
-  getParentRoute: () => rootRouteImport,
+  id: '/$code',
+  path: '/$code',
+  getParentRoute: () => ErrorsRouteRoute,
 } as any);
 const ErrorsIndexDotjsonRoute = ErrorsIndexDotjsonRouteImport.update({
-  id: '/errors/index.json',
-  path: '/errors/index.json',
-  getParentRoute: () => rootRouteImport,
+  id: '/index.json',
+  path: '/index.json',
+  getParentRoute: () => ErrorsRouteRoute,
 } as any);
 const FeedbackIndexRoute = FeedbackIndexRouteImport.update({
   id: '/feedback/',
@@ -195,29 +237,29 @@ const LegalSlugRoute = LegalSlugRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any);
 const PackagesIndexRoute = PackagesIndexRouteImport.update({
-  id: '/packages/',
-  path: '/packages/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => PackagesRouteRoute,
 } as any);
 const PackagesIndexDotjsonRoute = PackagesIndexDotjsonRouteImport.update({
-  id: '/packages/index.json',
-  path: '/packages/index.json',
-  getParentRoute: () => rootRouteImport,
+  id: '/index.json',
+  path: '/index.json',
+  getParentRoute: () => PackagesRouteRoute,
 } as any);
 const PostsIndexRoute = PostsIndexRouteImport.update({
-  id: '/posts/',
-  path: '/posts/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => PostsRouteRoute,
 } as any);
 const PostsSlugRoute = PostsSlugRouteImport.update({
-  id: '/posts/$slug',
-  path: '/posts/$slug',
-  getParentRoute: () => rootRouteImport,
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => PostsRouteRoute,
 } as any);
 const PostsFeedDotxmlRoute = PostsFeedDotxmlRouteImport.update({
-  id: '/posts/feed.xml',
-  path: '/posts/feed.xml',
-  getParentRoute: () => rootRouteImport,
+  id: '/feed.xml',
+  path: '/feed.xml',
+  getParentRoute: () => PostsRouteRoute,
 } as any);
 const AppProfileIndexRoute = AppProfileIndexRouteImport.update({
   id: '/profile/',
@@ -241,24 +283,24 @@ const BackofficeBackofficeIndexRoute =
     getParentRoute: () => BackofficeBackofficeRoute,
   } as any);
 const DocsGuidesIndexRoute = DocsGuidesIndexRouteImport.update({
-  id: '/docs/guides/',
-  path: '/docs/guides/',
-  getParentRoute: () => rootRouteImport,
+  id: '/guides/',
+  path: '/guides/',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const DocsGuidesSlugRoute = DocsGuidesSlugRouteImport.update({
-  id: '/docs/guides/$slug',
-  path: '/docs/guides/$slug',
-  getParentRoute: () => rootRouteImport,
+  id: '/guides/$slug',
+  path: '/guides/$slug',
+  getParentRoute: () => DocsRouteRoute,
 } as any);
 const PackagesNameIndexRoute = PackagesNameIndexRouteImport.update({
-  id: '/packages/$name/',
-  path: '/packages/$name/',
-  getParentRoute: () => rootRouteImport,
+  id: '/$name/',
+  path: '/$name/',
+  getParentRoute: () => PackagesRouteRoute,
 } as any);
 const PackagesNameApiDotjsonRoute = PackagesNameApiDotjsonRouteImport.update({
-  id: '/packages/$name/api.json',
-  path: '/packages/$name/api.json',
-  getParentRoute: () => rootRouteImport,
+  id: '/$name/api.json',
+  path: '/$name/api.json',
+  getParentRoute: () => PackagesRouteRoute,
 } as any);
 const BackofficeBackofficeEventSourcingIndexRoute =
   BackofficeBackofficeEventSourcingIndexRouteImport.update({
@@ -274,18 +316,25 @@ const BackofficeBackofficeEventSourcingProjectionsRoute =
   } as any);
 const PackagesNameVersionIndexRoute =
   PackagesNameVersionIndexRouteImport.update({
-    id: '/packages/$name/$version/',
-    path: '/packages/$name/$version/',
-    getParentRoute: () => rootRouteImport,
+    id: '/$name/$version/',
+    path: '/$name/$version/',
+    getParentRoute: () => PackagesRouteRoute,
   } as any);
 const PackagesNameVersionSplatRoute =
   PackagesNameVersionSplatRouteImport.update({
-    id: '/packages/$name/$version/$',
-    path: '/packages/$name/$version/$',
-    getParentRoute: () => rootRouteImport,
+    id: '/$name/$version/$',
+    path: '/$name/$version/$',
+    getParentRoute: () => PackagesRouteRoute,
   } as any);
 
 export interface FileRoutesByFullPath {
+  '/agents': typeof AgentsRouteRouteWithChildren;
+  '/changelog': typeof ChangelogRouteRouteWithChildren;
+  '/compare': typeof CompareRouteRouteWithChildren;
+  '/docs': typeof DocsRouteRouteWithChildren;
+  '/errors': typeof ErrorsRouteRouteWithChildren;
+  '/packages': typeof PackagesRouteRouteWithChildren;
+  '/posts': typeof PostsRouteRouteWithChildren;
   '/': typeof MarketingIndexRoute;
   '/llms-full.txt': typeof LlmsFullDottxtRoute;
   '/llms.txt': typeof LlmsDottxtRoute;
@@ -376,6 +425,13 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
+  '/agents': typeof AgentsRouteRouteWithChildren;
+  '/changelog': typeof ChangelogRouteRouteWithChildren;
+  '/compare': typeof CompareRouteRouteWithChildren;
+  '/docs': typeof DocsRouteRouteWithChildren;
+  '/errors': typeof ErrorsRouteRouteWithChildren;
+  '/packages': typeof PackagesRouteRouteWithChildren;
+  '/posts': typeof PostsRouteRouteWithChildren;
   '/_app': typeof AppRouteWithChildren;
   '/_marketing': typeof MarketingRouteWithChildren;
   '/llms-full.txt': typeof LlmsFullDottxtRoute;
@@ -425,6 +481,13 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
+    | '/agents'
+    | '/changelog'
+    | '/compare'
+    | '/docs'
+    | '/errors'
+    | '/packages'
+    | '/posts'
     | '/'
     | '/llms-full.txt'
     | '/llms.txt'
@@ -514,6 +577,13 @@ export interface FileRouteTypes {
     | '/packages/$name/$version';
   id:
     | '__root__'
+    | '/agents'
+    | '/changelog'
+    | '/compare'
+    | '/docs'
+    | '/errors'
+    | '/packages'
+    | '/posts'
     | '/_app'
     | '/_marketing'
     | '/llms-full.txt'
@@ -562,6 +632,13 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
+  AgentsRouteRoute: typeof AgentsRouteRouteWithChildren;
+  ChangelogRouteRoute: typeof ChangelogRouteRouteWithChildren;
+  CompareRouteRoute: typeof CompareRouteRouteWithChildren;
+  DocsRouteRoute: typeof DocsRouteRouteWithChildren;
+  ErrorsRouteRoute: typeof ErrorsRouteRouteWithChildren;
+  PackagesRouteRoute: typeof PackagesRouteRouteWithChildren;
+  PostsRouteRoute: typeof PostsRouteRouteWithChildren;
   AppRoute: typeof AppRouteWithChildren;
   MarketingRoute: typeof MarketingRouteWithChildren;
   LlmsFullDottxtRoute: typeof LlmsFullDottxtRoute;
@@ -574,34 +651,11 @@ export interface RootRouteChildren {
   ApiHealthRoute: typeof ApiHealthRoute;
   AuthPathnameRoute: typeof AuthPathnameRoute;
   BackofficeBackofficeRoute: typeof BackofficeBackofficeRouteWithChildren;
-  ChangelogSlugRoute: typeof ChangelogSlugRoute;
-  ChangelogFeedDotxmlRoute: typeof ChangelogFeedDotxmlRoute;
-  DocsDotNewRoute: typeof DocsDotNewRoute;
-  DocsGlossaryRoute: typeof DocsGlossaryRoute;
-  DocsUpgradeStoryRoute: typeof DocsUpgradeStoryRoute;
-  ErrorsCodeRoute: typeof ErrorsCodeRoute;
-  ErrorsIndexDotjsonRoute: typeof ErrorsIndexDotjsonRoute;
   LegalSlugRoute: typeof LegalSlugRoute;
-  PackagesIndexDotjsonRoute: typeof PackagesIndexDotjsonRoute;
-  PostsSlugRoute: typeof PostsSlugRoute;
-  PostsFeedDotxmlRoute: typeof PostsFeedDotxmlRoute;
   AboutIndexRoute: typeof AboutIndexRoute;
-  AgentsIndexRoute: typeof AgentsIndexRoute;
-  ChangelogIndexRoute: typeof ChangelogIndexRoute;
-  CompareIndexRoute: typeof CompareIndexRoute;
-  DocsIndexRoute: typeof DocsIndexRoute;
-  ErrorsIndexRoute: typeof ErrorsIndexRoute;
   FeedbackIndexRoute: typeof FeedbackIndexRoute;
-  PackagesIndexRoute: typeof PackagesIndexRoute;
-  PostsIndexRoute: typeof PostsIndexRoute;
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
   ApiOrpcSplatRoute: typeof ApiOrpcSplatRoute;
-  DocsGuidesSlugRoute: typeof DocsGuidesSlugRoute;
-  PackagesNameApiDotjsonRoute: typeof PackagesNameApiDotjsonRoute;
-  DocsGuidesIndexRoute: typeof DocsGuidesIndexRoute;
-  PackagesNameIndexRoute: typeof PackagesNameIndexRoute;
-  PackagesNameVersionSplatRoute: typeof PackagesNameVersionSplatRoute;
-  PackagesNameVersionIndexRoute: typeof PackagesNameVersionIndexRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -618,6 +672,41 @@ declare module '@tanstack/react-router' {
       path: '';
       fullPath: '/';
       preLoaderRoute: typeof MarketingRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/agents': {
+      id: '/agents';
+      path: '/agents';
+      fullPath: '/agents';
+      preLoaderRoute: typeof AgentsRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/changelog': {
+      id: '/changelog';
+      path: '/changelog';
+      fullPath: '/changelog';
+      preLoaderRoute: typeof ChangelogRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/compare': {
+      id: '/compare';
+      path: '/compare';
+      fullPath: '/compare';
+      preLoaderRoute: typeof CompareRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/docs': {
+      id: '/docs';
+      path: '/docs';
+      fullPath: '/docs';
+      preLoaderRoute: typeof DocsRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/errors': {
+      id: '/errors';
+      path: '/errors';
+      fullPath: '/errors';
+      preLoaderRoute: typeof ErrorsRouteRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/llms-full.txt': {
@@ -639,6 +728,20 @@ declare module '@tanstack/react-router' {
       path: '/manifest.webmanifest';
       fullPath: '/manifest.webmanifest';
       preLoaderRoute: typeof ManifestDotwebmanifestRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/packages': {
+      id: '/packages';
+      path: '/packages';
+      fullPath: '/packages';
+      preLoaderRoute: typeof PackagesRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/posts': {
+      id: '/posts';
+      path: '/posts';
+      fullPath: '/posts';
+      preLoaderRoute: typeof PostsRouteRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/robots.txt': {
@@ -678,10 +781,10 @@ declare module '@tanstack/react-router' {
     };
     '/agents/': {
       id: '/agents/';
-      path: '/agents';
+      path: '/';
       fullPath: '/agents/';
       preLoaderRoute: typeof AgentsIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof AgentsRouteRoute;
     };
     '/api/fleet': {
       id: '/api/fleet';
@@ -713,80 +816,80 @@ declare module '@tanstack/react-router' {
     };
     '/changelog/': {
       id: '/changelog/';
-      path: '/changelog';
+      path: '/';
       fullPath: '/changelog/';
       preLoaderRoute: typeof ChangelogIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ChangelogRouteRoute;
     };
     '/changelog/$slug': {
       id: '/changelog/$slug';
-      path: '/changelog/$slug';
+      path: '/$slug';
       fullPath: '/changelog/$slug';
       preLoaderRoute: typeof ChangelogSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ChangelogRouteRoute;
     };
     '/changelog/feed.xml': {
       id: '/changelog/feed.xml';
-      path: '/changelog/feed.xml';
+      path: '/feed.xml';
       fullPath: '/changelog/feed.xml';
       preLoaderRoute: typeof ChangelogFeedDotxmlRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ChangelogRouteRoute;
     };
     '/compare/': {
       id: '/compare/';
-      path: '/compare';
+      path: '/';
       fullPath: '/compare/';
       preLoaderRoute: typeof CompareIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof CompareRouteRoute;
     };
     '/docs/': {
       id: '/docs/';
-      path: '/docs';
+      path: '/';
       fullPath: '/docs/';
       preLoaderRoute: typeof DocsIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/docs/dot-new': {
       id: '/docs/dot-new';
-      path: '/docs/dot-new';
+      path: '/dot-new';
       fullPath: '/docs/dot-new';
       preLoaderRoute: typeof DocsDotNewRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/docs/glossary': {
       id: '/docs/glossary';
-      path: '/docs/glossary';
+      path: '/glossary';
       fullPath: '/docs/glossary';
       preLoaderRoute: typeof DocsGlossaryRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/docs/upgrade-story': {
       id: '/docs/upgrade-story';
-      path: '/docs/upgrade-story';
+      path: '/upgrade-story';
       fullPath: '/docs/upgrade-story';
       preLoaderRoute: typeof DocsUpgradeStoryRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/errors/': {
       id: '/errors/';
-      path: '/errors';
+      path: '/';
       fullPath: '/errors/';
       preLoaderRoute: typeof ErrorsIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ErrorsRouteRoute;
     };
     '/errors/$code': {
       id: '/errors/$code';
-      path: '/errors/$code';
+      path: '/$code';
       fullPath: '/errors/$code';
       preLoaderRoute: typeof ErrorsCodeRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ErrorsRouteRoute;
     };
     '/errors/index.json': {
       id: '/errors/index.json';
-      path: '/errors/index.json';
+      path: '/index.json';
       fullPath: '/errors/index.json';
       preLoaderRoute: typeof ErrorsIndexDotjsonRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof ErrorsRouteRoute;
     };
     '/feedback/': {
       id: '/feedback/';
@@ -804,38 +907,38 @@ declare module '@tanstack/react-router' {
     };
     '/packages/': {
       id: '/packages/';
-      path: '/packages';
+      path: '/';
       fullPath: '/packages/';
       preLoaderRoute: typeof PackagesIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
     '/packages/index.json': {
       id: '/packages/index.json';
-      path: '/packages/index.json';
+      path: '/index.json';
       fullPath: '/packages/index.json';
       preLoaderRoute: typeof PackagesIndexDotjsonRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
     '/posts/': {
       id: '/posts/';
-      path: '/posts';
+      path: '/';
       fullPath: '/posts/';
       preLoaderRoute: typeof PostsIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PostsRouteRoute;
     };
     '/posts/$slug': {
       id: '/posts/$slug';
-      path: '/posts/$slug';
+      path: '/$slug';
       fullPath: '/posts/$slug';
       preLoaderRoute: typeof PostsSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PostsRouteRoute;
     };
     '/posts/feed.xml': {
       id: '/posts/feed.xml';
-      path: '/posts/feed.xml';
+      path: '/feed.xml';
       fullPath: '/posts/feed.xml';
       preLoaderRoute: typeof PostsFeedDotxmlRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PostsRouteRoute;
     };
     '/_app/profile/': {
       id: '/_app/profile/';
@@ -867,31 +970,31 @@ declare module '@tanstack/react-router' {
     };
     '/docs/guides/': {
       id: '/docs/guides/';
-      path: '/docs/guides';
+      path: '/guides';
       fullPath: '/docs/guides/';
       preLoaderRoute: typeof DocsGuidesIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/docs/guides/$slug': {
       id: '/docs/guides/$slug';
-      path: '/docs/guides/$slug';
+      path: '/guides/$slug';
       fullPath: '/docs/guides/$slug';
       preLoaderRoute: typeof DocsGuidesSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRouteRoute;
     };
     '/packages/$name/': {
       id: '/packages/$name/';
-      path: '/packages/$name';
+      path: '/$name';
       fullPath: '/packages/$name/';
       preLoaderRoute: typeof PackagesNameIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
     '/packages/$name/api.json': {
       id: '/packages/$name/api.json';
-      path: '/packages/$name/api.json';
+      path: '/$name/api.json';
       fullPath: '/packages/$name/api.json';
       preLoaderRoute: typeof PackagesNameApiDotjsonRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
     '/backoffice/_backoffice/event-sourcing/': {
       id: '/backoffice/_backoffice/event-sourcing/';
@@ -909,20 +1012,136 @@ declare module '@tanstack/react-router' {
     };
     '/packages/$name/$version/': {
       id: '/packages/$name/$version/';
-      path: '/packages/$name/$version';
+      path: '/$name/$version';
       fullPath: '/packages/$name/$version/';
       preLoaderRoute: typeof PackagesNameVersionIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
     '/packages/$name/$version/$': {
       id: '/packages/$name/$version/$';
-      path: '/packages/$name/$version/$';
+      path: '/$name/$version/$';
       fullPath: '/packages/$name/$version/$';
       preLoaderRoute: typeof PackagesNameVersionSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof PackagesRouteRoute;
     };
   }
 }
+
+interface AgentsRouteRouteChildren {
+  AgentsIndexRoute: typeof AgentsIndexRoute;
+}
+
+const AgentsRouteRouteChildren: AgentsRouteRouteChildren = {
+  AgentsIndexRoute: AgentsIndexRoute,
+};
+
+const AgentsRouteRouteWithChildren = AgentsRouteRoute._addFileChildren(
+  AgentsRouteRouteChildren,
+);
+
+interface ChangelogRouteRouteChildren {
+  ChangelogSlugRoute: typeof ChangelogSlugRoute;
+  ChangelogFeedDotxmlRoute: typeof ChangelogFeedDotxmlRoute;
+  ChangelogIndexRoute: typeof ChangelogIndexRoute;
+}
+
+const ChangelogRouteRouteChildren: ChangelogRouteRouteChildren = {
+  ChangelogSlugRoute: ChangelogSlugRoute,
+  ChangelogFeedDotxmlRoute: ChangelogFeedDotxmlRoute,
+  ChangelogIndexRoute: ChangelogIndexRoute,
+};
+
+const ChangelogRouteRouteWithChildren = ChangelogRouteRoute._addFileChildren(
+  ChangelogRouteRouteChildren,
+);
+
+interface CompareRouteRouteChildren {
+  CompareIndexRoute: typeof CompareIndexRoute;
+}
+
+const CompareRouteRouteChildren: CompareRouteRouteChildren = {
+  CompareIndexRoute: CompareIndexRoute,
+};
+
+const CompareRouteRouteWithChildren = CompareRouteRoute._addFileChildren(
+  CompareRouteRouteChildren,
+);
+
+interface DocsRouteRouteChildren {
+  DocsDotNewRoute: typeof DocsDotNewRoute;
+  DocsGlossaryRoute: typeof DocsGlossaryRoute;
+  DocsUpgradeStoryRoute: typeof DocsUpgradeStoryRoute;
+  DocsIndexRoute: typeof DocsIndexRoute;
+  DocsGuidesSlugRoute: typeof DocsGuidesSlugRoute;
+  DocsGuidesIndexRoute: typeof DocsGuidesIndexRoute;
+}
+
+const DocsRouteRouteChildren: DocsRouteRouteChildren = {
+  DocsDotNewRoute: DocsDotNewRoute,
+  DocsGlossaryRoute: DocsGlossaryRoute,
+  DocsUpgradeStoryRoute: DocsUpgradeStoryRoute,
+  DocsIndexRoute: DocsIndexRoute,
+  DocsGuidesSlugRoute: DocsGuidesSlugRoute,
+  DocsGuidesIndexRoute: DocsGuidesIndexRoute,
+};
+
+const DocsRouteRouteWithChildren = DocsRouteRoute._addFileChildren(
+  DocsRouteRouteChildren,
+);
+
+interface ErrorsRouteRouteChildren {
+  ErrorsCodeRoute: typeof ErrorsCodeRoute;
+  ErrorsIndexDotjsonRoute: typeof ErrorsIndexDotjsonRoute;
+  ErrorsIndexRoute: typeof ErrorsIndexRoute;
+}
+
+const ErrorsRouteRouteChildren: ErrorsRouteRouteChildren = {
+  ErrorsCodeRoute: ErrorsCodeRoute,
+  ErrorsIndexDotjsonRoute: ErrorsIndexDotjsonRoute,
+  ErrorsIndexRoute: ErrorsIndexRoute,
+};
+
+const ErrorsRouteRouteWithChildren = ErrorsRouteRoute._addFileChildren(
+  ErrorsRouteRouteChildren,
+);
+
+interface PackagesRouteRouteChildren {
+  PackagesIndexDotjsonRoute: typeof PackagesIndexDotjsonRoute;
+  PackagesIndexRoute: typeof PackagesIndexRoute;
+  PackagesNameApiDotjsonRoute: typeof PackagesNameApiDotjsonRoute;
+  PackagesNameIndexRoute: typeof PackagesNameIndexRoute;
+  PackagesNameVersionSplatRoute: typeof PackagesNameVersionSplatRoute;
+  PackagesNameVersionIndexRoute: typeof PackagesNameVersionIndexRoute;
+}
+
+const PackagesRouteRouteChildren: PackagesRouteRouteChildren = {
+  PackagesIndexDotjsonRoute: PackagesIndexDotjsonRoute,
+  PackagesIndexRoute: PackagesIndexRoute,
+  PackagesNameApiDotjsonRoute: PackagesNameApiDotjsonRoute,
+  PackagesNameIndexRoute: PackagesNameIndexRoute,
+  PackagesNameVersionSplatRoute: PackagesNameVersionSplatRoute,
+  PackagesNameVersionIndexRoute: PackagesNameVersionIndexRoute,
+};
+
+const PackagesRouteRouteWithChildren = PackagesRouteRoute._addFileChildren(
+  PackagesRouteRouteChildren,
+);
+
+interface PostsRouteRouteChildren {
+  PostsSlugRoute: typeof PostsSlugRoute;
+  PostsFeedDotxmlRoute: typeof PostsFeedDotxmlRoute;
+  PostsIndexRoute: typeof PostsIndexRoute;
+}
+
+const PostsRouteRouteChildren: PostsRouteRouteChildren = {
+  PostsSlugRoute: PostsSlugRoute,
+  PostsFeedDotxmlRoute: PostsFeedDotxmlRoute,
+  PostsIndexRoute: PostsIndexRoute,
+};
+
+const PostsRouteRouteWithChildren = PostsRouteRoute._addFileChildren(
+  PostsRouteRouteChildren,
+);
 
 interface AppRouteChildren {
   AppProfileIndexRoute: typeof AppProfileIndexRoute;
@@ -964,6 +1183,13 @@ const BackofficeBackofficeRouteWithChildren =
   BackofficeBackofficeRoute._addFileChildren(BackofficeBackofficeRouteChildren);
 
 const rootRouteChildren: RootRouteChildren = {
+  AgentsRouteRoute: AgentsRouteRouteWithChildren,
+  ChangelogRouteRoute: ChangelogRouteRouteWithChildren,
+  CompareRouteRoute: CompareRouteRouteWithChildren,
+  DocsRouteRoute: DocsRouteRouteWithChildren,
+  ErrorsRouteRoute: ErrorsRouteRouteWithChildren,
+  PackagesRouteRoute: PackagesRouteRouteWithChildren,
+  PostsRouteRoute: PostsRouteRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   MarketingRoute: MarketingRouteWithChildren,
   LlmsFullDottxtRoute: LlmsFullDottxtRoute,
@@ -976,34 +1202,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHealthRoute: ApiHealthRoute,
   AuthPathnameRoute: AuthPathnameRoute,
   BackofficeBackofficeRoute: BackofficeBackofficeRouteWithChildren,
-  ChangelogSlugRoute: ChangelogSlugRoute,
-  ChangelogFeedDotxmlRoute: ChangelogFeedDotxmlRoute,
-  DocsDotNewRoute: DocsDotNewRoute,
-  DocsGlossaryRoute: DocsGlossaryRoute,
-  DocsUpgradeStoryRoute: DocsUpgradeStoryRoute,
-  ErrorsCodeRoute: ErrorsCodeRoute,
-  ErrorsIndexDotjsonRoute: ErrorsIndexDotjsonRoute,
   LegalSlugRoute: LegalSlugRoute,
-  PackagesIndexDotjsonRoute: PackagesIndexDotjsonRoute,
-  PostsSlugRoute: PostsSlugRoute,
-  PostsFeedDotxmlRoute: PostsFeedDotxmlRoute,
   AboutIndexRoute: AboutIndexRoute,
-  AgentsIndexRoute: AgentsIndexRoute,
-  ChangelogIndexRoute: ChangelogIndexRoute,
-  CompareIndexRoute: CompareIndexRoute,
-  DocsIndexRoute: DocsIndexRoute,
-  ErrorsIndexRoute: ErrorsIndexRoute,
   FeedbackIndexRoute: FeedbackIndexRoute,
-  PackagesIndexRoute: PackagesIndexRoute,
-  PostsIndexRoute: PostsIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiOrpcSplatRoute: ApiOrpcSplatRoute,
-  DocsGuidesSlugRoute: DocsGuidesSlugRoute,
-  PackagesNameApiDotjsonRoute: PackagesNameApiDotjsonRoute,
-  DocsGuidesIndexRoute: DocsGuidesIndexRoute,
-  PackagesNameIndexRoute: PackagesNameIndexRoute,
-  PackagesNameVersionSplatRoute: PackagesNameVersionSplatRoute,
-  PackagesNameVersionIndexRoute: PackagesNameVersionIndexRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

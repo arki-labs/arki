@@ -4,11 +4,9 @@ import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scri
 
 import { DevTools } from '@fleet/sitekit/devtools';
 import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/theme/script';
-import { Toaster } from '@arki/ui/sonner';
 
 import { getLocale } from '../paraglide/runtime.js';
 import { RootProvider } from '../root-provider';
-import { prefetchSessionFn } from '../features/auth/prefetch-session';
 import appCss from '../styles/global.css?url';
 
 function FunctionOnce<T = unknown>({
@@ -51,16 +49,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: 'manifest', href: '/site.webmanifest' },
     ],
   }),
-  // Populate the better-auth session in the QueryClient before any component
-  // renders. On initial SSR the cache is empty and we fetch directly via the
-  // server function. On client navigations the dehydrated cache already
-  // contains the session — the guard short-circuits and useSession()'s own
-  // refresh logic takes over.
-  beforeLoad: async ({ context }) => {
-    if (context.queryClient.getQueryData(['session']) !== undefined) return;
-    const session = await prefetchSessionFn();
-    context.queryClient.setQueryData(['session'], session);
-  },
   component: RootComponent,
   notFoundComponent: DefaultNotFound,
 });
@@ -70,9 +58,8 @@ function RootComponent() {
 
   return (
     <RootDocument lang={lang}>
-      <RootProvider locale={lang}>
+      <RootProvider>
         <Outlet />
-        <Toaster />
       </RootProvider>
     </RootDocument>
   );

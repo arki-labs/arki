@@ -2,12 +2,14 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 
-import { authClient } from '~/features/auth/client';
 import { getDefaultMeta } from '~/shared-metadata';
 
 export const Route = createFileRoute('/_app/profile/')({
   head: () => getDefaultMeta({ title: 'Profile' }),
   beforeLoad: async () => {
+    // Imported on demand: `beforeLoad` stays in the main bundle, and a static import would ship the auth client to
+    // every public page.
+    const { authClient } = await import('~/features/auth/client');
     const session = await authClient.getSession();
     if (!session.data?.user) {
       throw redirect({ href: '/auth/sign-in' });

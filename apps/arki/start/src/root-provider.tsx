@@ -1,26 +1,24 @@
-import { NuqsAdapter } from 'nuqs/adapters/tanstack-router';
-
-import { AppLocaleProvider } from '@arki/intl/tanstack-start';
 import { ThemeProvider } from '@arki/theme';
+import { AppProvider } from '@fleet/sitekit/app-context.tsx';
 
-import { Providers } from './providers';
-import { ORPCReactProvider } from './lib/orpc/client';
+import config from '~/config';
 
 interface RootProviderProps {
-  locale: string;
   children: React.ReactNode;
 }
 
-export function RootProvider({ locale, children }: RootProviderProps) {
+/**
+ * Providers every page uses, public pages included. Keep this list short: everything here ships in the JavaScript of
+ * every docs page. What only signed-in pages need (auth, oRPC, toasts, tooltips) lives in `SignedInProviders`;
+ * translations live in `LocaleProvider`, mounted only by the pages that read them.
+ */
+// designSystemId: set to 'atelier', 'workbench', or 'arena' based on the app's design system
+export function RootProvider({ children }: RootProviderProps) {
   return (
-    <AppLocaleProvider locale={locale}>
-      <ORPCReactProvider>
-        <ThemeProvider attribute="class" defaultTheme="system" enableColorScheme enableSystem>
-          <NuqsAdapter>
-            <Providers>{children}</Providers>
-          </NuqsAdapter>
-        </ThemeProvider>
-      </ORPCReactProvider>
-    </AppLocaleProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableColorScheme enableSystem>
+      <AppProvider appContext={config} designSystemId="atelier">
+        {children}
+      </AppProvider>
+    </ThemeProvider>
   );
 }

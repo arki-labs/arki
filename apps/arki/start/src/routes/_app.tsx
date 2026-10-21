@@ -2,16 +2,22 @@ import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
 
 import { WorkspaceLayout } from '@fleet/sitekit/layout/workspace/layout.tsx';
 
+import { ensureSession } from '~/features/auth/prefetch-session';
+import { SignedInProviders } from '~/providers';
+
 export const Route = createFileRoute('/_app')({
+  beforeLoad: ({ context }) => ensureSession(context.queryClient),
   component: AppLayout,
   notFoundComponent: AppNotFoundContent,
 });
 
 function AppLayout() {
   return (
-    <WorkspaceLayout>
-      <Outlet />
-    </WorkspaceLayout>
+    <SignedInProviders>
+      <WorkspaceLayout>
+        <Outlet />
+      </WorkspaceLayout>
+    </SignedInProviders>
   );
 }
 
