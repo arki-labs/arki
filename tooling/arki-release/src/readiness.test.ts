@@ -62,6 +62,19 @@ describe('evaluateReadiness', () => {
     expect(r.dimension.status).toBe('fail');
   });
 
+  it('accepts a subpath-only package when every code subpath declares types', () => {
+    // Why: @arki/ui has no root export by design; asset entries (css,
+    // package.json) are strings, and one untyped code entry must still fail.
+    const typed = makePackage((p) => {
+      p.exports = { './cn': { types: './dist/cn.d.ts', import: './src/cn.ts' }, './styles.css': './src/styles.css', './package.json': './package.json' };
+    });
+    expect(status(evaluateReadiness({ config, dir: typed }), 'types')).toBe('pass');
+    const untyped = makePackage((p) => {
+      p.exports = { './cn': { types: './dist/cn.d.ts', import: './src/cn.ts' }, './button': { import: './src/button.tsx' } };
+    });
+    expect(status(evaluateReadiness({ config, dir: untyped }), 'types')).toBe('fail');
+  });
+
   it('passes every disk item for a complete package and reports external items as missing', () => {
     // Why: a package must not look ready on evidence another module never produced.
     const r = evaluateReadiness({ config, dir: makePackage() });

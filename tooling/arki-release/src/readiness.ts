@@ -205,8 +205,13 @@ function hasTypes(manifest: Manifest): boolean {
   if (manifest.types) return true;
   const root = manifest.exports;
   if (typeof root !== 'object' || root === null) return false;
-  const dot = (root as Record<string, unknown>)['.'];
-  return typeof dot === 'object' && dot !== null && 'types' in dot;
+  const entries = root as Record<string, unknown>;
+  const dot = entries['.'];
+  if (dot !== undefined) return typeof dot === 'object' && dot !== null && 'types' in dot;
+  // Subpath-only packages (@arki/ui): every code entry must declare types.
+  // String entries are assets such as ./package.json or a stylesheet.
+  const code = Object.values(entries).filter((value): value is object => typeof value === 'object' && value !== null);
+  return code.length > 0 && code.every(value => 'types' in value);
 }
 
 function shipsDistAndDocs(files: readonly string[] | undefined): Check {
