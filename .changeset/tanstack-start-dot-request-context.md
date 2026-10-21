@@ -1,5 +1,4 @@
 ---
-'@arki/tanstack-start': minor
 '@arki/dot': patch
 ---
 
