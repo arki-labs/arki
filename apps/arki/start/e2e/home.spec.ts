@@ -402,7 +402,7 @@ test.describe('/ build path', () => {
     // WHY: selecting and copying code must give the exact source lines, buttons and colours included.
     test('copying a code block gives the excerpt text', async ({ page }) => {
       await page.goto('/');
-      const copied = await page.locator('#step-define pre').evaluate(pre => {
+      const copied = await page.locator('#step-define .home-code').nth(1).locator('pre').evaluate(pre => {
         const range = document.createRange();
         range.selectNodeContents(pre);
         const selection = getSelection();
@@ -410,7 +410,10 @@ test.describe('/ build path', () => {
         selection?.addRange(range);
         return selection?.toString() ?? '';
       });
-      expect(copied.trimEnd()).toBe(linesOf(DEFINE_APP).join('\n'));
+      // The gap between the chain's start and its end is drawn, and copied, as one blank line (a lone space in the
+      // markup, which the browser copies as a no-break space; both trim away).
+      const lines = copied.split('\n').map(line => line.trimEnd());
+      expect(lines.join('\n').trimEnd()).toBe(DEFINE_APP.parts.map(part => part.lines.join('\n')).join('\n\n'));
     });
   });
 

@@ -531,6 +531,33 @@
 .home-callout .home-code {
   border: 0;
 }
+.home-chain-key {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--home-line);
+}
+.home-chain-key > div {
+  display: grid;
+  grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 8px 12px;
+}
+.home-chain-key > div + div {
+  border-top: 1px dashed var(--home-line);
+}
+.home-chain-key dt {
+  font: 12.5px/1.5 var(--font-mono);
+}
+.home-chain-key dd {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+@media (max-width: 479px) {
+  .home-chain-key > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .home-callout .home-code + .home-code {
   margin-top: 0;
   border-top: 1px solid var(--home-line);

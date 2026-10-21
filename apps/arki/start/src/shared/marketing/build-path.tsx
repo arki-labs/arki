@@ -4,6 +4,7 @@ import type { BuildStep, Excerpt } from './build-steps';
 import {
   DEFINE_APP,
   DEFINE_STEP,
+  DEFINE_UNIT,
   EXPLAIN_COMMAND,
   EXPLAIN_GRAPH_OUTPUT,
   FEATURE_NEEDS,
@@ -17,7 +18,7 @@ import {
   START_IN_TEST,
   WIRE_STEP,
 } from './build-steps';
-import { Code } from './code';
+import { Code, HighlightedText } from './code';
 import { WireSheet } from './drawing-sheet';
 import { JournalChapter } from './journal-chapter';
 
@@ -58,6 +59,13 @@ function Callout({ step, children }: Readonly<CalloutProps>) {
   );
 }
 
+/** The three calls of avocabo's chain, in plain words: what each kind of unit is for. */
+const CHAIN_KEY = [
+  { call: '.infra(…)', meaning: 'What the app runs on: Postgres, a cache, mail, sign-in, locks.' },
+  { call: '.features(…)', meaning: 'What the app does: its features, and the RPC gateway in front of them.' },
+  { call: '.entrypoints(…)', meaning: 'How the world gets in: the web server and the cron clock.' },
+] as const;
+
 function Excerpts({ excerpts }: Readonly<{ excerpts: readonly Excerpt[] }>) {
   return excerpts.map((excerpt, index) => <Code key={index} excerpt={excerpt} />);
 }
@@ -68,10 +76,23 @@ export function BuildPath() {
     <div className="home-steps">
       <Step step={DEFINE_STEP} index={0}>
         <p className="home-step-text">
-          Importing this file opens nothing. Infra, features and entrypoints are listed in boot order.
+          A Dot app is a list of units. Each unit says what it provides and how it shuts down. <code>start()</code>{' '}
+          boots the list top to bottom; <code>dispose()</code> closes it bottom to top. If a unit is not in the chain, it
+          does not run.
         </p>
         <Callout step={DEFINE_STEP}>
+          <Code excerpt={DEFINE_UNIT} />
           <Code excerpt={DEFINE_APP} />
+          <dl className="home-chain-key">
+            {CHAIN_KEY.map(row => (
+              <div key={row.call}>
+                <dt>
+                  <HighlightedText text={row.call} />
+                </dt>
+                <dd>{row.meaning}</dd>
+              </div>
+            ))}
+          </dl>
         </Callout>
       </Step>
 

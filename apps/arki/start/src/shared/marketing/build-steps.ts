@@ -49,12 +49,53 @@ export function excerptCaption({ note, parts }: Excerpt): string {
 }
 
 const APP_FILE = 'apps/avocabo/backend/src/app.ts';
+const DOT_README = 'packages/dot/README.md';
 const QUICKSTART_FILE = 'packages/dot/docs/quickstart.md';
 const WAITLIST = 'apps/avocabo/backend/src/features/waitlist';
 const README_FILE = 'packages/journal/README.md';
 const REFUND_WORKFLOW_FILE = 'packages/payments/src/refunds/workflow.ts';
 
+/** The whole idea in one runnable file: a unit, the chain that starts it, and the shutdown. */
+export const DEFINE_UNIT = {
+  note: 'the quick start, runnable',
+  parts: [
+    {
+      id: 'unit',
+      path: DOT_README,
+      from: 41,
+      lines: [
+        'const database = infra({',
+        "  name: 'database',",
+        '  provides: {',
+        '    db: () => openDb(process.env.DATABASE_URL), // ← one factory per key; may be async',
+        '  },',
+        '  async dispose({ db }) {',
+        '    await db.close();',
+        '  },',
+        '});',
+      ],
+    },
+    {
+      id: 'start',
+      path: DOT_README,
+      from: 72,
+      lines: [
+        "const app = await defineApp('acme')",
+        '  .infra(database, stripe) // providers before consumers — enforced at compile time',
+        '  .start();',
+      ],
+    },
+    {
+      id: 'stop',
+      path: DOT_README,
+      from: 81,
+      lines: ['await app.stop();', 'await app.dispose();'],
+    },
+  ],
+} as const satisfies Excerpt;
+
 export const DEFINE_APP = {
+  note: 'a real app',
   parts: [
     {
       id: 'app',
@@ -65,8 +106,11 @@ export const DEFINE_APP = {
         '  .infra(database, cache, appMail, emailClient, authn, locking)',
         '  .features([...features, gateway])',
         '  .entrypoints(',
+        '    hostClock,',
+        '    tanstackStart({',
       ],
     },
+    { id: 'end', path: APP_FILE, from: 61, lines: ['    }),', '  );'] },
   ],
 } as const satisfies Excerpt;
 
@@ -304,6 +348,7 @@ export const START_IN_TEST = {
 
 /** Every excerpt on the page, for the test that opens the files. */
 export const ALL_EXCERPTS = [
+  DEFINE_UNIT,
   DEFINE_APP,
   WIRE_MISTAKE,
   WIRE_FIX,
@@ -338,9 +383,9 @@ const STEP_LIST = [
     id: 'define',
     number: 'F1',
     verb: 'Define',
-    kicker: 'the app is a chain',
-    title: 'The app is the chain. Nothing is auto-loaded.',
-    excerpts: [DEFINE_APP],
+    kicker: 'what a Dot app is',
+    title: 'Read one chain. That is the whole app.',
+    excerpts: [DEFINE_UNIT, DEFINE_APP],
   },
   {
     id: 'wire',
