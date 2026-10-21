@@ -360,11 +360,19 @@ type Verdict =
     }
   | { readonly kind: 'undone'; readonly result: unknown }
   | { readonly kind: 'children'; readonly plan: ChildrenPlan }
-  | { readonly kind: 'failed'; readonly reason: unknown; readonly retryable: boolean };
+  | {
+      readonly kind: 'failed';
+      /** What the step's error stores: a throw as its `UnexpectedDefect`. */
+      readonly reason: unknown;
+      /** What the retry judges: the error the step threw, as is, or the failure it returned. */
+      readonly retryReason: unknown;
+      readonly retryable: boolean;
+    };
 
 const failed = (reason: unknown, retryable = true): Verdict => ({
   kind: 'failed',
   reason: isFailure(reason) || isJournalError(reason) ? reason : callbackDefect(reason),
+  retryReason: reason,
   retryable,
 });
 
@@ -2699,7 +2707,7 @@ export function createWorkflows<
       }
       const error = reasonText(verdict.reason);
       const policy = (node.kind === 'step' ? node.options.retry : undefined) ?? defaultEffectRetry;
-      const wait = verdict.retryable ? policy.delay(data.attempt, verdict.reason) : undefined;
+      const wait = verdict.retryable ? policy.delay(data.attempt, verdict.retryReason) : undefined;
       if (wait !== undefined) {
         const checkpointed = await ctx.run(
           checkpoint,

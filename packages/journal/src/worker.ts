@@ -45,8 +45,10 @@ import { effectOverrides, keepFor, keepUntil, resolveRetention } from './retenti
 import { assertRootDb } from './storage.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
-/** The retry of an effect whose schedule sets none: 7 retries (8 tries), doubling from 1 s to at most 5 minutes. */
-/** The retry of an effect that sets none: 7 retries doubling from 1 s to at most 5 minutes. A workflow step uses it too. */
+/**
+ * The retry of an effect or a workflow step that sets none: 7 retries (8 tries), doubling from 1 s to at most
+ * 5 minutes. It retries a throw; a returned failure is final.
+ */
 export const defaultEffectRetry = backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7);
 const DEFAULT_POLL_MS = 1000;
 
@@ -211,13 +213,16 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     };
   };
 
-  /** An effect row: load its event, run the effect inside the effect hooks. Resolves with what the handler returned. */
+  /**
+   * An effect row: load its event, run the effect inside the effect hooks. Resolves with what the handler returned,
+   * a throw as its `UnexpectedDefect`, and with what the retry judges: the error thrown, as is, or the value returned.
+   */
   const runEffect = async (
     db: AppDb & RootDb,
     job: JobRow,
     effect: Effect<SchemaOutput<Meta>, AppDb, Run> | undefined,
     signal: AbortSignal,
-  ): Promise<unknown> => {
+  ): Promise<{ readonly outcome: unknown; readonly retryReason: unknown }> => {
     // The check constraint sets both on every effect row; this narrows them once.
     if (job.effect === null || job.eventSeq === null)
       throw new Error(`journal: effect job ${job.id} has no effect or event`);
@@ -229,9 +234,16 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
       eventRow.entityId,
     );
-    if (isFailure(event)) return event;
+    if (isFailure(event)) return { outcome: event, retryReason: event };
+    // The last throw of this run and the defect made of it, so the retry judges the error itself.
+    let caught: { readonly defect: unknown; readonly cause: unknown } | undefined;
+    const onThrow = (cause: unknown) => {
+      const defect = callbackDefect(cause);
+      caught = { defect, cause };
+      return defect;
+    };
     // Inside the lease: a hook that throws fails the job like a handler failure.
-    return await attempt(
+    const outcome = await attempt(
       () =>
         deps.hooks.run({ name: effect.name, event, jobId: job.id, attempt: job.attempts }, () => {
           const { run, accept, settle } = deps.attemptOn(db, event, effect.name, {
@@ -241,12 +253,13 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
           return settle(
             attempt(
               () => effect.run(event, { jobId: job.id, attempt: job.attempts, signal, db, run, accept }),
-              callbackDefect,
+              onThrow,
             ),
           );
         }),
-      callbackDefect,
+      onThrow,
     );
+    return { outcome, retryReason: caught !== undefined && outcome === caught.defect ? caught.cause : outcome };
   };
 
   /** The per-job retention override: a queue job's comes from its runner, an effect's from its schedule. */
@@ -302,13 +315,14 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     const effect = job.effect === null ? undefined : effectsByName.get(job.effect);
     const lost = new AbortController();
     const stopRenewing = renewWhile(db, job, leaseSeconds, lost);
-    // A failed try: the error the job threw, or the failure its effect returned.
-    const recordFailure = async (reason: unknown): Promise<void> => {
+    // A failed try: the error the job threw, or the failure its effect returned. `retryReason` is what the retry
+    // judges: for a throw the effect's own error, while `reason` is what `lastError` stores.
+    const recordFailure = async (reason: unknown, retryReason: unknown): Promise<void> => {
       // `attempts` counts the tries so far, which is the number of the retry that would come next.
       const delayMs =
         job.kind === 'queue'
           ? runner?.retryDelay(scheduledJob(job), reason)
-          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, reason);
+          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, retryReason);
       const dead = delayMs === undefined;
       // The attempt closes only if the job update matched: a stale worker's lease token matches nothing, so it finishes nothing.
       await db.transaction(async tx => {
@@ -354,23 +368,25 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     try {
       const ownSignal = AbortSignal.any([signal, lost.signal]);
       let outcome: unknown;
+      let retryReason: unknown;
       if (job.kind === 'queue') {
         if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
         outcome = await runner.run(scheduledJob(job), { db, signal: ownSignal });
-      } else outcome = await runEffect(db, job, effect, ownSignal);
+        retryReason = outcome;
+      } else ({ outcome, retryReason } = await runEffect(db, job, effect, ownSignal));
       if (signal.aborted && isFailure(outcome)) {
         await releaseInterrupted();
         return;
       }
       if (isFailure(outcome)) {
-        await recordFailure(outcome);
+        await recordFailure(outcome, retryReason);
         return;
       }
       await ack(db, job, runner);
       debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
     } catch (error) {
       if (signal.aborted) await releaseInterrupted();
-      else await recordFailure(error);
+      else await recordFailure(error, error);
     } finally {
       stopRenewing();
     }

@@ -53,7 +53,7 @@ let onPaid: (jobId: string) => Promise<void> | void = () => {
 };
 const mail = j
   .effect('order-mail', order, { OrderPaid: (_e, ctx) => onPaid(ctx.jobId) })
-  .withSchedule({ retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason)) });
+  .withSchedule({ retry: backoff.constant(1000) });
 const withJobs = j.compose({ effects: [mail] });
 
 const placeAndPay = async () => {

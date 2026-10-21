@@ -995,7 +995,7 @@ describe('a refusal the effect accepts', () => {
     await effectClient.close();
   });
 
-  it('an accepted refusal ends done; an unaccepted refusal or callback misuse dies after one try', async () => {
+  it('an accepted refusal ends done; an unaccepted refusal dies after one try; callback misuse is a throw, retried', async () => {
     const id = orderId(++next);
     orThrow(await relays.run(effectDb, placeOrder, { orderId: id }, meta));
     orThrow(await relays.write(effectDb, order, id, { meta, events: () => [OrderNoted({ note: 'relay' })] }));
@@ -1005,11 +1005,11 @@ describe('a refusal the effect accepts', () => {
     const { jobs: accepted } = await relays.jobs(effectDb, { effect: 'relay-accepts' });
     expect(accepted, 'the accepting job is done').toEqual([]);
     const { jobs: dead } = await relays.jobs(effectDb, { status: 'dead' });
-    expect(dead.map(job => job.effect).toSorted()).toEqual(['relay-forgets', 'relay-misuses']);
+    expect(dead.map(job => job.effect)).toEqual(['relay-forgets']);
     expect(dead[0]?.attempts).toBe(1);
-    const { jobs: retrying } = await relays.jobs(effectDb, { effect: 'relay-misuses', status: 'dead' });
-    expect(retrying, 'runtime callback misuse is a fatal defect by default').toMatchObject([
-      { attempts: 1, state: 'dead' },
+    const { jobs: retrying } = await relays.jobs(effectDb, { effect: 'relay-misuses' });
+    expect(retrying, 'runtime callback misuse throws, and the default policy retries a throw').toMatchObject([
+      { attempts: 1, state: 'delayed' },
     ]);
     expect(retrying[0]?.lastError).toContain(UnexpectedDefect.code);
     expect(

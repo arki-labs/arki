@@ -24,17 +24,12 @@ const handlers = {
     if (failWith !== undefined) throw failWith;
   },
 };
-const slow = j.effect('slow-retry', order, handlers).withSchedule({
-  retry: backoff
-    .constant(60_000)
-    .upTo(1)
-    .while(reason => UnexpectedDefect.is(reason)),
-});
+// A declared retry without `while` retries every throw.
+const slow = j.effect('slow-retry', order, handlers).withSchedule({ retry: backoff.constant(60_000).upTo(1) });
+// The predicate sees the error the handler threw, not the defect the journal records for it.
 const picky = j
   .effect('picky-retry', order, handlers)
-  .withSchedule({
-    retry: backoff.constant(1000).while(reason => UnexpectedDefect.is(reason) && !(reason.cause instanceof BadInput)),
-  });
+  .withSchedule({ retry: backoff.constant(1000).while(reason => !(reason instanceof BadInput)) });
 
 const slowJournal = j.compose({ effects: [slow] });
 const pickyJournal = j.compose({ effects: [picky] });
@@ -53,7 +48,7 @@ const charging = {
     return returnWith;
   },
 };
-// The default retry does not replay callback defects.
+// No `retry`: the default policy retries a throw, and a returned failure is final.
 const charge = j.effect('charge-default-retry', order, charging);
 const patient = j.effect('charge-timeout-retry', order, charging).withSchedule({
   retry: backoff
@@ -175,14 +170,20 @@ describe('an effect that returns a failure', () => {
     expect(await jobById(declined.id)).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
   });
 
-  it('an unexpected thrown callback defect is fatal by default', async () => {
+  it('a throw is retried by the default policy, so a network blip heals by itself', async () => {
     const job = await payOnce(chargeJournal);
     await drainReturning(chargeJournal, new Error('gateway down'));
     expect(await jobById(job.id)).toMatchObject({
       attempts: 1,
-      deadAt: expect.any(Date),
+      deadAt: null,
       lastError: expect.stringContaining(UnexpectedDefect.code),
     });
+    await db
+      .update(tables.jobs)
+      .set({ availableAt: new Date(0) })
+      .where(eq(tables.jobs.id, job.id));
+    await drainReturning(chargeJournal, { charged: true });
+    expect(await jobById(job.id)).toBeUndefined();
   });
 
   it('a plain result still acknowledges the job', async () => {

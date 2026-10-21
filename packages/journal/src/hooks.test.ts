@@ -171,23 +171,23 @@ describe('effect hooks', () => {
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(ran).toEqual([]);
     const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'hooked-mail'));
+    // A hook that throws is a throw like the handler's: the default policy retries the job.
     expect(job).toMatchObject({
       attempts: 1,
-      deadAt: expect.any(Date),
+      deadAt: null,
       lastError: expect.stringContaining(UnexpectedDefect.code),
     });
     expect(job?.lastError).not.toContain('circuit open');
     expect(seen).toEqual([{ name: 'hooked-mail', jobId: job?.id, attempt: 1, type: 'OrderPaid' }]);
 
     refuse = false;
-    orThrow(await journal.retry(db, job?.id ?? '', { actor: 'hook-test' }));
     await db
       .update(tables.jobs)
       .set({ availableAt: new Date(0) })
       .where(eq(tables.jobs.id, job?.id ?? ''));
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(ran).toEqual([id]);
-    expect(seen[1]).toMatchObject({ attempt: 1 });
+    expect(seen[1]).toMatchObject({ attempt: 2 });
     expect(() => journal.hooks.effect.around(async (_ctx, next) => next())).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );

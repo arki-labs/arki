@@ -9,7 +9,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { findCause, orThrow, UnexpectedDefect } from '@arki/failure';
+import { findCause, orThrow } from '@arki/failure';
 
 import { isJournalError, JournalError } from './errors.js';
 import { backoff } from './index.js';
@@ -54,10 +54,7 @@ const counting = j
     },
   })
   .withSchedule({
-    retry: backoff
-      .constant(0)
-      .upTo(2)
-      .while(reason => UnexpectedDefect.is(reason)),
+    retry: backoff.constant(0).upTo(2),
   });
 const countingJournal = j.compose({ effects: [counting] });
 

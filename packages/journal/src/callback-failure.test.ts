@@ -82,7 +82,7 @@ describe('owned hook defects', () => {
     expect(await db.select().from(tables.receipts).where(eq(tables.receipts.key, 'hook:defect'))).toEqual([]);
   });
 
-  it('an effect hook failure after the body is dead once and never acknowledges success', async () => {
+  it('an effect hook failure after the body is retried by the default policy and never acknowledges success', async () => {
     let calls = 0;
     const effect = j.effect('hook.defect.effect', order, {
       OrderPlaced: () => {
@@ -103,14 +103,15 @@ describe('owned hook defects', () => {
     expect(await hooked.drain(db).then(result => orThrow(result))).toBe(0);
     expect(calls).toBe(1);
     const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, effect.name));
-    expect(job).toMatchObject({ attempts: 1, deadAt: expect.any(Date) });
+    // A throw is retried by the default policy: the job waits for its next try, it is not acknowledged.
+    expect(job).toMatchObject({ attempts: 1, deadAt: null });
     expect(JSON.parse(job?.lastError ?? 'null')).toMatchObject({ code: UnexpectedDefect.code });
     expect(job?.lastError).not.toContain('private effect hook detail');
     const attempts = await db
       .select()
       .from(tables.jobAttempts)
       .where(eq(tables.jobAttempts.jobId, job?.id ?? ''));
-    expect(attempts.map(attempt => attempt.outcome)).toEqual(['dead']);
+    expect(attempts.map(attempt => attempt.outcome)).toEqual(['retry']);
     const archive = await db
       .select()
       .from(tables.jobArchive)
@@ -202,6 +203,77 @@ it('a durable step retries only the explicitly selected returned failure with it
   expect(reasons[0]).toBe(refusal);
   const [row] = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
   expect(row).toMatchObject({ state: 'completed', output: 'done' });
+});
+
+// WHY: a step's retry rule names the faults worth another try, such as a provider's rate limit. If the rule saw the
+// defect the journal records instead of the error the body threw, every rule would have to dig the error out first.
+describe('a step retry rule judges what the step body did', () => {
+  class Transient extends Error {}
+
+  it("a step's retry predicate sees the error its body threw, so it can retry a transient fault without unwrapping", async () => {
+    const init = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+    const thrown = new Transient('rate limited');
+    const reasons: unknown[] = [];
+    let calls = 0;
+    const flow = init
+      .workflow('failure.thrown.retry', { version: 1, input: z.object({}) })
+      .step(
+        'work',
+        () => {
+          calls += 1;
+          if (calls === 1) throw thrown;
+          return 'done';
+        },
+        {
+          retry: backoff
+            .constant(0)
+            .upTo(1)
+            .while(reason => {
+              reasons.push(reason);
+              return reason instanceof Transient;
+            }),
+        },
+      )
+      .finish();
+    const running = init.compose({ workflows: [flow], workflowMeta: meta });
+    const id = 'failure_thrown_retry';
+    orThrow(await running.run(db, flow.start, { input: {}, id }, meta));
+    for (let n = 0; n < 10; n++) if ((await running.drain(db).then(result => orThrow(result))) === 0) break;
+    expect(reasons).toEqual([thrown]);
+    expect(calls).toBe(2);
+    const [row] = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
+    expect(row).toMatchObject({ state: 'completed', output: 'done' });
+  });
+
+  it('a returned Failure is still not retried', async () => {
+    const init = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+    const Declined = defineFailure('test.workflow.declined');
+    let calls = 0;
+    const flow = init
+      .workflow('failure.returned.no_retry', { version: 1, input: z.object({}) })
+      .step(
+        'work',
+        () => {
+          calls += 1;
+          return Declined();
+        },
+        // A rule without `while` retries throws only: a returned failure is the step's answer, and a retry repeats it.
+        { retry: backoff.constant(0).upTo(3) },
+      )
+      .finish();
+    const running = init.compose({ workflows: [flow], workflowMeta: meta });
+    const id = 'failure_returned_no_retry';
+    orThrow(await running.run(db, flow.start, { input: {}, id }, meta));
+    for (let n = 0; n < 10; n++) if ((await running.drain(db).then(result => orThrow(result))) === 0) break;
+    expect(calls).toBe(1);
+    const [step] = await db.select().from(tables.workflowSteps).where(eq(tables.workflowSteps.runId, id));
+    expect(step).toMatchObject({
+      path: 'work',
+      status: 'failed',
+      attempt: 1,
+      error: expect.stringContaining(Declined.code),
+    });
+  });
 });
 
 it('runtime metadata invariants are typed before any handler or transaction work', async () => {

@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { j, tables } from '../test-support.js';
@@ -74,7 +74,7 @@ const three = j
         throw new Error('undo b failed once');
       }
     },
-    retry: backoff.constant(0).upTo(2).while(reason => UnexpectedDefect.is(reason)),
+    retry: backoff.constant(0).upTo(2),
   })
   .step('c', () => 'c', { undo: () => void log.push('undo c') })
   .waitFor('confirm', { signal: SIGNAL, schema: Confirmed })
@@ -99,10 +99,7 @@ const declining = j
   .workflow('test.declining', { version: 1, input: z.object({}) })
   .step('charge', () => 'charged', { undo: () => void log.push('undo charge') })
   .step('authorize', () => Declined({}), {
-    retry: backoff
-      .constant(0)
-      .upTo(2)
-      .while(reason => UnexpectedDefect.is(reason)),
+    retry: backoff.constant(0).upTo(2),
   })
   .finish();
 
@@ -110,10 +107,7 @@ const decliningAndCompensating = j
   .workflow('test.declining.compensating', { version: 1, input: z.object({}), onDeadStep: 'compensate' })
   .step('charge', () => 'charged', { undo: () => void log.push('undo charge') })
   .step('authorize', () => Declined({}), {
-    retry: backoff
-      .constant(0)
-      .upTo(2)
-      .while(reason => UnexpectedDefect.is(reason)),
+    retry: backoff.constant(0).upTo(2),
   })
   .finish();
 
@@ -171,10 +165,7 @@ const retrying = j
       throw new Error('not yet');
     },
     {
-      retry: backoff
-        .constant(60_000)
-        .upTo(2)
-        .while(reason => UnexpectedDefect.is(reason)),
+      retry: backoff.constant(60_000).upTo(2),
       undo: () => void log.push('undo later'),
     },
   )
@@ -187,7 +178,7 @@ const stuckUndo = j
       log.push('undo charge tried');
       if (alwaysFailUndo) throw new Error('refund provider down');
     },
-    retry: backoff.constant(0).upTo(1).while(reason => UnexpectedDefect.is(reason)),
+    retry: backoff.constant(0).upTo(1),
   })
   .waitFor('confirm', { signal: SIGNAL, schema: Confirmed })
   .finish();

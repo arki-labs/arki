@@ -81,10 +81,7 @@ const flaky = j
       throw new Error('provider down');
     },
     {
-      retry: backoff
-        .constant(0)
-        .upTo(2)
-        .while(reason => UnexpectedDefect.is(reason)),
+      retry: backoff.constant(0).upTo(2),
     },
   )
   .step('after', () => 'never')
