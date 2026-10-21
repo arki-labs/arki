@@ -1,6 +1,6 @@
 /* @import 'jotai-devtools/styles.css'; */
 @import 'tailwindcss';
-@import '@arki/design-systems/transitions/nav.css';
+@import '@arki/ui/styles/nav.css';
 
 /* Design system — choose one:
    @import '@arki/design-systems/workbench/tokens.css';

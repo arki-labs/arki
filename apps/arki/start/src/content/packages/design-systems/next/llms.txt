@@ -29,7 +29,7 @@
 - `@arki/design-systems/gallery/fonts.css`
 - `@arki/design-systems/gallery/fonts`: Gallery design system — font CSS variable references. `mono`, `sans`, `serif`.
 - `@arki/design-systems/gallery`: The Gallery design system: CSS variable names for its fonts (import the `.css` files for the tokens). `mono`, `sans`, `serif`.
-- `@arki/design-systems/transitions/nav.css`
+- `@arki/ui/styles/nav.css`
 - `@arki/design-systems/fonts`: Extra font modules (`cabin`, `gentiumPlus`, `raleway`, `sentient`) for app-level font aliases. `cabin`, `gentiumPlus`, `raleway`, `sentient`.
 - `@arki/design-systems/fonts/cabin`: Cabin — humanist sans-serif with a warm, modern feel. `cabin`.
 - `@arki/design-systems/fonts/cabin/cabin.css`

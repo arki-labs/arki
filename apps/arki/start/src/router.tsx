@@ -20,7 +20,7 @@ export function createRouter() {
     scrollToTopSelectors: ['[data-scroll-restoration-id="sidebar-inset"]'],
     trailingSlash: 'preserve',
     // Subtle browser-native crossfade on every navigation. Keyframes ship from
-    // @arki/design-systems/transitions/nav.css (imported in styles/global.css).
+    // @arki/ui/styles/nav.css (imported in styles/global.css).
     // Falls back to instant swap in browsers without View Transitions.
     defaultViewTransition: { types: ['nav'] },
     defaultErrorComponent: RootErrorComponent,

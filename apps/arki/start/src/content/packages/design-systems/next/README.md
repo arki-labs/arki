@@ -44,7 +44,7 @@ Each system has the same four files, under its own folder: `atelier`, `workbench
 | `@arki/design-systems/registry` | `DESIGN_SYSTEMS`, `DESIGN_SYSTEM_IDS`, `isDesignSystemId`, `parseDesignSystemId`, `resolveDesignSystemId`, `getDesignSystemById`, `getDesignSystemByIdSafe` |
 | `@arki/design-systems/typography`, `/palette-labels` | The shapes (Zod schemas) for a system's heading-font roster and mode labels |
 | `@arki/design-systems/fonts` | Extra font modules: `cabin`, `gentiumPlus`, `raleway`, `sentient` |
-| `@arki/design-systems/transitions/nav.css` | Navigation view-transition styles |
+| `@arki/ui/styles/nav.css` | Navigation view-transition styles |
 
 The `gallery` system has CSS and font imports but is not in the registry yet. Its id is not in `DESIGN_SYSTEM_IDS`.
 
