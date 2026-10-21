@@ -815,7 +815,7 @@ Reproduce with `bun run bench` in the package directory; regenerate this section
 
 ### Over a socket
 
-`bun run bench:server` runs the same three routes end to end, on Bun and on Node, against hand-written `Bun.serve` and `node:http` ceilings and against hono, elysia, h3, srvx and fastify, and reports server CPU microseconds per request next to requests per second (see `bench/server/README.md`). On a 12-core M2 Max, Bun 1.4.2 and Node 26.11, the default engine costs about 0.7 µs of server CPU per request over a bare `Response.json` on Bun and lands within 10 % of the raw `Bun.serve` ceiling; the Hono engine is 15 % to 20 % behind it on routes with parameters or a body.
+`bun run bench:server` runs the same three routes end to end, on Bun and on Node, against hand-written `Bun.serve` and `node:http` ceilings and against hono, elysia, h3, srvx and fastify, and reports server CPU microseconds per request next to requests per second (see `bench/server/README.md`). On a 12-core M2 Max, Bun 1.4.2 and Node 26.11, the default engine costs about 0.5 µs of CPU per request over a bare `Response.json` on Bun (1.0 µs on a route with a path parameter, 1.0 µs on a validated POST) and about 1.3 µs over `@hono/node-server`'s own floor on Node 26; the Hono engine is 10 % to 20 % behind it on routes with parameters or a body.
 
 ## License
 
