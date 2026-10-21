@@ -5,7 +5,7 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -37,8 +37,19 @@ const transformed = init
   .workflow('test.defread.transformed', { version: 1, input: z.object({ n: z.string().transform(Number) }) })
   .step('only', () => 'done')
   .finish();
+/** The undos that ran. */
+const undone: string[] = [];
+/** Charges, then waits for a confirmation it may never get: a cancel or the deadline drops the wait. */
+const confirmed = init
+  .workflow('test.defread.confirmed', { version: 1, input: z.object({}), deadline: '2h' })
+  .step('charge', () => 'charged', { undo: () => void undone.push('charge') })
+  .waitFor('confirm', { signal: 'confirm', schema: z.object({ by: z.string() }) })
+  .finish();
 
-const journal = init.compose({ workflows: [payment, other, transformed], workflowMeta: { actorId: 'system:workflow' } });
+const journal = init.compose({
+  workflows: [payment, other, transformed, confirmed],
+  workflowMeta: { actorId: 'system:workflow' },
+});
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -53,6 +64,17 @@ async function settle() {
     if ((await journal.drain(db).then(result => orThrow(result))) === 0) return;
   }
   throw new Error('the run did not settle');
+}
+async function parkedOnConfirm(id: string) {
+  expect(isFailure(await journal.run(db, confirmed.start, { input: {}, id }, caller))).toBe(false);
+  await settle();
+  expect(await confirmed.read(db, id)).toMatchObject({ run: { state: 'parked', node: 'confirm' } });
+}
+/** What `def.read` gives for a run that ended while it waited: the wait left no key, so the read is not refused. */
+async function readEnded(id: string) {
+  const read = await confirmed.read(db, id);
+  if (read === undefined || isFailure(read)) throw new Error(`expected the run, got ${JSON.stringify(read)}`);
+  return read.run;
 }
 async function finishedPayment(id: string) {
   expect(isFailure(await journal.run(db, payment.start, { input: { amount: 7 }, id }, caller))).toBe(false);
@@ -120,6 +142,39 @@ describe('def.read', () => {
     expect(await transformed.read(db, 'tr_1')).toMatchObject({
       code: 'journal.workflow_read_mismatch',
       data: { field: 'input' },
+    });
+  });
+
+  describe('a wait that never got its signal', () => {
+    it('a run cancelled while parked reads back, and the dropped wait has no result', async () => {
+      await parkedOnConfirm('conf_cancel');
+      expect(
+        isFailure(await journal.run(db, confirmed.cancel, { runId: 'conf_cancel', reason: 'no longer needed' }, caller)),
+      ).toBe(false);
+      await settle();
+      const run = await readEnded('conf_cancel');
+      expect(run.state).toBe('cancelled');
+      expect(run.results).toEqual({ charge: 'charged' });
+      expect(Object.hasOwn(run.results, 'confirm')).toBe(false);
+    });
+
+    it('a run failed by its deadline while parked reads back, and the dropped wait has no result', async () => {
+      await parkedOnConfirm('conf_deadline');
+      // Three hours pass: the deadline (2h) and its timer come due.
+      const back = sql`make_interval(hours => 3)`;
+      await db
+        .update(tables.workflowRuns)
+        .set({ deadlineAt: sql`${tables.workflowRuns.deadlineAt} - ${back}` })
+        .where(eq(tables.workflowRuns.id, 'conf_deadline'));
+      await db
+        .update(tables.jobs)
+        .set({ availableAt: sql`${tables.jobs.availableAt} - ${back}` })
+        .where(eq(tables.jobs.runId, 'conf_deadline'));
+      await settle();
+      const run = await readEnded('conf_deadline');
+      expect(run.state).toBe('failed');
+      expect(run.results).toEqual({ charge: 'charged' });
+      expect(Object.hasOwn(run.results, 'confirm')).toBe(false);
     });
   });
 });

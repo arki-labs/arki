@@ -782,6 +782,7 @@ export function createWorkflows<
             events.NodeSkipped({
               path: item.path,
               phase: 'undo',
+              cause: 'detached',
               reason: 'the child was detached, so it is left running',
               actorId: null,
               at,
@@ -795,7 +796,7 @@ export function createWorkflows<
         continue;
       }
       out.push(
-        events.NodeSkipped({ path: item.path, phase: 'undo', reason: 'the step declares no undo', actorId: null, at }),
+        events.NodeSkipped({ path: item.path, phase: 'undo', cause: 'no-undo', reason: 'the step declares no undo', actorId: null, at }),
       );
     }
     if (row.cancelledAt !== null || options.cancelling === true) {
@@ -821,7 +822,7 @@ export function createWorkflows<
       .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, row.node), eq(workflowSteps.phase, 'do')));
     if (step === undefined || step.status !== 'scheduled') return none;
     const dropped = {
-      events: [events.NodeSkipped({ path: row.node, phase: 'do', reason: COMPENSATING, actorId: null, at })],
+      events: [events.NodeSkipped({ path: row.node, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at })],
       inFlight: false,
     };
     // A parked wait has no work in flight: the job that parked it is only finishing.
@@ -1437,12 +1438,12 @@ export function createWorkflows<
           case 'skipped': {
             if (compensating) {
               return [
-                events.NodeSkipped({ path, phase, reason: outcome.reason, actorId: null, at }),
+                events.NodeSkipped({ path, phase, cause: 'when', reason: outcome.reason, actorId: null, at }),
                 ...(await compensate(inside.tx, def, row, at, { cause: null })),
               ];
             }
             return [
-              events.NodeSkipped({ path, phase, reason: outcome.reason, actorId: null, at }),
+              events.NodeSkipped({ path, phase, cause: 'when', reason: outcome.reason, actorId: null, at }),
               ...(await eventsAfter(inside.tx, input.runId, outcome.route, at)),
             ];
           }
@@ -1480,7 +1481,7 @@ export function createWorkflows<
             if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no child node '${path}'`);
             }
-            const dropped = events.NodeSkipped({ path, phase: 'do', reason: COMPENSATING, actorId: null, at });
+            const dropped = events.NodeSkipped({ path, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at });
             // The run began compensating while the children were being worked out: no child is started.
             if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
             if (pastDeadline(row)) {
@@ -1502,7 +1503,7 @@ export function createWorkflows<
             if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no wait node '${path}'`);
             }
-            const dropped = events.NodeSkipped({ path, phase: 'do', reason: COMPENSATING, actorId: null, at });
+            const dropped = events.NodeSkipped({ path, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at });
             // The run began compensating while this wait was starting: the wait is dropped, not parked.
             if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
             if (pastDeadline(row)) {
@@ -2057,6 +2058,7 @@ export function createWorkflows<
           events.NodeSkipped({
             path: args.path,
             phase: 'undo',
+            cause: 'operator',
             reason,
             actorId: args.op.actor,
             at,

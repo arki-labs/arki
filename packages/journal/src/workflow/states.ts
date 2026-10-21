@@ -18,3 +18,10 @@ export type StepPhase = (typeof STEP_PHASES)[number];
 
 /** Where a cancel leaves a run: `compensating` while it undoes its steps, `cancelled` when there was nothing to undo. */
 export const CANCEL_STATES = ['compensating', 'cancelled'] as const satisfies readonly (typeof RUN_STATES)[number][];
+
+/**
+ * Why a node was skipped, for code to act on (`reason` is the text for people): `when` (its condition was false),
+ * `compensating` (the run began compensating before the node ran: it has no result), `no-undo` (the step declares no
+ * undo), `detached` (a detached child is left running), `operator` (`skipUndo`).
+ */
+export const SKIP_CAUSES = ['when', 'compensating', 'no-undo', 'detached', 'operator'] as const;

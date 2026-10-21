@@ -13,7 +13,7 @@ import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
 import type { StepPhase, STEP_VIEW_STATUSES } from './states.js';
-import { STEP_PHASES } from './states.js';
+import { SKIP_CAUSES, STEP_PHASES } from './states.js';
 
 const at = z.iso.datetime();
 const phase = z.enum(STEP_PHASES);
@@ -102,6 +102,7 @@ export function workflowMachine<
     z.object({
       path: nodePath,
       phase,
+      cause: z.enum(SKIP_CAUSES),
       reason: z.string().min(1),
       actorId: z.string().nullable(),
       at,
@@ -187,8 +188,13 @@ export function workflowMachine<
     .on(NodeCompleted, (row, e) =>
       e.data.phase === 'do' ? { results: { ...row.results, [e.data.path]: e.data.result } } : {},
     )
-    // A `when`-skipped `do` node is `null` in results. A skipped undo changes nothing on the row.
-    .on(NodeSkipped, (row, e) => (e.data.phase === 'do' ? { results: { ...row.results, [e.data.path]: null } } : {}))
+    // A `when`-skipped `do` node is `null` in results. A node dropped by compensation (a wait that never got its
+    // signal) never ran, so it leaves no key. A skipped undo changes nothing on the row.
+    .on(NodeSkipped, (row, e) =>
+      e.data.phase === 'do' && e.data.cause !== 'compensating'
+        ? { results: { ...row.results, [e.data.path]: null } }
+        : {},
+    )
     // A dead step leaves the run where it is: `stuck` is derived from the step row.
     .on(NodeFailed, () => ({}))
     .on(Parked, (_row, e) => ({

@@ -154,15 +154,24 @@ describe('the workflow.run reducers', () => {
     expect(await runRow(id)).toMatchObject({ state: 'running', wakeAt: null });
   });
 
-  it('a skipped do node is null in results, and a skipped undo leaves results alone', async () => {
+  it('a when-skipped do node is null in results, a node dropped by compensation has no key, and a skipped undo leaves results alone', async () => {
     const id = orThrow(workflowRunId());
     orThrow(
       await write(
         id,
         started(),
         events.NodeCompleted({ path: 'a', phase: 'do', result: 1, resolvedBy: null, at: clock(1) }),
-        events.NodeSkipped({ path: 'b', phase: 'do', reason: 'when', actorId: null, at: clock(2) }),
-        events.NodeSkipped({ path: 'a', phase: 'undo', reason: 'no undo', actorId: null, at: clock(3) }),
+        events.NodeSkipped({ path: 'b', phase: 'do', cause: 'when', reason: 'when', actorId: null, at: clock(2) }),
+        // Dropped by compensation before it ran: a result of `null` would claim it ran and was skipped.
+        events.NodeSkipped({
+          path: 'c',
+          phase: 'do',
+          cause: 'compensating',
+          reason: 'the run began compensating',
+          actorId: null,
+          at: clock(3),
+        }),
+        events.NodeSkipped({ path: 'a', phase: 'undo', cause: 'no-undo', reason: 'no undo', actorId: null, at: clock(4) }),
       ),
     );
     expect((await runRow(id))?.results).toEqual({ a: 1, b: null });
@@ -314,7 +323,14 @@ describe('the step projection', () => {
         events.NodeCompleted({ path: 'hold', phase: 'do', result: 1, resolvedBy: null, at: clock(1) }),
         events.NodeCompleted({ path: 'payBack', phase: 'do', result: 2, resolvedBy: 'foreman:alice', at: clock(2) }),
         events.CompensationStarted({ at: clock(3) }),
-        events.NodeSkipped({ path: 'payBack', phase: 'undo', reason: 'no undo declared', actorId: null, at: clock(3) }),
+        events.NodeSkipped({
+          path: 'payBack',
+          phase: 'undo',
+          cause: 'no-undo',
+          reason: 'no undo declared',
+          actorId: null,
+          at: clock(3),
+        }),
         events.NodeScheduled({ path: 'hold', phase: 'undo', attempt: 1, key: 'k:undo', jobId: null, at: clock(4) }),
       ),
     );
