@@ -162,6 +162,14 @@ describe('dot env check', () => {
     const result = await dot('env', 'check');
     expect(result.code).toBe(0);
     expect(result.json.data).toMatchObject({ findings: [{ code: 'dot.env.schema_unavailable', severity: 'warning' }] });
+
+    // WHY: check is a gate. A tracked plain value nobody could classify may be a plaintext secret.
+    writeFileSync(path.join(app, '.env.development'), `${readFileSync(path.join(app, '.env.development'), 'utf8')}ODD_NAME=hunter2-really-secret\n`);
+    execFileSync('git', ['add', '.env.development'], { cwd: app });
+    const blocked = await dot('env', 'check');
+    expect(blocked.json.error?.code).toBe('dot.env_check_failed');
+    expect(blocked.out).toContain('ODD_NAME');
+    expect(blocked.out).not.toContain('hunter2');
   });
 });
 

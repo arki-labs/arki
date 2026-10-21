@@ -21,6 +21,7 @@ import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { z } from 'zod';
 
+import { decryptValue, findPrivateKey, findRoot, isEncrypted } from '@arki/env/node';
 import type { Failure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
@@ -64,6 +65,31 @@ export const ENV_FILES = ['.env', '.env.local', '.env.development', '.env.develo
 
 type EnvSource = { readonly name: string; readonly values: Readonly<Record<string, string | undefined>> };
 
+/**
+ * A file's values with `encrypted:` ones opened by the file's private key, so the database check
+ * sees the real URL and the app gets real values. A value no key opens stays ciphertext: the check
+ * then refuses it as not local (fail closed).
+ */
+function decrypted(
+  file: string,
+  values: Readonly<Record<string, string | undefined>>,
+  processEnv: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string | undefined>> {
+  if (!Object.values(values).some(value => value !== undefined && isEncrypted(value))) return values;
+  const keys = findPrivateKey(file, { root: findRoot(path.dirname(file)), env: processEnv })?.keys ?? [];
+  const open = (value: string): string => {
+    for (const key of keys) {
+      try {
+        return decryptValue(value, key);
+      } catch {
+        // Not this key: a comma list may hold an older one.
+      }
+    }
+    return value;
+  };
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value !== undefined && isEncrypted(value) ? open(value) : value]));
+}
+
 /** Each env file of the project (a missing one is empty), then the process env: lowest precedence first. */
 async function envSources(
   cwd: string,
@@ -71,8 +97,9 @@ async function envSources(
 ): Promise<readonly EnvSource[]> {
   const sources: EnvSource[] = [];
   for (const name of ENV_FILES) {
+    const file = path.join(cwd, name);
     try {
-      sources.push({ name, values: parseEnv(await readFile(path.join(cwd, name), 'utf8')) });
+      sources.push({ name, values: decrypted(file, parseEnv(await readFile(file, 'utf8')), processEnv) });
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }

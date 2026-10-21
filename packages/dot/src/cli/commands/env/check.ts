@@ -43,6 +43,8 @@ export default defineCommand({
     const tracked = trackedFiles(target.root, report.files);
     const keyFiles = trackedKeyFiles(target.root);
     const gitFailures = [tracked, keyFiles].flatMap(answer => (answer.ok ? [] : [answer.reason]));
+    // Without the schema a plain value in a tracked file may be a secret nobody can rule out: fail closed.
+    const unclassified = report.values.filter(value => value.kind === 'plain' && tracked.ok && tracked.value.has(value.file)).map(value => value.key);
     const findings: EnvFinding[] = [
       ...report.errors.map(error => ({
         code: error.code,
@@ -65,9 +67,12 @@ export default defineCommand({
         : [
             {
               code: 'dot.env.schema_unavailable',
-              severity: 'warning' as const,
-              message: `secret() keys not checked: ${schema.problem}`,
-              remediation: 'Run the check under Bun: `bun --bun dot env check`.',
+              severity: unclassified.length === 0 ? ('warning' as const) : ('error' as const),
+              message:
+                unclassified.length === 0
+                  ? `secret() keys not checked (every tracked value is encrypted): ${schema.problem}`
+                  : `cannot tell whether plain ${unclassified.join(', ')} in tracked files are secret: ${schema.problem}`,
+              remediation: 'Run the check under Bun (`bun --bun dot env check`), or encrypt the values: `dot env encrypt`.',
             },
           ]),
       ...[...new Set(gitFailures)].map(reason => ({
