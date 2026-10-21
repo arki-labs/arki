@@ -50,14 +50,27 @@ function underPrefix(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`);
 }
 
-/** `/a/b` from `http://host/a/b?q=1`; no `URL` object. */
+/**
+ * `/a/b` from `http://host/a/b?q=1`; no `URL` object. Percent-encoding is
+ * decoded the way Hono's `getPath` does it: `decodeURI` over the path, with
+ * `%25` kept as `%25` so a param segment's own `decodeURIComponent` is the
+ * only decode of what the client encoded (`%2541` → `%41`, never `A`).
+ */
 function pathOf(url: string): string {
   const scheme = url.indexOf('//');
   const start = url.indexOf('/', scheme === -1 ? 0 : scheme + 2);
   if (start === -1) return '/';
-  const end = url.indexOf('?', start);
-  const path = end === -1 ? url.slice(start) : url.slice(start, end);
-  return path.includes('%') ? tryDecode(path, decodeURI) : path;
+  let end = url.length;
+  for (let index = start; index < url.length; index++) {
+    const code = url.charCodeAt(index);
+    if (code === 63 || code === 35) {
+      end = index;
+      break;
+    }
+  }
+  const path = url.slice(start, end);
+  if (!path.includes('%')) return path;
+  return tryDecode(path.includes('%25') ? path.replaceAll('%25', '%2525') : path, decodeURI);
 }
 
 /** Decode, or keep the text when it is not valid percent-encoding (as Hono does). */

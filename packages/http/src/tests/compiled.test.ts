@@ -55,6 +55,11 @@ describe('compiled router vs Hono: same answers', () => {
     ['/users/me', 200, { via: 'me' }],
     ['/users/me/posts', 200, { via: 'posts', id: 'me' }], // static "me" dead-ends; backtracks to :id
     ['/users/u%20x', 200, { via: 'user', id: 'u x' }], // percent-decoded param
+    ['/users/%2541', 200, { via: 'user', id: '%41' }], // decoded exactly once: %25 is a literal percent sign
+    ['/users/100%25', 200, { via: 'user', id: '100%' }],
+    ['/users/%E9%9B%AA', 200, { via: 'user', id: '雪' }],
+    ['/users/bad%ZZ', 200, { via: 'user', id: 'bad%ZZ' }], // not valid encoding: kept as sent
+    ['/users/me?x=1#frag', 200, { via: 'me' }], // query and fragment are not part of the path
     ['/users/me/', 404, undefined], // trailing slash is a different path
     ['/opt', 200, { via: 'opt' }], // optional placeholder: served by Hono behind the trie
     ['/opt/7', 200, { via: 'opt', id: '7' }],
