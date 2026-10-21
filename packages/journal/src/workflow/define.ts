@@ -12,6 +12,7 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { RetentionAge, RunRetention } from '../retention.js';
 import type { AcceptFailure, BivariantFn, Needed, Needs, NoNeeds, RootDb } from '../types.js';
+import type { RunDetail } from './read.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
 import { parseRunKeep } from '../retention.js';
@@ -34,6 +35,41 @@ export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootD
 
 /** The context as the runner builds it: nothing is known about the input or the results. */
 export type ErasedContext = StepContext<unknown, Readonly<Record<string, unknown>>, Needs, unknown, unknown>;
+/**
+ * The library's claim for typed reads. The runner keeps a run's results erased (`results` by node name, `unknown`),
+ * while `def.read` hands them out typed per node (`types.results`) and the output typed by the `output` schema
+ * (`types.readOutput`). The compiler cannot connect the two, so the types rest on these facts:
+ * - the runner stores at `results[K]` only what node K produced, after node K's own schema took it;
+ * - the builder puts in `Checked` exactly the nodes `resultSchemaOf` finds a schema for, with that schema's output;
+ * - `read` checks every stored result of such a node with that same schema, and a completed run's output with the
+ *   `output` schema, before it gives them out.
+ * This guard is the one place the claim is made. At run time it checks the last fact: that `read` did check each of
+ * them (`checked` holds `output` and `results.<node>`). The first two are the runner's and the builder's contract.
+ */
+export function isCheckedRead<Input, ReadOutput, ReadResults extends AnyResults>(
+  def: WorkflowDef<StandardSchemaV1, unknown, AnySignals, Needs, ReadOutput, ReadResults>,
+  detail: RunDetail<Input>,
+  checked: ReadonlySet<string>,
+): detail is RunDetail<Input, ReadOutput, ReadResults> {
+  const { run } = detail;
+  if (def.output !== undefined && run.state === 'completed' && !checked.has('output')) return false;
+  return def.nodes.every(
+    node =>
+      resultSchemaOf(node) === undefined ||
+      !Object.hasOwn(run.results, node.name) ||
+      checked.has(`results.${node.name}`),
+  );
+}
+
+/** The schema a stored node result is checked with, and whether `null` (skipped, or timed out into `continue`) is kept. */
+export function resultSchemaOf(node: WorkflowNode) {
+  if (node.kind === 'step' && node.options.output !== undefined) {
+    return { schema: node.options.output, nullable: node.options.when !== undefined };
+  }
+  if (node.kind === 'waitFor') return { schema: node.schema, nullable: node.onTimeout === 'continue' };
+  return;
+}
+
 /** A stored body. Bivariant so a body typed for one workflow fits the erased slot without a cast. */
 type Body<Out, Extra extends unknown[] = []> = BivariantFn<[...Extra, ctx: ErasedContext], Out>;
 
@@ -111,6 +147,8 @@ export type WorkflowDef<
   Output = unknown,
   Signals extends AnySignals = AnySignals,
   N extends Needs = Needs,
+  ReadOutput = unknown,
+  ReadResults extends AnyResults = AnyResults,
 > = {
   readonly name: string;
   readonly version: number;
@@ -135,7 +173,14 @@ export type WorkflowDef<
   readonly nodes: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
-  readonly types?: { readonly output: Output; readonly signals: Signals; readonly needs: N };
+  /** `readOutput` and `results` are what `def.read` gives after its checks; see `CheckedRead`. */
+  readonly types?: {
+    readonly output: Output;
+    readonly signals: Signals;
+    readonly needs: N;
+    readonly readOutput: ReadOutput;
+    readonly results: ReadResults;
+  };
 };
 
 export type WorkflowOptions<
@@ -159,7 +204,8 @@ export type WorkflowOptions<
   readonly needs?: N;
 };
 
-type AnyResults = Readonly<Record<string, unknown>>;
+/** Results by node name, as the runner stores them. */
+export type AnyResults = Readonly<Record<string, unknown>>;
 export type NoResults = Readonly<Record<never, never>>;
 /** `Results` plus one key. Written as a mapped type so the shape prints and compares flat. */
 type Add<Results extends AnyResults, Name extends string, Value> = {
@@ -196,13 +242,21 @@ export type WorkflowBuilder<
   Where extends Host,
   Ext extends DefExtension = NoExtension,
   Signals extends AnySignals = NoSignals,
+  /** The nodes whose stored result `def.read` checks with a schema of the node, with the type that check gives. */
+  Checked extends AnyResults = NoResults,
 > = {
-  step<Name extends string, Returned, When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined>(
+  step<
+    Name extends string,
+    Returned,
+    When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
+    Output extends StandardSchemaV1<unknown, Resolved<Returned>> | undefined = undefined,
+  >(
     name: Fresh<Results, Name>,
     run: (ctx: Ctx<Input, Results, N, Where>) => Returned,
     options?: StepOptions<Ctx<Input, Results, N, Where>, Resolved<Returned>, keyof Results & string> & {
       /** When it returns false the step is skipped and its result is `null`. */
       readonly when?: When;
+      readonly output?: Output;
     },
   ): WorkflowBuilder<
     Input,
@@ -212,7 +266,8 @@ export type WorkflowBuilder<
     StepResult<Returned, When>,
     Where,
     Ext,
-    Signals
+    Signals,
+    [Output] extends [StandardSchemaV1] ? Add<Checked, Name, StepResult<SchemaOutput<Output>, When>> : Checked
   >;
 
   waitFor<
@@ -231,19 +286,20 @@ export type WorkflowBuilder<
     },
   ): WorkflowBuilder<
     Input,
-    Add<Results, Name, OnTimeout extends 'continue' ? SchemaOutput<Payload> | null : SchemaOutput<Payload>>,
+    Add<Results, Name, Waited<Payload, OnTimeout>>,
     N,
     Declared,
-    OnTimeout extends 'continue' ? SchemaOutput<Payload> | null : SchemaOutput<Payload>,
+    Waited<Payload, OnTimeout>,
     Where,
     Ext,
-    AddSignal<Signals, Signal, Payload>
+    AddSignal<Signals, Signal, Payload>,
+    Add<Checked, Name, Waited<Payload, OnTimeout>>
   >;
 
   sleep<Name extends string>(
     name: Fresh<Results, Name>,
     until: RetentionAge | ((ctx: Ctx<Input, Results, N, Where>) => Date),
-  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals>;
+  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals, Checked>;
 
   child<Name extends string, Def extends WorkflowDef>(
     name: Fresh<Results, Name>,
@@ -255,7 +311,7 @@ export type WorkflowBuilder<
       /** Undoes the node when the run compensates. Without it, the child run itself is compensated. */
       readonly undo?: (ctx: Ctx<Input, Results, N, Where> & { readonly result: OutputOf<Def> }) => unknown;
     },
-  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals>;
+  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals, Checked>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -274,28 +330,51 @@ export type WorkflowBuilder<
     Wait extends 'any' ? OutputOf<Def> : OutputOf<Def>[],
     Where,
     Ext,
-    Signals
+    Signals,
+    Checked
   >;
 
   /**
-   * Without a function the output is the last node's result. With an `output` schema the
-   * function must return that schema's output; the extra rest parameter turns a mismatch into an error.
+   * Without a function the output is the last node's result. With an `output` schema the function must return that
+   * schema's output (or a failure, or a promise of either): a wrong return does not compile. Without a function the
+   * last result must fit the schema, or the function is required.
    */
-  finish<Returned = Last>(
-    run?: (ctx: FinishContext<Input, Results>) => Returned,
-    ...check: FinishCheck<Declared, Returned>
-  ): WorkflowDef<Input, FinishOutput<Declared, Returned>, Signals, N> & ApplyExtension<Ext, Signals>;
+  finish<Returned extends FinishBound<Declared> = Last>(
+    ...run: [Last] extends [FinishBound<Declared>]
+      ? [run?: (ctx: FinishContext<Input, Results>) => Returned]
+      : [run: (ctx: FinishContext<Input, Results>) => Returned]
+  ): WorkflowDef<
+    Input,
+    FinishOutput<Declared, Returned>,
+    Signals,
+    N,
+    ReadOutputOf<Declared>,
+    ReadResultsOf<Results, Checked>
+  > &
+    ApplyExtension<Ext, Signals, ReadOutputOf<Declared>, ReadResultsOf<Results, Checked>>;
+};
+
+/** A `waitFor` result: the payload, or `null` when the wait timed out into `continue`. */
+type Waited<Payload extends StandardSchemaV1, OnTimeout> = OnTimeout extends 'continue'
+  ? SchemaOutput<Payload> | null
+  : SchemaOutput<Payload>;
+/** What `def.read` gives as the output: the `output` schema's output, `unknown` without one. */
+type ReadOutputOf<Declared extends StandardSchemaV1 | undefined> = [Declared] extends [StandardSchemaV1]
+  ? SchemaOutput<Declared>
+  : unknown;
+/** What `def.read` gives as the results: a checked node has its schema's type, any other `unknown`. A node that has not run is missing. */
+type ReadResultsOf<Results extends AnyResults, Checked extends AnyResults> = {
+  readonly [K in keyof Results]?: K extends keyof Checked ? Checked[K] : unknown;
 };
 
 type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
 type FinishOutput<Declared extends StandardSchemaV1 | undefined, Returned> = [Declared] extends [StandardSchemaV1]
   ? SchemaOutput<Declared>
   : Resolved<Returned>;
-type FinishCheck<Declared extends StandardSchemaV1 | undefined, Returned> = [Declared] extends [StandardSchemaV1]
-  ? [Resolved<Returned>] extends [SchemaOutput<Declared>]
-    ? []
-    : [error: 'finish must return the output schema type']
-  : [];
+/** What `finish` may return: with an `output` schema, its output or a failure, or a promise of either. */
+type FinishBound<Declared extends StandardSchemaV1 | undefined> = [Declared] extends [StandardSchemaV1]
+  ? SchemaOutput<Declared> | Failure | PromiseLike<SchemaOutput<Declared> | Failure>
+  : unknown;
 
 type Ctx<Input extends StandardSchemaV1, Results extends AnyResults, N extends Needs, Where extends Host> = StepContext<
   SchemaOutput<Input>,
@@ -317,18 +396,29 @@ const DEFAULT_LIMITS: WorkflowLimits = { payload: 65_536, transitions: 1000, chi
  * definition's signals. The signals are only complete at `finish()`, after `workflow()` has fixed the extension,
  * so the extension is `out`, written in terms of `this['signals']`, and `ApplyExtension` fills the slot in.
  */
-export type DefExtension = { readonly signals: unknown; readonly out: object };
+export type DefExtension = {
+  readonly signals: unknown;
+  readonly readOutput: unknown;
+  readonly results: unknown;
+  readonly out: object;
+};
 /** The extension that adds nothing. */
-export type NoExtension = { readonly signals: unknown; readonly out: Record<never, never> };
-/** What the extension `Ext` adds to a definition that declares the signals `Signals`. */
-export type ApplyExtension<Ext extends DefExtension, Signals extends AnySignals> = (Ext & {
+export type NoExtension = DefExtension & { readonly out: Record<never, never> };
+/** What the extension `Ext` adds to a definition with the signals `Signals` and what `def.read` gives. */
+export type ApplyExtension<Ext extends DefExtension, Signals extends AnySignals, ReadOutput, ReadResults> = (Ext & {
   readonly signals: Signals;
+  readonly readOutput: ReadOutput;
+  readonly results: ReadResults;
 })['out'];
 
 /** Adds what a journal puts on a finished definition. It sees the definition, with its signals, without the addition. */
-type Attach<Input extends StandardSchemaV1, Ext extends DefExtension> = <Signals extends AnySignals>(
-  def: WorkflowDef<Input, unknown, Signals>,
-) => ApplyExtension<Ext, Signals>;
+type Attach<Input extends StandardSchemaV1, Ext extends DefExtension> = <
+  Signals extends AnySignals,
+  ReadOutput,
+  ReadResults extends AnyResults,
+>(
+  def: WorkflowDef<Input, unknown, Signals, Needs, ReadOutput, ReadResults>,
+) => ApplyExtension<Ext, Signals, ReadOutput, ReadResults>;
 
 type BuilderState<Input extends StandardSchemaV1, Ext extends DefExtension> = {
   readonly attach: Attach<Input, Ext>;
@@ -403,14 +493,17 @@ function finishDef<
   Signals extends AnySignals,
   N extends Needs,
   Ext extends DefExtension,
+  ReadOutput,
+  ReadResults extends AnyResults,
 >(
   state: BuilderState<Input, Ext>,
   finish: WorkflowDef['finish'],
-): WorkflowDef<Input, Output, Signals, N> & ApplyExtension<Ext, Signals> {
+): WorkflowDef<Input, Output, Signals, N, ReadOutput, ReadResults> &
+  ApplyExtension<Ext, Signals, ReadOutput, ReadResults> {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
-  const plain: WorkflowDef<Input, Output, Signals, N> = {
+  const plain: WorkflowDef<Input, Output, Signals, N, ReadOutput, ReadResults> = {
     ...state.header,
     shape: Object.freeze({ nodes: Object.freeze(shape.nodes.map(entry => Object.freeze(entry))) }),
     shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => [entry.name, entry.kind, entry.undo]))),
@@ -435,7 +528,10 @@ function makeBuilder<
   Where extends Host,
   Ext extends DefExtension,
   Signals extends AnySignals,
->(state: BuilderState<Input, Ext>): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Ext, Signals> {
+  Checked extends AnyResults,
+>(
+  state: BuilderState<Input, Ext>,
+): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Ext, Signals, Checked> {
   return {
     step: (name, run, options) =>
       makeBuilder(

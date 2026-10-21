@@ -70,8 +70,18 @@ export type StepView = Pick<
   readonly stuck: boolean;
 };
 
-export type RunDetail = {
-  readonly run: RunRow & { readonly stuck: boolean; readonly stranded: StrandedReason | null };
+/**
+ * One run in full. The type parameters type the stored values: `def.read` checks them with the definition's schemas;
+ * `journal.workflows.run` leaves them as stored. `output` is `null` until the run completes.
+ */
+export type RunDetail<Input = unknown, Output = unknown, Results = RunRow['results']> = {
+  readonly run: Omit<RunRow, 'input' | 'output' | 'results'> & {
+    readonly input: Input;
+    readonly output: Output | null;
+    readonly results: Results;
+    readonly stuck: boolean;
+    readonly stranded: StrandedReason | null;
+  };
   /** Oldest first. */
   readonly steps: readonly StepView[];
   /** The paths whose undo was skipped: the work they did stays done. */

@@ -35,7 +35,8 @@ export type JournalErrorCode =
   | 'WORKFLOW_FINISHED'
   | 'WORKFLOW_COMPENSATING'
   | 'STEP_NOT_DEAD'
-  | 'STEP_NOT_RESOLVABLE';
+  | 'STEP_NOT_RESOLVABLE'
+  | 'WORKFLOW_READ_MISMATCH';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -163,6 +164,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
     what: 'an operator cannot supply the result of this step',
     next: 'Only a failed `do` step of a running run that declares an `output` schema can be resolved. Use `retryStep` instead',
   },
+  WORKFLOW_READ_MISMATCH: {
+    what: 'a stored value of this workflow run does not fit its schema, so `def.read` cannot give it typed',
+    next: 'Read the run untyped with `journal.workflows.run`. A run started on an older version, or an input schema that transforms its value, can store values the schema no longer takes',
+  },
 };
 
 /**
@@ -285,6 +290,21 @@ export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
   remediation: 'Restore the pinned workflow version and original node shape before resuming the run.',
 });
 export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
+
+/** What `def.read` returns when a stored value of the run does not fit its schema. `field` is `input`, `output` or
+ * `results.<node>`; `detail` is the `WORKFLOW_READ_MISMATCH` message, and the cause is the schema's `InvalidInput`,
+ * with its issues.
+ * @fix Read the run untyped with journal.workflows.run, or let the schema take the values older runs stored.
+ * @verify bun run test -- src/workflow/def-read.test.ts
+ */
+export const WorkflowReadMismatch = defineFailure('journal.workflow_read_mismatch', {
+  status: 409,
+  data: z.object({ runId: z.string(), field: z.string(), detail: z.string() }),
+  message: '{detail}',
+  remediation: 'Read the run untyped with journal.workflows.run, or let the schema take the values older runs stored.',
+});
+/** A {@link WorkflowReadMismatch} failure value. */
+export type WorkflowReadMismatch = ReturnType<typeof WorkflowReadMismatch>;
 
 /** Failures owned by command execution, in addition to the command definition's inferred refusals. */
 export const COMMAND_FAILURES = [...SCHEMA_FAILURES, ...TRANSACTION_FAILURES, CommandConflict] as const;

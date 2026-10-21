@@ -29,6 +29,7 @@ export {
   CommandInvalid,
   CommandNotFound,
   JournalError,
+  WorkflowReadMismatch,
   WorkflowStranded,
   isJournalError,
 } from './errors.js';

@@ -33,19 +33,28 @@ import type {
   Services,
   TransactionSource,
 } from '../types.js';
-import type { AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import type { AnyResults, AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import type { RunDetail } from './read.js';
 import type { CANCEL_STATES, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
-import { CommandConflict, CommandInvalid, CommandNotFound, isJournalError, JournalError } from '../errors.js';
+import {
+  CommandConflict,
+  CommandInvalid,
+  CommandNotFound,
+  isJournalError,
+  JournalError,
+  WorkflowReadMismatch,
+} from '../errors.js';
 import { givenServices } from '../handlers.js';
 import { workflowRunId, workflowSignalId } from '../id.js';
 import { createManagedJobOps } from '../outbox.js';
 import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retention.js';
 import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
-import { workflowWith } from './define.js';
+import { isCheckedRead, resultSchemaOf, workflowWith } from './define.js';
 import { workflowMachine } from './machine.js';
+import { createWorkflowReads } from './read.js';
 import { STEP_PHASES } from './states.js';
 import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
 
@@ -153,6 +162,13 @@ const StepDead = defineFailure('journal.workflow.step_dead', {
   remediation: 'Inspect the workflow checkpoint, repair the cause, then retry or resolve the step.',
 });
 
+/** What `def.read` gives: the run, typed, or why it cannot be. A throwing validator is a `ValidatorDefect`. */
+type ReadOutcome<Input, ReadOutput, ReadResults> =
+  | RunDetail<Input, ReadOutput, ReadResults>
+  | WorkflowReadMismatch
+  | ReturnType<typeof ValidatorDefect>
+  | undefined;
+
 /** The arguments of `def.start`. */
 export type StartArgs<Input> = { readonly input: Input; readonly id?: string };
 /** The schema of `def.start`: `{ input, id? }`, with `input` checked by the workflow's own input schema. */
@@ -168,6 +184,8 @@ export type WorkflowStarter<
   Tx extends TransactionSource<Tx>,
   Input extends StandardSchemaV1,
   Signals extends AnySignals,
+  ReadOutput,
+  ReadResults,
 > = {
   readonly start: Command<StartSchema<Input>, Promise<StartOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
   /**
@@ -179,6 +197,21 @@ export type WorkflowStarter<
   ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
   /** The command that cancels a run: it stops, undoes its completed steps newest first, and ends `cancelled`. */
   readonly cancel: Command<CancelSchema, Promise<CancelOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
+  /**
+   * One run of this workflow, as `journal.workflows.run` reads it, typed by the definition. `undefined` when there is
+   * no such run, or the run belongs to another workflow.
+   *
+   * Values with a schema are checked when read, and typed by that schema: the input; the output when the workflow
+   * declares an `output` schema (`null` until the run completes); the result of each step with an `output` schema
+   * (the schema's output, not what the step returned) and of each `waitFor`. Any other result is `unknown`, and a
+   * node that has not run is missing. A run whose stored values no longer fit
+   * returns `WORKFLOW_READ_MISMATCH` (failure code `journal.workflow_read_mismatch`); read it untyped with
+   * `journal.workflows.run`. A run started on an older version is checked the same way.
+   *
+   * The stored input is the input schema's output, so a schema whose output is not a valid input (a transform)
+   * makes `read` refuse.
+   */
+  readonly read: (db: DbHandle, runId: string) => Promise<ReadOutcome<SchemaOutput<Input>, ReadOutput, ReadResults>>;
 };
 /** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
@@ -187,7 +220,14 @@ export interface StarterOf<
   Tx extends TransactionSource<Tx>,
   Input extends StandardSchemaV1,
 > extends DefExtension {
-  readonly out: WorkflowStarter<Meta, Tx, Input, Extract<this['signals'], AnySignals>>;
+  readonly out: WorkflowStarter<
+    Meta,
+    Tx,
+    Input,
+    Extract<this['signals'], AnySignals>,
+    this['readOutput'],
+    this['results']
+  >;
 }
 
 function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<Input> {
@@ -2078,12 +2118,71 @@ export function createWorkflows<
     return { ok: true };
   };
 
-  /** `j.workflow`: the step-2 builder, with `start` and `signal` on the finished definition. */
+  /** The same reads as `journal.workflows`; `started` is filled by `register`, so `stranded` is right after compose. */
+  const reads = createWorkflowReads({ tables, registry: started });
+
+  /** A stored value checked with its schema: the value the schema gives, or the failure that names `field`. */
+  const checkStored = async <Output>(
+    schema: StandardSchemaV1<unknown, Output>,
+    stored: unknown,
+    runId: string,
+    field: string,
+  ) => {
+    const parsed = await parseAsync(schema, stored);
+    if (InvalidInput.is(parsed)) {
+      const { message } = new JournalError('WORKFLOW_READ_MISMATCH', 'workflow', runId, `${field}: ${reasonText(parsed)}`);
+      return WorkflowReadMismatch({ runId, field, detail: message }, { cause: parsed });
+    }
+    if (ValidatorDefect.is(parsed)) return parsed;
+    return { value: parsed };
+  };
+
+  /** `def.read`: one run of `def`, its stored values checked by the schemas `def` declares. */
+  const readFor =
+    <Input extends StandardSchemaV1, ReadOutput, ReadResults extends AnyResults>(
+      def: WorkflowDef<Input, unknown, AnySignals, Needs, ReadOutput, ReadResults>,
+    ) =>
+    async (db: DbHandle, runId: string): Promise<ReadOutcome<SchemaOutput<Input>, ReadOutput, ReadResults>> => {
+      const detail = await reads.run(db, runId);
+      if (detail === undefined || detail.run.name !== def.name) return undefined;
+      const input = await checkStored<SchemaOutput<Input>>(def.input, detail.run.input, runId, 'input');
+      if (WorkflowReadMismatch.is(input) || ValidatorDefect.is(input)) return input;
+      /** What this read checked, for `isCheckedRead`: `output` and `results.<node>`. */
+      const checkedFields = new Set<string>();
+      let { output } = detail.run;
+      if (def.output !== undefined && detail.run.state === 'completed') {
+        const checked = await checkStored(def.output, output, runId, 'output');
+        if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
+        output = checked.value;
+        checkedFields.add('output');
+      }
+      const results: Record<string, unknown> = { ...detail.run.results };
+      for (const node of def.nodes) {
+        const own = resultSchemaOf(node);
+        if (own === undefined || !Object.hasOwn(results, node.name)) continue;
+        const field = `results.${node.name}`;
+        const stored = results[node.name];
+        if (stored !== null || !own.nullable) {
+          const checked = await checkStored(own.schema, stored, runId, field);
+          if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
+          results[node.name] = checked.value;
+        }
+        checkedFields.add(field);
+      }
+      const read: RunDetail<SchemaOutput<Input>> = { ...detail, run: { ...detail.run, input: input.value, output, results } };
+      if (!isCheckedRead(def, read, checkedFields)) {
+        throw new Error(`journal: def.read of "${def.name}" left a schema of the definition unchecked`);
+      }
+      return read;
+    };
+
+  /** `j.workflow`: the step-2 builder, with `start`, `signal`, `cancel` and `read` on the finished definition. */
   const workflow: JournalDefinitions<Meta, Tx, AppDb>['workflow'] = (name, options) =>
     workflowWith(name, options, def => ({
       start: startCommandFor(def),
       signal: signalCommandFor(def),
       cancel: cancelCommandFor(def),
+      read: readFor(def),
     }));
 
   type StepEffectContext = EffectContext<AppDb, RootCommandRunner<Meta, Tx>> & Needed<Needs>;

@@ -76,7 +76,15 @@ describe('def.start, as types', () => {
   it('a workflow keeps its output type next to start', () => {
     expectTypeOf(refund.name).toBeString();
     expectTypeOf(refund.types).toEqualTypeOf<
-      { readonly output: { holdId: string }; readonly signals: NoSignals; readonly needs: NoNeeds } | undefined
+      | {
+          readonly output: { holdId: string };
+          readonly signals: NoSignals;
+          readonly needs: NoNeeds;
+          // No `output` schema and no checked step: `def.read` gives the output and `hold` as `unknown`.
+          readonly readOutput: unknown;
+          readonly results: { readonly hold?: unknown };
+        }
+      | undefined
     >();
   });
 });
