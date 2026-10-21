@@ -5,18 +5,12 @@ import type { FailureOf } from '@arki/failure';
 import { cleanup, resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
-import type {
-  EmptyShape,
-  UnitCloseFailure,
-  UnitOpenFailure,
-  UnitPhaseFailures,
-  Provided,
-} from '../unit-contract.js';
+import type { EmptyShape, Provided, UnitCloseFailure, UnitOpenFailure, UnitPhaseFailures } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { defineFeature, entrypoint, feature, plug } from '../feature.js';
+import { defineFeature, entrypoint } from '../feature.js';
 import { initUnits } from '../init-units.js';
-import { createUnit, infra, rename, service } from '../unit-contract.js';
 import { testApp, testUnit } from '../test-harness.js';
+import { createUnit, infra, rename, service } from '../unit-contract.js';
 
 const Refused = defineFailure('test.boot_authoring.refused');
 const CloseRefused = defineFailure('test.boot_authoring.close');
@@ -25,7 +19,6 @@ const boot = () => Promise.resolve(Refused());
 const _forms = {
   direct: infra({ name: 'direct', boot }),
   constructed: createUnit({ name: 'constructed', boot }),
-  object: plug(feature('object', { boot })),
   keys: factory.infra({ name: 'keys', boot }),
   witness: factory.infra({ name: 'witness', needs: { count: service<number>() }, boot }),
 };
@@ -46,13 +39,6 @@ const _empty = {
       await Promise.resolve();
     },
   }),
-  object: plug(
-    feature('empty', {
-      async boot() {
-        await Promise.resolve();
-      },
-    }),
-  ),
   keys: factory.infra({
     name: 'empty',
     async boot() {
@@ -84,14 +70,6 @@ const _mixed = {
     },
     start: () => Refused(),
   }),
-  object: plug(
-    feature('mixed', {
-      boot() {
-        /* Empty boot must infer undefined. */
-      },
-      start: () => Refused(),
-    }),
-  ),
   keys: factory.infra({
     name: 'mixed',
     boot() {
@@ -146,10 +124,6 @@ createUnit({ name: 'hidden', boot: hidden });
 // @ts-expect-error Promise<void> hides the actual returned failure
 createUnit({ name: 'hidden', boot: hiddenAsync });
 // @ts-expect-error void hides the actual returned failure
-feature('hidden', { boot: hidden });
-// @ts-expect-error Promise<void> hides the actual returned failure
-feature('hidden', { boot: hiddenAsync });
-// @ts-expect-error void hides the actual returned failure
 factory.infra({ name: 'hidden', boot: hidden });
 // @ts-expect-error Promise<void> hides the actual returned failure
 factory.infra({ name: 'hidden', boot: hiddenAsync });
@@ -159,8 +133,6 @@ factory.infra({ name: 'hidden', needs: {}, boot: hidden });
 factory.infra({ name: 'hidden', needs: {}, boot: hiddenAsync });
 // @ts-expect-error partial explicit generics cannot restore permissive void inference
 infra<EmptyShape>({ name: 'hidden', boot: hidden });
-// @ts-expect-error partial explicit generics cannot restore permissive void inference
-feature<'hidden'>('hidden', { boot: hiddenAsync });
 // @ts-expect-error partial explicit generics cannot restore permissive void inference
 factory.infra<readonly []>({ name: 'hidden', boot: hidden });
 
@@ -187,15 +159,6 @@ const _providerReplacement = {
   factories: { count: () => Refused() },
 };
 expectTypeOf<UnitOpenFailure<typeof _providerReplacement>>().toEqualTypeOf<FailureOf<typeof Refused>>();
-const _featureReplacement = plug({
-  ...feature('source', {
-    provides: { count: (): number | FailureOf<typeof Original> => Original() },
-    boot: () => Original(),
-  }),
-  factories: { count: () => 1 },
-  boot: () => Refused(),
-});
-expectTypeOf<UnitOpenFailure<typeof _featureReplacement>>().toEqualTypeOf<FailureOf<typeof Refused>>();
 const _keysReplacement = {
   ...factory.infra({ name: 'source', boot: () => Original() }),
   hooks: { boot: () => Refused() },
@@ -259,9 +222,6 @@ defineApp('bad-renamed-replacement').infra({ ..._renamedServiceSource, factories
 defineApp('missing-factory').infra({ ..._serviceSource, factories: {} });
 // @ts-expect-error new factory keys have no minted handles
 defineApp('extra-factory').infra({ ..._serviceSource, factories: { value: () => 42, extra: () => 1 } });
-const _objectSource = feature('object-source', { provides: { value: () => 42 } });
-// @ts-expect-error object features preserve the original factory contract
-defineApp('bad-object').features([{ ..._objectSource, factories: { value: () => 'text' } }]);
 const _qualifiedBad = defineFeature('parent.child').infra(_badService).usecases({}).entrypoints();
 // @ts-expect-error qualification must preserve the original local factory contract
 defineApp('bad-qualified').features([_qualifiedBad]);

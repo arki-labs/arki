@@ -1,10 +1,10 @@
 /**
- * `boot` is side effects only; `provides` is the one way a feature
- * publishes. A seed-only feature (boot = seed, no factories) must plug in
- * as a unit that provides `{}` — never an open record that "provides
- * every key" and collides with whatever is already mounted (`db`, `kv`, …).
+ * A feature that provides nothing must plug in as a unit that provides `{}`
+ * — never an open record that "provides every key" and collides with
+ * whatever is already mounted (`db`, `kv`, …). `provides` is the one way a
+ * feature publishes, and its factories run with the feature's needs.
  *
- * Found by the Drop Studio demo (catalog feature: boot = seed, no provides).
+ * Found by the Drop Studio demo (catalog feature: no provides).
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
@@ -12,7 +12,7 @@ import { orThrow } from '@arki/failure';
 
 import type { ProvidedOf } from '../feature.js';
 import { defineApp } from '../define-app.js';
-import { feature } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
 import { infra, service } from '../unit-contract.js';
 
 type Db = { readonly name: string };
@@ -22,75 +22,36 @@ const db = infra({
   provides: { db: () => ({ name: 'pglite' }) },
 });
 
-describe('boot is side-effect only', () => {
-  it('a seed feature provides {} and mounts after db without a collision', async () => {
-    let seededWith: string | undefined;
-    const catalog = feature('catalog', {
-      needs: { db: service<Db>() },
-      boot: async ({ db: handle }) => {
-        await Promise.resolve();
-        seededWith = handle.name;
-      },
-    });
+describe('a feature with no provides', () => {
+  it('provides {} and mounts after db without a collision', async () => {
+    const catalog = defineFeature('catalog').needs({ db: service<Db>() }).entrypoints();
     expect(Object.keys(catalog.provides)).toEqual([]);
+    // Empty, not the open `ServiceRecord` that would read as "provides every key".
+    expectTypeOf<keyof ProvidedOf<typeof catalog>>().toEqualTypeOf<never>();
 
-    // Both forms must type-check: the guard tuple is `[]` when there is no error.
     const app = orThrow(await defineApp('void-boot').infra(db).features([catalog]).boot());
-    const viaAll = orThrow(await defineApp('void-boot-all').infra(db).features([catalog]).boot());
+    const again = orThrow(await defineApp('void-boot-again').infra(db).features([catalog]).boot());
 
-    expect(seededWith).toBe('pglite');
-    expect(Object.keys(app.services)).toEqual(['db', 'feature.catalog']);
-    expect(Object.keys(viaAll.services)).toEqual(['db', 'feature.catalog']);
+    expect(Object.keys(app.services)).toEqual(['db', 'catalog.usecases', 'catalog.services', 'feature.catalog']);
+    expect(Object.keys(again.services)).toEqual(['db', 'catalog.usecases', 'catalog.services', 'feature.catalog']);
     orThrow(await app.dispose());
-    orThrow(await viaAll.dispose());
+    orThrow(await again.dispose());
   });
 
-  it('publishes only through provides factories; boot runs after them and sees their values', async () => {
+  it('publishes only through provides factories, built from the feature needs', async () => {
     const order: string[] = [];
-    let bootSaw: { readonly index: string } | undefined;
-    const search = feature('search', {
-      needs: { db: service<Db>() },
-      provides: {
+    const search = defineFeature('search')
+      .needs({ db: service<Db>() })
+      .provides({
         search: ({ db: handle }) => {
           order.push('factory');
           return { index: handle.name };
         },
-      },
-      boot: ({ search: built }) => {
-        order.push('boot');
-        bootSaw = built;
-      },
-    });
+      })
+      .entrypoints();
     const app = orThrow(await defineApp('provides').infra(db).features([search]).boot());
     expect(app.services.search).toEqual({ index: 'pglite' });
-    expect(order).toEqual(['factory', 'boot']);
-    // One instance: boot sees the very value the kernel publishes.
-    expect(bootSaw).toBe(app.services.search);
+    expect(order).toEqual(['factory']);
     orThrow(await app.dispose());
-  });
-
-  it('a value-returning boot does not compile — there is one way to publish', () => {
-    feature('legacy', {
-      needs: { db: service<Db>() },
-      // @ts-expect-error -- publish values through provides, never boot
-      boot: ({ db: handle }) => ({ search: { index: handle.name } }),
-    });
-    feature('legacy-async', {
-      // @ts-expect-error -- async publication also belongs in provides
-      boot: async () => {
-        await Promise.resolve();
-        return { search: 1 };
-      },
-    });
-    let seeds = 0;
-    const seed = feature('seed', {
-      boot: () => {
-        seeds += 1;
-      },
-    });
-    expect(seeds).toBe(0);
-    // Empty, not the open `ServiceRecord` that would read as "provides every key".
-    expectTypeOf<keyof ProvidedOf<typeof seed>>().toEqualTypeOf<never>();
-    expect(Object.keys(seed.provides)).toEqual([]);
   });
 });

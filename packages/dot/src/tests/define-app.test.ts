@@ -14,10 +14,9 @@ import { defineFailure, orThrow } from '@arki/failure';
 import type { DotApp } from '../define-app.js';
 import type { EmptyShape, UnitCloseFailure, UnitOpenFailure } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { feature } from '../feature.js';
 import { initUnits } from '../init-units.js';
-import { infra, rename, service } from '../unit-contract.js';
 import { testApp } from '../test-harness.js';
+import { infra, rename, service } from '../unit-contract.js';
 
 type DbService = {
   query(sql: string): Promise<null>;
@@ -270,9 +269,11 @@ describe('initUnits.context', () => {
       },
     });
 
-    const app = orThrow(await defineApp('feature-units')
-      .infra(...[dbUnit, authUnit, ordersUnit] as const)
-      .boot());
+    const app = orThrow(
+      await defineApp('feature-units')
+        .infra(...([dbUnit, authUnit, ordersUnit] as const))
+        .boot(),
+    );
 
     expect(app.services.ordersService.list()).toEqual(['o1']);
     expectTypeOf(app.services.db).toEqualTypeOf<DbService>();
@@ -311,7 +312,7 @@ describe('initUnits.context', () => {
     });
 
     // @ts-expect-error — a spread tuple keeps the same unsatisfied-needs guard as separate .infra() calls
-    defineApp('wrong-order').infra(...[consumer, dbUnit] as const);
+    defineApp('wrong-order').infra(...([consumer, dbUnit] as const));
     const dynamicUnits = [consumer, dbUnit];
     // @ts-expect-error — .infra() requires a tuple, so a plain array cannot bypass declaration-order checks
     defineApp('dynamic-wrong-order').infra(...dynamicUnits);
@@ -323,7 +324,6 @@ describe('initUnits.context', () => {
     expect(true).toBe(true);
   });
 });
-
 
 describe('ordinary service methods', () => {
   it('keeps open and close methods as service values without inferring resource ownership', async () => {
@@ -361,7 +361,6 @@ describe('ordinary service methods', () => {
   });
 });
 
-
 describe('boot callback boundaries', () => {
   it('rejects unknown callback outcomes and erased plans across authoring forms', () => {
     const untyped = (): unknown => undefined;
@@ -385,15 +384,6 @@ describe('boot callback boundaries', () => {
     factories.infra({ name: 'unknown-child', boot: () => ({ worker: child(untyped) }) });
     // @ts-expect-error -- a factory cannot recover callback outcomes from an erased plan.
     factories.infra({ name: 'erased-plan', boot: () => erased });
-
-    // @ts-expect-error -- object features enforce the same typed boot boundary.
-    feature('unknown-boot', { boot: untyped });
-    // @ts-expect-error -- feature cleanup callbacks must retain their outcomes.
-    feature('unknown-cleanup', { boot: () => ({ flush: cleanup(untyped) }) });
-    // @ts-expect-error -- feature child callbacks must retain their outcomes.
-    feature('unknown-child', { boot: () => ({ worker: child(untyped) }) });
-    // @ts-expect-error -- an object feature cannot recover an erased plan's failure contract.
-    feature('erased-plan', { boot: () => erased });
 
     expect(Object.keys(erased)).toEqual(['worker']);
   });

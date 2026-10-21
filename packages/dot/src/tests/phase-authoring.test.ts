@@ -3,34 +3,41 @@ import { describe, expect, it } from 'vitest';
 import { defineFailure, orThrow } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
-import { entrypoint, feature } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
+import { entrypoint } from '../feature.js';
 import { initUnits } from '../init-units.js';
 import { infra } from '../unit-contract.js';
 
 const Refused = defineFailure('test.phase_authoring.refused');
 
 describe('lifecycle authoring', () => {
-  it('runs object feature hooks with its provided service before driving adapters', async () => {
+  it('runs a feature unit hooks with its provided service before driving adapters', async () => {
     const calls: string[] = [];
     const factory = initUnits.context<{ value: number }>().create();
     const app = orThrow(
       await defineApp('object-hooks')
         .features([
-          feature('domain', {
-            configure() {
-              calls.push('feature.configure');
-            },
-            provides: { value: () => 42 },
-            start({ value }) {
-              calls.push(`feature.start:${value}`);
-            },
-            stop({ value }) {
-              calls.push(`feature.stop:${value}`);
-            },
-            dispose({ value }) {
-              calls.push(`feature.dispose:${value}`);
-            },
-          }),
+          defineFeature('domain')
+            .infra(
+              infra({
+                name: 'domain-unit',
+                configure() {
+                  calls.push('feature.configure');
+                },
+                provides: { value: () => 42 },
+                start({ value }) {
+                  calls.push(`feature.start:${value}`);
+                },
+                stop({ value }) {
+                  calls.push(`feature.stop:${value}`);
+                },
+                dispose({ value }) {
+                  calls.push(`feature.dispose:${value}`);
+                },
+              }),
+            )
+            .provides({ value: ({ value }) => value })
+            .entrypoints(),
         ])
         .entrypoints(
           entrypoint.fromFeatures(() =>
@@ -107,10 +114,14 @@ describe('lifecycle authoring', () => {
     expect(await app.dispose()).toBe(failure);
   });
 
-  it('preserves a returned feature configure failure', () => {
+  it('preserves a returned configure failure from a unit inside a feature', () => {
     const failure = Refused();
     const configured = defineApp('feature-configure-refusal')
-      .features([feature('domain', { configure: () => failure })])
+      .features([
+        defineFeature('domain')
+          .infra(infra({ name: 'domain-unit', configure: () => failure }))
+          .entrypoints(),
+      ])
       .configure();
     expect(configured).toBe(failure);
   });

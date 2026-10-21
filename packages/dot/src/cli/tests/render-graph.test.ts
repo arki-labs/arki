@@ -7,12 +7,13 @@
  * recorded while satisfying needs, not anything declared up front.
  */
 
-import { orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
-import { feature } from '../../feature.js';
+import { defineFeature } from '../../define-feature.js';
 import { entrypoint, infra, service } from '../../unit-contract.js';
 import { buildMermaidGraph, renderGraph } from '../render-graph.js';
 
@@ -94,7 +95,7 @@ describe('renderGraph', () => {
 
   it('draws a .features()/.entrypoints() app as the hexagon: infra → features → entrypoints, numbered in boot order', async () => {
     const db = infra({ name: 'db', provides: { db: () => ({ ok: true }) } });
-    const orders = feature('orders', { needs: { db: service<{ ok: boolean }>() } });
+    const orders = defineFeature('orders').needs({ db: service<{ ok: boolean }>() }).entrypoints();
     const health = entrypoint({
       name: 'health',
       needs: { db: service<{ ok: boolean }>() },

@@ -5,10 +5,10 @@ import type { FailureOf, SuccessOf } from '@arki/failure';
 import { child, cleanup, resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
-import type { UnitCloseFailure, UnitOpenFailure, UnitProvides, Provided } from '../unit-contract.js';
+import type { Provided, UnitCloseFailure, UnitOpenFailure } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
-import { bindEntrypoint, entrypoint, feature, plug } from '../feature.js';
+import { bindEntrypoint, entrypoint } from '../feature.js';
 import { initUnits } from '../init-units.js';
 import { lazy } from '../lazy.js';
 import { infra, rename, service } from '../unit-contract.js';
@@ -24,8 +24,6 @@ const flush = () => (possible() ? CloseRefused() : undefined);
 const factories = { db: () => resource(open, close) };
 const boot = () => ({ watch: child(watch), flush: cleanup(flush) });
 const direct = infra({ name: 'direct', provides: factories, boot });
-const objectFeature = feature('object', { provides: factories, boot });
-const _mountedObject = plug(objectFeature);
 const _renamed = rename(direct, { db: 'renamedDb' });
 const driving = entrypoint.fromFeatures(() => direct);
 const _drivingBound = bindEntrypoint(driving, []);
@@ -40,7 +38,6 @@ const _withInfra = defineFeature('infra').infra(direct).entrypoints();
 const instanced = chain.instance('copy');
 const lazyHandle = lazy(open, { dispose: close });
 const _lazyUnit = infra({ name: 'lazy', provides: { db: () => lazyHandle } });
-const _lazyFeature = feature('lazy-feature', { provides: { db: () => lazyHandle } });
 const _chainLazy = defineFeature('chain-lazy')
   .provides({ db: () => lazyHandle })
   .entrypoints();
@@ -48,14 +45,7 @@ const _chainLazy = defineFeature('chain-lazy')
 type OpenOfDirect = UnitOpenFailure<typeof direct>;
 type CloseOfDirect = UnitCloseFailure<typeof direct>;
 type OwnedForms =
-  | typeof _mountedObject
-  | typeof _renamed
-  | (readonly [typeof _drivingBound, typeof _drivenBound])[number]
-  | typeof byKeys
-  | typeof _byWitness;
-// Object keeps both phases exact.
-expectTypeOf<UnitOpenFailure<typeof _mountedObject>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<UnitCloseFailure<typeof _mountedObject>>().toEqualTypeOf<CloseOfDirect>();
+  typeof _renamed | (readonly [typeof _drivingBound, typeof _drivenBound])[number] | typeof byKeys | typeof _byWitness;
 // Renamed keeps both phases exact.
 expectTypeOf<UnitOpenFailure<typeof _renamed>>().toEqualTypeOf<OpenOfDirect>();
 expectTypeOf<UnitCloseFailure<typeof _renamed>>().toEqualTypeOf<CloseOfDirect>();
@@ -71,10 +61,6 @@ expectTypeOf<UnitCloseFailure<typeof byKeys>>().toEqualTypeOf<CloseOfDirect>();
 // Witness keeps both phases exact.
 expectTypeOf<UnitOpenFailure<typeof _byWitness>>().toEqualTypeOf<OpenOfDirect>();
 expectTypeOf<UnitCloseFailure<typeof _byWitness>>().toEqualTypeOf<CloseOfDirect>();
-// ObjectService
-expectTypeOf<Provided<typeof objectFeature.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
-// MountedService
-expectTypeOf<UnitProvides<typeof _mountedObject>['db']>().toEqualTypeOf<SuccessOf<typeof open>>();
 // ChainService
 expectTypeOf<Provided<typeof chain.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
 // ChainOpen
@@ -93,10 +79,6 @@ expectTypeOf<UnitCloseFailure<ReturnType<typeof _withInfra.units>[0]>>().toEqual
 expectTypeOf<UnitOpenFailure<ReturnType<typeof instanced.units>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
 // InstanceClose
 expectTypeOf<UnitCloseFailure<ReturnType<typeof instanced.units>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
-// LazyObjectClose
-expectTypeOf<UnitCloseFailure<ReturnType<typeof plug<typeof _lazyFeature>>>>().toEqualTypeOf<
-  UnitCloseFailure<typeof _lazyUnit>
->();
 // LazyChainClose
 expectTypeOf<UnitCloseFailure<ReturnType<typeof _chainLazy.units>[0]>>().toEqualTypeOf<
   UnitCloseFailure<typeof _lazyUnit>
@@ -105,7 +87,6 @@ expectTypeOf<UnitCloseFailure<ReturnType<typeof _chainLazy.units>[0]>>().toEqual
 expectTypeOf<string extends UnitCloseFailure<OwnedForms>['code'] ? true : false>().toEqualTypeOf<false>();
 
 const _directApp = defineApp('direct').infra(direct);
-const _objectApp = defineApp('object').features([objectFeature]);
 const _drivingApp = defineApp('driver').features([]).entrypoints(driving);
 const _drivenApp = defineApp('driven')
   .infra(infra.fromFeatures(() => direct))
@@ -118,10 +99,6 @@ const _resourceApp = defineApp('resource').infra(directResource);
 const _chainApp = defineApp('chain').features([chain]);
 const _nestedApp = defineApp('parent').features([parent]);
 const _instanceApp = defineApp('instance').features([instanced]);
-expectTypeOf<FailureOf<typeof _objectApp.boot>>().toEqualTypeOf<FailureOf<typeof _directApp.boot>>();
-expectTypeOf<FailureOf<SuccessOf<typeof _objectApp.boot>['dispose']>>().toEqualTypeOf<
-  FailureOf<SuccessOf<typeof _directApp.boot>['dispose']>
->();
 expectTypeOf<FailureOf<typeof _drivingApp.boot>>().toEqualTypeOf<FailureOf<typeof _directApp.boot>>();
 expectTypeOf<FailureOf<SuccessOf<typeof _drivingApp.boot>['dispose']>>().toEqualTypeOf<
   FailureOf<SuccessOf<typeof _directApp.boot>['dispose']>
@@ -154,8 +131,8 @@ expectTypeOf<FailureOf<typeof _instanceApp.boot>>().toEqualTypeOf<FailureOf<type
 expectTypeOf<FailureOf<SuccessOf<typeof _instanceApp.boot>['dispose']>>().toEqualTypeOf<
   FailureOf<SuccessOf<typeof _resourceApp.boot>['dispose']>
 >();
-export function consumers(value: UnitProvides<typeof _mountedObject>['db']) {
-  const database = defineApp('object').features([objectFeature]);
+export function consumers(value: Provided<typeof chain.provides.db>) {
+  const database = defineApp('chain').features([chain]);
   const adapters = defineApp('adapters')
     .infra(infra({ name: 'count', provides: { count: () => 1 } }))
     .infra(byKeys);
@@ -163,8 +140,6 @@ export function consumers(value: UnitProvides<typeof _mountedObject>['db']) {
   void adapters;
   // @ts-expect-error A resource descriptor must never reach the service consumer.
   value.prepare(new AbortController().signal);
-  // @ts-expect-error A boot callback only returns a supported scope plan, void or a declared failure.
-  feature('invalid-boot', { boot: () => ({ arbitrary: true }) });
   // @ts-expect-error Published success must match the context schema, even when acquired through a resource.
   factory.infra({
     name: 'invalid-service',

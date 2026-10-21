@@ -1,125 +1,64 @@
 /**
- * The feature contract: declarations are inert data whose compile-time
- * fragments fold without any kernel; `.features()` publishes slice
- * payloads under the derived token, attributes slice actions to the
- * feature, and merges the boot escape hatch; the builder keeps the
- * hexagon's direction (driven → core → driving). These encode WHY the
- * module exists — each would break if the declaration/mount split or the
- * phase order regressed.
+ * The feature contract: declarations are inert data; `.features()` publishes
+ * slice payloads under the derived key, attributes slice actions to the
+ * feature, and merges its provides; the builder keeps the hexagon's
+ * direction (driven → core → driving). These encode WHY the module exists
+ * — each would break if the declaration/mount split or the phase order
+ * regressed.
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
-import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from '../feature.js';
+import type { Provided, ServicesBag, ServicesOf } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
 import {
-  composeRepos,
-  composeRouter,
   entrypoint,
   entrypointsOf,
-  feature,
   FEATURE_ERROR_CODES,
-  plug,
   providesOf,
   resolveNeeds,
   servicesOf,
   sliceOf,
-  tokenOf,
 } from '../feature.js';
 import { defineApp, infra, service } from '../index.js';
-import { unit } from '../unit-contract.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
+import { unit } from '../unit-contract.js';
 
 type FakeDb = { readonly tag: 'db' };
 const fakeDb: FakeDb = { tag: 'db' };
 
-const ordersRouter = { list: 'orders.list' } as const;
-const billingRouter = { charge: 'billing.charge' } as const;
+const queueSlice = {
+  kind: 'queue',
+  key: 'queue',
+  actions: [{ id: 'orders:sync.consume', binding: 'queue', direction: 'in' as const, address: 'orders:sync' }],
+  resolve: () => ({ sync: 'job' }),
+};
 
-const orders = feature('orders', {
-  router: { orders: ordersRouter },
-  repos: { orders: (db: FakeDb) => ({ db, kind: 'orders-repo' as const }) },
-  use: [
-    {
-      key: 'queue',
-      actions: [{ id: 'orders:sync.consume', binding: 'queue', direction: 'in' as const, address: 'orders:sync' }],
-      resolve: () => ({ sync: 'job' }),
-    },
-  ],
-});
+const orders = defineFeature('orders').entrypoints(queueSlice);
 
-const billing = feature('billing', {
-  router: { billing: billingRouter },
-  repos: { billing: (db: FakeDb) => ({ db, kind: 'billing-repo' as const }) },
-});
+const billing = defineFeature('billing').entrypoints();
 
-const authish = feature('authish', {
-  needs: { db: service<FakeDb>() },
-  provides: { session: ({ db }) => ({ via: db.tag }) },
-});
+const authish = defineFeature('authish')
+  .needs({ db: service<FakeDb>() })
+  .provides({ identity: ({ db }) => ({ via: db.tag }) })
+  .entrypoints();
 
-describe('compile-time folds (no kernel involved)', () => {
-  it('composeRouter merges fragments and preserves each fragment type', () => {
-    const router = composeRouter([orders, billing]);
-    expect(new Set(Object.keys(router))).toEqual(new Set(['billing', 'orders']));
-    expectTypeOf(router.orders).toEqualTypeOf<typeof ordersRouter>();
-    expectTypeOf(router.billing).toEqualTypeOf<typeof billingRouter>();
-  });
-
-  it('composeRouter rejects two features claiming one mount key: a compile error, and a coded throw behind it', () => {
-    // The second fragment would silently replace the first, so the mistake
-    // must stop the build; the throw catches code that skips the types.
-    const clash = feature('clash', { router: { orders: {} } });
-    // @ts-expect-error -- "orders" is claimed twice
-    expect(() => composeRouter([orders, clash])).toThrow(
-      expect.objectContaining({
-        code: FEATURE_ERROR_CODES.duplicateRouterKey,
-        message: expect.stringMatching(/router mount key "orders"/),
-      }),
-    );
-  });
-
-  it('composeRouter accepts features without routers and features typed with a wide router record', () => {
-    const bare = feature('bare', {});
-    const wide: AnyFeature = feature('wide', { router: {} });
-    expect(Object.keys(composeRouter([orders, bare, wide, bare]))).toEqual(['orders']);
-  });
-
-  it('composeRepos folds factories over one db handle, typed by the factories', () => {
-    const db: FakeDb = { tag: 'db' };
-    const repos = composeRepos([orders, billing], db);
-    expect(repos.orders.kind).toBe('orders-repo');
-    expect(repos.billing.db).toBe(db);
-    expectTypeOf<ComposedRepos<readonly [typeof orders, typeof billing]>>().toEqualTypeOf<typeof repos>();
-  });
-
-  it('composeRepos rejects two features claiming one repo key: a compile error, and a coded throw behind it', () => {
-    const clash = feature('repo-clash', { repos: { orders: (db: FakeDb) => db } });
-    // @ts-expect-error -- "orders" is claimed twice
-    expect(() => composeRepos([orders, clash], { tag: 'db' })).toThrow(
-      expect.objectContaining({
-        code: FEATURE_ERROR_CODES.duplicateRepoKey,
-        message: expect.stringMatching(/repo key "orders"/),
-      }),
-    );
-  });
-});
-
-const slice = (key: string) => ({ key, actions: [], resolve: () => ({}) });
+const slice = (key: string) => ({ kind: key, key, actions: [], resolve: () => ({}) });
 
 describe('slice keys', () => {
   it('rejects two slices under one key: the second would silently replace the first when plugged', () => {
-    expect(() => feature('twice', { use: [slice('routes'), slice('jobs'), slice('routes')] })).toThrow(
+    expect(() => defineFeature('twice').entrypoints(slice('routes'), slice('jobs'), slice('routes'))).toThrow(
       expect.objectContaining({
         code: FEATURE_ERROR_CODES.duplicateSliceKey,
-        message: expect.stringMatching(/feature "twice" declares two "routes" slices/),
+        message: expect.stringMatching(/"twice" declares two "routes" entrypoints/),
       }),
     );
   });
 
   it('accepts slices with distinct keys and the same key in different features', () => {
-    expect(() => feature('one', { use: [slice('routes'), slice('jobs')] })).not.toThrow();
-    expect(() => feature('two', { use: [slice('routes')] })).not.toThrow();
+    expect(() => defineFeature('one').entrypoints(slice('routes'), slice('jobs'))).not.toThrow();
+    expect(() => defineFeature('two').entrypoints(slice('routes'))).not.toThrow();
   });
 });
 
@@ -136,32 +75,27 @@ describe('mounting features (.features)', () => {
     const services = app.services as Record<string, unknown>;
     expect(services['feature.orders']).toEqual({ queue: { sync: 'job' } });
     expect(services['feature.billing']).toEqual({});
-    expect(services['session']).toEqual({ via: 'db' });
+    expect(services['identity']).toEqual({ via: 'db' });
 
     orThrow(await app.dispose());
-  });
-
-  it('derives key-stable tokens without shared state', () => {
-    expect(tokenOf(orders).key).toBe('feature.orders');
-    expect(tokenOf(billing).key).toBe('feature.billing');
-    // Two independent derivations resolve the same wire key — the
-    // provide/collect handshake is by key string, not object identity.
-    expect(tokenOf(orders).key).toBe(tokenOf(orders).key);
   });
 
   it('mounts features in list order (boot order is the list order)', () => {
     const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     const { manifest } = orThrow(defineApp('order-test').infra(dbUnit).features([orders, billing]).configure());
     expect(manifest.plugins.map(p => p.name)).toEqual(['db', 'orders', 'billing']);
-    expect(plug(orders).name).toBe('orders');
   });
 
   it('resolves endpoint-style slices with the feature needs at boot', async () => {
     const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
-    const serving = feature('serving', {
-      needs: { db: service<FakeDb>() },
-      use: [{ key: 'routes', actions: [], resolve: ({ db }: { db: FakeDb }) => ({ boundTo: db.tag }) }],
-    });
+    const serving = defineFeature('serving')
+      .needs({ db: service<FakeDb>() })
+      .entrypoints({
+        kind: 'routes',
+        key: 'routes',
+        actions: [],
+        resolve: ({ db }: { db: FakeDb }) => ({ boundTo: db.tag }),
+      });
 
     const app = orThrow(await defineApp('slice-services-test').infra(dbUnit).features([serving]).boot());
     const services = app.services as Record<string, unknown>;
@@ -179,30 +113,26 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
     planOf: (userId: string) => (userId === 'usr_pro' ? ('pro' as const) : ('free' as const)),
   });
 
-  const plans = feature('plans', {
-    needs: { db: service<FakeDb>() },
-    provides: {
+  const plans = defineFeature('plans')
+    .needs({ db: service<FakeDb>() })
+    .provides({
       entitlements: ({ db }) => createEntitlements(db),
       warmedAt: async () => {
         await Promise.resolve();
         return 42;
       },
-    },
-    boot: ({ entitlements, warmedAt }) => {
-      expectTypeOf(entitlements).toEqualTypeOf<ReturnType<typeof createEntitlements>>();
-      expectTypeOf(warmedAt).toEqualTypeOf<number>();
-    },
-  });
+    })
+    .entrypoints();
 
-  const digest = feature('digest', {
-    needs: { access: plans.provides.entitlements },
-    provides: {
+  const digest = defineFeature('digest')
+    .needs({ access: plans.provides.entitlements })
+    .provides({
       digestPlan:
         ({ access }) =>
         (userId: string) =>
           access.planOf(userId),
-    },
-  });
+    })
+    .entrypoints();
 
   it('the graph is data: handle keys equal the factory keys and carry their provider before anything boots', () => {
     // dot explain and the kernel's configure-time checks read these keys
@@ -216,10 +146,9 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
   it("types each factory from the feature's needs and each handle from the factory's return — nothing restated", () => {
     expectTypeOf(plans.provides.entitlements.key).toEqualTypeOf<'entitlements'>();
     // An async factory's handle carries the resolved value, not the promise.
-    expectTypeOf(plans.provides.warmedAt).toEqualTypeOf<Handle<number, 'warmedAt', 'plans'>>();
-    expectTypeOf<Parameters<typeof digest.factories.digestPlan>[0]['access']>().toEqualTypeOf<
-      ReturnType<typeof createEntitlements>
-    >();
+    expectTypeOf<Provided<typeof plans.provides.warmedAt>>().toEqualTypeOf<number>();
+    // The consumer's factory saw the provider's type through the handle: its result is computed from `access`.
+    expectTypeOf<Provided<typeof digest.provides.digestPlan>>().toEqualTypeOf<(userId: string) => 'free' | 'pro'>();
   });
 
   it('wires the consumer to the instance the provider built, on the same wire key', async () => {
@@ -255,18 +184,18 @@ const createPlanLookup = () => ({ planOf: (userId: string) => (userId === 'usr_p
 const createScorer = () => ({ score: (text: string) => text.length });
 
 describe('services in the request context (gateway → bag → resolveNeeds)', () => {
-  const plans = feature('plans', { provides: { entitlements: createPlanLookup } });
-  const scoring = feature('scoring', { provides: { scorer: createScorer } });
+  const plans = defineFeature('plans').provides({ entitlements: createPlanLookup }).entrypoints();
+  const scoring = defineFeature('scoring').provides({ scorer: createScorer }).entrypoints();
   // `needs` lives in its own module in an app (feature.ts and router.ts both
   // import it); a procedure narrows the opaque bag with it.
   const companionNeeds = { access: plans.provides.entitlements, db: service<FakeDb>() };
-  const companion = feature('companion', { needs: companionNeeds });
+  const companion = defineFeature('companion').needs(companionNeeds).entrypoints();
   const features = [plans, scoring, companion] as const;
 
-  const gateway = feature('gateway', {
-    needs: { ...providesOf(features) },
-    provides: { bag: ctx => servicesOf(ctx, features) as ServicesBag },
-  });
+  const gateway = defineFeature('gateway')
+    .needs({ ...providesOf(features) })
+    .provides({ bag: ctx => servicesOf(ctx, features) as ServicesBag })
+    .entrypoints();
 
   it('ServicesOf is the merged provides of the tuple — named once, never restated', () => {
     type Services = ServicesOf<typeof features>;
@@ -375,14 +304,14 @@ describe('the hexagon: .infra → .features → .entrypoints', () => {
   });
 
   it('lets a later feature need what an earlier feature provides', async () => {
-    const profile = feature('profile', {
-      needs: { session: service<{ via: 'db' }>() },
-      provides: { profile: ({ session }) => `profile:${session.via}` },
-    });
+    const profile = defineFeature('profile')
+      .needs({ identity: service<{ via: 'db' }>() })
+      .provides({ profile: ({ identity }) => `profile:${identity.via}` })
+      .entrypoints();
     const app = orThrow(await defineApp('chain').infra(dbUnit).features([authish, profile]).boot());
     expectTypeOf(app.services.profile).toEqualTypeOf<string>();
     expect(app.services.profile).toBe('profile:db');
-    // @ts-expect-error — profile needs session, which authish only provides if it comes first
+    // @ts-expect-error — profile needs identity, which authish only provides if it comes first
     defineApp('chain-wrong').infra(dbUnit).features([profile, authish]);
     orThrow(await app.dispose());
   });
@@ -404,10 +333,10 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
   );
 
   it('sees the final feature list, boots before the features, and serves them as a dependency', async () => {
-    const writer = feature('writer', {
-      needs: { registry: service<{ handlers: readonly string[] }>() },
-      provides: { seenAtBoot: ({ registry: r }) => r.handlers },
-    });
+    const writer = defineFeature('writer')
+      .needs({ registry: service<{ handlers: readonly string[] }>() })
+      .provides({ seenAtBoot: ({ registry: r }) => r.handlers })
+      .entrypoints();
     const app = orThrow(await defineApp('driven-binding').infra(registry).features([orders, writer]).boot());
     expect(app.services.seenAtBoot).toEqual(['orders:queue']);
     expect(app.manifest.plugins.map(p => [p.name, p.role])).toEqual([
@@ -427,19 +356,5 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
     expect(failure).toMatchObject({
       cause: { code: 'ARKI_DOT_E025', message: expect.stringContaining('slice record') },
     });
-  });
-});
-
-describe('plug(): a slice names its actions after the mounting feature', () => {
-  it("reads `actionsOf(feature)` next to the static `actions`, as the chain form's compile does", () => {
-    const named = {
-      key: 'named',
-      actions: [],
-      actionsOf: (owner: string) => [{ id: `${owner}.ping`, binding: 'x', direction: 'in' as const, address: 'ping' }],
-      resolve: () => ({}),
-    };
-    expect(plug(feature('obj', { use: [named] })).actions.map(a => ('id' in a ? a.id : undefined))).toEqual([
-      'obj.ping',
-    ]);
   });
 });

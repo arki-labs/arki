@@ -4,11 +4,9 @@ import type { FailureOf, SuccessOf } from '@arki/failure';
 import { child, cleanup, resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
-import type { AnyFeature } from '../feature.js';
 import type { UnitCloseFailure, UnitOpenFailure } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { feature } from '../feature.js';
-import { lazy, infra } from '../unit-contract.js';
+import { infra, lazy } from '../unit-contract.js';
 
 const OpenRefused = defineFailure('type.ownership_open');
 const CloseRefused = defineFailure('type.ownership_close');
@@ -43,12 +41,3 @@ infra({ name: 'invalid', boot: () => ({ arbitrary: true }) });
 
 // @ts-expect-error an untyped provider cannot hide undeclared returned failures.
 infra({ name: 'unknown', provides: { value: (): unknown => OpenRefused() } });
-
-// Explicit erasure loses precision, but must never turn a fallible runtime into an infallible app.
-const erasedFeature: AnyFeature = feature('erased', { provides: { db: () => OpenRefused() } });
-const _erasedApp = defineApp('erased').features([erasedFeature]);
-expectTypeOf<Exclude<ReturnType<typeof OpenRefused>, FailureOf<typeof _erasedApp.boot>>>().toEqualTypeOf<never>();
-expectTypeOf<Exclude<ReturnType<typeof OpenRefused>, FailureOf<typeof _erasedApp.start>>>().toEqualTypeOf<never>();
-expectTypeOf<
-  Exclude<ReturnType<typeof CloseRefused>, FailureOf<SuccessOf<typeof _erasedApp.boot>['dispose']>>
->().toEqualTypeOf<never>();

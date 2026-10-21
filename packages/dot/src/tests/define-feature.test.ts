@@ -23,16 +23,7 @@ import type {
 import type { SupervisedUsecase, SupervisedUsecases } from '../kernel/usecase.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
-import {
-  defineFeature,
-  entrypoint,
-  entrypointsOf,
-  feature,
-  FEATURE_ERROR_CODES,
-  resolveNeeds,
-  routerFor,
-  sliceOf,
-} from '../feature.js';
+import { defineFeature, entrypoint, entrypointsOf, FEATURE_ERROR_CODES, resolveNeeds, routerFor } from '../feature.js';
 import { defineApp, infra, testApp } from '../index.js';
 import { unit } from '../unit-contract.js';
 
@@ -538,27 +529,6 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
     expect(unused).toBeTypeOf('function');
   });
 
-  it('mounts object-form and chain features side by side; drivers in .entrypoints() see both', async () => {
-    const legacy = feature('legacy', {
-      use: [{ key: 'schedules', actions: [], resolve: () => [{ name: 'legacy-tick' }] }],
-    });
-    const seen: unknown[] = [];
-    const scheduler = entrypoint.fromFeatures(features =>
-      unit({
-        name: 'scheduler',
-        boot: ctx => {
-          for (const f of features) seen.push([f.name, sliceOf(ctx, f)['schedules']]);
-        },
-      }),
-    );
-    const app = orThrow(
-      await defineApp('mixed').infra(database, billing).features([legacy, digest]).entrypoints(scheduler).start(),
-    );
-    expect(seen.map(entry => (Array.isArray(entry) ? entry[0] : undefined))).toEqual(['legacy', 'digest']);
-    expect(app.manifest.plugins.find(p => p.name === 'scheduler')?.role).toBe('entrypoint');
-    orThrow(await app.dispose());
-  });
-
   it('lets a driven adapter in .infra() read entrypoint declarations before the features boot', async () => {
     let declared: readonly string[] = [];
     const collector = infra.fromFeatures(features =>
@@ -612,7 +582,10 @@ describe('regressions (Astra review of Revision 1)', () => {
     const unused = () => {
       // @ts-expect-error -- the feature unit before its own infra: `digest.store` is not available yet
       defineApp('x').infra(database).infra(billing).infra(digest.units()[2]);
-      return defineApp('y').infra(database).infra(billing).infra(...digest.units());
+      return defineApp('y')
+        .infra(database)
+        .infra(billing)
+        .infra(...digest.units());
     };
     expect(unused).toBeTypeOf('function');
   });

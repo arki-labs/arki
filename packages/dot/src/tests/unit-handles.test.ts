@@ -18,10 +18,11 @@ import type { Handle, Lazy, Provided } from '../unit-contract.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
-import { feature, providesOf } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
+import { providesOf } from '../feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { infra, rename } from '../unit-contract.js';
 import { fake } from '../test-harness.js';
+import { infra, rename } from '../unit-contract.js';
 
 type Rows = { readonly url: string; readonly query: (sql: string) => readonly string[] };
 
@@ -55,10 +56,10 @@ describe('unit handles are data before boot', () => {
   it('types a consumer from the handle alone; dispose sees the factory value', async () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
-    const reports = feature('reports', {
-      needs: { db: database.provides.db },
-      provides: { report: ({ db }) => db.query('select 1') },
-    });
+    const reports = defineFeature('reports')
+      .needs({ db: database.provides.db })
+      .provides({ report: ({ db }) => db.query('select 1') })
+      .entrypoints();
     const app = orThrow(await defineApp('handles').infra(database).features([reports]).boot());
     expectTypeOf(app.services.report).toEqualTypeOf<readonly string[]>();
     expect(app.services.report).toEqual(['pg://main:select 1']);
@@ -90,7 +91,7 @@ describe('the kernel checks adapters at configure time', () => {
   it('a feature mounted before its db() adapter fails configure() with E020 naming .infra() — nothing boots', () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
-    const digest = feature('daily-digest', { needs: { db: database.provides.db } });
+    const digest = defineFeature('daily-digest').needs({ db: database.provides.db }).entrypoints();
     // @ts-expect-error -- driven adapters cannot follow the domain; the erased path is the kernel's job
     const builder = defineApp('late-adapter').features([digest]).infra(database);
     expect(builder.configure()).toMatchObject({
@@ -106,18 +107,18 @@ describe('the kernel checks adapters at configure time', () => {
   });
 
   it('a ring through an adapter fails configure() with E019', () => {
-    const billing = feature('billing', {
-      provides: { entitlements: () => ({ plan: 'pro' as const }) },
-    });
+    const billing = defineFeature('billing')
+      .provides({ entitlements: () => ({ plan: 'pro' as const }) })
+      .entrypoints();
     const audit = infra({
       name: 'audit',
       needs: { access: billing.provides.entitlements },
       provides: { audit: ({ access }) => ({ record: (what: string) => `${access.plan}:${what}` }) },
     });
-    const ringed = feature('billing', {
-      needs: { audit: audit.provides.audit },
-      provides: { entitlements: () => ({ plan: 'pro' as const }) },
-    });
+    const ringed = defineFeature('billing')
+      .needs({ audit: audit.provides.audit })
+      .provides({ entitlements: () => ({ plan: 'pro' as const }) })
+      .entrypoints();
     // @ts-expect-error -- audit needs entitlements, which nothing before it provides
     const builder = defineApp('ring').infra(audit).features([ringed]);
     expect(builder.configure()).toMatchObject({
@@ -132,7 +133,7 @@ describe('the kernel checks adapters at configure time', () => {
   it('dot explain draws the labelled db edge for an adapter consumer without booting', async () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
-    const digest = feature('daily-digest', { needs: { db: database.provides.db } });
+    const digest = defineFeature('daily-digest').needs({ db: database.provides.db }).entrypoints();
     const configured = orThrow(defineApp('explain-db').infra(database).features([digest]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
@@ -152,13 +153,15 @@ describe('rename() moves the handle with the mounted object', () => {
     // @ts-expect-error -- the old key is gone after rename
     expect(reportsDb.provides.db).toBeUndefined();
 
-    const fresh = feature('analytics', { needs: { db: reportsDb.provides.reportsDb } });
+    const fresh = defineFeature('analytics').needs({ db: reportsDb.provides.reportsDb }).entrypoints();
     const app = orThrow(await defineApp('renamed').infra(reportsDb).features([fresh]).boot());
     expect(app.services.reportsDb.url).toBe('pg://reports');
     orThrow(await app.dispose());
 
     // A handle taken from the object before the rename keeps the old key.
-    const stale = feature('stale', { needs: { db: makeDb('pg://x').provides.db } });
+    const stale = defineFeature('stale')
+      .needs({ db: makeDb('pg://x').provides.db })
+      .entrypoints();
     // @ts-expect-error -- `db` is not provided: only `reportsDb` is mounted
     const builder = defineApp('stale').infra(reportsDb).features([stale]);
     await expect(builder.boot()).resolves.toMatchObject({
@@ -193,10 +196,10 @@ describe('handle.lazy', () => {
 describe('fake(handle, value) and providesOf over units', () => {
   it('mounts a fake under the real handle, type-checked against it', async () => {
     const database = makeDb('pg://main');
-    const reports = feature('reports', {
-      needs: { db: database.provides.db },
-      provides: { report: ({ db }) => db.query('q') },
-    });
+    const reports = defineFeature('reports')
+      .needs({ db: database.provides.db })
+      .provides({ report: ({ db }) => db.query('q') })
+      .entrypoints();
     const fakeDb: Rows = { url: 'fake', query: () => ['faked'] };
     const app = orThrow(await defineApp('faked').infra(fake(database.provides.db, fakeDb)).features([reports]).boot());
     expect(app.services.report).toEqual(['faked']);
@@ -209,7 +212,9 @@ describe('fake(handle, value) and providesOf over units', () => {
 
   it('providesOf() merges unit handles with feature handles', () => {
     const database = makeDb('pg://main');
-    const billing = feature('billing', { provides: { entitlements: () => 'pro' as const } });
+    const billing = defineFeature('billing')
+      .provides({ entitlements: () => 'pro' as const })
+      .entrypoints();
     const merged = providesOf([database, billing]);
     expect(Object.keys(merged)).toEqual(['db', 'entitlements']);
     expectTypeOf(merged.db).toEqualTypeOf<Handle<Rows, 'db', 'db'>>();

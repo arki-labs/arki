@@ -14,7 +14,7 @@ import { runExplain } from '../cli/index.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
-import { feature } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { infra, service, token } from '../unit-contract.js';
 
@@ -29,14 +29,14 @@ describe('configure-time capability checks', () => {
     // Typed feature modules naming each other's handles never get here (TS7022 /
     // TDZ fire first); erased graphs and JS modules do. Witnesses by wire key
     // are exactly that erased shape.
-    const summarization = feature('ai-summarization', {
-      needs: { scorer: token<Scorer>()('scorer') },
-      provides: { intelligence: ({ scorer }): Intelligence => ({ summarize: text => `${scorer.score(text)}` }) },
-    });
-    const scoring = feature('relevance-scoring', {
-      needs: { intelligence: token<Intelligence>()('intelligence') },
-      provides: { scorer: ({ intelligence }): Scorer => ({ score: text => intelligence.summarize(text).length }) },
-    });
+    const summarization = defineFeature('ai-summarization')
+      .needs({ scorer: token<Scorer>()('scorer') })
+      .provides({ intelligence: ({ scorer }): Intelligence => ({ summarize: text => `${scorer.score(text)}` }) })
+      .entrypoints();
+    const scoring = defineFeature('relevance-scoring')
+      .needs({ intelligence: token<Intelligence>()('intelligence') })
+      .provides({ scorer: ({ intelligence }): Scorer => ({ score: text => intelligence.summarize(text).length }) })
+      .entrypoints();
     // @ts-expect-error -- the tuple guard rejects it too: scorer is provided after its consumer
     const ring = defineApp('ring').infra(db).features([summarization, scoring]);
 
@@ -56,8 +56,10 @@ describe('configure-time capability checks', () => {
   });
 
   it('a provider mounted after its consumer fails configure() with E020 naming both positions and the fix', () => {
-    const billing = feature('billing', { provides: { entitlements: () => ({ plan: 'pro' as const }) } });
-    const digest = feature('daily-digest', { needs: { access: billing.provides.entitlements } });
+    const billing = defineFeature('billing')
+      .provides({ entitlements: () => ({ plan: 'pro' as const }) })
+      .entrypoints();
+    const digest = defineFeature('daily-digest').needs({ access: billing.provides.entitlements }).entrypoints();
     // @ts-expect-error -- the tuple guard rejects the same order at compile time
     const misordered = defineApp('order').infra(db).features([digest, billing]);
 
@@ -79,16 +81,18 @@ describe('configure-time capability checks', () => {
 describe('dot explain', () => {
   it('lists capability edges and provides without booting — explain never boots', async () => {
     let built = 0;
-    const billing = feature('billing', {
-      needs: { db: service<Db>() },
-      provides: {
+    const billing = defineFeature('billing')
+      .needs({ db: service<Db>() })
+      .provides({
         entitlements: () => {
           built += 1;
           return { plan: 'pro' as const };
         },
-      },
-    });
-    const digest = feature('daily-digest', { needs: { access: billing.provides.entitlements, db: service<Db>() } });
+      })
+      .entrypoints();
+    const digest = defineFeature('daily-digest')
+      .needs({ access: billing.provides.entitlements, db: service<Db>() })
+      .entrypoints();
     const builder = defineApp('explain-edges').infra(db).features([billing, digest]);
 
     const explained = textUi();
@@ -104,8 +108,10 @@ describe('dot explain', () => {
     expect(manifest).toMatchObject({ manifestVersion: 2 });
     const configured = orThrow(builder.configure());
     expect(configured.manifest.plugins.find(p => p.name === 'billing')?.provides).toEqual([
-      'entitlements',
+      'billing.usecases',
+      'billing.services',
       'feature.billing',
+      'entitlements',
     ]);
     // Adapters (`.infra(db)`) are drawn too: their provides are static handles.
     expect(table).toContain('daily-digest --[db]--> db');

@@ -4,14 +4,13 @@ import { resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
-import { feature } from '../feature.js';
 import { initUnits } from '../init-units.js';
 import { createUnit, infra, rename } from '../unit-contract.js';
 
 const Refused = defineFailure('test.boot_authoring.refused');
 
 describe('boot authoring', () => {
-  it.each(['plugin', 'constructor', 'feature', 'keys', 'witness'] as const)(
+  it.each(['plugin', 'constructor', 'keys', 'witness'] as const)(
     '%s preserves failure identity and releases providers before returning it',
     async form => {
       const failure = Refused();
@@ -36,18 +35,15 @@ describe('boot authoring', () => {
       };
       const factory = initUnits.context<{ db: typeof db }>().create();
       const app = defineApp(`boot-${form}`);
-      const mounted =
-        form === 'feature'
-          ? app.features([feature('domain', { provides, boot, start })])
-          : app.infra(
-              form === 'keys'
-                ? factory.infra({ name: 'domain', provides, boot, start })
-                : form === 'witness'
-                  ? factory.infra({ name: 'domain', needs: {}, provides, boot, start })
-                  : form === 'constructor'
-                    ? createUnit({ name: 'domain', provides, boot, start })
-                    : infra({ name: 'domain', provides, boot, start }),
-            );
+      const mounted = app.infra(
+        form === 'keys'
+          ? factory.infra({ name: 'domain', provides, boot, start })
+          : form === 'witness'
+            ? factory.infra({ name: 'domain', needs: {}, provides, boot, start })
+            : form === 'constructor'
+              ? createUnit({ name: 'domain', provides, boot, start })
+              : infra({ name: 'domain', provides, boot, start }),
+      );
       expect(await mounted.start()).toBe(failure);
       expect(events).toEqual(['boot', 'close']);
     },
@@ -114,34 +110,4 @@ it('returns a replacement provider failure before boot runs', async () => {
   };
   expect(await defineApp('replacement-provider').infra(actual).boot()).toBe(failure);
   expect(calls).toBe(0);
-});
-
-it('object feature replacements use the actual providers and boot', async () => {
-  const events: string[] = [];
-  const failure = Refused();
-  const domain = {
-    ...feature('source', {
-      provides: {
-        value: () => {
-          events.push('original-provider');
-          return 1;
-        },
-      },
-      boot: () => {
-        events.push('original-boot');
-      },
-    }),
-    factories: {
-      value: () => {
-        events.push('replacement-provider');
-        return 2;
-      },
-    },
-    boot: ({ value }: { value: number }) => {
-      events.push(`replacement-boot:${value}`);
-      return failure;
-    },
-  };
-  expect(await defineApp('feature-replacement').features([domain]).boot()).toBe(failure);
-  expect(events).toEqual(['replacement-provider', 'replacement-boot:2']);
 });

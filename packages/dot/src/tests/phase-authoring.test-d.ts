@@ -8,14 +8,14 @@ import { defineFailure } from '@arki/failure';
 import type {
   EmptyPhases,
   EmptyShape,
+  Service,
   UnitCloseFailure,
   UnitOpenFailure,
   UnitPhaseFailures,
-  Provided,
-  Service,
 } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { bindEntrypoint, entrypoint, feature, plug } from '../feature.js';
+import { defineFeature } from '../define-feature.js';
+import { bindEntrypoint, entrypoint } from '../feature.js';
 import { initUnits } from '../init-units.js';
 import { createUnit, infra, rename, service } from '../unit-contract.js';
 
@@ -35,10 +35,9 @@ const hooks = {
 const open = () => (branch() ? OpenRefused() : { value: 1 });
 const factories = { db: () => resource(open, () => CloseRefused()) };
 const direct = infra({ name: 'direct', provides: factories, ...hooks });
-const object = feature('object', { provides: factories, ...hooks });
+const chainOfDirect = defineFeature('object').infra(direct).entrypoints();
 const factory = initUnits.context<{ count: number; db: SuccessOf<typeof open> }>().create();
 const _forms = {
-  object: plug(object),
   renamed: rename(direct, { db: 'otherDb' }),
   driving: bindEntrypoint(
     entrypoint.fromFeatures(() => direct),
@@ -61,25 +60,12 @@ expectTypeOf<Phases>().toEqualTypeOf<{
 expectTypeOf<PhasesByForm>().toEqualTypeOf<{ [Form in keyof Forms]: Phases }>();
 expectTypeOf<UnitOpenFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof open>>();
 expectTypeOf<UnitCloseFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof CloseRefused>>();
-expectTypeOf<Provided<typeof object.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
 
 const _empty = infra({ name: '_empty' });
-const _emptyObject = feature('_empty', {});
+const _emptyChain = defineFeature('_empty').entrypoints();
 const _emptyKeys = factory.infra({ name: '_empty' });
-expectTypeOf<
-  UnitPhaseFailures<typeof _empty | typeof _emptyObject | typeof _emptyKeys>
->().toEqualTypeOf<EmptyPhases>();
+expectTypeOf<UnitPhaseFailures<typeof _empty | typeof _emptyChain | typeof _emptyKeys>>().toEqualTypeOf<EmptyPhases>();
 
-const _contextual = feature('_contextual', {
-  needs: { count: service<number>() },
-  provides: { total: ({ count }) => count + 1 },
-  start({ count, total, $signal }) {
-    expectTypeOf(count).toEqualTypeOf<number>();
-    expectTypeOf(total).toEqualTypeOf<number>();
-    expectTypeOf($signal).toEqualTypeOf<AbortSignal>();
-    return Promise.resolve(StartRefused());
-  },
-});
 const _contextualKeys = factory.infra({
   name: '_contextual-keys',
   needs: ['count'],
@@ -91,15 +77,10 @@ const _contextualKeys = factory.infra({
     return Promise.resolve(DisposeRefused());
   },
 });
-expectTypeOf<UnitPhaseFailures<ReturnType<typeof plug<typeof _contextual>>>['start']>().toEqualTypeOf<
-  FailureOf<typeof StartRefused>
->();
-expectTypeOf<UnitPhaseFailures<typeof _contextualKeys>['dispose']>().toEqualTypeOf<
-  FailureOf<typeof DisposeRefused>
->();
+expectTypeOf<UnitPhaseFailures<typeof _contextualKeys>['dispose']>().toEqualTypeOf<FailureOf<typeof DisposeRefused>>();
 
 const _directApp = defineApp('direct').infra(direct);
-const _objectApp = defineApp('object').features([object]);
+const _objectApp = defineApp('object').features([chainOfDirect]);
 const _drivingApp = defineApp('driving')
   .features([])
   .entrypoints(entrypoint.fromFeatures(() => direct));
@@ -129,28 +110,11 @@ expectTypeOf<
 
 // Configure cannot silently admit asynchronous work at any authoring seam.
 // @ts-expect-error configure is synchronous
-feature('async-configure', { configure: () => Promise.resolve(ConfigureRefused()) });
-// @ts-expect-error configure is synchronous
 factory.infra({ name: 'async-configure', configure: () => Promise.resolve(ConfigureRefused()) });
 
 // Inline callbacks get an exact undefined context, including when another phase fails.
 const _mixedDirect = infra({
   name: 'mixed',
-  configure() {
-    /* Prove contextual undefined without an explicit return. */
-  },
-  async start() {
-    await Promise.resolve();
-    return StartRefused();
-  },
-  stop() {
-    /* Prove contextual undefined without an explicit return. */
-  },
-  async dispose() {
-    await Promise.resolve();
-  },
-});
-const _mixedObject = feature('mixed-object', {
   configure() {
     /* Prove contextual undefined without an explicit return. */
   },
@@ -202,9 +166,6 @@ const _mixedWitness = factory.infra({
 expectTypeOf<
   UnitPhaseFailures<typeof _mixedDirect | typeof _mixedKeys | typeof _mixedWitness>['start']
 >().toEqualTypeOf<FailureOf<typeof StartRefused>>();
-expectTypeOf<UnitPhaseFailures<ReturnType<typeof plug<typeof _mixedObject>>>['start']>().toEqualTypeOf<
-  FailureOf<typeof StartRefused>
->();
 
 // Void callbacks can hide actual Failure values, so detached callbacks must prove undefined.
 // eslint-disable-next-line failure/must-use -- Negative fixture intentionally hides a failure behind void to verify the authoring guard rejects it.
@@ -221,10 +182,6 @@ createUnit({ name: 'erased', stop: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
 createUnit({ name: 'erased', dispose: erasedPromiseHook });
 // @ts-expect-error a void return hides a failure
-feature('erased', { stop: erasedHook });
-// @ts-expect-error a Promise<void> return hides a failure
-feature('erased', { dispose: erasedPromiseHook });
-// @ts-expect-error a void return hides a failure
 factory.infra({ name: 'erased', stop: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
 factory.infra({ name: 'erased', dispose: erasedPromiseHook });
@@ -240,8 +197,6 @@ const configurePromise = () => Promise.resolve<undefined>(undefined);
 infra<EmptyShape>({ name: 'partial', configure: configurePromise });
 // @ts-expect-error configure remains synchronous with explicit wiring generics
 createUnit<EmptyShape, EmptyShape, 'partial', void>({ name: 'partial', configure: configurePromise });
-// @ts-expect-error configure remains synchronous with partial explicit generics
-feature<'partial'>('partial', { configure: configurePromise });
 // @ts-expect-error configure remains synchronous with partial explicit key-array generics
 factory.infra<readonly []>({ name: 'partial', configure: configurePromise });
 factory.infra<{ count: Service<number> }>({
