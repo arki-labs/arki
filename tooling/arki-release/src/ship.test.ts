@@ -104,6 +104,15 @@ function deps(overrides: Partial<ShipDeps> = {}): Partial<ShipDeps> {
         writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(readFileSync(manifestFile, 'utf8')), version: '0.2.0' }));
         rmSync(path.join(root, '.changeset', 'a-feature.md'));
       }
+      if (args.includes('arki:candidate')) {
+        // What a demo prints when the candidate breaks its typecheck.
+        const steps = [
+          { id: 'prepare', ok: true, detail: 'ok' },
+          { id: 'install', ok: true, detail: 'ok' },
+          { id: 'typecheck', ok: false, detail: 'TS2305' },
+        ];
+        return { code: 1, stdout: JSON.stringify({ steps }), stderr: '' };
+      }
       if (args.includes('test:docs')) {
         expect(opts.cwd).toBe(path.join(root, 'packages', 'a'));
         return ok(JSON.stringify({ examples: 3, modules: 1, compiled: 1, ran: 1, skipped: 1, skippedBlocks: [{ file: 'README.md', line: 9, reason: 'needs Stripe keys' }], failures: [] }));
@@ -256,9 +265,9 @@ describe('ship', () => {
     expect(JSON.parse(readFileSync(path.join(root, 'packages', 'a', 'package.json'), 'utf8'))).toMatchObject({ version: '0.1.0' });
   });
 
-  it('resume records doc examples and defers demo checks instead of passing them', async () => {
-    // Why: docs-fresh needs a producer, and a demo check that never ran must
-    // not count as proof that the demos still work.
+  it('resume records doc examples and writes the packet', async () => {
+    // Why: docs-fresh needs a producer, and the packet's publish lines must
+    // name the frozen tarballs the checks ran on.
     const resumed = await ship({ kind: 'resume', wave: 'foundation', dryRun: false });
     const candidate = await candidateOf(resumed.summary.candidateDir ?? '');
     expect(candidate.checks['docs:@arki/a']).toMatchObject({ status: 'success', envelope: { kind: 'report' } });
@@ -267,6 +276,35 @@ describe('ship', () => {
     expect(packet).toContain(`npm publish --access public ${path.join(resumed.summary.candidateDir ?? '', 'tarballs/arki-a-0.2.0.tgz')}`);
     expect(packet).toContain('npm view @arki/a@0.2.0 version dist.integrity');
     expect(packet).toContain('ship --finish --candidate');
+  });
+
+  it('resume runs each demo that uses the candidate and defers a demo that is not on disk', async () => {
+    // Why: demo-impact passes only on a real candidate run. A broken demo is
+    // recorded as a failure for the scorecard to judge, never hidden; a
+    // demo absent from this clone is deferred, never faked as a pass.
+    const demoDir = path.join(root, 'demos', 'shop');
+    mkdirSync(path.join(demoDir, 'src'), { recursive: true });
+    writeFileSync(path.join(demoDir, 'package.json'), JSON.stringify({ name: 'shop', scripts: { 'arki:candidate': 'bun scripts/arki-deps.ts candidate' } }));
+    writeFileSync(path.join(demoDir, 'arki.deps.json'), JSON.stringify({ linkRoot: '../../packages', packages: { '@arki/a': { path: 'a', version: '0.1.0' } } }));
+    writeFileSync(path.join(demoDir, 'src', 'index.ts'), "import { a } from '@arki/a';\nexport { a };\n");
+    const withDemos: ReleaseConfig = {
+      ...config,
+      demos: [
+        { name: 'shop', repo: 'arki-labs/shop', path: 'demos/shop' },
+        { name: 'absent', repo: 'arki-labs/absent', path: 'demos/absent' },
+      ],
+    };
+    const resumed = await runShip({ cwd: root, config: withDemos, mode: { kind: 'resume', wave: 'foundation', dryRun: false }, deps: deps() });
+    expect(calls.filter(c => c.command.includes('arki:candidate'))).toHaveLength(1);
+    expect(resumed.items.filter(s => s.id.startsWith('demo:')).map(s => [s.id, s.status])).toEqual([
+      ['demo:shop', 'failed'],
+      ['demo:absent', 'deferred'],
+    ]);
+    const candidate = await candidateOf(resumed.summary.candidateDir ?? '');
+    expect(candidate.checks['demo:shop']?.status).toBe('failure');
+    expect(candidate.checks['demo:absent']?.status).toBe('deferred');
+    // The stubbed scorecard is open, so the demo failure alone does not stop ship.
+    expect(resumed.status).toBe('success');
   });
 
   it('writes no packet when the scorecard gate is blocked', async () => {

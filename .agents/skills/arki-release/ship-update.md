@@ -51,7 +51,7 @@ bun release:arki ship --wave <id> --resume [--allow-demo-lag "<reason>"] [--allo
 1. `candidate` — packs every wave package whose version is not on npm into `.release/candidates/<wave>-<sha7>/`.
 2. `smoke` — installs those tarballs in a clean consumer outside the workspace (Node and Bun) and imports every export.
 3. Doc examples — runs `bun run test:docs --json` in each package that has the script; records `checks["docs:<pkg>"]`. No script is reported as such (SCORE_E007 warning), not as a failure.
-4. Demo checks — recorded as `deferred` ("demo candidate mode lands in T4.2"); they never count as a pass.
+4. Demo checks — each demo that uses a candidate package runs `bun run arki:candidate <dir>` (install, typecheck, test, build against the tarballs in a temp copy) and records `checks["demo:<name>"]` as `success` or `failure`; the scorecard decides. A demo folder not on disk is recorded as `deferred`. Rerun one by hand with `bun release:arki demo-check --demo <name> --candidate <dir>`.
 5. `scorecard --candidate` — packlist, metadata and dependencies from the tarballs, fixtures from the smoke run, docs-fresh from the doc examples, docs-impact against the last shipped candidate.
 6. If everything passes: writes `packet.md` next to `candidate.json`. Otherwise SHIP_E007 with each blocker.
 

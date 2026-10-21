@@ -25,6 +25,7 @@ import type { ReadinessResult } from './readiness';
  *   - impact             (T1.4): docs-impact and demo-impact for the packages a wave releases
  *   - ship               (T1.6): one command from a wave to a founder packet, then `--finish`
  *   - site               (T3.1): package docs + data files for apps/arki/start, from npm or the candidate
+ *   - demo-check         (T4.2): one demo installed, typechecked, tested and built against a candidate
  */
 export type ReleaseCommand =
   | 'inventory'
@@ -41,7 +42,8 @@ export type ReleaseCommand =
   | 'impact'
   | 'upgrade-guide'
   | 'ship'
-  | 'site';
+  | 'site'
+  | 'demo-check';
 
 /**
  * Lifecycle status of a release command run.

@@ -35,6 +35,7 @@ import {
   type CandidateCheckEntry,
   type DocsCheck,
 } from './candidate';
+import { demoCheckId, runDemoCheck } from './demo-check';
 import { demosUsing, loadDemos } from './demos';
 import { docExamplesReportSchema } from './docs-fresh';
 import { checkBumps, loadChangesets } from './impact';
@@ -74,7 +75,6 @@ export const SHIP_ERROR_CODES = {
 } as const;
 
 export const PACKET_FILE = 'packet.md';
-const DEMO_DEFERRED_REASON = 'demo candidate mode lands in T4.2';
 
 export const SHIP_STEP_STATUSES = ['done', 'planned', 'skipped', 'deferred', 'failed'] as const;
 export type ShipStepStatus = (typeof SHIP_STEP_STATUSES)[number];
@@ -576,13 +576,15 @@ async function resume(options: ShipOptions, wave: string, dryRun: boolean, deps:
     steps.push({ id: docsCheckId(pkg.name), status: check.status === 'failure' ? 'failed' : check.status === 'warning' ? 'skipped' : 'done', detail: docsDetail(check) });
   }
 
-  // 4. Demo candidate checks: recorded as deferred, never as a pass.
+  // 4. Demo candidate checks: each demo that uses a candidate package runs
+  // against the tarballs. A failure is recorded, not fatal: the scorecard's
+  // demo-impact decides. A demo not on disk is recorded as deferred.
   const registry = await loadDemos(cwd, config);
-  const present = new Set(registry.demos.filter(d => d.present).map(d => d.entry.name));
-  const demos = new Set(read.candidate.packages.flatMap(p => demosUsing(registry, p.name).map(u => u.demo)).filter(name => present.has(name)));
-  for (const demo of demos) {
-    await appendCandidateCheck(candidateDir, `demo:${demo}`, { status: 'deferred', envelope: { reason: DEMO_DEFERRED_REASON } }, deps.now);
-    steps.push({ id: `demo:${demo}`, status: 'deferred', detail: DEMO_DEFERRED_REASON });
+  const used = new Set(read.candidate.packages.flatMap(p => demosUsing(registry, p.name).map(u => u.demo)));
+  for (const demo of registry.demos.filter(d => !d.present || used.has(d.entry.name))) {
+    const check = await runDemoCheck({ cwd, config, demo: demo.entry.name, candidateDir, runner: deps.exec, now: deps.now });
+    const status: ShipStepStatus = check.status === 'success' ? 'done' : check.status === 'warning' ? 'deferred' : 'failed';
+    steps.push({ id: demoCheckId(demo.entry.name), status, detail: check.summary.message });
   }
 
   // 5. The gate over the frozen bytes and every recorded check.
