@@ -5,8 +5,7 @@
  */
 import { StringDecoder } from 'node:string_decoder';
 
-/** Secrets shorter than this are not redacted: too likely to match ordinary output. */
-export const MIN_REDACTED_LENGTH = 8;
+import { MIN_SECRET_LENGTH } from '@arki/log';
 
 const REDACTED = '[redacted]';
 
@@ -15,7 +14,7 @@ export type Redactor = { write(chunk: Buffer): void; end(): void };
 
 export function createRedactor(secrets: readonly string[], emit: (text: string) => void): Redactor {
   // Longest first, so a secret that contains another is replaced whole.
-  const values = [...new Set(secrets.filter(secret => secret.length >= MIN_REDACTED_LENGTH))];
+  const values = [...new Set(secrets.filter(secret => secret.length >= MIN_SECRET_LENGTH))];
   values.sort((a, b) => b.length - a.length);
   const decoder = new StringDecoder('utf8');
   let pending = '';

@@ -4,7 +4,7 @@ import type { Logger, Logging } from './logging.js';
 import type { LogConfig, LogRecord, Processor, Sink } from './types.js';
 import { logfmt, pretty } from './formatters.js';
 import { createLogging } from './logging.js';
-import { dropWhen, enrich, redact } from './processors.js';
+import { dropWhen, enrich, maskSecrets, redact } from './processors.js';
 import { consoleSink, lineSink, memorySink } from './sinks.js';
 import { buffer, deduplicate, fingersCrossed } from './wrappers.js';
 
@@ -74,6 +74,32 @@ describe('failures inside logging', () => {
     });
     log.info('queued');
     expect(() => vi.advanceTimersByTime(20)).not.toThrow();
+  });
+});
+
+describe('maskSecrets', () => {
+  it('hides a known secret value wherever it was logged: template, nested fields, error', () => {
+    // WHY: a secret revealed for a client and logged by hand has no known field path; `redact` cannot catch it.
+    const secret = 'sk_live_0123456789';
+    const out = lines();
+    const memory = memorySink();
+    const { log } = setup({
+      channels: { out: out.sink, memory },
+      default: { level: 'info', channels: ['out', 'memory'] },
+      processors: [maskSecrets(() => [secret, 'short'])],
+    });
+    log.info(`calling stripe with ${secret} for {user}`, { user: 'ada', request: { headers: [`Bearer ${secret}`] } });
+    log.error(new Error(`stripe rejected ${secret}`));
+    expect(out.lines.join('\n')).not.toContain(secret);
+    expect(memory.records[0]?.message()).toBe('calling stripe with [REDACTED] for ada');
+    expect(JSON.parse(out.lines[0] ?? '')).toMatchObject({ fields: { request: { headers: ['Bearer [REDACTED]'] } } });
+  });
+
+  it('leaves records alone when there is nothing to mask, and never masks short values', () => {
+    const memory = memorySink();
+    const { log } = setup({ channels: { memory }, default: { level: 'info', channels: ['memory'] }, processors: [maskSecrets(() => ['short'])] });
+    log.info('a short story');
+    expect(memory.records[0]?.message()).toBe('a short story');
   });
 });
 

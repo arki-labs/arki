@@ -15,7 +15,7 @@ export {
   type Logging,
   type Register,
 } from './logging.js';
-export { type Censor, dropWhen, enrich, redact } from './processors.js';
+export { type Censor, dropWhen, enrich, maskSecrets, MIN_SECRET_LENGTH, redact } from './processors.js';
 export { type RecordChanges, updateRecord } from './record.js';
 export { serializeError, serializeFailure } from './serialize.js';
 export { consoleSink, lineSink, type MemorySink, memorySink } from './sinks.js';
