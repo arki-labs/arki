@@ -1,0 +1,31 @@
+# @arki/schedule
+
+> Typed schedules for TypeScript: cron and interval handlers that run in process or on a durable queue backend, with locks and typed run results.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/schedule`: `DEFAULT_LOCK_HOLD_MS`, `SCHEDULE_ERROR_CODES`, `SCHEDULE_RUNTIME_FAILURES`, `ScheduleError`, `ScheduleLockFailed`, `defineSchedule`, `initSchedule`, `lockDurationMs`, `parseEveryInterval`; types `DefineScheduleOptions`, `DurableScheduleRegistration`, `DurableScheduler`; and 14 more.
+- `@arki/schedule/dot`: DOT adapter for @arki/schedule — the `schedule()` driving adapter. `DurableSchedules`, `SCHEDULE_ACTION_META_SCHEMA`, `composeSchedules`, `lockSummary`, `schedule`, `scheduleActions`, `schedules`; types `DurableSchedulesToken`, `FeatureLockOption`, `FeatureScheduleOptions`, `FeatureScheduleSlice`, `ScheduleClient`; and 13 more.
+- `@arki/schedule/projection`: `project`; types `ScheduleTableDocument`.
+- `@arki/schedule/runtime`: `assertDurableBackend`, `assertSingleClock`, `createScheduleRuntime`; types `DurableScheduleRegistration`, `DurableScheduler`, `ScheduleClock`, `ScheduleOutcome`, `ScheduleRefusal`, `ScheduleRunResult`, `ScheduleRunStatus`, `ScheduleRuntime`, `ScheduleRuntimeOptions`.
+- `@arki/schedule/orpc`: serve feature schedules as oRPC cron procedures. `checkOnly`, `cronErrorBody`, `cronRouterFor`, `defineCronContract`, `fail`, `lockHeld`, `ok`, `rethrow`, `skipped`; types `BodyOf`, `CronBody`, `CronContext`; and 12 more.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the overview, the limits and the status table.
+
+## By task
+- [Run a schedule](docs/recipes/run-schedules.md)
+- [Run a schedule on one replica only](docs/agent-guide.md#run-a-schedule-on-one-replica-only)
+- [Catch up after downtime](docs/agent-guide.md#catch-up-after-downtime)
+- [Expose a schedule as an HTTP cron route](docs/agent-guide.md#expose-a-schedule-as-an-http-cron-route)
+
+## Rules that bite
+- A declared failure is `refused`, not `ran`. Switch on `status` exhaustively.
+- The runtime never retries a handler. A durable backend redelivers, so external effects need idempotency keys.
+- A durable name cannot contain `:`.
+- Two replicas run the same in-process tick unless the schedule has a `lock`.
+- Use `initSchedule.context<Ctx>().create().define(...)` for a typed context, not `defineSchedule<Ctx>(...)`.

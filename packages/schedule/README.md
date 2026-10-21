@@ -1,407 +1,135 @@
 # @arki/schedule
 
-Schedules for DOT apps. Each schedule chooses how it runs:
+Typed schedules for TypeScript. A schedule is a name, a `cron` pattern or an `every` interval, and a handler. It runs in your process, or on a queue backend that catches up after downtime.
 
-- **In process** (the default, `durable: false`). A croner timer or interval
-  in each process. A tick that falls due while the app is down is skipped.
-- **Durable** (`durable: true`). A BullMQ job scheduler through
-  `@arki/queue`. Workers distribute ticks across replicas, and a tick missed
-  while no worker ran runs when a worker comes back. Delivery is at least once:
-  a stalled worker can cause redelivery. External effects need idempotency.
+- A handler returns a value or a declared failure. Every run reports one status: `ran`, `refused`, `handler-failed`, and the skip and lock outcomes.
+- Two kinds: in process (the default) and durable (`durable: true`, through `@arki/queue`).
+- One replica at a time with a `lock`. A Dot adapter and oRPC cron routes.
+- No hidden retries. The runtime runs the handler once per tick.
 
-Both kinds work with `cron` and with `every`.
+## Install
 
-## Inside a DOT app
-
-A feature declares its schedules with `schedules([...])`. `schedule()` is a
-driving adapter: mount it with `.serve()`, after the features. It runs the
-schedules of every mounted feature — the app lists its features once:
-
-```ts
-import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
-import { initSchedule } from '@arki/schedule';
-import { schedule, schedules } from '@arki/schedule/dot';
-
-type Ctx = { readonly db: Db };
-const s = initSchedule.context<Ctx>().create();
-
-export const reports = feature('reports', {
-  use: [
-    schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })]),
-  ],
-});
-
-defineApp('shop')
-  .use(db({ url }))
-  .features([reports, billing])
-  .serve(schedule({ needs: { db: database.provides.db }, context: ({ db }) => ({ db }) }));
+```sh
+bun add @arki/schedule
 ```
 
-`context` builds the one value every handler receives. The features are
-bound at runtime, so the compiler cannot check that their schedules expect
-this context: keep one context type per app. A schedule no feature owns
-goes in `schedule({ schedules: [...] })`; it runs on the same runtime, so
-names must be unique across both.
+`@arki/dot` is an optional peer for `@arki/schedule/dot`. `@orpc/contract` and `@orpc/server` are optional peers for `@arki/schedule/orpc`. Durable schedules need `@arki/queue` and Redis.
 
-### Schedules of a `defineFeature` feature: `schedules(core, defs)`
+## Quick start
 
-A chain feature lists its schedules in `.entrypoints(...)`. Pass the core, and
-each handler gets what every entrypoint of the feature gets — its needs, its
-private infra and `usecases` — typed with no annotation. The schedules file
-takes the core as a parameter (`import type`), so it never imports the
-feature at runtime:
-
-```ts
-// features/daily-digest/entrypoints/schedules.ts
-import type { core } from '../feature';
-
-export const digestSchedules = (c: typeof core) =>
-  schedules(c, [{ name: 'send-digest', cron: '*/15 * * * *', handler: ({ usecases }) => usecases.sendDue() }]);
-
-// features/daily-digest/feature.ts
-export const dailyDigest = core.entrypoints(digestSchedules(core));
-```
-
-A key the feature does not have (`({ db }) => …` when only its store needs
-`db`) is a compile error. Same options and rules as below; `schedule(...)` and
-`composeSchedules(...)` serve chain and object-form features side by side.
-Cron still decides _when_; the core decides _with what_.
-
-### One replica at a time: `lock`
-
-```ts
-import { locks } from '@arki/lock/dot';
-import { pgLease } from '@arki/lock/pg/lease';
-
-// Once, in the app: the `locks` service that locked schedules read.
-defineApp('avocabo').use(
-  locks({
-    namespace: 'avocabo',
-    needs: { db: database.provides.db },
-    store: ({ db }) => pgLease(db, { ttl: '30s' }),
-  }),
-);
-
-// The feature needs `locks`, like any other service.
-const core = defineFeature('clustering').needs({ locks: service<Locker>() }).usecases({ assign });
-
-schedules(core, [
-  { name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler: ({ usecases }) => usecases.assign() },
-  {
-    name: 'cluster-batch',
-    cron: '0 */4 * * *',
-    lock: { key: 'clusters', holdAtLeast: '5s' },
-    handler: ({ usecases }, run) => usecases.recluster({ signal: run.lock?.signal }),
-  },
-]);
-```
-
-- `lock` takes `true | string | { key?, holdAtLeast? }`. `true` locks on the
-  schedule name. A string, or `key`, locks on that key (give two jobs the same
-  key to make them exclude each other).
-- The lock comes from the feature's `locks` service, typed by the small
-  `Locker` port: `mutex(key).tryRun(fn, { holdAtLeast })` returns the value
-  of `fn`, or the `lock.held` failure when another holder has the key.
-  `locks()` from `@arki/lock/dot` provides it, and so does the `Locks` that
-  `createLocks` returns. A schedule with `lock` and no `locks` service is a
-  compile error (and
-  `ARKI_SCHEDULE_E009` at boot for code that skips the types).
-- The lock is held while the handler runs, not for a fixed time. There is no
-  key-value lease any more: that path is gone.
-- `holdAtLeast` defaults to `1s`. The lock stays held at least that long after
-  the job started, so a replica with a slow clock cannot start a sub-second
-  job again. `holdAtLeast: 0` turns it off. `trigger()` and the shutdown drain
-  wait for the release, so a locked run takes at least 1 s.
-- The handler's second argument has `run.lock`: `{ signal, fence }`. `signal`
-  aborts when the lock is known lost, so a long job can stop. `fence` is the
-  store's fencing token, or `undefined` when the store has none.
-- A run that finds the lock held reports `skipped-lock` and the handler never
-  starts. A lock that cannot be taken reports `lock-failed`. A handler that
-  throws inside the lock is still `handler-failed`. A lock lost after the
-  handler finished (during the hold) keeps the handler's result, counts in
-  `lockLost` and logs a warning.
-- A failed release after a good run is not a schedule result. `@arki/lock`
-  logs it and counts it in `Locks.counters.releaseErrors`.
-- The policy is in the manifest. `dot explain` shows `lock <key>`, or
-  `NO LOCK` for an unlocked schedule. After boot, `dot doctor` shows the full
-  line: `lock <ns>:<key>  [<store> · <kind> · <scope> · crash→<bound> · fence <level> · hold≥1s]`.
-  `overlap: 'skip'` still guards the process itself.
-
-### Feature-owned schedules: `schedules(needs, defs)`
-
-When a schedule belongs to one feature and works with that feature's
-services, declare it with the feature's `needs`. The handler's parameter is
-typed from `needs` with no annotation, and the feature must list the same
-services in its own `needs` (a compile error otherwise). The driver's
-`context` is not used for these handlers.
-
-```ts
-const needs = { mailer: service<Mailer>() };
-
-export const digest = feature('digest', {
-  needs,
-  use: [
-    schedules(needs, [
-      // Plain option objects, not defineSchedule(): the handler is typed from `needs`.
-      { name: 'send-digest', cron: '0 7 * * *', handler: ({ mailer }) => mailer.sendDigest() },
-    ]),
-  ],
-});
-```
-
-The options and validation match `defineSchedule` (`cron` or `every`,
-`timezone`, `overlap`), except `durable: true`: a durable run happens in
-another process that does not hold these services. It is a type error and
-fails at declaration with `ARKI_SCHEDULE_E006`. The handler may return a
-value; a `ran` result keeps it.
-
-### The host clock: `schedule({ clock: 'host' })`
-
-By default (`clock: 'internal'`) the runtime fires schedules on its own
-timers. With `clock: 'host'`, `start()` arms nothing: a schedule runs only
-when the host calls `trigger` (a platform cron, an HTTP endpoint). A durable
-schedule or a durable backend with the host clock fails boot with
-`ARKI_SCHEDULE_E007`, because two clocks would fire the same tick.
-
-### The `scheduler` service
-
-`schedule()` provides `scheduler` to the app, typed with no annotation:
-
-```ts
-const app = await defineApp('news')
-  .use(mailer())
-  .features([digest])
-  .serve(schedule({ clock: 'host' }))
-  .boot();
-
-app.services.scheduler.clock; // 'host'
-app.services.scheduler.names; // ['send-digest']
-await app.services.scheduler.trigger('send-digest');
-```
-
-`trigger(name)` resolves a `ScheduleOutcome`: a run result (see
-[Run results](#run-results)), or `unknown` for a name the driver does not
-run. A trigger works once the app has booted, before `start()` too. After
-`stop()` it reports `unavailable`; `stop()` waits for runs it already
-accepted.
-
-### Typed triggers: `composeSchedules(features, scheduler)`
-
-`composeSchedules` turns the service into a client typed from the features'
-own `schedules(needs | core, defs)` declarations, in either feature form. An undeclared name is a compile
-error, and a `ran` outcome's `value` is that handler's resolved return type:
-
-```ts
-const schedules = composeSchedules([digest], app.services.scheduler);
-const outcome = await schedules.trigger('send-digest');
-if (outcome.status === 'ran') outcome.value; // the type sendDigest() resolves to
-```
-
-It throws `ARKI_SCHEDULE_E008` when the scheduler does not run a declared
-schedule (pass the same features the app mounts).
-
-### Cron routes over oRPC: `@arki/schedule/orpc`
-
-When an outside clock (Coolify, a cron job) fires schedules over HTTP,
-`@arki/schedule/orpc` serves them as one oRPC contract: `POST /<name>`
-triggers the schedule `<name>`. You write the name and its 200 body schema;
-the method, the path and the dispatch are fixed. What each outcome answers
-is your policy. Needs the optional peers `@orpc/contract` and `@orpc/server`.
-
-```ts
-// server-only
-const cronContract = defineCronContract({ 'send-digest': digestRunSchema });
-const cronImplementer = implement(cronContract).$context<CronContext>().use(cronSecret); // your auth
-export const crons = cronRouterFor(cronImplementer, cronContract, features, {
-  respond: {}, // required for a cron whose run value is not exactly its body
-  skipped: () => skipped(), // overlap or held lock → the cron's lock-held body (200)
-  failed: (_name, cause) => rethrow(cause), // leave oRPC; your route's 500 boundary answers
-  unavailable: () => fail(503, { error: 'schedule unavailable' }),
-});
-
-// the route
-const handler = new OpenAPIHandler(crons, { customErrorResponseBodyEncoder: cronErrorBody });
-const carry: CronContext['carry'] = {};
-const { matched, response } = await handler.handle(request, {
-  prefix: '/api/cron',
-  context: { headers, schedules, carry },
-});
-if (carry.rethrow) throw carry.rethrow.cause;
-```
-
-What it checks at compile time: every name is a schedule of some feature,
-and every body schema is exactly the type the run puts on the wire (both
-ways), or that cron must say in `respond` how its value maps. A supervised
-`UnexpectedDefect` goes to the existing `failed` policy before response mapping;
-it never becomes a success body. Declared business refusals keep their explicit
-responder mapping. On the wire:
-
-- a run's body is the value as produced — `checkOnly()` checks it but keeps
-  the original, so key order is the run's, not the schema's;
-- `fail(status, body)` answers exactly `body`, never oRPC's error envelope;
-- `skipped()` answers `{ "skipped": "lock-held" }`, or the cron's own legacy
-  body (`{ body, skipped: {...} }` in its spec).
-
-No `node:` import, no auth, no logging: it runs on every runtime.
-
-## In-process schedules
-
-Use these for single-replica processes by default. For several replicas, give
-each job a `lock` (see "One replica at a time"). Without one, every replica
-runs every tick. `dot explain` prints `NO LOCK — runs on every replica` for
-such a schedule.
-
-## Durable schedules
-
-Mark the schedule, mount the queue's durable backend, and pass the
-`DurableSchedules` token to `schedule()`:
-
-```ts
-import { durableScheduler } from '@arki/queue/dot';
+```ts run expect
 import { defineSchedule } from '@arki/schedule';
-import { DurableSchedules, schedule } from '@arki/schedule/dot';
-
-const nightly = defineSchedule({
-  name: 'nightly-billing',
-  cron: '0 3 * * *',
-  timezone: 'Europe/Bucharest',
-  durable: true,
-  handler: async ctx => {
-    // ...
-  },
-});
-
-defineApp('billing')
-  .use(durableScheduler({ connection: env.REDIS_URL, keyPrefix: 'billing:' }))
-  .serve(schedule({ schedules: [nightly], durable: DurableSchedules }));
-```
-
-Declaring a durable schedule reads nothing from the world. Boot only builds
-the backend. Redis is reached when the app starts: each durable schedule
-gets its own BullMQ queue (`schedule.<name>`) with one job scheduler, and
-one worker per process. Start does not wait for Redis; a failed
-registration is logged as an error (`schedule durable registration failed`).
-
-Where each mistake is caught:
-
-| Mistake                                                                    | Caught                                                            |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.serve(...)`                                       |
-| `durable` given anything but the `DurableSchedules` token                  | Type error                                                        |
-| A durable name that contains `:` (BullMQ forbids it in queue names)        | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule`        |
-| A `durable: true` schedule but no `durable` option on `schedule()`         | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |
-
-### Without Dot
-
-A process that does not boot through Dot builds the runtime itself, from
-`@arki/schedule/runtime`. The main entry does not export it, so importing
-`@arki/schedule` stays free of the logger and timers.
-
-```ts
-import { createDurableScheduler } from '@arki/queue';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
-const runtime = createScheduleRuntime({
-  schedules: [nightly, warmCache],
-  durable: createDurableScheduler({ connection: process.env.REDIS_URL ?? '', keyPrefix: 'billing:' }),
+const report = defineSchedule({
+  name: 'daily-report',
+  cron: '0 6 * * *',
+  handler: async () => ({ rows: 3 }),
 });
 
-runtime.start(); // durable schedules go to BullMQ, the rest run in process
-// On shutdown:
+const runtime = createScheduleRuntime({ schedules: [report] });
+runtime.start(); // arms the timer for 06:00
+
+const result = await runtime.trigger('daily-report'); // run it now
+if (result.status === 'ran') console.log(`ran: ${result.value.rows} rows`);
+
 await runtime.stop();
 ```
 
-A `durable: true` schedule with no `durable` option makes `start()` throw
-`ARKI_SCHEDULE_E005`.
+```text
+ran: 3 rows
+```
 
-### What happens to missed ticks
+## When not to use this
 
-Checked against BullMQ 6.3 (`node_modules/bullmq/dist/esm`):
+- You need a job queue with retries, priorities and flows. Use `@arki/queue`. A schedule only decides when something starts.
+- You need an exact catch-up of every missed tick. Many missed ticks become one run, even when durable.
+- You need exactly-once effects. Durable delivery is at least once.
+- You run a single request and exit, such as a function on an edge platform. A schedule needs a process that stays up, or a host that calls `trigger`.
 
-- A job scheduler keeps exactly one pending job: the next tick. A worker
-  adds the following tick only when it takes the current one
-  (`classes/worker.js`, `upsertJobScheduler` with `override: false`).
-- So while no worker runs, ticks that fall due create no new jobs. The one
-  pending job waits in Redis.
-- When a worker comes back, that job runs once, right away. The next tick is
-  then set from the current time, not from the missed slots: for `cron` the
-  next match after now (`classes/job-scheduler.js`), for `every` the next
-  interval slot after now (`commands/includes/getJobSchedulerEveryNextMillis.lua`).
-  Many missed ticks therefore become **one** catch-up run, not one per tick.
-- At start, `@arki/queue` leaves an unchanged scheduler alone, so the
-  pending tick survives a restart. If you change the cron, timezone or
-  interval, the scheduler is replaced (`commands/addJobScheduler-11.lua`
-  deletes the pending job): a changed `cron` drops the missed tick and waits
-  for its next match; a changed `every` runs once right away.
-- A new `every` schedule runs once right after it is first registered, then
-  every interval. A new `cron` schedule first runs at its next match.
-- Renaming or removing a durable schedule leaves its old scheduler in Redis
-  with one pending job and no worker. Remove it with
-  `queue.removeJobScheduler(name)` on the `schedule.<name>` queue.
+## Runtime support
 
-### Overlap and locks
+`@arki/schedule` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
 
-Durable runs take no lock: BullMQ gives each tick's job to one worker.
-Feature schedules with `lock:` run under their own lock for the whole handler
-(see "One replica at a time" above). Each process runs at most one tick of a schedule at a time. A run
-that outlasts its interval can still overlap the next tick on another
-replica, because the next tick is queued when the current one starts.
+The in-process runtime uses timers and runs on Node 22.12 or newer and Bun. Durable schedules also need Redis, through `@arki/queue`. With `clock: 'host'` the runtime arms no timers, and the host calls `trigger`.
 
-## Run results
+Debug logs use the `arki:schedule` category. Show them with `DEBUG=arki:schedule`.
 
-Each run reports a `ScheduleRunResult` with one status:
+## Public imports
 
-| Status            | Meaning                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ran`             | The handler succeeded. `value` excludes defined failures.                                                                                                                                                                       |
-| `refused`         | The handler returned a declared business failure. `failure` preserves its exact type, identity and data. Counted in `handlerFailures`; never reported as `ran`.                                                                 |
-| `handler-failed`  | The handler threw or returned `UnexpectedDefect`. `cause` is the canonical `UnexpectedDefect`, with the original thrown value kept privately. Counted in `handlerFailures`.                                                     |
-| `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process.                                                                                                                                                     |
-| `skipped-lock`    | In process only: another replica holds the lock for this tick. Counted in `lockContention`.                                                                                                                                     |
-| `lock-failed`     | The lock provider failed. Known `store`/`lost` codes become `ScheduleLockFailed` with bounded `data.lockCode`; other throws become `UnexpectedDefect`. Original causes stay private. Counted in `lockFailures` (or `lockLost`). |
-| `unavailable`     | The runtime was already stopped; nothing ran.                                                                                                                                                                                   |
+- `@arki/schedule`: `defineSchedule`, `initSchedule`, `ScheduleError`, `ScheduleLockFailed`, `SCHEDULE_ERROR_CODES`, `SCHEDULE_RUNTIME_FAILURES`, `parseEveryInterval`, `lockDurationMs`, and the types.
+- `@arki/schedule/runtime`: `createScheduleRuntime` for a process that does not boot through Dot.
+- `@arki/schedule/dot`: Dot adapters. `schedule`, `schedules`, `composeSchedules`, `DurableSchedules`.
+- `@arki/schedule/orpc`: cron routes over oRPC.
+- `@arki/schedule/projection`: a schedule topology document from an app manifest.
 
-The durable adapter receives the same outcomes. Refusals, handler defects and
-lock failures must be recorded as failed business execution; successful message
-delivery alone does not make a schedule successful. Skips and unavailable runs
-are separate scheduling decisions. The schedule runtime does not retry handlers.
+`llms.txt` lists every export per entry point.
 
-## Upgrade: typed business outcomes
+## Failure behaviour
 
-Handle `refused` in an exhaustive status switch and read `outcome.failure`.
-Read `outcome.cause.cause` only for private diagnostics when handling a defect;
-serializing the canonical failure omits that private cause. Custom durable
-adapters must preserve the failure envelope and mark its execution failed.
-`cronRouterFor` sends domain refusals through the existing explicit `respond`
-mapping, or through `failed` when no mapping exists. It never defaults a refusal
-to an HTTP success. `UnexpectedDefect` uses `failed` directly.
+A run never throws to the timer. It reports a `ScheduleRunResult`.
 
-`defineSchedule(...)`, `initSchedule.context<Ctx>().create().define(...)`, the
-runtime's definition tuple and `composeSchedules(...)` retain each handler's
-success and refusal types. Prefer the context builder over
-`defineSchedule<Ctx>(...)`: supplying only the first generic argument prevents
-TypeScript from inferring the remaining arguments. Avoid annotating a concrete
-definition as the erased `ScheduleDef<Ctx>` when its result type is needed.
-`ScheduleValueOf` remains the complete declared handler return for explicit cron
-responders; `ScheduleSuccessOf` and `ScheduleFailureOf` infer its separate parts.
-`schedules([definitions])` now retains the same declaration information as the
-feature-owned forms. Schedule names reject surrounding whitespace so the typed
-name is the actual registered name.
+| Status            | Meaning                                                                          |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `ran`             | The handler succeeded. `value` excludes declared failures.                       |
+| `refused`         | The handler returned a declared failure. `failure` keeps its type and data.      |
+| `handler-failed`  | The handler threw. `cause` is an `UnexpectedDefect`.                             |
+| `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process.      |
+| `skipped-lock`    | Another replica holds the lock for this tick.                                    |
+| `lock-failed`     | The lock provider failed. `cause` is `ScheduleLockFailed` or `UnexpectedDefect`. |
+| `unavailable`     | The runtime is stopped. Nothing ran.                                             |
 
-## Observation
+A wrong declaration throws a `ScheduleError` with a code `ARKI_SCHEDULE_E001` to `E009` and a `.remediation`. The code is thrown at definition, boot or `start()`, never inside a tick. Each code has a fix and a check command in its JSDoc. The status table is checked by the example in [Run schedules](docs/recipes/run-schedules.md):
 
-Each scheduling attempt creates one `schedule.run` OpenTelemetry span, inherits
-the active context and records its classified outcome and duration. No SDK or
-exporter is installed by this library. Attributes include the declared schedule
-name and outcome; handler payloads, lock keys and private error causes are absent.
-Metric dimensions contain only the bounded scheduling outcome. Handler code can
-use the standard active span for custom events. Observer failures, including a
-context manager failing after invoking its callback, never replace the result or
-run the handler twice. Scheduling skips retain their own outcome attributes.
+```ts from="examples/run-schedules.ts#run"
+import { defineSchedule } from '@arki/schedule';
+import { createScheduleRuntime } from '@arki/schedule/runtime';
 
-The package-wide T08 audit still owns the remaining public declaration/lifecycle
-error inventory. Durable trace propagation across persisted jobs belongs to the
-queue adapter; an in-process execution span alone does not prove transport
-propagation or durable recovery. The existing runtime `start()` API starts durable
-registration asynchronously; its logs do not prove registration readiness.
+const report = defineSchedule({
+  name: 'daily-report',
+  every: '1h',
+  overlap: 'skip',
+  handler: async () => {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return { rows: 3 };
+  },
+});
+
+const runtime = createScheduleRuntime({ schedules: [report] });
+runtime.start(); // arms the timer: the first tick is an hour away
+
+// Run it now, as a test or an admin button would.
+const first = runtime.trigger('daily-report');
+const second = runtime.trigger('daily-report'); // the first run is still active in this process
+
+for (const result of await Promise.all([first, second])) {
+  console.log(result.status === 'ran' ? `ran: ${result.value.rows} rows` : result.status);
+}
+
+await runtime.stop();
+```
+
+## Limits
+
+- **An in-process schedule skips ticks missed while the app is down.** Boundary: a `0 6 * * *` schedule in an app that restarts from 05:55 to 06:05 does not run that day.
+- **Many missed durable ticks become one run.** A durable schedule keeps one pending tick. When a worker returns, it runs once, then the next tick is set from now.
+- **Several replicas run the same in-process tick** unless the schedule has a `lock`. `dot explain` prints `NO LOCK — runs on every replica`.
+- **Durable delivery is at least once.** A stalled worker can cause redelivery. Use an idempotency key for external effects.
+- **A durable name cannot contain `:`.** BullMQ forbids it in a queue name. `defineSchedule` throws `ARKI_SCHEDULE_E001`.
+- **A run that outlasts its interval can overlap the next tick on another replica,** because the next tick is queued when the current one starts. `overlap: 'skip'` covers one process only.
+- **`every` takes `s`, `m` or `h`.** `'0s'` and other zero or malformed intervals throw `ARKI_SCHEDULE_E001`.
+- **A renamed or removed durable schedule leaves its old scheduler in Redis** with one pending job and no worker. Remove it with `removeJobScheduler`.
+- **No retries.** A handler that throws is `handler-failed` for that tick. The next tick runs as planned.
+
+## Documentation
+
+- [Run schedules](docs/recipes/run-schedules.md): define a schedule, run it now, see overlap skipped.
+- [Schedules in a Dot app](docs/reference/dot.md): `schedules()`, `schedule()`, locks, the host clock, the `scheduler` service, oRPC cron routes.
+- [In-process and durable schedules](docs/reference/durable.md): the two kinds, the bare runtime, missed ticks, overlap.
+- [Run results and observation](docs/reference/results.md): statuses, typed outcomes, telemetry.
+- [Upgrading schedule outcomes](docs/upgrades/0.0.1-to-0.1.0.md)
+- [Agent guide](docs/agent-guide.md) and [llms.txt](llms.txt) for coding agents.
+
+## Support
+
+Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues).
