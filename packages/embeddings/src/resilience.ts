@@ -15,7 +15,13 @@ function isRetryable(failure: EmbedFailure): boolean {
   return RateLimited.is(failure) || (ModelUnavailable.is(failure) && failure.data.reason === 'unreachable');
 }
 
-/** `base`, but never shorter than the `retryAfterMs` a `RateLimited` asked for. */
+/** The default backoff's longest wait, and the longest `retryAfterMs` the default policy waits out. */
+const MAX_BACKOFF_MS = 5000;
+
+/**
+ * `base`, but never shorter than the `retryAfterMs` a `RateLimited` asked for. One that asks for
+ * more than `MAX_BACKOFF_MS` is not retried: the `RateLimited` goes back so the caller decides.
+ */
 function atLeastRetryAfter(base: Backoff): Backoff {
   return {
     // Built last, so the policy never calls the copied `upTo` and `while` on it.
@@ -23,20 +29,25 @@ function atLeastRetryAfter(base: Backoff): Backoff {
     delay(attempt, reason) {
       const wait = base.delay(attempt, reason);
       if (wait === undefined || !RateLimited.is(reason)) return wait;
-      return Math.max(wait, reason.data.retryAfterMs ?? 0);
+      const asked = reason.data.retryAfterMs ?? 0;
+      // Sleeping an hour (or past the clock's limit) inside a library call is never what the caller wants.
+      return asked > MAX_BACKOFF_MS ? undefined : Math.max(wait, asked);
     },
   };
 }
 
 /**
  * The default policy: `externalApiPolicy`'s retry and breaker, retrying the two retryable failures
- * and waiting at least `retryAfterMs`. Its timeout is 60 s, not 10 s: a local model embedding a full
+ * and waiting at least `retryAfterMs` (up to 5 s; a longer one is not retried). Its timeout is 60 s, not 10 s: a local model embedding a full
  * batch, or loading first, takes longer than 10 s.
  */
 function embeddingPolicy() {
   return createResiliencePolicy({
     retry: atLeastRetryAfter(
-      backoff.exponential({ base: 200, max: 5000, jitter: 0.25 }).upTo(3).while(RateLimited, ModelUnavailable),
+      backoff
+        .exponential({ base: 200, max: MAX_BACKOFF_MS, jitter: 0.25 })
+        .upTo(3)
+        .while(RateLimited, ModelUnavailable),
     ),
     circuitBreaker: { consecutiveFailures: 5, halfOpenAfter: 30_000 },
     timeout: { timeoutMs: 60_000 },
@@ -72,15 +83,19 @@ function resilience(policy: Policy<never, RetryWaitFailure>): EmbedMiddleware {
 
 /**
  * The same embedder with each `embed` call run through a resilience policy. It retries only
- * `RateLimited` (waiting at least its `retryAfterMs`) and `ModelUnavailable { reason: 'unreachable' }`;
+ * `RateLimited` and `ModelUnavailable { reason: 'unreachable' }`;
  * every other failure comes back after one attempt. `usage.requests` counts every attempt. A timeout,
  * an open circuit or a full bulkhead is `ModelUnavailable { reason: 'unreachable' }`, a cancel is
  * `Cancelled`: nothing is thrown for them.
  *
  * Default policy: 3 retries from 200 ms doubling to 5 s with 25% jitter, a breaker that opens after
- * 5 consecutive thrown failures for 30 s, and 60 s per attempt. A policy of your own retries what its
- * backoff selects, so build it with `.while(RateLimited, ModelUnavailable)`; it is never handed a
- * failure that must not be retried.
+ * 5 consecutive thrown failures for 30 s, and 60 s per attempt. It waits at least a `RateLimited`'s
+ * `retryAfterMs`; one over 5 s is not retried, the `RateLimited` comes back at once.
+ *
+ * A policy of your own retries what its backoff selects, so build it with
+ * `.while(RateLimited, ModelUnavailable)`; it is never handed a failure that must not be retried. It
+ * gets no `retryAfterMs` minimum: its backoff's `delay(attempt, reason)` must read
+ * `reason.data.retryAfterMs` when `RateLimited.is(reason)` if it should honour it.
  *
  * @example
  * const embedder = withResilience(base); // embedMany(embedder, texts) now retries each chunk

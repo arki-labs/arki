@@ -12,7 +12,7 @@ import type { EmbeddingModel, NativeRequest } from '../types.js';
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
-import { CHARS_PER_TOKEN, providerInputTooLong } from '../tokens.js';
+import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
 
 export type OpenAIModelOptions = {
   /** Default `'text-embedding-3-small'`. */
@@ -66,7 +66,7 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
       const result = await loaded.embedMany({
         model: loaded.model,
         // OpenAI has no truncate flag: cut at the character estimate of the model's limit.
-        values: truncate ? texts.map(text => text.slice(0, facts.maxInputTokens * CHARS_PER_TOKEN)) : [...texts],
+        values: truncate ? texts.map(text => truncateByEstimate(text, facts.maxInputTokens)) : [...texts],
         // Retries belong to withResilience, where each attempt is charged once.
         maxRetries: 0,
         ...(dimensions === undefined ? {} : { providerOptions: { openai: { dimensions } } }),
@@ -93,7 +93,7 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (status === 400 && mentionsContextLength(`${error.message} ${error.responseBody ?? ''}`)) {
-        return providerInputTooLong(texts, facts.maxInputTokens);
+        return providerInputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `openai answered ${status}: ${error.message.slice(0, 200)}` });
     }

@@ -72,7 +72,7 @@ const batch = await embedMany(embedder, ['a', 'b']);
 if ('vectors' in batch) console.log(batch.usage.requests);
 ```
 
-Only `RateLimited` (at least `retryAfterMs` apart) and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt.
+Only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt. The default policy waits at least `retryAfterMs`; over 5 s it does not retry and returns the `RateLimited`. A policy you pass gets no such minimum: its backoff's `delay(attempt, reason)` must read `reason.data.retryAfterMs` itself.
 
 ## Rules that bite
 

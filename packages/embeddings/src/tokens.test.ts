@@ -11,7 +11,7 @@ import { InputTooLong } from './failures.js';
 import { createOllamaModel } from './ollama/index.js';
 import { createOpenAICompatibleModel } from './openai-compatible/index.js';
 import { echoTexts, stubModel } from './tests/stub-model.js';
-import { countTokens } from './tokens.js';
+import { countTokens, providerInputTooLong, truncateByEstimate } from './tokens.js';
 
 const fixture = (name: string): string => readFileSync(new URL(`ollama/__fixtures__/${name}`, import.meta.url), 'utf8');
 
@@ -58,6 +58,24 @@ describe('onTooLong', () => {
     const inputs = ['a', 'b', 'c', 'x'.repeat(41)];
     const result = await embedMany(embedder, inputs, { concurrency: 1 });
     expect(InputTooLong.is(result) && result.data.index).toBe(3);
+  });
+
+  // Billing for a batch that is then thrown away is the bug: refuse before the first chunk is sent.
+  it('fail refuses a later over-long input before any chunk is sent', async () => {
+    const calls: NativeRequest[] = [];
+    const embedder = createEmbedder(
+      stubModel(
+        request => {
+          calls.push(request);
+          return echoTexts(request);
+        },
+        { maxBatch: 2, maxInputTokens: 2 },
+      ),
+    );
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const result = await embedMany(embedder, ['a', 'b', 'c', 'x'.repeat(100)], { concurrency: 1 });
+    expect(InputTooLong.is(result) && result.data.index).toBe(3);
+    expect(calls).toHaveLength(0);
   });
 
   it('truncate sends the input and tells the provider to cut it', async () => {
@@ -125,5 +143,40 @@ describe('onTooLong', () => {
     if (isFailure(embedder)) throw new Error(embedder.message);
     await embedder.embed(['y'.repeat(100)], { onTooLong: 'truncate' });
     expect(sent[0]).toMatchObject({ input: ['y'.repeat(20)] });
+  });
+
+  // A cut through a surrogate pair sends malformed text, which a server may reject or mangle.
+  it('openai-compatible truncate never splits a character', async () => {
+    const sent: unknown[] = [];
+    const fetch = vi.fn((_url: string, init: RequestInit) => {
+      sent.push(typeof init.body === 'string' ? JSON.parse(init.body) : undefined);
+      return Promise.resolve(Response.json({ data: [{ index: 0, embedding: [0.5, 0.5] }] }));
+    });
+    const model = createOpenAICompatibleModel({
+      id: 'm',
+      baseURL: 'http://x/v1',
+      dimensions: 2,
+      maxInputTokens: 2,
+      fetch,
+    });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    await embedder.embed(['a'.repeat(7) + '😀'], { onTooLong: 'truncate' });
+    expect(sent[0]).toMatchObject({ input: ['aaaaaaa'] });
+    expect(truncateByEstimate('a'.repeat(7) + '😀', 2).isWellFormed()).toBe(true);
+    expect(truncateByEstimate('a'.repeat(6) + '😀', 2)).toBe('aaaaaa😀');
+  });
+});
+
+describe('providerInputTooLong', () => {
+  // A provider's 400 does not say which input; the tokenizer, not the character length, finds it.
+  it('names the input with the most tokens by the record tokenizer, with that count', () => {
+    const model = stubModel(echoTexts, { maxInputTokens: 8, countTokens: text => (text.startsWith('字') ? 50 : 1) });
+    expect(providerInputTooLong(model, ['a'.repeat(40), '字字']).data).toEqual({
+      index: 1,
+      tokens: { basis: 'counted', count: 50 },
+      max: 8,
+    });
   });
 });

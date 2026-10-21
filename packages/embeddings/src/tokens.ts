@@ -29,13 +29,34 @@ export function countTokens(model: EmbeddingModel, input: EmbedInput): TokenCoun
 }
 
 /**
- * The `InputTooLong` for a provider's "context length exceeded" answer, which does not say which
- * input it was. Names the longest one by estimate: the likeliest culprit, with its estimated count.
+ * `text` cut where `onTooLong: 'truncate'` cuts without a tokenizer: its first `maxTokens * 4` UTF-16
+ * code units, less a high surrogate left last, so a character is never split in half.
+ *
+ * @example
+ * truncateByEstimate('a'.repeat(7) + '😀', 2); // 'aaaaaaa': the emoji is dropped whole
  */
-export function providerInputTooLong(texts: readonly string[], max: number) {
+export function truncateByEstimate(text: string, maxTokens: number): string {
+  const cut = text.slice(0, maxTokens * CHARS_PER_TOKEN);
+  // A high surrogate last lost its low half to the cut. Checked by code unit, without the `u` flag:
+  // `isWellFormed` is not on every runtime.
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/**
+ * The `InputTooLong` for a provider's "context length exceeded" answer, which does not say which
+ * input it was. Names the input with the most tokens by `countTokens(model, text)`: the likeliest
+ * culprit, with that count.
+ */
+export function providerInputTooLong(model: EmbeddingModel, texts: readonly string[]) {
   let index = 0;
-  for (const [position, text] of texts.entries()) if (text.length > (texts[index]?.length ?? 0)) index = position;
-  return InputTooLong({ index, tokens: estimate(texts[index] ?? ''), max });
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
 }
 
 const BASIS_STRENGTH = { reported: 3, counted: 2, estimated: 1, unknown: 0 } as const;

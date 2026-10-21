@@ -10,7 +10,7 @@ import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
-import { CHARS_PER_TOKEN, providerInputTooLong } from '../tokens.js';
+import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
 
 export type OpenAICompatibleModelOptions = {
   /** The model name the server expects, e.g. `'Qwen/Qwen3-Embedding-8B'`. */
@@ -103,7 +103,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
         body: JSON.stringify({
           model: id,
           // The protocol has no truncate flag: cut at the character estimate of the model's limit.
-          input: truncate ? texts.map(text => text.slice(0, maxInputTokens * CHARS_PER_TOKEN)) : texts,
+          input: truncate ? texts.map(text => truncateByEstimate(text, maxInputTokens)) : texts,
           ...(requested === undefined ? {} : { dimensions: requested }),
         }),
         ...(signal ? { signal } : {}),
@@ -123,7 +123,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (response.status === 400 && mentionsContextLength(text)) {
-        return providerInputTooLong(texts, maxInputTokens);
+        return providerInputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `${label} answered ${response.status}: ${text.slice(0, 200)}` });
     }

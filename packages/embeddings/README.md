@@ -92,7 +92,9 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 
 `withResilience(embedder, policy?)` returns an embedder whose every call runs through an `@arki/resilience` policy. `embedMany` over it retries each chunk on its own.
 
-- It retries only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }`. A `RateLimited` with `retryAfterMs` waits at least that long.
+- It retries only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }`.
+- With the default policy, a `RateLimited` with `retryAfterMs` waits at least that long. Over 5 s, it is not retried: the `RateLimited` comes back at once and you decide when to try again.
+- A policy you pass gets no `retryAfterMs` minimum. To honour it, have its backoff's `delay(attempt, reason)` return at least `reason.data.retryAfterMs` when `RateLimited.is(reason)`.
 - Every other failure comes back after one attempt. Retrying bad input or a bad key burns quota and hides the bug.
 - `usage.requests` counts every attempt, failed ones included.
 - A timeout, an open circuit or a full bulkhead becomes `ModelUnavailable { reason: 'unreachable' }`. Nothing is thrown for them.
@@ -105,7 +107,7 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 `onTooLong` decides what happens to an input longer than the model's `maxInputTokens`:
 
 - `'fail'` (the default) returns `InputTooLong` with the input's `index`, its token count and the limit, before any request is sent. When the provider's own count disagrees and it answers 400, that is `InputTooLong` too, naming the longest input.
-- `'truncate'` sends it anyway. Ollama cuts it itself. OpenAI and OpenAI-compatible servers have no such flag, so the text is cut at `maxInputTokens * 4` characters first.
+- `'truncate'` sends it anyway. Ollama cuts it itself. OpenAI and OpenAI-compatible servers have no such flag, so the text is cut at `maxInputTokens * 4` characters first (never inside a character). That cut is a character estimate: dense text (CJK, code) has more tokens per character, so it can still be over the limit and come back as `InputTooLong`.
 
 Counts are `estimated` (`ceil(characters / 4)`) unless the model record carries a tokenizer, in which case they are `counted`.
 

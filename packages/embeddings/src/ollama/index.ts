@@ -162,7 +162,7 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
         return RateLimited(wait === undefined ? {} : { retryAfterMs: wait });
       }
       if (response.status === 400 && mentionsContextLength(text)) {
-        return providerInputTooLong(texts, facts.maxInputTokens);
+        return providerInputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `ollama answered ${response.status}: ${text.slice(0, 200)}` });
     }

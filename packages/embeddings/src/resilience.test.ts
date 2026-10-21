@@ -48,6 +48,17 @@ describe('withResilience', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(290);
   });
 
+  // Waiting out "come back in an hour" (or past the clock's limit) inside a call is never wanted:
+  // the RateLimited goes back to the caller at once, after one attempt, and nothing is thrown.
+  it('does not retry a retryAfterMs longer than the default backoff waits', async () => {
+    const { embedder, state } = failingThen(RateLimited({ retryAfterMs: 3e9 }));
+    const started = Date.now();
+    const result = await embedMany(withResilience(embedder), ['a']);
+    expect(RateLimited.is(result) && result.data.retryAfterMs).toBe(3e9);
+    expect(state.calls).toBe(1);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it('retries an unreachable model but not one that is not pulled', async () => {
     const unreachable = failingThen(ModelUnavailable({ model: 'stub', reason: 'unreachable' }));
     expect(isFailure(await embedMany(withResilience(unreachable.embedder, instantPolicy()), ['a']))).toBe(false);
