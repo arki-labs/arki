@@ -60,14 +60,9 @@ function pathOf(url: string): string {
   const scheme = url.indexOf('//');
   const start = url.indexOf('/', scheme === -1 ? 0 : scheme + 2);
   if (start === -1) return '/';
-  let end = url.length;
-  for (let index = start; index < url.length; index++) {
-    const code = url.charCodeAt(index);
-    if (code === 63 || code === 35) {
-      end = index;
-      break;
-    }
-  }
+  const query = url.indexOf('?', start);
+  const hash = url.indexOf('#', start);
+  const end = query === -1 ? (hash === -1 ? url.length : hash) : hash === -1 ? query : Math.min(query, hash);
   const path = url.slice(start, end);
   if (!path.includes('%')) return path;
   return tryDecode(path.includes('%25') ? path.replaceAll('%25', '%2525') : path, decodeURI);

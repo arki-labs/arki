@@ -447,25 +447,35 @@ function decodeInput(
   }
   if (contract.query !== undefined) jobs.push(...fieldJobs('query', contract.query, key => lastQueryValue(base, key)));
   if (contract.body !== undefined) jobs.push({ at: ['body'], schema: decoderOf(contract.body), value: body });
+  // Nothing declared at all: the raw params are the input. No jobs, no runs, no issues to collect.
+  // (A declared group whose fields are all optional and absent still becomes `{}`, through assemble.)
+  if (jobs.length === 0 && contract.params === undefined && contract.headers === undefined && contract.query === undefined) {
+    return checked(contract, { params, headers: undefined, query: undefined, body: undefined });
+  }
   return andThen(runJobs(jobs), runs => assemble(contract, params, runs));
 }
 
 function assemble(contract: ContractLike, params: Readonly<Record<string, string>>, runs: readonly Ran[]): ErasedInput {
   rejectIssues(issuesOf(runs));
-  const decoded: Record<Exclude<Where, 'body'>, Record<string, unknown>> = { params: {}, headers: {}, query: {} };
+  // One fresh record per declared group; an undeclared group stays `undefined` (params: the raw ones).
+  const decodedParams: Record<string, unknown> | undefined = contract.params === undefined ? undefined : {};
+  const headers: Record<string, unknown> | undefined = contract.headers === undefined ? undefined : {};
+  const query: Record<string, unknown> | undefined = contract.query === undefined ? undefined : {};
   let body: unknown;
   for (const { job, result } of runs) {
-    const [where, key] = job.at;
     if (result.issues !== undefined) continue;
+    const [where, key] = job.at;
     if (where === 'body') body = result.value;
-    else if (key !== undefined) decoded[where][key] = result.value;
+    else if (key !== undefined) {
+      const group = where === 'params' ? decodedParams : where === 'headers' ? headers : query;
+      if (group !== undefined) group[key] = result.value;
+    }
   }
-  const input: ErasedInput = {
-    params: contract.params === undefined ? params : decoded.params,
-    headers: contract.headers === undefined ? undefined : decoded.headers,
-    query: contract.query === undefined ? undefined : decoded.query,
-    body,
-  };
+  return checked(contract, { params: decodedParams ?? params, headers, query, body });
+}
+
+/** The contract's own `check`, after every field and the body decoded. */
+function checked(contract: ContractLike, input: ErasedInput): ErasedInput {
   if (contract.check !== undefined) rejectIssues(contract.check(input) ?? []);
   return input;
 }
