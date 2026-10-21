@@ -55,7 +55,6 @@ export const config: ReleaseConfig = {
       id: 'foundation',
       label: 'Wave 1 — Foundation',
       packages: [
-        '@arki/assert',
         // schema and failure publish first: env needs schema, resilience needs failure.
         '@arki/schema',
         '@arki/failure',
@@ -136,7 +135,7 @@ export const config: ReleaseConfig = {
     ],
     libraries: [
       '@arki/math', '@arki/money', '@arki/date', '@arki/string', '@arki/clock', '@arki/resilience',
-      '@arki/assert', '@arki/ts', '@arki/bench', '@arki/react-hooks', '@arki/icons', '@arki/async',
+      '@arki/ts', '@arki/bench', '@arki/react-hooks', '@arki/icons', '@arki/async',
       '@arki/schema', '@arki/expr', '@arki/cas',
     ],
   },

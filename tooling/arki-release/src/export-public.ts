@@ -903,7 +903,7 @@ const PUBLIC_README = [
   '| Wave | Packages |',
   '| ---- | -------- |',
   '| **Kernel** | [`@arki/dot`](packages/dot) — application composition kernel |',
-  '| **Foundation** | [`@arki/assert`](packages/assert), [`@arki/contracts`](packages/contracts), [`@arki/log`](packages/log), [`@arki/env`](packages/env), [`@arki/ts`](packages/ts), [`@arki/resilience`](packages/resilience), [`@arki/date`](packages/date), [`@arki/string`](packages/string), [`@arki/clock`](packages/clock) |',
+  '| **Foundation** | [`@arki/contracts`](packages/contracts), [`@arki/log`](packages/log), [`@arki/env`](packages/env), [`@arki/ts`](packages/ts), [`@arki/resilience`](packages/resilience), [`@arki/date`](packages/date), [`@arki/string`](packages/string), [`@arki/clock`](packages/clock) |',
   '| **Adapters** | [`@arki/db`](packages/db), [`@arki/kv`](packages/kv) |',
   '',
   '## Doctrine',

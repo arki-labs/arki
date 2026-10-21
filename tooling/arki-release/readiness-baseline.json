@@ -1,13 +1,4 @@
 {
-  "@arki/assert": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs",
-    "types"
-  ],
   "@arki/async": [
     "file-changelog",
     "file-llms-txt",

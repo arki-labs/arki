@@ -15,7 +15,7 @@ The canonical release waves (active set — see `arki.release.config.ts`
 for the source of truth; trimmed for stable v1 per the doctrine
 "smaller and excellent rather than broad and uneven"):
 
-1. **foundation** — `@arki/assert`, `@arki/contracts`, `@arki/log`,
+1. **foundation** — `@arki/contracts`, `@arki/log`,
    `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`,
    `@arki/string`, `@arki/clock`
 2. **dot-kernel** — `@arki/dot`
