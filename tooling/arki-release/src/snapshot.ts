@@ -22,11 +22,13 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import debugFactory from 'debug';
 
+import { COMMUNITY_FILES, ISSUE_TEMPLATE_DIR } from './export-public';
+
 const debug = debugFactory('arki:release:snapshot');
 const run = promisify(execFile);
 
-/** Everything the exporter reads from the repository root. */
-const SNAPSHOT_PATHS = ['packages', 'package.json', 'arki.release.config.ts'] as const;
+/** Everything the exporter reads from the repository root, community files included. */
+const SNAPSHOT_PATHS = ['packages', 'package.json', 'arki.release.config.ts', ...COMMUNITY_FILES, ISSUE_TEMPLATE_DIR] as const;
 const BUILD_OUTPUT_DIR = 'dist';
 
 export type SourceSnapshot = {

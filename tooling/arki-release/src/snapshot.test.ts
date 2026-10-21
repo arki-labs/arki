@@ -32,6 +32,9 @@ beforeEach(() => {
   write('packages/edited/package.json', '{"name":"@arki/edited","version":"0.0.1"}\n');
   write('packages/ui/chat/package.json', '{"name":"@arki/chat","version":"0.0.1"}\n');
   write('apps/private/secret.ts', 'never exported\n');
+  write('SECURITY.md', 'committed policy\n');
+  write('CONTRIBUTING.md', 'committed guide\n');
+  write('.github/ISSUE_TEMPLATE/bug.yml', 'name: Bug\n');
   git('add', '.');
   git('commit', '-qm', 'base');
   write('packages/clean/dist/index.js', 'built clean\n');
@@ -55,6 +58,9 @@ describe('createSourceSnapshot', () => {
 
     expect(readFileSync(path.join(snapshot.dir, 'packages/edited/package.json'), 'utf8')).toContain('0.0.1');
     expect(readFileSync(path.join(snapshot.dir, 'arki.release.config.ts'), 'utf8')).toContain('committed');
+    // The exporter copies these from the snapshot; without them every candidate crashed.
+    expect(readFileSync(path.join(snapshot.dir, 'SECURITY.md'), 'utf8')).toBe('committed policy\n');
+    expect(existsSync(path.join(snapshot.dir, '.github/ISSUE_TEMPLATE/bug.yml'))).toBe(true);
     expect(existsSync(path.join(snapshot.dir, 'apps'))).toBe(false);
   });
 
