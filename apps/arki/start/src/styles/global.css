@@ -11,12 +11,12 @@
    — or (games/scored surfaces) —
    @import '@fleet/design-systems/arena/tokens.css';
    @import '@fleet/design-systems/arena/theme-bridge.css';
-   — or (the arki brand: arki.dev) —
-   @import '@fleet/design-systems/arki/tokens.css';
-   @import '@fleet/design-systems/arki/theme-bridge.css';
+   — or (the arki brand: arki.dev, app-local) —
+   @import './arki/tokens.css';
+   @import './arki/theme-bridge.css';
 */
-@import '@fleet/design-systems/arki/tokens.css';
-@import '@fleet/design-systems/arki/theme-bridge.css';
+@import './arki/tokens.css';
+@import './arki/theme-bridge.css';
 
 /* Tailwind plugins */
 @plugin "tailwindcss-animate";
@@ -35,7 +35,6 @@
 @source "../../../../../packages/seo/src";
 @source "../../../../../fleet/feedback/src";
 @source "../../../../../packages/auth/src";
-@source "../../../../../fleet/design-systems/src";
 
 @custom-variant dark (&:is(.dark *));
 

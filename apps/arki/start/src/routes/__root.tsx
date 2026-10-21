@@ -3,7 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scripts } from '@tanstack/react-router';
 
 import { DevTools } from '@fleet/sitekit/devtools';
-import { arkiThemeClasses, arkiThemes } from '@fleet/design-systems/arki/themes';
+import { arkiThemeClasses, arkiThemes } from '~/styles/arki/themes';
 import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/ui/theme/script';
 
 import { getLocale } from '../paraglide/runtime.js';

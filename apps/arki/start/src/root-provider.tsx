@@ -1,11 +1,15 @@
 import { ThemeProvider } from '@arki/ui/theme';
 import { AppProvider } from '@fleet/sitekit/app-context.tsx';
-import { arkiThemeClasses, arkiThemes } from '@fleet/design-systems/arki/themes';
 
 import config from '~/config';
+import { registerArkiDesignSystem } from '~/styles/arki/register';
+import { arkiThemeClasses, arkiThemes } from '~/styles/arki/themes';
 
 // One stable array: the provider re-applies the theme whenever `themes` changes identity.
 const siteThemes = [...arkiThemes];
+
+// Runs when the app loads this module, so it is set before the first render on server and client.
+registerArkiDesignSystem();
 
 interface RootProviderProps {
   children: React.ReactNode;

@@ -1,4 +1,4 @@
-import type { ArkiTheme } from '@fleet/design-systems/arki/themes';
+import type { ArkiTheme } from '~/styles/arki/themes';
 import type { RefObject } from 'react';
 import { useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
