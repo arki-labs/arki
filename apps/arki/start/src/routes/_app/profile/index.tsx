@@ -2,19 +2,19 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 
+import { prefetchSessionFn } from '~/features/auth/prefetch-session';
 import { getDefaultMeta } from '~/shared-metadata';
 
 export const Route = createFileRoute('/_app/profile/')({
   head: () => getDefaultMeta({ title: 'Profile' }),
   beforeLoad: async () => {
-    // Imported on demand: `beforeLoad` stays in the main bundle, and a static import would ship the auth client to
-    // every public page.
-    const { authClient } = await import('~/features/auth/client');
-    const session = await authClient.getSession();
-    if (!session.data?.user) {
+    // A server function, not the browser auth client: during server rendering the auth client cannot reach the auth
+    // API with the visitor's cookies, so a signed-out first load became a 500 instead of this redirect.
+    const principal = await prefetchSessionFn();
+    if (!principal) {
       throw redirect({ href: '/auth/sign-in' });
     }
-    return { user: session.data.user };
+    return { user: principal.user };
   },
   component: ProfilePage,
 });
