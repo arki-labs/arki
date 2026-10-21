@@ -88,14 +88,10 @@ export default defineCommand({
   },
 });
 
-/** Keys the app schema declares `secret()`. A schema that fails to load only costs this extra redaction. */
+/** Keys the app schema declares `secret()`. A schema that cannot load only costs this extra redaction (files' encrypted values are still redacted). */
 async function secretKeysOf(cwd: string): Promise<ReadonlySet<string>> {
-  try {
-    const description = await loadDescription(cwd);
-    return new Set((description?.keys ?? []).filter(key => key.secret).map(key => key.key));
-  } catch {
-    return new Set();
-  }
+  const schema = await loadDescription(cwd);
+  return new Set((schema.description?.keys ?? []).filter(key => key.secret).map(key => key.key));
 }
 
 function signalNumber(signal: NodeJS.Signals): number {

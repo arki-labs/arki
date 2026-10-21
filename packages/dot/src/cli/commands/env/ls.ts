@@ -11,11 +11,12 @@ export default defineCommand({
   input: z.object({ schema: z.string().optional().describe('Env module to read declared keys from (default: src/env.ts)'), env: envTargetInput.env, cwd: envTargetInput.cwd }),
   effects: 'read',
   examples: ['dot env ls', 'dot env ls --env production --json'],
-  async run({ input }) {
+  async run({ input, ui }) {
     const target = resolveTarget(input);
     const report = loadEnvFiles({ cwd: target.cwd, root: target.root, environment: target.environment, env: { ...process.env }, write: false });
-    const description = await loadDescription(target.cwd, input.schema);
-    const declared = new Map((description?.keys ?? []).map(key => [key.key, key]));
+    const schema = await loadDescription(target.cwd, input.schema);
+    if (schema.problem !== undefined) ui.warn(schema.problem);
+    const declared = new Map((schema.description?.keys ?? []).map(key => [key.key, key]));
     const shadowed = new Set(report.shadowed.map(entry => entry.key));
     const keys = report.values.map(value => ({
       key: value.key,

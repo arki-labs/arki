@@ -38,8 +38,8 @@ export default defineCommand({
       write: false,
       references: input.resolve ? DEFAULT_RESOLVERS : OFFLINE_RESOLVERS,
     });
-    const description = await loadDescription(target.cwd, input.schema);
-    const secretKeys = new Set((description?.keys ?? []).filter(key => key.secret).map(key => key.key));
+    const schema = await loadDescription(target.cwd, input.schema);
+    const secretKeys = new Set((schema.description?.keys ?? []).filter(key => key.secret).map(key => key.key));
     const tracked = trackedFiles(target.root, report.files);
     const keyFiles = trackedKeyFiles(target.root);
     const gitFailures = [tracked, keyFiles].flatMap(answer => (answer.ok ? [] : [answer.reason]));
@@ -60,6 +60,16 @@ export default defineCommand({
         file: relative(target.root, entry.file),
         key: entry.key,
       })),
+      ...(schema.problem === undefined
+        ? []
+        : [
+            {
+              code: 'dot.env.schema_unavailable',
+              severity: 'warning' as const,
+              message: `secret() keys not checked: ${schema.problem}`,
+              remediation: 'Run the check under Bun: `bun --bun dot env check`.',
+            },
+          ]),
       ...[...new Set(gitFailures)].map(reason => ({
         code: 'dot.env.git_unavailable',
         severity: 'error' as const,

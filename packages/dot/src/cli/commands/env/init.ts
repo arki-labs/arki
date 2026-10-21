@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { initEnvFile } from '@arki/env/node';
+import { is } from '@arki/schema';
 
 import { envTargetInput, relative, resolveTarget } from '../../env-files.js';
 
@@ -47,12 +48,13 @@ function ensureIgnored(file: string): 'added' | 'present' {
 
 function ensureAgentDeny(file: string): 'added' | 'present' | 'no-settings' {
   if (!existsSync(path.dirname(file))) return 'no-settings';
-  const parsed = existsSync(file) ? claudeSettings.safeParse(JSON.parse(readFileSync(file, 'utf8'))) : claudeSettings.safeParse({});
-  if (!parsed.success) return 'no-settings';
-  const deny = parsed.data.permissions?.deny ?? [];
+  const settings: unknown = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  // `is` narrows the parsed file itself: a schema-parsed copy lists known keys first and would reorder it.
+  if (!is(settings, claudeSettings)) return 'no-settings';
+  const deny = settings.permissions?.deny ?? [];
   const missing = AGENT_DENY.filter(rule => !deny.includes(rule));
   if (missing.length === 0) return 'present';
-  const next = { ...parsed.data, permissions: { ...parsed.data.permissions, deny: [...deny, ...missing] } };
+  const next = { ...settings, permissions: { ...settings.permissions, deny: [...deny, ...missing] } };
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
   return 'added';

@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { EnvDescription } from '@arki/env/core';
 import { describeEnv } from '@arki/env/core';
 import { findRoot } from '@arki/env/node';
+import { is } from '@arki/schema';
 
 /** The flags every `dot env` command shares. */
 export const envTargetInput = {
@@ -70,24 +71,43 @@ export function trackedKeyFiles(root: string): GitAnswer<readonly string[]> {
   return answer.ok ? { ok: true, value: answer.value.filter(file => path.basename(file).startsWith('.env.keys')) } : answer;
 }
 
+/** The app's env schema, or why it could not be read (`problem`). No module at all is not a problem. */
+export type SchemaAnswer = { readonly description: EnvDescription | undefined; readonly problem?: string };
+
 /**
  * The env schema of the app in `cwd`, merged across every `defineEnv` export of its env module
- * (`--schema`, else `src/env.ts`, else `env.ts`). `undefined` when there is none or it fails to load.
+ * (`--schema`, else `src/env.ts`, else `env.ts`). A module that fails to import (Node without
+ * TypeScript support, a broken import) is reported in `problem`, never thrown and never silent.
  */
-export async function loadDescription(cwd: string, schema?: string): Promise<EnvDescription | undefined> {
+export async function loadDescription(cwd: string, schema?: string): Promise<SchemaAnswer> {
   const candidates = schema === undefined ? ['src/env.ts', 'env.ts'].map(file => path.join(cwd, file)) : [path.resolve(cwd, schema)];
   const module = candidates.find(file => existsSync(file));
-  if (module === undefined) return undefined;
-  const loaded: unknown = await import(pathToFileURL(module).href);
-  const exports = z.record(z.string(), z.unknown()).safeParse(loaded);
-  if (!exports.success) return undefined;
-  const keys = new Map<string, EnvDescription['keys'][number]>();
-  for (const value of Object.values(exports.data)) {
-    const object = z.object({}).loose().safeParse(value);
-    const description = object.success ? describeEnv(object.data) : undefined;
-    for (const key of description?.keys ?? []) keys.set(key.key, key);
+  if (module === undefined) return { description: undefined };
+  // Only the declaration is read, never a value, and the files are not loaded yet. An env built by
+  // `defineEnv` validates the first time anything touches it (even listing its keys), so the switch
+  // stays on until the scan is done.
+  const skip = process.env.SKIP_ENV_VALIDATION;
+  process.env.SKIP_ENV_VALIDATION = '1';
+  try {
+    let loaded: unknown;
+    try {
+      loaded = await import(pathToFileURL(module).href);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'import failed';
+      return { description: undefined, problem: `cannot import ${path.relative(cwd, module)} (${reason}); run \`dot\` under Bun (\`bun --bun dot env ...\`) to read secret() keys` };
+    }
+    if (!is(loaded, z.record(z.string(), z.unknown()))) return { description: undefined };
+    const keys = new Map<string, EnvDescription['keys'][number]>();
+    // `is` narrows the export itself: the description is keyed by the env object, and a parsed copy would miss it.
+    for (const value of Object.values(loaded)) {
+      if (!is(value, z.object({}).loose())) continue;
+      for (const key of describeEnv(value)?.keys ?? []) keys.set(key.key, key);
+    }
+    return { description: keys.size === 0 ? undefined : { keys: [...keys.values()] } };
+  } finally {
+    if (skip === undefined) delete process.env.SKIP_ENV_VALIDATION;
+    else process.env.SKIP_ENV_VALIDATION = skip;
   }
-  return keys.size === 0 ? undefined : { keys: [...keys.values()] };
 }
 
 /** The shape of a value, safe to print: `hex`, `base64`, `url`, `number`, `text`. */

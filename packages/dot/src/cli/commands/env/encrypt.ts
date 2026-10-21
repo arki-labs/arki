@@ -28,7 +28,7 @@ export default defineCommand({
   }),
   effects: 'write',
   examples: ['dot env encrypt', 'dot env encrypt --key STRIPE_SECRET_KEY', 'dot env encrypt --from .env --all'],
-  async run({ input }) {
+  async run({ input, ui }) {
     const target = resolveTarget(input);
     const file = relative(target.root, target.file);
     if (publicKeyIn(target.file) === undefined) return EnvNoHeader({ file });
@@ -39,8 +39,9 @@ export default defineCommand({
     }
     const source = path.resolve(target.cwd, input.from);
     if (!existsSync(source)) return EnvNoChange({ file, reason: `${input.from} does not exist` });
-    const description = await loadDescription(target.cwd, input.schema);
-    const secretKeys = new Set((description?.keys ?? []).filter(key => key.secret).map(key => key.key));
+    const schema = await loadDescription(target.cwd, input.schema);
+    if (schema.problem !== undefined) ui.warn(schema.problem);
+    const secretKeys = new Set((schema.description?.keys ?? []).filter(key => key.secret).map(key => key.key));
     const encrypted: string[] = [];
     const plain: string[] = [];
     for (const [key, entry] of envValues(parseEnv(readFileSync(source, 'utf8')))) {

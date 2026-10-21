@@ -26,8 +26,9 @@ export default defineCommand({
     if ((input.value === undefined) === !input.stdin) return EnvValueMissing({ key: input.key });
     const value = input.value ?? (await readStdin());
     if (input.plain) {
-      const description = await loadDescription(target.cwd, input.schema);
-      if (description?.keys.some(key => key.key === input.key && key.secret) === true) return EnvPlainSecret({ key: input.key });
+      const schema = await loadDescription(target.cwd, input.schema);
+      if (schema.problem !== undefined) ui.warn(schema.problem);
+      if (schema.description?.keys.some(key => key.key === input.key && key.secret) === true) return EnvPlainSecret({ key: input.key });
     }
     if (!input.plain && publicKeyIn(target.file) === undefined) return EnvNoHeader({ file });
     if (!setEnvFileValue(target.file, input.key, value, { plain: input.plain })) return EnvNoChange({ file, reason: `${input.key} already holds this value` });

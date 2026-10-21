@@ -60,6 +60,17 @@ describe('dot env init', () => {
     const again = await dot('env', 'init');
     expect(again.json.data).toMatchObject({ headerAdded: false, gitignore: 'present', agentDeny: 'present' });
   });
+
+  it("adds the read-deny without reordering the user's settings", async () => {
+    // WHY: init edits a file the user owns; a reshuffled settings.json is a noisy, unreviewable diff.
+    const settings = path.join(root, '.claude', 'settings.json');
+    writeFileSync(settings, JSON.stringify({ model: 'x', permissions: { allow: ['Bash(ls)'], deny: ['Bash(rm)'], ask: [] } }));
+    await dot('env', 'init');
+    const written = JSON.parse(readFileSync(settings, 'utf8'));
+    expect(Object.keys(written)).toEqual(['model', 'permissions']);
+    expect(Object.keys(written.permissions)).toEqual(['allow', 'deny', 'ask']);
+    expect(written.permissions.deny).toEqual(['Bash(rm)', 'Read(**/.env.keys)', 'Read(**/.env.keys.*)']);
+  });
 });
 
 describe('set, get, ls never leak a value', () => {
@@ -119,6 +130,38 @@ describe('dot env check', () => {
     writeFileSync(path.join(app, '.env'), 'A=1\n');
     const legacy = await dot('env', 'check');
     expect(legacy.json.data).toMatchObject({ findings: [{ code: 'dot.env.legacy_file', severity: 'warning' }] });
+  });
+
+  it('reads secret() keys from an env module whose values are not set', async () => {
+    // WHY: the files are not loaded when check imports src/env.ts; validation must not stop it.
+    await dot('env', 'init');
+    mkdirSync(path.join(app, 'src'));
+    writeFileSync(
+      path.join(app, 'src', 'env.ts'),
+      [
+        // The temp dir has no node_modules: import the very files dot resolves, so the registry is shared.
+        `import { z } from '${import.meta.resolve('zod')}';`,
+        `import { defineEnv, secret } from '${import.meta.resolve('@arki/env/core')}';`,
+        "export const env = defineEnv({ server: { STRIPE_SECRET_KEY: secret(z.string().min(1)) }, runtimeEnv: process.env });",
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(path.join(app, '.env.development'), `${readFileSync(path.join(app, '.env.development'), 'utf8')}STRIPE_SECRET_KEY=${SECRET}\n`);
+    execFileSync('git', ['add', '.env.development'], { cwd: app });
+    const result = await dot('env', 'check');
+    expect(result.json.error?.code).toBe('dot.env_check_failed');
+    expect(result.out).toContain('dot.env.plaintext_secret');
+    expect(result.out).not.toContain(SECRET);
+  });
+
+  it('reports an env schema that cannot be imported instead of crashing', async () => {
+    // WHY: under Node, importing src/env.ts throws; check must still run and say what it skipped.
+    await dot('env', 'init');
+    mkdirSync(path.join(app, 'src'));
+    writeFileSync(path.join(app, 'src', 'env.ts'), "throw new Error('cannot load');\n");
+    const result = await dot('env', 'check');
+    expect(result.code).toBe(0);
+    expect(result.json.data).toMatchObject({ findings: [{ code: 'dot.env.schema_unavailable', severity: 'warning' }] });
   });
 });
 
