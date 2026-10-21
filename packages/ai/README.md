@@ -119,6 +119,8 @@ for await (const chunk of stream) {
 
 ### Orchestration (Flow)
 
+`createFlow` runs its nodes in memory, inside one request or one job. It is not durable: a restart loses the run. Work that must survive process death, or that waits for hours or days, belongs in a durable workflow of `@arki/journal` ([Workflows](../journal/README.md#workflows)).
+
 ```typescript
 import { createFlow } from '@arki/ai';
 

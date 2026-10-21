@@ -18,6 +18,7 @@ Reads are plain Drizzle queries. Replay exists for checks and repair, not for re
 | Add an entity, with create and delete                                                         | [Add an entity](docs/agent-guide.md#add-an-entity-with-create-and-delete)                                                  |
 | Add an effect that runs after commit                                                          | [Add an effect](docs/agent-guide.md#add-an-effect-that-runs-after-commit)                                                  |
 | Add a command and run it from a request or a job                                              | [Add a command](docs/agent-guide.md#add-a-command-and-run-it)                                                              |
+| Add a durable workflow: steps, waits, undo, operators                                         | [Workflows](#workflows), [agent guide: Workflows](docs/agent-guide.md#workflows)                                           |
 | Find out why a write failed                                                                   | [Find out why](docs/agent-guide.md#find-out-why-a-write-failed), [Errors](docs/agent-guide.md#errors)                      |
 | Check or repair a row, rebuild a read model                                                   | [Recovery verbs](docs/agent-guide.md#recovery-verbs)                                                                       |
 | Wire it in a Dot app, or ship journal pieces from a package                                   | [Dot](docs/agent-guide.md#dot), [Shared packages](docs/agent-guide.md#shared-packages)                                     |
@@ -43,14 +44,16 @@ The example is a sketch of an app, not one runnable file. Each comment names the
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
 import { CommandConflict, CommandNotFound, initJournal, need } from '@arki/journal';
-// src/schema.ts — the two journal tables live in the app's schema.
+// src/schema.ts — the journal tables live in the app's schema.
 import { journalTables } from '@arki/journal/pg';
 
-export const j = initJournal({ meta: z.object({ actorId: z.string() }) });
+export const tables = journalTables(); // or journalTables(pgSchema('app'))
+
+export const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
 // Or, to type `tx` everywhere with the app's own Drizzle transaction type:
-// export const j = initJournal.tx<AppTx>().create({ meta: ... });
+// export const j = initJournal.tx<AppTx>().create({ tables, meta: ... });
 // And to type `db` inside effects with the app's own database type:
-// export const j = initJournal.tx<AppTx>().db<AppDb>().create({ meta: ... });
+// export const j = initJournal.tx<AppTx>().db<AppDb>().create({ tables, meta: ... });
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
 // A table keyed by another column: j.entity('profile', profiles, { key: 'accountId' }).
@@ -110,10 +113,8 @@ export const orderMail = j.effect(
   },
 );
 
-export const tables = journalTables(); // or journalTables(pgSchema('app'))
-
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
+export const journal = j.compose({ projections: [customerStats], effects: [orderMail], services: { mailer } });
 
 // The request context binds the door once: the database and the signed-in actor.
 export const createContext = (user: User) => ({ user, runCommand: journal.bind(db, { actorId: user.id }) });
@@ -222,7 +223,7 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 });
 
 // src/journal.root.ts
-export const journal = j.compose({ tables, effects: [closeAfterPayment] });
+export const journal = j.compose({ effects: [closeAfterPayment] });
 ```
 
 - `run(command, input, meta)` is `journal.run` on the root database that the worker or `drain` was given. It opens its own transaction and commits before it returns.
@@ -290,7 +291,7 @@ Savepoints are a stack. Two `write` or `run` calls open on one transaction at th
 
 ### The app's transaction type
 
-`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `DbHandle`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database. To name the root database type as well, see Effects.
+`initJournal({ tables, meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `DbHandle`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ tables, meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database. To name the root database type as well, see Effects.
 
 ### Reducers
 
@@ -425,7 +426,7 @@ export const orderMail = j.effect(
   },
 );
 
-export const journal = j.compose({ tables, effects: [orderMail], services: { mailer } });
+export const journal = j.compose({ effects: [orderMail], services: { mailer } });
 ```
 
 - `need<Mailer>()` comes from `@arki/journal`. It is a marker: it holds the type and no value.
@@ -435,11 +436,11 @@ export const journal = j.compose({ tables, effects: [orderMail], services: { mai
 - A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws.
 - An effect that needs nothing has three arguments: `j.effect(name, entity, on)`.
 
-`db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. With `.tx<AppTx>()` they also need a database that opens `AppTx` transactions, because effects run commands on it. The app's own Drizzle database does. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
+`db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ tables, meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. With `.tx<AppTx>()` they also need a database that opens `AppTx` transactions, because effects run commands on it. The app's own Drizzle database does. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ tables, meta })`.
 
 ### When a job runs
 
-An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. `retry`: a `Backoff` from `@arki/resilience` (re-exported here as `backoff`), the same retry schedule queue jobs and resilience policies take. It says how long a failed job waits before its next try, and when it is dead instead: `withSchedule({ retry: backoff.exponential({ base: 5_000 }).upTo(3).while(error => error instanceof SmtpError) })`. The default is `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`: 8 tries, doubling from 1 s to at most 5 minutes. Retries keep their priority. A handler may also return a failure from `@arki/failure` for an expected outcome, such as a declined card: the job is then dead after one try, because another try would repeat it. It runs again only when the `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. Its `lastError` is the failure as JSON: code, message, status and data. A bad value throws `BAD_DEFINITION` where the schedule is declared.
+An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. `when: event => boolean`: the write makes a job only for the events where it returns true, so `withSchedule({ when: e => e.data.total > 10_000 })` queues nothing for small orders. The default is every event of the effect's types. `retry`: a `Backoff` from `@arki/resilience` (re-exported here as `backoff`), the same retry schedule queue jobs and resilience policies take. It says how long a failed job waits before its next try, and when it is dead instead: `withSchedule({ retry: backoff.exponential({ base: 5_000 }).upTo(3).while(error => error instanceof SmtpError) })`. The default is `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`: 8 tries, doubling from 1 s to at most 5 minutes. Retries keep their priority. A handler may also return a failure from `@arki/failure` for an expected outcome, such as a declined card: the job is then dead after one try, because another try would repeat it. It runs again only when the `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. Its `lastError` is the failure as JSON: code, message, status and data. A bad value throws `BAD_DEFINITION` where the schedule is declared.
 
 ## The worker
 
@@ -579,7 +580,7 @@ A third helper table, `journal_job_attempts`, has one row per try. It lives and 
 
 Move on success is one statement under the lease fence: the fenced `DELETE` feeds the archive `INSERT`. A worker that lost its lease archives nothing.
 
-**The policy.** Give it to `compose` next to `tables`. Every field is optional.
+**The policy.** Give it to `initJournal`, next to `tables`. Every field is optional. `retention.workflows` is the policy for finished workflow runs (see [Workflows](#retention)).
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 import { ndjsonArchiveSink } from '@arki/journal';
@@ -599,10 +600,9 @@ export const auditTrail = j
   .effect('auditTrail', order, { OrderPlaced: (e, { db }) => writeAudit(db, e) })
   .withSchedule({ retention: { completed: 'untilExported' } }); // kept only until the sink has it
 
-export const journal = j.compose({
+export const j = initJournal({
   tables,
-  effects: [sendWelcomeMail, auditTrail],
-  services: { mailer },
+  meta: z.object({ actorId: z.string() }),
   retention: {
     retryableFor: '30d', // a dead job stays retryable this long
     archive: {
@@ -614,6 +614,9 @@ export const journal = j.compose({
     sweep: { every: '1h', batch: 1000 },
   },
 });
+
+// The effects are defined on this `j`, then composed.
+export const journal = j.compose({ effects: [sendWelcomeMail, auditTrail], services: { mailer } });
 ```
 
 `journal.retention` is the policy after parsing, with the defaults filled in. The worker, the verbs and the Foreman module all read it.
@@ -653,7 +656,7 @@ Each step takes at most `sweep.batch` rows. A failing step is logged and the nex
 **An app that schedules the sweep itself.** Set `sweep: false`, and call the three verbs from your own schedule. Each one is public and takes `op` as its last argument; without it the actor is `system:retention`.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
-// compose({ tables, retention: { sweep: false, archive: { sink } } })
+// initJournal({ tables, retention: { sweep: false, archive: { sink } } })
 await journal.purgeDead(db, { olderThan: new Date(Date.now() - 30 * 86_400_000) }, { actor: 'cron:journal' });
 await journal.exportArchive(db, { limit: 1000 }, { actor: 'cron:journal' });
 await journal.pruneArchive(db, { limit: 1000 }, { actor: 'cron:journal' });
@@ -802,6 +805,365 @@ export const relayOrderPaid = j.effect(
 
 For a broker that dedupes on a message id, use `jobId` the same way. `kv.publish` (Redis Pub/Sub) is a best-effort notification: nobody acknowledges it, and it does not take a job id. Use it for a live page or a cache poke, never for work that must happen. For work that must happen, relay a durable job as above. The journal has no generic broker framework on purpose.
 
+## Workflows
+
+A workflow is a list of steps that runs to the end even when the process dies. Each step runs as a job in `journal_jobs`. When a step finishes, its result is saved (a checkpoint) and the next step is scheduled, in one transaction. A run can wait for a signal from outside, or sleep, for hours or days. When it cannot finish, it undoes the steps it did, newest first (compensation). The run is a journal entity (`workflow.run`), so every move is an event in `journal_events`.
+
+**When to use one.** The work must survive a restart, or it waits for hours or days: use a journal workflow. A loop of steps inside one request or one job: use `createFlow` from `@arki/ai`. `createFlow` runs in memory and is not durable. It stays that way on purpose.
+
+The [agent guide](docs/agent-guide.md#workflows) has the rules, the error codes and the traps.
+
+### Define a workflow
+
+`j.workflow(name, { version, input, output?, needs? })` starts a definition. Each node adds one result, and the types follow: in a later step, `results.hold` has the type the `hold` step returned. `.finish()` ends the definition. The example is one file that runs: it defines a refund, runs it on an in-memory database, and checks what happened.
+
+```ts run
+import { z } from 'zod';
+
+import { orThrow } from '@arki/failure';
+import { initJournal, need } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+/** The payment provider, as the workflow sees it. */
+type Payments = {
+  hold(paymentId: string, amount: number): Promise<{ holdId: string }>;
+  release(holdId: string): Promise<void>;
+  refund(paymentId: string, amount: number, idempotencyKey: string): Promise<{ refundId: string }>;
+};
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+
+const Settled = z.object({ settledAt: z.iso.datetime() });
+
+export const refund = j
+  .workflow('payments.refund', {
+    version: 1,
+    input: z.object({ paymentId: z.string(), amount: z.int().positive() }),
+    output: z.object({ refundId: z.string(), settledAt: z.string() }),
+    needs: { payments: need<Payments>() },
+  })
+  // `undo` runs when the run compensates. `result` is what this step returned.
+  .step('hold', ({ input, payments }) => payments.hold(input.paymentId, input.amount), {
+    undo: ({ result, payments }) => payments.release(result.holdId),
+  })
+  // `key` is the same on every try of this step: the provider dedupes on it. `output` checks the stored result, so
+  // `def.read` types it and an operator can supply it by hand (`resolveStep`).
+  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, input.amount, key), {
+    output: z.object({ refundId: z.string() }),
+  })
+  // The run parks here until the provider's webhook sends the signal.
+  .waitFor('settled', { signal: 'provider.refund.settled', schema: Settled, timeout: '3d' })
+  .finish(({ results }) => ({ refundId: results.payBack.refundId, settledAt: results.settled.settledAt }));
+```
+
+The other nodes:
+
+- `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, and the needs by name. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
+- `when: ctx => boolean` skips the step when it returns false. Its result is then `null`, and its type says so (`R | null`).
+- `next: 'node'` or `next: ({ result }) => 'node' | 'next'` jumps back to an earlier node, so a loop is a step with `next`. A name later in the list does not compile.
+- `.waitFor(name, { signal, schema, timeout?, onTimeout? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node.
+- `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time.
+- `.child(name, def, { input })` starts another workflow and waits for it. The result is the child's output.
+- `.map(name, def, { items, input, wait?, concurrency? })` starts one child per item. The result is the outputs in item order. With `wait: 'any'` the first child to finish wins, and the others are cancelled.
+- `.finish(fn?)` works out the output. Without `fn` the output is the last node's result. With an `output` schema, `fn` must return that schema's output, or it does not compile.
+
+```ts continue
+const inStock = (orderId: string) => orderId.startsWith('ord_'); // a stand-in for a real stock check
+
+const shipParcel = j
+  .workflow('orders.ship-parcel', { version: 1, input: z.object({ parcelId: z.string() }) })
+  .step('label', ({ input }) => ({ tracking: `trk_${input.parcelId}` }))
+  .finish(); // the output is the last result: { tracking }
+
+export const fulfil = j
+  .workflow('orders.fulfil', {
+    version: 1,
+    input: z.object({ orderId: z.string(), parcels: z.array(z.string()).min(1), gift: z.boolean() }),
+  })
+  .step('wrap', ({ input }) => ({ paper: 'red', orderId: input.orderId }), { when: ({ input }) => input.gift })
+  .sleep('pause', '5m')
+  // Not ready yet: back to `pause`, then check again. Each visit gets a new key.
+  .step('stock', ({ input }) => ({ ready: inStock(input.orderId) }), {
+    next: ({ result }) => (result.ready ? 'next' : 'pause'),
+  })
+  .map('ship', shipParcel, { items: ({ input }) => input.parcels, input: (_ctx, parcelId) => ({ parcelId }) })
+  .child('first', shipParcel, { input: ({ input }) => ({ parcelId: input.parcels[0] ?? input.orderId }) })
+  .finish(({ results }) => ({
+    wrapped: results.wrap !== null, // `wrap` is `{ paper, orderId } | null`
+    tracking: results.ship.map(parcel => parcel.tracking), // `ship` is `{ tracking }[]`
+  }));
+```
+
+### Compose
+
+Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`) and one projection (the `workflow_steps` table).
+
+```ts continue
+const released: string[] = [];
+const payments: Payments = {
+  hold: async paymentId => ({ holdId: `hold_${paymentId}` }),
+  release: async holdId => void released.push(holdId),
+  refund: async (paymentId, _amount, idempotencyKey) => ({ refundId: `re_${paymentId}_${idempotencyKey.length}` }),
+};
+
+export const journal = j.compose({
+  workflows: [refund],
+  workflowMeta: { actorId: 'system:workflow' },
+  services: { payments },
+});
+```
+
+- Compose workflows once per `initJournal()`. A second compose with workflows on the same `j` throws `BAD_DEFINITION`. A new process (a deploy, a restart) runs `initJournal()` again, so it composes again.
+- A missing service is a compile error, as for an effect, and `compose` throws `BAD_DEFINITION` naming the workflow and the need. In Dot the feature's `needs` make it a compile error.
+
+### Start, signal, cancel, read
+
+A finished definition has three commands and one read. The commands run through `journal.run`, `journal.bind`, `context.run` or `ctx.run`, like any command.
+
+- `def.start` takes `{ input, id? }` and returns `{ runId }`. The default id is `wfr_<random>`. Give your own id to make the start idempotent: the same id and input return the same run, and another input is a `CommandConflict`.
+- `def.signal(name)` takes `{ runId, deliveryId, payload }`. `name` must be a signal one of the `waitFor` nodes declares. `deliveryId` is the sender's own id, such as the webhook event id. It returns a `status`: `woke` (the run moved on), `kept` (stored; the run takes it when it reaches the wait), `duplicate` (this `deliveryId` was seen) or `finished` (the run is over, so it was dropped).
+- `def.cancel` takes `{ runId, reason }`. It returns `{ state: 'compensating' }` while the run undoes its steps, or `{ state: 'cancelled' }` when there was nothing to undo.
+- `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema). A result without a schema is `unknown`. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
+
+```ts continue
+const { db, client } = await openJournalDb(tables); // in an app: the root database
+const customer = { actorId: 'usr_1' };
+
+const started = orThrow(
+  await journal.run(db, refund.start, { id: 'refund:ord_1', input: { paymentId: 'pay_1', amount: 500 } }, customer),
+);
+// In an app `journal.worker(db)` runs the jobs. Here `drain` runs what is due.
+await journal.drain(db); // hold
+await journal.drain(db); // payBack, then the run parks on `settled`
+
+const delivered = orThrow(
+  await journal.run(
+    db,
+    refund.signal('provider.refund.settled'),
+    { runId: started.runId, deliveryId: 'evt_1', payload: { settledAt: '2026-10-21T10:00:00Z' } },
+    { actorId: 'webhook:provider' },
+  ),
+);
+if (delivered.status !== 'woke') throw new Error('the signal wakes the parked run');
+await journal.drain(db);
+
+const done = orThrow(await refund.read(db, started.runId));
+if (done?.run.state !== 'completed') throw new Error('the run completes');
+// `output` is typed by the workflow's `output` schema, and `results.payBack` by the step's.
+if (done.run.output?.settledAt !== '2026-10-21T10:00:00Z') throw new Error('the output holds the settle time');
+if (done.run.results.payBack?.refundId === undefined) throw new Error('the checked step result is there');
+```
+
+### Failure and compensation
+
+A step that throws is tried again with its `retry` backoff (default: the effects' backoff, 8 tries). A step that returns a failure from `@arki/failure` is dead at once. A dead step, or a `waitFor` that timed out with `'fail'`, follows the workflow's `onDeadStep`:
+
+- `'wait'` (the default): the run stays where it is, marked `stuck`, until an operator retries the step, gives its result, or cancels the run.
+- `'compensate'`: the run undoes its steps at once and ends `failed`.
+
+Compensation runs the `undo` of each finished step, newest first. A step without `undo` is skipped and listed in `residual`: its work stays done. A child is compensated as a whole run, unless the `child` node has its own `undo`. A `deadline` on the workflow fails a run that has not finished in time, and compensates it.
+
+A cancel stops the run and compensates it the same way, then the run ends `cancelled`. A step that is running finishes first. A step that never started does not run. A wait or sleep the run was parked on is dropped, and a dropped node has no result. Children are cancelled too, unless the `child` node says `onCancel: 'detach'`.
+
+```ts continue
+const second = orThrow(await journal.run(db, refund.start, { input: { paymentId: 'pay_2', amount: 300 } }, customer));
+await journal.drain(db);
+await journal.drain(db); // parked on `settled`
+
+const cancel = orThrow(
+  await journal.run(db, refund.cancel, { runId: second.runId, reason: 'customer withdrew' }, customer),
+);
+if (cancel.state !== 'compensating') throw new Error('hold is undone first');
+await journal.drain(db);
+
+const cancelled = orThrow(await refund.read(db, second.runId));
+if (cancelled?.run.state !== 'cancelled') throw new Error('the run ends cancelled');
+if (released.join() !== 'hold_pay_2') throw new Error('hold is released');
+if (cancelled.residual.join() !== 'payBack') throw new Error('payBack has no undo: the refund stays done');
+```
+
+### Idempotency
+
+A step can run twice. The worker can die after the provider answered and before the checkpoint committed. Then another worker runs the step again. The journal does not hide this: the step body owns it. Two ways:
+
+- Give the provider an idempotency key. `ctx.key` is the same on every try of one visit of the step, so the provider answers the second call with the first result.
+- Look up, then act. Check whether the work is already done (a row, a provider lookup), and do it only when it is not.
+
+A worker whose lease ran out cannot commit a checkpoint: the journal refuses it with `LEASE_LOST`, and nothing is written.
+
+### Versions
+
+A run keeps the version it started with, to the end. To change a workflow's steps, add a new definition with the same name and a higher `version`, and register both: `compose({ workflows: [refundV1, refundV2] })`. New runs start the highest version. Older versions only finish the runs they have. Remove the old one when `journal.workflows.counts(db)` shows none of its runs are left.
+
+A run whose version is no longer registered, or whose definition has other nodes than it started with, is stranded. The runner leaves it alone; it never runs the wrong step. `journal.workflows.stranded(db)` lists them, with the reason (`WORKFLOW_UNKNOWN` or `WORKFLOW_SHAPE_CHANGED`). Put the old code back and `retryStep` resumes the run.
+
+### Operators
+
+`journal.workflows` reads runs and moves them by hand.
+
+| Call                                                       | What it does                                                                                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runs(db, { state?, name?, version?, parentId?, stuck? })` | Runs, newest first, with a `next` cursor.                                                                                                   |
+| `run(db, id)`                                              | One run with its steps, children, `residual` and unconsumed signals. Untyped: `def.read` is the typed form.                                 |
+| `counts(db)`                                               | How many runs per name, version and state.                                                                                                  |
+| `stranded(db)`                                             | Unfinished runs whose code is missing or changed.                                                                                           |
+| `history(db, id)`                                          | The run's events, oldest first.                                                                                                             |
+| `retryStep(db, { runId, path, phase }, op)`                | Runs a dead step again, with the same key. A dead child or map node restarts its failed children. A stranded run retries all its dead jobs. |
+| `resolveStep(db, { runId, path, result }, op)`             | Gives the result of a dead `do` step by hand, checked by its `output` schema. The run goes on. Needs a step with `output`.                  |
+| `checkResult(db, { runId, path, result })`                 | Says whether `resolveStep` would take `result`. Writes nothing.                                                                             |
+| `skipUndo(db, { runId, path }, op)`                        | Gives up a failed undo. `op.reason` is required. The path joins `residual` and compensation goes on.                                        |
+| `signal(db, { runId, name, deliveryId, payload }, op)`     | Delivers a signal from JSON, checked by the run's own version.                                                                              |
+| `cancel(db, { runId, reason }, op)`                        | Cancels a run of any workflow.                                                                                                              |
+
+`op` is `{ actor, reason?, executionId? }`, as for the job verbs. The run's events record it. A step or timer job belongs to its run: the raw job verbs (`journal.retry`, `discard`, `cancel`) refuse it with `JOB_MANAGED`.
+
+```ts continue
+// One row per name, version and state: here `payments.refund` v1 has one `completed` and one `cancelled` run.
+const counts = await journal.workflows.counts(db);
+if (counts.length !== 2) throw new Error('one completed run and one cancelled run');
+
+// RunStarted, NodeScheduled, NodeCompleted, ..., Parked, CancelRequested, CompensationStarted, ..., RunCancelled
+const { events } = await journal.workflows.history(db, second.runId);
+if (events.at(-1)?.type !== 'RunCancelled') throw new Error('the history ends with the cancel');
+await client.close();
+```
+
+`journalWorkflowsModule({ journal, db, meta, payload? })` from `@arki/journal/foreman` puts the same reads and verbs in Foreman, with previews and approvals. `meta(permit)` gives the meta of the commands it runs; its `actorId` is written on the run's events. The ids are `workflow.runs`, `.run`, `.counts`, `.stranded`, `.history` (permission `workflow:read`), `workflow.retryStep` (`journal:retry`, low risk), `workflow.signal` (`workflow:signal`, medium), `workflow.resolveStep` and `workflow.skipUndo` (`workflow:resolve`, high), and `workflow.cancel` (`workflow:cancel`, high). Its refusals are `JOURNAL_WORKFLOWS_ERROR_CODES`, `ARKI_JOURNAL_E010` to `E017`.
+
+### Retention
+
+A finished run's row is kept for a while, then the sweeper deletes it. Its events stay. Set the time on `initJournal`, next to the job retention. A workflow's own `retention` option overrides it.
+
+```ts
+import { z } from 'zod';
+
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+
+export const j = initJournal({
+  tables: journalTables(),
+  meta: z.object({ actorId: z.string() }),
+  retention: { workflows: { completed: '30d', failed: '180d', cancelled: '90d' } },
+});
+
+export const nightly = j
+  .workflow('reports.nightly', { version: 1, input: z.object({}), retention: { completed: '1d' } })
+  .step('build', () => 'done')
+  .finish();
+```
+
+Defaults: `completed` 7 days, `failed` 90 days, `cancelled` the same as `failed`. `'untilExported'` and `max` are refused: a run has no sink. A completed child whose parent has not finished is kept, because the parent may still undo it.
+
+### Workflows in Dot
+
+A feature lists its workflows with `journalHandlers({ workflows })`, or `journalWorkflows(core, defs)` in a `defineFeature` chain. The app passes `workflowMeta` to `journal({ j, workflowMeta })`. A step gets the services of the feature that lists its workflow, by need name. The feature must declare each need, or it does not compile. Each workflow is an action in the manifest: `<name>@<version>.run`, with its signals in the meta.
+
+```ts
+import { z } from 'zod';
+
+import { defineApp } from '@arki/dot';
+import { defineFeature, feature } from '@arki/dot/feature';
+import { plugin, service } from '@arki/dot/plugin';
+import { initJournal, need } from '@arki/journal';
+import { journal, journalHandlers, journalWorker, journalWorkflows } from '@arki/journal/dot';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+type Payments = { refund(paymentId: string, idempotencyKey: string): Promise<{ refundId: string }> };
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+
+const refund = j
+  .workflow('payments.refund', {
+    version: 1,
+    input: z.object({ paymentId: z.string() }),
+    needs: { payments: need<Payments>() },
+  })
+  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, key))
+  .finish();
+
+const { db } = await openJournalDb(tables); // the app's root database
+const stripe = plugin({
+  name: 'stripe',
+  provides: {
+    payments: (): Payments => ({ refund: async (paymentId, key) => ({ refundId: `re_${paymentId}_${key}` }) }),
+  },
+});
+
+// A `feature(...)`: the feature declares what its workflows need.
+const refunds = feature('refunds', {
+  needs: { payments: service<Payments>() },
+  use: [journalHandlers({ workflows: [refund] })],
+});
+
+// The same in a `defineFeature` chain: the needs come from the core.
+const core = defineFeature('refunds-chain').needs({ payments: stripe.provides.payments }).usecases({});
+export const refundsChain = core.entrypoints(journalWorkflows(core, [refund]));
+
+export const app = defineApp('shop')
+  .use(plugin({ name: 'db', provides: { db: () => db } }))
+  .use(stripe)
+  .use(journal({ j, workflowMeta: { actorId: 'system:workflow' } }))
+  .features([refunds])
+  .serve(journalWorker());
+```
+
+`journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` entrypoint, so a `defineFeature` feature with both effects and workflows lists them together with `journalHandlers`.
+
+### Testing
+
+`workflowHarness({ setup })` from `@arki/journal/testing` gives a test an in-memory database and control of time and crashes. `setup` builds the runtime: `initJournal`, the definitions and the compose. It returns `tables`, `journal` and the definitions the test uses. The harness adds:
+
+- `tick(age)` moves time forward by shifting the stored due times back.
+- `drain()` runs jobs until none is due.
+- `crash()` is a restart: the rows stay, and `setup` runs again, so the journal and the definitions are new.
+- `close()` closes the database.
+
+```ts run
+import { z } from 'zod';
+
+import { orThrow } from '@arki/failure';
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { workflowHarness } from '@arki/journal/testing';
+
+const sent: string[] = [];
+
+const h = await workflowHarness({
+  setup: () => {
+    const tables = journalTables();
+    const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+    const reminder = j
+      .workflow('trial.reminder', { version: 1, input: z.object({ email: z.string() }) })
+      .sleep('wait', '7d')
+      .step('remind', ({ input }) => void sent.push(input.email))
+      .finish();
+    return { tables, journal: j.compose({ workflows: [reminder], workflowMeta: { actorId: 'system' } }), reminder };
+  },
+});
+
+orThrow(
+  await h.journal.run(
+    h.db,
+    h.reminder.start,
+    { id: 'trial_1', input: { email: 'ana@example.com' } },
+    { actorId: 'usr_1' },
+  ),
+);
+orThrow(await h.drain()); // parked on `wait`
+h.crash(); // the process restarts: new journal, same rows
+await h.tick('7d');
+orThrow(await h.drain());
+
+console.log(sent, orThrow(await h.reminder.read(h.db, 'trial_1'))?.run.state);
+await h.close();
+```
+
+Start, signal and read in a test go through the definitions, as in an app. After `crash()`, read `h.journal` and the definitions from the harness again: the old ones belong to the dead runtime.
+
 ## Foreman
 
 `@arki/journal/foreman` is the job console for Foreman. `@arki/admin` is an optional peer. `journalJobsModule` serves the job reads and verbs above, with previews and approvals.
@@ -851,7 +1213,7 @@ The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each wit
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
+export const journal = j.compose({ projections: [customerStats], effects: [orderMail], services: { mailer } });
 
 // src/server.ts
 const worker = journal.worker(db);
@@ -873,7 +1235,7 @@ export const orders = feature('orders', {
 export const app = defineApp('shop')
   .use(db())
   .use(mailer())
-  .use(journal({ j, tables: journalTables() }))
+  .use(journal({ j }))
   .features([orders, billing])
   .serve(journalWorker());
 
@@ -1076,9 +1438,9 @@ An entity table needs a string key column that is primary or unique (`id` by def
 | `@arki/journal/orpc`          | the optional oRPC error mapping (see Rejected rules)                                                              |
 | `@arki/journal/http`          | `responseCache`, the Postgres cache for HTTP idempotency                                                          |
 | `@arki/journal/http/webhooks` | outgoing webhooks on the job table                                                                                |
-| `@arki/journal/foreman`       | the Foreman job console                                                                                           |
+| `@arki/journal/foreman`       | the Foreman job console and workflow console                                                                      |
 | `@arki/journal/projection`    | the projection entry for Dot tooling                                                                              |
-| `@arki/journal/testing`       | `openJournalDb(schema)`: in-memory PGlite with the schema pushed, for tests                                       |
+| `@arki/journal/testing`       | `openJournalDb(schema)`: in-memory PGlite with the schema pushed; `workflowHarness`, for workflow tests           |
 
 ## Failure behaviour
 
@@ -1099,10 +1461,12 @@ The agent guide has the [error table](docs/agent-guide.md#errors) and the [recov
 - **Version 1** means the journal created the row. A row that existed before starts at version 2.
 - **Any worker claims any job.** Run the worker in the process that holds what its effects talk to.
 - **The job table holds pending and dead work only.** Finished jobs leave. Retention decides what is kept.
+- **Workflow steps are at least once.** A step can run again after a crash. The step body owns idempotency (`ctx.key`).
+- **Workflow values are small JSON.** The input, each result, each signal payload and the output must stay under `limits.payload` (65 536 bytes by default). A larger input makes `start` return `CommandConflict`; a larger result fails its step with `WORKFLOW_LIMIT`. A value must also come back from JSON unchanged (no `Date`, no class instance), or it is `UNSTABLE_SCHEMA`. Store big data elsewhere and keep a reference.
 
 ## Documentation
 
-The [agent guide](docs/agent-guide.md) has the model, a task map, the rules and the errors. The [design spec](https://github.com/arki-labs/arki/blob/main/packages/journal/docs/specs/2026-10-09-journal-design.md) explains intent.
+The [agent guide](docs/agent-guide.md) has the model, a task map, the rules and the errors. Upgrade guides are in [`docs/upgrades/`](docs/upgrades/): the latest is [0.3.0 to 0.4.0](docs/upgrades/0.3.0-to-0.4.0.md). The [design spec](https://github.com/arki-labs/arki/blob/main/packages/journal/docs/specs/2026-10-09-journal-design.md) explains intent.
 
 ## Support
 

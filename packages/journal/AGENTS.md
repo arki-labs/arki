@@ -11,7 +11,7 @@ A journal for Drizzle entities: events, projections and effects with one write p
 3. Match errors on `error.code` (`isJournalError(error, 'CONFLICT')`). Never on the message.
 4. Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.
 5. `drain` and `worker` take the root database, never a transaction.
-6. Effects run at least once, after the commit. An effect must be safe to repeat. Use `jobId` as the idempotency key.
+6. Effects run at least once, after the commit. An effect must be safe to repeat. Use `jobId` as the idempotency key. A workflow step too: pass `ctx.key` to the provider.
 7. A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row.
 8. Events are frozen. Copy before you change. Pass ids exactly as they are stored.
 9. `@arki/journal/errors` and the core import no driver. Keep browser code able to load them.

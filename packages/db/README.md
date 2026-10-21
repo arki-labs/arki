@@ -626,14 +626,14 @@ journal with the app's transaction type, so the `tx` a command receives is
 one the repositories accept:
 
 ```ts skip="a fragment of a journal-backed oRPC procedure; @arki/journal is not a dependency of this package"
-const j = initJournal.tx<Transaction>().create({ meta });
+const j = initJournal.tx<Transaction>().create({ tables, meta });
 const deposit = j.command('deposit', input, async (data, { write, tx }) => {
   const limit = await repos.withTx(tx).limits.forAccount(data.accountId); // reads see this command's writes
   return write(account, data.accountId, row => /* events */ []);
 });
 ```
 
-With plain `initJournal({ meta })`, `tx` is the journal's structural
+With plain `initJournal({ tables, meta })`, `tx` is the journal's structural
 `DbHandle`, and `repos.withTx(tx)` does not compile.
 
 ### Cross-feature reads: `reader(repo, methods)`

@@ -404,7 +404,7 @@ const signup = defineFeature('signup')
   .entrypoints(jobs(q.registry({ welcome })));
 
 defineApp('signup-worker')
-  .infra(database, scheduling, journal({ j, tables }))
+  .infra(database, scheduling, journal({ j }))
   .features([signup])
   .entrypoints(
     journalWorker({
@@ -416,7 +416,7 @@ defineApp('signup-worker')
 
 The worker manifest lists `<job>.consume` under the plugin `journal-worker`.
 
-- **No entities needed.** The outbox needs the journal tables and a journal worker, not entities or effects. Compose a journal with only `tables`, run `journal.worker(db, { jobs: outboxRunner(...) })`, and add the migration from the `@arki/journal` README (Tables) to your app.
+- **No entities needed.** The outbox needs the journal tables and a journal worker, not entities or effects. Give `initJournal({ tables })` the journal tables, compose it with no handlers (`j.compose({})`), run `journal.worker(db, { jobs: outboxRunner(...) })`, and add the migration from the `@arki/journal` README (Tables) to your app.
 - **Private package.** `@arki/queue` is private. The typed API is private too. Public `@arki/journal` users get only the `JobRunner` port.
 
 ### Durable backend for `@arki/schedule`

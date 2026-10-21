@@ -68,7 +68,7 @@ defineApp('signup-api').infra(database, scheduling).features([signup]);
 
 // Worker process: the same features, plus the journal worker.
 defineApp('signup-worker')
-  .infra(database, scheduling, journal({ j, tables }))
+  .infra(database, scheduling, journal({ j }))
   .features([signup])
   .entrypoints(journalWorker({ listen, jobs: outboxJobs({ needs: {}, context: ({ db }) => ({ db }) }) }));
 ```

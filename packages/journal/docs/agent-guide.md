@@ -19,20 +19,20 @@ Paths that start with `src/` are files of this package. App files are named from
 
 ## Three objects
 
-| Object                | How you get it                                | What it does                                                                                                  | Where it lives in an app                             |
-| --------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `j`, the definitions  | `initJournal` (see Setup)                     | Declares things: `j.event`, `j.entity`, `j.command`, `j.projection`, `j.effect`. It never touches a database. | `journal.ts`                                         |
-| The entity builder    | `j.entity(kind, table)`                       | A chain of `.create(Event, reducer)` and `.on(Event, reducer)`. The result is the entity you pass to `write`. | `features/<name>/<entity>.ts`                        |
-| `journal`, the runner | `j.compose({ tables, projections, effects })` | Does the work: `run`, `bind`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.      | `journal.root.ts`, or the Dot adapter `journal(...)` |
+| Object                | How you get it                                   | What it does                                                                                                                | Where it lives in an app                             |
+| --------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `j`, the definitions  | `initJournal` (see Setup)                        | Declares things: `j.event`, `j.entity`, `j.command`, `j.projection`, `j.effect`, `j.workflow`. It never touches a database. | `journal.ts`                                         |
+| The entity builder    | `j.entity(kind, table)`                          | A chain of `.create(Event, reducer)` and `.on(Event, reducer)`. The result is the entity you pass to `write`.               | `features/<name>/<entity>.ts`                        |
+| `journal`, the runner | `j.compose({ projections, effects, workflows })` | Does the work: `run`, `bind`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.                    | `journal.root.ts`, or the Dot adapter `journal(...)` |
 
 How to tell them apart: only `journal` takes a database. Events, entities, commands, projections and effects need only `j`. They must never import the composed `journal`.
 
 The word `create` has two meanings. Neither one builds the journal. `j.compose(...)` builds the journal.
 
-| You see                                                | It means                                                          | Defined in       |
-| ------------------------------------------------------ | ----------------------------------------------------------------- | ---------------- |
-| `initJournal.tx<AppTx>().db<AppDb>().create({ meta })` | Finish the setup chain. Returns `j`.                              | `src/journal.ts` |
-| `.create(Event, reducer)` on an entity builder         | Declare a create reducer. It builds the first row from the event. | `src/entity.ts`  |
+| You see                                                        | It means                                                          | Defined in       |
+| -------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------- |
+| `initJournal.tx<AppTx>().db<AppDb>().create({ tables, meta })` | Finish the setup chain. Returns `j`.                              | `src/journal.ts` |
+| `.create(Event, reducer)` on an entity builder                 | Declare a create reducer. It builds the first row from the event. | `src/entity.ts`  |
 
 ## Setup
 
@@ -40,21 +40,22 @@ The word `create` has two meanings. Neither one builds the journal. `j.compose(.
 import { initJournal, need } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
+// schema.ts: the journal tables go into the app's schema and migrations.
+export const tables = journalTables(); // or journalTables(pgSchema('app'))
+
 // journal.ts: once per app. `meta` is the schema of the metadata every event records.
+// `retention` (optional) is the one policy for finished jobs and finished workflow runs.
 export const j = initJournal
   .tx<AppTx>()
   .db<AppDb>()
-  .create({ meta: z.object({ actorId: z.string().min(1) }) });
-
-// schema.ts: the two journal tables go into the app's schema and migrations.
-export const tables = journalTables(); // or journalTables(pgSchema('app'))
+  .create({ tables, meta: z.object({ actorId: z.string().min(1) }), retention: { workflows: { completed: '30d' } } });
 
 // journal.root.ts: the one place that lists handlers.
-// `services` gives each effect what it needs, by name.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
+// `services` gives each effect and workflow step what it needs, by name.
+export const journal = j.compose({ projections: [customerStats], effects: [orderMail], services: { mailer } });
 ```
 
-`.tx<AppTx>()` types `tx` in commands and projections. `.db<AppDb>()` types `db` in effects. Both steps are optional and type-only. `initJournal({ meta })` alone also returns `j`. `AppDb` is the app's Drizzle database type. `AppTx` is its transaction type: `Parameters<Parameters<AppDb['transaction']>[0]>[0]`.
+`.tx<AppTx>()` types `tx` in commands and projections. `.db<AppDb>()` types `db` in effects. Both steps are optional and type-only. `initJournal({ tables, meta })` alone also returns `j`. `tables` is required: the journal's own entities (such as `workflow.run`) are declared on them. `AppDb` is the app's Drizzle database type. `AppTx` is its transaction type: `Parameters<Parameters<AppDb['transaction']>[0]>[0]`.
 
 drizzle-kit migrates only the schema module's top-level exports. Export each `journalTables()` table on its own, never only the object. Keep `export type JournalTablesCheck = ExportsEveryJournalTable<typeof thisModule>;` in that module (`import type * as thisModule` from the file itself): it stops compiling and names the table when a journal upgrade adds one you have not exported. Export it, then run `drizzle-kit generate`.
 
@@ -231,7 +232,7 @@ await journal.purgeDead(db, { olderThan, limit: 500 }, op); // olderThan must re
 await journal.replayJob(db, archivedId, op); // a NEW job id, not a retry; JOB_EXISTS on a live dedupe key
 ```
 
-Every verb that changes something writes one `journal_job_operations` row in its transaction. Retention goes in `j.compose({ tables, retention })`: `retryableFor` (`'30d'`), `archive.completed` (`'7d'`), `archive.dead` (`'90d'`), `archive.sink`, `operations` (`'forever'`), `sweep` (`{ every: '1h', batch: 1000 }` or `false`). A `Keep` is `false`, `'forever'`, `'untilExported'` (needs a sink, else `BAD_DEFINITION` at boot), an age (`'30d'`) or `{ age, max }`. One effect overrides it with `withSchedule({ retention: { completed: false } })`; a queue job with `.options({ retention })`.
+Every verb that changes something writes one `journal_job_operations` row in its transaction. Retention goes in `initJournal({ tables, retention })`: `retryableFor` (`'30d'`), `archive.completed` (`'7d'`), `archive.dead` (`'90d'`), `archive.sink`, `operations` (`'forever'`), `sweep` (`{ every: '1h', batch: 1000 }` or `false`). A `Keep` is `false`, `'forever'`, `'untilExported'` (needs a sink, else `BAD_DEFINITION` at boot), an age (`'30d'`) or `{ age, max }`. One effect overrides it with `withSchedule({ retention: { completed: false } })`; a queue job with `.options({ retention })`. `retention.workflows` (`completed` `'7d'`, `failed` `'90d'`, `cancelled` = `failed`) is for finished workflow runs; see [Workflows](#workflows).
 
 Rules:
 
@@ -241,6 +242,10 @@ Rules:
 - Foreman: `journalJobsModule({ journal, db })` from `@arki/journal/foreman`. Refusals are `ARKI_JOURNAL_E001` to `E005`.
 - Outbound webhook signing returns exact HTTP failures before sending. The worker keeps ownership and applies the configured retry predicate; use `.while(WebhookCryptoUnavailable)` only when retrying that refusal is intended. Attempts store the safe failure code.
 - Inbox: key a command with the webhook event id (`journal.run(db, cmd, input, meta, { idempotencyKey })`). Relay: an effect that calls `queue.add(name, data, { jobId })`. `kv.publish` is best-effort only.
+
+### Add a durable workflow
+
+See [Workflows](#workflows): the rules, a five-step task, the traps and the [error codes](#workflow-errors).
 
 ### Find out why a write failed
 
@@ -265,6 +270,7 @@ Rules:
 - Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
 - After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
 - Job operations and retention: `src/outbox.ts` (`createJobOps`: reads, verbs, sweep steps), `src/retention.ts` (`Keep`, defaults, `ndjsonArchiveSink`), `src/foreman/index.ts` (the Foreman module).
+- Workflows: `src/workflow/define.ts` (the builder and its types), `src/workflow/runner.ts` (`start`, `signal`, `cancel`, `read`, the `workflow.step` and `workflow.timer` effects, compensation), `src/workflow/machine.ts` (the `workflow.run` entity and its events), `src/workflow/read.ts` (`journal.workflows` reads and verbs), `src/workflow/states.ts` (states, statuses, skip causes), `src/foreman/workflows.ts` (the Foreman module), `src/testing.ts` (`workflowHarness`).
 - Edges: `src/pg.ts` (the tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
 
 ## Rules that bite
@@ -290,7 +296,7 @@ Two kinds of error have a code.
 - A `JournalError` is the library's own failure. It is about one entity's row or history. It has `code`, `kind` and `entityId`. Its codes are in the table below.
 - A rule of the app that rejects a request returns a failure. Receipt key mismatches also return `CommandConflict`; unexpected command callback exceptions return `TransactionDefect` with a private cause; effect/workflow bodies return `UnexpectedDefect`. Stranded workflow jobs persist `WorkflowStranded`. The journal's four are in [Rejected rules](#rejected-rules).
 
-This is the only copy of this table. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
+This is the only copy of this table. The workflow and job codes have their own tables, in [Workflow errors](#workflow-errors) and the README. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
 
 | Code               | What it means                                                                                                                                                                                                                                                                                                                   | Usual cause                                                                                                                                                                                                         | What to do                                                                                                                                                                             | Thrown in                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -347,16 +353,84 @@ A command handler, its `authorize` or an `events` function returns a failure fro
 | `rerun(db, projection, { afterSeq, batchSize })` | A database that opens transactions | `{ events }`: how many events it handled.                                      | To fill a new read model or rebuild a lost one. Every handler runs again, so empty a counting read model first.                                                                             |
 | `drain(db, { batchSize, signal, services })`     | The root database only             | How many jobs it claimed.                                                      | To run one batch of due jobs by hand, in a test or a script. The worker calls it in a loop.                                                                                                 |
 
+## Workflows
+
+A workflow is a list of steps that survives process death. Each node runs as a `workflow.step` job. Its checkpoint (the result, and the next node scheduled) commits in one transaction. The [README, Workflows](../README.md#workflows) has the API and an example that runs. This section has the rules, the error codes and the traps.
+
+### Pick the tool
+
+| The work                                                       | Use                                        |
+| -------------------------------------------------------------- | ------------------------------------------ |
+| Must survive a restart, or waits hours or days (signal, sleep) | `j.workflow` (this section)                |
+| A loop of steps inside one request or one job, in memory       | `createFlow` from `@arki/ai`. Not durable. |
+| One reaction to one event, after commit                        | `j.effect`                                 |
+
+### Rules
+
+1. **The step body owns idempotency.** A step runs at least once: a crash after the provider answered and before the checkpoint runs it again. Pass `ctx.key` to the provider as its idempotency key, or look up first and act only when the work is not done. Never make a new random key inside the body: the re-run would send another one.
+2. **Compose workflows once per `initJournal()`.** Pass every definition, and every workflow a `child` or `map` node starts, to one `compose({ workflows, workflowMeta })`. `workflowMeta` is required; it is the meta of the runner's own checkpoints, such as `{ actorId: 'system:workflow' }`.
+3. **A changed node list is a new version.** Adding, removing, renaming or reordering nodes needs a higher `version`. Keep the old definition registered until `journal.workflows.counts(db)` shows no unfinished run of it. Bump the version for a changed meaning too: the shape check sees node names, not what a body does.
+4. **Start the newest version.** `def.start` of an older registered version throws `WORKFLOW_VERSION_RETIRED`. Export one name for the newest definition and start runs through it.
+5. **Throw to retry, return a failure to stop.** A thrown error retries with the step's `retry` backoff. A returned failure kills the step at once, and `onDeadStep` decides: `'wait'` (default) leaves it for an operator, `'compensate'` undoes the run.
+6. **Values are small JSON.** Inputs, results, payloads and the output must come back from JSON unchanged (no `Date`, no class instance) and stay under `limits.payload` (65 536 bytes). Return an id, not the document.
+7. **Give `output` to a step an operator may resolve.** `resolveStep` checks the result with it. A step without `output` can only be retried.
+8. **Signals carry the sender's id.** `deliveryId` is the webhook event id or another id the sender repeats on a resend. A repeat returns `duplicate` and changes nothing. One signal name has one payload schema in a workflow.
+9. **Move a run with the workflow verbs.** `journal.workflows.retryStep`, `resolveStep`, `skipUndo`, `signal`, `cancel`, or the Foreman module. The raw job verbs refuse workflow jobs.
+
+### Task: add a workflow
+
+1. Declare it next to its feature: `j.workflow('<area>.<verb>', { version: 1, input, output?, needs? })`, then the nodes, then `.finish()`. Give each step that calls an outside system an `undo` if its work can be undone.
+2. List it in `compose({ workflows, workflowMeta, services })`, or in the feature's `journalHandlers({ workflows })` in a Dot app.
+3. Start it from a procedure or an effect: `context.run(def.start, { id?, input })`. Give an `id` from the business key (`refund:<orderId>`) when a retry of the request must not start a second run.
+4. Deliver outside events with `def.signal(name)`, and read runs with `def.read(db, runId)`.
+5. Test it with `workflowHarness` from `@arki/journal/testing`: `tick` for timers and deadlines, `crash` for restarts.
+
+### Traps
+
+- **One compose per `initJournal()`.** A second compose with workflows on the same `j` throws `BAD_DEFINITION`. A test that composes twice builds a new `initJournal()` each time. A deploy is a new process, so it runs `initJournal()` again.
+- **`JOB_MANAGED` on the raw job verbs.** `journal.retry`, `discard` and `cancel` refuse a job with a `run_id`. A raw retry would skip the run's own transitions. Use `journal.workflows.retryStep`.
+- **The step body owns idempotency.** The journal never dedupes the outside call for you. `LEASE_LOST` stops a stale worker's checkpoint, not its provider call.
+- **A transforming input schema makes `def.read` refuse.** The run stores the input schema's output. `def.read` checks the stored value with the same schema. A schema whose output is not a valid input (`z.string().transform(Number)` stores a number, and the string schema refuses it) fails, and `def.read` returns `WorkflowReadMismatch`. Read such runs with `journal.workflows.run`, or keep input schemas free of transforms.
+- **A dropped wait has no result.** When a run starts compensating (cancel, deadline, `onDeadStep: 'compensate'`) while parked on a `waitFor` or `sleep`, that node is skipped with cause `compensating`. It leaves no key in `results`. `def.read` types results as optional for this reason: check `'settled' in results` or `results.settled !== undefined`, never assume `null`.
+- **A missing service in a plain `compose`** is a compile error for a workflow step, as for an effect, and `compose` throws `BAD_DEFINITION` naming the workflow and the need. In Dot the feature's `needs` make it a compile error.
+- **`def.start` throws for code it does not know.** A definition that no compose registered throws `WORKFLOW_UNKNOWN`; an older version throws `WORKFLOW_VERSION_RETIRED`. Both are bugs in the app, not refusals, so they are thrown.
+- **After `h.crash()` in a test,** read `h.journal` and the definitions from the harness again. The old objects belong to the dead runtime.
+
+### Workflow errors
+
+The workflow codes are `JournalError` codes, thrown, unless the row says returned. Match on `error.code`.
+
+| Code                        | What it means                                                                                                                                                                                                       | What to do                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKFLOW_UNKNOWN`          | No registered workflow has this name and version.                                                                                                                                                                   | Pass the definition to `compose({ workflows })` in every process that starts or runs it. Keep old versions until their runs end. |
+| `WORKFLOW_VERSION_RETIRED`  | `def.start` of an older version while a newer one is registered.                                                                                                                                                    | Start the newest definition. The older one only finishes its runs.                                                               |
+| `WORKFLOW_SHAPE_CHANGED`    | The registered definition has other nodes than the run started with.                                                                                                                                                | Bump `version` for a changed node list. Put the old definition back to let its runs finish.                                      |
+| `WORKFLOW_LIMIT`            | A value is larger than `limits.payload`, or a run nests too deep. At start it is a returned `CommandConflict`.                                                                                                      | Store the data elsewhere and keep a reference, or raise `limits.payload`.                                                        |
+| `STEP_TIMEOUT`              | A step ran longer than its `timeout`. The step fails and follows its `retry`.                                                                                                                                       | Raise `timeout`, or stop the body when `ctx.signal` aborts.                                                                      |
+| `LEASE_LOST`                | This worker no longer holds the step's job. Nothing was written.                                                                                                                                                    | Nothing in app code. The new owner runs the step. Make the body idempotent (rule 1).                                             |
+| `WORKFLOW_NOT_FOUND`        | No run has this id.                                                                                                                                                                                                 | Check the id, and that retention did not prune the finished run.                                                                 |
+| `WORKFLOW_FINISHED`         | The run is completed, failed or cancelled.                                                                                                                                                                          | Start a new run. A finished run is history.                                                                                      |
+| `WORKFLOW_COMPENSATING`     | The run is undoing its work, so the verb does not apply.                                                                                                                                                            | Wait, or fix the failed undo with `retryStep` (phase `undo`) or `skipUndo`.                                                      |
+| `STEP_NOT_DEAD`             | The step is not dead, so there is nothing to retry or skip.                                                                                                                                                         | Read the run (`journal.workflows.run`) and pick a step with status `failed`.                                                     |
+| `STEP_NOT_RESOLVABLE`       | The step has no `output` schema, is not a `do` step, or the run is not running.                                                                                                                                     | Use `retryStep`, or add `output` to the step in a new version.                                                                   |
+| `JOB_MANAGED`               | A raw job verb was used on a workflow's job.                                                                                                                                                                        | Use the `journal.workflows` verbs.                                                                                               |
+| `WORKFLOW_READ_MISMATCH`    | Returned by `def.read` as the failure `WorkflowReadMismatch` (`journal.workflow_read_mismatch`): a stored value no longer fits its schema. `data.field` names it.                                                   | Read untyped with `journal.workflows.run`; widen the schema to take what older runs stored.                                      |
+| `journal.workflow_stranded` | The failure `WorkflowStranded`, stored on the job of a stranded run (`data.reason` is `WORKFLOW_UNKNOWN` or `WORKFLOW_SHAPE_CHANGED`).                                                                              | Restore the run's version with its original nodes, then `retryStep`.                                                             |
+| `BAD_DEFINITION`            | A wrong definition: a duplicate node name, a `next` that is not earlier, a second compose, a missing `workflowMeta`, an unregistered child, a missing service, `'untilExported'` or `max` in `retention.workflows`. | Fix what the message names. It is thrown when the code loads or composes.                                                        |
+
+The Foreman module answers its refusals with `ARKI_JOURNAL_E010` to `E017` (`JOURNAL_WORKFLOWS_ERROR_CODES` in `src/foreman/workflows.ts`): `staleRevision` (refresh the preview), `finished`, `stepNotDead`, `badSignal` (a signal or payload the run's version does not take), `compensating`, `stepNotResolvable`, `notFound` and `stranded`. Each code's `@fix` there says what to do.
+
 ## Dot
 
 `@arki/journal/dot` exports the driven adapter `journal(...)` (for `.use()`), the driving adapter `journalWorker(...)` (for `.serve()`) and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
 
-| Question                  | Plain app                                             | Dot app                                                                                   |
-| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Where handlers are listed | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.            |
-| Who builds the journal    | Your code.                                            | `journal({ j, tables })`, from the mounted features. It publishes `services.journal`.     |
-| Who runs the worker       | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.serve(journalWorker())`, between `start` and `stop`. A process without it runs no jobs. |
-| What an effect needs      | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.           |
+| Question                   | Plain app                                             | Dot app                                                                                               |
+| -------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Where handlers are listed  | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.                        |
+| Who builds the journal     | Your code.                                            | `journal({ j, workflowMeta? })`, from the mounted features. It publishes `services.journal`.          |
+| Who runs the worker        | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.serve(journalWorker())`, between `start` and `stop`. A process without it runs no jobs.             |
+| What an effect needs       | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.                       |
+| Where workflows are listed | `j.compose({ workflows, workflowMeta })`.             | `journalHandlers({ workflows })` or `journalWorkflows(core, defs)`; `workflowMeta` on `journal(...)`. |
 
 | Where the door is bound | The request context: `journal.bind(db, { actorId })`. | The gateway's context factory: `services.journal.bind(services.db, { actorId })`. |
 
