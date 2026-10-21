@@ -248,15 +248,13 @@ export type DemoImpactInput = {
 export function evaluateDemoImpact(input: DemoImpactInput): ScorecardDimensionResult {
   const { pkg, demos, candidateChecks, changesets } = input;
   const unchecked = demos.filter(name => candidateChecks[`demo:${name}`]?.status !== 'success');
-  if (demos.length > 0 && unchecked.length === 0) return result('pass', `demo check passed: ${demos.join(', ')}`);
+  // No demo imports it: the registry already states the reason (founder, 2026-10-21).
+  if (demos.length === 0) return result('pass', 'no registered demo uses this package');
+  if (unchecked.length === 0) return result('pass', `demo check passed: ${demos.join(', ')}`);
   const scan = scanReasons('demo', pkg, changesets);
   if (scan.reason !== null) return result('pass', `no demo impact: ${scan.reason}`);
-  const why =
-    demos.length === 0
-      ? 'no registered demo uses this package, and no reason is recorded.'
-      : `no passing candidate check for demo ${unchecked.join(', ')}.`;
-  const suggestion = demos.length === 0 ? 'not used by any registered demo' : '<why the demos need no change>';
-  return result('fail', why, missingReasonErrors('demo', pkg, scan, why, suggestion));
+  const why = `no passing candidate check for demo ${unchecked.join(', ')}.`;
+  return result('fail', why, missingReasonErrors('demo', pkg, scan, why, '<why the demos need no change>'));
 }
 
 /** The commit a package's docs must be diffed from: the last candidate that shipped it, else the commit that set its npm version. */

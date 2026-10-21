@@ -17,7 +17,7 @@ Short description of what changed and why.
 - One changeset touches one wave. A changeset that bumps a package inside the wave **and** one outside is refused (SHIP_E002): split it.
 - Changesets for other waves stay pending; `ship` versions only its own set.
 - Explain a breaking change in `docs/upgrades/<from>-to-<to>.md`, not in the changeset.
-- If the docs need no change, say why with a `no docs impact: <reason>` line; same for demos with `no demo impact: <reason>`.
+- If the docs need no change, say why with a `no docs impact: <reason>` line; same for demos with `no demo impact: <reason>` (only when a registered demo uses the package; otherwise demo-impact passes on its own).
 
 ## Phase 0 — plan (agent)
 

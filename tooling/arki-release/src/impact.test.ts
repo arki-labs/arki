@@ -84,17 +84,12 @@ describe('demo-impact', () => {
     expect(res.evidence[0]?.code).toBe('IMPACT_E002');
   });
 
-  it('suggests the not-used line for a package no demo uses', () => {
-    // Why: unused packages still need an explicit, reviewable statement.
+  it('passes a package no registered demo uses, with that fact as the reason', () => {
+    // Why: the demo registry already proves it; a typed line restating it adds
+    // nothing, and consumed changesets could not carry it at --resume.
     const res = evaluateDemoImpact({ pkg: '@arki/math', demos: [], candidateChecks: {}, changesets: [] });
-    expect(res.status).toBe('fail');
-    expect(res.evidence[0]?.remediation).toContain('no demo impact: not used by any registered demo');
-  });
-
-  it('accepts that suggested line', () => {
-    // Why: the printed remediation must itself pass the gate.
-    const res = evaluateDemoImpact({ pkg: '@arki/math', demos: [], candidateChecks: {}, changesets: [cs('no demo impact: not used by any registered demo')] });
     expect(res.status).toBe('pass');
+    expect(res.details).toBe('no registered demo uses this package');
   });
 });
 
