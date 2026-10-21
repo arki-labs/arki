@@ -125,7 +125,8 @@ describe('changesets', () => {
 describe('base and runImpact', () => {
   const git: GitRunner = async args => {
     if (args[0] === 'log') return { code: 0, stdout: 'abc123\n', stderr: '' };
-    if (args[0] === 'show') return { code: 0, stdout: '{ "version": "1.0.0" }', stderr: '' };
+    // abc123 left package.json at the npm version of each test below (1.0.0, 0.4.0).
+    if (args[0] === 'show') return { code: 0, stdout: '"version": "1.0.0"\n"version": "0.4.0"', stderr: '' };
     if (args[0] === 'diff') return { code: 0, stdout: 'packages/math/src/a.ts\n', stderr: '' };
     return { code: 1, stdout: '', stderr: '' };
   };

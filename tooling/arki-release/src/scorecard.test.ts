@@ -223,6 +223,7 @@ function releaseReady(root: string): Pick<ScorecardOptions, 'npmRunner' | 'gitRu
     args[0] === 'view' ? { stdout: '["0.9.0"]', stderr: '', code: 0 } : pack(args, options);
   const gitRunner: GitRunner = async args => {
     if (args[0] === 'log') return { stdout: 'abc123\n', stderr: '', code: 0 };
+    if (args[0] === 'show') return { stdout: '{ "version": "0.9.0" }', stderr: '', code: 0 };
     if (args[0] === 'diff') return { stdout: 'packages/assert/README.md\n', stderr: '', code: 0 };
     return { stdout: '', stderr: 'unexpected git call', code: 1 };
   };
