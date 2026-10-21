@@ -1,3 +1,6 @@
+/**
+ * `@arki/testing/e2e` — Playwright end-to-end tests that boot a built app against the real stack: config, setup, story helpers and request holds.
+ */
 export { e2eConfig, type E2EConfigOptions } from './config.js';
 export { SERVER_ROOT_ENV_KEY, stackSetup } from './setup.js';
 export { holdRequests, type RequestHold } from './hold.js';

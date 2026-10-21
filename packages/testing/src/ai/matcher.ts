@@ -9,7 +9,12 @@ export type ScoreOptions<TInput = unknown, TExpected = unknown> = AiTools & {
   readonly expected?: TExpected;
 };
 
-/** Thrown when a scorer could not score. Never a pass, and not turned into a pass by `.not`. */
+/**
+ * Thrown when a scorer could not score. Never a pass, and not turned into a pass by `.not`.
+ *
+ * @fix Read `score.reason`. Usually the judge or embedder is unreachable, or the output has the wrong shape. Start the judge model or fix the output, then run the test again.
+ * @verify bun run test -- src/ai/ai.test.ts
+ */
 export class UnscorableError extends Error {
   constructor(readonly score: Score) {
     super(`UNSCORABLE: ${score.name} could not score the output: ${score.reason}`);

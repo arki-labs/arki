@@ -1,3 +1,7 @@
+/**
+ * `@arki/testing/containers` — one shared Postgres and one shared Redis container for a whole Vitest run.
+ * Call `setupGlobalTestContainers` from `globalSetup` and `teardownGlobalTestContainers` after it.
+ */
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedTestContainer } from 'testcontainers';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';

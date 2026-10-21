@@ -1,0 +1,49 @@
+# @arki/testing
+
+> Test tooling for TypeScript backends: shared Postgres and Redis containers, an integration tester with role callers and rollback, typed factories, assertions that name the expected and actual value, MSW mocking and AI scorers. Ships TypeScript source for Vitest and Bun.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/testing`: Comprehensive Testing Utilities. `FactoryBuilder`, `FactoryRegistry`, `assertArrayEmpty`, `assertArrayLength`, `assertArrayNotEmpty`, `assertArraySorted`, `assertContainsId`, `assertDeepPartialMatch`, `assertErrorThrown`, `assertMatchesSchema`, `assertNoError`, `assertNotContainsId`; and 41 more.
+- `@arki/testing/ai`: scorers, the judge, and the score contract. `UnscorableError`, `containsFacts`, `cosine`, `createEmbedder`, `createJudge`, `defineScorer`, `grounded`, `rubric`, `scoreMatch`, `shape`, `similarTo`; types `AiTools`; and 11 more.
+- `@arki/testing/ai/playwright`: Playwright's `expect` with `toScore`. `expect`.
+- `@arki/testing/ai/vitest`: importing this file adds `toScore` to Vitest's `expect`. `expect`; types `AiExpect`, `ScoreAssertion`.
+- `@arki/testing/assertions`: Enhanced Assertion Helpers for Testing. `assertArrayEmpty`, `assertArrayLength`, `assertArrayNotEmpty`, `assertArraySorted`, `assertContainsId`, `assertDeepPartialMatch`, `assertErrorThrown`, `assertMatchesSchema`, `assertNoError`, `assertNotContainsId`, `assertOneOf`, `assertPaginationValid`; and 1 more.
+- `@arki/testing/containers`: one shared Postgres and one shared Redis container for a whole Vitest run. `POSTGRES_GLOBAL_KEY`, `REDIS_GLOBAL_KEY`, `getGlobalPostgresConnectionString`, `getGlobalRedisConnectionString`, `setupGlobalTestContainers`, `startPostgresContainer`, `startRedisContainer`, `teardownGlobalTestContainers`; types `SharedContainerOptions`.
+- `@arki/testing/debug`: Debug Utilities for Testing. `configureDebug`, `createDebugContext`, `debugContainers`, `debugFactories`, `debugTester`, `dumpDatabase`, `dumpTable`, `isDebugEnabled`, `logDebug`, `logQuery`, `logSection`, `logState`; and 2 more.
+- `@arki/testing/factories`: Factory System for Test Data Generation. `FactoryBuilder`, `FactoryRegistry`, `createFactories`, `createFactory`, `createMany`, `createSequence`, `faker`; types `FactoriesOutput`, `Factory`, `FactoryMap`, `FactoryOutput`.
+- `@arki/testing/e2e`: Playwright end-to-end tests that boot a built app against the real stack: config, setup, story helpers and request holds. `SERVER_ROOT_ENV_KEY`, `e2eConfig`, `e2eTest`, `ensureBuilt`, `holdRequests`, `stackSetup`, `storyFor`; types `Actor`, `BootableApp`, `CronRun`, `E2EConfigOptions`, `E2EOptions`; and 6 more.
+- `@arki/testing/services/http-fixtures`: a small local HTTP server for the things an app fetches from the outside world: an RSS feed, a web page, a webhook target. `httpFixtures`; types `HttpFixturesOptions`, `HttpFixturesValue`.
+- `@arki/testing/services/mailpit`: one Mailpit container per worker, so a worker's mailbox is its own. `mailbox`, `mailpit`; types `MailSummary`, `Mailbox`, `MailpitWorker`, `ReceivedMail`.
+- `@arki/testing/services/ollama`: the Ollama daemon already running on this machine. `ollama`; types `OllamaOptions`, `OllamaValue`.
+- `@arki/testing/services/postgres`: one Postgres container per run, one migrated template database, and one clone of it per worker (`CREATE DATABASE … TEMPLATE`, tens of milliseconds). `postgres`, `truncateAll`; types `PostgresOptions`, `PostgresRun`, `PostgresWorker`.
+- `@arki/testing/services/redis`: one Redis container per worker. `flushRedis`, `redis`; types `RedisWorker`.
+- `@arki/testing/stack`: the real services a test run needs, declared once per app. `STACK_ENV_KEY`, `defineStack`, `readManifest`, `service`; types `AttachedStack`, `Env`, `Json`, `RunValues`, `RunningStack`, `ServiceMap`, `ServiceScope`, `ServiceSpec`; and 8 more.
+- `@arki/testing/stack/contract`: The provider contract: one suite every service runs. `describeServiceContract`, `leftoverContainers`, `newRunId`; types `ContractOptions`.
+- `@arki/testing/server/integration-tester`: `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests. `IntegrationTester`; types `CreateCallerArgs`, `IntegrationTesterConfig`, `TestUser`, `TestUserRole`, `TesterDatabase`, `TesterOptions`, `TesterUserOverrides`, `TesterUsers`.
+- `@arki/testing/msw`: MSW (Mock Service Worker) primitives for Vitest-based HTTP testing. `HttpHandler`, `HttpResponse`, `RequestHandler`, `delay`, `http`, `passthrough`, `setupMswServer`; types `DefaultBodyType`, `ResponseResolver`, `SetupMswServerOptions`, `SetupServer`, `StrictRequest`; and 1 more.
+- `@arki/testing/performance`: Performance Testing Utilities. `assertPerformance`, `benchmarkQuery`, `comparePerformance`, `createPerformanceTracker`, `measurePerformance`, `measureQuery`; types `PerformanceResult`.
+- `@arki/testing/server/tester-builder`: Tester Builder - tRPC-style initialization pattern. `initTester`; types `ContextTesterBuilder`, `InitialTesterBuilder`, `TesterBuilder`, `TesterConfig`.
+- `@arki/testing/timestamps`: Timestamp assertions that accept every moment type an app stores. `assertTimestamps`, `assertUpdatedAfterCreated`, `describeKind`, `epochMilliseconds`, `epochNanoseconds`, `isTimestamp`; types `Timestamp`, `Timestamps`.
+- `@arki/testing/vitest-setup`: the Vitest test API re-exported, so a setup file imports from one place. `afterAll`, `afterEach`, `beforeAll`, `beforeEach`, `describe`, `expect`, `it`, `test`, `vi`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the overview and the limits.
+
+## By task
+- [Build test data](docs/agent-guide.md#build-test-data)
+- [Test a backend against a real database](docs/agent-guide.md#test-a-backend-against-a-real-database)
+- [Mock an outside HTTP API](docs/agent-guide.md#mock-an-outside-http-api)
+- [Score AI output](docs/agent-guide.md#score-ai-output)
+- [Run an end-to-end story against a built app](docs/agent-guide.md#run-an-end-to-end-story-against-a-built-app)
+
+## Rules that bite
+- The root entry needs no Docker. `containers`, `server/*`, `msw`, `e2e` and `ai` are separate subpaths with their own peers.
+- `setupGlobalTestContainers` sets `DB_URL`, `REDIS_URL`, `KV_URL`, `AUTH_SECRET`, `VITE_URL` and `NODE_ENV`. It never reads them first.
+- `withTransaction` rolls back only the tester's own connection.
+- A request with no MSW handler fails the test. Handlers reset after each test.
+- `UnscorableError` is never a pass.

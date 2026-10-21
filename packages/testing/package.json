@@ -1,7 +1,27 @@
 {
   "name": "@arki/testing",
-  "private": true,
   "version": "0.1.3",
+  "private": true,
+  "description": "Test tooling for TypeScript backends: testcontainers Postgres and Redis, an integration tester, typed factories, assertions, MSW mocking and AI judges.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "testing",
+    "vitest",
+    "testcontainers",
+    "msw",
+    "playwright"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/testing"
+  },
+  "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
@@ -118,6 +138,24 @@
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/src/**/*.d.ts",
+    "!dist/src/**/*.test.d.ts",
+    "!dist/src/**/__fixtures__/**",
+    "src/**",
+    "!src/**/*.test.ts",
+    "!src/**/*.spec.ts",
+    "!src/**/__fixtures__/**",
+    "!src/**/*.calibration.test.ts",
+    "docs/agent-guide.md",
+    "docs/*.md",
+    "docs/recipes/**",
+    "llms.txt",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -125,6 +163,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -169,6 +208,9 @@
     "@arki/auth": {
       "optional": true
     },
+    "@playwright/test": {
+      "optional": true
+    },
     "@testcontainers/postgresql": {
       "optional": true
     },
@@ -180,9 +222,12 @@
     },
     "testcontainers": {
       "optional": true
-    },
-    "@playwright/test": {
-      "optional": true
     }
+  },
+  "engines": {
+    "node": ">=22.10"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

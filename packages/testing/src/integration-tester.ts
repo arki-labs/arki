@@ -1,3 +1,6 @@
+/**
+ * `@arki/testing/server/integration-tester` — `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests.
+ */
 // Fixture setup needs concrete IDs; abort setup if secure generation fails.
 import { orThrow } from '@arki/failure';
 import crypto from 'node:crypto';
