@@ -28,6 +28,10 @@ const NO_USAGE: Usage = { tokens: { basis: 'counted', count: 0 }, requests: 0, c
  * Embeds any number of inputs: packs them by `maxBatch` and `maxBatchTokens`, runs the chunks with
  * bounded concurrency and reassembles vectors in input order. All or nothing: the first failure
  * cancels the remaining chunks, waits for the ones in flight, and is returned with no vectors.
+ *
+ * @example
+ * const batch = await embedMany(embedder, texts, { purpose: 'document', concurrency: 4 });
+ * if (isFailure(batch)) return batch;
  */
 export async function embedMany(
   embedder: Embedder,
@@ -107,7 +111,12 @@ export async function embedMany(
   return { vectors, space, usage: usage ?? NO_USAGE };
 }
 
-/** Embeds one input. Same validation and failures as `embedMany`. */
+/**
+ * Embeds one input. Same validation and failures as `embedMany`.
+ *
+ * @example
+ * const query = await embed(embedder, 'refund policy', { purpose: 'query' });
+ */
 export async function embed(
   embedder: Embedder,
   input: EmbedInput,

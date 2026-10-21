@@ -61,7 +61,12 @@ function wait(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
-/** A seeded, deterministic, not-semantic embedder. Its vectors go through the same validation as a real one. */
+/**
+ * A seeded, deterministic, not-semantic embedder. Its vectors go through the same validation as a real one.
+ *
+ * @example
+ * const embedder = fakeEmbedder({ dimensions: 8, failures: { 'bad text': RateLimited({}) } });
+ */
 export function fakeEmbedder(options: FakeEmbedderOptions): Embedder {
   const { dimensions, seed = 0, failures = {}, delayMs = 0 } = options;
 

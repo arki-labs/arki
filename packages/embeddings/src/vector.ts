@@ -1,11 +1,21 @@
-/** Euclidean length. */
+/**
+ * Euclidean length.
+ *
+ * @example
+ * norm([3, 4]); // 5
+ */
 export function norm(vector: Iterable<number>): number {
   let sum = 0;
   for (const value of vector) sum += value * value;
   return Math.sqrt(sum);
 }
 
-/** Cosine similarity, for tests and rescoring, not search. Two zero vectors answer 0. */
+/**
+ * Cosine similarity, for tests and rescoring, not search. Two zero vectors answer 0.
+ *
+ * @example
+ * cosine(Float32Array.of(1, 0), Float32Array.of(0, 1)); // 0
+ */
 export function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let aa = 0;
@@ -23,7 +33,12 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   return denominator === 0 ? 0 : dot / denominator;
 }
 
-/** A unit-length copy. A zero vector is returned as a zero copy. */
+/**
+ * A unit-length copy. A zero vector is returned as a zero copy.
+ *
+ * @example
+ * l2Normalize(Float32Array.of(3, 4)); // Float32Array [0.6, 0.8]
+ */
 export function l2Normalize(vector: Float32Array): Float32Array {
   const length = norm(vector);
   const out = new Float32Array(vector.length);

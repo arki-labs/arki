@@ -17,6 +17,9 @@ import { isModelRef } from '../ref.js';
  *
  * `OLLAMA_BASE_URL` has no default here: its presence is what picks Ollama in the provider order.
  * The default `http://127.0.0.1:11434` is applied by `createOllamaModel`.
+ *
+ * @example
+ * const env = resolveEmbeddingConfig(process.env); // the record, or ConfigurationFailure
  */
 export function resolveEmbeddingConfig(env: EnvSource) {
   let problem: string | undefined;

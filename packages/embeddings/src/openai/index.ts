@@ -47,7 +47,12 @@ async function loadSdk(id: string, apiKey: string, baseURL: string | undefined) 
   }
 }
 
-/** An OpenAI model record. Snapshot ids never change their vectors, so `assurance` is `immutable`. */
+/**
+ * An OpenAI model record. Snapshot ids never change their vectors, so `assurance` is `immutable`.
+ *
+ * @example
+ * const model = createOpenAIModel({ id: 'text-embedding-3-small', apiKey: process.env.OPENAI_API_KEY ?? '' });
+ */
 export function createOpenAIModel(options: OpenAIModelOptions) {
   const id = options.id ?? 'text-embedding-3-small';
   const facts = OPENAI_FACTS[id];

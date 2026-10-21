@@ -8,6 +8,9 @@ export function textOf(input: EmbedInput): string {
 /**
  * Tokens one input costs. Slice 0 estimates `ceil(chars / 4)` for every model; a tokenizer
  * (`counted`) arrives in slice 1. The model parameter is that seam.
+ *
+ * @example
+ * countTokens(model, 'twelve chars'); // { basis: 'estimated', count: 3 }
  */
 export function countTokens(_model: EmbeddingModel, input: EmbedInput): TokenCount {
   return { basis: 'estimated', count: Math.ceil(textOf(input).length / 4) };

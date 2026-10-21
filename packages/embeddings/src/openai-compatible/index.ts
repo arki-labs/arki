@@ -77,6 +77,9 @@ function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
 /**
  * A model record for an OpenAI-compatible server. The operator decides what the id serves, so
  * `assurance` is `operator-pinned`.
+ *
+ * @example
+ * const model = createOpenAICompatibleModel({ id: 'Qwen/Qwen3-Embedding-8B', baseURL: 'https://api.example.com/v1', dimensions: 4096 });
  */
 export function createOpenAICompatibleModel(options: OpenAICompatibleModelOptions) {
   const { id, dimensions } = options;

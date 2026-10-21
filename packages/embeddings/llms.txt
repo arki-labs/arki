@@ -1,0 +1,32 @@
+# @arki/embeddings
+
+> Text to vectors behind one Embedder shape: checked output, every expected failure returned as a value, and embedding spaces that stop vectors from different models being mixed.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`, `UnsupportedInput`, `cosine`, `countTokens`; and 32 more.
+- `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
+- `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
+- `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
+- `@arki/embeddings/env`: validates the embedding variables with `@arki/env`. `resolveEmbeddingConfig`.
+- `@arki/embeddings/testing`: a deterministic fake embedder for tests. `fakeEmbedder`; types `FakeEmbedderOptions`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+- [Set up embeddings](docs/recipes/set-up-embeddings.md): Ollama by default, OpenAI when configured.
+
+## By task
+- [Embed documents](docs/agent-guide.md#embed-documents)
+- [Keep an index and a model in step](docs/agent-guide.md#keep-an-index-and-a-model-in-step)
+- [Use a hosted or self-hosted server](docs/agent-guide.md#use-a-hosted-or-self-hosted-server)
+- [Test code that embeds](docs/agent-guide.md#test-code-that-embeds)
+
+## Rules that bite
+- Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
+- Store `spaceId(batch.space)` next to every index; a different space means re-embed.
+- The library never changes input text, and `fakeEmbedder` is not semantic.
+- `resolveEmbeddingModel` never touches the network. Voyage and Google are `ConfigurationFailure` in this release.

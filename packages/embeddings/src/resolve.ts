@@ -50,6 +50,9 @@ function buildModel(provider: EmbeddingProviderName, id: string | undefined, env
  * Picks the embedding model from an explicit ref, else `EMBEDDING_MODEL`, else the first configured
  * provider in the order `ollama → openai → voyage → google`. Pure: no network, no `process.env`
  * (pass it). With `requiredSpace`, a model whose space differs is `SpaceMismatch`, never a silent re-embed.
+ *
+ * @example
+ * const model = resolveEmbeddingModel(undefined, process.env, { requiredSpace: storedSpace });
  */
 export function resolveEmbeddingModel(
   ref?: EmbeddingModelRef,

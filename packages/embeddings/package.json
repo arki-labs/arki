@@ -2,18 +2,7 @@
   "name": "@arki/embeddings",
   "version": "0.0.0",
   "private": true,
-  "description": "Text → vectors and rerank for ARKI: one Embedder shape over Ollama, OpenAI, Voyage, Google, Cohere, Mistral, Jina, Bedrock, OpenAI-compatible servers and in-process Transformers.js; failures as values; cache, resilience and telemetry wrappers.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/embeddings"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
+  "description": "Text → vectors and rerank for ARKI: one Embedder shape over Ollama, OpenAI, Voyage, Google, Cohere, Mistral, Jina, Bedrock, OpenAI-compatible servers and in-process Transformers.js; failures as values; a fake embedder for tests.",
   "keywords": [
     "arki",
     "typescript",
@@ -23,10 +12,18 @@
     "ollama",
     "transformers"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/embeddings"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -69,6 +66,8 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "!src/**/__fixtures__/**",
+    "docs/**",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"
@@ -81,36 +80,17 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "test:runtimes": "arki-runtimes",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p examples/tsconfig.json"
   },
-  "arki": {
-    "runtimes": [
-      "node",
-      "bun",
-      "deno",
-      "browser",
-      "hermes"
-    ]
-  },
+  "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "zod": "catalog:"
-  },
-  "peerDependencies": {
-    "@ai-sdk/openai": "catalog:ai",
-    "ai": "catalog:ai"
-  },
-  "peerDependenciesMeta": {
-    "@ai-sdk/openai": {
-      "optional": true
-    },
-    "ai": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@ai-sdk/openai": "catalog:ai",
@@ -125,5 +105,31 @@
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
-  "prettier": "@arki/prettier-config"
+  "peerDependencies": {
+    "@ai-sdk/openai": "catalog:ai",
+    "ai": "catalog:ai"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/openai": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  }
 }

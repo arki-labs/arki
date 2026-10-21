@@ -79,6 +79,9 @@ const withTag = (id: string): string => (id.includes(':') ? id : `${id}:latest`)
 /**
  * An Ollama model record. `revision` is the model digest, read once from `/api/tags` on the
  * first call (resolving a model must never touch the network), so it is `undefined` until then.
+ *
+ * @example
+ * const model = createOllamaModel({ id: 'qwen3-embedding:0.6b', baseURL: 'http://127.0.0.1:11434' });
  */
 export function createOllamaModel(options: OllamaModelOptions = {}) {
   const id = options.id ?? 'qwen3-embedding:0.6b';

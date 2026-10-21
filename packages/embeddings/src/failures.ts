@@ -126,7 +126,12 @@ const EMBED_FAILURES = [
 
 export type EmbedFailure = ReturnType<(typeof EMBED_FAILURES)[number]>;
 
-/** True for a failure this package defines; false for every other value, other failures included. */
+/**
+ * True for a failure this package defines; false for every other value, other failures included.
+ *
+ * @example
+ * if (isEmbedFailure(result)) log.warn(result.code);
+ */
 export function isEmbedFailure(value: unknown): value is EmbedFailure {
   return isFailure(value) && EMBED_FAILURES.some(definition => definition.is(value));
 }

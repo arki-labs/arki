@@ -36,6 +36,9 @@ function checkQuantization(model: EmbeddingModel, quantization: 'int8' | 'binary
 /**
  * A model with fixed output options. Refuses sizes outside `model.matryoshka` and dtypes the
  * provider cannot produce with `UnsupportedInput`, never a throw.
+ *
+ * @example
+ * const embedder = createEmbedder(model, { dimensions: 512 }); // an Embedder, or UnsupportedInput
  */
 export function createEmbedder(model: EmbeddingModel, options: EmbedderOptions = {}) {
   const dimensions = options.dimensions ?? model.dimensions;
