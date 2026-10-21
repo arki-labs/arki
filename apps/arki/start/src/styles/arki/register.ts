@@ -4,6 +4,7 @@ import { arkiPaletteLabels } from './palette-labels';
 import { arkiTypography } from './typography';
 
 declare module '@fleet/sitekit/design-system' {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- declaration merging needs an interface
   interface DesignSystemRegistry {
     arki: true;
   }
