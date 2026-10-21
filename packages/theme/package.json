@@ -1,6 +1,6 @@
 {
   "name": "@arki/theme",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Light / dark / system theme provider and no-flash init script for ARKI React apps.",
   "license": "MIT",
   "repository": {

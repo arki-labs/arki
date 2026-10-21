@@ -1,5 +1,14 @@
 # @arki/theme
 
+## 0.2.2
+
+### Patch Changes
+
+- 0f148f1: Apply the default theme when browser storage is blocked, and fall back to light when system theme detection is unavailable. Keep provider rendering and cleanup safe when media query APIs throw.
+- 53ef944: Docs standard: README sections, AGENTS.md, llms.txt, agent guide and checked doc examples.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
 ## 0.2.1
 
 ### Patch Changes

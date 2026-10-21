@@ -1,5 +1,28 @@
 # @arki/ui
 
+## 0.1.6
+
+### Patch Changes
+
+- d0ba607: Replaces the `"./*"` wildcard in `exports` with one explicit entry per public module. Every import path that worked before still works, so nothing breaks. New tools can now list and check the exact set of entries.
+- 53ef944: Docs standard: README sections, AGENTS.md, llms.txt, agent guide and checked doc examples.
+
+  Removes two `exports` entries that pointed at files that do not exist: `.` (`src/index.ts`) and `./toast` (`src/toast/index.ts`). Importing either already failed, so no working import changes. Use the per-component subpaths, for example `@arki/ui/button` and `@arki/ui/sonner`.
+
+- Updated dependencies [a9a32c0]
+- Updated dependencies [d0ba607]
+- Updated dependencies [0f148f1]
+- Updated dependencies [53ef944]
+- Updated dependencies [8e0a3c0]
+- Updated dependencies [53ef944]
+- Updated dependencies [53ef944]
+- Updated dependencies [d0ba607]
+- Updated dependencies [53ef944]
+  - @arki/react-hooks@0.1.2
+  - @arki/icons@0.1.2
+  - @arki/theme@0.2.2
+  - @arki/design-systems@0.1.3
+
 ## 0.1.5
 
 ### Patch Changes

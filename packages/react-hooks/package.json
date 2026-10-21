@@ -1,6 +1,6 @@
 {
   "name": "@arki/react-hooks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Curated React hooks for ARKI apps — Mantine, usehooks-ts, hotkeys and local-storage hooks under one import.",
   "license": "MIT",
   "repository": {
