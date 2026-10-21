@@ -475,7 +475,7 @@ import { Pool } from 'pg';
 
 import type { LeaseDb } from '@arki/lock/pg/lease';
 import type { Locker } from '@arki/schedule';
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { locks } from '@arki/lock/dot';
 import { pgLease } from '@arki/lock/pg/lease';
@@ -488,20 +488,17 @@ const database = infra({
 });
 
 // A feature asks for the `locks` service, and for locks on its schedules.
-const needs = { locks: service<Locker>() };
-const billing = feature('billing', {
-  needs,
-  use: [
-    schedules(needs, [
-      // lock: true  -> the key is the schedule name, held at least 1 s
-      { name: 'send-invoices', cron: '*/5 * * * *', lock: true, handler: () => 'sent' },
-      // a string shares one key, so two jobs exclude each other
-      { name: 'close-books', cron: '0 3 * * *', lock: 'ledger', handler: () => 'closed' },
-      // the object form sets the key and the minimum hold
-      { name: 'quick', every: '1m', lock: { key: 'quick', holdAtLeast: 0 }, handler: () => 'ok' },
-    ]),
-  ],
-});
+const billingCore = defineFeature('billing').needs({ locks: service<Locker>() });
+const billing = billingCore.entrypoints(
+  schedules(billingCore, [
+    // lock: true  -> the key is the schedule name, held at least 1 s
+    { name: 'send-invoices', cron: '*/5 * * * *', lock: true, handler: () => 'sent' },
+    // a string shares one key, so two jobs exclude each other
+    { name: 'close-books', cron: '0 3 * * *', lock: 'ledger', handler: () => 'closed' },
+    // the object form sets the key and the minimum hold
+    { name: 'quick', every: '1m', lock: { key: 'quick', holdAtLeast: 0 }, handler: () => 'ok' },
+  ]),
+);
 
 export const app = defineApp('billing')
   .infra(database)

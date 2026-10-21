@@ -7,10 +7,11 @@
 import { z } from 'zod';
 
 import type { HttpMiddleware, RequestId, RouteBundle } from '@arki/http';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { infra, token } from '@arki/dot/unit';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
-import { endpoints, optional, route, routes } from '@arki/http';
+import { optional, route, routes } from '@arki/http';
+import { endpoints } from '@arki/http/dot';
 
 export const OrderId = z.string();
 export const Order = z.object({ id: OrderId, status: z.enum(['open', 'shipped']) });
@@ -96,10 +97,11 @@ export const core = defineFeature('orders').usecases({
   list: () => (query: OrderQuery) => db.orders.list(query),
 });
 
-export const orders = feature('orders', {
-  actions: [listOrders],
-  use: [endpoints(() => routes().bind(listOrders, ({ query }) => db.orders.list(query)))],
-});
+export const orders = core.entrypoints(
+  endpoints(core, ({ usecases }) => routes().bind(listOrders, ({ query }) => usecases.list(query)), {
+    contracts: [listOrders],
+  }),
+);
 
 export const adminPlugin = infra({
   name: 'admin',

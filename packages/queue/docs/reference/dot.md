@@ -9,15 +9,14 @@ worker with `.entrypoints()`:
 ```ts skip="excerpt: it uses names this page does not define"
 import type { QueueClient } from '@arki/queue/dot';
 import { defineApp } from '@arki/dot';
-import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
+import { defineFeature } from '@arki/dot/feature';
+import { service } from '@arki/dot/unit';
 import { jobs, queue, queueWorker } from '@arki/queue/dot';
 
-const orders = feature('orders', {
-  use: [jobs({ sendReceipt })],
-  needs: { queue: queuePlugin.provides.queue }, // or service<QueueClient>() when the host plugin is out of reach
-  provides: { checkout: ({ queue }) => createCheckout(queue) }, // queue.enqueue(sendReceipt, { orderId })
-});
+const orders = defineFeature('orders')
+  .needs({ queue: queuePlugin.provides.queue }) // or service<QueueClient>() when the host plugin is out of reach
+  .provides({ checkout: ({ queue }) => createCheckout(queue) }) // queue.enqueue(sendReceipt, { orderId })
+  .entrypoints(jobs({ sendReceipt }));
 
 // API process: enqueues only.
 defineApp('shop-api')
@@ -48,8 +47,6 @@ defineApp('shop-worker')
   producer actions (`<job>.produce`), and the worker declares the consumer
   actions (`<job>.consume`, `<schedule>.fire`). An API process never claims to
   consume a queue.
-- A `defineFeature` feature lists the same `jobs(...)` in its
-  `.entrypoints(...)`: `defineFeature('orders')….entrypoints(jobs({ sendReceipt }))`.
-  The worker reads chain and object-form features side by side. Job handlers
-  still get the worker's `context`, not the feature's services — a job may run
-  in a process where the feature never booted.
+- A feature lists its `jobs(...)` in `.entrypoints(...)`, as the example shows.
+  Job handlers still get the worker's `context`, not the feature's services — a
+  job may run in a process where the feature never booted.

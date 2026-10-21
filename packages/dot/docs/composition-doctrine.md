@@ -33,7 +33,7 @@ actions, building a handler from a static router); _observation_ is not.
   3. **Boot**, for anything that depends on the world: env, files, the
      network, the clock. Never at import.
 - **Never move a check down the ladder.** Many consumers never boot through
-  Dot: a router from `composeRouter` goes straight to oRPC. A check deferred
+  Dot: a router from `routerFor` goes straight to oRPC. A check deferred
   to boot would never run for them, and a loud mistake would become a silent
   one.
 - **Every type check keeps a runtime throw behind it.** Plain JavaScript and
@@ -78,8 +78,7 @@ property, interactively.
 ## 2. Types derive from values (the `$inferSelect` rule)
 
 Never hand-write a type that restates a value: `type AppRouter = typeof
-appRouter`, repo types via `ReturnType<typeof createOrdersRepository>`,
-`ComposedRepos<typeof features>`. A hand-written mirror interface is drift
+appRouter`, repo types via `ReturnType<typeof createOrdersRepository>`. A hand-written mirror interface is drift
 waiting to happen.
 
 The one sanctioned exception: **cycle-cutting pins**. Where deriving a type
@@ -106,23 +105,23 @@ The pin makes the hand list compiler-enforced instead of trusted.
 
 ## 3. One declaration, many projections
 
-A feature is declared **once** (`feature()`) and everything else is a
+A feature is declared **once** (`defineFeature()`) and everything else is a
 projection of it: the unit `.features()` mounts, the slice token
-(`tokenOf`), manifest actions (`dot explain` attribution), the composed
-router (client types), the repo record. If adding a capability requires editing a second
+(`tokenOf`), manifest actions (`dot explain` attribution), the router
+(`routerFor`, client types), the feature's own store (`repos`). If adding a capability requires editing a second
 place, the design is wrong — extend the declaration and derive.
 
-Boot-time capabilities ride **slice contracts** — structural
+Boot-time capabilities ride **entrypoint descriptors** — structural
 `{ key, actions, resolve }` wrappers exported by the adapter that consumes
 them (`jobs()` from `@arki/queue/dot`, `schedules()` from
-`@arki/schedule/dot`, `endpoints()` from `@arki/http`). Dependencies follow
-use; the slice set stays open; `@arki/dot/feature` imports no adapter.
+`@arki/schedule/dot`, `endpoints()` from `@arki/http/dot`). Dependencies follow
+use; the entrypoint set stays open; `@arki/dot/feature` imports no adapter.
 
 ## 4. One membership list, typed folds
 
 `src/features.ts` is THE list. Everything derives from the tuple:
-`.features(features)`, `composeRouter(features)`,
-`composeRepos(features, db)`, `composeSchema(...)`. Entrypoint units
+`.features(features)`, `routerFor(rpcContract, features)`,
+`composeSchema(...)`. Entrypoint units
 (`http`, `schedule`, `queueWorker`) are bound to the mounted list by
 `.entrypoints()` — they never take it as an argument. Folds are typed
 identities: runtime merge + exact intersection type + duplicate-key
@@ -160,7 +159,7 @@ const gateway = entrypoint.fromFeatures(mounted =>
 
 const shop = await defineApp('shop')
   .infra(logger, database) // what the app runs on; log first
-  .features(features) // defineFeature() values (feature() during the migration)
+  .features(features) // defineFeature() values
   .entrypoints(gateway) // what calls into the features
   .boot();
 if (isFailure(shop)) throw new Error(shop.code);
@@ -256,14 +255,14 @@ same feature twice (`reports#eu`, qualified keys, needs rebound to another
 provider, children re-derived). An instance is not a child: it is public,
 top-level, and owns its own infra units.
 
-### The app spine is a hexagon (object form — removed when the migration to `defineFeature` ends)
+### The app spine is a hexagon
 
 `app.ts` wires the units in three steps, and the builder types enforce the
 order — a unit in the wrong step does not compile:
 
 ```ts run
 import { defineApp, entrypoint, infra } from '@arki/dot';
-import { feature, unit } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
 // Stand-ins for adapters from @arki/db, @arki/queue and @arki/http.
@@ -271,12 +270,17 @@ const db = infra({ name: 'db', provides: { db: () => ({ query: async (_sql: stri
 const queue = infra({ name: 'queue', provides: { queue: () => ({ enqueue: async (_job: string) => {} }) } });
 const http = entrypoint({ name: 'http' });
 const queueWorker = entrypoint({ name: 'queue-worker' });
-const features = [feature('orders', { needs: { db: db.provides.db }, provides: { orders: () => 'orders' } })] as const;
+const features = [
+  defineFeature('orders')
+    .needs({ db: db.provides.db })
+    .provides({ orders: () => 'orders' })
+    .entrypoints(),
+] as const;
 
 const app = await defineApp('shop')
   .infra(db) // infra units — what features need
   .infra(queue) //   (a queue CLIENT features enqueue with)
-  .features(features) // the domain core — feature() values, one list
+  .features(features) // the domain core — defineFeature() values, one list
   .entrypoints(http, queueWorker) // entrypoint units — what calls the features
   .boot();
 if (isFailure(app)) throw new Error(app.code);
@@ -323,7 +327,7 @@ schema leaves (tables.ts — import nothing above)
   checks every unit's needs against every unit's static provides, so the
   same rule holds for adapters, not only features.
 - **Capabilities never form a ring.** Two feature modules naming each
-  other's handles fail as `TS7022` on both `feature()` consts (and an ESM TDZ
+  other's handles fail as `TS7022` on both `defineFeature()` consts (and an ESM TDZ
   `ReferenceError` at runtime); erased graphs fail `configure()` with
   `ARKI_DOT_E019`, which prints the ring (through any units). Break it by moving the shared
   piece into a third feature both need, or by reading through `db.query`
@@ -361,7 +365,7 @@ Three lifetimes, three homes:
 | Lifetime     | Home                                                                  | Examples                                                 |
 | ------------ | --------------------------------------------------------------------- | -------------------------------------------------------- |
 | compile-time | ES modules, composed folds                                            | schema, relations, routers, repo factories, context TYPE |
-| boot-time    | units / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles     |
+| boot-time    | units / feature `provides` factories, side-effect `boot` + entrypoints | db handle, auth instance, event store, route bundles     |
 | request-time | the gateway's context factory                                         | session lookup, per-request context value                |
 
 "If it doesn't need boot, it doesn't need a unit" — static data rides

@@ -1121,16 +1121,16 @@ Defaults: `completed` 7 days, `failed` 90 days, `cancelled` the same as `failed`
 
 ### Workflows in Dot
 
-A feature lists its workflows with `journalHandlers({ workflows })`, or `journalWorkflows(core, defs)` in a `defineFeature` chain. The app passes `workflowMeta` to `journal({ j, workflowMeta })`. A step gets the services of the feature that lists its workflow, by need name. The feature must declare each need, or it does not compile. Each workflow is an action in the manifest: `<name>@<version>.run`, with its signals in the meta.
+A feature lists its workflows with `journalWorkflows(core, defs)` in `.entrypoints(...)`, or with `journalHandlers({ workflows })`. The app passes `workflowMeta` to `journal({ j, workflowMeta })`. A step gets the services of the feature that lists its workflow, by need name. The feature must declare each need, or it does not compile. Each workflow is an action in the manifest: `<name>@<version>.run`, with its signals in the meta.
 
 ```ts
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { defineFeature, feature } from '@arki/dot/feature';
-import { infra, service } from '@arki/dot/unit';
+import { defineFeature } from '@arki/dot/feature';
+import { infra } from '@arki/dot/unit';
 import { initJournal, need } from '@arki/journal';
-import { journal, journalHandlers, journalWorker, journalWorkflows } from '@arki/journal/dot';
+import { journal, journalWorker, journalWorkflows } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 
@@ -1156,15 +1156,9 @@ const stripe = infra({
   },
 });
 
-// A `feature(...)`: the feature declares what its workflows need.
-const refunds = feature('refunds', {
-  needs: { payments: service<Payments>() },
-  use: [journalHandlers({ workflows: [refund] })],
-});
-
-// The same in a `defineFeature` chain: the needs come from the core.
-const core = defineFeature('refunds-chain').needs({ payments: stripe.provides.payments }).usecases({});
-export const refundsChain = core.entrypoints(journalWorkflows(core, [refund]));
+// The feature declares what its workflows need, in the core.
+const core = defineFeature('refunds').needs({ payments: stripe.provides.payments }).usecases({});
+export const refunds = core.entrypoints(journalWorkflows(core, [refund]));
 
 export const app = defineApp('shop')
   .infra(infra({ name: 'db', provides: { db: () => db } }))
@@ -1174,7 +1168,7 @@ export const app = defineApp('shop')
   .entrypoints(journalWorker());
 ```
 
-`journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` entrypoint, so a `defineFeature` feature with both effects and workflows lists them together with `journalHandlers`.
+`journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` entrypoint, so a feature with both effects and workflows lists them together with `journalHandlers`.
 
 ### Testing
 
@@ -1289,10 +1283,9 @@ await worker.stop();
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/features/orders/feature.ts
-export const orders = feature('orders', {
-  needs: { mailer: mailerInfra.provides.mailer }, // typed handle; service<Mailer>() also works
-  use: [journalHandlers({ projections: [customerStats], effects: [orderMail] })],
-});
+export const orders = defineFeature('orders')
+  .needs({ mailer: mailerInfra.provides.mailer }) // typed handle; service<Mailer>() also works
+  .entrypoints(journalHandlers({ projections: [customerStats], effects: [orderMail] }));
 
 // src/app.ts
 export const app = defineApp('shop')
@@ -1322,7 +1315,7 @@ await run(payOrder, input);
 
 ### A `defineFeature` feature
 
-A chain feature declares the same handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above, for both feature forms side by side.
+A feature can declare the same handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // features/orders/feature.ts
@@ -1338,7 +1331,7 @@ export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [or
 
 - `journalProjections(...projections)` is an infra unit that boots nothing; its unit is `<feature>/journal-projections`.
 - `journalEffects(core, { effects, taps })` is an entrypoint. An effect's needs come from the feature by name: a need alias, an infra service (the feature's private `mailer` above) or `usecases`. A missing one is a compile error at this call, and a boot error for callers that skip the types.
-- Duplicate names are refused across both forms, naming both features.
+- Duplicate names are refused across features, naming both.
 - `dot explain --as journal-flow` lists which event starts which effect (`OrderPaid → order-mail`, owned by `orders`). It reads the effects' manifest actions; nothing extra is collected. It is the only way to see that paying an order sends a mail, short of reading every file.
 
 **The actor.** `actorRun(select)` from `@arki/journal/orpc` is a middleware that adds `context.run`, the journal's runner bound to the request's database and actor. The app's `select` says who the actor is; the journal assumes no session shape.

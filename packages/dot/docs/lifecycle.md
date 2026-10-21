@@ -176,7 +176,7 @@ cause, while diagnostics record the phase, owner and legacy ID:
 | `ARKI_DOT_E021` | `$describeAction` named an action the unit may not amend (unknown id, or neither its own nor in a binding it owns).                                                                                          |
 
 `TS7022` ("implicitly has type 'any' because it … is referenced directly or
-indirectly in its own initializer") on a `feature()` const is the compile-time
+indirectly in its own initializer") on a `defineFeature()` const is the compile-time
 face of a capability ring: two feature modules name each other's handles.
 Read the two files it names; E019 is the backstop for erased graphs.
 

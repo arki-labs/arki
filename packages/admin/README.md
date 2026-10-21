@@ -2,7 +2,7 @@
 
 The contract between an ARKI app and Foreman (the fleet control plane). An app exposes **modules** (reads and actions) behind signed requests. Foreman reads the manifest and calls them.
 
-Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler), `./receipts` (receipt schemas and the KV store), `./client` (Foreman side), `./dot` (DOT slice), `./http` (v1 `/api/fleet`).
+Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler), `./receipts` (receipt schemas and the KV store), `./client` (Foreman side), `./dot` (DOT entrypoint), `./http` (v1 `/api/fleet`).
 
 ## Turn it on
 
@@ -52,17 +52,18 @@ Keep the `/api/fleet` route. Foreman still polls it until it negotiates protocol
 
 ## DOT app
 
-`foreman()` is a feature slice. It takes the same options as `createForemanHandlerFromEnv`, built from the feature's `needs`.
+`foreman()` is an entrypoint of a feature. It takes the same options as `createForemanHandlerFromEnv`, built from the feature's `needs`.
 
 ```ts
 import { foreman } from '@arki/admin/dot';
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { journalReceiptStore } from '@arki/journal/foreman';
 
-export const operations = feature('operations', {
-  needs: { kv: kvPlugin.provides.kv, db: database.provides.db }, // handles; service<T>() also works
-  use: [
-    foreman(({ kv, db }: { kv: KV; db: Db }) => ({
+export const operations = defineFeature('operations')
+  .needs({ kv: kvPlugin.provides.kv, db: database.provides.db }) // handles; service<T>() also works
+  .entrypoints({
+    kind: 'routes',
+    ...foreman(({ kv, db }: { kv: KV; db: Db }) => ({
       env,
       environment: 'prod',
       app: { version },
@@ -78,11 +79,10 @@ export const operations = feature('operations', {
       modules: [queueModule()],
       context: () => ({}),
     })),
-  ],
-});
+  });
 ```
 
-The slice lands under the `routes` key, so `feature()` throws `ARKI_DOT_E024` if the same feature also holds an `endpoints()` slice. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
+The entrypoint lands under the `routes` key, so the same feature cannot also hold an `endpoints()` entrypoint. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
 
 ## Modules every target serves
 

@@ -250,41 +250,17 @@ its schema must be JSON-safe: a `Date` field fails `revive` on the client.
 
 ## Inside a DOT app
 
-A feature declares its HTTP surface with `endpoints(build)`. The builder
-runs once at boot with the feature's typed needs:
-
-```ts
-import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/unit';
-import { endpoints, routes } from '@arki/http';
-
-import { type Db, createOrder, listOrders } from './fixture.ts';
-
-export const orders = feature('orders', {
-  needs: { db: service<Db>() },
-  actions: [listOrders, createOrder], // manifest + OpenAPI metadata
-  use: [
-    endpoints(({ db }: { readonly db: Db }) =>
-      routes()
-        .bind(listOrders, async ({ query }) => db.orders.list(query))
-        .bind(createOrder, async ({ body }, ctx) => db.orders.create(body, ctx.requestId)),
-    ),
-  ],
-});
-```
-
-A `defineFeature` feature uses `endpoints(core, build, { contracts })` from
-`@arki/http/dot`, in `.entrypoints(...)`. `build` gets what every entrypoint
-of the feature gets — needs, private infra and `usecases` — typed from the
-core, so the routes file needs no annotation and no runtime import of the
-feature. `contracts` are the feature's manifest actions (a chain feature has no
-`actions` list of its own):
+A feature declares its HTTP surface with `endpoints(core, build, { contracts })`
+from `@arki/http/dot`, in `.entrypoints(...)`. `build` runs once at boot. It
+gets what every entrypoint of the feature gets — needs, private infra and
+`usecases` — typed from the core, so the routes file needs no annotation and no
+runtime import of the feature. `contracts` are the feature's manifest actions
+(a feature has no `actions` list of its own):
 
 ```ts
 // features/orders/entrypoints/routes.ts
 import { routes } from '@arki/http';
 import { endpoints } from '@arki/http/dot';
-
 
 import { core, listOrders } from './fixture.ts';
 
@@ -296,9 +272,6 @@ export const orderRoutes = (c: typeof core) =>
 // features/orders/feature.ts
 export const orders = core.entrypoints(orderRoutes(core));
 ```
-
-`http()` serves both forms from one route table, in mount order. (Same
-routes, fewer places for them to hide.)
 
 `http()` is an entrypoint unit: mount it with `.entrypoints()`, after the
 features. It serves the routes of every mounted feature, in mount order —
@@ -317,7 +290,7 @@ const app = await defineApp('shop-api')
 hookSignals(app);
 ```
 
-A feature with no `endpoints()` slice is skipped. Mount `http()` with
+A feature with no `endpoints()` entrypoint is skipped. Mount `http()` with
 `.entrypoints()`, not `.infra()`: under `.infra()` it boots before the features, so
 their routes do not exist yet and boot fails.
 
@@ -347,7 +320,7 @@ ingress FIRST: the server stops accepting, drains in-flight requests
 (`drainTimeoutMs`, default 10 s, `ARKI_HTTP_E005` on overrun), and only
 then do features tear down. `boot` builds the router without listening;
 `start` listens; `dispose` severs remaining connections and releases the
-port. A feature whose `routes` slice is not a route bundle fails boot with
+port. A feature whose routes are not a route bundle fails boot with
 `ARKI_HTTP_E010`.
 
 The published `httpServer` service carries the composed

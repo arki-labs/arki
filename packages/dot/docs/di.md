@@ -205,12 +205,9 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
   by the builder guard. `dot explain` shows
   `daily-digest --[daily-digest.store]--> daily-digest/store --[db]--> database`.
 
-`.features()` takes `defineFeature` features and object-form `feature()`
-values side by side during the migration.
-
 Adapter authors: `entrypoint.fromFeatures` and `infra.fromFeatures` units receive the features as mounted
-(`MountedFeature` — either form). Read a feature's declarations with
-`entrypointsOf(f)` (its `entrypoints`, or the object form's `use`), its slice
+(`MountedFeature`). Read a feature's declarations with
+`entrypointsOf(f)` (its `entrypoints`), its slice
 record with `sliceOf(ctx, f)`, and a chain feature's own units with
 `f.units()`.
 
@@ -378,23 +375,21 @@ through: same `this`, same arguments, the very same return value.
 from `@orpc/otel` with your SDK to turn it on; the usecase spans then nest
 under it.
 
-## Features and the hexagon (object form — removed when the migration to `defineFeature` ends)
+## Features and the hexagon
 
-Domain modules are `feature()` values from `@arki/dot/feature`. A feature is
-inert data: router fragments and repo factories fold without any kernel, and
-boot-time slices (`jobs()`, `schedules()`, `endpoints()`) say what the
-feature hands its adapters.
+Domain modules are `defineFeature` values from `@arki/dot/feature`. A feature is
+inert data until the app boots it: its entrypoints (`jobs()`, `schedules()`,
+`endpoints()`) say what the feature hands its adapters.
 
 ```ts skip="uses jobs() from @arki/queue, which depends on @arki/dot"
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
+import { rpc } from '@arki/dot/orpc';
 
-export const orders = feature('orders', {
-  router: { orders: ordersRouter },
-  repos: { orders: createOrdersRepository },
-  needs: { db: service<Db>() },
-  use: [jobs({ syncOrders })],
-  provides: { ordersIndex: ({ db }) => openIndex(db) },
-});
+export const orders = defineFeature('orders')
+  .needs({ db: service<Db>() })
+  .infra(store) // repos({ orders: createOrdersRepository }) from @arki/db/dot
+  .provides({ ordersIndex: ({ db }) => openIndex(db) })
+  .entrypoints(rpc(ordersRpcContract, ordersImplementer, ordersProcedures), jobs({ syncOrders }));
 ```
 
 The app wires its units in three steps — the hexagon of ports and adapters:
@@ -421,30 +416,26 @@ each receiving the feature's needs. Consumers name the capability by handle —
 the type comes from the provider's factory, so it is written once:
 
 ```ts
-import { defineApp, infra, service } from '@arki/dot';
-import { feature } from '@arki/dot/feature';
+import { defineApp, infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 
 // Stand-ins for your own modules.
 type Db = { query(sql: string): Promise<unknown[]> };
-type Entitlements = { planOf(userId: string): Promise<string>; warmUp(): Promise<void> };
+type Entitlements = { planOf(userId: string): Promise<string> };
 declare function openDb(): Db;
 declare function createEntitlements(db: Db): Entitlements;
 declare function createDigest(access: Entitlements): { previewFor(userId: string): Promise<string[]> };
 const database = infra({ name: 'database', provides: { db: () => openDb() } });
 
-export const billing = feature('billing', {
-  needs: { db: database.provides.db },
-  provides: { entitlements: ({ db }) => createEntitlements(db) },
-  boot: async ({ entitlements }) => {
-    await entitlements.warmUp();
-    return undefined;
-  }, // sees the factories' values
-});
+export const billing = defineFeature('billing')
+  .needs({ db: database.provides.db })
+  .provides({ entitlements: ({ db }) => createEntitlements(db) })
+  .entrypoints();
 
-export const digest = feature('daily-digest', {
-  needs: { access: billing.provides.entitlements }, // typed from createEntitlements
-  provides: { digest: ({ access }) => createDigest(access) },
-});
+export const digest = defineFeature('daily-digest')
+  .needs({ access: billing.provides.entitlements }) // typed from createEntitlements
+  .provides({ digest: ({ access }) => createDigest(access) })
+  .entrypoints();
 
 export const app = defineApp('app').infra(database).features([billing, digest]); // provider first: boot order
 ```
@@ -458,21 +449,20 @@ data before anything boots:
   The fix line is role-aware: "Move X before Y in .features([...])." for a
   feature provider, "Mount X with .infra() before Y." for any other unit;
 - two features that need each other form a ring: TypeScript reports `TS7022`
-  on both `feature()` consts (read the two files it names), and `configure()`
+  on both `defineFeature()` consts (read the two files it names), and `configure()`
   returns `UnexpectedDefect` with `ARKI_DOT_E019` ring metadata (through any units) for
   erased graphs;
 - `dot explain` draws one labelled edge per capability, such as
   `daily-digest --[entitlements]--> billing`, without booting.
   A feature's slice record (`feature.<name>`) is one of its unit's provides.
 
-`boot` performs side effects (seed, warm-up) and returns `undefined`, a concrete
-failure or an ownership plan. Service values belong in `provides`.
+A `provides` factory builds a service value. Side effects (seed, warm-up) belong in a unit's `boot`, which returns `undefined`, a concrete failure or an ownership plan.
 
 ### Capabilities in the request context
 
-This is the object-form pattern: each procedure names its handles with
-`needs(...)`. New code uses `bind(featureLogic)` once per feature instead
-(see [oRPC, contract first](#orpc-contract-first-arkidotorpc)).
+A feature's own procedures use `bind(featureLogic)` once per feature (see
+[oRPC, contract first](#orpc-contract-first-arkidotorpc)). The bag below is for
+the gateway and for a procedure that reads another feature's capability.
 
 A request context cannot name the merged service type — the routers that read
 the context are part of it, so the type loops. The context carries an opaque
@@ -486,24 +476,26 @@ import { os } from '@orpc/server';
 import type { NeedsShape } from '@arki/dot';
 import type { ServicesBag } from '@arki/dot/feature';
 import { service } from '@arki/dot';
-import { feature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
+import { defineFeature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
 
 // Stand-ins for your own modules.
 type Db = { query(sql: string): Promise<unknown[]> };
 type Entitlements = { planOf(userId: string): Promise<string> };
 declare function createEntitlements(): Entitlements;
 declare function ingest(entitlements: Entitlements): Promise<void>;
-export const billing = feature('billing', { provides: { entitlements: () => createEntitlements() } });
+export const billing = defineFeature('billing')
+  .provides({ entitlements: () => createEntitlements() })
+  .entrypoints();
 const features = [billing] as const;
 
-export const gateway = feature('gateway', {
-  needs: { db: service<Db>(), ...providesOf(features) },
-  provides: {
+export const gateway = defineFeature('gateway')
+  .needs({ db: service<Db>(), ...providesOf(features) })
+  .provides({
     rpc: ctx => ({
       context: (headers: Headers) => ({ headers, db: ctx.db, services: servicesOf(ctx, features) }),
     }),
-  },
-});
+  })
+  .entrypoints();
 
 // core/orpc.ts — the one app-side middleware
 const o = os.$context<{ services: ServicesBag }>();

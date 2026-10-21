@@ -9,19 +9,16 @@ entrypoint: mount it with `.entrypoints()`, after the features. It runs the
 schedules of every mounted feature — the app lists its features once:
 
 ```ts skip="excerpt: it uses names this page does not define"
-import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
+import { defineFeature } from '@arki/dot/feature';
 import { initSchedule } from '@arki/schedule';
 import { schedule, schedules } from '@arki/schedule/dot';
 
 type Ctx = { readonly db: Db };
 const s = initSchedule.context<Ctx>().create();
 
-export const reports = feature('reports', {
-  use: [
-    schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })]),
-  ],
-});
+export const reports = defineFeature('reports').entrypoints(
+  schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })]),
+);
 
 defineApp('shop')
   .infra(db({ url }))
@@ -35,9 +32,9 @@ this context: keep one context type per app. A schedule no feature owns
 goes in `schedule({ schedules: [...] })`; it runs on the same runtime, so
 names must be unique across both.
 
-### Schedules of a `defineFeature` feature: `schedules(core, defs)`
+### Schedules that use the feature: `schedules(core, defs)`
 
-A chain feature lists its schedules in `.entrypoints(...)`. Pass the core, and
+A feature lists its schedules in `.entrypoints(...)`. Pass the core, and
 each handler gets what every entrypoint of the feature gets — its needs, its
 private infra and `usecases` — typed with no annotation. The schedules file
 takes the core as a parameter (`import type`), so it never imports the
@@ -55,9 +52,8 @@ export const dailyDigest = core.entrypoints(digestSchedules(core));
 ```
 
 A key the feature does not have (`({ db }) => …` when only its store needs
-`db`) is a compile error. Same options and rules as below; `schedule(...)` and
-`composeSchedules(...)` serve chain and object-form features side by side.
-Cron still decides _when_; the core decides _with what_.
+`db`) is a compile error. Same options and rules as below. Cron still decides
+_when_; the core decides _with what_.
 
 ### One replica at a time: `lock`
 
@@ -119,26 +115,22 @@ schedules(core, [
   line: `lock <ns>:<key>  [<store> · <kind> · <scope> · crash→<bound> · fence <level> · hold≥1s]`.
   `overlap: 'skip'` still guards the process itself.
 
-### Feature-owned schedules: `schedules(needs, defs)`
+### Feature-owned schedules: `schedules(core, defs)`
 
 When a schedule belongs to one feature and works with that feature's
-services, declare it with the feature's `needs`. The handler's parameter is
-typed from `needs` with no annotation, and the feature must list the same
-services in its own `needs` (a compile error otherwise). The entrypoint's
-`context` is not used for these handlers.
+services, declare it with the feature's core. The handler's parameter is
+typed from the core with no annotation. The entrypoint's `context` is not
+used for these handlers.
 
 ```ts skip="excerpt: it uses names this page does not define"
-const needs = { mailer: service<Mailer>() };
+const core = defineFeature('digest').needs({ mailer: service<Mailer>() });
 
-export const digest = feature('digest', {
-  needs,
-  use: [
-    schedules(needs, [
-      // Plain option objects, not defineSchedule(): the handler is typed from `needs`.
-      { name: 'send-digest', cron: '0 7 * * *', handler: ({ mailer }) => mailer.sendDigest() },
-    ]),
-  ],
-});
+export const digest = core.entrypoints(
+  schedules(core, [
+    // Plain option objects, not defineSchedule(): the handler is typed from the core.
+    { name: 'send-digest', cron: '0 7 * * *', handler: ({ mailer }) => mailer.sendDigest() },
+  ]),
+);
 ```
 
 The options and validation match `defineSchedule` (`cron` or `every`,
@@ -180,7 +172,7 @@ accepted.
 ### Typed triggers: `composeSchedules(features, scheduler)`
 
 `composeSchedules` turns the service into a client typed from the features'
-own `schedules(needs | core, defs)` declarations, in either feature form. An undeclared name is a compile
+own `schedules(core, defs)` declarations. An undeclared name is a compile
 error, and a `ran` outcome's `value` is that handler's resolved return type:
 
 ```ts skip="excerpt: it uses names this page does not define"
