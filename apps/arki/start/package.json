@@ -16,7 +16,7 @@
     "test": "vitest run --configLoader runner",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit --skipLibCheck",
-    "with-env": "dotenv -e ../../../.env -e ../.env --"
+    "with-env": "dot env run --"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -63,6 +63,7 @@
   },
   "devDependencies": {
     "@arki/arki-release": "workspace:*",
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/playwright-config": "workspace:*",
@@ -76,7 +77,6 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
     "@vitejs/plugin-react": "catalog:",
-    "dotenv-cli": "catalog:env",
     "nitro": "catalog:tanstack/start",
     "vite": "catalog:build-tools",
     "vitest": "catalog:"

@@ -22,7 +22,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "up": "bun run with-env drizzle-kit up",
-    "with-env": "dotenv -e ../../../.env -e ../.env --"
+    "with-env": "dot env run --"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -51,7 +51,6 @@
     "@better-auth/cli": "catalog:better-auth",
     "@t3-oss/env-core": "catalog:env",
     "@trigger.dev/build": "catalog:trigger",
-    "dotenv-cli": "catalog:env",
     "drizzle-kit": "catalog:drizzle",
     "tsx": "catalog:"
   }
