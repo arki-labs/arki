@@ -72,12 +72,12 @@ function useCrane(
   useEffect(() => {
     const home = stage.current;
     if (home === null) return;
-    const scroller = scrollParent(home);
-    const target: HTMLElement | Window = scroller ?? window;
     const sections = [...home.querySelectorAll<HTMLElement>('[data-floor]')];
     let frame = 0;
     const update = () => {
       frame = 0;
+      // Found on every frame: before the page CSS lands, nothing above `.home` scrolls yet.
+      const scroller = scrollParent(home);
       const top = scroller?.getBoundingClientRect().top ?? 0;
       const height = scroller?.clientHeight ?? window.innerHeight;
       const line = top + height * READING_LINE;
@@ -98,11 +98,12 @@ function useCrane(
       if (frame === 0) frame = requestAnimationFrame(update);
     };
     update();
-    target.addEventListener('scroll', schedule, { passive: true });
+    // Scroll events do not bubble; caught on the way down, any scroller's scroll reaches this one listener.
+    document.addEventListener('scroll', schedule, { capture: true, passive: true });
     window.addEventListener('resize', schedule);
     return () => {
       cancelAnimationFrame(frame);
-      target.removeEventListener('scroll', schedule);
+      document.removeEventListener('scroll', schedule, { capture: true });
       window.removeEventListener('resize', schedule);
     };
   }, [stage, cable, load]);
