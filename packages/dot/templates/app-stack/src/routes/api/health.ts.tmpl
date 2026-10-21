@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 
 import { sql } from '@arki/db/orm';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import { startApp } from '~/server/runtime';
@@ -13,8 +14,12 @@ export const Route = createFileRoute('/api/health')({
     handlers: {
       GET: async () => {
         try {
-          const { services } = await startApp();
-          await services.db.execute(sql`select 1`);
+          const started = await startApp();
+          if (isFailure(started)) {
+            log.error('app did not start: {code} {message}', { code: started.code, message: started.message });
+            return Response.json({ status: 'error' }, { status: 503 });
+          }
+          await started.services.db.execute(sql`select 1`);
           return Response.json({ status: 'ok' });
         } catch (error) {
           log.error('health check failed: {error}', { error: error instanceof Error ? error : String(error) });

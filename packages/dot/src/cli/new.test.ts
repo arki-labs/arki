@@ -703,6 +703,7 @@ describe('templates', () => {
       '@arki/log': `^${TEMPLATE_VERSIONS.log}`,
       '@arki/db': `^${TEMPLATE_VERSIONS.db}`,
       '@arki/journal': `^${TEMPLATE_VERSIONS.journal}`,
+      '@arki/failure': `^${TEMPLATE_VERSIONS.failure}`,
       '@arki/ui': `^${TEMPLATE_VERSIONS.ui}`,
       '@arki/design-systems': `^${TEMPLATE_VERSIONS['design-systems']}`,
       zod: ZOD_VERSION,
@@ -710,7 +711,16 @@ describe('templates', () => {
     // Only the packages above: every other @arki package is unpublished.
     const arkiDeps = Object.keys(manifest.dependencies).filter(dep => dep.startsWith('@arki/'));
     expect(arkiDeps.sort()).toEqual(
-      ['@arki/db', '@arki/design-systems', '@arki/dot', '@arki/env', '@arki/journal', '@arki/log', '@arki/ui'].sort(),
+      [
+        '@arki/db',
+        '@arki/design-systems',
+        '@arki/dot',
+        '@arki/env',
+        '@arki/failure',
+        '@arki/journal',
+        '@arki/log',
+        '@arki/ui',
+      ].sort(),
     );
   });
 });

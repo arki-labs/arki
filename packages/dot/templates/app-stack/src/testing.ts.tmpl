@@ -1,4 +1,5 @@
 import { db } from '@arki/db/dot';
+import { orThrow } from '@arki/failure';
 import { call } from '@orpc/server';
 
 import { createApp } from './app';
@@ -7,10 +8,11 @@ import type { RpcContext } from './server/orpc';
 
 /**
  * Boot the real app on a fresh in-memory PGlite database: same plugins, same
- * migrations, no Docker. Call `dispose()` in `afterAll`.
+ * migrations, no Docker. Call `dispose()` in `afterAll`. A failed boot or
+ * dispose throws: in a test, a failure there is a bug.
  */
 export async function bootTestApp() {
-  const booted = await createApp(db({ driver: 'pglite', memory: true, relations })).boot();
+  const booted = orThrow(await createApp(db({ driver: 'pglite', memory: true, relations })).boot());
   const context: RpcContext = {
     db: booted.services.db,
     run: booted.services.journal.bind(booted.services.db, { actorId: null }),
@@ -18,7 +20,7 @@ export async function bootTestApp() {
   return {
     services: booted.services,
     context,
-    dispose: () => booted.dispose(),
+    dispose: async () => orThrow(await booted.dispose()),
   };
 }
 

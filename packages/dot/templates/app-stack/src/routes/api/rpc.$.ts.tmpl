@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { onError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import { router } from '~/server/router';
@@ -18,10 +19,12 @@ const handler = new RPCHandler(router, {
 });
 
 async function handle(request: Request): Promise<Response> {
-  const { matched, response } = await handler.handle(request, {
-    prefix: '/api/rpc',
-    context: await createRpcContext(),
-  });
+  const context = await createRpcContext();
+  if (isFailure(context)) {
+    log.error('app did not start: {code} {message}', { code: context.code, message: context.message });
+    return Response.json({ status: 'error' }, { status: 503 });
+  }
+  const { matched, response } = await handler.handle(request, { prefix: '/api/rpc', context });
   return matched ? response : new Response('Not found', { status: 404 });
 }
 

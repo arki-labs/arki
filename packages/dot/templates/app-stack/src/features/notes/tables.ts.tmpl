@@ -9,7 +9,8 @@ import { createIdFactory } from '@arki/db/id-factory';
 import { integer, pgTable, text, timestamp, varchar } from '@arki/db/pg';
 
 export const noteId = createIdFactory('note_');
-export type NoteId = ReturnType<typeof noteId.create>;
+/** `noteId.create()` returns the id or an `IdGenerationFailure`, so the id type comes from the column. */
+export type NoteId = (typeof notes.$inferSelect)['id'];
 
 export const notes = pgTable('notes', {
   id: noteId.primaryColumn(),

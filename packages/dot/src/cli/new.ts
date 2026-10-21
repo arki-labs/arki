@@ -118,6 +118,7 @@ export type RunNewOptions = {
     readonly log?: string;
     readonly db?: string;
     readonly journal?: string;
+    readonly failure?: string;
     readonly ui?: string;
     readonly designSystems?: string;
   };
@@ -263,6 +264,7 @@ export async function planOperations(opts: RunNewOptions): Promise<NewPlan | Fai
     logVersion: opts.versions?.log ?? TEMPLATE_VERSIONS.log,
     dbVersion: opts.versions?.db ?? TEMPLATE_VERSIONS.db,
     journalVersion: opts.versions?.journal ?? TEMPLATE_VERSIONS.journal,
+    failureVersion: opts.versions?.failure ?? TEMPLATE_VERSIONS.failure,
     uiVersion: opts.versions?.ui ?? TEMPLATE_VERSIONS.ui,
     designSystemsVersion: opts.versions?.designSystems ?? TEMPLATE_VERSIONS['design-systems'],
   };

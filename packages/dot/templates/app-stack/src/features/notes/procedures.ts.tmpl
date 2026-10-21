@@ -1,6 +1,9 @@
 import { ORPCError } from '@orpc/server';
 import { z } from 'zod';
 
+import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+import { COMMAND_FAILURES } from '@arki/journal';
+
 import { procedure } from '~/server/orpc';
 
 import { createNote, createNoteInput } from './note';
@@ -18,5 +21,10 @@ export const notesRouter = {
     return found;
   }),
 
-  create: procedure.input(createNoteInput).handler(({ context, input }) => context.run(createNote, input)),
+  // The command returns its failures as values. `orThrowRpc` answers each one
+  // with the typed oRPC error the `errors` map declares, so the client gets it typed.
+  create: procedure
+    .errors(errorMap(...COMMAND_FAILURES))
+    .input(createNoteInput)
+    .handler(({ context, input, errors }) => orThrowRpc(context.run(createNote, input), errors)),
 };

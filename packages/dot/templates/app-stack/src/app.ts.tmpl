@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import type { MigratableDb } from '@arki/db/migrate';
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import type { EmptyShape, NeedsShape, Plugin, PluginOwnership, PluginPhases } from '@arki/dot/plugin';
 import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
@@ -27,9 +27,13 @@ const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
  * 6. `journal-worker` runs the journal's effects (after-commit jobs) between start and stop.
  *
  * The database plugin is a parameter so tests can boot the same app on an
- * in-memory PGlite database (see `src/testing.ts`).
+ * in-memory PGlite database (see `src/testing.ts`). Postgres and PGlite fail
+ * in different ways, so the parameter accepts any failure (`PluginOwnership`,
+ * `PluginPhases`); `boot()` and `start()` return them as values.
  */
-export function createApp(database: Plugin<EmptyShape, { readonly db: MigratableDb<typeof relations> }>) {
+export function createApp(
+  database: Plugin<EmptyShape, { readonly db: MigratableDb<typeof relations> }, NeedsShape, string, PluginOwnership, PluginPhases>,
+) {
   return defineApp('{{name}}')
     .use(
       log(() => ({

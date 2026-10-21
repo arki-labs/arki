@@ -5,9 +5,12 @@
  *   with the actor from the request: the audit trail.
  * - `note` is the entity: how events turn into a row in `notes`.
  * - `createNote` is the command a procedure runs. It checks input, picks an
- *   id and writes the event. Event row and table row commit together.
+ *   id and writes the event. Event row and table row commit together. A
+ *   failure it returns rolls the whole command back.
  */
 import { z } from 'zod';
+
+import { isFailure } from '@arki/failure';
 
 import { j } from '~/server/journal';
 
@@ -35,6 +38,8 @@ export const createNoteInput = z.object({
 
 export const createNote = j.command('createNote', createNoteInput, async (input, { write }) => {
   const id = noteId.create();
-  await write(note, id, () => [NoteCreated({ title: input.title, body: input.body })]);
+  if (isFailure(id)) return id;
+  const written = await write(note, id, () => [NoteCreated({ title: input.title, body: input.body })]);
+  if (isFailure(written)) return written;
   return { id };
 });

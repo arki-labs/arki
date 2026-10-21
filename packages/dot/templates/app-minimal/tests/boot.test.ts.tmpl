@@ -1,12 +1,15 @@
 import { beforeAll, expect, test } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { app as appBuilder } from '../src/app.js';
 
-type BootedApp = Awaited<ReturnType<typeof appBuilder.boot>>;
-let booted: BootedApp;
+/** `boot()` returns a failure instead of throwing; in a test a failed boot is a bug, so throw it. */
+const bootApp = async () => orThrow(await appBuilder.boot());
+let booted: Awaited<ReturnType<typeof bootApp>>;
 
 beforeAll(async () => {
-  booted = await appBuilder.boot();
+  booted = await bootApp();
 });
 
 test('app boots and exposes env service', () => {
@@ -18,7 +21,7 @@ test('app boots and exposes env service', () => {
 test('diagnostics has all 5 arrays', () => {
   const { diagnostics } = booted;
   expect(diagnostics.plugins).toBeDefined();
-  expect(diagnostics.routes).toBeDefined();
+  expect(diagnostics.actions).toBeDefined();
   expect(diagnostics.services).toBeDefined();
   expect(diagnostics.lifecycle).toBeDefined();
   expect(diagnostics.issues).toBeDefined();

@@ -1,4 +1,5 @@
 import { createAppRuntime } from '@arki/dot/runtime';
+import { isFailure } from '@arki/failure';
 
 import { app, dev } from '~/app';
 
@@ -16,16 +17,22 @@ import type { RpcContext } from './orpc';
  */
 const runtime = createAppRuntime(process.env['DOT_DEV'] === '1' ? dev : app, { hot: import.meta.hot });
 
-/** The started app, started on first use. */
+/** The started app, started on first use, or the failure that kept it from starting. */
 export function startApp() {
   return runtime.get();
 }
 
-/** The oRPC context for one request. There is no sign-in yet, so writes have no actor. */
-export async function createRpcContext(): Promise<RpcContext> {
-  const { services } = await startApp();
-  return {
+/**
+ * The oRPC context for one request, or the failure that kept the app from
+ * starting. There is no sign-in yet, so writes have no actor.
+ */
+export async function createRpcContext() {
+  const started = await startApp();
+  if (isFailure(started)) return started;
+  const { services } = started;
+  const context: RpcContext = {
     db: services.db,
     run: services.journal.bind(services.db, { actorId: null }),
   };
+  return context;
 }
