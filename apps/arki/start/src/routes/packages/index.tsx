@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 import { Pill } from '~/shared/site-chrome';
 import { packageHref } from '~/features/site-data/package-urls';
@@ -18,8 +18,8 @@ import {
 
 export const Route = createFileRoute('/packages/')({
   validateSearch: z.object({
-    q: z.string().optional(),
-    status: z.string().optional(),
+    q: z.optional(z.string()),
+    status: z.optional(z.string()),
   }),
   loader: () => listPackageRowsFn(),
   head: () =>

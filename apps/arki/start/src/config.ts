@@ -1,21 +1,13 @@
-import type { ProjectKey } from '@fleet/sitekit/project-data.ts';
 import type { AppContextType } from '@fleet/sitekit/types.ts';
 import { CubeIcon } from '@arki/icons/phosphor';
-import { getProjectDataByKey } from '@fleet/sitekit/project-data.ts';
+// This app's own entry, so the other projects' data is not downloaded with it.
+import { arkiData as project } from '@fleet/sitekit/project-data/arki';
 
 import packageJSON from '../package.json';
 import { env } from './env';
 
-const projectName = packageJSON.name.split('/').shift()?.replace('@', '');
-
-const project = getProjectDataByKey(projectName as ProjectKey);
-
-if (!project) {
-  throw new Error(`Project "${projectName}" not found`);
-}
-
 const config = {
-  appKey: project.key as ProjectKey,
+  appKey: project.key,
   appTitle: project.title,
   appDefaultTitle: project.title + ' - ' + project.tagline,
   appDescription: project.description,
@@ -26,9 +18,9 @@ const config = {
   appAuthor: project.author.name,
   appAuthorAvatar: project.author.avatar,
   appIntegrations: project.integrations,
-  appLocales: project.i18n?.locales ?? [],
-  appDefaultLocale: project.i18n?.defaultLocale ?? 'en',
-  appLocalePrefix: project.i18n?.localePrefix ?? 'as-needed',
+  appLocales: project.i18n.locales,
+  appDefaultLocale: project.i18n.defaultLocale,
+  appLocalePrefix: project.i18n.localePrefix,
   // Imported here rather than read from `@fleet/sitekit/projects`, which imports every fleet project's icon.
   appIcon: CubeIcon,
 } satisfies AppContextType;

@@ -1,4 +1,4 @@
-import { registerDesignSystem } from '@fleet/sitekit/register-design-system';
+import { registerDesignSystemUnvalidated } from '@fleet/sitekit/register-design-system-unvalidated';
 
 import { arkiPaletteLabels } from './palette-labels';
 import { arkiTypography } from './typography';
@@ -15,7 +15,7 @@ declare module '@fleet/sitekit/design-system' {
  * (server and client).
  */
 export function registerArkiDesignSystem(): void {
-  registerDesignSystem('arki', {
+  registerDesignSystemUnvalidated('arki', {
     name: 'Arki',
     packagePath: '~/styles/arki',
     description:

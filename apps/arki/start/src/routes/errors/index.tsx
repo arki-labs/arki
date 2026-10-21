@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 import { packageHref } from '~/features/site-data/package-urls';
 import { listErrorsFn } from '~/features/site-data/site-data';
@@ -23,7 +23,7 @@ function codeCount(count: number): string {
 }
 
 export const Route = createFileRoute('/errors/')({
-  validateSearch: z.object({ q: z.string().optional() }),
+  validateSearch: z.object({ q: z.optional(z.string()) }),
   loaderDeps: ({ search }) => ({ q: search.q }),
   loader: async ({ deps }) => {
     const all = await listErrorsFn();
