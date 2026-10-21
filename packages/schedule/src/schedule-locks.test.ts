@@ -17,7 +17,7 @@ import type { MemoryStore } from '@arki/lock/memory';
 import type { PgSessionGuarantees, pgTransaction } from '@arki/lock/pg';
 import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from '@arki/lock/pg/lease';
 import type { RedisStore } from '@arki/lock/redis';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks, LockError, LockHeld } from '@arki/lock';
@@ -273,10 +273,10 @@ describe('schedules(core, [{ lock }])', () => {
 
   it('a lock with a `locks` service from locks() of @arki/lock/dot works end to end', async () => {
     const needs = { locks: service<Locker>() };
-    const billing = feature('billing', {
-      needs,
-      use: [schedules(needs, [{ name: 'bill', every: '1m', lock: { holdAtLeast: 0 }, handler: () => 'done' }])],
-    });
+    const billingCore = defineFeature('billing').needs(needs).usecases({});
+    const billing = billingCore.entrypoints(
+      schedules(billingCore, [{ name: 'bill', every: '1m', lock: { holdAtLeast: 0 }, handler: () => 'done' }]),
+    );
     const started = await orThrow(
       defineApp('plugin-app')
         .infra(locks({ namespace: 'billing', store: () => memoryStore() }))
@@ -439,10 +439,10 @@ const summaryOf = (actions: readonly { id: string; summary?: string }[]) =>
 describe('booted lock summary', () => {
   it('shows the whole lock line after boot, once the store is known, and keeps the short line in the static manifest', async () => {
     const needs = { locks: service<Locker>() };
-    const billing = feature('billing', {
-      needs,
-      use: [schedules(needs, [{ name: 'job', every: '1m', lock: true, handler: () => 'done' }])],
-    });
+    const billingCore = defineFeature('billing').needs(needs).usecases({});
+    const billing = billingCore.entrypoints(
+      schedules(billingCore, [{ name: 'job', every: '1m', lock: true, handler: () => 'done' }]),
+    );
     const configured = orThrow(
       defineApp('boot-summary')
         .infra(locks({ namespace: 'ns', store: () => memoryStore() }))

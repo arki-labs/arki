@@ -6,8 +6,7 @@
  * Why these tests exist: the journal composes BEFORE the features boot, so it
  * must find a feature's handlers in the feature value itself, wherever the
  * layers put them, and fold them into one declaration — or a write runs
- * without its projection, or a job has no owner. While both feature forms
- * exist, one journal must serve both. And an effect's needs must be checked
+ * without its projection, or a job has no owner. And an effect's needs must be checked
  * against the feature where the effect is listed, not at the first job.
  */
 import type { PGlite } from '@electric-sql/pglite';
@@ -17,14 +16,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { infra, rename, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
 import type { JobRunner } from './types.js';
-import { journal, journalEffects, journalHandlers, journalProjections, journalWorker } from './dot.js';
+import { journal, journalEffects, journalProjections, journalWorker } from './dot.js';
 import { need } from './handlers.js';
 import { jobId } from './id.js';
 import { project } from './projection.js';
@@ -111,13 +110,14 @@ function ordersFeature(sent: OrderId[], done?: (id: OrderId) => void) {
 }
 
 describe('journalProjections + journalEffects in a defineFeature feature', () => {
-  it('composes the journal from both layers before boot, next to an object-form feature, and runs each part', async () => {
+  it('composes the journal from both layers before boot, across features, and runs each part', async () => {
     const sent: OrderId[] = [];
     const delivered = new Map<OrderId, () => void>();
     const orders = ordersFeature(sent, id => delivered.get(id)?.());
-    const billing = feature('billing', {
-      use: [journalHandlers({ projections: [countPlaced('legacy-billing-count', 'legacy')] })],
-    });
+    const billing = defineFeature('billing')
+      .infra(journalProjections(countPlaced('billing-count', 'billing')))
+      .usecases({})
+      .entrypoints();
 
     const app = track(
       await orThrow(
@@ -130,16 +130,16 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     );
     await orThrow(app.start());
 
-    // One journal, both forms folded in, in feature order.
-    expect(app.services.journal.catalog.projections).toEqual(['chain-orders-count', 'legacy-billing-count']);
+    // One journal, every feature folded in, in feature order.
+    expect(app.services.journal.catalog.projections).toEqual(['chain-orders-count', 'billing-count']);
     expect(app.services.journal.catalog.effects).toEqual(['chain-order-mail']);
 
     const id = orderId(++next);
     const mailed = new Promise<void>(resolve => delivered.set(id, resolve));
     orThrow(await app.services.journal.run(db, placeOrder, { id, customerId: 'mixed' }, meta));
-    // Inline projections ran inside the write, from the infra unit and the legacy slice alike.
+    // Inline projections ran inside the write, from each feature's infra unit.
     expect(await placedCount('chain:mixed')).toBe(1);
-    expect(await placedCount('legacy:mixed')).toBe(1);
+    expect(await placedCount('billing:mixed')).toBe(1);
     // The effect ran in the worker with the feature's PRIVATE mailer, found by its local name.
     await mailed;
     expect(sent).toEqual([id]);
@@ -167,11 +167,14 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
     expect(await placedCount('child:nested')).toBe(1);
   });
 
-  it('refuses a duplicate across the two forms and names both features, so a job never has two owners', async () => {
+  it('refuses a duplicate across two features and names both, so a job never has two owners', async () => {
     const chain = defineFeature('chain')
       .infra(journalProjections(countPlaced('twice-count', 'a')))
       .entrypoints();
-    const legacy = feature('legacy', { use: [journalHandlers({ projections: [countPlaced('twice-count', 'b')] })] });
+    const legacy = defineFeature('legacy')
+      .infra(journalProjections(countPlaced('twice-count', 'b')))
+      .usecases({})
+      .entrypoints();
 
     await expect(
       defineApp('twice').infra(dbPlugin(), journal({ j })).features([chain, legacy]).boot(),

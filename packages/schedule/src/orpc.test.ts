@@ -10,7 +10,7 @@ import { implement } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { service } from '@arki/dot/unit';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
@@ -24,29 +24,27 @@ const needs = { clock: service<Clock>() };
 const DeliveryRefused = defineFailure('schedule.delivery_refused', { status: 409 });
 
 /** Three value shapes: exactly the body, a value that needs a mapping, and one with a legacy lock-held body. */
-const reader = feature('reader', {
-  needs,
-  use: [
-    schedules(needs, [
-      {
-        name: 'gate',
-        every: '1m',
-        handler: ({ clock }) => {
-          if (clock.now() < 0) return UnexpectedDefect({ cause: new Error('clock unavailable') });
-          return { gated: clock.now(), skipped: 1 };
-        },
+const readerCore = defineFeature('reader').needs(needs).usecases({});
+const reader = readerCore.entrypoints(
+  schedules(readerCore, [
+    {
+      name: 'gate',
+      every: '1m',
+      handler: ({ clock }) => {
+        if (clock.now() < 0) return UnexpectedDefect({ cause: new Error('clock unavailable') });
+        return { gated: clock.now(), skipped: 1 };
       },
-      {
-        name: 'retain',
-        every: '1m',
-        handler: ({ clock }): { ok: true; body: { purged: number } } | { ok: false; error: string } =>
-          clock.now() > 0 ? { ok: true, body: { purged: 4 } } : { ok: false, error: 'pool timed out' },
-      },
-      { name: 'items', every: '1m', handler: () => ({ processed: 7, failed: 0, durationMs: 120 }) },
-      { name: 'business', every: '1m', handler: ({ clock }) => (clock.now() > 0 ? { sent: 1 } : DeliveryRefused()) },
-    ]),
-  ],
-});
+    },
+    {
+      name: 'retain',
+      every: '1m',
+      handler: ({ clock }): { ok: true; body: { purged: number } } | { ok: false; error: string } =>
+        clock.now() > 0 ? { ok: true, body: { purged: 4 } } : { ok: false, error: 'pool timed out' },
+    },
+    { name: 'items', every: '1m', handler: () => ({ processed: 7, failed: 0, durationMs: 120 }) },
+    { name: 'business', every: '1m', handler: ({ clock }) => (clock.now() > 0 ? { sent: 1 } : DeliveryRefused()) },
+  ]),
+);
 const features = [reader] as const;
 
 // Keys on purpose NOT in the value's order: the wire must keep the value's order anyway.

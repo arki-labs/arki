@@ -13,7 +13,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
@@ -93,9 +93,9 @@ const dependency = infra({
   provides: { dependency: () => ({ name: 'test-dependency' }) satisfies Dependency },
 });
 
-const orders = feature('orders', { use: [jobs(registry)] });
+const orders = defineFeature('orders').entrypoints(jobs(registry));
 // A feature with no jobs: the worker must skip it, not fail.
-const billing = feature('billing', {});
+const billing = defineFeature('billing').entrypoints();
 
 type QueueCtx = {
   readonly dependencyName: string;
@@ -200,12 +200,18 @@ describe('queue() — the infra client', () => {
     // Why: features enqueue through a service they declare, so the client
     // must be a `.infra()` adapter mounted BEFORE `.features()`.
     let seen: QueueClient | undefined;
-    const checkout = feature('checkout', {
+    // A chain feature has no boot hook of its own: its infra unit boots with it.
+    const checkoutBoot = infra({
+      name: 'checkout-boot',
       needs: { queue: service<QueueClient>() },
       boot: ({ queue: client }) => {
         seen = client;
       },
     });
+    const checkout = defineFeature('checkout')
+      .needs({ queue: service<QueueClient>() })
+      .infra(checkoutBoot)
+      .entrypoints();
 
     const app = await orThrow(
       defineApp('api')
@@ -225,7 +231,7 @@ describe('queue() — the infra client', () => {
   });
 
   it('a feature that needs the client does not compile without queue()', () => {
-    const checkout = feature('checkout', { needs: { queue: service<QueueClient>() } });
+    const checkout = defineFeature('checkout').needs({ queue: service<QueueClient>() }).entrypoints();
     // @ts-expect-error — nothing provides `queue` before the features
     defineApp('api').features([checkout]);
     expect(true).toBe(true);
@@ -315,9 +321,9 @@ describe('queueWorker() — the entrypoint', () => {
     expect(stopped).toBe(1);
   });
 
-  it("reads a defineFeature feature's jobs() entrypoint, next to an object-form feature", async () => {
-    // Why: during the migration an app mounts both forms. The worker must
-    // register both registries and claim the consumer side of both, before boot.
+  it("reads each defineFeature feature's jobs() entrypoint", async () => {
+    // Why: an app mounts several features with jobs. The worker must
+    // register every registry and claim the consumer side of all, before boot.
     let registered: Record<string, unknown> | undefined;
     const { fakeQ } = fakeBuilder({ ...idleInstance(), register: next => ((registered = next), done()) });
     const encodeVideo = q.job

@@ -13,12 +13,12 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, DotLifecycleErrorCode, infra, rename, service, token } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { RouteBundle } from '../bundle.js';
-import { endpoints, routes, rpcMount } from '../bundle.js';
+import { routes, rpcMount } from '../bundle.js';
 import { route } from '../contract.js';
 import { endpoints as coreEndpoints, http, HTTP_PLUGIN_ERROR_CODES, registerRoutes } from '../dot.js';
 import { HTTP_ERROR_CODES } from '../error.js';
@@ -109,15 +109,14 @@ describe('http() plugin', () => {
   // `.features()`, and `.entrypoints(http())` serves their routes. A second list
   // inside http() would drift from the first.
   it('serves the routes of every mounted feature without the app listing them again', async () => {
-    const orders = feature('orders', {
-      needs: { ordersDb: service<OrdersDb>() },
-      actions: [listOrders],
-      use: [
-        endpoints(({ ordersDb }: { readonly ordersDb: OrdersDb }) => routes().bind(listOrders, () => ordersDb.list())),
-      ],
-    });
+    const ordersCore = defineFeature('orders').needs({ ordersDb: service<OrdersDb>() }).usecases({});
+    const orders = ordersCore.entrypoints(
+      coreEndpoints(ordersCore, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()), {
+        contracts: [listOrders],
+      }),
+    );
     // A feature with no HTTP surface is skipped, not an error.
-    const quiet = feature('quiet', {});
+    const quiet = defineFeature('quiet').entrypoints();
 
     const app = await orThrow(
       defineApp('http-feature-test')
@@ -135,9 +134,9 @@ describe('http() plugin', () => {
     await orThrow(app.dispose());
   });
 
-  it("serves a defineFeature feature's endpoints(core, build) next to an object-form feature", async () => {
-    // Why: during the migration an app mounts both forms behind one route
-    // table, and the chain form's handlers reach private infra through usecases.
+  it("serves a defineFeature feature's endpoints(core, build) next to a feature without private infra", async () => {
+    // Why: an app mounts several features behind one route table, and a
+    // handler reaches private infra through usecases.
     const store = infra({
       name: 'store',
       needs: { ordersDb: service<OrdersDb>() },
@@ -156,10 +155,10 @@ describe('http() plugin', () => {
         contracts: [listOrders],
       });
     const orders = core.entrypoints(orderRoutes(core));
-    const status = feature('status', {
-      actions: [health],
-      use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
-    });
+    const statusCore = defineFeature('status').usecases({});
+    const status = statusCore.entrypoints(
+      coreEndpoints(statusCore, () => routes().bind(health, () => ({ ok: true })), { contracts: [health] }),
+    );
 
     const app = await orThrow(
       defineApp('http-mixed')
@@ -194,10 +193,10 @@ describe('http() plugin', () => {
   // the features, when their routes do not exist yet. The builder rejects
   // it at compile time, so an app never serves a silently empty route table.
   it('cannot be mounted with .infra() ahead of the features it serves', () => {
-    const orders = feature('orders', {
-      actions: [listOrders],
-      use: [endpoints(() => routes().bind(listOrders, () => []))],
-    });
+    const ordersCore = defineFeature('orders').usecases({});
+    const orders = ordersCore.entrypoints(
+      coreEndpoints(ordersCore, () => routes().bind(listOrders, () => []), { contracts: [listOrders] }),
+    );
 
     const tooEarly = () =>
       defineApp('http-too-early')
@@ -208,10 +207,10 @@ describe('http() plugin', () => {
   });
 
   it('serves token bundles and feature routes from one route table', async () => {
-    const status = feature('status', {
-      actions: [health],
-      use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
-    });
+    const statusCore = defineFeature('status').usecases({});
+    const status = statusCore.entrypoints(
+      coreEndpoints(statusCore, () => routes().bind(health, () => ({ ok: true })), { contracts: [health] }),
+    );
 
     const app = await orThrow(
       defineApp('http-mixed-test')
@@ -232,8 +231,11 @@ describe('http() plugin', () => {
   });
 
   it('fails boot with E010 when a feature publishes a routes slice that is not a bundle', async () => {
-    const broken = feature('broken', {
-      use: [{ key: 'routes', actions: [], resolve: () => ({ not: 'a bundle' }) }],
+    const broken = defineFeature('broken').entrypoints({
+      kind: 'routes',
+      key: 'routes',
+      actions: [],
+      resolve: () => ({ not: 'a bundle' }),
     });
 
     await expect(

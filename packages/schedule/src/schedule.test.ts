@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -118,9 +118,9 @@ describe('schedule DOT projection', () => {
         calls.push(ctx.dependencyName);
       },
     });
-    const reports = feature('reports', { use: [schedules([daily])] });
+    const reports = defineFeature('reports').entrypoints(schedules([daily]));
     // A feature with no schedules is skipped, not an error.
-    const quiet = feature('quiet', {});
+    const quiet = defineFeature('quiet').entrypoints();
     const fake = fakeDurableScheduler();
     const dependency = infra({ name: 'dependency', provides: { dependency: () => ({ name: 'dep' }) } });
     const backend = infra({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
@@ -151,7 +151,7 @@ describe('schedule DOT projection', () => {
 
   it('runs feature and app-level schedules on one runtime, so their names must not clash', async () => {
     const plain = defineSchedule({ name: 'shared-name', every: '1h', handler: () => Promise.resolve() });
-    const owner = feature('owner', { use: [schedules([plain])] });
+    const owner = defineFeature('owner').entrypoints(schedules([plain]));
 
     await expect(
       defineApp('schedule-clash')
@@ -165,7 +165,12 @@ describe('schedule DOT projection', () => {
   });
 
   it('fails boot with a coded error when a feature publishes a schedules slice that is not a schedule list', async () => {
-    const broken = feature('broken', { use: [{ key: 'schedules', actions: [], resolve: () => ({ not: 'a list' }) }] });
+    const broken = defineFeature('broken').entrypoints({
+      kind: 'schedules',
+      key: 'schedules',
+      actions: [],
+      resolve: () => ({ not: 'a list' }),
+    });
 
     await expect(defineApp('schedule-broken').features([broken]).entrypoints(schedule({})).boot()).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -432,7 +437,7 @@ describe('durable schedules', () => {
 
   it('the Dot unit fails boot for a durable feature schedule too, naming the schedule', async () => {
     const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: async () => {} });
-    const durableFeature = feature('durable-feature', { use: [schedules([nightly])] });
+    const durableFeature = defineFeature('durable-feature').entrypoints(schedules([nightly]));
 
     await expect(
       defineApp('durable-missing-feature').features([durableFeature]).entrypoints(schedule({})).boot(),

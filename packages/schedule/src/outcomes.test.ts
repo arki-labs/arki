@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp } from '@arki/dot/unit';
 import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks } from '@arki/lock';
@@ -63,22 +63,23 @@ describe('business outcomes', () => {
     await runtime.stop();
   });
 
-  it('infers both feature forms, including handlers that require the run argument', async () => {
+  it('infers every feature, including handlers that require the run argument', async () => {
     const refusal = Refused({ reason: 'feature disabled' });
-    const objectFeature = feature('object-report', {
-      use: [schedules({}, [{ name: 'object', every: '1h', handler: (_ctx, run) => (run.lock ? 1 : refusal) }])],
-    });
+    const runCore = defineFeature('run-report');
+    const runFeature = runCore.entrypoints(
+      schedules(runCore, [{ name: 'object', every: '1h', handler: (_ctx, run) => (run.lock ? 1 : refusal) }]),
+    );
     const core = defineFeature('chain-report');
     const chain = core.entrypoints(
       schedules(core, [{ name: 'chain', every: '1h', handler: () => DifferentRefusal() }]),
     );
     const app = await orThrow(
       defineApp('typed-failures')
-        .features([objectFeature, chain])
+        .features([runFeature, chain])
         .entrypoints(schedule({ clock: 'host' }))
         .boot(),
     );
-    const client = composeSchedules([objectFeature, chain], app.services.scheduler);
+    const client = composeSchedules([runFeature, chain], app.services.scheduler);
     const result = await client.trigger('object');
     if (result.status === 'refused') expectTypeOf(result.failure).toEqualTypeOf<typeof refusal>();
     if (result.status === 'ran') expectTypeOf(result.value).toEqualTypeOf<number>();
@@ -92,7 +93,7 @@ describe('business outcomes', () => {
   it('infers legacy definition-list slices from the definitions the runtime executes', async () => {
     const refusal = Refused({ reason: 'legacy' });
     const report = defineSchedule({ name: 'legacy', every: '1h', handler: () => Promise.resolve(refusal) });
-    const reports = feature('legacy-report', { use: [schedules([report])] });
+    const reports = defineFeature('legacy-report').entrypoints(schedules([report]));
     const app = await orThrow(
       defineApp('legacy')
         .features([reports])

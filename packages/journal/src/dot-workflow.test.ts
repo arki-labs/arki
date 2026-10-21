@@ -1,5 +1,5 @@
 /**
- * Workflows in the Dot adapter: `journalHandlers({ workflows })` and `journalWorkflows(core, defs)`.
+ * Workflows in the Dot adapter: `journalWorkflows(core, defs)`.
  *
  * Why these tests exist: `workflow.step` is ONE effect shared by every workflow, but a Dot feature's
  * services belong to the feature. A step must get the services of the feature that declared its
@@ -15,11 +15,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { z } from 'zod';
 
 import { defineApp, rename } from '@arki/dot';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { infra, service, token } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
-import { journal, journalHandlers, journalWorker, journalWorkflows } from './dot.js';
+import { journal, journalWorker, journalWorkflows } from './dot.js';
 import { need } from './handlers.js';
 import { initJournal } from './journal.js';
 import { tables } from './test-support.js';
@@ -64,14 +64,15 @@ const stateOf = async (id: string) =>
 const completed = (id: string) =>
   vi.waitFor(async () => expect(await stateOf(id)).toBe('completed'), { timeout: 5000 });
 
-describe('journalHandlers({ workflows })', () => {
+describe('journalWorkflows(core, defs) in a feature', () => {
   it("a feature's workflows are composed and started through services.journal", async () => {
     const wj = freshJournal();
     const hello = wj
       .workflow('dot.hello', { version: 1, input: z.object({}) })
       .step('greet', () => 'hi')
       .finish();
-    const greeter = feature('greeter', { use: [journalHandlers({ workflows: [hello] })] });
+    const greeterCore = defineFeature('greeter').usecases({});
+    const greeter = greeterCore.entrypoints(journalWorkflows(greeterCore, [hello]));
     const app = track(
       await orThrow(defineApp('wf-compose')
         .infra(dbPlugin())
@@ -94,10 +95,8 @@ describe('journalHandlers({ workflows })', () => {
       .workflow('dot.needs', { version: 1, input: z.object({}), needs: { provider: need<Provider>() } })
       .step('call', ({ provider }) => void seen.push(provider.name))
       .finish();
-    const orders = feature('orders', {
-      needs: { provider: service<Provider>() },
-      use: [journalHandlers({ workflows: [flow] })],
-    });
+    const ordersCore = defineFeature('orders').needs({ provider: service<Provider>() }).usecases({});
+    const orders = ordersCore.entrypoints(journalWorkflows(ordersCore, [flow]));
     const app = track(
       await orThrow(defineApp('wf-services')
         .infra(dbPlugin())
@@ -123,17 +122,22 @@ describe('journalHandlers({ workflows })', () => {
         .workflow(`dot.${name}`, { version: 1, input: z.object({}), needs: { provider: need<Provider>() } })
         .step('call', ({ provider }) => void seen.push(`${name}:${provider.name}`))
         .finish();
-    const featureOf = <Name extends string>(name: Name) => {
+    const partsOf = <const Name extends string>(name: Name) => {
       const Token = token<Provider>()(`${name}.provider`);
-      const flow = flowOf(name);
-      return {
-        flow,
-        provider: rename(providerOf(name), { provider: Token.key }),
-        feature: feature(name, { needs: { provider: Token }, use: [journalHandlers({ workflows: [flow] })] }),
-      };
+      return { Token, flow: flowOf(name), provider: rename(providerOf(name), { provider: Token.key }) };
     };
-    const orders = featureOf('orders');
-    const billing = featureOf('billing');
+    const ordersParts = partsOf('orders');
+    const ordersCore = defineFeature('orders').needs({ provider: ordersParts.Token }).usecases({});
+    const orders = {
+      ...ordersParts,
+      feature: ordersCore.entrypoints(journalWorkflows(ordersCore, [ordersParts.flow])),
+    };
+    const billingParts = partsOf('billing');
+    const billingCore = defineFeature('billing').needs({ provider: billingParts.Token }).usecases({});
+    const billing = {
+      ...billingParts,
+      feature: billingCore.entrypoints(journalWorkflows(billingCore, [billingParts.flow])),
+    };
     const app = track(
       await orThrow(defineApp('wf-two-features')
         .infra(dbPlugin())
@@ -159,13 +163,15 @@ describe('journalHandlers({ workflows })', () => {
       .workflow('dot.twice', { version: 1, input: z.object({}) })
       .step('a', () => 1)
       .finish();
-    const declare = <Name extends string>(name: Name) =>
-      feature(name, { use: [journalHandlers({ workflows: [flow] })] });
+    const oneCore = defineFeature('one').usecases({});
+    const one = oneCore.entrypoints(journalWorkflows(oneCore, [flow]));
+    const twoCore = defineFeature('two').usecases({});
+    const two = twoCore.entrypoints(journalWorkflows(twoCore, [flow]));
     await expect(
       defineApp('wf-twice')
         .infra(dbPlugin())
         .infra(journal({ j: wj, workflowMeta }))
-        .features([declare('one'), declare('two')])
+        .features([one, two])
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -182,8 +188,9 @@ describe('journalHandlers({ workflows })', () => {
       .step('call', ({ provider }) => provider.name)
       .finish();
     // Erased on purpose: what a caller that skips the types would hand over (the types refuse it).
-    const erased: Parameters<typeof journalHandlers>[0] = { workflows: [flow] };
-    const bare = feature('bare', { use: [journalHandlers(erased)] });
+    const erased: Parameters<typeof journalWorkflows>[1] = [flow];
+    const bareCore = defineFeature('bare').usecases({});
+    const bare = bareCore.entrypoints(journalWorkflows(bareCore, erased));
     await expect(
       defineApp('wf-missing')
         .infra(dbPlugin())
@@ -204,7 +211,8 @@ describe('journalHandlers({ workflows })', () => {
       .workflow('dot.approve', { version: 2, input: z.object({}) })
       .waitFor('approval', { signal: 'approved', schema: approval })
       .finish();
-    const approvals = feature('approvals', { use: [journalHandlers({ workflows: [flow] })] });
+    const approvalsCore = defineFeature('approvals').usecases({});
+    const approvals = approvalsCore.entrypoints(journalWorkflows(approvalsCore, [flow]));
     const configured = orThrow(defineApp('wf-manifest')
       .infra(dbPlugin())
       .infra(journal({ j: wj, workflowMeta }))
@@ -257,7 +265,8 @@ describe('journalWorker() and workflows', () => {
       .sleep('nap', () => new Date(Date.now() + 100))
       .step('after', () => void order.push('after'))
       .finish();
-    const sleepy = feature('sleepy', { use: [journalHandlers({ workflows: [flow] })] });
+    const sleepyCore = defineFeature('sleepy').usecases({});
+    const sleepy = sleepyCore.entrypoints(journalWorkflows(sleepyCore, [flow]));
     const app = track(
       await orThrow(defineApp('wf-timer')
         .infra(dbPlugin())

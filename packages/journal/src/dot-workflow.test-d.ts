@@ -1,10 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { service } from '@arki/dot/unit';
 
-import { journalHandlers, journalWorkflows } from './dot.js';
+import { journalWorkflows } from './dot.js';
 import { need } from './handlers.js';
 import { initJournal } from './journal.js';
 import { tables } from './test-support.js';
@@ -23,18 +23,18 @@ const plain = wj
 
 describe("a workflow's needs are read from its definition", () => {
   it('a feature that declares a workflow must have the services its needs name', () => {
+    const bare = defineFeature('bare').usecases({});
     // @ts-expect-error -- the feature has no `provider` need, but the workflow needs one
-    const refused = feature('bare', { use: [journalHandlers({ workflows: [needy] })] });
-    const given = feature('given', {
-      needs: { provider: service<Provider>() },
-      use: [journalHandlers({ workflows: [needy] })],
-    });
+    const refused = bare.entrypoints(journalWorkflows(bare, [needy]));
+    const givenCore = defineFeature('given').needs({ provider: service<Provider>() }).usecases({});
+    const given = givenCore.entrypoints(journalWorkflows(givenCore, [needy]));
     expectTypeOf(refused.name).toBeString();
     expectTypeOf(given.name).toBeString();
   });
 
   it('a workflow with no needs asks the feature for nothing', () => {
-    const free = feature('free', { use: [journalHandlers({ workflows: [plain] })] });
+    const freeCore = defineFeature('free').usecases({});
+    const free = freeCore.entrypoints(journalWorkflows(freeCore, [plain]));
     expectTypeOf(free.name).toBeString();
   });
 

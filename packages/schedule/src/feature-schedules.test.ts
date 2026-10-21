@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -23,17 +23,15 @@ type Ledger = { readonly close: () => string };
 const mailerNeeds = { mailer: service<Mailer>() };
 const ledgerNeeds = { ledger: service<Ledger>() };
 
-const digest = feature('digest', {
-  needs: mailerNeeds,
-  use: [
-    schedules(mailerNeeds, [{ name: 'send-digest', every: '1m', handler: ({ mailer }) => mailer.send('subscribers') }]),
-  ],
-});
+const digestCore = defineFeature('digest').needs(mailerNeeds).usecases({});
+const digest = digestCore.entrypoints(
+  schedules(digestCore, [{ name: 'send-digest', every: '1m', handler: ({ mailer }) => mailer.send('subscribers') }]),
+);
 
-const billing = feature('billing', {
-  needs: ledgerNeeds,
-  use: [schedules(ledgerNeeds, [{ name: 'close-books', cron: '* * * * *', handler: ({ ledger }) => ledger.close() }])],
-});
+const billingCore = defineFeature('billing').needs(ledgerNeeds).usecases({});
+const billing = billingCore.entrypoints(
+  schedules(billingCore, [{ name: 'close-books', cron: '* * * * *', handler: ({ ledger }) => ledger.close() }]),
+);
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -113,15 +111,12 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
   });
 
   it('rejects, at compile time, a schedule whose needs the feature does not declare', () => {
-    feature('forgetful', {
-      // @ts-expect-error the schedule needs `mailer`, which this feature's `needs` does not list.
-      use: [schedules(mailerNeeds, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }])],
-    });
-    // Control: the same slice compiles once the feature declares the need.
-    feature('declared', {
-      needs: mailerNeeds,
-      use: [schedules(mailerNeeds, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }])],
-    });
+    const forgetful = defineFeature('forgetful').usecases({});
+    // @ts-expect-error the schedule needs `mailer`, which this feature's `needs` does not list.
+    schedules(forgetful, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }]);
+    // Control: the same schedule compiles once the feature declares the need.
+    const declared = defineFeature('declared').needs(mailerNeeds).usecases({});
+    schedules(declared, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }]);
   });
 
   // A durable tick runs in another process that does not hold these services.
@@ -242,19 +237,18 @@ describe('the scheduler service', () => {
 
   it('keeps the failure cause on handler-failed', async () => {
     const boom = new Error('mail server down');
-    const failing = feature('failing', {
-      use: [
-        schedules({}, [
-          {
-            name: 'fails',
-            every: '1h',
-            handler: () => {
-              throw boom;
-            },
+    const failingCore = defineFeature('failing').usecases({});
+    const failing = failingCore.entrypoints(
+      schedules(failingCore, [
+        {
+          name: 'fails',
+          every: '1h',
+          handler: () => {
+            throw boom;
           },
-        ]),
-      ],
-    });
+        },
+      ]),
+    );
     const app = await orThrow(
       defineApp('failing-app')
         .features([failing])

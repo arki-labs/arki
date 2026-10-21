@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable, z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
-import { feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
@@ -92,7 +92,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
         received.push(`${ctx.worker}:${data.to}`);
         return Promise.resolve('sent');
       });
-    const mail = feature('mail', { use: [jobs({ sendMail })] });
+    const mail = defineFeature('mail').entrypoints(jobs({ sendMail }));
     const keyPrefix = `split-${crypto.randomUUID()}:`;
 
     const api = await orThrow(
@@ -164,7 +164,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
       .step('reserve', { job: reserve, data: input => ({ orderId: input.orderId }) })
       .step('notify', { job: notify, data: input => ({ to: input.orderId }), dependsOn: ['reserve'] })
       .build();
-    const orders = feature('orders', { use: [jobs({ reserve, notify, orderFlow })] });
+    const orders = defineFeature('orders').entrypoints(jobs({ reserve, notify, orderFlow }));
     const keyPrefix = `flow-${crypto.randomUUID()}:`;
 
     const api = await orThrow(

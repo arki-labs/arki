@@ -4,14 +4,14 @@
  * Why these tests exist: a schedules file sits next to the feature, not in
  * it, so its handlers must be typed from the core alone (no annotation, no
  * restated deps) and must run on the feature's own private infra and
- * usecases. And while both feature forms exist, one scheduler and one typed
- * client must serve an app that mounts both.
+ * usecases. And one scheduler and one typed client must serve an app that
+ * mounts several features.
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DepsOf } from '@arki/dot/feature';
 import type { SuccessOf } from '@arki/failure';
-import { defineFeature, feature } from '@arki/dot/feature';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -43,12 +43,12 @@ const digestSchedules = (c: typeof core) =>
 
 const digest = core.entrypoints(digestSchedules(core));
 
-/** The object form, still mounted next to it during the migration. */
+/** A second feature with only a need and no private infra, mounted next to it. */
 const ledgerNeeds = { ledger: service<Ledger>() };
-const billing = feature('billing', {
-  needs: ledgerNeeds,
-  use: [schedules(ledgerNeeds, [{ name: 'close-books', every: '1h', handler: ({ ledger }) => ledger.close() }])],
-});
+const billingCore = defineFeature('billing').needs(ledgerNeeds).usecases({});
+const billing = billingCore.entrypoints(
+  schedules(billingCore, [{ name: 'close-books', every: '1h', handler: ({ ledger }) => ledger.close() }]),
+);
 
 const boot = () =>
   defineApp('mixed')
@@ -75,7 +75,7 @@ describe('schedules(core, defs)', () => {
     expect(true).toBe(true);
   });
 
-  it("runs the handler on the feature's private infra and usecases, next to an object-form feature", async () => {
+  it("runs the handler on the feature's private infra and usecases, next to another feature", async () => {
     const app = await orThrow(boot());
     await expect(app.services.scheduler.trigger('send-digest')).resolves.toEqual({
       name: 'send-digest',
@@ -97,8 +97,8 @@ describe('schedules(core, defs)', () => {
   });
 });
 
-describe('composeSchedules over both feature forms', () => {
-  it("accepts either form's names and types each result from its own handler", async () => {
+describe('composeSchedules over several features', () => {
+  it("accepts every feature's names and types each result from its own handler", async () => {
     const app = await orThrow(boot());
     const client = composeSchedules([digest, billing], app.services.scheduler);
     const sent = await client.trigger('send-digest');
