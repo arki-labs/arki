@@ -1,5 +1,165 @@
 # @arki/db
 
+## 0.4.0
+
+### Minor Changes
+
+- 7ce6a18: A PGlite data directory has one owner. `initDbRuntimeLocal` (and so `db({ driver: 'pglite', dataDir })`) takes an owner lock, `<dataDir>/.arki-owner`, before it opens PGlite. A second open while the first handle lives, in another process or in the same one, throws `DbRuntimeLocalError` with code `ARKI_DB_LOCAL_E001` and the owner's `pid` (both exported from `@arki/db/runtime-local`, with `DB_RUNTIME_LOCAL_ERROR_CODES`). A lock left by a process that is gone is taken over; there is no age-based takeover. `pglite.close()` gives the lock back, and so does a PGlite that fails to start (it used to stay open). `memory://` and `idb://` take no lock, and `node:fs` loads only for file paths.
+
+  `createDb({ url })` no longer needs `DB_URL`: the pool settings are read without validating it. `getDbConnectionParams()` works without `DB_URL` too.
+
+  Breaking (0.x): two handles on one PGlite directory used to open (and corrupt the data); the second now throws.
+
+- 8b3cc80: First-class repositories, ids and keyset pagination (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, phase 1c).
+
+  - `@arki/db/dot`: `repos(database.provides.db, factories)` — a feature's repositories as one plugin, built once per boot and bound to the database the handle names (its type must be one the factories accept). `repos.withTx(tx)` rebinds the set to a transaction (a fresh set per call; nested transactions rebind the original set). `withTx` is a reserved name (compile error and `ARKI_DB_PLUGIN_E002`). `reader(repo, ['get'])` publishes bound methods for other features (`ARKI_DB_PLUGIN_E003` for a non-method).
+  - `@arki/db/pagination` (new): `keysetQuery(keyset, columns)` — `orderBy`, `after(cursor)`, `take(limit)` (`limit + 1`) and `page(rows, limit)` for a `keyset()` from `@arki/contracts`.
+  - `@arki/db/id`: `idColumns(defineId('sty_'))` — the column helpers of `createIdFactory` for an id declared in `@arki/contracts`. `createIdFactory` now builds its columns through it (same output).
+
+- 115aa87: `@arki/db/dot` stores take the database from the feature, not from a handle argument.
+
+  - Breaking: `repos(factories)` and `advisoryLocks(options)` drop the handle parameter. Both need `db` unbound; the feature declares it: `defineFeature('highlights').needs({ db: entrypointOnly(database.provides.db) }).infra(repos({ … }))`. A feature that declares no `db`, or one of another type, fails at `.infra()` (compile and runtime).
+  - New `txRepos(factories)`: the same store for a scope that owns its transactions. The published `repos` has `withTx(tx)` only (`TxRepos<F>`), so no usecase can reach a database-bound repository.
+
+- d471284: `@arki/db/dot`: `transactions<Db>()`, an infra plugin that needs `db` unbound and publishes one function, `transaction(fn)`: `fn` runs inside a transaction of the feature's database, committed on return and rolled back on a throw. Nothing else leaves it (no query builder, no `db`), so with `db` entrypoint-only a usecase may open a transaction but never run raw SQL. The `tx` it hands out is the database's own transaction type (`TxOf<Db>`); `OpenTransaction<Tx>` is the published function's type.
+- 5e4c630: `transactions(handle)` takes the feature's database handle instead of a type argument: `transactions(database.provides.db)` replaces `transactions<Db>()`. The database and transaction types are read off the handle, and `.infra()` refuses a feature whose `db` need is another database's handle (compile error; `E026` at runtime). `db()` keeps its plugin name in the type (`Plugin<…, 'db'>`), `dbMigrations()` and `kv()` return what `plugin()` infers, so their handles carry `provider: 'db' | 'db-migrations' | 'kv'` instead of `string` and the feature builder's identity checks apply around them. Library plugins that need an app handle take it as a parameter, like `transactions(handle)`; a feature's own infra plugins may name handles directly in `needs` (the `arki-feature-layers/infra-runtime-imports` lint now allows the imports and bans only a plugin's own `feature.ts`, `usecases/` and `entrypoints/`).
+- 7ce6a18: `pendingMigrations(db, options)` (from `@arki/db/migrate`) lists the migrations `migrateDb` would apply now, in order. It is read only and uses drizzle's own rule. `dbMigrations()` now provides `migrations: { pending }`: the names its boot found pending, read before it applied them. `dot dev` prints them.
+- 7c05d9a: Add nominal domain kinds to `defineId(prefix, { kind })`, preserving canonical
+  schema output through `IdOf` and DB columns without changing stored strings.
+  The one-argument declaration remains compatible. Migrate each domain and its
+  consumers together using the canonical schema at raw boundaries.
+
+  Replace Journal's private Cuid2 generation with modern, supervised declarations.
+  Public `jobId`, Journal write/worker/workflow/operator methods, webhook scheduling,
+  Queue outbox scheduling and Mail outbox scheduling can now return precise
+  `IdGenerationFailure` outcomes. Handle returned failures before treating an
+  operation as committed or acknowledged. Partial writes roll back and adapters
+  preserve the original failure.
+
+  Admin actions can declare canonical `failures` and infer their exact execute
+  outcomes. Refusals produce failed receipts; undeclared or thrown failures are
+  supervised without leaking private metadata. Receipt replay and clients support
+  canonical server-error statuses. Dot outbox producers retain the complete
+  scheduling outcome.
+
+  See Contracts' `docs/upgrades/domain-ids.md` and Journal's
+  `docs/upgrades/id-generation-failures.md` for migration details and remaining
+  identity-branding scope.
+
+- 232d3e8: Share bounded Web Crypto generation across modern and legacy IDs. Legacy
+  `createId`, `createPrefixedId`, and factory `create`/`make`/`new` now return exact
+  canonical generation failures. Preserve stored formats and prefixes, including
+  legacy empty and punctuation prefixes, while removing the Cuid2 fallback to
+  `Math.random`. Infer stored types from the successful schema and handle failures
+  before side effects or string interpolation.
+
+  Modern declarations use `defineId` with `IdOf` inferred from the canonical schema.
+  Payment ID factory exports become browser-safe declarations; use `idColumns`
+  for their table helpers. Payment provider creates and billing persistence return
+  generation failures; webhook adapters must check these before acknowledgement.
+  AI tombstone columns use modern declarations. Flow stops on returned failures;
+  use `createFlow<State, Context>()(config)` to infer the exact node failure union.
+  Ordinary patches cannot disguise a canonical failure through structural typing.
+
+- 011ece7: Return exact ID generation failures from `defineId` and Auth generators, preserving
+  successful prefixes and schema types. Validate and bound the entropy provider
+  protocol; retain private causes and observe malformed asynchronous output.
+
+  Propagate failures through modern consumers. Drizzle scalar defaults bridge at
+  the foreign callback, while owned transactions restore canonical identity and
+  roll back without replaying a returned refusal. FS upload creation returns before
+  I/O and declares the same failure tuple in its native RPC contract.
+
+  Handle `isFailure(id)` before using a generated ID. Derive stored ID types from
+  the declaration or schema, not the generator's `ReturnType`. See Contracts'
+  `docs/upgrades/typed-ids.md`. Legacy DB generators remain unchanged pending their
+  separate consumer migration.
+
+- 71dea3e: Carry inferred failures through configure, boot, start, stop and dispose, with atomic service publication, rollback aggregation and supervised usecase invocation even without tracing. Configure now returns a typed outcome and remains synchronous with no I/O; logging activates during boot. Detached lifecycle callbacks must prove an undefined or concrete failure return rather than void.
+
+  Breaking: check configure before accessing the manifest, inspect stop/dispose outcomes, and handle managed CLI preflight failures under `dot.preflight_failed` in `.error.data.{app,migrations,report,failure}` (exit 3). Successful JSON paths remain unchanged. See `docs/upgrade-phases.md` for phase-specific outcomes and migration steps.
+
+  Cron oRPC adapters route canonical supervised defects through the existing failure policy before success mapping; business refusals keep their explicit responders.
+
+  Database, mail, queue, resilience and Journal adapters retain their authored factory and lifecycle return types, including driver-specific service types.
+
+- 9281865: `listenOnPool` moves from `@arki/journal` to `@arki/db/pg`, with `ListenClient`, `ListenPool`, `ListenOptions` and `unrefTimer`. **Breaking for `@arki/journal`:** it no longer exports `listenOnPool`, `ListenClient` or `ListenPool`; import them from `@arki/db/pg`. `journal.worker(db, { listen })` is unchanged. The listener now also handles an `end` without an error, runs a `select 1` health check every `healthMs` (default 5000; no answer by the next check drops the client), reports `onState('ready' | 'disconnected')`, releases a lost client exactly once, and forwards nothing from a released client. `ListenClient` gains `on('end')`. `@arki/db` no longer has a dev dependency on `@arki/journal`; the two tests that used both now live in `@arki/journal`.
+
+  `@arki/live/pg` (milestone M1): `liveMigration` generates the reviewable trigger SQL (statement triggers that publish `{ v: 1, tag }` at commit; partition leaves publish their root), `liveChannel`, `verifyLiveTriggers` lists every table that would not publish (missing, disabled or replica-only, wrong function, events or arguments, uncovered partition leaf), `touch` publishes tags from inside a transaction, and `pgSource` is the hub's source on a `pg` pool: `ready` only after `LISTEN`, `gap` on a lost listener or an unreadable payload. Each hint carries the committing transaction's id (`txid`, `pg_current_xact_id()` as a decimal string), and the hub's `change` frame now has `txids` (strict schema change). The generated SQL splits statements with `--> statement-breakpoint`, so Drizzle's migrator runs it on PGlite too. `@arki/db` is a new optional peer.
+
+- 62ec96a: Return a canonical failure from a transaction callback to roll back its writes and preserve the original failure. Successful callbacks commit. The transaction helpers now expose inferred failure outcomes for database faults, cancellation and uncertain commits; inspect those outcomes before using success values.
+
+  Serializable retries remain bounded to PostgreSQL serialization failures and deadlocks. An uncertain commit is never automatically replayed. Plain transaction wrappers retain their existing isolation and single-attempt behavior.
+
+  Transactional oRPC procedures declare the canonical transaction error map. Their middleware classifies `result.output` and preserves the surrounding result metadata. See the database transaction upgrade guide for caller and contract migration steps.
+
+- 232d3e8: Cursor encoding and decoding return canonical failures. Database pagination
+  preserves those outcomes before building SQL or returning a page. Check codec
+  results and declare the original cursor failures at RPC boundaries.
+
+  Failure lint rules now catch discarded callback returns, nested aggregate and
+  iterator results, and blind acceptance through aliases or generic failure guards.
+  Handle each outcome or forward it to its owner.
+  Browser contract linting admits canonical failure definitions while keeping
+  exception bridges in implementations.
+  The exported lock conformance suite now checks each queued task's acquisition
+  outcome before accepting its completion counts.
+
+  Dot acquires telemetry instruments inside guarded execution, so importing before
+  SDK setup works and broken reporters cannot replace application outcomes.
+
+- 7b4b5bf: Transactional procedures. Three new entries:
+
+  - `@arki/db/transaction`: `runTransaction(db, work, options)` runs `work` in one SERIALIZABLE transaction and reruns it on SQLSTATE `40001` / `40P01` only (bounded: `retries` 0–10, default 3; jittered 10–250 ms waits). Also `retryableSqlState`, `DbTransactionError` (`ARKI_DB_TX_E001`–`E006`), `isDbTransactionError`, `parseTransactionSettings`. Portable.
+  - `@arki/db/orpc`: `transactionalProcedure(db, { repos, retries })` is an oRPC middleware that gives the handler `tx` and repositories bound with `withTx(tx)`, reruns the handler on a conflict, and maps exhaustion to `ORPCError('CONFLICT')` (409). Use with `implement(contract, transactionalProcedureConfig)`, as the last `.use()`. `TransactionScopeOf<typeof transact>` is the scope a usecase takes. Portable.
+  - `@arki/db/eslint`: the type-aware rule `db/no-effects-in-transaction` reports `fetch`, queue writes (`Queue#add`, `trigger()`, `enqueue()`) and `.effect()` inside transactional code.
+
+  `TransactionalDb` now accepts the transaction config: `transaction(fn, config?: PgTransactionConfig)`. A database whose `transaction` takes no config still fits; `createUnitOfWork` is unchanged.
+
+  New dependencies: `@arki/resilience` and `@arki/clock` (and, through resilience, `cockatiel` and `@arki/failure`). New optional peers: `@orpc/server`, `@typescript-eslint/utils`, `eslint`, `typescript`. The package now ships `llms.txt` and `docs/`.
+
+- f2e9f69: Breaking: `defineEnv` now validates in every environment. `CI` and `lint` runs no longer skip validation. The only implicit opt-out is `SKIP_ENV_VALIDATION=1` (exactly `1`); set it only in build stages that run without secrets. `options.skipValidation` still overrides it. The `@arki/env/dot` plugin now validates at boot and fails with `ARKI_ENV_PLUGIN_E001` (new `ENV_PLUGIN_ERROR_CODES`), and `EnvServices['env']` is derived from `defineEnv` without a cast.
+- 232d3e8: Repair schema/type agreement across Drizzle validators, ID factories and AI configuration.
+
+  Breaking: generated table validators no longer claim phantom `$type<T>` shapes. Use a runtime schema with `jsonColumn` and reuse it in explicit validator refinements for precise input/output types. Bare JSON columns retain the native runtime validator and its honest inferred type.
+
+  Breaking: `createIdFactory(prefix)` infers its ID from the literal prefix; remove the former second type argument. Payments ID aliases now reflect the prefixes their generators already produce. Existing generated values and stored IDs are unchanged.
+
+  Breaking: replace AI `SearchOptionsType` with `SearchSettings`, and `AIServiceConfigType` with `RAGServiceConfig`. The `@arki/ai/types` aliases use those same distinct names. Provider configuration and sanitizer patterns now share their actual validation schemas, preserving custom `RegExp` rules.
+
+  See `docs/features/arki-framework/migrations/defined-once.md` for migration examples and compatibility notes.
+
+- 670554a: Return canonical failures from local PGlite initialization and expose typed
+  owned cleanup. Generate a nominal UUID owner ID before filesystem mutation,
+  propagate exact failures through the Dot provider, and supervise Drizzle
+  construction and failed startup cleanup. Check `isFailure` before using the
+  result and use its `close()` method for typed cleanup. Raw PGlite retains its
+  foreign close contract.
+
+### Patch Changes
+
+- 5bc6390: `db()` publishes through a `provides` factory (`database.provides.db` is a typed handle before boot) and the pg driver takes `url?: () => string | undefined`, read at boot and falling back to `DB_URL`. `createDb()` accepts an optional `url` that overrides `DB_URL`.
+- 232d3e8: Propagate exact Clock sleep failures through retry policies, composition, fallback helpers and Dot services. Retry stops on a failed wait. Owned scopes recognize canonical Clock cancellation only with their private cancellation cause. Callers must inspect retry outcomes; success remains unwrapped.
+
+  Transactions and HTTP clients map wait refusals to their existing cancellation/defect contracts without repeating the operation.
+
+- 3359639: Add `mergeRelations` to `@arki/db/orm`. It joins several `defineRelationsPart(...)` results into one relations config, merging per table, so features can each declare their own relations without losing keys on shared tables. The same relation declared twice throws `DB_COMPOSITION_E004`.
+- cbefc52: Dot plugins no longer pass a hard-coded `version` (the field was removed from `@arki/dot`).
+- b9ae16f: Trace local database initialization, file ownership acquisition and owned close
+  through the application-configured OpenTelemetry provider. Spans inherit the
+  active caller context and record only canonical failure codes. Concurrent close
+  calls share one attempt; broken or reentrant reporting cannot duplicate work,
+  alter exact failure results or release unconfirmed ownership.
+- 953991a: Docs standard: new `AGENTS.md`, a README in the standard section order with a tested quick start, `Limits` and `Failure behaviour`, a rewritten `llms.txt` with import paths, an agent guide with a model, a task map and a verify section, a backup and restore recipe, and `@fix` and `@verify` tags on every error code. A code comment no longer names an app.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- 2ce7fe2: New `@arki/db/errors` entry with `isUniqueViolation(error, constraint?)`: the "insert, and answer CONFLICT on a duplicate" check, read the same way for node-postgres, PGlite and Bun SQL, and through Drizzle's `DrizzleQueryError`. Bun SQL puts the SQLSTATE in `errno` and its own name (`ERR_POSTGRES_SERVER_ERROR`) in `code`, so a check that reads `code` never matched there.
+
+  Fix: `runTransaction` now retries a `40001` / `40P01` raised by Bun SQL. `retryableSqlState` stopped at Bun's `code` and never saw the SQLSTATE in `errno`, so under Bun a serialization failure or deadlock reached the caller on the first try.
+
+  `@arki/journal` uses the shared check in place of its private copy, and no longer matches the error message text.
+
 ## 0.3.1
 
 ### Patch Changes

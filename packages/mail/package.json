@@ -1,6 +1,6 @@
 {
   "name": "@arki/mail",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Typed mail for TypeScript: Standard Schema templates, honest transports, quota failover, and mail that commits with your transaction.",
   "repository": {
     "type": "git",
