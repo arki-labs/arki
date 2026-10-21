@@ -3,7 +3,8 @@
    agents and compare pages. Everything lives under `.site` (the root
    of `SiteSectionLayout`). Colours are arki semantic tokens, so
    light/dark follows the app theme (`.dark` on <html>). Fonts come
-   from arki (workbench's) `--font-sans` / `--font-mono`. Loaded by the five
+   from arki: `--font-sans` (IBM Plex Sans), `--font-mono` (JetBrains Mono),
+   headings `--heading-font` (Archivo, set in global.css). Loaded by the five
    section `route.tsx` files through `site-chrome.tsx`.
    ──────────────────────────────────────────────────────────────── */
 

@@ -1,4 +1,2 @@
-// Choose your design system's font exports:
-//   atelier: warm, editorial aesthetic (ekuation, manuscribed, domodoro)
-//   workbench: tool-first, calm utility (sudoku, typeroom, hyphenate)
-export { mono, sans, serif } from '@arki/design-systems/workbench/fonts';
+// arki.dev uses the arki brand system: Archivo headings, IBM Plex Sans text, JetBrains Mono code.
+export { mono, sans, serif } from '@arki/design-systems/arki/fonts';

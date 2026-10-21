@@ -38,3 +38,10 @@
 @source "../../../../../packages/design-systems/src";
 
 @custom-variant dark (&:is(.dark *));
+
+/* arki headings are Archivo. Base layer, so any page rule that sets its own font-family wins. */
+@layer base {
+  :where(h1, h2, h3, h4, h5, h6) {
+    font-family: var(--heading-font);
+  }
+}

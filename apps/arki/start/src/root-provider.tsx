@@ -1,7 +1,11 @@
 import { ThemeProvider } from '@arki/theme';
 import { AppProvider } from '@fleet/sitekit/app-context.tsx';
+import { arkiThemeClasses, arkiThemes } from '@arki/design-systems/arki/themes';
 
 import config from '~/config';
+
+// One stable array: the provider re-applies the theme whenever `themes` changes identity.
+const siteThemes = [...arkiThemes];
 
 interface RootProviderProps {
   children: React.ReactNode;
@@ -15,7 +19,14 @@ interface RootProviderProps {
 // designSystemId: the app's design system; arki.dev uses the arki brand system (must match styles/global.css)
 export function RootProvider({ children }: RootProviderProps) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableColorScheme enableSystem>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableColorScheme
+      enableSystem
+      themes={siteThemes}
+      themeClasses={arkiThemeClasses}
+    >
       <AppProvider appContext={config} designSystemId="arki">
         {children}
       </AppProvider>

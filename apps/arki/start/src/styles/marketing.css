@@ -2,7 +2,8 @@
    marketing.css — chrome and brand-token scope for the arki.dev
    marketing surface. Loaded by `_marketing.tsx` layout route.
    Colours come from the arki design system (mineral in light,
-   signal in dark); fonts are its inherited workbench fonts.
+   signal in dark, parchment and drafting table by candle); fonts are
+   its own: Archivo headings, IBM Plex Sans text, JetBrains Mono code.
    ──────────────────────────────────────────────────────────────── */
 
 .marketing {
@@ -102,7 +103,7 @@
   font-size: 10px;
   color: var(--foreground);
 }
-.marketing-statusbar .pill.success { color: hsl(142 65% 55%); border-color: hsl(142 65% 55% / 0.3); }
+.marketing-statusbar .pill.success { color: var(--success); border-color: color-mix(in oklab, var(--success) 30%, transparent); }
 .marketing-statusbar .pill .dot {
   width: 6px;
   height: 6px;
@@ -142,10 +143,10 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: linear-gradient(90deg, transparent, hsl(240 6% 90% / 0.35));
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--muted) 35%, transparent));
 }
 :is(.dark) .band-side {
-  background: linear-gradient(90deg, transparent, hsl(240 6% 14% / 0.25));
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--muted) 25%, transparent));
 }
 .band-tag {
   font-family: var(--font-mono);

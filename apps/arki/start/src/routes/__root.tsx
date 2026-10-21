@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scripts } from '@tanstack/react-router';
 
 import { DevTools } from '@fleet/sitekit/devtools';
+import { arkiThemeClasses, arkiThemes } from '@arki/design-systems/arki/themes';
 import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/theme/script';
 
 import { getLocale } from '../paraglide/runtime.js';
@@ -71,7 +72,10 @@ function RootDocument({ lang, children }: { lang: string; children: ReactNode })
     <html suppressHydrationWarning lang={lang}>
       <head>
         <HeadContent />
-        <FunctionOnce param={THEME_STORAGE_KEY}>{themeDetectionFn}</FunctionOnce>
+        {/* Same themes and classes as ThemeProvider in root-provider.tsx, so the first paint matches hydration. */}
+        <FunctionOnce param={{ storageKey: THEME_STORAGE_KEY, themes: arkiThemes, themeClasses: arkiThemeClasses }}>
+          {themeDetectionFn}
+        </FunctionOnce>
       </head>
       <body className="h-dvh overflow-hidden bg-background font-sans text-foreground antialiased">
         {children}

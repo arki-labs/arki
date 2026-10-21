@@ -27,6 +27,7 @@
     "@arki/content-react": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/design-systems": "workspace:*",
     "@arki/dev-certs": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
