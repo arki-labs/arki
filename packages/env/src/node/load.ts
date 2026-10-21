@@ -96,8 +96,13 @@ export type EnvFilesReport = {
 
 const loadedSecrets = new Set<string>();
 
-/** Keys a file may never set: they make every process started with this environment load other code. */
-const REFUSED_KEY = /^(?:NODE_OPTIONS|LD_\w+|DYLD_\w+)$/;
+/**
+ * Keys a file may never set: they make a process started with this environment load other code
+ * (interpreter options, preload and module paths, shell startup files) or trust another TLS
+ * authority. A machine that needs one sets it in its own shell.
+ */
+const REFUSED_KEY =
+  /^(?:NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|BUN_OPTIONS|LD_\w+|DYLD_\w+|BASH_ENV|ENV|PERL5OPT|PERL5LIB|PYTHONPATH|PYTHONSTARTUP|RUBYOPT)$/i;
 
 /** Keys bundlers inline into browser code. */
 const PUBLIC_KEY = /^(?:VITE_|NEXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)/;

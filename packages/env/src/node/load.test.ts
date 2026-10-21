@@ -182,10 +182,10 @@ describe('editing', () => {
 describe('refused entries', () => {
   it('never applies loader-hijacking keys from a file', () => {
     // WHY: a committed NODE_OPTIONS=--require would run code in every process started with this env.
-    write(app, '.env.development', ['NODE_OPTIONS=--require ./evil.js', 'DYLD_INSERT_LIBRARIES=x', 'OK=1']);
+    write(app, '.env.development', ['NODE_OPTIONS=--require ./evil.js', 'DYLD_INSERT_LIBRARIES=x', 'bash_env=./x.sh', 'NODE_EXTRA_CA_CERTS=./mitm.pem', 'OK=1']);
     const { env, report } = load();
     expect([env['NODE_OPTIONS'], env['DYLD_INSERT_LIBRARIES'], env['OK']]).toEqual([undefined, undefined, '1']);
-    expect(report.refused.map(entry => entry.key)).toEqual(['NODE_OPTIONS', 'DYLD_INSERT_LIBRARIES']);
+    expect(report.refused.map(entry => entry.key)).toEqual(['NODE_OPTIONS', 'DYLD_INSERT_LIBRARIES', 'bash_env', 'NODE_EXTRA_CA_CERTS']);
   });
 
   it('never resolves a reference into a public key', () => {
