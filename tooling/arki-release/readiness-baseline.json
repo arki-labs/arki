@@ -56,15 +56,6 @@
     "readme-h2-order",
     "pkg-engines"
   ],
-  "@arki/design-systems": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs",
-    "types"
-  ],
   "@arki/dot": [
     "file-agents-md",
     "pkg-engines"

@@ -1,6 +1,6 @@
 import { ThemeProvider } from '@arki/ui/theme';
 import { AppProvider } from '@fleet/sitekit/app-context.tsx';
-import { arkiThemeClasses, arkiThemes } from '@arki/design-systems/arki/themes';
+import { arkiThemeClasses, arkiThemes } from '@fleet/design-systems/arki/themes';
 
 import config from '~/config';
 

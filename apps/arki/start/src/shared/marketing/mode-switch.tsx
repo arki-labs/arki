@@ -1,8 +1,8 @@
+import type { ArkiTheme } from '@fleet/design-systems/arki/themes';
 import type { RefObject } from 'react';
 import { useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 
-import type { ArkiTheme } from '@arki/design-systems/arki/themes';
 import { useTheme } from '@arki/ui/theme';
 
 type ModeTheme = Exclude<ArkiTheme, 'system'>;
