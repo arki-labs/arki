@@ -27,6 +27,16 @@ export type ThemeDetectionOptions = {
   defaultTheme?: string;
   themes?: readonly string[];
   enableSystem?: boolean;
+  /**
+   * The classes each theme puts on the root element, e.g. `{ 'candle-dark': ['dark', 'candlelight'] }`.
+   * A theme not listed here adds a class with its own name, as before. A theme whose classes include
+   * `dark` also gets `color-scheme: dark`. Every class named here is removed on each switch, so none goes stale.
+   */
+  themeClasses?: Readonly<Record<string, readonly string[]>>;
+  /** Apply this already-resolved theme and skip storage and system detection (the provider uses this). */
+  forcedTheme?: string;
+  /** Set the `color-scheme` style on the root element (default: true). */
+  enableColorScheme?: boolean;
 };
 
 /**
@@ -66,15 +76,22 @@ export function themeDetectionFn(input: string | ThemeDetectionOptions): void {
     const defaultTheme = options.defaultTheme ?? 'system';
     const themes = options.themes ?? ['light', 'dark', 'system'];
     const enableSystem = options.enableSystem ?? true;
+    const themeClasses = options.themeClasses ?? {};
+    const enableColorScheme = options.enableColorScheme ?? true;
 
-    let theme: string | null = null;
-    try {
-      theme = localStorage.getItem(storageKey);
-    } catch {
-      // Storage restrictions must still allow the default theme to apply.
+    let selectedTheme: string;
+    if (options.forcedTheme === undefined) {
+      let theme: string | null = null;
+      try {
+        theme = localStorage.getItem(storageKey);
+      } catch {
+        // Storage restrictions must still allow the default theme to apply.
+      }
+      const storedTheme = theme !== null && themes.includes(theme) ? theme : defaultTheme;
+      selectedTheme = themes.includes(storedTheme) ? storedTheme : (themes[0] ?? defaultTheme);
+    } else {
+      selectedTheme = options.forcedTheme;
     }
-    const storedTheme = theme !== null && themes.includes(theme) ? theme : defaultTheme;
-    const selectedTheme = themes.includes(storedTheme) ? storedTheme : (themes[0] ?? defaultTheme);
     let resolvedTheme = selectedTheme;
     if (selectedTheme === 'system' && enableSystem) {
       resolvedTheme = 'light';
@@ -84,23 +101,30 @@ export function themeDetectionFn(input: string | ThemeDetectionOptions): void {
         // Match the provider's light fallback when system detection is unavailable.
       }
     }
-    const isDark = resolvedTheme === 'dark';
 
+    const mapped = Object.prototype.hasOwnProperty.call(themeClasses, resolvedTheme)
+      ? themeClasses[resolvedTheme]
+      : undefined;
+    const classesToAdd = mapped ?? (attribute === 'class' ? [resolvedTheme] : resolvedTheme === 'dark' ? ['dark'] : []);
+    const isDark = classesToAdd.includes('dark');
+    const root = document.documentElement;
+
+    // Remove everything any theme can add, so switching never leaves a stale class behind.
+    const everyClass = new Set(['light', 'dark', ...Object.values(themeClasses).flat()]);
     if (attribute === 'class') {
-      document.documentElement.classList.remove(
-        ...new Set([...themes.filter(value => value !== 'system'), 'light', 'dark']),
-      );
-      document.documentElement.classList.add(resolvedTheme);
-    } else {
-      document.documentElement.setAttribute(attribute, resolvedTheme);
-      document.documentElement.classList.toggle('dark', isDark);
+      for (const value of themes) if (value !== 'system') everyClass.add(value);
     }
-    document.documentElement.classList.toggle('is-dark', isDark);
+    if (attribute !== 'class') {
+      everyClass.delete('light');
+      root.setAttribute(attribute, resolvedTheme);
+    }
+    root.classList.remove(...everyClass);
+    root.classList.add(...classesToAdd);
+    root.classList.toggle('is-dark', isDark);
 
-    if (isDark && attribute !== 'class') {
-      document.documentElement.classList.add('dark');
+    if (enableColorScheme) {
+      root.style.colorScheme = isDark ? 'dark' : 'light';
     }
-    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
   } catch {
     // The host document may not be writable.
   }

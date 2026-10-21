@@ -2,6 +2,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import type { ThemeDetectionOptions } from './script';
+import { themeDetectionFn } from './script';
+
 const MEDIA = '(prefers-color-scheme: dark)';
 const STORAGE_KEY = 'theme';
 
@@ -26,6 +29,8 @@ export type ThemeProviderProps = {
   disableTransitionOnChange?: boolean;
   /** Force a specific theme (overrides user preference) */
   forcedTheme?: string;
+  /** The classes each theme puts on the root element (default: a theme adds a class with its own name). */
+  themeClasses?: ThemeDetectionOptions['themeClasses'];
   /** Nonce for CSP */
   nonce?: string;
 };
@@ -92,18 +97,15 @@ function normalizeTheme(theme: string | null, themes: readonly string[], default
 }
 
 /**
- * Apply theme to document
+ * Apply theme to document. The class and color-scheme rules live in `themeDetectionFn`,
+ * the same function the pre-paint script runs, so the two cannot drift apart.
  */
 function applyTheme(
   theme: ResolvedTheme,
-  attribute: string,
-  enableColorScheme: boolean,
+  options: Omit<ThemeDetectionOptions, 'forcedTheme' | 'enableSystem' | 'storageKey' | 'defaultTheme'>,
   disableTransitionOnChange: boolean,
-  themes: readonly string[],
 ): void {
   if (typeof document === 'undefined') return;
-
-  const root = document.documentElement;
 
   // Disable transitions during change if requested
   if (disableTransitionOnChange) {
@@ -124,20 +126,7 @@ function applyTheme(
     }, 1);
   }
 
-  // Apply theme attribute
-  if (attribute === 'class') {
-    root.classList.remove(...new Set([...themes.filter(value => value !== 'system'), 'light', 'dark']));
-    root.classList.add(theme);
-  } else {
-    root.setAttribute(attribute, theme);
-    root.classList.toggle('dark', theme === 'dark');
-  }
-  root.classList.toggle('is-dark', theme === 'dark');
-
-  // Apply color-scheme
-  if (enableColorScheme) {
-    root.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
-  }
+  themeDetectionFn({ ...options, forcedTheme: theme, enableSystem: false });
 }
 
 export function ThemeProvider({
@@ -150,6 +139,7 @@ export function ThemeProvider({
   themes = defaultThemes,
   disableTransitionOnChange = false,
   forcedTheme,
+  themeClasses,
 }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<string>(() => {
     // During SSR, use default theme
@@ -214,8 +204,8 @@ export function ThemeProvider({
 
   // Apply theme to document when it changes
   useEffect(() => {
-    applyTheme(resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes);
-  }, [resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes]);
+    applyTheme(resolvedTheme, { attribute, enableColorScheme, themes, themeClasses }, disableTransitionOnChange);
+  }, [resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes, themeClasses]);
 
   // Listen for storage changes (cross-tab sync)
   useEffect(() => {
