@@ -2,7 +2,7 @@ import { isFailure } from '@arki/failure';
 
 import type { EmbedFailure } from './failures.js';
 import type { EmbedInput, EmbedOptions, Embedder, Embedding, EmbeddingBatch, Usage } from './types.js';
-import { Cancelled, InvalidOutput } from './failures.js';
+import { Cancelled, InputTooLong, InvalidOutput } from './failures.js';
 import { pack } from './pack.js';
 import { addTokens } from './tokens.js';
 
@@ -42,7 +42,7 @@ export async function embedMany(
   if (signal?.aborted) return Cancelled();
   if (inputs.length === 0) return { vectors: [], space: embedder.space, usage: NO_USAGE };
 
-  const chunks = pack(embedder.model, inputs);
+  const chunks = pack(embedder.model, inputs, embedOptions.onTooLong === 'truncate');
   if (isFailure(chunks)) return chunks;
 
   const controller = new AbortController();
@@ -72,7 +72,10 @@ export async function embedMany(
           signal: controller.signal,
         });
         if (isFailure(batch)) {
-          failure ??= batch;
+          // An index from `embed` counts within the chunk; the caller's counts within `inputs`.
+          failure ??= InputTooLong.is(batch)
+            ? InputTooLong({ ...batch.data, index: batch.data.index + chunk.start })
+            : batch;
           controller.abort();
           return;
         }

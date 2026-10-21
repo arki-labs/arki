@@ -9,16 +9,10 @@
 import { isFailure } from '@arki/failure';
 
 import type { EmbeddingModel, NativeRequest } from '../types.js';
-import {
-  Cancelled,
-  ConfigurationFailure,
-  InputTooLong,
-  InvalidOutput,
-  ModelUnavailable,
-  RateLimited,
-} from '../failures.js';
+import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
+import { CHARS_PER_TOKEN, providerInputTooLong } from '../tokens.js';
 
 export type OpenAIModelOptions = {
   /** Default `'text-embedding-3-small'`. */
@@ -61,7 +55,7 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
 
   let sdk: ReturnType<typeof loadSdk> | undefined;
 
-  const embedTexts = async ({ texts, dimensions, signal }: NativeRequest) => {
+  const embedTexts = async ({ texts, dimensions, truncate, signal }: NativeRequest) => {
     sdk ??= loadSdk(id, options.apiKey, options.baseURL);
     const loaded = await sdk;
     if (isFailure(loaded)) {
@@ -71,7 +65,8 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
     try {
       const result = await loaded.embedMany({
         model: loaded.model,
-        values: [...texts],
+        // OpenAI has no truncate flag: cut at the character estimate of the model's limit.
+        values: truncate ? texts.map(text => text.slice(0, facts.maxInputTokens * CHARS_PER_TOKEN)) : [...texts],
         // Retries belong to withResilience, where each attempt is charged once.
         maxRetries: 0,
         ...(dimensions === undefined ? {} : { providerOptions: { openai: { dimensions } } }),
@@ -98,7 +93,7 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (status === 400 && mentionsContextLength(`${error.message} ${error.responseBody ?? ''}`)) {
-        return InputTooLong({ index: 0, tokens: { basis: 'unknown' }, max: facts.maxInputTokens });
+        return providerInputTooLong(texts, facts.maxInputTokens);
       }
       return InvalidOutput({ reason: `openai answered ${status}: ${error.message.slice(0, 200)}` });
     }

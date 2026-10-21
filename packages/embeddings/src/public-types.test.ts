@@ -6,7 +6,9 @@ import type {
   EmbeddingBatch,
   EmbeddingModel,
   EmbedFailure,
+  EmbedMiddleware,
   Instruction,
+  NormalizeTextOptions,
   TokenCount,
 } from './index.js';
 import {
@@ -14,16 +16,22 @@ import {
   cosine,
   countTokens,
   createEmbedder,
+  E5_INSTRUCTION,
   embed,
+  EMBEDDINGGEMMA_INSTRUCTION,
   embedMany,
   isEmbedFailure,
   isSameSpace,
   l2Normalize,
   NO_INSTRUCTION,
+  NOMIC_INSTRUCTION,
   norm,
+  normalizeText,
   QWEN3_INSTRUCTION,
   resolveEmbeddingModel,
   spaceId,
+  withMiddleware,
+  withResilience,
 } from './index.js';
 
 describe('public types of the root entry', () => {
@@ -62,5 +70,20 @@ describe('public types of the root entry', () => {
   it('the instruction constants are Instructions, whose version feeds the space id', () => {
     expectTypeOf(QWEN3_INSTRUCTION).toEqualTypeOf<Instruction>();
     expectTypeOf(NO_INSTRUCTION).toEqualTypeOf<Instruction>();
+    expectTypeOf(EMBEDDINGGEMMA_INSTRUCTION).toEqualTypeOf<Instruction>();
+    expectTypeOf(NOMIC_INSTRUCTION).toEqualTypeOf<Instruction>();
+    expectTypeOf(E5_INSTRUCTION).toEqualTypeOf<Instruction>();
+  });
+
+  it('wrappers take an Embedder and give back an Embedder, so they stack and embedMany takes the result', () => {
+    expectTypeOf(withMiddleware).parameter(0).toEqualTypeOf<Embedder>();
+    expectTypeOf(withMiddleware).parameters.toEqualTypeOf<[Embedder, ...EmbedMiddleware[]]>();
+    expectTypeOf(withMiddleware).returns.toEqualTypeOf<Embedder>();
+    expectTypeOf(withResilience).parameter(0).toEqualTypeOf<Embedder>();
+    expectTypeOf(withResilience).returns.toEqualTypeOf<Embedder>();
+  });
+
+  it('normalizeText is a pure string → string helper the embedder never calls', () => {
+    expectTypeOf(normalizeText).toEqualTypeOf<(text: string, options?: NormalizeTextOptions) => string>();
   });
 });

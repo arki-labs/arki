@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`, `UnsupportedInput`, `cosine`, `countTokens`; and 32 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 39 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
@@ -24,9 +24,11 @@
 - [Keep an index and a model in step](docs/agent-guide.md#keep-an-index-and-a-model-in-step)
 - [Use a hosted or self-hosted server](docs/agent-guide.md#use-a-hosted-or-self-hosted-server)
 - [Test code that embeds](docs/agent-guide.md#test-code-that-embeds)
+- [Retry rate limits and outages](docs/agent-guide.md#retry-rate-limits-and-outages)
 
 ## Rules that bite
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
 - Store `spaceId(batch.space)` next to every index; a different space means re-embed.
-- The library never changes input text, and `fakeEmbedder` is not semantic.
+- The embedder never changes input text (call `normalizeText` yourself), and `fakeEmbedder` is not semantic.
+- Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
 - `resolveEmbeddingModel` never touches the network. Voyage and Google are `ConfigurationFailure` in this release.

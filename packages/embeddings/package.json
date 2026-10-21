@@ -88,6 +88,7 @@
     "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
     "zod": "catalog:"
   },

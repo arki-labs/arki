@@ -12,8 +12,9 @@ import type {
   NativeEmbeddings,
   Quantization,
 } from './types.js';
-import { Cancelled, InvalidOutput, UnsupportedInput } from './failures.js';
+import { Cancelled, InputTooLong, InvalidOutput, UnsupportedInput } from './failures.js';
 import { spaceOf } from './space.js';
+import { countTokens } from './tokens.js';
 
 /** Output options an embedder is created with. */
 export type EmbedderOptions = {
@@ -62,9 +63,7 @@ export function buildEmbedder(
 
   const embed = async (inputs: readonly EmbedInput[], options: EmbedOptions) => {
     if (options.signal?.aborted) return Cancelled();
-    // Truncation needs a tokenizer to cut at the right place; it arrives in slice 1. Refusing is
-    // louder than embedding the whole text anyway.
-    if (options.onTooLong === 'truncate') return UnsupportedInput({ index: -1, part: 'truncate' });
+    const truncate = options.onTooLong === 'truncate';
     const callDimensions = options.dimensions ?? dimensions;
     const callQuantization = options.quantization ?? (quantization === 'float32' ? undefined : quantization);
     const refused = checkDimensions(model, callDimensions) ?? checkQuantization(model, callQuantization);
@@ -82,11 +81,21 @@ export function buildEmbedder(
       if (input.text === undefined) return UnsupportedInput({ index, part: 'text' });
       texts.push(prefix + input.text);
     }
+    if (!truncate) {
+      // The prefix is sent too, so it counts against the model's limit.
+      for (const [index, text] of texts.entries()) {
+        const tokens = countTokens(model, text);
+        if (tokens.basis !== 'unknown' && tokens.count > model.maxInputTokens) {
+          return InputTooLong({ index, tokens, max: model.maxInputTokens });
+        }
+      }
+    }
 
     const native = await model.embedTexts({
       texts,
       ...(callDimensions === model.dimensions ? {} : { dimensions: callDimensions }),
       ...(callQuantization === undefined ? {} : { quantization: callQuantization }),
+      ...(truncate ? { truncate } : {}),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     if (isFailure(native)) {

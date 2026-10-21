@@ -6,16 +6,10 @@ import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest } from '../types.js';
-import {
-  Cancelled,
-  ConfigurationFailure,
-  InputTooLong,
-  InvalidOutput,
-  ModelUnavailable,
-  RateLimited,
-} from '../failures.js';
+import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
-import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
+import { EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION, NOMIC_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
+import { providerInputTooLong } from '../tokens.js';
 
 export type OllamaModelOptions = {
   /** Default `'qwen3-embedding:0.6b'`. */
@@ -57,7 +51,7 @@ const OLLAMA_FACTS: Readonly<Record<string, OllamaFacts>> = {
     maxBatch: 64,
     maxBatchTokens: 65_536,
     normalized: true,
-    instruction: NO_INSTRUCTION,
+    instruction: EMBEDDINGGEMMA_INSTRUCTION,
   },
   'nomic-embed-text': {
     dimensions: 768,
@@ -66,7 +60,7 @@ const OLLAMA_FACTS: Readonly<Record<string, OllamaFacts>> = {
     maxBatch: 64,
     maxBatchTokens: 65_536,
     normalized: true,
-    instruction: NO_INSTRUCTION,
+    instruction: NOMIC_INSTRUCTION,
   },
 };
 
@@ -139,7 +133,7 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
     return digestRequest;
   };
 
-  const embedTexts = async ({ texts, dimensions = recordSize, signal }: NativeRequest) => {
+  const embedTexts = async ({ texts, dimensions = recordSize, truncate, signal }: NativeRequest) => {
     if (digest === undefined) await learnDigest(signal);
     let response: Response;
     try {
@@ -149,7 +143,8 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
         body: JSON.stringify({
           model: id,
           input: texts,
-          truncate: false,
+          // Ollama cuts an over-long input itself only when asked; otherwise it answers 400.
+          truncate: truncate === true,
           ...(options.keepAlive === undefined ? {} : { keep_alive: options.keepAlive }),
           ...(dimensions === undefined ? {} : { dimensions }),
         }),
@@ -167,7 +162,7 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
         return RateLimited(wait === undefined ? {} : { retryAfterMs: wait });
       }
       if (response.status === 400 && mentionsContextLength(text)) {
-        return InputTooLong({ index: 0, tokens: { basis: 'unknown' }, max: facts.maxInputTokens });
+        return providerInputTooLong(texts, facts.maxInputTokens);
       }
       return InvalidOutput({ reason: `ollama answered ${response.status}: ${text.slice(0, 200)}` });
     }

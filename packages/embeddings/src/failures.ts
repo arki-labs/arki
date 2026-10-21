@@ -55,7 +55,7 @@ export const UnsupportedInput = defineFailure('embeddings.unsupported_input', {
   data: z.object({
     /** The input at fault, or -1 when the refusal is about an option rather than one input. */
     index: z.number(),
-    part: z.enum(['text', 'image', 'batch', 'dimensions', 'quantization', 'truncate']),
+    part: z.enum(['text', 'image', 'batch', 'dimensions', 'quantization']),
   }),
   message: 'the model does not support this {part} (input {index})',
   remediation: 'Remove the unsupported input part or option, or select a model that supports it.',

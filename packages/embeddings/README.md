@@ -44,7 +44,7 @@ export async function embedForIndex(embedder: Embedder, texts: readonly string[]
 ## When not to use this
 
 - Vector storage and search. This package makes vectors and compares nothing for you; `cosine` is for tests and rescoring.
-- Reranking, caching, retries and telemetry wrappers. They are not in this release.
+- Reranking, caching and telemetry wrappers. They are not in this release.
 - Images, sparse vectors and multi-vector output. The types exist, and no adapter produces them yet.
 - Meaning-based assertions in tests with `fakeEmbedder`. Its vectors are not semantic (see [Testing](#testing)).
 
@@ -56,14 +56,14 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 
 ## Public imports
 
-| Entry                                | What it is                                                                                                                                                                                            | Peers                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `resolveEmbeddingModel`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `countTokens`, `QWEN3_INSTRUCTION`, `NO_INSTRUCTION`, the failures | none                              |
-| `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                     | none                              |
-| `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                     | `@ai-sdk/openai`, `ai` (optional) |
-| `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                       | none                              |
-| `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                     | none                              |
-| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                            | none                              |
+| Entry                                | What it is                                                                                                                                                                                                                                      | Peers                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `withResilience`, `withMiddleware`, `resolveEmbeddingModel`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                              |
+| `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                               | none                              |
+| `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                               | `@ai-sdk/openai`, `ai` (optional) |
+| `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                 | none                              |
+| `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                               | none                              |
+| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                                                                      | none                              |
 
 `resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side.
 
@@ -88,12 +88,48 @@ Every expected failure is returned, never thrown. Each is an `@arki/failure` def
 
 A throw from a custom `embed` or an `onProgress` callback is a bug in that code, not a failure value. `embedMany` stops the other chunks and rethrows it.
 
+## Retries
+
+`withResilience(embedder, policy?)` returns an embedder whose every call runs through an `@arki/resilience` policy. `embedMany` over it retries each chunk on its own.
+
+- It retries only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }`. A `RateLimited` with `retryAfterMs` waits at least that long.
+- Every other failure comes back after one attempt. Retrying bad input or a bad key burns quota and hides the bug.
+- `usage.requests` counts every attempt, failed ones included.
+- A timeout, an open circuit or a full bulkhead becomes `ModelUnavailable { reason: 'unreachable' }`. Nothing is thrown for them.
+- The default policy: 3 retries from 200 ms doubling to 5 s with 25% jitter, a circuit breaker (5 failures, 30 s), and 60 s per attempt. Pass your own policy built with `.while(RateLimited, ModelUnavailable)` on its backoff to change that.
+
+`withMiddleware(embedder, ...middleware)` wraps `embed` with your own `EmbedMiddleware` functions. The first one is outermost: it sees the call first and the result last.
+
+## Long inputs
+
+`onTooLong` decides what happens to an input longer than the model's `maxInputTokens`:
+
+- `'fail'` (the default) returns `InputTooLong` with the input's `index`, its token count and the limit, before any request is sent. When the provider's own count disagrees and it answers 400, that is `InputTooLong` too, naming the longest input.
+- `'truncate'` sends it anyway. Ollama cuts it itself. OpenAI and OpenAI-compatible servers have no such flag, so the text is cut at `maxInputTokens * 4` characters first.
+
+Counts are `estimated` (`ceil(characters / 4)`) unless the model record carries a tokenizer, in which case they are `counted`.
+
+## Instructions
+
+Asymmetric models were trained with a prefix per purpose. The model record applies it for the `purpose` you pass; `instruction.version` is part of the space id, so a changed prefix is a new space.
+
+| Table                        | Models                                   | `query`                          | `document`              |
+| ---------------------------- | ---------------------------------------- | -------------------------------- | ----------------------- |
+| `QWEN3_INSTRUCTION`          | Qwen3-Embedding (Ollama default)         | `Instruct: … Query: `            | none                    |
+| `EMBEDDINGGEMMA_INSTRUCTION` | `embeddinggemma`                         | `task: search result \| query: ` | `title: none \| text: ` |
+| `NOMIC_INSTRUCTION`          | `nomic-embed-text`                       | `search_query: `                 | `search_document: `     |
+| `E5_INSTRUCTION`             | E5 family, through `./openai-compatible` | `query: `                        | `passage: `             |
+| `NO_INSTRUCTION`             | OpenAI, the fake                         | none                             | none                    |
+
+EmbeddingGemma and nomic also have `classification` and `clustering` prefixes; EmbeddingGemma has `similarity`.
+
 ## Limits
 
 - **A request is one provider call of at most `maxBatch` inputs and `maxBatchTokens` tokens.** `embedMany` splits larger work for you. One input that alone costs more than `maxBatchTokens` is refused with `InputTooLong` before any request is sent.
-- **Token counts are estimates in this release:** `ceil(characters / 4)`. A provider's own count replaces it in the result when the provider reports one.
+- **Token counts are estimates in this release:** `ceil(characters / 4)`. No adapter ships a tokenizer yet. A provider's own count replaces it in the result when the provider reports one.
+- **One input** may cost at most the model's `maxInputTokens`; see [Long inputs](#long-inputs).
 - **Dimensions** must be the model's native size or one of its Matryoshka sizes. Any other size is `UnsupportedInput`, not a silent resize.
-- **Texts are never changed.** There is no normalisation, so the same text in a different Unicode form is a different input.
+- **Texts are never changed.** The embedder sends exactly what you pass, so the same text in a different Unicode form is a different input. Call `normalizeText(text, { romanianDiacritics? })` yourself, on documents and queries alike: NFC, one space per whitespace run, and optionally ş/ţ → ș/ț.
 - **A failed batch has no partial result.** If chunk 7 of 10 fails, you get the failure and none of the vectors.
 
 The boundary, with the fake embedder: its limit is 1 000 000 tokens per request, which is 4 000 000 characters.

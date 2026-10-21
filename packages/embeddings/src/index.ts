@@ -42,6 +42,16 @@ export { isSameSpace, spaceId } from './space.js';
 export { createEmbedder } from './embedder.js';
 export { embed, embedMany } from './embed.js';
 export { resolveEmbeddingModel } from './resolve.js';
-export { NO_INSTRUCTION, QWEN3_INSTRUCTION } from './instructions.js';
+export {
+  E5_INSTRUCTION,
+  EMBEDDINGGEMMA_INSTRUCTION,
+  NO_INSTRUCTION,
+  NOMIC_INSTRUCTION,
+  QWEN3_INSTRUCTION,
+} from './instructions.js';
 export { cosine, l2Normalize, norm } from './vector.js';
 export { countTokens } from './tokens.js';
+export { normalizeText } from './normalize.js';
+export type { NormalizeTextOptions } from './normalize.js';
+export { withMiddleware } from './middleware.js';
+export { withResilience } from './resilience.js';

@@ -72,6 +72,8 @@ export type NativeRequest = {
   readonly dimensions?: number;
   /** Set only for a provider-native dtype listed in `model.quantizations`. */
   readonly quantization?: 'int8' | 'binary';
+  /** Set only for `onTooLong: 'truncate'`: cut each text to what the model accepts instead of refusing it. */
+  readonly truncate?: true;
   readonly signal?: AbortSignal;
 };
 
@@ -100,6 +102,8 @@ export type EmbeddingModel = {
   readonly inputs: readonly ('text' | 'image')[];
   /** Provider-native output dtypes. */
   readonly quantizations: readonly ('int8' | 'binary')[];
+  /** Exact tokens of one text, when the record carries a tokenizer. Without it, `countTokens` estimates. */
+  readonly countTokens?: (text: string) => number;
   /** One native request, at most `maxBatch` texts, no retry. Output is validated by `createEmbedder`, not here. */
   readonly embedTexts: (request: NativeRequest) => Promise<NativeEmbeddings | EmbedFailure>;
   /** Frees an in-process session (Transformers.js). */
@@ -111,6 +115,11 @@ export type EmbedOptions = {
   readonly purpose?: Purpose;
   readonly dimensions?: number;
   readonly quantization?: 'int8' | 'binary';
+  /**
+   * An input longer than `model.maxInputTokens`: `'fail'` (default) returns `InputTooLong` before
+   * any request; `'truncate'` lets the provider cut it (Ollama) or cuts it at `maxInputTokens * 4`
+   * characters first (OpenAI, OpenAI-compatible).
+   */
   readonly onTooLong?: 'fail' | 'truncate';
   readonly signal?: AbortSignal;
 };
@@ -135,7 +144,7 @@ export type Embedder = {
   embed(inputs: readonly EmbedInput[], options: EmbedOptions): Promise<EmbeddingBatch | EmbedFailure>;
 };
 
-/** Wraps an embedder's `embed`. Composition order is explicit (`withMiddleware`, slice 1). */
+/** Wraps an embedder's `embed`. `withMiddleware` composes them, the first outermost. */
 export type EmbedMiddleware = (next: Embedder['embed'], embedder: Embedder) => Embedder['embed'];
 
 /** Byte store behind `withCache` (slice 2). */

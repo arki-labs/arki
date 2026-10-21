@@ -10,6 +10,7 @@ Read this before changing code that turns text into vectors. The [README](../REA
 - A **space** (`EmbeddingSpace`) is what must match for two vectors to be comparable. `spaceId(space)` is its stored string form. A different space means re-embed, never mix.
 - **`resolveEmbeddingModel`** picks the model from a ref, `EMBEDDING_MODEL`, or the first configured provider in the order `ollama → openai → voyage → google`. It is pure.
 - Every expected failure is a returned `@arki/failure` value. `isEmbedFailure` recognises any of them.
+- **`withResilience`** and **`withMiddleware`** wrap an embedder and return an embedder. Retries live only there: adapters never retry.
 
 ## Task map
 
@@ -60,11 +61,26 @@ if ('vectors' in batch) console.log(batch.vectors.length);
 
 `fakeEmbedder` is deterministic and not semantic. Do not assert ranking by meaning against it.
 
+### Retry rate limits and outages
+
+```ts run
+import { embedMany, withResilience } from '@arki/embeddings';
+import { fakeEmbedder } from '@arki/embeddings/testing';
+
+const embedder = withResilience(fakeEmbedder({ dimensions: 4 }));
+const batch = await embedMany(embedder, ['a', 'b']);
+if ('vectors' in batch) console.log(batch.usage.requests);
+```
+
+Only `RateLimited` (at least `retryAfterMs` apart) and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt.
+
 ## Rules that bite
 
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
 - Store `spaceId(batch.space)` next to every index. Without it you cannot tell a stale index from a fresh one.
-- The same text is the same input only byte for byte. The library never normalises text.
+- The same text is the same input only byte for byte. The embedder never normalises text; call `normalizeText` yourself, the same way on documents and queries.
+- Retry only through `withResilience`. It retries `RateLimited` and an unreachable model, nothing else; never wrap `embed` in a loop of your own.
+- An instruction's prefixes are frozen per `version`. Changing one without bumping `version` mixes two spaces under one space id.
 - `resolveEmbeddingModel` returns before the network is touched, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call.
 - Voyage and Google resolve to `ConfigurationFailure` in this release.
 - Never catch to hide a thrown error from a custom `embed`. It is a bug in that code.
@@ -75,8 +91,8 @@ if ('vectors' in batch) console.log(batch.vectors.length);
 
 | Failure                | Code                           | What to do                                                                                                                      |
 | ---------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `RateLimited`          | `embeddings.rate_limited`      | Wait `data.retryAfterMs`, then retry.                                                                                           |
-| `InputTooLong`         | `embeddings.input_too_long`    | Split the text at `data.index` into smaller chunks.                                                                             |
+| `RateLimited`          | `embeddings.rate_limited`      | Wrap the embedder in `withResilience`, or wait `data.retryAfterMs` and retry.                                                   |
+| `InputTooLong`         | `embeddings.input_too_long`    | Split the text at `data.index` into smaller chunks, or pass `onTooLong: 'truncate'` if losing its end is acceptable.            |
 | `ModelUnavailable`     | `embeddings.model_unavailable` | `not-pulled`: `ollama pull <model>`. `unreachable`: start the server or fix the base URL. `peer-missing`: install the SDK peer. |
 | `UnsupportedInput`     | `embeddings.unsupported_input` | Drop the part or option named in `data.part`, or pick a model that supports it.                                                 |
 | `InvalidOutput`        | `embeddings.invalid_output`    | Inspect the provider answer in `data.reason`. The batch was discarded.                                                          |

@@ -7,16 +7,10 @@ import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
-import {
-  Cancelled,
-  ConfigurationFailure,
-  InputTooLong,
-  InvalidOutput,
-  ModelUnavailable,
-  RateLimited,
-} from '../failures.js';
+import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
+import { CHARS_PER_TOKEN, providerInputTooLong } from '../tokens.js';
 
 export type OpenAICompatibleModelOptions = {
   /** The model name the server expects, e.g. `'Qwen/Qwen3-Embedding-8B'`. */
@@ -97,7 +91,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
   const maxInputTokens = options.maxInputTokens ?? 8192;
 
-  const embedTexts = async ({ texts, dimensions: requested, signal }: NativeRequest) => {
+  const embedTexts = async ({ texts, dimensions: requested, truncate, signal }: NativeRequest) => {
     let response: Response;
     try {
       response = await send(`${baseURL}/embeddings`, {
@@ -108,7 +102,8 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
         },
         body: JSON.stringify({
           model: id,
-          input: texts,
+          // The protocol has no truncate flag: cut at the character estimate of the model's limit.
+          input: truncate ? texts.map(text => text.slice(0, maxInputTokens * CHARS_PER_TOKEN)) : texts,
           ...(requested === undefined ? {} : { dimensions: requested }),
         }),
         ...(signal ? { signal } : {}),
@@ -128,7 +123,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (response.status === 400 && mentionsContextLength(text)) {
-        return InputTooLong({ index: 0, tokens: { basis: 'unknown' }, max: maxInputTokens });
+        return providerInputTooLong(texts, maxInputTokens);
       }
       return InvalidOutput({ reason: `${label} answered ${response.status}: ${text.slice(0, 200)}` });
     }
