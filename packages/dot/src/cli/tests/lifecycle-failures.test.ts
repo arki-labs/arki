@@ -136,3 +136,45 @@ describe('managed lifecycle failures', () => {
     });
   });
 });
+
+describe('doctor plugin construction failures', () => {
+  // WHY: the generic "construction failed" message hid the plugin's own failure, so an operator
+  // reading `dot doctor --json` could not tell a missing provider from a bad config.
+  it('shows the failure code and message a plugin returned from boot', async () => {
+    const Unavailable = defineFailure('test.cli_lifecycle.unavailable', {
+      message: 'provider "x" is not reachable',
+    });
+    const report = await runDoctor(defineApp('doctor-typed').use(plugin({ name: 'llm', boot: () => Unavailable() })));
+    expect(report).toMatchObject({
+      code: 'dot.doctor_failed',
+      data: {
+        issues: [
+          {
+            code: expect.stringContaining('E003'),
+            plugin: 'llm',
+            message: expect.stringContaining('provider "x" is not reachable'),
+            metadata: { phase: 'boot', owner: 'llm', failureCode: Unavailable.code },
+          },
+        ],
+      },
+    });
+  });
+
+  // WHY: a thrown error becomes a defect whose message is deliberately generic (same rule as every
+  // other hook failure), so doctor must not leak the raw thrown text.
+  it('keeps the thrown error message out of the report', async () => {
+    const report = await runDoctor(
+      defineApp('doctor-thrown').use(
+        plugin({
+          name: 'db',
+          boot: () => {
+            throw new Error('connect ECONNREFUSED');
+          },
+        }),
+      ),
+    );
+    expect(report).toMatchObject({
+      data: { issues: [{ plugin: 'db', message: expect.not.stringContaining('ECONNREFUSED') }] },
+    });
+  });
+});

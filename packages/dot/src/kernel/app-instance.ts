@@ -1337,9 +1337,10 @@ export class DotAppImpl<
         const issue = makeIssue({
           code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
           plugin: plugin.name,
-          message: `Plugin "${plugin.name}" construction failed.`,
-          remediation: 'Inspect the plugin failure and its owned cleanup outcomes.',
+          message: `Plugin "${plugin.name}" construction failed: ${construction.message}`,
+          remediation: construction.remediation ?? 'Inspect the plugin failure and its owned cleanup outcomes.',
           docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
+          metadata: { phase: 'boot', owner: plugin.name, failureCode: construction.code },
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({

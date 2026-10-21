@@ -142,6 +142,7 @@ Every failure below is exported from `@arki/dot/cli` and comes back in the
 `error` field of the JSON envelope.
 
 - `DoctorFailed` (`dot.doctor_failed`): `dot doctor` found error issues. The whole report is in `.error.data`.
+  When a plugin fails to boot, its issue keeps the outer code `ARKI_DOT_E003`. The issue `message` now ends with the plugin's own failure message, and `metadata.failureCode` holds the plugin's failure code (for example `ai.provider_unavailable`). A thrown error still shows only the generic defect message.
 - `PreflightFailed` (`dot.preflight_failed`): a managed preflight reported a lifecycle failure. The report is in `.error.data`.
 - `ObservabilityNoSdk` (`dot.observability_no_sdk`): `dot doctor --observability` found no OpenTelemetry SDK. It shows up as a warning issue, not as a returned failure.
 - `ProjectionNotFound` (`dot.projection_not_found`): no plugin registers the `--as` format you asked for.
