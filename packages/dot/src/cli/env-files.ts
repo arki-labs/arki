@@ -33,42 +33,48 @@ export function relative(root: string, file: string): string {
   return path.relative(root, file) || '.';
 }
 
-/** The files among `files` that git tracks. Empty outside a git repository. */
-export function trackedFiles(root: string, files: readonly string[]): ReadonlySet<string> {
-  if (files.length === 0) return new Set();
+/**
+ * What git says about the repository: a list, or why it could not answer. Outside a git repository
+ * nothing is tracked (an empty list); inside one, a failing git is `unknown`, never "nothing tracked",
+ * so a check that depends on it fails closed.
+ */
+export type GitAnswer<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string };
+
+function git(root: string, args: readonly string[]): GitAnswer<readonly string[]> {
+  if (!existsSync(path.join(root, '.git'))) return { ok: true, value: [] };
   try {
-    const out = execFileSync('git', ['ls-files', '-z', '--', ...files.map(file => path.relative(root, file))], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return new Set(out.split('\0').filter(Boolean).map(file => path.join(root, file)));
-  } catch {
-    return new Set();
+    const out = execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    return { ok: true, value: out.split('\0').filter(Boolean) };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message.split('\n')[0] ?? 'git failed' : 'git failed' };
   }
+}
+
+/** The files among `files` that git tracks. Files outside `root` are never tracked. */
+export function trackedFiles(root: string, files: readonly string[]): GitAnswer<ReadonlySet<string>> {
+  const inside = files.filter(file => !path.relative(root, file).startsWith('..'));
+  if (inside.length === 0) return { ok: true, value: new Set() };
+  const answer = git(root, ['ls-files', '-z', '--', ...inside.map(file => path.relative(root, file))]);
+  return answer.ok ? { ok: true, value: new Set(answer.value.map(file => path.join(root, file))) } : answer;
 }
 
 /** Every file in the repository (tracked or not ignored) whose name is `name`. */
-export function filesNamed(root: string, name: string): readonly string[] {
-  try {
-    const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
-    return [...new Set(out.split('\0').filter(file => path.basename(file) === name))].map(file => path.join(root, file));
-  } catch {
-    return [];
-  }
+export function filesNamed(root: string, name: string): GitAnswer<readonly string[]> {
+  const answer = git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+  return answer.ok ? { ok: true, value: [...new Set(answer.value.filter(file => path.basename(file) === name))].map(file => path.join(root, file)) } : answer;
 }
 
 /** Tracked files whose name starts with `.env.keys`: each is a leaked private key. */
-export function trackedKeyFiles(root: string): readonly string[] {
-  try {
-    const out = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
-    return out.split('\0').filter(file => path.basename(file).startsWith('.env.keys'));
-  } catch {
-    return [];
-  }
+export function trackedKeyFiles(root: string): GitAnswer<readonly string[]> {
+  const answer = git(root, ['ls-files', '-z']);
+  return answer.ok ? { ok: true, value: answer.value.filter(file => path.basename(file).startsWith('.env.keys')) } : answer;
 }
 
 /**
  * The env schema of the app in `cwd`, merged across every `defineEnv` export of its env module
  * (`--schema`, else `src/env.ts`, else `env.ts`). `undefined` when there is none or it fails to load.
  */
-export async function loadDescription(cwd: string, schema: string | undefined): Promise<EnvDescription | undefined> {
+export async function loadDescription(cwd: string, schema?: string): Promise<EnvDescription | undefined> {
   const candidates = schema === undefined ? ['src/env.ts', 'env.ts'].map(file => path.join(cwd, file)) : [path.resolve(cwd, schema)];
   const module = candidates.find(file => existsSync(file));
   if (module === undefined) return undefined;

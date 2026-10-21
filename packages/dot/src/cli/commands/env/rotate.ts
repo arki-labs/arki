@@ -21,8 +21,9 @@ export default defineCommand({
     const target = resolveTarget(input);
     const name = path.basename(target.file);
     const files = filesNamed(target.root, name);
-    if (files.length === 0) return EnvNoChange({ file: name, reason: `no ${name} file in the repository` });
-    const result = rotateEnvFiles(files, { root: target.root });
+    if (!files.ok) return EnvNoChange({ file: name, reason: `cannot list the repository files: ${files.reason}` });
+    if (files.value.length === 0) return EnvNoChange({ file: name, reason: `no ${name} file in the repository` });
+    const result = rotateEnvFiles(files.value, { root: target.root });
     return {
       privateKeyName: result.privateKeyName,
       files: result.files.map(file => ({ file: relative(target.root, file.file), values: file.values })),

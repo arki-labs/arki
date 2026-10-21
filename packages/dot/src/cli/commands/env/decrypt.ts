@@ -19,7 +19,11 @@ export default defineCommand({
   run({ input }) {
     const target = resolveTarget(input);
     const file = relative(target.root, target.file);
-    if (!input.force && trackedFiles(target.root, [target.file]).has(target.file)) return EnvDecryptTracked({ file });
+    if (!input.force) {
+      const tracked = trackedFiles(target.root, [target.file]);
+      // Unknown counts as tracked: decrypting in place must fail closed.
+      if (!tracked.ok || tracked.value.has(target.file)) return EnvDecryptTracked({ file });
+    }
     const found = findPrivateKey(target.file, { root: target.root, env: process.env });
     if (found === undefined) return EnvLoadFailed({ errors: [{ code: 'ARKI_ENV_FILES_E001', message: `no private key for ${file}`, file }] });
     const decrypted = decryptEnvFile(target.file, found.keys, input.key);

@@ -41,6 +41,8 @@ export default defineCommand({
     const description = await loadDescription(target.cwd, input.schema);
     const secretKeys = new Set((description?.keys ?? []).filter(key => key.secret).map(key => key.key));
     const tracked = trackedFiles(target.root, report.files);
+    const keyFiles = trackedKeyFiles(target.root);
+    const gitFailures = [tracked, keyFiles].flatMap(answer => (answer.ok ? [] : [answer.reason]));
     const findings: EnvFinding[] = [
       ...report.errors.map(error => ({
         code: error.code,
@@ -58,7 +60,13 @@ export default defineCommand({
         file: relative(target.root, entry.file),
         key: entry.key,
       })),
-      ...trackedKeyFiles(target.root).map(file => ({
+      ...[...new Set(gitFailures)].map(reason => ({
+        code: 'dot.env.git_unavailable',
+        severity: 'error' as const,
+        message: `cannot ask git which files are tracked: ${reason}`,
+        remediation: 'Fix git in this repository (`git status` must work), then run the check again.',
+      })),
+      ...(keyFiles.ok ? keyFiles.value : []).map(file => ({
         code: 'dot.env.tracked_keys',
         severity: 'error' as const,
         message: `${file} is tracked by git: its private keys are exposed`,
@@ -66,7 +74,7 @@ export default defineCommand({
         file,
       })),
       ...report.values
-        .filter(value => value.kind === 'plain' && secretKeys.has(value.key) && tracked.has(value.file))
+        .filter(value => value.kind === 'plain' && secretKeys.has(value.key) && tracked.ok && tracked.value.has(value.file))
         .map(value => ({
           code: 'dot.env.plaintext_secret',
           severity: 'error' as const,

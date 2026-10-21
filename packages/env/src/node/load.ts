@@ -173,27 +173,30 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport 
 
   const errors: EnvFilesError[] = [];
   const keysByFile = new Map<string, readonly string[] | null>();
-  const privateKeysFor = (file: string): readonly string[] | null => {
-    if (!keysByFile.has(file)) {
-      const found = findPrivateKey(file, { root, env: target });
-      keysByFile.set(file, found?.keys ?? null);
-      if (found === undefined) {
-        errors.push({
-          code: ENV_FILES_ERROR_CODES.missingPrivateKey,
-          file,
-          message: `${path.relative(root, file)} has encrypted values but no private key: set ${privateKeyHint(file)} or add it to ${keysFileCandidates(file, root)
-            .map(candidate => path.relative(root, candidate))
-            .join(' or ')}`,
-        });
-      }
+  const missingReported = new Set<string>();
+  /** The keys for `file`. A missing key is an error only when a value actually needs it (`required`). */
+  const privateKeysFor = (file: string, required: boolean): readonly string[] | null => {
+    if (!keysByFile.has(file)) keysByFile.set(file, findPrivateKey(file, { root, env: target })?.keys ?? null);
+    const keys = keysByFile.get(file) ?? null;
+    if (keys === null && required && !missingReported.has(file)) {
+      missingReported.add(file);
+      errors.push({
+        code: ENV_FILES_ERROR_CODES.missingPrivateKey,
+        file,
+        message: `${path.relative(root, file)} has encrypted values but no private key: set ${privateKeyHint(file)} or add it to ${keysFileCandidates(file, root)
+          .map(candidate => path.relative(root, candidate))
+          .join(' or ')}`,
+      });
     }
-    return keysByFile.get(file) ?? null;
+    return keys;
   };
 
   const values: EnvFileValue[] = [];
   for (const [key, { file, line, raw }] of winners) {
     if (isEncrypted(raw)) {
-      const keys = privateKeysFor(file);
+      // A value the real environment already provides (Coolify, a parent `dot env run`) needs no key.
+      const current = nonEmpty(target[key]);
+      const keys = privateKeysFor(file, current === undefined || isEncrypted(current));
       if (keys === null) {
         values.push({ key, file, line, kind: 'encrypted' });
         continue;

@@ -150,6 +150,17 @@ describe('dot env run', () => {
     expect({ status: exit.status, stdout: exit.stdout }).toEqual({ status: 7, stdout: '' });
   });
 
+  it('never hands the private key to the child', () => {
+    // WHY: `dot env run -- <agent>` must not give the agent the key that decrypts everything.
+    const keys = readFileSync(path.join(root, '.env.keys'), 'utf8');
+    const key = /DOTENV_PRIVATE_KEY_DEVELOPMENT=(\w+)/.exec(keys)?.[1] ?? '';
+    const result = spawnSync('bun', [CLI, 'env', 'run', '--cwd', app, '--no-redact', '--', 'node', '-e', 'console.log(process.env.DOTENV_PRIVATE_KEY_DEVELOPMENT ?? "absent")'], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: 'development', DOTENV_PRIVATE_KEY_DEVELOPMENT: key },
+    });
+    expect(result.stdout).toBe('absent\n');
+  });
+
   it('fails with an envelope, before starting anything, when the key is missing', () => {
     rmSync(path.join(root, '.env.keys'));
     const result = run('--', 'node', '-e', 'console.log("started")');

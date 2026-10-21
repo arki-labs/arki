@@ -110,6 +110,14 @@ describe('encrypted values', () => {
     expect(env['TOKEN']).toBeUndefined();
   });
 
+  it('needs no private key for values the environment already provides', () => {
+    // WHY: Coolify sets the values in production, and a nested `dot env run` gets them from its parent (without the key).
+    write(app, '.env.development', [`TOKEN=${encryptValue('x', pair.publicKey)}`]);
+    const env: Record<string, string | undefined> = { TOKEN: 'from-platform' };
+    const report = loadEnvFiles({ cwd: app, environment: 'development', env });
+    expect({ errors: report.errors, token: env['TOKEN'] }).toEqual({ errors: [], token: 'from-platform' });
+  });
+
   it('reports a wrong key per value without leaking it', () => {
     write(app, '.env.development', [`TOKEN=${encryptValue('top-secret', generateKeypair().publicKey)}`]);
     const { report } = load();

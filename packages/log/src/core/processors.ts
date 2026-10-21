@@ -111,6 +111,12 @@ export function maskSecrets(values: () => readonly string[], options: { readonly
       const masked = mask(serialised, secrets);
       return masked === serialised ? value : masked;
     }
+    if (value instanceof Error) {
+      // An error inside the fields (`{ err }`): mask its serialised form, like the record's own error.
+      const serialised = serializeError(value);
+      const masked = mask(serialised, secrets);
+      return masked !== serialised && isFieldMap(masked) ? errorFrom(masked) : value;
+    }
     if (!isFieldMap(value)) return value;
     let copy: Record<string, Value> | undefined;
     for (const key of Object.keys(value)) {

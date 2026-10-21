@@ -90,6 +90,7 @@ describe('maskSecrets', () => {
     });
     log.info(`calling stripe with ${secret} for {user}`, { user: 'ada', request: { headers: [`Bearer ${secret}`] } });
     log.error(new Error(`stripe rejected ${secret}`));
+    log.warn('retrying', { cause: new Error(`timeout calling ${secret}`) });
     expect(out.lines.join('\n')).not.toContain(secret);
     expect(memory.records[0]?.message()).toBe('calling stripe with [REDACTED] for ada');
     expect(JSON.parse(out.lines[0] ?? '')).toMatchObject({ fields: { request: { headers: ['Bearer [REDACTED]'] } } });
