@@ -2,11 +2,15 @@
 
 import type { AuthUIProviderProps } from '@daveyplate/better-auth-ui';
 import type { ReactNode } from 'react';
+import { useContext } from 'react';
 import { AuthQueryProvider } from '@daveyplate/better-auth-tanstack';
+import { AuthUIContext } from '@daveyplate/better-auth-ui';
 import { AuthUIProviderTanstack } from '@daveyplate/better-auth-ui/tanstack';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 
 import type { AuthCapabilities } from '../react/capabilities.js';
+import type { UserChangeHandler } from './user-change.js';
+import { useUserChange } from './user-change.js';
 
 /**
  * Safe image wrapper that validates src before rendering.
@@ -30,17 +34,37 @@ function methodProps(
   };
 }
 
+/** Reports the session's user to `onUserChange`, using the same session query as the auth screens. */
+function UserChangeReporter({ onUserChange }: { onUserChange: UserChangeHandler }) {
+  const session = useContext(AuthUIContext).hooks.useSession();
+  const known = !session.isPending && !session.error;
+  useUserChange(known ? (session.data?.user.id ?? null) : undefined, onUserChange);
+  return null;
+}
+
 /**
  * `capabilities` (from `createAuthClient(definition).capabilities`) decides which sign-in methods
  * the auth screens offer, so they never show a method the server refuses.
+ *
+ * `onUserChange` gets the signed-in user's id, or `null` when signed out, each time that
+ * changes: on sign-in, sign-out, and a new session that replaced another user's. It is never
+ * called while the session is still loading or failed to load, and not twice in a row for the
+ * same user while the provider stays mounted. Use it for per-user cleanup, such as dropping
+ * the previous user's offline caches. With `disabled` there is no session and it is never called.
  */
 export function ArkiAuthProvider({
   children,
   authClient,
   capabilities,
   disabled = false,
+  onUserChange,
   ...props
-}: AuthUIProviderProps & { children: ReactNode; disabled?: boolean; capabilities: AuthCapabilities }) {
+}: AuthUIProviderProps & {
+  children: ReactNode;
+  disabled?: boolean;
+  capabilities: AuthCapabilities;
+  onUserChange?: UserChangeHandler;
+}) {
   const tsNavigate = useNavigate();
   const router = useRouter();
 
@@ -75,6 +99,7 @@ export function ArkiAuthProvider({
         {...methodProps(capabilities)}
         {...props}
       >
+        {onUserChange && <UserChangeReporter onUserChange={onUserChange} />}
         {children}
       </AuthUIProviderTanstack>
     </AuthQueryProvider>

@@ -105,6 +105,9 @@ export default defineConfig({
       },
     }),
     tanstackStart({
+      // TanStack Start looks for `src/client.tsx`; without this the build uses its default client
+      // entry and `entry-client.tsx` (Sentry init, service-worker registration) never runs.
+      client: { entry: './entry-client.tsx' },
       // `entry` resolves relative to `srcDirectory` (default 'src'), not
       // the project root — './src/entry-server.ts' silently falls back to
       // TanStack's default-entry stub.

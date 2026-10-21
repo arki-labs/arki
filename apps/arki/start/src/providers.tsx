@@ -6,6 +6,7 @@ import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
 import { FullscreenProvider } from '@arki/react-fullscreen';
 import { useIsClient } from '@arki/react-hooks/is-client';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
+import { clearCachesOnUserChange } from '@arki/tanstack-start/pwa/client';
 import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
 import { useTheme } from '@arki/theme';
 import { Toaster } from '@arki/ui/sonner';
@@ -52,7 +53,11 @@ export function SignedInProviders({ children }: { children: React.ReactNode }) {
     <LocaleProvider>
       <ORPCReactProvider>
         <NuqsAdapter>
-          <ArkiAuthProvider authClient={authClient} capabilities={authClient.capabilities}>
+          <ArkiAuthProvider
+            authClient={authClient}
+            capabilities={authClient.capabilities}
+            onUserChange={clearCachesOnUserChange}
+          >
             <NavContextProvider nav={nav}>
               <Provider store={customStore}>
                 <TooltipProvider>

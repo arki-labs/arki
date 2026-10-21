@@ -169,11 +169,13 @@
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "@testcontainers/postgresql": "catalog:testing",
+    "@testing-library/react": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
     "drizzle-kit": "catalog:drizzle",
+    "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
     "rate-limiter-flexible": "catalog:",
     "vitest": "catalog:"
