@@ -113,7 +113,7 @@ export const FLOORS = [
         ['plain', " '@arki/ui/card';"],
       ],
     ],
-    packages: ['theme', 'icons', 'react-hooks', 'design-systems', 'ui'],
+    packages: ['theme', 'icons', 'react-hooks', 'ui'],
   },
   {
     name: 'Specialized',

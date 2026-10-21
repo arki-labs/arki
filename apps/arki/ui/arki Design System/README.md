@@ -25,7 +25,7 @@ This kit is derived from these provided documents (read-only):
   agent-native rewrite; the brand kit + brief supersede it)
 - `arki/claude-design-setup.md` and `arki/claude-design-validation-prompts.md`
 
-There is no live codebase yet — `fleet/design-systems/src/arki/` will be
+There is no live codebase yet — `apps/arki/start/src/styles/arki/` will be
 created **from this kit's output**, not the other way around.
 
 ---
