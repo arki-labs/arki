@@ -3,7 +3,26 @@
   "version": "0.1.0",
   "private": false,
   "description": "Typed command-line programs from one defineCommand: schema-driven flags, a JSON envelope when piped, text on a TTY, stable exit codes, and help that never loads a handler.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "cli",
+    "command-line",
+    "agent"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/cli"
+  },
   "license": "MIT",
+  "engines": {
+    "node": ">=22.10"
+  },
   "sideEffects": false,
   "type": "module",
   "exports": {
