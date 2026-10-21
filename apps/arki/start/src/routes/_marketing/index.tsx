@@ -145,6 +145,10 @@ function HomePage() {
           <a href="#framework">Framework</a>
           <a href="#app-preview">The app</a>
           <a href="#principles">Principles</a>
+          <a href="/docs">Docs</a>
+          <a href="/packages">Packages</a>
+          <a href="/errors">Errors</a>
+          <a href="/compare">Compare</a>
         </nav>
         <div className="home-header-actions">
           <button

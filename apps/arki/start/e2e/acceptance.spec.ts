@@ -71,6 +71,22 @@ test.describe('site acceptance', () => {
     });
   }
 
+  // WHY: the homepage is where most readers arrive; its header must lead straight to the reference sections, and a
+  // keyboard user must be able to reach each of them.
+  test('the homepage nav offers Docs, Packages, Errors and Compare to the keyboard', async ({ page }) => {
+    await page.goto('/');
+    const mainNav = page.getByRole('navigation', { name: 'Main navigation' });
+    for (const [name, href] of [
+      ['Docs', '/docs'],
+      ['Packages', '/packages'],
+      ['Errors', '/errors'],
+      ['Compare', '/compare'],
+    ] as const) {
+      await expect(mainNav.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
+    }
+    expect(await unreachedByTab(page)).toEqual([]);
+  });
+
   // WHY: code samples are what readers copy; on a 320px phone they must scroll inside their own box, not push the
   // whole page sideways.
   for (const path of WIDE_CONTENT_PAGES) {
