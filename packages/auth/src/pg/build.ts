@@ -9,6 +9,7 @@ import { getTableColumns } from 'drizzle-orm';
 
 import { isFailure } from '@arki/failure';
 
+import { is, recordSchema } from '@arki/schema';
 import type { AuthDefinition, AuthMethod, IdTokenMethodsOf, ResolvedDefinition, SocialMethod } from '../definition.js';
 import type { AuthErrorCode } from '../errors.js';
 import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.js';
@@ -89,9 +90,9 @@ const nonEmptyText = (value: unknown): value is string => typeof value === 'stri
 /** Reads one provider's credentials from the runtime values; anything missing is `ARKI_AUTH_E001`. */
 function credentialsOf<K extends SocialMethod>(providers: unknown, method: K) {
   const entry: unknown =
-    typeof providers === 'object' && providers !== null ? Reflect.get(providers, method) : undefined;
+    is(providers, recordSchema) ? Reflect.get(providers, method) : undefined;
   const field = (key: string): unknown =>
-    typeof entry === 'object' && entry !== null ? Reflect.get(entry, key) : undefined;
+    is(entry, recordSchema) ? Reflect.get(entry, key) : undefined;
   const clientId = field('clientId');
   const clientSecret = field('clientSecret');
   if (!nonEmptyText(clientId) || !nonEmptyText(clientSecret)) {
@@ -540,8 +541,8 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         .clone()
         .json()
         .catch(() => null);
-      const code: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'code') : undefined;
-      const message: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'message') : undefined;
+      const code: unknown = is(body, recordSchema) ? Reflect.get(body, 'code') : undefined;
+      const message: unknown = is(body, recordSchema) ? Reflect.get(body, 'message') : undefined;
       // `sessionCreating` refused the session with the app's own code.
       if (isAuthErrorCode(code)) throw new AuthError(code, typeof message === 'string' ? message : code);
       const reason = await failureOf(response);

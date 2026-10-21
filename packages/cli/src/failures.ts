@@ -4,6 +4,7 @@
  * framework failure to one.
  */
 import type { StandardSchemaV1 } from '@arki/schema';
+import { is, recordSchema } from '@arki/schema';
 import { defineFailure } from '@arki/failure';
 
 /** Process exit codes. Stable: scripts and agents branch on them. */
@@ -33,10 +34,6 @@ export type InputIssue = {
   readonly message: string;
 };
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every(entry => typeof entry === 'string');
 }
@@ -60,7 +57,7 @@ type ConfirmationRequiredData = { readonly flag: '--yes' };
 
 function isInputIssue(value: unknown): value is InputIssue {
   return (
-    isRecord(value) &&
+    is(value, recordSchema) &&
     isStringArray(value['path']) &&
     (value['flag'] === undefined || typeof value['flag'] === 'string') &&
     typeof value['message'] === 'string'
@@ -78,7 +75,7 @@ export const UnknownCommand = defineFailure('cli.unknown_command', {
   data: guarded(
     'cli.unknown_command',
     (value): value is UnknownCommandData =>
-      isRecord(value) && typeof value['received'] === 'string' && isStringArray(value['suggestions']),
+      is(value, recordSchema) && typeof value['received'] === 'string' && isStringArray(value['suggestions']),
   ),
 });
 
@@ -93,7 +90,7 @@ export const InvalidInput = defineFailure('cli.invalid_input', {
   data: guarded(
     'cli.invalid_input',
     (value): value is InvalidInputData =>
-      isRecord(value) && Array.isArray(value['issues']) && value['issues'].every(issue => isInputIssue(issue)),
+      is(value, recordSchema) && Array.isArray(value['issues']) && value['issues'].every(issue => isInputIssue(issue)),
   ),
 });
 
@@ -107,7 +104,7 @@ export const PreviewUnsupported = defineFailure('cli.preview_unsupported', {
   remediation: 'Run it without --dry-run.',
   data: guarded(
     'cli.preview_unsupported',
-    (value): value is PreviewUnsupportedData => isRecord(value) && isStringArray(value['command']),
+    (value): value is PreviewUnsupportedData => is(value, recordSchema) && isStringArray(value['command']),
   ),
 });
 
@@ -122,7 +119,7 @@ export const InputRequired = defineFailure('cli.input_required', {
   data: guarded(
     'cli.input_required',
     (value): value is InputRequiredData =>
-      isRecord(value) && typeof value['field'] === 'string' && typeof value['flag'] === 'string',
+      is(value, recordSchema) && typeof value['field'] === 'string' && typeof value['flag'] === 'string',
   ),
 });
 
@@ -136,7 +133,7 @@ export const ConfirmationRequired = defineFailure('cli.confirmation_required', {
   remediation: 'Pass --yes to confirm without a terminal.',
   data: guarded(
     'cli.confirmation_required',
-    (value): value is ConfirmationRequiredData => isRecord(value) && value['flag'] === '--yes',
+    (value): value is ConfirmationRequiredData => is(value, recordSchema) && value['flag'] === '--yes',
   ),
 });
 

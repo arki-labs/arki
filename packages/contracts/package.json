@@ -71,6 +71,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/failure": "workspace:*",
+    "@arki/schema": "workspace:*",
     "zod": "catalog:",
     "zod-form-data": "catalog:validation"
   },

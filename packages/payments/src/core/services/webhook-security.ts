@@ -4,6 +4,7 @@ import type { Instant } from '@arki/date';
 import { isBefore, now, sub } from '@arki/date';
 import { isFailure } from '@arki/failure';
 import { WebhookMalformed, WebhookStale, stripe } from '@arki/http/webhooks';
+import { is, recordSchema } from '@arki/schema';
 
 import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
 import { mapStripeEventType } from '../providers/stripe-event-types.js';
@@ -308,9 +309,7 @@ export class WebhookSecurityService {
       const payloadStr = typeof payload === 'string' ? payload : payload.toString();
       const parsed = JSON.parse(payloadStr) as JsonValue;
       const sanitized = this.deepSanitize(parsed);
-      return typeof sanitized === 'object' && sanitized !== null && !Array.isArray(sanitized)
-        ? (sanitized as Record<string, unknown>)
-        : {};
+      return is(sanitized, recordSchema) ? sanitized : {};
     } catch {
       return {};
     }

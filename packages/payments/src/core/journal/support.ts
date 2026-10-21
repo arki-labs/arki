@@ -9,6 +9,7 @@ import type { Instant } from '@arki/date';
 import type { Failure } from '@arki/failure';
 import { instant } from '@arki/date';
 import { isFailure } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 /** Event data is stored as JSON, so a time travels as an ISO string. */
 export function toIso(value: Instant): string {
@@ -47,10 +48,6 @@ export function storedReal(value: number): number {
   return stored;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Deep equality for JSON values. Key order does not matter: a `jsonb` column
  * returns object keys in its own order. A key holding `undefined` equals a
@@ -65,7 +62,7 @@ export function sameJson(left: unknown, right: unknown): boolean {
     return left.length === right.length && left.every((item, index) => sameJson(item, right[index]));
   }
 
-  if (isPlainObject(left) && isPlainObject(right)) {
+  if (is(left, recordSchema) && is(right, recordSchema)) {
     const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
 
     return [...keys].every(key => sameJson(left[key], right[key]));

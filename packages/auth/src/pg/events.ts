@@ -7,6 +7,7 @@
  */
 import { isFailure } from '@arki/failure';
 
+import { is, recordSchema } from '@arki/schema';
 import type { AuthMethod } from '../definition.js';
 import type { AuthEvents, SignInFailure } from './types.js';
 import { isSocialMethod } from '../definition.js';
@@ -64,7 +65,7 @@ export async function failureOf(response: Response): Promise<SignInFailure | und
       .clone()
       .json()
       .catch(() => null);
-    const code: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'code') : undefined;
+    const code: unknown = is(body, recordSchema) ? Reflect.get(body, 'code') : undefined;
     return code === 'EMAIL_NOT_VERIFIED' ? 'unverified' : 'unknown';
   }
   if (response.status >= 400) return 'unknown';

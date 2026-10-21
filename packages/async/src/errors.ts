@@ -3,6 +3,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec';
 
 import type { Failure, FailureOf } from '@arki/failure';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 /**
  * Owned scopes return typed failures. Legacy timing helpers throw an
@@ -161,7 +162,7 @@ export const SUPERVISOR_FAILURES = [Cancelled, Deadline, UnexpectedDefect] as co
 /** The exact canonical supervisor union. */
 export type SupervisorFailure = ReturnType<(typeof SUPERVISOR_FAILURES)[number]>;
 function validateScopeCounts(value: unknown) {
-  if (typeof value === 'object' && value !== null && 'primaryCount' in value && 'cleanupCount' in value) {
+  if (is(value, recordSchema) && 'primaryCount' in value && 'cleanupCount' in value) {
     const { primaryCount, cleanupCount } = value;
     if (
       typeof primaryCount === 'number' &&

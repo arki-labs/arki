@@ -2,6 +2,8 @@
  * `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk).
  * No SDK and no peer, so it runs on every runtime that has `fetch`.
  */
+import { is, recordSchema } from '@arki/schema';
+
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest } from '../types.js';
 import {
@@ -12,7 +14,7 @@ import {
   ModelUnavailable,
   RateLimited,
 } from '../failures.js';
-import { isRecord, mentionsContextLength, retryAfterMs } from '../http.js';
+import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 
 export type OllamaModelOptions = {
@@ -120,11 +122,11 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
       try {
         const response = await send(`${baseURL}/api/tags`, { method: 'GET', ...(signal ? { signal } : {}) });
         const body: unknown = response.ok ? await response.json() : undefined;
-        const models = isRecord(body) && Array.isArray(body['models']) ? body['models'] : [];
+        const models = is(body, recordSchema) && Array.isArray(body['models']) ? body['models'] : [];
         const entry = models.find(
-          (model: unknown) => isRecord(model) && (model['name'] === withTag(id) || model['model'] === withTag(id)),
+          (model: unknown) => is(model, recordSchema) && (model['name'] === withTag(id) || model['model'] === withTag(id)),
         );
-        const value: unknown = isRecord(entry) ? entry['digest'] : undefined;
+        const value: unknown = is(entry, recordSchema) ? entry['digest'] : undefined;
         if (typeof value === 'string') digest = value;
       } catch {
         // Unreachable or aborted: the embed request that follows reports it as a failure value.
@@ -173,12 +175,12 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
     } catch {
       return signal?.aborted ? Cancelled() : InvalidOutput({ reason: 'ollama answered malformed JSON' });
     }
-    const embeddings = isRecord(body) ? body['embeddings'] : undefined;
+    const embeddings = is(body, recordSchema) ? body['embeddings'] : undefined;
     if (!Array.isArray(embeddings) || !embeddings.every(item => Array.isArray(item))) {
       return InvalidOutput({ reason: 'ollama answered without an embeddings array' });
     }
-    const promptTokens = isRecord(body) ? body['prompt_eval_count'] : undefined;
-    const loadNs = isRecord(body) ? body['load_duration'] : undefined;
+    const promptTokens = is(body, recordSchema) ? body['prompt_eval_count'] : undefined;
+    const loadNs = is(body, recordSchema) ? body['load_duration'] : undefined;
     return {
       vectors: embeddings,
       tokens:

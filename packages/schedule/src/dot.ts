@@ -39,6 +39,7 @@ import type { SuccessOf } from '@arki/failure';
 import { allFeatures, driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
+import { is, recordSchema } from '@arki/schema';
 import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
 import type { DurableScheduler, ScheduleClock, ScheduleOutcome, ScheduleRefusal, ScheduleRuntime } from './runtime.js';
 import { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';
@@ -330,12 +331,12 @@ function lockPlanOf(def: { readonly name: string; readonly lock?: FeatureLockOpt
 }
 
 function isLocker(value: unknown): value is Locker {
-  return typeof value === 'object' && value !== null && 'mutex' in value && typeof value.mutex === 'function';
+  return is(value, recordSchema) && 'mutex' in value && typeof value.mutex === 'function';
 }
 
 /** The feature's `locks` service, read at boot — a missing one fails the boot, not the first tick. */
 function locksOf(services: unknown, schedule: string): Locker {
-  const locks: unknown = typeof services === 'object' && services !== null ? Reflect.get(services, 'locks') : undefined;
+  const locks: unknown = is(services, recordSchema) ? Reflect.get(services, 'locks') : undefined;
   if (!isLocker(locks)) {
     throw new ScheduleError({
       code: SCHEDULE_ERROR_CODES.lockServiceMissing,
@@ -763,7 +764,7 @@ export type ScheduleClient<TFeatures extends readonly MountedFeature[]> = {
 function declaredNames(slice: AnyFeatureSlice): readonly string[] {
   if (slice.key !== 'schedules' || !('definitions' in slice) || !Array.isArray(slice.definitions)) return [];
   return slice.definitions.flatMap((definition: unknown) =>
-    typeof definition === 'object' && definition !== null && 'name' in definition && typeof definition.name === 'string'
+    is(definition, recordSchema) && 'name' in definition && typeof definition.name === 'string'
       ? [definition.name]
       : [],
   );

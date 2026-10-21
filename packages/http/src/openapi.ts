@@ -9,7 +9,7 @@
  */
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { hasJsonSchema, isStandardSchema } from '@arki/schema';
+import { hasJsonSchema, is, isStandardSchema, plainObjectSchema } from '@arki/schema';
 
 import type { ContractLike } from './contract.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
@@ -188,21 +188,15 @@ function isJsonPrimitive(value: unknown): value is string | number | boolean | n
   return value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number';
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  return prototype === Object.prototype || prototype === null;
-}
-
 function isJsonValue(value: unknown): value is JsonValue {
   if (isJsonPrimitive(value)) return typeof value !== 'number' || Number.isFinite(value);
   if (Array.isArray(value)) return value.every(isJsonValue);
-  if (!isPlainObject(value)) return false;
+  if (!is(value, plainObjectSchema)) return false;
   return Object.values(value).every(isJsonValue);
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return isPlainObject(value) && Object.values(value).every(isJsonValue);
+  return is(value, plainObjectSchema) && Object.values(value).every(isJsonValue);
 }
 
 function jsonDeepEqual(left: unknown, right: unknown): boolean {
@@ -211,7 +205,7 @@ function jsonDeepEqual(left: unknown, right: unknown): boolean {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
     return left.every((value, index) => jsonDeepEqual(value, right[index]));
   }
-  if (!isPlainObject(left) || !isPlainObject(right)) return false;
+  if (!is(left, plainObjectSchema) || !is(right, plainObjectSchema)) return false;
   const leftEntries = Object.entries(left);
   const rightEntries = Object.entries(right);
   if (leftEntries.length !== rightEntries.length) return false;

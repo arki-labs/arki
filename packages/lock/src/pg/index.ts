@@ -42,6 +42,7 @@ import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 
 import { getLogger } from '@arki/log';
+import { is, recordSchema } from '@arki/schema';
 
 import type {
   AcquireRequest,
@@ -119,15 +120,11 @@ export const HOLD_BEAT_TIMEOUT_MS = 5000;
 const LOCK_TIMEOUT_CODE = '55P03';
 const SAVEPOINT = 'arki_lock_wait';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /** `{ rows: [...] }` (node-postgres, PGlite) or a bare array (postgres.js): the first row, if any. */
 function firstRow(result: unknown): Record<string, unknown> | undefined {
-  const rows: unknown = Array.isArray(result) ? result : isRecord(result) ? result['rows'] : undefined;
+  const rows: unknown = Array.isArray(result) ? result : is(result, recordSchema) ? result['rows'] : undefined;
   const first: unknown = Array.isArray(rows) ? rows[0] : undefined;
-  return isRecord(first) ? first : undefined;
+  return is(first, recordSchema) ? first : undefined;
 }
 
 function wasAcquired(result: unknown): boolean {
@@ -137,7 +134,7 @@ function wasAcquired(result: unknown): boolean {
 /** Drizzle wraps driver errors; the Postgres code sits on the error or one of its causes. */
 function hasPgCode(error: unknown, code: string): boolean {
   let current: unknown = error;
-  for (let depth = 0; depth < 5 && isRecord(current); depth++) {
+  for (let depth = 0; depth < 5 && is(current, recordSchema); depth++) {
     if (current['code'] === code) return true;
     current = current['cause'];
   }

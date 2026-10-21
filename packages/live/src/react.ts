@@ -44,6 +44,7 @@ import type {
 import type { ReactElement, ReactNode } from 'react';
 import { createContext, createElement, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { is, recordSchema } from '@arki/schema';
 
 import type { LiveStatus } from './client.js';
 import type { LiveCursor, LiveEvent, LiveKeyKind, LiveManifest, LiveReceipt } from './types.js';
@@ -152,9 +153,7 @@ type LiveSession = {
 const sessions = new WeakMap<QueryClient, LiveSession>();
 
 function isAuthError(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'status' in error && (error.status === 401 || error.status === 403)
-  );
+  return is(error, recordSchema) && (error.status === 401 || error.status === 403);
 }
 
 function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], initialCursor: LiveCursor | undefined) {

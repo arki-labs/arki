@@ -13,6 +13,7 @@
  * Typed by shape, so this file imports no driver.
  */
 import { getLogger } from '@arki/log';
+import { is, recordSchema } from '@arki/schema';
 
 /** Enable with `DEBUG=arki:db:listen`. */
 const debugListen = getLogger('arki:db:listen');
@@ -23,7 +24,7 @@ const debugListen = getLogger('arki:db:listen');
  * holds a process open, so there is nothing to do.
  */
 export function unrefTimer(timer: unknown): void {
-  if (typeof timer === 'object' && timer !== null && 'unref' in timer && typeof timer.unref === 'function')
+  if (is(timer, recordSchema) && 'unref' in timer && typeof timer.unref === 'function')
     timer.unref();
 }
 

@@ -2,6 +2,7 @@
  * The registry walk: a nested record of job, schedule and flow definitions, flattened the way
  * `queue.register()` and `jobs(...)` read it. `dot.ts` and the outbox runner share it.
  */
+import { is, recordSchema } from '@arki/schema';
 import type { FlowDefinition, ScheduleDefinition } from '../types/builder.ts';
 import type { JobDefinition } from '../types/job.ts';
 import { outboxError, OUTBOX_ERROR_CODES } from './errors.ts';
@@ -10,29 +11,17 @@ import { outboxError, OUTBOX_ERROR_CODES } from './errors.ts';
 export type QueueRegistry = Record<string, unknown>;
 
 export function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '_type' in value &&
-    (value as { _type?: unknown })._type === 'job' &&
-    '_internal' in value &&
-    typeof (value as { _internal?: { name?: unknown } })._internal?.name === 'string'
-  );
+  if (!is(value, recordSchema) || value['_type'] !== 'job') return false;
+  const internal = value['_internal'];
+  return is(internal, recordSchema) && typeof internal['name'] === 'string';
 }
 
 export function isScheduleDefinition(value: unknown): value is ScheduleDefinition {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '_type' in value &&
-    (value as { _type?: unknown })._type === 'schedule'
-  );
+  return is(value, recordSchema) && value['_type'] === 'schedule';
 }
 
 export function isFlowDefinition(value: unknown): value is FlowDefinition {
-  return (
-    typeof value === 'object' && value !== null && '_type' in value && (value as { _type?: unknown })._type === 'flow'
-  );
+  return is(value, recordSchema) && value['_type'] === 'flow';
 }
 
 export type QueueDefinition = JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition;
@@ -46,8 +35,8 @@ export function collectQueueDefinitions(
       definitions.push(value);
       continue;
     }
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      collectQueueDefinitions(value as QueueRegistry, definitions);
+    if (is(value, recordSchema)) {
+      collectQueueDefinitions(value, definitions);
     }
   }
   return definitions;

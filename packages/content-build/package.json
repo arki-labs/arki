@@ -36,6 +36,7 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@code-hike/mdx": "catalog:",
     "@content-collections/core": "catalog:next",
     "@content-collections/mdx": "catalog:next",

@@ -19,6 +19,7 @@ import type { JobsSource } from '@arki/journal/dot';
 import { driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
+import { is, recordSchema } from '@arki/schema';
 import type { DurableSchedulerOptions } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { Outbox, OutboxOptions, OutboxTx, ScheduleOptions } from './outbox/outbox.ts';
@@ -226,7 +227,7 @@ export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry)
 }
 
 function isQueueRegistry(value: unknown): value is QueueRegistry {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return is(value, recordSchema);
 }
 
 function isFeatureJobs(value: unknown): value is FeatureJobs {

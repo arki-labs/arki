@@ -5,10 +5,9 @@
 import { z } from 'zod';
 
 import { defineFailure, isFailure } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 import type { EmbeddingSpace, TokenCount } from './types.js';
-
-const isObject = (value: unknown): boolean => typeof value === 'object' && value !== null;
 
 /**
  * @fix Wait retryAfterMs (when set) and try again, or wrap the embedder in withResilience.
@@ -27,7 +26,7 @@ export const RateLimited = defineFailure('embeddings.rate_limited', {
  */
 export const InputTooLong = defineFailure('embeddings.input_too_long', {
   status: 400,
-  data: z.object({ index: z.number(), tokens: z.custom<TokenCount>(isObject), max: z.number() }),
+  data: z.object({ index: z.number(), tokens: z.custom<TokenCount>(value => is(value, recordSchema)), max: z.number() }),
   message: 'input {index} is longer than the model accepts ({max} tokens)',
   remediation: 'Split the text into smaller chunks before embedding it.',
 });
@@ -79,7 +78,7 @@ export const InvalidOutput = defineFailure('embeddings.invalid_output', {
  */
 export const SpaceMismatch = defineFailure('embeddings.space_mismatch', {
   status: 409,
-  data: z.object({ expected: z.custom<EmbeddingSpace>(isObject), actual: z.custom<EmbeddingSpace>(isObject) }),
+  data: z.object({ expected: z.custom<EmbeddingSpace>(value => is(value, recordSchema)), actual: z.custom<EmbeddingSpace>(value => is(value, recordSchema)) }),
   message: 'the configured model is not the embedding space the index was built in',
   remediation: 'Re-embed the corpus in the new space, or configure the model the index was built with.',
 });

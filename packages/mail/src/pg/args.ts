@@ -1,5 +1,6 @@
 /** The stored shape of a queued mail, and reading it back without trusting it. */
 import type { ScheduledJob } from '@arki/journal';
+import { is, recordSchema } from '@arki/schema';
 
 import type { MailMessage } from '../types.js';
 import { MAIL_ERROR_CODES, MailError } from '../errors.js';
@@ -10,19 +11,17 @@ export const MAIL_JOB = 'mail.deliver.v1';
 /** What a queue row holds. */
 export type QueuedArgs = { readonly version: 1; readonly message: MailMessage; readonly expiresAt?: string };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 const isAddresses = (value: unknown): boolean =>
   typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'));
 const isStringRecord = (value: unknown): value is Record<string, string> =>
-  isRecord(value) && Object.values(value).every(item => typeof item === 'string');
+  is(value, recordSchema) && Object.values(value).every(item => typeof item === 'string');
 const optional = (value: unknown, check: (value: unknown) => boolean): boolean => value === undefined || check(value);
 const isString = (value: unknown): boolean => typeof value === 'string';
 
 /** A stored message, checked field by field: the row may predate a deploy or be edited by hand. */
 export function isMailMessage(value: unknown): value is MailMessage {
   return (
-    isRecord(value) &&
+    is(value, recordSchema) &&
     isString(value.from) &&
     isString(value.subject) &&
     isString(value.text) &&
@@ -40,7 +39,7 @@ export function isMailMessage(value: unknown): value is MailMessage {
 /** The row's args, or a permanent failure: a row that cannot be read will never send. */
 export function queuedArgs(job: ScheduledJob): QueuedArgs {
   const args = job.args;
-  if (isRecord(args) && args.version === 1 && isMailMessage(args.message) && optional(args.expiresAt, isString)) {
+  if (is(args, recordSchema) && args.version === 1 && isMailMessage(args.message) && optional(args.expiresAt, isString)) {
     const expiresAt = typeof args.expiresAt === 'string' ? args.expiresAt : undefined;
     return { version: 1, message: args.message, ...(expiresAt === undefined ? {} : { expiresAt }) };
   }

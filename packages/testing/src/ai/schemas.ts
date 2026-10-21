@@ -4,12 +4,9 @@
  * schema library of its own.
  */
 import type { SchemaWithJson } from '@arki/schema';
-import { withJsonSchema } from '@arki/schema';
+import { is, recordSchema, withJsonSchema } from '@arki/schema';
 
 type Failure = { readonly issues: readonly { readonly message: string }[] };
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 function schemaOf<TOutput>(
   json: Readonly<Record<string, unknown>>,
@@ -38,7 +35,7 @@ export const verdictSchema = schemaOf<Verdict>(
     required: ['pass', 'reason'],
   },
   value =>
-    isRecord(value) && typeof value['pass'] === 'boolean' && typeof value['reason'] === 'string'
+    is(value, recordSchema) && typeof value['pass'] === 'boolean' && typeof value['reason'] === 'string'
       ? { pass: value['pass'], reason: value['reason'] }
       : null,
   '{ pass: boolean, reason: string }',
@@ -62,12 +59,12 @@ export const claimsSchema = schemaOf<{ readonly claims: readonly CheckedClaim[] 
     required: ['claims'],
   },
   value => {
-    if (!isRecord(value) || !Array.isArray(value['claims'])) return null;
+    if (!is(value, recordSchema) || !Array.isArray(value['claims'])) return null;
     const claims: CheckedClaim[] = [];
     const items: readonly unknown[] = value['claims'];
     for (const item of items) {
       if (
-        !isRecord(item) ||
+        !is(item, recordSchema) ||
         typeof item['claim'] !== 'string' ||
         typeof item['supported'] !== 'boolean' ||
         typeof item['quote'] !== 'string'

@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 
 import { defineFailure, isFailure } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 /** Response exceeds its budget. @fix Request a smaller page. @verify bun run test -- src/orpc.test.ts */
 export const ResultTooLarge = defineFailure('mcp.result_too_large', {
@@ -26,7 +27,7 @@ export function toolResult(value: unknown, maxChars: number): CallToolResult {
     if (text === undefined) return toolResult(InvalidResult(), maxChars);
     // A detached JSON snapshot cannot leak prototypes or change after validation.
     const json: unknown = JSON.parse(text);
-    const structured = typeof json === 'object' && json !== null && !Array.isArray(json);
+    const structured = is(json, recordSchema);
     const size = text.length + (structured ? text.length : 0);
     if (size > maxChars) return toolResult(ResultTooLarge(), maxChars);
     return { content: [{ type: 'text', text }], ...(structured ? { structuredContent: json } : {}) };

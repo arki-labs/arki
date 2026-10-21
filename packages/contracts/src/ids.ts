@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { FailureOf } from '@arki/failure';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
+import { is, recordSchema } from '@arki/schema';
 import { CONTRACTS_ERROR_CODES, ContractsError, RandomSourceUnavailable } from './errors.js';
 
 /**
@@ -101,14 +102,14 @@ export function defineId(prefix: string, options?: unknown) {
     );
   }
   if (options === undefined) return prefixedId(prefix);
-  const kind: unknown = typeof options === 'object' && options !== null ? Reflect.get(options, 'kind') : undefined;
+  const kind: unknown = is(options, recordSchema) ? Reflect.get(options, 'kind') : undefined;
   if (typeof kind !== 'string' || kind.length === 0) {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdKind,
       'defineId: kind must be a non-empty domain name. Use one literal name for each identity kind.',
     );
   }
-  const format: unknown = typeof options === 'object' && options !== null ? Reflect.get(options, 'format') : undefined;
+  const format: unknown = is(options, recordSchema) ? Reflect.get(options, 'format') : undefined;
   if (format === undefined || format === 'uuid') return brandedId(prefix, kind, format);
   return brandedId(prefix, kind, snapshotIdFormat(format));
 }

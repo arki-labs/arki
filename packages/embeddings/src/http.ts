@@ -13,11 +13,6 @@ export function retryAfterMs(read: (name: string) => string | null | undefined):
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
-/** True for an object (not an array) so its fields can be read. */
-export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** True when a provider's 400 body says the input exceeded the context window. */
 export function mentionsContextLength(text: string): boolean {
   return /context length|context window|maximum context|too many tokens|input length/i.test(text);

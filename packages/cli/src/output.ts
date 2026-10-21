@@ -2,6 +2,8 @@
  * Where a result goes: the mode (`-o`, `--json`, `ARKI_OUTPUT`, the
  * terminal), `--fields`, ndjson lines, and the default text rendering.
  */
+import { is, recordSchema } from '@arki/schema';
+
 import type { Mode } from './command.js';
 import type { Envelope } from './envelope.js';
 import type { Ui } from './ui.js';
@@ -32,10 +34,6 @@ export function resolveMode(options: {
   return options.tty ? 'text' : 'json';
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** `a,b.c` → `[['a'], ['b', 'c']]`. */
 export function parseFields(raw: string): readonly (readonly string[])[] {
   return raw
@@ -51,7 +49,7 @@ export function parseFields(raw: string): readonly (readonly string[])[] {
  */
 export function pickFields(value: unknown, paths: readonly (readonly string[])[]): unknown {
   if (Array.isArray(value)) return value.map(entry => pickFields(entry, paths));
-  if (!isRecord(value)) return value;
+  if (!is(value, recordSchema)) return value;
   const picked: Record<string, unknown> = {};
   const byHead = new Map<string, (readonly string[])[]>();
   for (const [head, ...tail] of paths) {
@@ -93,10 +91,10 @@ function table(rows: readonly Readonly<Record<string, unknown>>[]): string {
 export function renderText(data: unknown): string {
   if (data === null || data === undefined) return '';
   if (Array.isArray(data)) {
-    if (data.length > 0 && data.every(entry => isRecord(entry))) return table(data);
+    if (data.length > 0 && data.every(entry => is(entry, recordSchema))) return table(data);
     return data.map(entry => cell(entry)).join('\n');
   }
-  if (isRecord(data)) {
+  if (is(data, recordSchema)) {
     return Object.entries(data)
       .map(([key, value]) => `${key}: ${cell(value)}`)
       .join('\n');
@@ -126,7 +124,7 @@ export function writeEnvelope(envelope: Envelope<unknown>, options: WriteOptions
     return;
   }
   if (mode === 'ndjson') {
-    const items = envelope.ok && isRecord(envelope.data) ? envelope.data['items'] : undefined;
+    const items = envelope.ok && is(envelope.data, recordSchema) ? envelope.data['items'] : undefined;
     if (!Array.isArray(items)) {
       stdout(`${JSON.stringify(envelope)}\n`);
       return;

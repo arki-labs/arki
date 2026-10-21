@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 
 import type { Failure } from '@arki/failure';
 import { isFailure } from '@arki/failure';
+import { is, plainObjectSchema, recordSchema } from '@arki/schema';
 
 import type { DotAppManifest, JsonValue, ProjectionManifest } from '../manifest.js';
 import {
@@ -43,16 +44,10 @@ function isJsonPrimitive(value: unknown): value is string | number | boolean | n
   return value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number';
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  return prototype === Object.prototype || prototype === null;
-}
-
 function isJsonValue(value: unknown): value is JsonValue {
   if (isJsonPrimitive(value)) return typeof value !== 'number' || Number.isFinite(value);
   if (Array.isArray(value)) return value.every(item => isJsonValue(item));
-  if (!isPlainObject(value)) return false;
+  if (!is(value, plainObjectSchema)) return false;
   return Object.values(value).every(item => isJsonValue(item));
 }
 
@@ -62,7 +57,7 @@ function jsonDeepEqual(left: unknown, right: unknown): boolean {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
     return left.every((value, index) => jsonDeepEqual(value, right[index]));
   }
-  if (!isPlainObject(left) || !isPlainObject(right)) return false;
+  if (!is(left, plainObjectSchema) || !is(right, plainObjectSchema)) return false;
   const leftEntries = Object.entries(left);
   const rightEntries = Object.entries(right);
   if (leftEntries.length !== rightEntries.length) return false;
@@ -132,7 +127,7 @@ function messageOf(error: unknown): string {
 }
 
 function hasProject(value: unknown): value is ProjectionModule {
-  return typeof value === 'object' && value !== null && 'project' in value && typeof value.project === 'function';
+  return is(value, recordSchema) && typeof value['project'] === 'function';
 }
 
 async function loadProjectionModule(
@@ -187,5 +182,5 @@ export async function renderProjection(source: ProjectionSource): Promise<Projec
 
 /** True when a command's data is the `--as` payload. */
 export function isProjectionData(value: unknown): value is ProjectionData {
-  return typeof value === 'object' && value !== null && 'format' in value && 'document' in value;
+  return is(value, recordSchema) && 'format' in value && 'document' in value;
 }

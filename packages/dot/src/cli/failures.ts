@@ -8,6 +8,7 @@
  */
 import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
+import { is, recordSchema } from '@arki/schema';
 import { defineFailure } from '@arki/failure';
 
 import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
@@ -30,10 +31,6 @@ export function dotCliDocsUrl(code: string): string {
 }
 
 type Fields = Readonly<Record<string, unknown>>;
-
-function isRecord(value: unknown): value is Fields {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every(entry => typeof entry === 'string');
@@ -68,7 +65,7 @@ export type AppNotFoundData = { readonly cwd: string; readonly searched: readonl
 export const AppNotFound = defineFailure('dot.app_not_found', {
   data: guarded(
     'dot.app_not_found',
-    (value): value is AppNotFoundData => isRecord(value) && strings(value, ['cwd']) && isStringArray(value['searched']),
+    (value): value is AppNotFoundData => is(value, recordSchema) && strings(value, ['cwd']) && isStringArray(value['searched']),
   ),
   message: 'No DOT app file found in {cwd}',
   remediation:
@@ -93,7 +90,7 @@ export const AppInvalidExport = defineFailure('dot.app_invalid_export', {
   data: guarded(
     'dot.app_invalid_export',
     (value): value is AppInvalidExportData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       strings(value, ['filePath'], ['exportName']) &&
       isStringArray(value['exports']) &&
       isStringArray(value['matches']),
@@ -130,7 +127,7 @@ export const AppImportFailed = defineFailure('dot.app_import_failed', {
   data: guarded(
     'dot.app_import_failed',
     (value): value is AppImportFailedData =>
-      isRecord(value) && strings(value, ['filePath', 'causeMessage'], ['exportName', 'causeCode', 'causeRemediation']),
+      is(value, recordSchema) && strings(value, ['filePath', 'causeMessage'], ['exportName', 'causeCode', 'causeRemediation']),
   ),
   message: data =>
     data.exportName === null
@@ -155,7 +152,7 @@ export const AppLifecycleFailed = defineFailure('dot.app_lifecycle_failed', {
   data: guarded(
     'dot.app_lifecycle_failed',
     (value): value is AppLifecycleFailedData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       (value['phase'] === 'configure' || value['phase'] === 'boot') &&
       strings(value, ['underlyingCode', 'causeMessage']),
   ),
@@ -186,7 +183,7 @@ export const ProjectionNotFound = defineFailure('dot.projection_not_found', {
   data: guarded(
     'dot.projection_not_found',
     (value): value is ProjectionNotFoundData =>
-      isRecord(value) && strings(value, ['format']) && isStringArray(value['registeredFormats']),
+      is(value, recordSchema) && strings(value, ['format']) && isStringArray(value['registeredFormats']),
   ),
   message: 'No projection is registered for format "{format}"',
   remediation:
@@ -210,7 +207,7 @@ export const ProjectionImportFailed = defineFailure('dot.projection_import_faile
   data: guarded(
     'dot.projection_import_failed',
     (value): value is ProjectionImportFailedData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       strings(value, ['specifier', 'registeringPlugin'], ['causeMessage']) &&
       (value['stage'] === 'resolve' || value['stage'] === 'import' || value['stage'] === 'export'),
   ),
@@ -239,7 +236,7 @@ export const ProjectionExecutionFailed = defineFailure('dot.projection_execution
   data: guarded(
     'dot.projection_execution_failed',
     (value): value is ProjectionExecutionFailedData =>
-      isRecord(value) && strings(value, ['format', 'specifier', 'registeringPlugin', 'causeMessage']),
+      is(value, recordSchema) && strings(value, ['format', 'specifier', 'registeringPlugin', 'causeMessage']),
   ),
   message: 'Projection "{format}" failed while rendering: {causeMessage}',
   remediation: 'Make `project(manifest)` pure and return JSON-round-trip-safe output.',
@@ -259,10 +256,10 @@ export const ProjectionConflict = defineFailure('dot.projection_conflict', {
   data: guarded(
     'dot.projection_conflict',
     (value): value is ProjectionConflictData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       strings(value, ['format']) &&
       Array.isArray(value['projections']) &&
-      value['projections'].every(entry => isRecord(entry) && strings(entry, ['plugin', 'module'])),
+      value['projections'].every(entry => is(entry, recordSchema) && strings(entry, ['plugin', 'module'])),
   ),
   message: 'Multiple projection modules are registered for format "{format}"',
   remediation: 'Remove one registration, or make both plugins register the same module specifier.',
@@ -277,9 +274,9 @@ export const DoctorFailed = defineFailure('dot.doctor_failed', {
   data: guarded(
     'dot.doctor_failed',
     (value): value is DoctorReport =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       typeof value['status'] === 'string' &&
-      isRecord(value['app']) &&
+      is(value['app'], recordSchema) &&
       Array.isArray(value['plugins']) &&
       Array.isArray(value['issues']),
   ),
@@ -298,7 +295,7 @@ export const TargetNotEmpty = defineFailure('dot.target_not_empty', {
   data: guarded(
     'dot.target_not_empty',
     (value): value is TargetNotEmptyData =>
-      isRecord(value) && strings(value, ['target']) && isStringArray(value['conflicting']),
+      is(value, recordSchema) && strings(value, ['target']) && isStringArray(value['conflicting']),
   ),
   message: 'Target directory "{target}" is not empty',
   remediation: 'Choose an empty directory, or re-run with --force to overwrite.',
@@ -314,7 +311,7 @@ export type TemplateMissingData = { readonly templateRoot: string };
 export const TemplateMissing = defineFailure('dot.template_missing', {
   data: guarded(
     'dot.template_missing',
-    (value): value is TemplateMissingData => isRecord(value) && strings(value, ['templateRoot']),
+    (value): value is TemplateMissingData => is(value, recordSchema) && strings(value, ['templateRoot']),
   ),
   message: 'No template files found under {templateRoot}',
   remediation: 'Reinstall @arki/dot: it must ship its `templates/` directory.',
@@ -336,11 +333,11 @@ export const WriteFailed = defineFailure('dot.write_failed', {
   data: guarded(
     'dot.write_failed',
     (value): value is WriteFailedData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       strings(value, ['target']) &&
       Array.isArray(value['written']) &&
       Array.isArray(value['failed']) &&
-      value['failed'].every(entry => isRecord(entry) && strings(entry, ['path', 'message'])),
+      value['failed'].every(entry => is(entry, recordSchema) && strings(entry, ['path', 'message'])),
   ),
   message: data => `Failed to write ${String(data.failed.length)} file(s) under ${data.target}`,
   remediation: 'Check the filesystem permissions of the target directory, then re-run with --force.',
@@ -374,7 +371,7 @@ export type DevDbUnreachableData = {
 export const DevDbUnreachable = defineFailure('dot.dev_db_unreachable', {
   data: guarded(
     'dot.dev_db_unreachable',
-    (value): value is DevDbUnreachableData => isRecord(value) && strings(value, ['target', 'reason']),
+    (value): value is DevDbUnreachableData => is(value, recordSchema) && strings(value, ['target', 'reason']),
   ),
   message: 'Database {target} is not reachable: {reason}',
   remediation:
@@ -391,7 +388,7 @@ export type DevRunnerFailedData = { readonly command: string; readonly causeMess
 export const DevRunnerFailed = defineFailure('dot.dev_runner_failed', {
   data: guarded(
     'dot.dev_runner_failed',
-    (value): value is DevRunnerFailedData => isRecord(value) && strings(value, ['command', 'causeMessage']),
+    (value): value is DevRunnerFailedData => is(value, recordSchema) && strings(value, ['command', 'causeMessage']),
   ),
   message: 'Could not start the app runner `{command}`: {causeMessage}',
   remediation:
@@ -408,7 +405,7 @@ export type DevPortInUseData = { readonly port: number };
 export const DevPortInUse = defineFailure('dot.dev_port_in_use', {
   data: guarded(
     'dot.dev_port_in_use',
-    (value): value is DevPortInUseData => isRecord(value) && typeof value['port'] === 'number',
+    (value): value is DevPortInUseData => is(value, recordSchema) && typeof value['port'] === 'number',
   ),
   message: 'Port {port} is already in use',
   remediation: 'Stop the process that listens on that port, or pick another one with `dot dev --port <n>`.',
@@ -425,7 +422,7 @@ export const DevAlreadyRunning = defineFailure('dot.dev_already_running', {
   data: guarded(
     'dot.dev_already_running',
     (value): value is DevAlreadyRunningData =>
-      isRecord(value) && typeof value['pid'] === 'number' && strings(value, ['statePath']),
+      is(value, recordSchema) && typeof value['pid'] === 'number' && strings(value, ['statePath']),
   ),
   message: 'dot dev is already running in this project (pid {pid})',
   remediation:
@@ -448,7 +445,7 @@ export type DevRemoteDbRefusedData = {
 export const DevRemoteDbRefused = defineFailure('dot.dev_remote_db_refused', {
   data: guarded(
     'dot.dev_remote_db_refused',
-    (value): value is DevRemoteDbRefusedData => isRecord(value) && strings(value, ['target', 'host', 'source']),
+    (value): value is DevRemoteDbRefusedData => is(value, recordSchema) && strings(value, ['target', 'host', 'source']),
   ),
   message: 'Refusing the remote database {target} ({source}): dot dev applies migrations on boot',
   remediation:
@@ -465,7 +462,7 @@ export type DevAppStartedData = { readonly filePath: string; readonly exportName
 export const DevAppStarted = defineFailure('dot.dev_app_started', {
   data: guarded(
     'dot.dev_app_started',
-    (value): value is DevAppStartedData => isRecord(value) && strings(value, ['filePath', 'exportName']),
+    (value): value is DevAppStartedData => is(value, recordSchema) && strings(value, ['filePath', 'exportName']),
   ),
   message:
     'The `{exportName}` export in {filePath} is already configured or started; dot dev needs an unstarted builder',
@@ -491,7 +488,7 @@ export const DevPreflightFailed = defineFailure('dot.dev_preflight_failed', {
   data: guarded(
     'dot.dev_preflight_failed',
     (value): value is DevPreflightFailedData =>
-      isRecord(value) &&
+      is(value, recordSchema) &&
       strings(value, ['reason']) &&
       (value['exitCode'] === null || typeof value['exitCode'] === 'number') &&
       isStringArray(value['output']),

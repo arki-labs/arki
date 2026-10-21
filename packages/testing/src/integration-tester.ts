@@ -11,6 +11,7 @@ import type { UserId } from '@arki/auth';
 import { createUserId } from '@arki/auth/ids';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
+import { is as matchesSchema, recordSchema } from '@arki/schema';
 
 import type {
   IntegrationTesterConfig,
@@ -50,7 +51,7 @@ type Endable = { end(): Promise<void> };
 type Releasable = { release(): void | Promise<void> };
 
 function isObjectWith<K extends string>(value: unknown, key: K): value is Record<K, unknown> {
-  return typeof value === 'object' && value !== null && key in value;
+  return matchesSchema(value, recordSchema) && key in value;
 }
 
 function isEndable(value: unknown): value is Endable {
@@ -598,7 +599,7 @@ export class IntegrationTester<
 
     // Get all table names from schema
     const tables = Object.values(this.config.schema).filter(
-      (value): value is PgTable => typeof value === 'object' && value !== null,
+      (value): value is PgTable => matchesSchema(value, recordSchema),
     );
 
     for (const table of tables) {

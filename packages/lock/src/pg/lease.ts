@@ -12,6 +12,7 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
+import { is, recordSchema } from '@arki/schema';
 
 import type {
   AcquireRequest,
@@ -105,8 +106,7 @@ const notificationSchema = z.object({ channel: z.string(), payload: z.string().o
 
 function rowsOf(result: unknown): readonly unknown[] {
   if (Array.isArray(result)) return result;
-  if (typeof result === 'object' && result !== null && 'rows' in result && Array.isArray(result.rows))
-    return result.rows;
+  if (is(result, recordSchema) && Array.isArray(result['rows'])) return result['rows'];
   return [];
 }
 

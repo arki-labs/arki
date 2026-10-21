@@ -5,6 +5,8 @@
  * registered function with a valid arity; the length, depth and node budgets
  * run as in `parse`. The result is a fresh copy, never the input.
  */
+import { is, plainObjectSchema } from '@arki/schema';
+
 import type { CallNotation, Equation, Expr, Node, Warning, WarningCode } from './ast.js';
 import type { Span } from './errors.js';
 import type { Language } from './language.js';
@@ -41,12 +43,6 @@ const WARNING_CODES: readonly WarningCode[] = [
 const BINARY_OPS = ['+', '-', '*', '/', '^'] as const;
 const NOTATIONS: readonly CallNotation[] = ['call', 'bars', 'radical'];
 const NO_SPAN: Span = { start: 0, end: 0 };
-
-function isRecord(value: unknown): value is Fields {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function isOffset(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -88,7 +84,7 @@ class Reader {
   }
 
   record(value: unknown, keys: readonly string[], path: string): Fields {
-    if (!isRecord(value)) throw invalid(path, ['a plain object'], value);
+    if (!is(value, plainObjectSchema)) throw invalid(path, ['a plain object'], value);
     const own = Object.keys(value);
     if (own.length !== keys.length || own.some(key => !keys.includes(key))) {
       throw invalid(path, [`exactly the keys ${keys.join(', ')}`], own.join(', '));
@@ -139,7 +135,7 @@ class Reader {
     if (depth > this.limits.depth) throw new ExprLimitError('depth', this.limits.depth, depth);
     this.nodeCount++;
     if (this.nodeCount > this.limits.nodes) throw new ExprLimitError('nodes', this.limits.nodes, this.nodeCount);
-    if (!isRecord(value)) throw invalid(path, ['a node object'], value);
+    if (!is(value, plainObjectSchema)) throw invalid(path, ['a node object'], value);
     const { kind } = value;
     if (!oneOf(NODE_KINDS, kind)) {
       throw invalid(`${path}.kind`, NODE_KINDS, kind);
@@ -243,7 +239,7 @@ class Reader {
  */
 export function fromJSON(value: unknown, options: FromJSONOptions = {}): Expr | Equation {
   const reader = new Reader(options);
-  if (!isRecord(value)) throw invalid('(root)', ['an object'], value);
+  if (!is(value, plainObjectSchema)) throw invalid('(root)', ['an object'], value);
   const isEquation = 'left' in value;
   const record = reader.record(
     value,

@@ -16,6 +16,7 @@ import type {
   AuthMailBrandPicker,
   AuthTemplates,
 } from './types.js';
+import { is, recordSchema } from '@arki/schema';
 import { AUTH_ERROR_CODES } from '../errors.js';
 import { errorField, log } from '../log.js';
 
@@ -52,7 +53,7 @@ export const authLinkInput: AuthLinkInputSchema = {
     async validate(value) {
       const result = await magicLink.input['~standard'].validate(value);
       if (result.issues !== undefined) return result;
-      const appUrl: unknown = typeof value === 'object' && value !== null ? Reflect.get(value, 'appUrl') : undefined;
+      const appUrl: unknown = is(value, recordSchema) ? Reflect.get(value, 'appUrl') : undefined;
       if (appUrl === undefined) return { value: result.value };
       if (typeof appUrl === 'string' && isHttpUrl(appUrl)) return { value: { ...result.value, appUrl } };
       return { issues: [{ message: 'appUrl must be an absolute http(s) URL', path: ['appUrl'] }] };

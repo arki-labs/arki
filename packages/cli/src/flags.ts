@@ -6,6 +6,7 @@
  * live here too, so a schema key that collides with one is caught in one place.
  */
 import type { SchemaWithJson } from '@arki/schema';
+import { is, recordSchema } from '@arki/schema';
 
 export type FlagKind = 'boolean' | 'integer' | 'number' | 'string';
 
@@ -33,10 +34,6 @@ export type FlagSpec = {
   /** The schema's `description` (Zod `.describe()`): help text. */
   readonly description: string | undefined;
 };
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** `maxBatches` → `max-batches`. */
 export function kebabCase(key: string): string {
@@ -113,7 +110,7 @@ export function isGlobal(spec: FlagSpec): boolean {
  */
 export function flagsOf(schema: SchemaWithJson, args: readonly string[] = []): readonly FlagSpec[] {
   const json = schema['~standard'].jsonSchema.input({ target: 'draft-2020-12' });
-  if (typeOf(json) !== 'object' || !isRecord(json['properties'])) {
+  if (typeOf(json) !== 'object' || !is(json['properties'], recordSchema)) {
     throw new TypeError('A command input must be an object schema.');
   }
   const properties = json['properties'];
@@ -126,9 +123,9 @@ export function flagsOf(schema: SchemaWithJson, args: readonly string[] = []): r
     if (RESERVED.has(key) || RESERVED.has(flag)) {
       throw new TypeError(`The input key "${key}" collides with the global flag --${flag}; rename the key.`);
     }
-    const property = isRecord(value) ? value : {};
+    const property = is(value, recordSchema) ? value : {};
     const array = typeOf(property) === 'array';
-    const item = array && isRecord(property['items']) ? property['items'] : property;
+    const item = array && is(property['items'], recordSchema) ? property['items'] : property;
     const index = args.indexOf(key);
     const position = index === -1 ? undefined : index;
     if (array && position !== undefined && position !== args.length - 1) {

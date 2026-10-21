@@ -46,6 +46,7 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "croner": "catalog:",
     "zod": "catalog:"

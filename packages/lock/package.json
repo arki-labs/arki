@@ -99,6 +99,7 @@
     "@arki/clock": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

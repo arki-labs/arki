@@ -146,6 +146,7 @@
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/mail": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@better-auth/expo": "catalog:better-auth",
     "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",

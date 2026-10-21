@@ -73,6 +73,7 @@
   "dependencies": {
     "@arki/clock": "workspace:*",
     "@arki/failure": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@standard-schema/spec": "^1.1.0"
   },

@@ -16,13 +16,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { is, recordSchema } from '@arki/schema';
+
 /** Read `version` from `@arki/dot`'s own package.json. */
 export function readDotVersion(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const manifestPath = path.resolve(here, '..', '..', 'package.json');
   const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  if (typeof parsed === 'object' && parsed !== null && 'version' in parsed && typeof parsed.version === 'string') {
-    return parsed.version;
+  if (is(parsed, recordSchema) && typeof parsed['version'] === 'string') {
+    return parsed['version'];
   }
   throw new Error(`@arki/dot: no "version" field in ${manifestPath}`);
 }

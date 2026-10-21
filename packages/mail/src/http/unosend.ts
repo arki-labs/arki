@@ -4,6 +4,7 @@
  * No idempotency header is sent, as Unosend documents none.
  */
 import { isFailure } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
@@ -27,7 +28,7 @@ export type UnosendOptions = {
 /** The error text and code, top level (`{ message, code }`) or nested (`{ error: { message, code } }`). */
 function errorDetail(body: unknown): { message?: string; providerCode?: string } {
   const nested = fieldOf(body, 'error');
-  const source = typeof nested === 'object' && nested !== null ? nested : body;
+  const source = is(nested, recordSchema) ? nested : body;
   const message = stringOf(fieldOf(source, 'message')) ?? stringOf(nested);
   const code = fieldOf(source, 'code');
   const providerCode = typeof code === 'string' || typeof code === 'number' ? String(code) : undefined;

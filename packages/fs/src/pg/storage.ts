@@ -16,6 +16,7 @@ import { z } from 'zod';
 import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 
+import { is, recordSchema } from '@arki/schema';
 import type { CREATE_UPLOAD_FAILURES } from '../files/failures.js';
 import type { FileId, SignedFileUrl, UploadRequest, UploadTicket } from '../files/schemas.js';
 import type { SignedUploadAdapter, StorageAdapter } from '../storage/types.js';
@@ -139,7 +140,7 @@ function mimeAllowed(mime: string, allowed: readonly string[]): boolean {
 /** For JS callers and adapters typed loosely: the type system already refuses the local adapter. */
 function signsUploads(adapter: StorageAdapter): boolean {
   const capabilities: unknown = Reflect.get(adapter, 'capabilities');
-  return typeof capabilities === 'object' && capabilities !== null && Reflect.get(capabilities, 'signedPut') === true;
+  return is(capabilities, recordSchema) && Reflect.get(capabilities, 'signedPut') === true;
 }
 
 /** Runs one object-store call; any failure that is not already coded becomes `ARKI_FS_E007`. */

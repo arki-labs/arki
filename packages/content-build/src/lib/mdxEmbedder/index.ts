@@ -5,6 +5,7 @@ import type { Paragraph, Root } from 'mdast';
 import type { Plugin } from 'unified';
 import type { VFile } from 'vfile';
 
+import { is, recordSchema } from '@arki/schema';
 import type { Embed } from './embeds.js';
 import { EMBEDS_FOLDER, findEmbeds, SNAPSHOT_SCRIPT, snapshotFile } from './embeds.js';
 import { gitHubItemSchema } from './github/index.js';
@@ -14,7 +15,7 @@ import { parseWith, replaceWithElement } from './utils.js';
 /** The document's path inside its collection, as content-collections puts it on the file. */
 function documentName(file: VFile): string {
   const meta = file.data['_meta'];
-  return typeof meta === 'object' && meta !== null && 'filePath' in meta && typeof meta.filePath === 'string'
+  return is(meta, recordSchema) && 'filePath' in meta && typeof meta.filePath === 'string'
     ? meta.filePath
     : 'an MDX document';
 }

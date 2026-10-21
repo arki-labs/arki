@@ -26,6 +26,7 @@ import type { Failure } from '@arki/failure';
 import type { ErrorMapOf } from '@arki/failure/orpc';
 import { isFailure } from '@arki/failure';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+import { is, recordSchema } from '@arki/schema';
 
 import type { TransactionalDb } from './composition.js';
 import type { TransactionFailure, TransactionSettings } from './transaction.js';
@@ -127,7 +128,7 @@ function isMarked(context: object): boolean {
 }
 
 function isAsyncIterable(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && Symbol.asyncIterator in value;
+  return is(value, recordSchema) && Symbol.asyncIterator in value;
 }
 
 /**

@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import { isFailure } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 import { embedMany } from '../embed.js';
-import { isRecord } from '../http.js';
 import { createEmbedder } from '../embedder.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { createOllamaModel } from './index.js';
@@ -24,7 +24,7 @@ function stubFetch(answer: (body: { input: string[] }) => Response) {
     const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ url, body });
     if (url.endsWith('/api/tags')) return Promise.resolve(new Response(TAGS));
-    const input = isRecord(body) && Array.isArray(body['input']) ? body['input'].map(String) : [];
+    const input = is(body, recordSchema) && Array.isArray(body['input']) ? body['input'].map(String) : [];
     return Promise.resolve(answer({ input }));
   });
   return { fetch, calls, embedCalls: () => calls.filter(call => call.url.endsWith('/api/embed')) };
@@ -84,7 +84,7 @@ describe('./ollama', () => {
     expect(embeds).toHaveLength(3);
     expect(embeds[0]?.body).toMatchObject({ model: 'qwen3-embedding:0.6b', truncate: false });
     const first = embeds[0]?.body;
-    expect(isRecord(first) && Array.isArray(first['input']) ? first['input'].length : 0).toBe(64);
+    expect(is(first, recordSchema) && Array.isArray(first['input']) ? first['input'].length : 0).toBe(64);
   });
 
   it('maps 404 to ModelUnavailable', async () => {

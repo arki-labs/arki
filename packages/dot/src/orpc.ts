@@ -41,6 +41,7 @@ import type { ContractProcedure, ContractRouter, IntersectPick, Meta, Router } f
 import { ORPCError, os, traverseContractProcedures } from '@orpc/server';
 
 import { getLogger } from '@arki/log';
+import { is, recordSchema } from '@arki/schema';
 
 import type { RpcEntrypoint } from './define-feature.js';
 import type { HandleEntries, ServicesBag } from './feature.js';
@@ -233,7 +234,7 @@ function mountedPaths(
     const here = [...path, key];
     if (childRouters.has(value)) return [here.join('.')];
     // A procedure carries `~orpc`; only plain groups are walked.
-    if (typeof value === 'object' && value !== null && !('~orpc' in value))
+    if (is(value, recordSchema) && !('~orpc' in value))
       return mountedPaths(value, childRouters, here);
     return [];
   });
@@ -246,7 +247,7 @@ function buildRouter(implementer: unknown, factories: object): Record<string, un
       key,
       typeof value === 'function'
         ? value(implementer)
-        : typeof value === 'object' && value !== null
+        : is(value, recordSchema)
           ? buildRouter(implementer, value)
           : value,
     ]),

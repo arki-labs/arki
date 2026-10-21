@@ -18,7 +18,7 @@ import { getConstructionPlans, PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
-import { parseAsync } from '@arki/schema';
+import { is, parseAsync, recordSchema } from '@arki/schema';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { JobTriggerResult } from '../trigger.ts';
@@ -167,7 +167,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
   async function traverseRegistry(registry: Registry, services: object | undefined): Promise<void> {
     for (const value of Object.values(registry)) {
-      if (typeof value === 'object' && value !== null) {
+      if (is(value, recordSchema)) {
         if ('_type' in value) {
           if ((value as { _type: string })._type === 'job') {
             registerJobDef(value as JobDefinition<unknown, unknown, unknown>, services);
@@ -176,8 +176,8 @@ export function createRuntimeLocalQueueInstance<TContext>(
           } else if ((value as { _type: string })._type === 'flow') {
             observeQueue(() => debugRegister.warn('[runtime-local] flow definitions are not supported — skipping'));
           }
-        } else if (!Array.isArray(value)) {
-          await traverseRegistry(value as Registry, services);
+        } else {
+          await traverseRegistry(value, services);
         }
       }
     }

@@ -12,6 +12,8 @@
  * plugin's need is satisfied during boot, so `doctor` shows the full wiring.
  */
 
+import { is, recordSchema } from '@arki/schema';
+
 import type { DotAppManifest } from '../manifest.js';
 
 /** The `data` of `--graph`: Mermaid source. */
@@ -79,6 +81,6 @@ export function renderGraph(manifest: DotAppManifest): GraphData {
 /** True when a command's data is the `--graph` payload. */
 export function isGraphData(value: unknown): value is GraphData {
   return (
-    typeof value === 'object' && value !== null && 'format' in value && value.format === 'mermaid' && 'source' in value
+    is(value, recordSchema) && value['format'] === 'mermaid' && 'source' in value
   );
 }

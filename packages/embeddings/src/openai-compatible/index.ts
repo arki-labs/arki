@@ -3,6 +3,8 @@
  * TEI, vLLM, LM Studio, a proxy) over plain `fetch`. No SDK and no peer, so it runs everywhere
  * `fetch` does. The server does not say what it serves, so the caller states `dimensions`.
  */
+import { is, recordSchema } from '@arki/schema';
+
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import {
@@ -13,7 +15,7 @@ import {
   ModelUnavailable,
   RateLimited,
 } from '../failures.js';
-import { isRecord, mentionsContextLength, retryAfterMs } from '../http.js';
+import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 
 export type OpenAICompatibleModelOptions = {
@@ -49,8 +51,8 @@ function vectorsByIndex(data: readonly unknown[], count: number): readonly (read
   const rows: { readonly index: number; readonly embedding: readonly unknown[] }[] = [];
   const seen = new Set<number>();
   for (const row of data) {
-    const index = isRecord(row) ? row['index'] : undefined;
-    const embedding = isRecord(row) ? row['embedding'] : undefined;
+    const index = is(row, recordSchema) ? row['index'] : undefined;
+    const embedding = is(row, recordSchema) ? row['embedding'] : undefined;
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= count) {
       return `row index ${String(index)} is not in 0..${count - 1}`;
     }
@@ -66,7 +68,7 @@ function vectorsByIndex(data: readonly unknown[], count: number): readonly (read
 /** `usage.prompt_tokens` when the server reports it. */
 function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
   const usage = body['usage'];
-  const prompt = isRecord(usage) ? usage['prompt_tokens'] : undefined;
+  const prompt = is(usage, recordSchema) ? usage['prompt_tokens'] : undefined;
   return typeof prompt === 'number' && Number.isFinite(prompt)
     ? { basis: 'reported', count: prompt }
     : { basis: 'unknown' };
@@ -134,8 +136,8 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleModelOption
     } catch {
       return signal?.aborted ? Cancelled() : InvalidOutput({ reason: `${label} answered malformed JSON` });
     }
-    const data = isRecord(body) ? body['data'] : undefined;
-    if (!isRecord(body) || !Array.isArray(data)) {
+    const data = is(body, recordSchema) ? body['data'] : undefined;
+    if (!is(body, recordSchema) || !Array.isArray(data)) {
       return InvalidOutput({ reason: `${label} answered without a data array` });
     }
     const vectors = vectorsByIndex(data, texts.length);

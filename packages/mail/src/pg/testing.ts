@@ -5,6 +5,7 @@
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import type { DbHandle, JournalTables } from '@arki/journal';
+import { is, recordSchema } from '@arki/schema';
 
 import { isMailMessage, MAIL_JOB } from './args.js';
 
@@ -35,7 +36,7 @@ export function mailQueueAssertions(db: DbHandle, tables: Pick<JournalTables, 'j
       .orderBy(jobs.id);
     return rows.flatMap(row => {
       const message: unknown =
-        typeof row.args === 'object' && row.args !== null ? Reflect.get(row.args, 'message') : undefined;
+        is(row.args, recordSchema) ? row.args['message'] : undefined;
       if (!isMailMessage(message)) return [];
       if (template !== undefined && message.template !== template.name) return [];
       return [

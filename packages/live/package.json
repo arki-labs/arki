@@ -101,6 +101,7 @@
   "dependencies": {
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
+    "@arki/schema": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

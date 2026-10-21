@@ -71,7 +71,10 @@ One schema serves both failure channels with the same issues:
 Out of scope: preconditions on values that are already typed, such as finite or
 range checks on a `number` parameter in a hot path, use `invariant` or plain code.
 Exhaustive switches use `unreachable`. Only schema implementations and
-`@arki/schema` itself inspect raw shapes by hand. See [A-39](decisions.md#framework-consolidation-2026-10-19).
+`@arki/schema` itself inspect raw shapes by hand, plus the packages that cannot
+import it: `@arki/failure` (`@arki/schema` depends on it), `@arki/log` (kept
+zero-dependency) and `@arki/bench` (dev tooling). They keep plain checks and do
+not copy schemas locally, because local copies would recreate the duplicates. See [A-39](decisions.md#framework-consolidation-2026-10-19).
 
 Verification rejects hand-written type guards, validator helpers and ad-hoc
 `isX(value: unknown)` functions on unknown values. Existing copies are migration work.
