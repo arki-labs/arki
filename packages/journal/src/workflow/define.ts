@@ -11,7 +11,19 @@ import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { RetentionAge, RunRetention } from '../retention.js';
-import type { AcceptFailure, BivariantFn, Needed, Needs, NoNeeds, RootDb, ServicesFor } from '../types.js';
+import type {
+  AcceptFailure,
+  AnyEntity,
+  AnyEventDef,
+  BivariantFn,
+  EntityIdOf,
+  Needed,
+  Needs,
+  NoNeeds,
+  RecordedOf,
+  RootDb,
+  ServicesFor,
+} from '../types.js';
 import type { RunDetail } from './read.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
@@ -173,6 +185,8 @@ export type WorkflowDef<
   readonly retention: RunRetention;
   readonly limits: WorkflowLimits;
   readonly needs: Needs;
+  /** The journal event that starts a run, if any. Only the highest registered version may declare one. */
+  readonly startOn: ErasedStartOn | undefined;
   readonly nodes: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
@@ -197,10 +211,25 @@ export type WorkflowServices<W extends readonly WorkflowDef[]> = ServicesFor<{
   readonly [K in keyof W]: { readonly needs: NeedsOfDef<W[K]> };
 }>;
 
+/**
+ * `startOn`: the event of `entity` that starts a run. `id` gives the run id and `input` the run's input, both from the
+ * recorded event, typed by the entity's key and the event's data. `id` and `input` are method signatures, so a typed
+ * `startOn` fits the erased one a definition keeps; see `BivariantFn`.
+ */
+export type StartOn<Input extends StandardSchemaV1, E, D, MetaOut> = {
+  readonly entity: E;
+  readonly event: D;
+  id(event: RecordedOf<D, MetaOut, EntityIdOf<E>>): string;
+  input(event: RecordedOf<D, MetaOut, EntityIdOf<E>>): SchemaInput<Input>;
+};
+/** A `startOn` as the runner keeps it: nothing is known about the entity, the event or the input. */
+export type ErasedStartOn = StartOn<StandardSchemaV1, AnyEntity, AnyEventDef, unknown>;
+
 export type WorkflowOptions<
   Input extends StandardSchemaV1,
   N extends Needs,
   Output extends StandardSchemaV1 | undefined,
+  Start extends ErasedStartOn = ErasedStartOn,
 > = {
   readonly version: number;
   readonly input: Input;
@@ -216,6 +245,11 @@ export type WorkflowOptions<
   readonly retention?: RunRetention;
   readonly limits?: Partial<WorkflowLimits>;
   readonly needs?: N;
+  /**
+   * Starts a run when `entity` records `event`, with the app's `workflowMeta`, at the highest registered version. The
+   * job is written in the event's transaction, so the run starts once. An id that already has a run starts nothing.
+   */
+  readonly startOn?: Start;
 };
 
 /** Results by node name, as the runner stores them. */
@@ -649,9 +683,10 @@ export function workflowWith<
   Declared extends StandardSchemaV1 | undefined,
   Where extends Host,
   Ext extends DefExtension,
+  Start extends ErasedStartOn,
 >(
   name: string,
-  options: WorkflowOptions<Input, N, Declared>,
+  options: WorkflowOptions<Input, N, Declared, Start>,
   attach: Attach<Input, Ext>,
 ): WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Ext> {
   if (name === '') refuse(name, 'a workflow needs a name');
@@ -666,6 +701,13 @@ export function workflowWith<
   }
   for (const [outcome, keep] of Object.entries(options.retention ?? {})) {
     parseRunKeep(keep, `workflow "${name}": retention.${outcome}`);
+  }
+  const { startOn } = options;
+  if (startOn !== undefined && startOn.entity.events.get(startOn.event.type) !== startOn.event) {
+    refuse(
+      name,
+      `startOn: entity "${startOn.entity.kind}" does not record event "${startOn.event.type}"; pass an event the entity declares`,
+    );
   }
   return makeBuilder({
     attach,
@@ -682,6 +724,7 @@ export function workflowWith<
       retention: options.retention ?? {},
       limits,
       needs: options.needs ?? {},
+      startOn,
     },
   });
 }

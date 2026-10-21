@@ -898,7 +898,7 @@ export const fulfil = j
 
 ### Compose
 
-Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`) and one projection (the `workflow_steps` table).
+Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`), one more per workflow with a `startOn` (`workflow.start:<name>`, see [Start on an event](#start-on-an-event)), and one projection (the `workflow_steps` table).
 
 ```ts continue
 const released: string[] = [];
@@ -1031,6 +1031,65 @@ await client.close();
 ```
 
 `journalWorkflowsModule({ journal, db, meta, payload? })` from `@arki/journal/foreman` puts the same reads and verbs in Foreman, with previews and approvals. `meta(permit)` gives the meta of the commands it runs; its `actorId` is written on the run's events. The ids are `workflow.runs`, `.run`, `.counts`, `.stranded`, `.history` (permission `workflow:read`), `workflow.retryStep` (`journal:retry`, low risk), `workflow.signal` (`workflow:signal`, medium), `workflow.resolveStep` and `workflow.skipUndo` (`workflow:resolve`, high), and `workflow.cancel` (`workflow:cancel`, high). Its refusals are `JOURNAL_WORKFLOWS_ERROR_CODES`, `ARKI_JOURNAL_E010` to `E017`.
+
+### Start on an event
+
+`startOn: { entity, event, id, input }` starts a run when `entity` records `event`. `id` gives the run id and `input` the run's input, both from the recorded event: `e.entityId` has the entity's key type, `e.data` the event's data, and `input` must return the workflow's input, or it does not compile. Composing adds one effect for it, `workflow.start:<workflow name>`.
+
+- The job is written in the transaction that records the event, so the run starts once, even when that command is retried.
+- The run starts with the app's `workflowMeta`, at the highest registered version, like `def.start`.
+- An id that already has a run, whatever its input or version, starts nothing. The job ends done, not dead.
+- Only the highest registered version may declare `startOn`. A lower one with `startOn` makes `compose` throw `BAD_DEFINITION`.
+
+```ts run
+import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
+
+import { orThrow } from '@arki/failure';
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+
+const orders = pgTable('orders', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  total: integer('total').notNull(),
+  version: integer('version').notNull().default(0),
+});
+const OrderPlaced = j.event('OrderPlaced', z.object({ total: z.int().positive() }));
+const order = j.entity('order', orders).create(OrderPlaced, e => ({ total: e.data.total }));
+
+export const welcome = j
+  .workflow('orders.welcome', {
+    version: 1,
+    input: z.object({ orderId: z.string(), total: z.int() }),
+    startOn: {
+      entity: order,
+      event: OrderPlaced,
+      id: e => `welcome:${e.entityId}`, // the order id: one run per order
+      input: e => ({ orderId: e.entityId, total: e.data.total }),
+    },
+  })
+  .step('thank', ({ input }) => `thanks for ${input.total}`)
+  .finish();
+
+const placeOrder = j.command('orders.place', z.object({ id: z.string(), total: z.int().positive() }), (input, { write }) =>
+  write(order, input.id, () => [OrderPlaced({ total: input.total })]),
+);
+
+const journal = j.compose({ workflows: [welcome], workflowMeta: { actorId: 'system:workflow' } });
+const { db, client } = await openJournalDb({ ...tables, orders });
+
+orThrow(await journal.run(db, placeOrder, { id: 'ord_1', total: 500 }, { actorId: 'usr_1' }));
+await journal.drain(db); // workflow.start:orders.welcome starts the run
+await journal.drain(db); // thank
+
+const thanked = orThrow(await welcome.read(db, 'welcome:ord_1'));
+if (thanked?.run.output !== 'thanks for 500') throw new Error('the order started the run');
+await client.close();
+```
 
 ### Retention
 

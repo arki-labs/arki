@@ -33,7 +33,7 @@ import type {
   Services,
   TransactionSource,
 } from '../types.js';
-import type { AnyResults, AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
+import type { AnyResults, AnySignals, DefExtension, ErasedContext, ErasedStartOn, WorkflowDef, WorkflowNode } from './define.js';
 import type { RunDetail } from './read.js';
 import type { CANCEL_STATES, SignalStatus, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
@@ -62,6 +62,8 @@ import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
 export const STEP_EFFECT = 'workflow.step';
 /** The library-owned effect that fires a park's wake time and a run's deadline. */
 export const TIMER_EFFECT = 'workflow.timer';
+/** The library-owned effects that start a run from a journal event (`startOn`): `workflow.start:<workflow name>`. */
+export const START_EFFECT = 'workflow.start';
 /** The actor on the job operation rows the runner writes, such as the timer it cancels when a signal wins. */
 const WORKFLOW_ACTOR = 'system:workflow';
 /** The command that moves a run on after a node attempt. Internal: only the step effect runs it. */
@@ -2252,6 +2254,18 @@ export function createWorkflows<
         }
       }
     }
+    // One `startOn` per workflow name: two versions with their own would start two runs, or the wrong one.
+    for (const def of defs) {
+      const newest = newestVersionOf(def.name);
+      if (def.startOn !== undefined && def.version < newest) {
+        throw new JournalError(
+          'BAD_DEFINITION',
+          'workflow',
+          def.name,
+          `workflow "${def.name}" v${def.version} declares startOn, but v${newest} is registered; only the highest version may declare startOn, so move it there`,
+        );
+      }
+    }
     const needs: Needs = Object.fromEntries(defs.flatMap(def => Object.entries(def.needs)));
 
     /**
@@ -2783,7 +2797,42 @@ export function createWorkflows<
         retry: strandedRetry,
       });
 
-    return { effects: [effect, timer], steps: machine.steps };
+    /**
+     * The effect of a workflow's `startOn`: `def.start` with the app's `workflowMeta`. Its job is written in the
+     * transaction that records the event, so the run starts once, even when the command that recorded it is retried.
+     * An id that already has a run, whatever its input or version, starts nothing: a later deploy or another input for
+     * the same id ends the job as done, never dead.
+     */
+    const startEffectFor = (def: WorkflowDef, startOn: ErasedStartOn) => {
+      const start = startCommandFor(def);
+      return j.effect(`${START_EFFECT}:${def.name}`, startOn.entity, {
+        [startOn.event.type]: async (event, ctx) => {
+          const runId = startOn.id(event);
+          const exists = async () => {
+            const rows = await ctx.db.select({ id: workflowRuns.id }).from(workflowRuns).where(eq(workflowRuns.id, runId));
+            return rows.length > 0;
+          };
+          const skip = () =>
+            debugWorkflow.debug('{name}: run {runId} exists, so event {seq} starts nothing', {
+              name: def.name,
+              runId,
+              seq: event.seq,
+            });
+          if (await exists()) return void skip();
+          const outcome = await ctx.run(start, { id: runId, input: startOn.input(event) }, meta);
+          // Another start took the id between the look-up and this one: the run exists, so the job is done. The row
+          // decides, not the refusal: a conflict for an id with no run (a payload over the limit) still fails the job.
+          if (CommandConflict.is(outcome) && (await exists())) {
+            ctx.accept(outcome);
+            return void skip();
+          }
+          return outcome;
+        },
+      });
+    };
+    const starts = defs.flatMap(def => (def.startOn === undefined ? [] : [startEffectFor(def, def.startOn)]));
+
+    return { effects: [effect, timer, ...starts], steps: machine.steps };
   }
 
   return {

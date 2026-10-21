@@ -27,6 +27,7 @@ import type {
   EntityTable,
   EventDef,
   EventOptions,
+  EventsOf,
   HandlerServices,
   IdTable,
   JobRunner,
@@ -51,7 +52,14 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
-import type { NoResults, WorkflowBuilder, WorkflowDef, WorkflowOptions, WorkflowServices } from './workflow/define.js';
+import type {
+  NoResults,
+  StartOn,
+  WorkflowBuilder,
+  WorkflowDef,
+  WorkflowOptions,
+  WorkflowServices,
+} from './workflow/define.js';
 import type { WorkflowOps } from './workflow/read.js';
 import type { StarterOf } from './workflow/runner.js';
 
@@ -639,9 +647,11 @@ export type JournalDefinitions<
     Input extends StandardSchemaV1,
     N extends Needs = NoNeeds,
     Declared extends StandardSchemaV1 | undefined = undefined,
+    E extends AnyEntity<SchemaOutput<Meta>> = never,
+    D extends EventsOf<E> = never,
   >(
     name: string,
-    options: WorkflowOptions<Input, N, Declared>,
+    options: WorkflowOptions<Input, N, Declared, StartOn<Input, E, D, SchemaOutput<Meta>>>,
   ): WorkflowBuilder<
     Input,
     NoResults,

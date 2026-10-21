@@ -9,7 +9,8 @@ import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
 import type { SignalStatus } from './states.js';
-import { j, order } from '../test-support.js';
+import type { OrderId } from '../test-support.js';
+import { j, order, OrderPlaced, Unrelated } from '../test-support.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it. The callbacks never execute.
 const refund = j
@@ -148,6 +149,56 @@ describe('ctx.run in a workflow body, as types', () => {
         expectTypeOf(run(ping, { n: 1 }, { actorId: 'usr_1' })).resolves.toEqualTypeOf<string | CommandFailure>();
         // @ts-expect-error an effect names its actor: the meta is required
         expectTypeOf(run(ping, { n: 1 })).resolves.toEqualTypeOf<string | CommandFailure>();
+      },
+    });
+  });
+});
+
+describe('startOn, as types', () => {
+  const input = z.object({ orderId: z.string(), total: z.number() });
+
+  it("types the event from the entity's key and the event's data", () => {
+    j.workflow('typed.start', {
+      version: 1,
+      input,
+      startOn: {
+        entity: order,
+        event: OrderPlaced,
+        id: e => {
+          expectTypeOf(e.entityId).toEqualTypeOf<OrderId>();
+          expectTypeOf(e.data).toEqualTypeOf<{ customerId: string; total: number }>();
+          expectTypeOf(e.meta).toEqualTypeOf<{ actorId: string }>();
+          return e.entityId;
+        },
+        input: e => ({ orderId: e.entityId, total: e.data.total }),
+      },
+    });
+  });
+
+  it("checks input against the workflow's input schema", () => {
+    j.workflow('wrong.input', {
+      version: 1,
+      input,
+      startOn: {
+        entity: order,
+        event: OrderPlaced,
+        id: e => e.entityId,
+        // @ts-expect-error the input schema has `total`, not `totl`
+        input: e => ({ orderId: e.entityId, totl: e.data.total }),
+      },
+    });
+  });
+
+  it('takes only an event the entity records', () => {
+    j.workflow('wrong.event', {
+      version: 1,
+      input,
+      startOn: {
+        entity: order,
+        // @ts-expect-error `order` does not record `Unrelated`
+        event: Unrelated,
+        id: () => 'x',
+        input: () => ({ orderId: 'x', total: 1 }),
       },
     });
   });
