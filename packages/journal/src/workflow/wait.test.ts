@@ -67,7 +67,14 @@ const looping = j
   .step('check', ({ results }) => results.approved.by, { next: () => (passes++ === 0 ? 'approved' : 'next') })
   .finish();
 
-const journal = j.compose({ workflows: [approval, lenient, napping, bounded, looping], workflowMeta });
+/** Waits for approval only when the input asks for it. */
+const optional = j
+  .workflow('test.optional', { version: 1, input: z.object({ needsApproval: z.boolean() }) })
+  .waitFor('approved', { signal: SIGNAL, schema: Granted, timeout: '3d', when: ({ input }) => input.needsApproval })
+  .step('after', ({ results }) => `by:${results.approved?.by ?? 'nobody'}`)
+  .finish();
+
+const journal = j.compose({ workflows: [approval, lenient, napping, bounded, looping, optional], workflowMeta });
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -155,7 +162,7 @@ const start = async (
   return id;
 };
 const deliver = (
-  def: typeof approval | typeof bounded | typeof lenient | typeof looping,
+  def: typeof approval | typeof bounded | typeof lenient | typeof looping | typeof optional,
   runId: string,
   deliveryId: string,
   by = 'alice',
@@ -289,6 +296,39 @@ describe('a timer and the park it was made for', () => {
     expectOk(await deliver(looping, id, 'evt_loop_2'));
     await settle();
     expect(await runRow(id)).toMatchObject({ state: 'completed' });
+  });
+});
+
+const startOptional = async (needsApproval: boolean) => {
+  const id = newId('optional');
+  expectOk(await journal.run(db, optional.start, { input: { needsApproval }, id }, caller));
+  return id;
+};
+
+describe('a waitFor with when', () => {
+  it('a wait whose when is false is skipped and its result is null, so the run goes on without parking', async () => {
+    const id = await startOptional(false);
+    await settle();
+    expect(await runRow(id)).toMatchObject({ state: 'completed', output: 'by:nobody', results: { approved: null } });
+    expect(await eventTypes(id)).not.toContain('Parked');
+    const [skipped] = await db
+      .select({ data: tables.events.data })
+      .from(tables.events)
+      .where(and(eq(tables.events.entityId, id), eq(tables.events.type, 'NodeSkipped')));
+    // The same cause as a skipped step, so operators and `def.read` treat both alike.
+    expect(skipped?.data).toMatchObject({ path: 'approved', cause: 'when' });
+    expect(await timersOf(id), 'a skipped wait leaves no timer').toEqual([]);
+    const read = orThrow(await optional.read(db, id));
+    expect(read?.run.results.approved).toBeNull();
+  });
+
+  it('a wait with when true parks as before, and the signal wakes it', async () => {
+    const id = await startOptional(true);
+    await settle();
+    expect(await runRow(id)).toMatchObject({ state: 'parked', node: 'approved' });
+    expect(await deliver(optional, id, 'evt_optional')).toEqual({ status: 'woke' });
+    await settle();
+    expect(await runRow(id)).toMatchObject({ state: 'completed', output: 'by:alice' });
   });
 });
 

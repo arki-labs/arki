@@ -19,7 +19,7 @@ import { Deadline } from '@arki/async';
 import { defineFailure, InvalidInput, isAsyncSchemaFailure, isFailure, orThrow, ValidatorDefect } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
-import type { Command, CommandContext, JournalDefinitions, RootCommandRunner } from '../api.js';
+import type { Command, CommandContext, JournalDefinitions, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
 import type { CommandFailure } from '../errors.js';
 import type { JournalTables } from '../pg.js';
 import type { JobRetention, RetentionAge } from '../retention.js';
@@ -2450,32 +2450,39 @@ export function createWorkflows<
       }
     }
 
-    /** The park of a `waitFor` or `sleep` node: when it wakes by itself, and for which signal it waits. */
-    function attemptWait(
+    /**
+     * The park of a `waitFor` or `sleep` node: when it wakes by itself, and for which signal it waits. A `waitFor`
+     * whose `when` returns false is skipped instead, like a step: the run does not park and the result is `null`.
+     */
+    async function attemptWait(
+      def: WorkflowDef,
+      index: number,
       node: Extract<WorkflowNode, { readonly kind: 'waitFor' | 'sleep' }>,
       row: Row,
       event: NodeScheduledEvent,
       ctx: StepEffectContext,
-    ): Verdict {
+    ): Promise<Verdict> {
+      const body: ErasedContext = {
+        ...ctx,
+        runId: row.id,
+        path: event.data.path,
+        attempt: event.data.attempt,
+        input: row.input,
+        results: row.results,
+        key: event.data.key,
+        signal: ctx.signal,
+      };
       try {
         if (node.kind === 'waitFor') {
+          if (node.when !== undefined && !node.when(body)) {
+            const route = await routeAt(def, index + 1, row, node.name, null);
+            return isFailure(route) ? failed(route, false) : { kind: 'skipped', reason: 'when', route };
+          }
           const wakeAt = node.timeout === undefined ? null : inMs(parseAge(node.timeout));
           return { kind: 'park', waitingFor: node.signal, wakeAt };
         }
         const { until } = node;
-        const due =
-          typeof until === 'function'
-            ? until({
-                ...ctx,
-                runId: row.id,
-                path: event.data.path,
-                attempt: event.data.attempt,
-                input: row.input,
-                results: row.results,
-                key: event.data.key,
-                signal: ctx.signal,
-              })
-            : new Date(Date.now() + parseAge(until));
+        const due = typeof until === 'function' ? until(body) : new Date(Date.now() + parseAge(until));
         if (!(due instanceof Date) || Number.isNaN(due.getTime())) {
           throw new TypeError(`sleep '${node.name}' needs a valid Date to wake at`);
         }
@@ -2615,8 +2622,11 @@ export function createWorkflows<
         warnStranded(row, def);
         return strandedFailure(row, def);
       }
+      // A body's command without a meta records the app's `workflowMeta`; one with a meta records that one.
+      const run: WorkflowCommandRunner<Meta, Tx> = (command, input, given, call) =>
+        outer.run(command, input, given === undefined ? meta : given, call);
       // This definition's own services win over the flat set the effect was bound with.
-      const ctx: StepEffectContext = { ...outer, ...servicesById?.get(`${def.name}@${def.version}`) };
+      const ctx: StepEffectContext = { ...outer, run, ...servicesById?.get(`${def.name}@${def.version}`) };
       const index = def.nodes.findIndex(candidate => candidate.name === data.path);
       const node = def.nodes[index];
       if (node === undefined) {
@@ -2652,7 +2662,7 @@ export function createWorkflows<
               : await routeResolved(def, index, node, row, event, ctx, data.resolution.result);
         } else if (node.kind === 'child' || node.kind === 'map') {
           verdict = await attemptChildren(def, index, node, row, event, ctx);
-        } else verdict = attemptWait(node, row, event, ctx);
+        } else verdict = await attemptWait(def, index, node, row, event, ctx);
       }
 
       const at = { runId, path: data.path, phase: data.phase, attempt: data.attempt };

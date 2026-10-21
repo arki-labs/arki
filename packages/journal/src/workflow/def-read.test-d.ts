@@ -26,6 +26,8 @@ const payment = j
     when: ({ input }) => input.amount > 10,
   })
   .waitFor('approve', { signal: 'approve', schema: z.object({ by: z.string() }), onTimeout: 'continue' })
+  .waitFor('review', { signal: 'review', schema: z.object({ ok: z.boolean() }), when: ({ input }) => input.amount > 99 })
+  .waitFor('receipt', { signal: 'receipt', schema: z.object({ no: z.string() }) })
   .child('ledger', kid, { input: () => ({}) })
   .map('fan', kid, { items: () => [1], input: () => ({}) })
   // A finish that reads its ctx, with a declared output: this used to need a second argument.
@@ -44,6 +46,9 @@ describe('def.read, as types', () => {
     expectTypeOf(results.notify).toBeUnknown();
     expectTypeOf(results.bonus).toEqualTypeOf<{ points: number } | null | undefined>();
     expectTypeOf(results.approve).toEqualTypeOf<{ by: string } | null | undefined>();
+    // A wait with `when` may be skipped, so its checked result may be `null`; a wait without it never is.
+    expectTypeOf(results.review).toEqualTypeOf<{ ok: boolean } | null | undefined>();
+    expectTypeOf(results.receipt).toEqualTypeOf<{ no: string } | undefined>();
     expectTypeOf(results.ledger).toBeUnknown();
     expectTypeOf(results.fan).toBeUnknown();
     // @ts-expect-error the input schema has no `currency`

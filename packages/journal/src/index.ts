@@ -13,6 +13,7 @@ export type {
   JournalDefinitions,
   ReplayResult,
   RootCommandRunner,
+  WorkflowCommandRunner,
   RunOptions,
   CallOptions,
   VerifyResult,

@@ -860,10 +860,10 @@ export const refund = j
 
 The other nodes:
 
-- `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, and the needs by name. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
+- `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, and the needs by name. `run(command, input)` may leave the meta out: the command then records the `workflowMeta` the app gave `compose`. A meta passed as the third argument is used as given. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
 - `when: ctx => boolean` skips the step when it returns false. Its result is then `null`, and its type says so (`R | null`).
 - `next: 'node'` or `next: ({ result }) => 'node' | 'next'` jumps back to an earlier node, so a loop is a step with `next`. A name later in the list does not compile.
-- `.waitFor(name, { signal, schema, timeout?, onTimeout? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node.
+- `.waitFor(name, { signal, schema, timeout?, onTimeout?, when? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node. `when` works as on a step: when it returns false the run does not park, the result is `null`, and the type says so (`payload | null`).
 - `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time.
 - `.child(name, def, { input })` starts another workflow and waits for it. The result is the child's output.
 - `.map(name, def, { items, input, wait?, concurrency? })` starts one child per item. The result is the outputs in item order. With `wait: 'any'` the first child to finish wins, and the others are cancelled.
@@ -898,7 +898,7 @@ export const fulfil = j
 
 ### Compose
 
-Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`) and one projection (the `workflow_steps` table).
+Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`) and one projection (the `workflow_steps` table).
 
 ```ts continue
 const released: string[] = [];

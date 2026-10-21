@@ -203,19 +203,39 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
  */
 export type CommandRunner<MetaOut, Tx extends TransactionSource<Tx> = DbHandle> = CommandContext<MetaOut, Tx>['run'];
 /**
+ * A command runner on the root database. `MetaArgs` are the arguments after `input`: the meta, then the call options.
+ * The signature is written here once; `RootCommandRunner` and `WorkflowCommandRunner` differ only in whether the meta
+ * may be left out.
+ */
+type RootRunnerWith<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  MetaArgs extends readonly unknown[],
+> = <S extends StandardSchemaV1, R>(
+  command: Command<S, R, SchemaOutput<Meta>, Tx>,
+  input: NoInfer<SchemaInput<S>>,
+  ...metaArgs: MetaArgs
+) => Promise<Awaited<R> | CommandFailure>;
+/**
  * The type of an effect's `ctx.run`: `journal.run` without `source`. It runs on the
  * root database the worker or `drain` was given, in its own transaction. `meta`
- * is required, as in `journal.run`: the library never picks an actor.
+ * is required, as in `journal.run`: the library never picks an actor, so the caller names it.
+ * Only a workflow body's `ctx.run` may leave it out, and then the app chose it: the `workflowMeta` of `compose`.
  */
 export type RootCommandRunner<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx> = DbHandle,
-> = <S extends StandardSchemaV1, R>(
-  command: Command<S, R, SchemaOutput<Meta>, Tx>,
-  input: NoInfer<SchemaInput<S>>,
-  meta: SchemaInput<Meta>,
-  opts?: CallOptions,
-) => Promise<Awaited<R> | CommandFailure>;
+> = RootRunnerWith<Meta, Tx, [meta: SchemaInput<Meta>, opts?: CallOptions]>;
+/**
+ * The type of `ctx.run` in a workflow body (a step, an undo, a `when`, a `key`, a `next`, a child's `input`).
+ * `meta` may be left out: the command then records the `workflowMeta` the app passed to
+ * `compose({ workflows, workflowMeta })`. The library still never invents an actor: the app chose `workflowMeta`.
+ * A meta passed here is used as given.
+ */
+export type WorkflowCommandRunner<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx> = DbHandle,
+> = RootRunnerWith<Meta, Tx, [meta?: SchemaInput<Meta>, opts?: CallOptions]>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -628,7 +648,7 @@ export type JournalDefinitions<
     N,
     Declared,
     never,
-    { readonly db: AppDb; readonly run: RootCommandRunner<Meta, Tx> },
+    { readonly db: AppDb; readonly run: WorkflowCommandRunner<Meta, Tx> },
     StarterOf<Meta, Tx, Input>
   >;
   compose<

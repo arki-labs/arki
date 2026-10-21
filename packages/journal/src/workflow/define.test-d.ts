@@ -144,6 +144,26 @@ describe('the workflow builder, as types', () => {
       });
   });
 
+  it('a waitFor with when is payload | null downstream, and one without it is the payload', () => {
+    base()
+      .waitFor('settled', { signal: 's', schema: z.object({ id: z.string() }) })
+      .waitFor('approved', {
+        signal: 'a',
+        schema: z.object({ by: z.string() }),
+        // `when` sees the context of the nodes before it, typed.
+        when: ({ input, results }) => {
+          expectTypeOf(input.amount).toBeNumber();
+          expectTypeOf(results.settled).toEqualTypeOf<{ id: string }>();
+          return input.amount > 100;
+        },
+      })
+      .step('after', ({ results }) => {
+        expectTypeOf(results.settled).toEqualTypeOf<{ id: string }>();
+        expectTypeOf(results.approved).toEqualTypeOf<{ by: string } | null>();
+        return 1;
+      });
+  });
+
   it('waitFor adds its signal and payload schema to the definition, so a sender cannot name another signal', () => {
     const accepted = z.object({ id: z.string() });
     const _def = base()

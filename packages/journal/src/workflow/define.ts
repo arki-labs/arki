@@ -66,7 +66,9 @@ export function resultSchemaOf(node: WorkflowNode) {
   if (node.kind === 'step' && node.options.output !== undefined) {
     return { schema: node.options.output, nullable: node.options.when !== undefined };
   }
-  if (node.kind === 'waitFor') return { schema: node.schema, nullable: node.onTimeout === 'continue' };
+  if (node.kind === 'waitFor') {
+    return { schema: node.schema, nullable: node.onTimeout === 'continue' || node.when !== undefined };
+  }
   return;
 }
 
@@ -98,6 +100,7 @@ export type WorkflowNode =
       readonly schema: StandardSchemaV1;
       readonly timeout?: RetentionAge;
       readonly onTimeout: 'fail' | 'continue';
+      readonly when?: Body<boolean>;
     }
   | {
       readonly kind: 'sleep';
@@ -287,6 +290,7 @@ export type WorkflowBuilder<
     Name extends string,
     Signal extends string,
     Payload extends StandardSchemaV1,
+    When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
     OnTimeout extends 'fail' | 'continue' = 'fail',
   >(
     name: Fresh<Results, Name>,
@@ -296,17 +300,19 @@ export type WorkflowBuilder<
       readonly schema: Payload;
       readonly timeout?: RetentionAge;
       readonly onTimeout?: OnTimeout;
+      /** When it returns false the wait is skipped: the run does not park, and the result is `null`. */
+      readonly when?: When;
     },
   ): WorkflowBuilder<
     Input,
-    Add<Results, Name, Waited<Payload, OnTimeout>>,
+    Add<Results, Name, Waited<Payload, OnTimeout, When>>,
     N,
     Declared,
-    Waited<Payload, OnTimeout>,
+    Waited<Payload, OnTimeout, When>,
     Where,
     Ext,
     AddSignal<Signals, Signal, Payload>,
-    Add<Checked, Name, Waited<Payload, OnTimeout>>
+    Add<Checked, Name, Waited<Payload, OnTimeout, When>>
   >;
 
   sleep<Name extends string>(
@@ -367,10 +373,10 @@ export type WorkflowBuilder<
     ApplyExtension<Ext, Signals, ReadOutputOf<Declared>, ReadResultsOf<Results, Checked>>;
 };
 
-/** A `waitFor` result: the payload, or `null` when the wait timed out into `continue`. */
-type Waited<Payload extends StandardSchemaV1, OnTimeout> = OnTimeout extends 'continue'
+/** A `waitFor` result: the payload, or `null` when the wait timed out into `continue` or its `when` skipped it. */
+type Waited<Payload extends StandardSchemaV1, OnTimeout, When> = OnTimeout extends 'continue'
   ? SchemaOutput<Payload> | null
-  : SchemaOutput<Payload>;
+  : Skippable<SchemaOutput<Payload>, When>;
 /** What `def.read` gives as the output: the `output` schema's output, `unknown` without one. */
 type ReadOutputOf<Declared extends StandardSchemaV1 | undefined> = [Declared] extends [StandardSchemaV1]
   ? SchemaOutput<Declared>
@@ -380,7 +386,9 @@ type ReadResultsOf<Results extends AnyResults, Checked extends AnyResults> = {
   readonly [K in keyof Results]?: K extends keyof Checked ? Checked[K] : unknown;
 };
 
-type StepResult<Returned, When> = undefined extends When ? Resolved<Returned> : Resolved<Returned> | null;
+/** A node's result, and `null` when the node has a `when` that can skip it. */
+type Skippable<Result, When> = undefined extends When ? Result : Result | null;
+type StepResult<Returned, When> = Skippable<Resolved<Returned>, When>;
 type FinishOutput<Declared extends StandardSchemaV1 | undefined, Returned> = [Declared] extends [StandardSchemaV1]
   ? SchemaOutput<Declared>
   : Resolved<Returned>;
@@ -571,6 +579,7 @@ function makeBuilder<
           schema: options.schema,
           timeout: options.timeout,
           onTimeout: options.onTimeout ?? 'fail',
+          when: options.when,
         }),
       );
     },

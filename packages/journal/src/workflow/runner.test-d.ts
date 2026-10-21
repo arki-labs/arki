@@ -9,7 +9,7 @@ import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
 import type { SignalStatus } from './states.js';
-import { j } from '../test-support.js';
+import { j, order } from '../test-support.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it. The callbacks never execute.
 const refund = j
@@ -123,5 +123,32 @@ describe('def.cancel, as types', () => {
         },
       })
       .finish();
+  });
+});
+
+describe('ctx.run in a workflow body, as types', () => {
+  const ping = j.command('ping', z.object({ n: z.number() }), () => 'pong');
+
+  it("may leave the meta out in a workflow body: the app's workflowMeta is used", () => {
+    j.workflow('pinger', { version: 1, input: z.object({}) })
+      .step('ping', async ({ run }) => {
+        expectTypeOf(await run(ping, { n: 1 })).toEqualTypeOf<string | CommandFailure>();
+        // A meta passed by the body is still checked against the app's meta schema.
+        expectTypeOf(run(ping, { n: 1 }, { actorId: 'usr_1' })).resolves.toEqualTypeOf<string | CommandFailure>();
+        // @ts-expect-error the app's meta has `actorId`, not `actor`
+        expectTypeOf(run(ping, { n: 1 }, { actor: 'usr_1' })).resolves.toEqualTypeOf<string | CommandFailure>();
+        return 1;
+      })
+      .finish();
+  });
+
+  it("still needs the meta in an effect's ctx.run (RootCommandRunner), where no app choice stands in for it", () => {
+    j.effect('pinged', order, {
+      OrderPlaced: (_event, { run }) => {
+        expectTypeOf(run(ping, { n: 1 }, { actorId: 'usr_1' })).resolves.toEqualTypeOf<string | CommandFailure>();
+        // @ts-expect-error an effect names its actor: the meta is required
+        expectTypeOf(run(ping, { n: 1 })).resolves.toEqualTypeOf<string | CommandFailure>();
+      },
+    });
   });
 });
