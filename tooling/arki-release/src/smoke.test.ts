@@ -219,6 +219,22 @@ describe('runSmoke', () => {
     expect(envelope.items[0]?.checks.find(c => c.id === 'vite-build')?.status).toBe('pass');
   });
 
+  it('bundles only the source-distributed packages, not compiled ones in the same candidate', async () => {
+    // Why: compiled deps (@arki/failure's eslint entry, @arki/date's router
+    // entry) carry optional-peer subpaths that cannot bundle without the peer;
+    // node and bun already import them.
+    const dir = makeCandidate(['@arki/journal', '@arki/log']);
+    const { runner } = fakeRunner({ packed: { journal: journal.manifest, log: logNew.manifest }, installed: { '@arki/journal': journal, '@arki/log': logNew } });
+    let bundled = '';
+    const spy: ExecRunner = (command, args, opts) => {
+      if (command === 'npx' && args.includes('vite')) bundled = readFileSync(path.join(opts.cwd, 'src', 'main.ts'), 'utf8');
+      return runner(command, args, opts);
+    };
+    await runSmoke({ ...base(dir, spy), config: config('source') });
+    expect(bundled).toContain("from '@arki/journal'");
+    expect(bundled).not.toContain('@arki/log');
+  });
+
   it('does not fail a source-distributed package that bare node cannot import', async () => {
     // Why: @arki/ui and friends ship .ts and .css for a bundler; node's
     // "Unknown file extension" is expected there, and blocked every frontend candidate.

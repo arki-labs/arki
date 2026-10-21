@@ -360,8 +360,10 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
     if (kind === 'source') {
       const viteDir = path.join(consumer, 'vite-fixture');
       await cp(path.join(smokeDir, 'vite-fixture'), viteDir, { recursive: true });
+      // Compiled packages in the candidate were imported under node and bun
+      // above; their optional-peer entries cannot bundle without the peer.
       const imports = installed
-        .filter(p => tarballOf.has(p.name))
+        .filter(p => tarballOf.has(p.name) && sourcePackages.has(p.name))
         .flatMap(p => exportSpecs(p.manifest))
         .map((spec, i) => `import * as m${i} from '${spec}';\nvoid m${i};`);
       await writeFile(path.join(viteDir, 'src', 'main.ts'), `${imports.join('\n')}\nexport {};\n`);
