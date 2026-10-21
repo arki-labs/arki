@@ -38,7 +38,7 @@ import {
 import { demosUsing, loadDemos } from './demos';
 import { docExamplesReportSchema } from './docs-fresh';
 import { checkBumps, loadChangesets } from './impact';
-import { discoverManifests } from './inventory';
+import { discoverManifests, type ParsedManifest } from './inventory';
 import { createEnvelope } from './json-output';
 import { LEDGER_PATH, renderLedgerEntry, writeLedgerEntry } from './ledger';
 import { npmVersionLookup, runOrder } from './order';
@@ -227,6 +227,25 @@ export async function runShip(options: ShipOptions): Promise<ShipEnvelope> {
   return mode.kind === 'start' ? start(options, wave.id, mode.dryRun, deps) : resume(options, wave.id, mode.dryRun, deps);
 }
 
+/** Every public package the roots need, transitively, by the edges `changeset version` checks: dependencies, optional dependencies and peers (optional ones too). Excludes the roots. */
+function dependencyClosure(manifests: readonly ParsedManifest[], roots: ReadonlySet<string>): Set<string> {
+  const byName = new Map(manifests.map(m => [m.name, m]));
+  const closure = new Set<string>();
+  const queue = [...roots];
+  for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+    const manifest = byName.get(name);
+    if (manifest === undefined) continue;
+    const needs = [manifest.dependencies, manifest.optionalDependencies, manifest.peerDependencies].flatMap(entries => Object.keys(entries ?? {}));
+    for (const dep of needs) {
+      const depManifest = byName.get(dep);
+      if (depManifest === undefined || depManifest.private || roots.has(dep) || closure.has(dep)) continue;
+      closure.add(dep);
+      queue.push(dep);
+    }
+  }
+  return closure;
+}
+
 function shipError(code: string, message: string, remediation: string, target?: string, severity: ReleaseError['severity'] = 'error'): ReleaseError {
   return { code, severity, message, remediation, ...(target === undefined ? {} : { target }) };
 }
@@ -293,10 +312,30 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
   const { changesets, errors: changesetErrors } = await loadChangesets(cwd);
   const { manifests } = await discoverManifests(cwd);
   const versionOf = Object.fromEntries(manifests.map(m => [m.name, m.version]));
-  const ours = changesets.filter(c => Object.keys(c.bumps).some(name => publishSet.has(name)));
+  // `changeset version` refuses to ignore a package that a versioned package
+  // depends on (peers count, optional ones too). So the set's dependencies are
+  // never ignored. One in another wave with pending changesets would be bumped
+  // but not published here: refuse and name the wave to ship first. One in no
+  // wave has never been on npm, so it is versioned with the set.
+  const waveOf = new Map(config.waves.flatMap(w => w.packages.map(name => [name, w.id] as const)));
+  const pendingNames = new Set(changesets.flatMap(c => Object.keys(c.bumps)));
+  const closure = dependencyClosure(manifests, publishSet);
+  const versionSet = new Set([...publishSet, ...[...closure].filter(name => !waveOf.has(name) && pendingNames.has(name))]);
+  const ours = changesets.filter(c => Object.keys(c.bumps).some(name => versionSet.has(name)));
   const refusals: ReleaseError[] = [...changesetErrors.filter(e => e.severity === 'error'), ...checkBumps(ours, versionOf)];
+  for (const name of [...closure].filter(n => waveOf.has(n) && pendingNames.has(n))) {
+    const depWave = waveOf.get(name) ?? '';
+    refusals.push(
+      shipError(
+        SHIP_ERROR_CODES.foreignChangeset,
+        `The ${wave} set depends on ${name}, which has pending changesets in the ${depWave} wave.`,
+        `Ship the ${depWave} wave first, then run this ship again. If ${depWave} also depends on ${wave}, move the package to the later wave in arki.release.config.ts.`,
+        name,
+      ),
+    );
+  }
   for (const changeset of ours) {
-    for (const pkg of Object.keys(changeset.bumps).filter(name => !publishSet.has(name))) {
+    for (const pkg of Object.keys(changeset.bumps).filter(name => !versionSet.has(name))) {
       refusals.push(
         shipError(
           SHIP_ERROR_CODES.foreignChangeset,
@@ -319,7 +358,7 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
     steps.push({ id: 'changesets', status: 'failed', detail: `${String(refusals.length)} refusal(s)` });
     return fail('A pending changeset cannot ship with this wave; nothing was changed.', missingBin === null ? refusals : [...refusals, missingBin]);
   }
-  const ignored = manifests.map(m => m.name).filter(name => !publishSet.has(name));
+  const ignored = manifests.map(m => m.name).filter(name => !versionSet.has(name) && !closure.has(name));
   const versionArgs = [changesetBin, 'version', ...ignored.flatMap(name => ['--ignore', name])];
   steps.push({
     id: 'changesets',
@@ -367,7 +406,7 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
   }
   const after = await discoverManifests(cwd);
   const bumped = after.manifests.filter(m => versionOf[m.name] !== undefined && versionOf[m.name] !== m.version);
-  const strays = bumped.filter(m => !publishSet.has(m.name));
+  const strays = bumped.filter(m => !versionSet.has(m.name));
   if (strays.length > 0) {
     steps.push({ id: 'version', status: 'failed', detail: `bumped outside the set: ${strays.map(m => m.name).join(', ')}` });
     return fail('`changeset version` bumped packages outside the publish set.', strays.map(m =>

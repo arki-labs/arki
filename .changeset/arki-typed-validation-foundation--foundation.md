@@ -1,7 +1,6 @@
 ---
 '@arki/failure': minor
 '@arki/schema': minor
-'@arki/env': patch
 ---
 
 Make failure the acyclic validation foundation. Schema parsing now returns exact typed validation failures, and failure revival returns typed protocol/validator defects instead of throwing. Add validated versioned JSON envelopes; retain legacy envelope reads while rejecting non-JSON data and changing output transforms. oRPC error maps validate output-only wire data.

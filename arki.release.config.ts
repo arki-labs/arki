@@ -61,9 +61,7 @@ export const config: ReleaseConfig = {
         '@arki/failure',
         '@arki/contracts',
         '@arki/log',
-        '@arki/env',
         '@arki/ts',
-        '@arki/resilience',
         '@arki/date',
         '@arki/string',
         '@arki/clock',
@@ -74,8 +72,10 @@ export const config: ReleaseConfig = {
     {
       id: 'dot-kernel',
       label: 'Wave 2 — DOT Kernel',
-      // @arki/cli publishes first: the dot CLI runs on it (A-32).
-      packages: ['@arki/cli', '@arki/dot'],
+      // @arki/cli publishes first: the dot CLI runs on it (A-32). `@arki/env`
+      // and `@arki/resilience` moved here from Foundation 2026-10-21: both peer
+      // on `@arki/dot`, and a wave may depend only on earlier waves.
+      packages: ['@arki/cli', '@arki/dot', '@arki/env', '@arki/resilience'],
     },
     {
       id: 'infrastructure-adapters',

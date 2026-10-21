@@ -1,6 +1,5 @@
 ---
 '@arki/admin': minor
-'@arki/queue': minor
 ---
 
 Add nominal domain kinds to `defineId(prefix, { kind })`, preserving canonical

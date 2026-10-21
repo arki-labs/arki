@@ -47,6 +47,11 @@ function writePackage(name: string, version: string, scripts: Record<string, str
   writeFileSync(path.join(root, 'packages', name, 'CHANGELOG.md'), `# @arki/${name}\n`);
 }
 
+function addDependencies(name: string, fields: Record<string, unknown>): void {
+  const manifestFile = path.join(root, 'packages', name, 'package.json');
+  writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(readFileSync(manifestFile, 'utf8')), ...fields }));
+}
+
 function writeChangeset(file: string, bumps: Record<string, string>): void {
   const front = Object.entries(bumps).map(([pkg, bump]) => `'${pkg}': ${bump}`).join('\n');
   writeFileSync(path.join(root, '.changeset', file), `---\n${front}\n---\n\nA change.\n`);
@@ -205,6 +210,41 @@ describe('ship', () => {
     expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.foreignChangeset]);
     expect(envelope.errors[0]?.target).toBe('@arki/x');
     expect(calls.filter(c => c.via === 'exec')).toEqual([]);
+  });
+
+  it('never ignores a package the set depends on, even through an optional peer', async () => {
+    // Why: `changeset version` exits 1 when a versioned package depends on an
+    // ignored one, so ignoring a dependency blocks every wave that has one.
+    addDependencies('a', { peerDependencies: { '@arki/x': 'workspace:*' }, peerDependenciesMeta: { '@arki/x': { optional: true } } });
+    rmSync(path.join(root, '.changeset', 'x-feature.md'));
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.commitNeeded]);
+    const version = calls.find(c => c.command.includes(' version'));
+    expect(version?.command).not.toContain('--ignore @arki/x');
+    expect(version?.command).toContain('--ignore @arki/b');
+  });
+
+  it('refuses when the set depends on a package with pending changesets in another wave', async () => {
+    // Why: changeset version would bump that dependency, which this ship never
+    // publishes. The other wave must ship first.
+    addDependencies('a', { dependencies: { '@arki/x': 'workspace:*' } });
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => [e.code, e.target])).toEqual([[SHIP_ERROR_CODES.foreignChangeset, '@arki/x']]);
+    expect(envelope.errors[0]?.remediation).toContain('Ship the specialized wave first');
+    expect(calls.filter(c => c.via === 'exec')).toEqual([]);
+  });
+
+  it('versions a dependency that is in no wave with the set, since npm has never seen it', async () => {
+    // Why: a held public package (config `notYet`) cannot be ignored while a
+    // wave package depends on it, and no other ship would ever consume its changesets.
+    writePackage('held', '0.0.2');
+    addDependencies('a', { peerDependencies: { '@arki/held': 'workspace:*' } });
+    writeChangeset('held-change.md', { '@arki/held': 'patch' });
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false });
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.commitNeeded]);
+    expect(calls.find(c => c.command.includes(' version'))?.command).not.toContain('--ignore @arki/held');
+    expect(envelope.summary.next).toContain('.changeset/held-change.md');
   });
 
   it('dry run prints the plan and runs neither changeset version nor the build', async () => {
