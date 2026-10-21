@@ -270,16 +270,17 @@ export async function resolveBase(input: {
 }): Promise<string | null> {
   if (input.lastShippedCommit !== null) return input.lastShippedCommit;
   if (input.npmVersion === null) return null;
-  const out = await input.git([
-    'log',
-    '-1',
-    '--format=%H',
-    `-G"version": "${input.npmVersion}"`,
-    '--',
-    `packages/${input.dir}/package.json`,
-  ], { cwd: input.root });
-  const sha = out.stdout.trim();
-  return out.code === 0 && sha !== '' ? sha : null;
+  const manifest = `packages/${input.dir}/package.json`;
+  const versionLine = `"version": "${input.npmVersion}"`;
+  // -G also matches the commit that bumped the version away, so take the
+  // newest match whose package.json still holds the npm version afterwards.
+  const out = await input.git(['log', '--format=%H', `-G${versionLine}`, '--', manifest], { cwd: input.root });
+  if (out.code !== 0) return null;
+  for (const sha of out.stdout.split('\n').map(l => l.trim()).filter(l => l !== '')) {
+    const after = await input.git(['show', `${sha}:${manifest}`], { cwd: input.root });
+    if (after.code === 0 && after.stdout.includes(versionLine)) return sha;
+  }
+  return null;
 }
 
 export async function changedSince(root: string, base: string, dir: string, git: GitRunner): Promise<string[]> {

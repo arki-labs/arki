@@ -125,6 +125,7 @@ describe('changesets', () => {
 describe('base and runImpact', () => {
   const git: GitRunner = async args => {
     if (args[0] === 'log') return { code: 0, stdout: 'abc123\n', stderr: '' };
+    if (args[0] === 'show') return { code: 0, stdout: '{ "version": "1.0.0" }', stderr: '' };
     if (args[0] === 'diff') return { code: 0, stdout: 'packages/math/src/a.ts\n', stderr: '' };
     return { code: 1, stdout: '', stderr: '' };
   };
@@ -138,6 +139,20 @@ describe('base and runImpact', () => {
   it('falls back to the commit that set the npm version', async () => {
     // Why: packages shipped before candidates existed still need a base.
     expect(await resolveBase({ root: '/repo', dir: 'math', npmVersion: '1.0.0', lastShippedCommit: null, git })).toBe('abc123');
+  });
+
+  it('skips the commit that bumped the npm version away', async () => {
+    // Why: git log -G also matches the removing commit. Taking it as the base
+    // made every docs change since the npm release invisible (IMPACT_E001).
+    const bumped: GitRunner = async args => {
+      if (args[0] === 'log') return { code: 0, stdout: 'bump99\nabc123\n', stderr: '' };
+      if (args[0] === 'show') {
+        const version = args[1]?.startsWith('bump99') ? '1.1.0' : '1.0.0';
+        return { code: 0, stdout: `{ "version": "${version}" }`, stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: '' };
+    };
+    expect(await resolveBase({ root: '/repo', dir: 'math', npmVersion: '1.0.0', lastShippedCommit: null, git: bumped })).toBe('abc123');
   });
 
   it('fails the run for a package with source-only changes', async () => {
