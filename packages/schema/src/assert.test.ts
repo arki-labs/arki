@@ -1,3 +1,4 @@
+import { AsyncSchema, InvalidInput } from '@arki/failure';
 import { type } from 'arktype';
 import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +7,7 @@ import { z } from 'zod';
 import type { StandardSchemaV1 } from './types.js';
 import { assert, ensure, is } from './assert.js';
 import { AssertError, SCHEMA_ERROR_CODES } from './errors.js';
+import { recordSchema } from './schemas.js';
 
 const SECRET = 'sk-live-4242-do-not-print';
 
@@ -192,5 +194,32 @@ describe('redaction does not garble the rest of the message', () => {
     const message = messageOf(1, v.pipe(v.number(), v.minValue(10)));
     expect(message).toContain('10');
     expect(message).not.toMatch(/received 1\b/);
+  });
+});
+
+// Procedures, sessions and caches pass failures around as ordinary data. A guard on such a value
+// answers about the value; it must never mistake the value for its own rejection.
+describe('a value that is itself a failure', () => {
+  const invalid = InvalidInput({ issues: [{ message: 'raised elsewhere' }] });
+  const pending = AsyncSchema();
+
+  it('is() answers true for a matching invalid-input failure, not false', () => {
+    expect(is(invalid, recordSchema)).toBe(true);
+  });
+
+  it('is() answers true for any other failure kind instead of throwing it', () => {
+    expect(is(pending, recordSchema)).toBe(true);
+  });
+
+  it('assert passes a matching failure value', () => {
+    expect(
+      thrownBy(() => {
+        assert(pending, recordSchema);
+      }),
+    ).toBeUndefined();
+  });
+
+  it('ensure returns the failure value unchanged', () => {
+    expect(ensure(invalid, recordSchema)).toBe(invalid);
   });
 });

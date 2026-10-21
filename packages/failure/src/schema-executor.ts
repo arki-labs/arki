@@ -40,7 +40,11 @@ function complete<Output>(result: StandardSchemaV1.Result<Output>) {
   return InvalidInput({ issues: publicIssues });
 }
 
-/** @internal Keeps successful failure-valued outputs distinct for revival. */
+/**
+ * Run a schema once without unwrapping: `{ value }` on success, or an invalid-input,
+ * async-schema or validator-defect failure. Use it when the value itself may be a failure,
+ * which `parse` would confuse with a rejection.
+ */
 export function executeSchema<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown) {
   let pending: unknown;
   try {

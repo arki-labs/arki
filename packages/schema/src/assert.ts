@@ -1,10 +1,10 @@
 /** The throwing channel: `is`, `assert` and `ensure` run a schema and treat a rejection as a bug in the caller. */
 import { AsyncSchema, InvalidInput, orThrow } from '@arki/failure';
+import { executeSchema } from '@arki/failure/schema';
 
 import type { StandardSchemaV1 } from './types.js';
 import { AssertError, SCHEMA_ERROR_CODES } from './errors.js';
 import { formatIssues, pathOf } from './issues.js';
-import { parse } from './parse.js';
 
 /** How a failed `assert` or `ensure` describes itself. */
 export type AssertOptions = {
@@ -80,7 +80,7 @@ export function is<Schema extends StandardSchemaV1>(
   value: unknown,
   schema: Schema,
 ): value is StandardSchemaV1.InferInput<Schema> {
-  const result = parse(schema, value);
+  const result = executeSchema(schema, value);
   if (InvalidInput.is(result)) return false;
   if (AsyncSchema.is(result)) throw needsAsync();
   orThrow(result);
@@ -100,7 +100,7 @@ export function assert<Schema extends StandardSchemaV1>(
   schema: Schema,
   options?: AssertOptions,
 ): asserts value is StandardSchemaV1.InferInput<Schema> {
-  const result = parse(schema, value);
+  const result = executeSchema(schema, value);
   if (InvalidInput.is(result)) throw rejected(value, result.data.issues, options);
   if (AsyncSchema.is(result)) throw needsAsync(options);
   orThrow(result);
@@ -117,8 +117,8 @@ export function ensure<Schema extends StandardSchemaV1>(
   schema: Schema,
   options?: AssertOptions,
 ): StandardSchemaV1.InferOutput<Schema> {
-  const result = parse(schema, value);
+  const result = executeSchema(schema, value);
   if (InvalidInput.is(result)) throw rejected(value, result.data.issues, options);
   if (AsyncSchema.is(result)) throw needsAsync(options);
-  return orThrow(result);
+  return orThrow(result).value;
 }

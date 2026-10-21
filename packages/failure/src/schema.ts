@@ -6,6 +6,8 @@ import { isFailure } from './failure.js';
 import { AsyncSchema, InvalidInput, ValidatorDefect } from './foundations.js';
 import { executeSchema, executeSchemaAsync } from './schema-executor.js';
 
+export { executeSchema } from './schema-executor.js';
+
 /** Validation definitions for boundaries that expose schema parsing to their callers. */
 export const SCHEMA_FAILURES = [InvalidInput, AsyncSchema, ValidatorDefect] as const;
 
