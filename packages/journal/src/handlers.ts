@@ -266,11 +266,6 @@ export function bindEffect<Meta, AppDb, Run>(
 }
 
 /**
- * The effects and taps as they run: each bound to its services from `services`.
- * A handler `j.compose` already bound needs nothing, so it gets nothing. Throws on the first
- * missing service, so a worker refuses to start instead of failing job after job.
- */
-/**
  * Give one effect its services from `from`, which answers per handler ref. An effect with `bindPerWorkflow`
  * (`workflow.step`) is asked once per workflow; any other effect is asked once, as `bindEffect` does.
  */
@@ -283,6 +278,11 @@ export function bindEffectFrom<Meta, AppDb, Run>(
     : effect.bindPerWorkflow(workflow => from({ kind: 'effect', name: effect.name, workflow }));
 }
 
+/**
+ * The effects and taps as they run: each bound to its services from `services`.
+ * A handler `j.compose` already bound needs nothing, so it gets nothing. Throws on the first
+ * missing service, so a worker refuses to start instead of failing job after job.
+ */
 export function bindHandlers<Meta, AppDb, Run>(
   handlers: {
     readonly effects: readonly Effect<Meta, AppDb, Run, Needs>[];

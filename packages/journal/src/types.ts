@@ -431,6 +431,8 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
   /**
    * Only `workflow.step` has it. It is the same effect with each registered workflow's services read from
    * `servicesOf(name@version)`, instead of one flat set shared by every workflow.
+   *
+   * @internal
    */
   readonly bindPerWorkflow?: (servicesOf: (workflow: string) => Services) => Effect<Meta, AppDb, Run>;
 };
