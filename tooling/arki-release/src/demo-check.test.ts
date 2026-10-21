@@ -79,7 +79,35 @@ const check = (demo: string, output: RunOutput) =>
     now: () => new Date('2026-10-21T00:00:00.000Z'),
   });
 
+/** Writes a one-package candidate next to `candidateDir`. */
+function writeSibling(name: string, wave: string, createdAt: string): string {
+  const dir = path.join(path.dirname(candidateDir), name);
+  mkdirSync(path.join(dir, 'tarballs'), { recursive: true });
+  const bytes = Buffer.from(`bytes of ${name}`);
+  writeFileSync(path.join(dir, 'tarballs', 'b.tgz'), bytes);
+  const sibling: Candidate = {
+    wave,
+    sourceCommit: 'abcdef1234567890',
+    createdAt,
+    packages: [{ name: '@arki/b', version: '0.1.0', tarball: 'tarballs/b.tgz', sha512: createHash('sha512').update(bytes).digest('hex'), publishOrder: 1 }],
+    checks: {},
+  };
+  writeFileSync(path.join(dir, 'candidate.json'), JSON.stringify(sibling));
+  return dir;
+}
+
 describe('runDemoCheck', () => {
+  it('passes the newest candidate of every other wave along with its own', async () => {
+    // Why: a demo uses several waves; no single wave's candidate holds them
+    // all, so a lone candidate can never install it (the 2026-10-21 deadlock).
+    // Older candidates of a wave, and others of its own wave, are left out.
+    writeSibling('dot-kernel-old', 'dot-kernel', '2026-10-16T00:00:00.000Z');
+    const newest = writeSibling('dot-kernel-new', 'dot-kernel', '2026-10-18T00:00:00.000Z');
+    writeSibling('foundation-other', 'foundation', '2026-10-19T00:00:00.000Z');
+    await check('shop', { code: 0, stdout: allPass, stderr: '' });
+    expect(calls.map(c => c.command)).toEqual([`bun run arki:candidate ${candidateDir} ${newest}`]);
+  });
+
   it('records success when every step of the demo passes against the candidate', async () => {
     // Why: demo-impact opens only on a `success` record; a demo that installs,
     // typechecks, tests and builds against the frozen tarballs is that proof.

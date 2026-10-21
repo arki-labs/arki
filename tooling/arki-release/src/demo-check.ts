@@ -12,6 +12,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import debugFactory from 'debug';
 import { z } from 'zod';
@@ -61,9 +62,34 @@ export interface RunDemoCheckOptions {
   /** Demo name from `config.demos`. */
   readonly demo: string;
   readonly candidateDir: string;
+  /**
+   * Other waves' candidates whose tarballs join this one. A demo uses several
+   * waves, and no single wave's candidate holds them all. Default: the newest
+   * candidate of every other wave next to `candidateDir`.
+   */
+  readonly siblingDirs?: readonly string[];
   /** Runs `bun run arki:candidate`; tests pass a fake. */
   readonly runner?: ExecRunner;
   readonly now?: () => Date;
+}
+
+/** The newest readable candidate of every other wave in the same candidates folder. */
+export async function siblingCandidates(candidateDir: string): Promise<string[]> {
+  const own = await readCandidate(candidateDir);
+  if (!own.ok) return [];
+  const root = path.dirname(candidateDir);
+  const newest = new Map<string, { readonly dir: string; readonly createdAt: string }>();
+  for (const name of await readdir(root).catch(() => [])) {
+    const dir = path.join(root, name);
+    if (dir === candidateDir) continue;
+    const read = await readCandidate(dir);
+    if (!read.ok || read.candidate.wave === own.candidate.wave) continue;
+    const seen = newest.get(read.candidate.wave);
+    if (seen === undefined || read.candidate.createdAt > seen.createdAt) {
+      newest.set(read.candidate.wave, { dir, createdAt: read.candidate.createdAt });
+    }
+  }
+  return [...newest.values()].map(s => s.dir).toSorted();
 }
 
 /** The candidate check id demo-impact reads. */
@@ -148,10 +174,11 @@ export async function runDemoCheck(options: RunDemoCheckOptions): Promise<DemoCh
     return record(candidateDir, checkId, { status: 'deferred', envelope: { reason: message } }, envelope, now);
   }
 
-  debug('running arki:candidate in %s against %s', demoDir, candidateDir);
-  const out = await runner('bun', ['run', 'arki:candidate', candidateDir], { cwd: demoDir });
+  const dirs = [candidateDir, ...(options.siblingDirs ?? (await siblingCandidates(candidateDir)))];
+  debug('running arki:candidate in %s against %o', demoDir, dirs);
+  const out = await runner('bun', ['run', 'arki:candidate', ...dirs], { cwd: demoDir });
   const steps = parseReport(out.stdout);
-  const rerun = `Run \`cd ${entry.path} && bun run arki:candidate ${candidateDir}\` to see the full output.`;
+  const rerun = `Run \`cd ${entry.path} && bun run arki:candidate ${dirs.join(' ')}\` to see the full output.`;
   if (steps === null) {
     const message = `\`bun run arki:candidate\` in ${entry.path} printed no report (exit ${String(out.code)}): ${out.stderr.trim().slice(-300)}`;
     const envelope = done(
