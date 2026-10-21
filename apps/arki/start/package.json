@@ -14,7 +14,7 @@
     "lint": "eslint",
     "preview": "bun run with-env vite preview",
     "test": "vitest run --configLoader runner",
-    "test:e2e": "bunx playwright test",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "with-env": "dotenv -e ../../../.env -e ../.env --"
   },
@@ -64,11 +64,13 @@
   "devDependencies": {
     "@arki/arki-release": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/playwright-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tailwind-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@playwright/test": "catalog:testing",
     "@tailwindcss/vite": "catalog:styling",
     "@types/node": "catalog:node",
     "@types/react": "catalog:react",

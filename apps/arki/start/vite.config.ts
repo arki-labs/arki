@@ -78,11 +78,30 @@ export default defineConfig({
     tailwindcss(),
     contentPlugin(),
     nitro({
-      // Prerender SEO discovery files at build time — output lives in
-      // `.output/public/{robots.txt,sitemap.xml}` and is served by the CDN
-      // edge with no function invocation per crawl.
+      // Prerender SEO discovery files and every docs page without params at
+      // build time — output lives in `.output/public/` and is served by the
+      // CDN edge with no function invocation per request. Detail pages
+      // (`/packages/$name/...`, `/docs/guides/$slug`, `/errors/$code`) stay
+      // server-rendered: they grow with every package version and doc file,
+      // and their data is bundled, so rendering one on request is cheap.
       prerender: {
-        routes: ['/robots.txt', '/sitemap.xml'],
+        routes: [
+          '/robots.txt',
+          '/sitemap.xml',
+          '/llms.txt',
+          '/llms-full.txt',
+          '/.well-known/security.txt',
+          '/packages',
+          '/packages/index.json',
+          '/errors',
+          '/docs',
+          '/docs/guides',
+          '/docs/glossary',
+          '/docs/dot-new',
+          '/docs/upgrade-story',
+          '/compare',
+          '/agents',
+        ],
       },
     }),
     tanstackStart({

@@ -35,8 +35,12 @@ export function DocBody({ html, headings, snapshot }: DocBodyProps) {
           </ul>
         </nav>
       )}
-      {/* Compiled at build time from our own package docs by `compileMarkdown`; not user input. */}
-      <div className="prose dark:prose-invert" dangerouslySetInnerHTML={{ __html: html }} />
+      {/* Compiled at build time from our own package docs by `compileMarkdown`; not user input. A wide table scrolls
+          inside its own box so a 320px screen never scrolls the whole page sideways. */}
+      <div
+        className="prose dark:prose-invert [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </article>
   );
 }

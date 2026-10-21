@@ -9,6 +9,6 @@
     },
     "types": ["vite/client", "@tanstack/start-client-core"]
   },
-  "include": ["src", "vite.config.ts", "content.config.ts"],
+  "include": ["src", "e2e", "playwright.config.ts", "vite.config.ts", "content.config.ts"],
   "exclude": ["node_modules", "dist", "src/content/packages"]
 }

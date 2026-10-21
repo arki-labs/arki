@@ -8,6 +8,7 @@ import {
   packagesFileSchema,
   snapshotMetaSchema,
 } from '@arki/arki-release/site-schema';
+import { apiIndexSchema } from '@arki/library-tooling/api-index-schema';
 
 import demosFile from '~/generated/demos.json';
 import dotNewFile from '~/generated/dot-new.json';
@@ -30,30 +31,36 @@ const dotNew = dotNewFileSchema.parse(dotNewFile);
 const packagesByShort = new Map(packages.map(entry => [entry.short, entry]));
 const errorsByCode = new Map(errors.map(entry => [entry.code, entry]));
 
-const snapshotFolder = /\/content\/packages\/([^/]+\/[^/]+)\/[^/]+$/;
+const snapshotFile = /\/content\/packages\/([^/]+\/[^/]+)\/(.+)$/;
 
-/** `<short>/<version>` of a globbed snapshot file. */
-function snapshotKeyOf(file: string): string {
-  const key = snapshotFolder.exec(file)?.[1];
-  if (key === undefined) throw new Error(`site-data: ${file} is not in a snapshot folder`);
-  return key;
+/** `<short>/<version>` of a globbed snapshot file, and the file's path inside that snapshot. */
+function snapshotPartsOf(file: string): { key: string; path: string } {
+  const match = snapshotFile.exec(file);
+  if (match?.[1] === undefined || match[2] === undefined) throw new Error(`site-data: ${file} is not in a snapshot folder`);
+  return { key: match[1], path: match[2] };
 }
 
 const snapshots = new Map(
   Object.entries(
     import.meta.glob<unknown>('../../content/packages/*/*/snapshot.json', { eager: true, import: 'default' }),
-  ).map(([file, value]) => [snapshotKeyOf(file), snapshotMetaSchema.parse(value)]),
+  ).map(([file, value]) => [snapshotPartsOf(file).key, snapshotMetaSchema.parse(value)]),
 );
 
-/** Files at the root of each snapshot, loaded on demand so each stays its own server chunk. */
-const snapshotRootFiles = new Map(
-  Object.entries(import.meta.glob<string>('../../content/packages/*/*/*', { query: '?raw', import: 'default' })).map(
-    ([file, load]) => [`${snapshotKeyOf(file)}/${file.slice(file.lastIndexOf('/') + 1)}`, load],
-  ),
+/** Files at the root of each snapshot and its agent guide, loaded on demand so each stays its own server chunk. */
+const snapshotRawFiles = new Map(
+  Object.entries(
+    import.meta.glob<string>(['../../content/packages/*/*/*', '../../content/packages/*/*/docs/agent-guide.md'], {
+      query: '?raw',
+      import: 'default',
+    }),
+  ).map(([file, load]) => {
+    const parts = snapshotPartsOf(file);
+    return [`${parts.key}/${parts.path}`, load];
+  }),
 );
 
 /** The snapshot files text and JSON routes serve as they are. */
-export const SNAPSHOT_RAW_FILES = ['api.json', 'llms.txt', 'AGENTS.md'] as const;
+export const SNAPSHOT_RAW_FILES = ['api.json', 'llms.txt', 'AGENTS.md', 'docs/agent-guide.md'] as const;
 
 const docsBySnapshot = Map.groupBy(allPackageDocs, doc => doc._meta.directory.split('/').slice(0, 2).join('/'));
 const guidesBySlug = new Map(allGuides.map(guide => [guide.slug, guide]));
@@ -96,8 +103,14 @@ export function findPackageDoc(short: string, version: string, path: string) {
 
 /** One of `SNAPSHOT_RAW_FILES` from a snapshot, as text; null when the snapshot does not hold it. */
 export async function readSnapshotFile(short: string, version: string, file: (typeof SNAPSHOT_RAW_FILES)[number]) {
-  const load = snapshotRootFiles.get(`${short}/${version}/${file}`);
+  const load = snapshotRawFiles.get(`${short}/${version}/${file}`);
   return load === undefined ? null : await load();
+}
+
+/** A snapshot's `api.json`, parsed; null when the snapshot does not hold one. Throws on a malformed file. */
+export async function readApiIndex(short: string, version: string) {
+  const text = await readSnapshotFile(short, version, 'api.json');
+  return text === null ? null : apiIndexSchema.parse(JSON.parse(text));
 }
 
 export function listErrors() {

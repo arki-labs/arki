@@ -6,6 +6,7 @@ import { z } from '@arki/contracts';
 
 import { compileDoc, readPackageMirrors, readSnapshotFiles } from './src/features/site-data/package-docs.build';
 import { packageDocLinkRewriter } from './src/features/site-data/package-urls';
+import { parseGlossary } from './src/routes/docs/-glossary';
 
 /**
  * Package docs copied by `bun release:arki site` from npm tarballs
@@ -64,4 +65,20 @@ const guides = defineCollection({
   }),
 });
 
-export default defineContentConfig({ content: [posts, legals, faqs, changelogs, packageDocs, guides] });
+/**
+ * The glossary `/docs/glossary` renders: a copy of the repo's `docs/arki/glossary.md` (named by its `source:` line),
+ * kept in the app because the Docker build only sees workspaces. Its table rows become terms with an anchor each;
+ * the route resolves their links against the latest snapshots (see `resolveGlossaryLink`).
+ */
+const glossaries = defineCollection({
+  name: 'Glossaries',
+  directory: 'src/content/glossary',
+  include: 'glossary.md',
+  schema: z.object({
+    source: z.string(),
+    content: z.string(),
+  }),
+  transform: document => ({ ...document, ...parseGlossary(document.content) }),
+});
+
+export default defineContentConfig({ content: [posts, legals, faqs, changelogs, packageDocs, guides, glossaries] });

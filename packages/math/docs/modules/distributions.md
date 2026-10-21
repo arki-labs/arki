@@ -28,4 +28,4 @@ smallest `k` with `cdf(k) ≥ p`".
 The special functions underneath — `erf`, `erfc`, `erfInv`, `gamma`, `gammaLn`, `beta`, `betaLn`,
 `regularizedGammaP`, `regularizedBeta` — are exported too. Every one of them, and every
 distribution method, is measured against mpmath far into the tails; the bounds are in
-[Accuracy](#accuracy).
+[Accuracy](../accuracy.md).

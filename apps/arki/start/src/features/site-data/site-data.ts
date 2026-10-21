@@ -14,6 +14,7 @@ import {
   listGuides,
   listPackageDocs,
   listPackages,
+  readApiIndex,
   readSnapshotFile,
   SNAPSHOT_RAW_FILES,
 } from './site-data.server';
@@ -42,6 +43,10 @@ export const getPackageDocFn = createServerFn({ method: 'GET' })
 export const getSnapshotFileFn = createServerFn({ method: 'GET' })
   .inputValidator(snapshotInput.extend({ file: z.enum(SNAPSHOT_RAW_FILES) }))
   .handler(({ data }) => readSnapshotFile(data.short, data.version, data.file));
+
+export const getApiIndexFn = createServerFn({ method: 'GET' })
+  .inputValidator(snapshotInput)
+  .handler(({ data }) => readApiIndex(data.short, data.version));
 
 export const listErrorsFn = createServerFn({ method: 'GET' }).handler(() => listErrors());
 

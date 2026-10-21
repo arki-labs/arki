@@ -10,4 +10,20 @@ export default [
   ...baseConfig,
   ...reactConfig,
   ...restrictEnvAccess,
+  {
+    // TanStack Router signals control flow by throwing redirect()/notFound();
+    // these are not error objects, so only-throw-error must allow them.
+    files: ['src/routes/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        {
+          allow: [
+            { from: 'package', name: 'Redirect', package: '@tanstack/router-core' },
+            { from: 'package', name: 'NotFoundError', package: '@tanstack/router-core' },
+          ],
+        },
+      ],
+    },
+  },
 ];
