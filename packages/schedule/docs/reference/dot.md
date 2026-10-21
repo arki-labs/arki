@@ -66,9 +66,9 @@ import { locks } from '@arki/lock/dot';
 import { pgLease } from '@arki/lock/pg/lease';
 
 // Once, in the app: the `locks` service that locked schedules read.
-defineApp('avocabo').use(
+defineApp('shop').use(
   locks({
-    namespace: 'avocabo',
+    namespace: 'shop',
     needs: { db: database.provides.db },
     store: ({ db }) => pgLease(db, { ttl: '30s' }),
   }),
