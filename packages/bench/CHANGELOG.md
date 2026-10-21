@@ -1,5 +1,17 @@
 # @arki/bench
 
+## 0.1.0
+
+### Minor Changes
+
+- b0a9677: Choose the Node you measure on, and know when it is the wrong one. `--node <path>` (or `ARKI_BENCH_NODE`) sets the Node binary for the Node leg; the default is the Node running `arki-bench`. When the project declares a Node version (`.nvmrc`, `.node-version`, `volta.node` or `engines.node`, found by walking up from the bench file) and the Node that ran does not meet it, the result gets a blocking `node-version-mismatch` warning naming both versions, so it is marked NOT PUBLISHABLE. A `--node` path that does not exist is a `runtime-missing` warning.
+
+### Patch Changes
+
+- 7922fb5: Docs standard: README reordered with install, quick start, limits and failure behaviour; `AGENTS.md`, `llms.txt` and `docs/agent-guide.md` added; the quick start is now a tested example file.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
 ## 0.0.2
 
 Fixed:

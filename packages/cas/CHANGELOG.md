@@ -1,5 +1,19 @@
 # @arki/cas
 
+## 0.0.2
+
+### Patch Changes
+
+- 7922fb5: Docs standard: README reordered with install, quick start, limits and failure behaviour; `AGENTS.md`, `llms.txt` and `docs/agent-guide.md` added; doc examples compile under `test:docs`.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- b6d2b8a: Initial public release of `@arki/expr` (safe formula parsing, printing and evaluation in float, decimal, rational and complex domains, with LaTeX output) and `@arki/cas` (bounded computer algebra on expr: exact polynomials and rational functions with π and e as symbols, `simplify`, `derivative` with a rule-by-rule `derivation`, `factor` over ℚ and closed-form roots).
+- Updated dependencies [7922fb5]
+- Updated dependencies [b6d2b8a]
+  - @arki/expr@0.0.2
+  - @arki/math@0.1.0
+
 ## Unreleased
 
 Release preparation (RFC `2026-10-15-arki-cas` §18 build step 5). The package is now public (Wave 5, Specialized), together with `@arki/expr`.

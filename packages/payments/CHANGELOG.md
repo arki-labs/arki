@@ -1,5 +1,107 @@
 # @arki/payments
 
+## 0.4.0
+
+### Minor Changes
+
+- 232d3e8: Share bounded Web Crypto generation across modern and legacy IDs. Legacy
+  `createId`, `createPrefixedId`, and factory `create`/`make`/`new` now return exact
+  canonical generation failures. Preserve stored formats and prefixes, including
+  legacy empty and punctuation prefixes, while removing the Cuid2 fallback to
+  `Math.random`. Infer stored types from the successful schema and handle failures
+  before side effects or string interpolation.
+
+  Modern declarations use `defineId` with `IdOf` inferred from the canonical schema.
+  Payment ID factory exports become browser-safe declarations; use `idColumns`
+  for their table helpers. Payment provider creates and billing persistence return
+  generation failures; webhook adapters must check these before acknowledgement.
+  AI tombstone columns use modern declarations. Flow stops on returned failures;
+  use `createFlow<State, Context>()(config)` to infer the exact node failure union.
+  Ordinary patches cannot disguise a canonical failure through structural typing.
+
+- 232d3e8: Make failure the acyclic validation foundation. Schema parsing now returns exact typed validation failures, and failure revival returns typed protocol/validator defects instead of throwing. Add validated versioned JSON envelopes; retain legacy envelope reads while rejecting non-JSON data and changing output transforms. oRPC error maps validate output-only wire data.
+
+  Migrate consumers to check failures, propagate them through Journal event/write/replay and queue/mail operations, and use explicit exception bridges at foreign callbacks. Journal rejects invalid event entries before inserting them. See `@arki/failure/docs/upgrade-typed-validation.md` for breaking API and stored-data migration details.
+
+- 232d3e8: Repair schema/type agreement across Drizzle validators, ID factories and AI configuration.
+
+  Breaking: generated table validators no longer claim phantom `$type<T>` shapes. Use a runtime schema with `jsonColumn` and reuse it in explicit validator refinements for precise input/output types. Bare JSON columns retain the native runtime validator and its honest inferred type.
+
+  Breaking: `createIdFactory(prefix)` infers its ID from the literal prefix; remove the former second type argument. Payments ID aliases now reflect the prefixes their generators already produce. Existing generated values and stored IDs are unchanged.
+
+  Breaking: replace AI `SearchOptionsType` with `SearchSettings`, and `AIServiceConfigType` with `RAGServiceConfig`. The `@arki/ai/types` aliases use those same distinct names. Provider configuration and sanitizer patterns now share their actual validation schemas, preserving custom `RegExp` rules.
+
+  See `docs/features/arki-framework/migrations/defined-once.md` for migration examples and compatibility notes.
+
+- 498dff0: Expected payment answers are returned as `@arki/failure` values, not thrown. Bugs, bad input and provider faults are still thrown.
+
+  - `StripeProvider` (and `BasePaymentProvider`) return `CardDeclined` (`payments.card_declined`, 402, data `{ providerCode, declineCode }`) from the calls that charge or check a card: `createSubscription`, `updateSubscription`, `createPayment`, `confirmPayment`, `createPaymentIntent`, `attachPaymentMethod`. They return `IdempotencyConflict` (`payments.idempotency_conflict`, 409) from the calls that take an `idempotencyKey`, and `ReferenceNotFound` (`payments.reference_not_found`, 404, data `{ kind, id, missing }`) for an id with no row, or a plan with no Stripe price, before any request. Import them from `@arki/payments/core/providers/provider-error`.
+  - `PaymentProviderError` no longer has the codes `card_declined`, `idempotency_conflict` and `reference_not_found`. A card or idempotency error from a call that cannot return those failures is thrown as `invalid_request`.
+  - `RefundService.requestRefund`, `approveRefund` and `rejectRefund` return `TransactionNotFound`, `RefundWindowExceeded`, `DuplicatePendingRefund`, `RefundAmountExceeded`, `RefundNotFound` and `RefundInvalidState` (`payments.*`), in place of throwing `RefundError` or a plain `Error`. Import them from `@arki/payments/refunds`. `RefundError` keeps `REASON_REQUIRED` and `PROCESSING_FAILED`.
+  - When the provider returns a failure while a refund is paid back, the refund still ends `failed` and support is told, as when the provider throws.
+  - `SubscriptionManager` and `TaxService.createTaxTransaction` return the provider's failures and write nothing for a change the provider refused. `DunningService` handles them as it handled the old thrown errors: the step fails and the subscription row is left alone. `PaymentRetryService` marks the attempt failed.
+  - Fix: in `PaymentRetryService`, a declined card on the last retry now ends dunning (the subscription is marked past due), as any other failed last retry does. Before, it left the subscription as it was.
+  - The journal commands of `createCoreJournal` and `createRefundsJournal` return `CommandNotFound` (`journal.not_found`, 404), `CommandConflict` (`journal.conflict`, 409) and `CommandInvalid` (`journal.invalid`, 400) from `@arki/journal` when a rule says no, in place of throwing `CommandError` `NOT_FOUND`, `CONFLICT` and `BAD_REQUEST`. The message is the same, now in `detail` and `message`. Nothing is written, as before. Over oRPC the error code changes from `NOT_FOUND` to `journal.not_found` (and so on); the status stays.
+  - `CoreWrites` and `RefundWrites` (from `writes(run)`) return those failures beside the row: each method's type lists the ones it can return. `syncSubscription` cannot refuse and still returns only the row.
+  - `SubscriptionManager` (`updateSubscription`, `setCancelAtPeriodEnd`, `cancelSubscription`, `reactivateSubscription`, `pauseSubscription`, `resumeSubscription`) returns a refused journal write, in place of throwing `Error('Failed to ...')`. The provider change was made before, as it was then.
+  - `DunningService.handlePaymentFailure` and `handleSubscriptionRecovery` return a refused write in place of throwing it. A refused write inside a dunning step is logged and the step stops, as before. `PaymentRetryService` marks the attempt `failed` with the refusal's message, as before.
+  - `RefundService.approveRefund`, `rejectRefund` and the payback return a refused write in place of throwing it. A refund whose completion is refused still ends `failed` and support is told, as before.
+  - `WebhookHandler` throws a refused write with `orThrow` (`UnexpectedFailure`), so the event fails and is retried, as before. The error message now starts with the failure code.
+
+- ceaadfa: `createCoreJournal`, `createPaymentJournal`, `createSubscriptionJournal` and `createRefundsJournal` take a journal whose meta schema is any Standard Schema with a plain-record output (`StandardSchemaV1<unknown, Record<string, unknown>>`), not only `z.ZodObject`.
+- 232d3e8: Breaking: `defineEnv` now validates in every environment. `CI` and `lint` runs no longer skip validation. The only implicit opt-out is `SKIP_ENV_VALIDATION=1` (exactly `1`); set it only in build stages that run without secrets. `options.skipValidation` still overrides it. The `@arki/env/dot` plugin now validates at boot and fails with `ARKI_ENV_PLUGIN_E001` (new `ENV_PLUGIN_ERROR_CODES`), and `EnvServices['env']` is derived from `defineEnv` without a cast.
+
+### Patch Changes
+
+- fe5a391: README follows the docs standard (install, quick start, limits and failure behaviour that match the `payments.*` failures), with `llms.txt`, an agent guide, `AGENTS.md` and `test:docs`. The nine `payments.*` failures gain `@fix` and `@verify` tags.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- 232d3e8: Signed webhooks in. `@arki/http/webhooks` adds `verifyWebhook({ scheme })`, a deriver that checks a request's signature over a clone of its body, and three schemes: `standardWebhooks`, `stripe` and `hmac` (GitHub, Slack, Shopify and most others). Each scheme also has `verify` and `sign`. Several secrets are accepted at once for rotation, the signed time must be within a tolerance, and `webhook.id` comes only from signed bytes (for `hmac`, the SHA-256 of the body), ready to be a journal idempotency key. New error codes `ARKI_HTTP_E012`, `E413`, `E420`, `E421`, `E422`.
+
+  `@arki/payments` checks Stripe signatures through `stripe()` from `@arki/http/webhooks` and now depends on `@arki/http`. Results are unchanged, except that a `t=` that is not Unix seconds now reports `Invalid signature format` instead of a time outside the window.
+
+- 232d3e8: Preserve typed business failures across job execution, scheduled runs and durable
+  commands. BullMQ and pg-boss share outcome classification and explicit retry
+  decisions; persisted refusals cannot become successful jobs. Queue submission
+  returns canonical validation, unavailability or uncertain-acceptance failures.
+  Middleware failure types flow from their definitions.
+
+  Schedule clients infer success and refusal from each definition and distinguish
+  refused work from overlap, lock contention and unavailability. Journal rolls back
+  refused commands, supervises callback defects, returns receipt conflicts, and
+  persists typed diagnostics for incompatible pinned workflows.
+
+  Breaking migration: narrow enqueue results before using IDs or counting accepted
+  work; register the exported failure definitions at RPC boundaries; handle
+  `refused` schedule outcomes. Returned failures and unexpected defects are not
+  retried by default. Follow each package's upgrade guidance for persisted jobs
+  and workflow versions.
+
+  Payments preserves duplicate-pending-refund handling when Journal returns a
+  typed constraint rejection. Other transaction failures retain their identity,
+  including uncertain commits; the service does not retry or call the provider.
+
+- 232d3e8: Return exact canonical webhook signing, verification and request-preparation
+  failures, supervise Web Crypto and add safe default tracing. Declare
+  WEBHOOK_FAILURES on protected HTTP routes and narrow direct results before
+  accepting a delivery. Payments fails closed on returned verification failures;
+  the Journal inbox declares the new contract and outbound delivery returns signing failures without sending or acknowledging jobs. Returned signing failures need an explicit backoff retry predicate.
+- Updated dependencies [9bfddf3]
+- Updated dependencies [1668156]
+- Updated dependencies [7922fb5]
+  - @arki/money@0.1.0
+  - @arki/contracts@0.2.0
+  - @arki/date@0.3.0
+  - @arki/db@0.4.0
+  - @arki/env@0.1.0
+  - @arki/failure@0.1.0
+  - @arki/http@0.3.0
+  - @arki/journal@0.3.0
+  - @arki/kv@0.3.0
+  - @arki/log@0.2.0
+  - @arki/schema@0.1.0
+
 ## 0.3.2
 
 ### Patch Changes

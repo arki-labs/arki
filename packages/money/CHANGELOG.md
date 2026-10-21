@@ -1,5 +1,20 @@
 # @arki/money
 
+## 0.1.0
+
+### Minor Changes
+
+- 1668156: Money-only errors carry stable codes `ARKI_MONEY_E001` to `E004` (exported as `MONEY_ERROR_CODES`) and a `remediation`. Breaking: `UnknownCurrencyError.code` held the bad currency text; that is now `currencyCode`, and `code` is the stable error code. `MoneyError` is now abstract.
+
+### Patch Changes
+
+- 9bfddf3: Faster `allocate`: whole-number ratios skip decimal parsing, parts are computed with plain number arithmetic while they stay safe integers, and the largest-remainder sort is skipped when every remainder is equal (about 2× faster for `allocate([1, 1, 1])`).
+- 7922fb5: Docs standard: README reordered with install, quick start, limits and failure behaviour; `AGENTS.md`, `llms.txt` and `docs/agent-guide.md` added; the four money error codes carry `@fix` and `@verify` tags; doc examples compile under `test:docs`.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- @arki/math@0.1.0
+
 ## 0.0.4
 
 Changed:

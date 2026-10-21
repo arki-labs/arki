@@ -24,6 +24,17 @@ Also unreleased: float domain and LaTeX (RFC `2026-10-14-arki-expr` §21 step 2)
 - `Language` carries its function and constant names as type parameters, so `compile` requires host implementations by type. Function definitions take an optional `cost` (default 1) for the steps budget.
 - `size-limit` budgets in `test`; benchmark suite against mathjs (pruned) and expr-eval.
 
+## 0.0.2
+
+### Patch Changes
+
+- 7922fb5: Docs standard: README reordered with install, quick start, limits and failure behaviour; `AGENTS.md`, `llms.txt` and `docs/agent-guide.md` added; doc examples compile under `test:docs`.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- b6d2b8a: Initial public release of `@arki/expr` (safe formula parsing, printing and evaluation in float, decimal, rational and complex domains, with LaTeX output) and `@arki/cas` (bounded computer algebra on expr: exact polynomials and rational functions with π and e as symbols, `simplify`, `derivative` with a rule-by-rule `derivation`, `factor` over ℚ and closed-form roots).
+- @arki/math@0.1.0
+
 ## 0.0.1
 
 Core (RFC `2026-10-14-arki-expr` §21 step 1). Not published yet.
