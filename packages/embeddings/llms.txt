@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 42 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 44 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
@@ -13,6 +13,7 @@
 - `@arki/embeddings/testing`: a deterministic fake embedder for tests. `fakeEmbedder`; types `FakeEmbedderOptions`.
 - `@arki/embeddings/kv`: a `CacheStore` over an `@arki/kv` client (or anything with its `get` and `set`), so `withCache` shares vectors across processes through Redis. `kvCacheStore`.
 - `@arki/embeddings/dot`: the app's one embedder as a Dot plugin. `embeddings`.
+- `@arki/embeddings/transformers`: a model run in process by Transformers.js (ONNX Runtime), no server. `createTransformersModel`; types `TransformersModelOptions`.
 <!-- llms:end -->
 
 ## Start here
@@ -29,6 +30,8 @@
 - [Retry rate limits and outages](docs/agent-guide.md#retry-rate-limits-and-outages)
 - [Cache repeated texts](docs/agent-guide.md#cache-repeated-texts)
 - [Give a Dot app its embedder](docs/agent-guide.md#give-a-dot-app-its-embedder)
+- [Embed a corpus as a stream](docs/agent-guide.md#embed-a-corpus-as-a-stream)
+- [Run a model in process](docs/agent-guide.md#run-a-model-in-process)
 
 ## Rules that bite
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.

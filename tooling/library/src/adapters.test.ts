@@ -22,6 +22,10 @@ describe('isAdapterSubpath', () => {
     expect(isAdapterSubpath('./openai')).toBe(true);
   });
 
+  it('treats ./transformers as an adapter, because @arki/embeddings/transformers loads its optional Transformers.js peer', () => {
+    expect(isAdapterSubpath('./transformers')).toBe(true);
+  });
+
   it('keeps plain subpaths portable', () => {
     expect(isAdapterSubpath('./memory')).toBe(false);
   });

@@ -7,6 +7,7 @@ Read this before changing code that turns text into vectors. The [README](../REA
 - A **model record** (`EmbeddingModel`) is the facts about one model (size, batch limits, instruction prefixes) plus one native call, `embedTexts`. `createOllamaModel`, `createOpenAIModel` and `createOpenAICompatibleModel` build them. The provider client lives inside the closure, so the root names no SDK.
 - An **embedder** (`createEmbedder(model, options)`) fixes the output options and adds the output check. `embed` and `embedMany` run it.
 - **`embedMany`** packs inputs by `maxBatch` and `maxBatchTokens`, runs chunks with bounded concurrency, keeps input order, and is all or nothing.
+- **`embedStream`** is the corpus form: a pull-based `ReadableStream` of `{ item, result }` in source order, one result per item, failures included.
 - A **space** (`EmbeddingSpace`) is what must match for two vectors to be comparable. `spaceId(space)` is its stored string form. A different space means re-embed, never mix.
 - **`resolveEmbeddingModel`** picks the model from a ref, `EMBEDDING_MODEL`, or the first configured provider in the order `ollama → openai → voyage → google`. It is pure.
 - Every expected failure is a returned `@arki/failure` value. `isEmbedFailure` recognises any of them.
@@ -92,6 +93,31 @@ The key covers the space, purpose, size, dtype, truncation choice, namespace and
 
 `embeddings({ model, cache: true })` from `@arki/embeddings/dot` publishes `embedder: Embedder | null`. A configuration that does not resolve logs once at `warn` and publishes `null`: handle `null` in every feature that embeds. Size a vector index from the same space (`vectorIndex({ space })` in `@arki/ai/dot`).
 
+### Embed a corpus as a stream
+
+```ts
+import type { Embedder } from '@arki/embeddings';
+import { embedStream, isEmbedFailure, spaceId } from '@arki/embeddings';
+
+type Doc = { readonly id: string; readonly body: string };
+type Row = { readonly id: string; readonly vector: Float32Array | Int8Array | Uint8Array; readonly space: string };
+
+export async function indexCorpus(embedder: Embedder, docs: AsyncIterable<Doc>, write: (row: Row) => Promise<void>) {
+  const skipped: string[] = [];
+  for await (const { item, result } of embedStream(embedder, docs, { text: doc => doc.body, purpose: 'document' })) {
+    if (isEmbedFailure(result)) skipped.push(item.id);
+    else await write({ id: item.id, vector: result.vector, space: spaceId(result.space) });
+  }
+  return skipped;
+}
+```
+
+The source is read only as fast as the loop runs. Stop early with `break`: that cancels the stream and aborts the requests in flight.
+
+### Run a model in process
+
+`await createTransformersModel()` from `@arki/embeddings/transformers` loads EmbeddingGemma `q8` (about 316 MB on the first run) with the peer `@huggingface/transformers`. It is async and returns `ModelUnavailable` as a value when the peer, the model or the network is missing. Call `model.dispose?.()` when done. Not for Hermes.
+
 ## Rules that bite
 
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
@@ -104,6 +130,8 @@ The key covers the space, purpose, size, dtype, truncation choice, namespace and
 - Never catch to hide a thrown error from a custom `embed`. It is a bug in that code.
 - `embeddings()` publishes `null` when nothing resolves. A feature that embeds must handle `null`, not assume a model.
 - `withTelemetry` never logs input text unless `recordInputs: true`. Keep it that way for user content.
+- A `./transformers` record is unusable after `dispose()`: a call then throws. Dispose once, when every user is done.
+- Do not switch an existing corpus to `./transformers` (or any other model) without re-embedding it: the space changes.
 
 ## Errors
 
@@ -122,7 +150,7 @@ The key covers the space, purpose, size, dtype, truncation choice, namespace and
 
 ### Errors (thrown)
 
-None are defined. This package throws only what a caller's own `embed` or `onProgress` throws.
+None are defined. This package throws only what a caller's own `embed`, `onProgress`, `text` or stream source throws (`embedStream` errors the stream with it), and an invariant error when a `./transformers` record is used after `dispose()`.
 
 ## Verify
 

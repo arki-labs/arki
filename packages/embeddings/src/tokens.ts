@@ -15,9 +15,9 @@ function estimate(text: string): TokenCount {
 }
 
 /**
- * Tokens one input costs. `counted` when the model record carries a tokenizer (`model.countTokens`),
- * otherwise `estimated` as `ceil(characters / 4)`. No adapter in this release ships a tokenizer, so
- * every count is an estimate; a provider's own count replaces it in `usage` when it reports one.
+ * Tokens one input costs. `counted` when the model record carries a tokenizer (`model.countTokens`,
+ * as `./transformers` records do), otherwise `estimated` as `ceil(characters / 4)`; a provider's own
+ * count replaces an estimate in `usage` when it reports one.
  *
  * @example
  * countTokens(model, 'twelve chars'); // { basis: 'estimated', count: 3 }

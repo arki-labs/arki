@@ -64,6 +64,11 @@
       "import": "./dist/dot/index.js",
       "default": "./dist/dot/index.js"
     },
+    "./transformers": {
+      "types": "./dist/transformers/index.d.ts",
+      "import": "./dist/transformers/index.js",
+      "default": "./dist/transformers/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -112,16 +117,19 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@huggingface/transformers": "catalog:ai",
     "@langchain/classic": "1.0.52",
     "@langchain/core": "catalog:",
     "@types/node": "catalog:node",
     "ai": "catalog:ai",
+    "fastembed": "3.0.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
     "@ai-sdk/openai": "catalog:ai",
     "@arki/dot": "workspace:*",
+    "@huggingface/transformers": "catalog:ai",
     "ai": "catalog:ai"
   },
   "peerDependenciesMeta": {
@@ -129,6 +137,9 @@
       "optional": true
     },
     "@arki/dot": {
+      "optional": true
+    },
+    "@huggingface/transformers": {
       "optional": true
     },
     "ai": {

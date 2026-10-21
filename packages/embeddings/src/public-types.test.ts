@@ -3,6 +3,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 import type { Provided } from '@arki/dot/plugin';
 import type { KV } from '@arki/kv';
 
+import type { embeddings } from './dot/index.js';
 import type {
   CacheStore,
   Embedder,
@@ -15,7 +16,7 @@ import type {
   NormalizeTextOptions,
   TokenCount,
 } from './index.js';
-import type { embeddings } from './dot/index.js';
+import type { createTransformersModel } from './transformers/index.js';
 import {
   Cancelled,
   cosine,
@@ -25,6 +26,7 @@ import {
   embed,
   EMBEDDINGGEMMA_INSTRUCTION,
   embedMany,
+  embedStream,
   isEmbedFailure,
   isSameSpace,
   l2Normalize,
@@ -108,6 +110,17 @@ describe('public types of the root entry', () => {
 
   it('the Dot plugin publishes Embedder | null, so a feature must handle an app with no model', () => {
     expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder | null>();
+  });
+
+  it('embedStream yields one { item, result } per source item, the result a value or an EmbedFailure', () => {
+    type Doc = { readonly id: number };
+    expectTypeOf(embedStream<Doc>).returns.toEqualTypeOf<
+      ReadableStream<{ readonly item: Doc; readonly result: Embedding | EmbedFailure }>
+    >();
+  });
+
+  it('createTransformersModel is async and answers a model record or a failure value', () => {
+    expectTypeOf<Awaited<ReturnType<typeof createTransformersModel>>>().toMatchTypeOf<EmbeddingModel | EmbedFailure>();
   });
 
   it('normalizeText is a pure string → string helper the embedder never calls', () => {

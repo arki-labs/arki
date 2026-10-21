@@ -1,6 +1,8 @@
 // Cross-runtime smoke test. Runs under Node, Bun and Deno via `bun run test:runtimes`, and is
 // bundled for the browser and Hermes targets. It drives the root with the fake embedder and the
 // `./ollama` record against an in-process fetch stub, so no server is needed on any runtime.
+// With TRANSFORMERS_SMOKE=1 it also loads EmbeddingGemma through `./transformers` (a ~300 MB
+// download, into TRANSFORMERS_CACHE_DIR when set); that check runs on Node and Bun only.
 
 import { cosine, createEmbedder, embed, embedMany, spaceId, withCache } from '../dist/index.js';
 import { kvCacheStore } from '../dist/kv/index.js';
@@ -23,6 +25,24 @@ async function openAICompatibleStub(_url, init) {
   const { input } = JSON.parse(init.body);
   const data = input.map((_, index) => ({ index, embedding: [index + 1, 0, 0, 0] })).reverse();
   return new Response(JSON.stringify({ data, usage: { prompt_tokens: input.length } }));
+}
+
+/** Opt-in: a real in-process embed. The import specifier is computed so the browser and Hermes bundles leave it out. */
+async function transformersChecks() {
+  const env = globalThis.process?.env ?? {};
+  // Deno runs a bundle, where the relative entry does not resolve; Deno is not claimed for this entry.
+  if (env.TRANSFORMERS_SMOKE !== '1' || typeof Deno !== 'undefined') return [];
+  const entry = '../dist/transformers/index.js';
+  const { createTransformersModel } = await import(entry);
+  const model = await createTransformersModel(
+    env.TRANSFORMERS_CACHE_DIR ? { cacheDir: env.TRANSFORMERS_CACHE_DIR } : {},
+  );
+  const batch = await embedMany(createEmbedder(model), ['the rain in Spain', 'ploaia din Spania']);
+  await model.dispose?.();
+  return [
+    ['transformers embeds two texts', batch.vectors?.length, 2],
+    ['transformers observes 768 dims', model.dimensions, 768],
+  ];
 }
 
 async function main() {
@@ -50,7 +70,10 @@ async function main() {
   await embed(cached, 'a');
   const hit = await embed(cached, 'a');
 
+  const transformers = await transformersChecks();
+
   const checks = [
+    ...transformers,
     ['cache answers the second call', hit.usage?.cacheHits, 1],
     ['cached vector is the same vector', cosine(hit.vector, first.vector), 1],
     ['fake vector has 8 dims', first.vector?.length, 8],

@@ -9,7 +9,15 @@
     "test": {
       "env": [
         "OLLAMA_LIVE",
-        "OLLAMA_BASE_URL"
+        "OLLAMA_BASE_URL",
+        "TRANSFORMERS_LIVE",
+        "TRANSFORMERS_CACHE_DIR"
+      ]
+    },
+    "test:runtimes": {
+      "env": [
+        "TRANSFORMERS_SMOKE",
+        "TRANSFORMERS_CACHE_DIR"
       ]
     }
   }
