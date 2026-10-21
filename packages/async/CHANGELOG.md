@@ -1,5 +1,17 @@
 # @arki/async
 
+## 0.1.1
+
+### Patch Changes
+
+- c794d12: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+- Updated dependencies [6601242]
+- Updated dependencies [2000a7e]
+- Updated dependencies [6601242]
+  - @arki/failure@0.2.0
+  - @arki/schema@0.2.0
+  - @arki/clock@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes

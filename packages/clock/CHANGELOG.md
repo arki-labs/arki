@@ -1,5 +1,13 @@
 # @arki/clock
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [6601242]
+- Updated dependencies [2000a7e]
+  - @arki/failure@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

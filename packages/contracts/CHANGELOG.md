@@ -1,5 +1,21 @@
 # @arki/contracts
 
+## 0.3.0
+
+### Minor Changes
+
+- ee192bd: `defineId(...)` default ids (and `createIdBody`, so `@arki/db`'s `createId` / `createPrefixedId` too) are cuid2 ids, generated with `@paralleldrive/cuid2`: 24 characters, a letter first, then letters and digits, a SHA3 of time, a counter, a host fingerprint and random salt. The shape is unchanged (today's ids already passed `isCuid`), so stored ids and schemas keep working. Every random bit still comes from Web Crypto, resolved per generation: an unusable provider answers `RandomSourceUnavailable`, a provider that breaks the protocol answers `UnexpectedDefect`. Rejection sampling is gone with the old construction. A cuid2 costs about 100 µs on Bun and Node, so it is for entity identities; `format: 'uuid'` (used by `@arki/http`'s `requestId`) is unchanged and stays under a microsecond.
+
+### Patch Changes
+
+- c4f8bef: `defineId(...)`: `create()` and `is()` parse with the id schema's `z.compile()` fast path, built once per declaration, and `is()` answers `false` for a non-string without parsing. Same results; about half the time per call, which matters for `requestId` on every HTTP request.
+- c794d12: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+- Updated dependencies [6601242]
+- Updated dependencies [2000a7e]
+- Updated dependencies [6601242]
+  - @arki/failure@0.2.0
+  - @arki/schema@0.2.0
+
 ## 0.2.0
 
 ### Minor Changes

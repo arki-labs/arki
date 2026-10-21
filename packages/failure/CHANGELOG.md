@@ -1,5 +1,12 @@
 # @arki/failure
 
+## 0.2.0
+
+### Minor Changes
+
+- 6601242: Breaking: `assertNever` is renamed `unreachable`, with no alias. Its default message no longer contains the value (it could leak a secret). The error code stays `ARKI_FAILURE_E004`. New: `invariant(condition, message?)` asserts a condition and throws `FailureError` `ARKI_FAILURE_E008`; the message may be a function, built only on failure.
+- 2000a7e: Fix: `is`, `assert` and `ensure` now answer about a value that is itself a failure. Before, `is(failureValue, recordSchema)` returned `false` for an invalid-input failure and threw for any other failure, because `parse` returns a failure-valued output and a rejection the same way. `@arki/failure/schema` now exports `executeSchema`, which runs a schema once without unwrapping (`{ value }` or a failure), and the throwing channel is built on it.
+
 ## 0.1.0
 
 ### Minor Changes
