@@ -1,15 +1,26 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { z } from 'zod';
 
-import { Shell } from '@fleet/sitekit/components/shell';
-import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
-
+import { Pill } from '~/shared/site-chrome';
 import { packageHref } from '~/features/site-data/package-urls';
 import { getDefaultMeta } from '~/shared-metadata';
 
 import { listPackageRowsFn } from './-package-data';
-import { TIER_GROUPS } from './-tiers';
+import {
+  examplesText,
+  filterPackages,
+  groupByTier,
+  runtimesText,
+  STATUS_PILL,
+  statusFromSearch,
+  totalLine,
+} from './-package-list';
 
 export const Route = createFileRoute('/packages/')({
+  validateSearch: z.object({
+    q: z.string().optional(),
+    status: z.string().optional(),
+  }),
   loader: () => listPackageRowsFn(),
   head: () =>
     getDefaultMeta({
@@ -19,81 +30,132 @@ export const Route = createFileRoute('/packages/')({
   component: PackagesPage,
 });
 
-type PackageRow = Awaited<ReturnType<typeof listPackageRowsFn>>[number];
-
-const columnCount = 7;
-
-function examplesText(examples: PackageRow['examples']): string {
-  if (examples === null) return 'none recorded';
-  return `${examples.compiled} compiled, ${examples.run} run, ${examples.skipped} skipped`;
-}
-
-function runtimesText(runtimes: PackageRow['runtimes']): string {
-  const entries = Object.entries(runtimes);
-  if (entries.length === 0) return 'not declared';
-  return entries.map(([runtime, range]) => `${runtime} ${range}`).join(', ');
-}
-
 function PackagesPage() {
   const rows = Route.useLoaderData();
-  const groups = TIER_GROUPS.map(group => ({ ...group, rows: rows.filter(row => row.tier === group.tier) })).filter(
-    group => group.rows.length > 0,
-  );
+  const { q = '', status: statusParam } = Route.useSearch();
+  const status = statusFromSearch(statusParam);
+  const { shown, chips } = filterPackages(rows, q, status);
+  const groups = groupByTier(shown);
+  const query = q.trim();
 
   return (
-    <PageContainer breadcrumbs={{ items: [{ label: 'Packages', href: '/packages' }] }}>
-      <Shell className="sm:py-8 md:py-12">
-        <h1>Packages</h1>
-        <p>
-          Status <code>published</code> means the latest docs come from npm. <code>next</code> means they come from a
-          release candidate that is not on npm yet. <code>archive</code> means only an old README is kept.{' '}
-          <code>none</code> means nothing is published yet.
-        </p>
-        <p>
-          <a href="/packages/index.json">This list as JSON</a>
-        </p>
-        <div className="overflow-x-auto">
-          <table aria-label="Packages">
-            <thead>
+    <main id="content" className="pk-main">
+      <h1>Packages</h1>
+      <p className="pk-lede">
+        Tier 1 is the app stack. Tier 2 libraries work on their own. <code>published</code> docs come from npm;{' '}
+        <code>next</code> docs come from a release candidate that is not on npm yet. <code>archive</code> keeps only an
+        old README. <code>none</code> means nothing is published yet.
+      </p>
+      <p className="mono pk-total">
+        {totalLine(rows)} · <a href="/packages/index.json">this list as JSON</a>
+      </p>
+
+      <form method="get" action="/packages" role="search" aria-label="Filter packages" className="pk-form">
+        {/* First submit button of the form, so Enter in the search box keeps the status picked now. */}
+        <button type="submit" name="status" value={status} className="pk-sr">
+          Apply filter
+        </button>
+        <label htmlFor="pkg-q" className="pk-sr">
+          Filter by name or purpose
+        </label>
+        <div className="pk-search">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.5-3.5" />
+          </svg>
+          <input id="pkg-q" name="q" type="search" defaultValue={q} placeholder="Filter by name or purpose" />
+        </div>
+        <div role="group" aria-label="Status" className="pk-chips">
+          {chips.map(chip => (
+            <button key={chip.id} type="submit" name="status" value={chip.id} className="chip" aria-pressed={status === chip.id}>
+              {chip.id === 'all' ? 'All' : chip.id} <span className="mono pk-count">{chip.count}</span>
+            </button>
+          ))}
+        </div>
+      </form>
+
+      <p role="status" className="mono pk-result">
+        {shown.length === rows.length ? `Showing all ${rows.length}` : `Showing ${shown.length} of ${rows.length}`}
+      </p>
+
+      {shown.length > 0 ? (
+        <table aria-label="Packages" className="cards pk-table">
+          <thead>
+            <tr>
+              <th scope="col">Package</th>
+              <th scope="col">Purpose</th>
+              <th scope="col">Status</th>
+              <th scope="col">npm → next</th>
+              <th scope="col">Doc examples</th>
+            </tr>
+          </thead>
+          {groups.map(group => (
+            <tbody key={String(group.tier)}>
               <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Purpose</th>
-                <th scope="col">Status</th>
-                <th scope="col">npm</th>
-                <th scope="col">Next</th>
-                <th scope="col">Runtimes</th>
-                <th scope="col">Doc examples</th>
+                <th scope="rowgroup" colSpan={5} className="pk-group">
+                  {group.label} <span className="pk-group-count">· {group.rows.length}</span>
+                </th>
               </tr>
-            </thead>
-            {groups.map(group => (
-              <tbody key={String(group.tier)}>
-                <tr>
-                  <th scope="rowgroup" colSpan={columnCount}>
-                    {group.label}
-                  </th>
-                </tr>
-                {group.rows.map(row => (
-                  <tr key={row.short} data-package={row.short}>
+              {group.rows.map(row => {
+                const runtimes = runtimesText(row.runtimes);
+                const pill = STATUS_PILL[row.status];
+                return (
+                  <tr key={row.short} className="card-row" data-package={row.short}>
                     <th scope="row">
-                      <a href={packageHref(row.short)}>{row.name}</a>
+                      <a className="pname" href={packageHref(row.short)}>
+                        {row.name}
+                      </a>
+                      {runtimes !== null && <div className="mono pk-runtimes">{runtimes}</div>}
                     </th>
-                    <td>
+                    <td className="c-full pk-purpose">
                       {row.purpose ?? (row.status === 'none' ? 'No docs published yet.' : 'The README has no summary.')}
                     </td>
-                    <td>
-                      <code>{row.status}</code>
+                    <td className="c-end">
+                      <Pill kind={pill.kind} glyph={pill.glyph}>
+                        {row.status}
+                      </Pill>
                     </td>
-                    <td>{row.npmVersion ?? 'not published'}</td>
-                    <td>{row.nextVersion ?? 'none'}</td>
-                    <td>{runtimesText(row.runtimes)}</td>
-                    <td>{examplesText(row.examples)}</td>
+                    <td className="mono pk-ver">
+                      <span className="lbl">npm → next</span>
+                      {row.npmVersion ?? '—'} → {row.nextVersion ?? '—'}
+                    </td>
+                    <td className="mono pk-ex">
+                      <span className="lbl">Examples</span>
+                      {examplesText(row.examples)}
+                    </td>
                   </tr>
-                ))}
-              </tbody>
-            ))}
-          </table>
+                );
+              })}
+            </tbody>
+          ))}
+        </table>
+      ) : (
+        <div className="pk-empty">
+          {query === '' ? (
+            <p className="pk-empty-title">No package has this status.</p>
+          ) : (
+            <>
+              <p className="pk-empty-title">
+                No package matches <code>{query}</code>.
+              </p>
+              <p className="pk-empty-hint">
+                The filter looks at package names and the first line of each README. Error codes and API names live
+                elsewhere:
+              </p>
+            </>
+          )}
+          <ul>
+            {query !== '' && (
+              <li>
+                <a href={`/errors?q=${encodeURIComponent(query)}`}>Search error codes for “{query}”</a>
+              </li>
+            )}
+            <li>
+              <a href="/packages">Clear the filter</a>
+            </li>
+          </ul>
         </div>
-      </Shell>
-    </PageContainer>
+      )}
+    </main>
   );
 }

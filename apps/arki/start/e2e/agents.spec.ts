@@ -26,6 +26,8 @@ test.describe('agent files and the agent benchmark page', () => {
     const results = page.getByTestId('agents-results');
     const empty = page.getByTestId('agents-empty');
     await expect(results.or(empty)).toBeVisible();
+    // The package table is folded into a details element: open it first.
+    await page.getByText(/^Show all \d+ packages$/).click();
     await expect(page.getByTestId('agents-library-benchmarks').getByRole('row').nth(1)).toBeVisible();
   });
 });

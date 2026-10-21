@@ -1,5 +1,3 @@
-import { Shell } from '@fleet/sitekit/components/shell';
-import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { getDefaultMeta } from '~/shared-metadata';
@@ -47,23 +45,22 @@ function GlossaryPage() {
   const { title, intro, columns, terms } = Route.useLoaderData();
 
   return (
-    <PageContainer
-      breadcrumbs={{
-        items: [
-          { label: 'Docs', href: '/docs' },
-          { label: title, href: '/docs/glossary' },
-        ],
-      }}
-    >
-      <Shell className="sm:py-8 md:py-12">
-        <h1>{title}</h1>
+    <main id="content">
+      <div className="gl-wrap">
+        <nav aria-label="Breadcrumb" className="dd-crumb">
+          <a href="/docs">Docs</a> / <span aria-current="page">{title}</span>
+        </nav>
+        <h1 className="dd-h1">{title}</h1>
         {intro.map(paragraph => (
-          <p key={paragraph}>
+          <p key={paragraph} className="dd-lead">
             <InlineCode text={paragraph} />
           </p>
         ))}
-        {/* The table scrolls inside its own box so a 320px screen never scrolls the whole page sideways. */}
-        <div className="max-w-full overflow-x-auto" role="region" aria-label="Glossary terms">
+        <p className="gl-count">
+          {terms.length} terms · link to one with <code>/docs/glossary#&lt;term&gt;</code>
+        </p>
+        {/* Wide screens: one table. At 767px and below each row stacks (see site.css), so nothing scrolls sideways. */}
+        <div role="region" aria-label="Glossary terms" className="gl-table">
           <table data-testid="glossary">
             <thead>
               <tr>
@@ -80,25 +77,33 @@ function GlossaryPage() {
                   <th scope="row">
                     <a href={`#${term.id}`}>
                       <InlineCode text={term.term} />
+                      <span className="gl-hash" aria-hidden="true">
+                        #
+                      </span>
                     </a>
                   </th>
                   <td>
+                    <span className="lbl lbl-meaning">What it means</span>
                     <InlineCode text={term.meaning} />
                   </td>
-                  <td>
+                  <td className={term.readMore === null ? 'gl-none' : undefined}>
+                    <span className="lbl">Where to read</span>
                     {term.readMore !== null && (
                       <a href={term.readMore.href}>
                         <InlineCode text={term.readMore.label} />
                       </a>
                     )}
                   </td>
-                  <td>{term.formerly === null ? null : <InlineCode text={term.formerly} />}</td>
+                  <td className={term.formerly === null ? 'gl-none gl-was' : 'gl-was'}>
+                    <span className="lbl">Formerly</span>
+                    {term.formerly !== null && <InlineCode text={term.formerly} />}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </Shell>
-    </PageContainer>
+      </div>
+    </main>
   );
 }

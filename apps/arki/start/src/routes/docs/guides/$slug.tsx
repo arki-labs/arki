@@ -1,5 +1,3 @@
-import { Shell } from '@fleet/sitekit/components/shell';
-import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 import { createFileRoute, notFound } from '@tanstack/react-router';
 
 import { DocBody } from '~/features/site-data/doc-body';
@@ -21,18 +19,13 @@ function GuidePage() {
   const { guide } = Route.useLoaderData();
 
   return (
-    <PageContainer
-      breadcrumbs={{
-        items: [
-          { label: 'Docs', href: '/docs' },
-          { label: 'Guides', href: '/docs/guides' },
-          { label: guide.title, href: `/docs/guides/${guide.slug}` },
-        ],
-      }}
-    >
-      <Shell className="sm:py-8 md:py-12">
+    <main id="content">
+      <div className="gd-article">
+        <nav aria-label="Breadcrumb" className="dd-crumb">
+          <a href="/docs">Docs</a> / <a href="/docs/guides">Guides</a> / <span aria-current="page">{guide.title}</span>
+        </nav>
         <DocBody html={guide.html} headings={guide.headings} />
-      </Shell>
-    </PageContainer>
+      </div>
+    </main>
   );
 }

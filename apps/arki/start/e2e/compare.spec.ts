@@ -12,7 +12,7 @@ test.describe('compare page', () => {
     await expect(shipped.getByRole('link')).toHaveAttribute('href', /^\/packages\/[a-z-]+$/);
 
     // A planned cell names a release wave or batch.
-    await expect(page.locator('[data-cell="planned"]').first()).toContainText('Release wave:');
+    await expect(page.locator('[data-cell="planned"]').first()).toContainText(/release wave/i);
 
     // A not-planned cell gives its reason.
     const notPlanned = page.locator('[data-cell="not-planned"]').first();
@@ -30,9 +30,9 @@ test.describe('dot new preview', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('What dot new writes');
     await expect(page.getByText('Nothing runs in your browser')).toBeVisible();
     await expect(page.getByTestId('dot-new-template').first()).toBeVisible();
-    await expect(page.getByTestId('dot-new-file').first()).toContainText('bytes');
+    await expect(page.getByTestId('dot-new-file').first()).toContainText(/\d+(\.\d)? (B|KB)/);
     await expect(page.getByRole('heading', { name: 'Next steps' }).first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'What you own afterwards' }).first()).toBeVisible();
+    await expect(page.getByText('all yours to edit').first()).toBeVisible();
   });
 });
 

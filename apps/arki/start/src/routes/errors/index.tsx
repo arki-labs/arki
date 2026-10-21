@@ -1,13 +1,26 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { z } from 'zod';
 
-import { Shell } from '@fleet/sitekit/components/shell';
-import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
-
+import { packageHref } from '~/features/site-data/package-urls';
 import { listErrorsFn } from '~/features/site-data/site-data';
 import { getDefaultMeta } from '~/shared-metadata';
-
+import { Pill } from '~/shared/site-chrome';
 import { ErrorSearchForm } from './-search-form';
+
+/** The first sentence of a doc comment, so a row stays one line. */
+function firstSentence(text: string): string {
+  const end = text.search(/[.!?](?:\s|$)/);
+  return end === -1 ? text : text.slice(0, end + 1);
+}
+
+/** `@arki/dot` -> `dot`: the short name that package URLs and anchors use. */
+function shortName(packageName: string): string {
+  return packageName.slice(packageName.indexOf('/') + 1);
+}
+
+function codeCount(count: number): string {
+  return `${count} ${count === 1 ? 'code' : 'codes'}`;
+}
 
 export const Route = createFileRoute('/errors/')({
   validateSearch: z.object({ q: z.string().optional() }),
@@ -18,7 +31,9 @@ export const Route = createFileRoute('/errors/')({
     const matches =
       query === ''
         ? all
-        : all.filter(entry => `${entry.code} ${entry.what} ${entry.package}`.toLowerCase().includes(query));
+        : all.filter(entry =>
+            `${entry.code} ${entry.package} ${firstSentence(entry.what)}`.toLowerCase().includes(query),
+          );
     const groups = Map.groupBy(matches, entry => entry.package);
     return {
       query: deps.q?.trim() ?? '',
@@ -35,48 +50,104 @@ export const Route = createFileRoute('/errors/')({
   component: ErrorsPage,
 });
 
-/** The first sentence of a doc comment, so a row stays one line. */
-function firstSentence(text: string): string {
-  const end = text.search(/[.!?](?:\s|$)/);
-  return end === -1 ? text : text.slice(0, end + 1);
-}
-
 function ErrorsPage() {
   const { query, total, count, groups } = Route.useLoaderData();
+  const countLine =
+    query === '' ? `${total} codes in ${groups.length} packages` : `${count} of ${total} codes match "${query}"`;
 
   return (
-    <PageContainer breadcrumbs={{ items: [{ label: 'Error codes', href: '/errors' }] }}>
-      <Shell className="sm:py-8 md:py-12">
-        <h1>Error codes</h1>
-        <p>
-          Each code says what happened and how to fix it. A thrown error stops your code. A failure is a value a
-          function returns, and you decide what to do with it.
-        </p>
-        <ErrorSearchForm defaultValue={query} />
-        <p data-testid="errors-count">
-          {query === '' ? `${total} codes` : `${count} of ${total} codes match "${query}"`}
-        </p>
-        {count === 0 ? (
-          <p data-testid="errors-empty">No code matches. Try a shorter word, or clear the search.</p>
-        ) : (
-          groups.map(([packageName, entries]) => (
-            <section key={packageName} aria-labelledby={`pkg-${packageName}`}>
-              <h2 id={`pkg-${packageName}`}>{packageName}</h2>
-              <ul>
-                {entries.map(entry => (
-                  <li key={entry.code} data-testid="error-row">
-                    <Link to="/errors/$code" params={{ code: entry.code }}>
-                      <code>{entry.code}</code>
-                    </Link>{' '}
-                    <span data-kind={entry.kind}>{entry.kind === 'thrown' ? 'Thrown' : 'Failure'}</span>{' '}
-                    {firstSentence(entry.what)}
-                  </li>
-                ))}
-              </ul>
+    <main id="content" className="errors-main">
+      <h1 className="e-title">Error codes</h1>
+      <p className="e-lede">
+        Each code says what happened and how to fix it. A thrown error stops your code. A failure is a value a function
+        returns, and you decide what to do with it.
+      </p>
+      <p className="e-legend">
+        <span>
+          <Pill kind="k-thrown" glyph="▲">
+            thrown
+          </Pill>{' '}
+          <span className="e-muted">stops your code unless you catch it</span>
+        </span>
+        <span>
+          <Pill kind="k-failure" glyph="◇">
+            failure
+          </Pill>{' '}
+          <span className="e-muted">returned as a value for you to handle</span>
+        </span>
+      </p>
+      <ErrorSearchForm defaultValue={query} />
+      <p role="status" className="sub e-count" data-testid="errors-count">
+        {countLine}
+      </p>
+      {query === '' && (
+        <nav aria-label="Packages with error codes" className="e-jump">
+          {groups.map(([packageName, entries]) => (
+            <a key={packageName} className="chip" href={`#pkg-${shortName(packageName)}`}>
+              <span className="mono">{packageName}</span> <span className="mono e-n">{entries.length}</span>
+            </a>
+          ))}
+        </nav>
+      )}
+      {count === 0 ? (
+        <div className="e-nomatch" data-testid="errors-empty">
+          <p className="e-nomatch-title">
+            No code matches <code>{query}</code>.
+          </p>
+          <p className="e-muted">The search looks at codes, package names and the first line of what happened.</p>
+          <ul>
+            <li>Try a shorter word, or part of the code.</li>
+            <li>
+              <Link to="/errors">Clear the search</Link>
+            </li>
+          </ul>
+        </div>
+      ) : (
+        groups.map(([packageName, entries]) => {
+          const short = shortName(packageName);
+          return (
+            <section key={packageName} aria-labelledby={`pkg-${short}`}>
+              <h2 id={`pkg-${short}`} className="pkgh">
+                <Link to={packageHref(short)}>{packageName}</Link>{' '}
+                <span className="n">{codeCount(entries.length)}</span>
+              </h2>
+              <table className="cards" aria-label={`Error codes in ${packageName}`}>
+                <thead>
+                  <tr>
+                    <th scope="col" className="e-col-code">
+                      Code
+                    </th>
+                    <th scope="col" className="e-col-kind">
+                      Kind
+                    </th>
+                    <th scope="col">What happened</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map(entry => (
+                    <tr key={entry.code} className="card-row" data-testid="error-row">
+                      <th scope="row" className="e-cell-code">
+                        <Link className="ecode" to="/errors/$code" params={{ code: entry.code }}>
+                          {entry.code}
+                        </Link>
+                      </th>
+                      <td className="c-end" data-kind={entry.kind}>
+                        <Pill
+                          kind={entry.kind === 'thrown' ? 'k-thrown' : 'k-failure'}
+                          glyph={entry.kind === 'thrown' ? '▲' : '◇'}
+                        >
+                          {entry.kind}
+                        </Pill>
+                      </td>
+                      <td className="c-full e-muted">{firstSentence(entry.what)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </section>
-          ))
-        )}
-      </Shell>
-    </PageContainer>
+          );
+        })
+      )}
+    </main>
   );
 }

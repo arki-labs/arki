@@ -17,8 +17,30 @@ test.describe('/packages', () => {
     expect(response?.status()).toBe(200);
     const table = page.getByRole('table', { name: 'Packages' });
     await expect(table.locator('tr[data-package]')).toHaveCount(expected);
-    await expect(table.getByRole('rowheader', { name: 'Tier 1: the stack' })).toBeVisible();
-    await expect(table.getByRole('rowheader', { name: 'Tier 2: standalone libraries' })).toBeVisible();
+    await expect(table.getByRole('rowheader', { name: /^Tier 1: the stack/ })).toBeVisible();
+    await expect(table.getByRole('rowheader', { name: /^Tier 2: standalone libraries/ })).toBeVisible();
+  });
+
+  test('the filter is a plain GET form: the status chip and the query narrow the list', async ({ page }) => {
+    const archived = packages.filter(entry => entry.status === 'archive');
+    await page.goto('/packages?status=archive');
+    await expect(page.getByRole('button', { name: /^archive/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('table', { name: 'Packages' }).locator('tr[data-package]')).toHaveCount(archived.length);
+
+    // Enter in the search box submits the form's first button, which carries the status on screen.
+    await page.getByRole('searchbox').fill('a');
+    await page.getByRole('searchbox').press('Enter');
+    await expect(page).toHaveURL(/status=archive/);
+    await expect(page).toHaveURL(/q=a(&|$)/);
+
+    const unknownStatus = await page.goto('/packages?status=bogus');
+    expect(unknownStatus?.status()).toBe(200);
+    await expect(page.getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
+
+    const none = await page.goto('/packages?q=graphql');
+    expect(none?.status()).toBe(200);
+    await expect(page.getByText('No package matches')).toBeVisible();
+    await expect(page.getByRole('link', { name: /Search error codes for/ })).toBeVisible();
   });
 
   test('/packages/dot/next shows the candidate banner with the next version', async ({ page }) => {
@@ -27,10 +49,14 @@ test.describe('/packages', () => {
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { level: 1, name: '@arki/dot' })).toBeVisible();
     await expect(page.getByRole('note').filter({ hasText: `candidate for v${dot?.nextVersion}` })).toBeVisible();
-    await expect(page.getByText(`@arki/dot@${dot?.nextVersion}`, { exact: true })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Versions' }).locator('a[aria-current="page"]')).toHaveText(
-      `${dot?.nextVersion}`,
+    // The header line names the version; the Release health heading repeats it.
+    await expect(page.getByText(`for @arki/dot@${dot?.nextVersion}`).first()).toBeVisible();
+    // The version list lives in a closed <details> picker; open it as a reader would.
+    await page.locator('details.vpick > summary').click();
+    await expect(page.getByRole('list', { name: 'Versions of @arki/dot' }).locator('a[aria-current="page"]')).toHaveText(
+      new RegExp(`^${dot?.nextVersion}`),
     );
+    await expect(page.getByRole('region', { name: /^Release health/ })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Public imports' })).toBeVisible();
   });
 
@@ -38,7 +64,7 @@ test.describe('/packages', () => {
     const archived = dot?.versions.find(version => version.archive);
     test.skip(archived === undefined, 'dot has no archived snapshot');
     await page.goto(`/packages/dot/${archived?.version}`);
-    await expect(page.getByRole('note').filter({ hasText: 'Archive, not supported.' })).toBeVisible();
+    await expect(page.getByRole('note').filter({ hasText: `${archived?.version} is archived.` })).toBeVisible();
   });
 
   test('a doc page renders by its path', async ({ page }) => {

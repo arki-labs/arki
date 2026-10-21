@@ -12,6 +12,7 @@ import {
   listPackagesFn,
 } from '~/features/site-data/site-data';
 
+import { withFocusableCode } from './-package-view';
 import { publicImports } from './-public-imports';
 import { readmePurpose, withoutLeadingTitle } from './-readme-text';
 
@@ -39,7 +40,7 @@ export const listPackageRowsFn = createServerFn({ method: 'GET' }).handler(async
  * page: `snapshot` is null and the page says no docs are published yet.
  */
 export const getPackageDetailFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ short: z.string(), version: z.string().nullable() }))
+  .validator(z.object({ short: z.string(), version: z.string().nullable() }))
   .handler(async ({ data }) => {
     const entry = await getPackageFn({ data: { short: data.short } });
     if (entry === null) return null;
@@ -69,7 +70,7 @@ export const getPackageDetailFn = createServerFn({ method: 'GET' })
       purpose: readme === null ? null : readmePurpose(readme.doc.html),
       snapshot: listing.snapshot,
       docs: listing.docs.filter(doc => doc.path !== 'README').map(doc => ({ path: doc.path, title: doc.title })),
-      readme: readme === null ? null : { html: withoutLeadingTitle(readme.doc.html), headings: readme.doc.headings },
+      readme: readme === null ? null : { html: withFocusableCode(withoutLeadingTitle(readme.doc.html)), headings: readme.doc.headings },
       imports: apiIndex === null ? null : publicImports(apiIndex),
     };
   });

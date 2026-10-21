@@ -1,5 +1,3 @@
-import { Shell } from '@fleet/sitekit/components/shell';
-import { PageContainer } from '@fleet/sitekit/layout/workspace/page-container.tsx';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { getDefaultMeta } from '~/shared-metadata';
@@ -38,82 +36,101 @@ export const Route = createFileRoute('/docs/')({
   component: DocsIndexPage,
 });
 
+function DocsLinks({ title, links }: { title: string; links: readonly { href: string; title: string }[] }) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      <ul>
+        {links.map(link => (
+          <li key={link.href}>
+            <a href={link.href} data-testid="doc-job-link">
+              {link.title}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function DocsIndexPage() {
   const { jobs, snapshots } = Route.useLoaderData();
 
   return (
-    <PageContainer breadcrumbs={{ items: [{ label: 'Docs', href: '/docs' }] }}>
-      <Shell className="sm:py-8 md:py-12">
-        <header>
-          <h1>Docs</h1>
-          <p>Start from what you want to do. Each task links to the pages that answer it.</p>
+    <>
+      <main id="content">
+        <div className="dx-wrap">
+          <h1 className="dd-h1">Docs</h1>
+          <p className="dd-lead">Start from what you want to do. Each task links to the pages that answer it.</p>
           {snapshots.map(snapshot => (
-            <p key={snapshot.name} className="text-sm text-muted-foreground">
-              For <code>{`${snapshot.name}@${snapshot.version}`}</code>
-              {snapshot.channel === 'next' && ' (not on npm yet: release candidate)'}
+            <p key={snapshot.name} className="dx-for">
+              <span aria-hidden="true">!</span>
+              <span>
+                For <code>{`${snapshot.name}@${snapshot.version}`}</code>
+                {snapshot.channel === 'next' && ' · not on npm yet: release candidate'}
+              </span>
             </p>
           ))}
-        </header>
 
-        <nav aria-label="Tasks">
-          <ol>
-            {jobs.map(job => (
-              <li key={job.id}>
-                <a href={`#${job.id}`}>{job.title}</a>
+          <ol className="dx-jobs">
+            {jobs.map((job, index) => (
+              <li key={job.id} id={job.id} className="dx-job" data-testid="doc-job">
+                <div className="dx-head">
+                  <span className="dx-num" aria-hidden="true">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  <div>
+                    <h2>{job.title}</h2>
+                    <p>{job.summary}</p>
+                  </div>
+                </div>
+                <div className="dx-cols">
+                  {job.links.length === 0 ? (
+                    <p className="none">No page answers this yet.</p>
+                  ) : (
+                    <DocsLinks title="Read" links={job.links} />
+                  )}
+                  {job.concepts.length > 0 && <DocsLinks title="Background" links={job.concepts} />}
+                </div>
               </li>
             ))}
           </ol>
-        </nav>
 
-        {jobs.map(job => (
-          <section key={job.id} id={job.id} aria-labelledby={`${job.id}-title`} data-testid="doc-job">
-            <h2 id={`${job.id}-title`}>{job.title}</h2>
-            <p>{job.summary}</p>
-            {job.links.length === 0 ? (
-              <p>No page answers this yet.</p>
-            ) : (
-              <ul>
-                {job.links.map(link => (
-                  <li key={link.href}>
-                    <a href={link.href} data-testid="doc-job-link">
-                      {link.title}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {job.concepts.length > 0 && (
-              <>
-                <h3>Background</h3>
-                <ul>
-                  {job.concepts.map(link => (
-                    <li key={link.href}>
-                      <a href={link.href} data-testid="doc-job-link">
-                        {link.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+          <section aria-labelledby="docs-more-title">
+            <h2 id="docs-more-title" className="dx-moreh">
+              More
+            </h2>
+            <ul className="dx-more">
+              <li>
+                <a href="/docs/guides">Guides</a>
+                <span> — step-by-step recipes that end with a command to check the result.</span>
+              </li>
+              <li>
+                <a href="/docs/glossary">Glossary</a>
+                <span> — the words these docs use.</span>
+              </li>
+              <li>
+                <a href="/packages">Packages</a>
+                <span> — every package with its docs.</span>
+              </li>
+            </ul>
           </section>
-        ))}
 
-        <section aria-labelledby="docs-more-title">
-          <h2 id="docs-more-title">More</h2>
-          <ul>
-            <li>
-              <a href="/docs/guides">Guides</a>: step-by-step recipes that end with a command to check the result.
+          <p className="dd-agents">
+            For agents: <a href="/agents">/agents</a> · <a href="/llms.txt">/llms.txt</a>
+          </p>
+        </div>
+      </main>
+      <aside className="rail" aria-label="On this page">
+        <h2>On this page</h2>
+        <ul>
+          {jobs.map(job => (
+            <li key={job.id}>
+              <a href={`#${job.id}`}>{job.title}</a>
             </li>
-            <li>
-              <a href="/docs/glossary">Glossary</a>: the words these docs use.
-            </li>
-            <li>
-              <a href="/packages">Packages</a>: every package with its docs.
-            </li>
-          </ul>
-        </section>
-      </Shell>
-    </PageContainer>
+          ))}
+        </ul>
+      </aside>
+    </>
   );
 }

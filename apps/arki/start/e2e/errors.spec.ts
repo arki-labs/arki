@@ -16,10 +16,24 @@ test.describe('/errors', () => {
     });
   }
 
-  test('an unknown code is a 404 that offers the search', async ({ page }) => {
+  test('a removed code renders the removed page and points at its replacement', async ({ page }) => {
+    const response = await page.goto('/errors/DOT_CLI_E001');
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('DOT_CLI_E001');
+    const banner = page.getByRole('note');
+    await expect(banner).toContainText('This code was removed in @arki/dot 0.7.0.');
+    await expect(banner.getByRole('link', { name: 'dot.app_not_found' })).toHaveAttribute(
+      'href',
+      '/errors/dot.app_not_found',
+    );
+  });
+
+  test('an unknown code is a 404 that offers the search, pre-filled with the code', async ({ page }) => {
     const response = await page.goto('/errors/not.a.real.code');
     expect(response?.status()).toBe(404);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('No such error code');
     await expect(page.getByRole('search')).toBeVisible();
+    await expect(page.getByRole('searchbox')).toHaveValue('not.a.real.code');
     await expect(page.getByRole('link', { name: 'See all error codes' })).toBeVisible();
   });
 

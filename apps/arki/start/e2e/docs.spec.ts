@@ -34,6 +34,15 @@ test.describe('docs: jobs index, guides and glossary', () => {
     await expect(links.first()).toBeVisible();
     const hrefs = await links.evaluateAll(anchors => anchors.map(anchor => anchor.getAttribute('href') ?? ''));
 
+    // The "ends with" column shows the command a reader runs to check they are done: the last command of the guide.
+    const checks = await page.locator('.gd-row').evaluateAll(rows =>
+      rows.map(row => ({
+        href: row.querySelector('a')?.getAttribute('href') ?? '',
+        check: row.querySelector('[data-testid="guide-check"] code')?.textContent ?? null,
+      })),
+    );
+    expect(checks.some(row => row.check !== null)).toBe(true);
+
     for (const href of hrefs) {
       const response = await page.goto(href);
       expect(response?.status(), href).toBe(200);
@@ -54,6 +63,19 @@ test.describe('docs: jobs index, guides and glossary', () => {
           return (lastSection.compareDocumentPosition(lastCommand) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
         });
       expect(endsWithCommand, href).toBe(true);
+
+      const shown = checks.find(row => row.href === href)?.check ?? null;
+      const lastCommand = await page.evaluate(() => {
+        const blocks = document.querySelectorAll(
+          'pre[data-language="sh"], pre[data-language="bash"], pre[data-language="shell"]',
+        );
+        const lines = ([...blocks].at(-1)?.textContent ?? '')
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line !== '' && !line.startsWith('#'));
+        return lines.at(-1) ?? null;
+      });
+      expect(shown, href).toBe(lastCommand);
     }
   });
 

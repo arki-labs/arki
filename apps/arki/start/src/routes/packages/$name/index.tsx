@@ -17,5 +17,5 @@ export const Route = createFileRoute('/packages/$name/')({
 });
 
 function LatestPackagePage() {
-  return <PackageDetailPage detail={Route.useLoaderData()} />;
+  return <PackageDetailPage detail={Route.useLoaderData()} inVersion={false} />;
 }
