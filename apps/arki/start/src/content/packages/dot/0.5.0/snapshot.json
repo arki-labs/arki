@@ -1,0 +1,14 @@
+{
+  "name": "@arki/dot",
+  "channel": "published",
+  "version": "0.5.0",
+  "archive": true,
+  "sha512": "523577de6bc2ca50df22b0bc44e50db8bac15bffc33a5418db2b0a423ec123c81a92373306776b60e1eb45bfc8ad005ce60bd968207ced27c7c06c1d29e0c1cc",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

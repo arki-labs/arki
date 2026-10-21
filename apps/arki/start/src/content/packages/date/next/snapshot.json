@@ -1,0 +1,42 @@
+{
+  "name": "@arki/date",
+  "channel": "next",
+  "version": "0.3.0",
+  "archive": false,
+  "sha512": "4126bfc89c5aa6e28b1f3858284068f0f8e38ee6903d48c27a551b416d789aaecd0a43325ce8e4005e3e3a685764a7fcf3e4d5ab1b10f769eed907fb7ad5cb00",
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 15,
+    "modules": 12,
+    "compiled": 12,
+    "ran": 5,
+    "skipped": 2,
+    "skippedBlocks": [
+      {
+        "file": "README.md",
+        "line": 403,
+        "reason": "needs @orpc/server and an app router, which this package does not depend on"
+      },
+      {
+        "file": "README.md",
+        "line": 417,
+        "reason": "needs @tanstack/react-start, which this package does not depend on"
+      }
+    ],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

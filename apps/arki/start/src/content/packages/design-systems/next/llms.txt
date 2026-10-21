@@ -1,0 +1,72 @@
+# @arki/design-systems
+
+> Semantic colour tokens, Tailwind v4 bridges and bundled fonts for the shared ARKI design systems (atelier, workbench, arena, tribunal, gallery). Tokens and fonts only, no components.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/design-systems/atelier/tokens.css`
+- `@arki/design-systems/atelier/theme-bridge.css`
+- `@arki/design-systems/atelier/fonts.css`
+- `@arki/design-systems/atelier/fonts`: Atelier design system — font CSS variable references. `mono`, `sans`, `serif`.
+- `@arki/design-systems/atelier`: The Atelier design system: CSS variable names for its fonts (import the `.css` files for the tokens). `mono`, `sans`, `serif`.
+- `@arki/design-systems/workbench/tokens.css`
+- `@arki/design-systems/workbench/theme-bridge.css`
+- `@arki/design-systems/workbench/fonts.css`
+- `@arki/design-systems/workbench/fonts`: Workbench design system — font CSS variable references. `mono`, `sans`, `serif`.
+- `@arki/design-systems/workbench`: The Workbench design system: CSS variable names for its fonts (import the `.css` files for the tokens). `mono`, `sans`, `serif`.
+- `@arki/design-systems/arena/tokens.css`
+- `@arki/design-systems/arena/theme-bridge.css`
+- `@arki/design-systems/arena/fonts.css`
+- `@arki/design-systems/arena/fonts`: Arena design system — font CSS variable references. `mono`, `sans`, `serif`.
+- `@arki/design-systems/arena`: The Arena design system: CSS variable names for its fonts (import the `.css` files for the tokens). `mono`, `sans`, `serif`.
+- `@arki/design-systems/tribunal/tokens.css`
+- `@arki/design-systems/tribunal/theme-bridge.css`
+- `@arki/design-systems/tribunal/fonts.css`
+- `@arki/design-systems/tribunal/fonts`: Tribunal design system — font CSS variable references. `display`, `mono`, `sans`, `serif`.
+- `@arki/design-systems/tribunal`: The Tribunal design system: CSS variable names for its fonts (import the `.css` files for the tokens). `display`, `mono`, `sans`, `serif`.
+- `@arki/design-systems/gallery/tokens.css`
+- `@arki/design-systems/gallery/theme-bridge.css`
+- `@arki/design-systems/gallery/fonts.css`
+- `@arki/design-systems/gallery/fonts`: Gallery design system — font CSS variable references. `mono`, `sans`, `serif`.
+- `@arki/design-systems/gallery`: The Gallery design system: CSS variable names for its fonts (import the `.css` files for the tokens). `mono`, `sans`, `serif`.
+- `@arki/design-systems/transitions/nav.css`
+- `@arki/design-systems/fonts`: Extra font modules (`cabin`, `gentiumPlus`, `raleway`, `sentient`) for app-level font aliases. `cabin`, `gentiumPlus`, `raleway`, `sentient`.
+- `@arki/design-systems/fonts/cabin`: Cabin — humanist sans-serif with a warm, modern feel. `cabin`.
+- `@arki/design-systems/fonts/cabin/cabin.css`
+- `@arki/design-systems/fonts/gentium-plus`: Gentium Plus — elegant serif for academic and multilingual typography. `gentiumPlus`.
+- `@arki/design-systems/fonts/gentium-plus/gentium-plus.css`
+- `@arki/design-systems/fonts/raleway`: Raleway — geometric sans-serif with refined, elegant letterforms. `raleway`.
+- `@arki/design-systems/fonts/raleway/raleway.css`
+- `@arki/design-systems/fonts/sentient`: Sentient — contemporary serif with subtle calligraphic warmth. `sentient`.
+- `@arki/design-systems/fonts/sentient/sentient.css`
+- `@arki/design-systems/typography`: The shape of a design system's heading-font roster, as Zod schemas and inferred types. `parseTypographyRoster`, `typographyRosterSchema`, `typographyVariantSchema`; types `TypographyRoster`, `TypographyVariant`.
+- `@arki/design-systems/palette-labels`: The shape of a design system's names for light, system and dark modes, as a Zod schema. `paletteLabelsSchema`; types `PaletteLabels`.
+- `@arki/design-systems/atelier/typography`: The Atelier heading-font roster a user can pick from. `atelierTypography`.
+- `@arki/design-systems/workbench/typography`: The Workbench heading-font roster a user can pick from. `workbenchTypography`.
+- `@arki/design-systems/arena/typography`: The Arena heading-font roster a user can pick from. `arenaTypography`.
+- `@arki/design-systems/atelier/palette-labels`: The Atelier names for the light, system and dark modes. `atelierPaletteLabels`.
+- `@arki/design-systems/workbench/palette-labels`: The Workbench names for the light, system and dark modes. `workbenchPaletteLabels`.
+- `@arki/design-systems/arena/palette-labels`: The Arena names for the light, system and dark modes. `arenaPaletteLabels`.
+- `@arki/design-systems/tribunal/typography`: The Tribunal heading-font roster a user can pick from. `tribunalTypography`.
+- `@arki/design-systems/tribunal/palette-labels`: The Tribunal names for the light, system and dark modes. `tribunalPaletteLabels`.
+- `@arki/design-systems/registry`: The list of supported design systems, with helpers that parse and look up a system id. `DESIGN_SYSTEMS`, `DESIGN_SYSTEM_IDS`, `designSystemIdSchema`, `designSystemMetadataSchema`, `getDesignSystemById`, `getDesignSystemByIdSafe`, `isDesignSystemId`, `parseDesignSystemId`, `resolveDesignSystemId`; types `DesignSystemId`, `DesignSystemMetadata`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Use a system in an app](docs/agent-guide.md#use-a-system-in-an-app)
+- [Read a font variable name in TypeScript](docs/agent-guide.md#read-a-font-variable-name-in-typescript)
+- [Check an id that came from outside](docs/agent-guide.md#check-an-id-that-came-from-outside)
+- [Add a token](docs/agent-guide.md#add-a-token)
+- [Add an app-specific token](docs/agent-guide.md#add-an-app-specific-token)
+
+## Rules that bite
+- Never mix two systems in one app.
+- `tokens.css` does nothing without `theme-bridge.css`.
+- `parseDesignSystemId` throws; `resolveDesignSystemId` falls back; `getDesignSystemByIdSafe` returns `null`.
+- `gallery` has CSS but no registry id.
+- Dark mode needs the `dark` class on `<html>`.

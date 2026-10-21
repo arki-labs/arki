@@ -1,0 +1,440 @@
+{
+  "package": "@arki/failure",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "assertNever",
+      "kind": "function",
+      "signature": "export declare function assertNever(value: never, message?: string): never;",
+      "jsdocSummary": "Mark a branch that cannot be reached. Put it in the `default` of a switch over a union: when the union gains a member, the call stops compiling."
+    },
+    {
+      "subpath": ".",
+      "name": "AsyncSchema",
+      "kind": "variable",
+      "signature": "export declare const AsyncSchema: import(\"./failure.js\").FailureDefinition<\"schema.async_required\", undefined>;",
+      "jsdocSummary": "A synchronous operation received an asynchronous validator result."
+    },
+    {
+      "subpath": ".",
+      "name": "AsyncSchemaFailure",
+      "kind": "type",
+      "signature": "export type AsyncSchemaFailure = FailureOf<typeof parseAsync<never>>;",
+      "jsdocSummary": "The exact failures an asynchronous schema parse can return."
+    },
+    {
+      "subpath": ".",
+      "name": "attempt",
+      "kind": "function",
+      "signature": "export declare function attempt<Value, Mapped>(run: () => PromiseLike<Value>, onThrow: (cause: unknown) => Mapped): Promise<Value | Mapped>; ; export declare function attempt<Value, Mapped>(run: () => Value, onThrow: (cause: unknown) => Mapped): Value | Mapped;",
+      "jsdocSummary": "Run `run`. If it throws (or its promise rejects), return `onThrow(cause)` instead. A mapper that throws itself passes the error on, so it can map the errors it knows and rethrow the rest."
+    },
+    {
+      "subpath": ".",
+      "name": "AwaitFirst",
+      "kind": "type",
+      "signature": "export type AwaitFirst<Value> = [Value] extends [PromiseLike<unknown>] ? [error: 'await the value first: a promise is never a failure'] : [];",
+      "jsdocSummary": "Refuses a promise: `isFailure(find(id))` is always false, so it must be awaited first."
+    },
+    {
+      "subpath": ".",
+      "name": "collect",
+      "kind": "function",
+      "signature": "export declare function collect<const Values extends readonly unknown[]>(values: Values): { -readonly [Key in keyof Values]: Exclude<Values[Key], Failure>; } | Extract<Values[number], Failure>;",
+      "jsdocSummary": "Every success, or the first failure. Typed per position like `Promise.all`."
+    },
+    {
+      "subpath": ".",
+      "name": "DataOf",
+      "kind": "type",
+      "signature": "export type DataOf<Schema> = Schema extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<Schema> : undefined;",
+      "jsdocSummary": "The data a definition's failures carry: the schema's output type, the live value the failure carries; `undefined` without a schema."
+    },
+    {
+      "subpath": ".",
+      "name": "defineFailure",
+      "kind": "function",
+      "signature": "export declare function defineFailure<const Code extends string, Schema extends StandardSchemaV1 | undefined = undefined, const Message extends string = string>(code: Code, options?: FailureOptions<Schema, Message>): FailureDefinition<Code, Schema>;",
+      "jsdocSummary": "Name one kind of expected failure. The code, the data type and the message are written here once; every failure value, `match` handler, oRPC error map and `revive` takes its types from this definition."
+    },
+    {
+      "subpath": ".",
+      "name": "Failure",
+      "kind": "type",
+      "signature": "export type Failure<Code extends string = string, Data = unknown> = { /** Stable, unique code, such as `post.not_found`. Match on it, never on the message. */ readonly code: Code; /** What went wrong, for people. */ readonly message: string; /** The facts the caller needs to handle it, such as the id that was not found. */ readonly data: Data; /** The HTTP status a boundary answers with: 400–599. */ readonly status: number; /** What the caller can do about it, in one sentence. */ readonly remediation: string | undefined; /** What caused it: a lower-level failure or a caught error. Walk the chain with `findCause`. */ readonly cause?: unknown; readonly [BRAND]: true; };",
+      "jsdocSummary": "A typed failure, returned as a value. Made by calling a {@link FailureDefinition}."
+    },
+    {
+      "subpath": ".",
+      "name": "FAILURE_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const FAILURE_ERROR_CODES: { /** * `defineFailure` got an empty code, or the reserved code `ok`. * * @fix Give the failure a non-empty dotted code such as `post.not_found`, and not `ok`. * @verify bun run test -- src/failure.test.ts */ readonly invalidCode: 'ARKI_FAILURE_E001'; /** * `defineFailure` got a status that is not an integer from 400 to 599. * * @fix Pass an integer status from 400 to 599, or leave `status` out for the default 400. * @verify bun run test -- src/failure.test.ts */ readonly invalidStatus: 'ARKI_FAILURE_E002'; /** * `match` met a failure code it has no handler for. The types stop this, so it happens only when they were bypassed. * * @fix Add a handler for the code to `match`, or fix the cast that hid it from the compiler. * @verify bun run test -- src/handle.test.ts */ readonly unhandledFailure: 'ARKI_FAILURE_E003'; /** * `assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside). * * @fix Handle the new case in the `switch`, or validate the data at the boundary. * @verify bun run test -- src/handle.test.ts */ readonly unreachable: 'ARKI_FAILURE_E004'; /** * Two definitions with the same code were given where codes must be unique. * * @fix Give each definition its own code, or pass the definition only once. * @verify bun run test -- src/orpc.test.ts */ readonly duplicateCode: 'ARKI_FAILURE_E005'; /** * @deprecated Retired: revival now returns InvalidEnvelope with reason invalid_data. * * @fix Check the stored data against the schema. A schema that transforms its input cannot read its own output. * @verify bun run test -- src/revive.test.ts */ readonly invalidData: 'ARKI_FAILURE_E006'; /** * @deprecated Retired: revival now returns AsyncSchema. * * @fix Use a schema that validates synchronously for failure data. * @verify bun run test -- src/revive.test.ts */ readonly asyncSchema: 'ARKI_FAILURE_E007'; };",
+      "jsdocSummary": "Stable error codes of `@arki/failure`."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureDefinition",
+      "kind": "type",
+      "signature": "export type FailureDefinition<Code extends string = string, Schema extends StandardSchemaV1 | undefined = StandardSchemaV1 | undefined> = { /** Make a failure of this kind. */ (...args: MakeArgs<Schema>): Failure<Code, DataOf<Schema>>; readonly code: Code; readonly status: number; readonly remediation: string | undefined; /** The schema of the data, for boundaries that send failures over the wire (oRPC error maps, `revive`). */ readonly dataSchema: Schema; /** True when `value` is a failure with this definition's code. */ is(value: unknown): value is Failure<Code, DataOf<Schema>>; };",
+      "jsdocSummary": "One kind of failure. Call it to make a failure value."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureError",
+      "kind": "class",
+      "signature": "export declare class FailureError extends Error { readonly code: FailureErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: FailureErrorCode, message: string, remediation: string, options?: ErrorOptions); }",
+      "jsdocSummary": "A coded mistake in how `@arki/failure` is used."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureErrorCode",
+      "kind": "type",
+      "signature": "export type FailureErrorCode = (typeof FAILURE_ERROR_CODES)[keyof typeof FAILURE_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link FailureError}."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureIn",
+      "kind": "type",
+      "signature": "export type FailureIn<Value> = unknown extends Value ? Value & Failure : Extract<Value, Failure>;",
+      "jsdocSummary": "The failures in `Value`, or any failure when `Value` is `unknown`."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureOf",
+      "kind": "type",
+      "signature": "export type FailureOf<Fn extends (...args: never[]) => unknown> = Extract<Awaited<ReturnType<Fn>>, Failure>;",
+      "jsdocSummary": "The failures a function can return, for sync and async functions: `FailureOf<typeof findPost>`."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureOptions",
+      "kind": "type",
+      "signature": "export type FailureOptions<Schema extends StandardSchemaV1 | undefined, Message extends string = string> = { /** Schema of the data the failure carries: any Standard Schema (Zod 4, Valibot, ArkType). */ readonly data?: Schema; /** * What the failure says. A template such as `'no post {id}'` fills each * `{key}` from the data, and a placeholder that is not a key of the data is * a type error. A function builds the message from the data. Defaults to the code. */ readonly message?: CheckedMessage<Message, DataOf<Schema>> | ((data: DataOf<Schema>) => string); /** HTTP status at a boundary, 400–599. Defaults to 400: an expected failure is the caller's to handle, not a server bug. */ readonly status?: number; /** What the caller can do about it, in one sentence. */ readonly remediation?: string; };",
+      "jsdocSummary": "What `defineFailure` takes besides the code."
+    },
+    {
+      "subpath": ".",
+      "name": "findCause",
+      "kind": "function",
+      "signature": "export declare function findCause<Code extends string, Schema extends StandardSchemaV1 | undefined>(value: unknown, definition: FailureDefinition<Code, Schema>): Failure<Code, DataOf<Schema>> | undefined; ; export declare function findCause<Instance>(value: unknown, kind: abstract new (...args: never[]) => Instance): Instance | undefined;",
+      "jsdocSummary": "The first link in the cause chain, starting with `value` itself, that is a failure of `definition` or an instance of the error class `kind`."
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidEnvelope",
+      "kind": "variable",
+      "signature": "export declare const InvalidEnvelope: import(\"./failure.js\").FailureDefinition<\"failure.invalid_envelope\", StandardSchemaV1<unknown, EnvelopeData>>;",
+      "jsdocSummary": "An external envelope cannot be trusted as a known failure."
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidInput",
+      "kind": "variable",
+      "signature": "export declare const InvalidInput: import(\"./failure.js\").FailureDefinition<\"schema.invalid_input\", StandardSchemaV1<unknown, InputData>>;",
+      "jsdocSummary": "Input failed the schema's checks. Only intentional public issue fields are retained."
+    },
+    {
+      "subpath": ".",
+      "name": "isAsyncSchemaFailure",
+      "kind": "function",
+      "signature": "export declare function isAsyncSchemaFailure(value: unknown): value is AsyncSchemaFailure;",
+      "jsdocSummary": "True only for the canonical failures returned by asynchronous schema parsing."
+    },
+    {
+      "subpath": ".",
+      "name": "isFailure",
+      "kind": "function",
+      "signature": "export declare function isFailure<Value>(value: Value, ...awaitFirst: AwaitFirst<Value>): value is FailureIn<Value>;",
+      "jsdocSummary": "True when `value` is a failure made by any {@link FailureDefinition}. Narrows `T | Failure` both ways. Passing a promise is a type error: await it first."
+    },
+    {
+      "subpath": ".",
+      "name": "isSchemaFailure",
+      "kind": "function",
+      "signature": "export declare function isSchemaFailure(value: unknown): value is SchemaFailure;",
+      "jsdocSummary": "True only for the canonical failures returned by synchronous schema parsing."
+    },
+    {
+      "subpath": ".",
+      "name": "MakeOptions",
+      "kind": "type",
+      "signature": "export type MakeOptions = { /** What caused this failure: a lower-level failure or a caught error. */ readonly cause?: unknown; };",
+      "jsdocSummary": "What making one failure may take besides its data."
+    },
+    {
+      "subpath": ".",
+      "name": "match",
+      "kind": "function",
+      "signature": "export declare function match<Value, Handlers extends MatchHandlers<Value>>(value: Value, handlers: Handlers & NoStaleHandlers<Handlers, keyof MatchHandlers<Value>>): HandlerResult<Handlers>;",
+      "jsdocSummary": "Handle the success value and every failure the value can carry. A missing handler is a type error, and so is a handler for a code that can no longer happen, so adding or removing a failure updates every `match` at compile time. A value that can only be a failure takes no `ok` handler."
+    },
+    {
+      "subpath": ".",
+      "name": "MatchHandlers",
+      "kind": "type",
+      "signature": "export type MatchHandlers<Value> = ([Exclude<Value, Failure>] extends [never] ? unknown : { readonly ok: (value: Exclude<Value, Failure>) => unknown; }) & { readonly [Code in FailureCodes<Value>]: (failure: FailureWithCode<Value, Code>) => unknown; };",
+      "jsdocSummary": "One handler per failure code the value can carry, plus `ok` for the success value when the value can be a success. All are required. A value that can only be a failure (such as one from `reviveRpcError`) takes no `ok`."
+    },
+    {
+      "subpath": ".",
+      "name": "orThrow",
+      "kind": "function",
+      "signature": "export declare function orThrow<Value>(value: PromiseLike<Value>): Promise<Exclude<Value, Failure>>; ; export declare function orThrow<Value>(value: Value): Exclude<Value, Failure>;",
+      "jsdocSummary": "The value, or throw the failure as an {@link UnexpectedFailure}. For places where a failure is a bug: a seed script, a test, an id you just created. Takes a promise too, so `orThrow(find(id))` cannot forget the `await`."
+    },
+    {
+      "subpath": ".",
+      "name": "partition",
+      "kind": "function",
+      "signature": "export declare function partition<Value>(values: Iterable<Value>): [Exclude<Value, Failure>[], Extract<Value, Failure>[]];",
+      "jsdocSummary": "Split values into successes and failures, each in input order."
+    },
+    {
+      "subpath": ".",
+      "name": "recover",
+      "kind": "function",
+      "signature": "export declare function recover<Value, Handlers extends RecoverHandlers<Value>>(value: Value, handlers: Handlers & NoStaleHandlers<Handlers, FailureCodes<Value>>): Exclude<Value, Failure<Extract<keyof Handlers, string>, unknown>> | HandlerResult<Handlers>;",
+      "jsdocSummary": "Handle some failures and pass the rest through. The result type drops the handled codes and adds what their handlers return, so the compiler tracks exactly which failures are still possible."
+    },
+    {
+      "subpath": ".",
+      "name": "RecoverHandlers",
+      "kind": "type",
+      "signature": "export type RecoverHandlers<Value> = { readonly [Code in FailureCodes<Value>]?: (failure: FailureWithCode<Value, Code>) => unknown; };",
+      "jsdocSummary": "Handlers for some of the failure codes a value can carry."
+    },
+    {
+      "subpath": ".",
+      "name": "Result",
+      "kind": "type",
+      "signature": "export type Result<Value, Failures extends Failure = never> = Value | Failures;",
+      "jsdocSummary": "A value that may be a failure: the success value, or one of the failures it can return."
+    },
+    {
+      "subpath": ".",
+      "name": "REVIVAL_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const REVIVAL_FAILURES: readonly [import(\"./failure.js\").FailureDefinition<\"failure.invalid_envelope\", StandardSchemaV1<unknown, { reason: (typeof import(\"./foundations.js\").INVALID_ENVELOPE_REASONS)[number]; }>>, import(\"./failure.js\").FailureDefinition<\"schema.async_required\", undefined>, import(\"./failure.js\").FailureDefinition<\"schema.validator_defect\", undefined>, import(\"./failure.js\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Boundary failures, reusable by transports that expose revival to their caller."
+    },
+    {
+      "subpath": ".",
+      "name": "RevivalFailure",
+      "kind": "type",
+      "signature": "export type RevivalFailure = ReturnType<(typeof REVIVAL_FAILURES)[number]>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "revive",
+      "kind": "function",
+      "signature": "export declare function revive<const Definitions extends readonly Revivable[]>(value: unknown, definitions: Definitions): ReturnType<Definitions[number]> | RevivalFailure | undefined; ; export declare function revive<const Definitions extends readonly Revivable[], Invalid>(value: unknown, definitions: Definitions, options: { readonly onInvalid: (failure: RevivalFailure) => Invalid; }): ReturnType<Definitions[number]> | Invalid | undefined;",
+      "jsdocSummary": "Rebuild a known failure using local metadata. Unknown codes and malformed envelopes return InvalidEnvelope; unrelated values return undefined. Accepts legacy `{code, data}` and version 1 envelopes. JSON data must validate without changing: non-JSON data and transforms need a separate wire definition."
+    },
+    {
+      "subpath": ".",
+      "name": "reviveJson",
+      "kind": "function",
+      "signature": "export declare function reviveJson<const Definitions extends readonly Revivable[]>(text: string, definitions: Definitions): ReturnType<Definitions[number]> | RevivalFailure | undefined;",
+      "jsdocSummary": "Parse JSON and revive it under the same allowlist and protocol rules."
+    },
+    {
+      "subpath": ".",
+      "name": "SCHEMA_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const SCHEMA_FAILURES: readonly [import(\"./failure.js\").FailureDefinition<\"schema.invalid_input\", StandardSchemaV1<unknown, { issues: readonly StandardSchemaV1.Issue[]; }>>, import(\"./failure.js\").FailureDefinition<\"schema.async_required\", undefined>, import(\"./failure.js\").FailureDefinition<\"schema.validator_defect\", undefined>];",
+      "jsdocSummary": "Validation definitions for boundaries that expose schema parsing to their callers."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaFailure",
+      "kind": "type",
+      "signature": "export type SchemaFailure = FailureOf<typeof parse<never>>;",
+      "jsdocSummary": "The exact failures a synchronous schema parse can return."
+    },
+    {
+      "subpath": ".",
+      "name": "serialize",
+      "kind": "function",
+      "signature": "export declare function serialize<const Definitions extends readonly Revivable[]>(failure: NoInfer<ReturnType<Definitions[number]>>, definitions: Definitions): ReturnType<typeof serializeNow>;",
+      "jsdocSummary": "Produce a version 1 JSON-safe envelope, omitting private causes and remote presentation metadata. A definition omitted from the allowlist is a type error."
+    },
+    {
+      "subpath": ".",
+      "name": "stoppable",
+      "kind": "function",
+      "signature": "export declare function stoppable<Value extends object, Failures extends Failure = never>(value: Value, stoppedBy?: Failures): Stoppable<Value, Failures>;",
+      "jsdocSummary": "Builds a {@link Stoppable}, so a partial-success function's return type is inferred and needs no annotation: return `stoppable(value)` when the work finished, and `stoppable(value, failure)` when a failure stopped it. Returns a shallow copy of `value`; the `stoppedBy` key is present only when a failure is given, so a finished result has no such key."
+    },
+    {
+      "subpath": ".",
+      "name": "Stoppable",
+      "kind": "type",
+      "signature": "export type Stoppable<Value, Failures extends Failure> = Value & { readonly stoppedBy?: Failures; };",
+      "jsdocSummary": "A partial success: the value, plus the failure that stopped the work early when one did. Callers read `result.stoppedBy` directly, with no `'stoppedBy' in result` check."
+    },
+    {
+      "subpath": ".",
+      "name": "SuccessOf",
+      "kind": "type",
+      "signature": "export type SuccessOf<Fn extends (...args: never[]) => unknown> = Exclude<Awaited<ReturnType<Fn>>, Failure>;",
+      "jsdocSummary": "The success value a function returns, without its failures: `SuccessOf<typeof findPost>`."
+    },
+    {
+      "subpath": ".",
+      "name": "UnexpectedDefect",
+      "kind": "variable",
+      "signature": "export declare const UnexpectedDefect: import(\"./failure.js\").FailureDefinition<\"failure.unexpected_defect\", undefined>;",
+      "jsdocSummary": "A caught operation defect, distinct from the UnexpectedFailure exception bridge."
+    },
+    {
+      "subpath": ".",
+      "name": "UnexpectedFailure",
+      "kind": "class",
+      "signature": "export declare class UnexpectedFailure<F extends Failure = Failure> extends Error { readonly failure: F; readonly code: F['code']; readonly status: number; readonly remediation: string | undefined; constructor(failure: F); }",
+      "jsdocSummary": "A failure thrown because the code decided it cannot happen: what {@link orThrow} throws."
+    },
+    {
+      "subpath": ".",
+      "name": "ValidatorDefect",
+      "kind": "variable",
+      "signature": "export declare const ValidatorDefect: import(\"./failure.js\").FailureDefinition<\"schema.validator_defect\", undefined>;",
+      "jsdocSummary": "A validator threw, rejected, or violated the Standard Schema result contract."
+    },
+    {
+      "subpath": "./eslint",
+      "name": "default",
+      "kind": "variable",
+      "signature": "declare const plugin: TSESLint.FlatConfig.Plugin & { configs: { recommended: TSESLint.FlatConfig.Config; }; };",
+      "jsdocSummary": "The plugin, with a flat `recommended` config that registers it as `failure` and turns `failure/must-use` and `failure/no-blind-accept` on for TypeScript files only: the rules need type information, which plain `.js` files (such as `eslint.config.js`) do not have."
+    },
+    {
+      "subpath": "./eslint",
+      "name": "mustUse",
+      "kind": "variable",
+      "signature": "export declare const mustUse: TSESLint.RuleModule<\"callbackReturn\" | \"mustUse\", [], unknown, TSESLint.RuleListener> & { name: string; };",
+      "jsdocSummary": "Report a statement that discards a call which may return a failure."
+    },
+    {
+      "subpath": "./eslint",
+      "name": "noBlindAccept",
+      "kind": "variable",
+      "signature": "export declare const noBlindAccept: TSESLint.RuleModule<\"noBlindAccept\", [{ names: string[]; }], unknown, TSESLint.RuleListener> & { name: string; };",
+      "jsdocSummary": "Report `accept(x)` when `x` is not checked by kind."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "DeclaredErrors",
+      "kind": "type",
+      "signature": "export type DeclaredErrors<Value> = { readonly [Code in Extract<Value, Failure>['code']]: ErrorConstructor<Extract<Value, Failure<Code>>['data']>; };",
+      "jsdocSummary": "The handler's `errors` must hold a constructor for every failure code the value can carry. A code the contract does not list is a missing property."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "errorMap",
+      "kind": "function",
+      "signature": "export declare function errorMap<const Definitions extends readonly DefinitionShape[]>(...definitions: Definitions): ErrorMapOf<Definitions>;",
+      "jsdocSummary": "The oRPC error map for these definitions, for a contract's `.errors(...)`. Two definitions with the same code throw `ARKI_FAILURE_E005`."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "ErrorMapOf",
+      "kind": "type",
+      "signature": "export type ErrorMapOf<Definitions extends readonly DefinitionShape[]> = { readonly [Definition in Definitions[number] as Definition['code']]: Definition['dataSchema'] extends StandardSchemaV1 ? { readonly status: number; readonly [RPC_FAILURE_DEFINITION]: Definition; readonly data: StandardSchemaV1<StandardSchemaV1.InferOutput<Definition['dataSchema']>, StandardSchemaV1.InferOutput<Definition['dataSchema']>>; } : { readonly status: number; readonly [RPC_FAILURE_DEFINITION]: Definition; }; };",
+      "jsdocSummary": "The oRPC error map for a list of definitions: one entry per code, with its status and data schema."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "orThrowRpc",
+      "kind": "function",
+      "signature": "export declare function orThrowRpc<Value>(value: PromiseLike<Value>, errors: NoInfer<DeclaredErrors<Value>>): Promise<Exclude<Value, Failure>>; ; export declare function orThrowRpc<Value>(value: Value, errors: NoInfer<DeclaredErrors<Awaited<Value>>>): Exclude<Value, Failure>; ; export declare function orThrowRpc<Value, Success>(value: PromiseLike<Value>, errors: NoInfer<DeclaredErrors<Value>>, success: Success): Promise<Success>; ; export declare function orThrowRpc<Value, Success>(value: Value, errors: NoInfer<DeclaredErrors<Awaited<Value>>>, success: Success): Success;",
+      "jsdocSummary": "The value, or throw its failure through the handler's `errors`, the typed `ORPCError` the contract declares (same code, status, message and data). Pass the handler's `errors`: a failure the contract does not list is a compile error. Takes a promise too, so a handler can return `orThrowRpc(usecase(input), errors)` directly."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "reviveRpcError",
+      "kind": "function",
+      "signature": "export declare function reviveRpcError<const Definitions extends readonly RevivableDefinition[]>(error: unknown, definitions: Definitions): ReturnType<Definitions[number]> | import(\"./revive.js\").RevivalFailure | undefined;",
+      "jsdocSummary": "The live failure a caught `ORPCError` stands for, when its code is one of `definitions`; `undefined` for any other error. Data is checked with the definition's schema like `revive`, returning a typed protocol failure when it is malformed. Use it on the client to `match` on failures the contract declares."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "RPC_FAILURE_DEFINITION",
+      "kind": "variable",
+      "signature": "export declare const RPC_FAILURE_DEFINITION: unique symbol;",
+      "jsdocSummary": "Canonical definition retained across contract adapters; symbols never enter JSON error envelopes."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "rpcFailureDefinitions",
+      "kind": "function",
+      "signature": "export declare function rpcFailureDefinitions<const Map extends Readonly<Record<string, RpcFailureSource>>>(map: Map): RetainedDefinition<Map[keyof Map]>[];",
+      "jsdocSummary": "Read the original definitions from a native contract without rebuilding failure types or schemas."
+    },
+    {
+      "subpath": "./schema",
+      "name": "AsyncSchemaFailure",
+      "kind": "type",
+      "signature": "export type AsyncSchemaFailure = FailureOf<typeof parseAsync<never>>;",
+      "jsdocSummary": "The exact failures an asynchronous schema parse can return."
+    },
+    {
+      "subpath": "./schema",
+      "name": "isAsyncSchemaFailure",
+      "kind": "function",
+      "signature": "export declare function isAsyncSchemaFailure(value: unknown): value is AsyncSchemaFailure;",
+      "jsdocSummary": "True only for the canonical failures returned by asynchronous schema parsing."
+    },
+    {
+      "subpath": "./schema",
+      "name": "isSchemaFailure",
+      "kind": "function",
+      "signature": "export declare function isSchemaFailure(value: unknown): value is SchemaFailure;",
+      "jsdocSummary": "True only for the canonical failures returned by synchronous schema parsing."
+    },
+    {
+      "subpath": "./schema",
+      "name": "parse",
+      "kind": "function",
+      "signature": "export declare function parse<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown): Output | import(\"./failure.js\").Failure<\"schema.async_required\", undefined> | import(\"./failure.js\").Failure<\"schema.invalid_input\", { issues: readonly StandardSchemaV1.Issue[]; }> | import(\"./failure.js\").Failure<\"schema.validator_defect\", undefined>;",
+      "jsdocSummary": "The schema's output, or an invalid-input, async-schema or validator-defect failure."
+    },
+    {
+      "subpath": "./schema",
+      "name": "parseAsync",
+      "kind": "function",
+      "signature": "export declare function parseAsync<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown): Promise<Output | import(\"./failure.js\").Failure<\"schema.invalid_input\", { issues: readonly StandardSchemaV1.Issue[]; }> | import(\"./failure.js\").Failure<\"schema.validator_defect\", undefined>>;",
+      "jsdocSummary": "The schema's output, or an invalid-input or validator-defect failure."
+    },
+    {
+      "subpath": "./schema",
+      "name": "SCHEMA_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const SCHEMA_FAILURES: readonly [import(\"./failure.js\").FailureDefinition<\"schema.invalid_input\", StandardSchemaV1<unknown, { issues: readonly StandardSchemaV1.Issue[]; }>>, import(\"./failure.js\").FailureDefinition<\"schema.async_required\", undefined>, import(\"./failure.js\").FailureDefinition<\"schema.validator_defect\", undefined>];",
+      "jsdocSummary": "Validation definitions for boundaries that expose schema parsing to their callers."
+    },
+    {
+      "subpath": "./schema",
+      "name": "SchemaFailure",
+      "kind": "type",
+      "signature": "export type SchemaFailure = FailureOf<typeof parse<never>>;",
+      "jsdocSummary": "The exact failures a synchronous schema parse can return."
+    }
+  ],
+  "errorCodes": [
+    "ARKI_FAILURE_E001",
+    "ARKI_FAILURE_E002",
+    "ARKI_FAILURE_E003",
+    "ARKI_FAILURE_E004",
+    "ARKI_FAILURE_E005",
+    "ARKI_FAILURE_E006",
+    "ARKI_FAILURE_E007",
+    "failure.invalid_envelope",
+    "failure.unexpected_defect",
+    "schema.async_required",
+    "schema.invalid_input",
+    "schema.validator_defect"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@arki/failure",
+  "channel": "next",
+  "version": "0.1.0",
+  "archive": false,
+  "sha512": "bc9dcca5ab2b2e3b1e73f2d45911111d38de97a9dc6d25907a5f3b69fbacb856732309bfe089c154cce56b07b0cc04428348e22a301059f65f94355c537c0253",
+  "files": [
+    "CHANGELOG.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "docs/examples/fixture.ts",
+    "docs/upgrade-typed-validation.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 23,
+    "modules": 14,
+    "compiled": 14,
+    "ran": 10,
+    "skipped": 1,
+    "skippedBlocks": [
+      {
+        "file": "README.md",
+        "line": 346,
+        "reason": "needs an app's eslint config and typescript-eslint"
+      }
+    ],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

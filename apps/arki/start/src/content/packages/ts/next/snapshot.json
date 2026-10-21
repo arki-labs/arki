@@ -1,0 +1,31 @@
+{
+  "name": "@arki/ts",
+  "channel": "next",
+  "version": "0.0.4",
+  "archive": false,
+  "sha512": "8e8cedeb5123e46038e0a7cc0aeaf3747dbede6efddce7554dc9e420aa397a9b1f1ade5953e4ac100e02bf9783da56ea09e4228f4f621acd06defc1ccc25b78b",
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 4,
+    "modules": 4,
+    "compiled": 4,
+    "ran": 1,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

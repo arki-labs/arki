@@ -1,0 +1,14 @@
+{
+  "name": "@arki/design-systems",
+  "channel": "published",
+  "version": "0.0.0-stage",
+  "archive": true,
+  "sha512": "9c8739bfbaa07f760e2dc4d6b5c6f08b771f05c5a4d0c1e77171bd916422d5fbfbaf6e6fabf98afa2ae1f216f20e6c7ead593cd7bbaae3dda3c023d57faa0baf",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

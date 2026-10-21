@@ -1,0 +1,1700 @@
+[
+  {
+    "name": "@arki/assert",
+    "short": "assert",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.0.3",
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "foundation",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:17:38.846Z"
+    },
+    "versions": [
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 3,
+      "run": 3,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/assert",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs",
+      "types"
+    ]
+  },
+  {
+    "name": "@arki/async",
+    "short": "async",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": null,
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 10,
+      "run": 7,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/async",
+    "openGaps": [
+      "file-changelog",
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/auth",
+    "short": "auth",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/auth",
+    "openGaps": [
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-keywords",
+      "pkg-homepage",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/bench",
+    "short": "bench",
+    "tier": 2,
+    "wave": "specialized",
+    "status": "archive",
+    "npmVersion": "0.0.2",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {
+      "node": ">=22.10"
+    },
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/bench",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/cas",
+    "short": "cas",
+    "tier": 2,
+    "wave": "specialized",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/cas",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/cli",
+    "short": "cli",
+    "tier": 1,
+    "wave": "dot-kernel",
+    "status": "next",
+    "npmVersion": null,
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 7,
+      "run": 2,
+      "skipped": 1
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": null
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/cli",
+    "openGaps": []
+  },
+  {
+    "name": "@arki/clock",
+    "short": "clock",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.0.2",
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 5,
+      "run": 5,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/clock",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/contracts",
+    "short": "contracts",
+    "tier": 1,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.1.0",
+    "nextVersion": "0.2.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 14,
+      "run": 11,
+      "skipped": 2
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.0.4"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/contracts",
+    "openGaps": [
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/date",
+    "short": "date",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.2.0",
+    "nextVersion": "0.3.0",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.2.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.3.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 12,
+      "run": 5,
+      "skipped": 2
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/date",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/db",
+    "short": "db",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "archive",
+    "npmVersion": "0.3.1",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.3.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.9",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.8",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.7",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.6",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.1.9"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/db",
+    "openGaps": [
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/design-systems",
+    "short": "design-systems",
+    "tier": 1,
+    "wave": "frontend",
+    "status": "next",
+    "npmVersion": "0.1.2",
+    "nextVersion": "0.1.3",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.3",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 3,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/design-systems",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs",
+      "types"
+    ]
+  },
+  {
+    "name": "@arki/dot",
+    "short": "dot",
+    "tier": 1,
+    "wave": "dot-kernel",
+    "status": "next",
+    "npmVersion": "0.6.1",
+    "nextVersion": "0.7.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.6.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.5.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.4.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.4.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.3.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.7.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 61,
+      "run": 22,
+      "skipped": 8
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.4.1"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/dot",
+    "openGaps": [
+      "file-agents-md",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/env",
+    "short": "env",
+    "tier": 1,
+    "wave": "dot-kernel",
+    "status": "next",
+    "npmVersion": "0.0.11",
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.0.11",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.9",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.8",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.7",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.6",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 6,
+      "run": 4,
+      "skipped": 3
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.0.8"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/env",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/expr",
+    "short": "expr",
+    "tier": 2,
+    "wave": "specialized",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/expr",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/failure",
+    "short": "failure",
+    "tier": 1,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": null,
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 14,
+      "run": 10,
+      "skipped": 1
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/failure",
+    "openGaps": [
+      "file-changelog",
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/http",
+    "short": "http",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "archive",
+    "npmVersion": "0.2.1",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.2.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/http",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/icons",
+    "short": "icons",
+    "tier": 2,
+    "wave": "frontend",
+    "status": "next",
+    "npmVersion": "0.1.1",
+    "nextVersion": "0.1.2",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.2",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 6,
+      "run": 0,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/icons",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/journal",
+    "short": "journal",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "published",
+    "npmVersion": "0.2.1",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.2.1",
+        "channel": "published",
+        "archive": false
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": false
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": false
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/journal",
+    "openGaps": [
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/kv",
+    "short": "kv",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "archive",
+    "npmVersion": "0.2.1",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.2.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.8",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.7",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.6",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/kv",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/live",
+    "short": "live",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/live",
+    "openGaps": []
+  },
+  {
+    "name": "@arki/lock",
+    "short": "lock",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/lock",
+    "openGaps": [
+      "file-changelog",
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/log",
+    "short": "log",
+    "tier": 1,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.1.0",
+    "nextVersion": "0.2.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 6,
+      "run": 0,
+      "skipped": 3
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.0.3"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/log",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/mail",
+    "short": "mail",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/mail",
+    "openGaps": [
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-keywords",
+      "pkg-homepage",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/math",
+    "short": "math",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.0.10",
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "foundation",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:17:38.846Z"
+    },
+    "versions": [
+      {
+        "version": "0.0.10",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.8",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 29,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/math",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/money",
+    "short": "money",
+    "tier": 2,
+    "wave": "specialized",
+    "status": "archive",
+    "npmVersion": "0.0.4",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.0.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/money",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/payments",
+    "short": "payments",
+    "tier": 1,
+    "wave": "specialized",
+    "status": "archive",
+    "npmVersion": "0.3.2",
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [
+      {
+        "version": "0.3.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.3.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/payments",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/react-hooks",
+    "short": "react-hooks",
+    "tier": 2,
+    "wave": "frontend",
+    "status": "next",
+    "npmVersion": "0.1.1",
+    "nextVersion": "0.1.2",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.2",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 5,
+      "run": 0,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/react-hooks",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs",
+      "types"
+    ]
+  },
+  {
+    "name": "@arki/resilience",
+    "short": "resilience",
+    "tier": 2,
+    "wave": "dot-kernel",
+    "status": "next",
+    "npmVersion": "0.1.0",
+    "nextVersion": "0.2.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 16,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/resilience",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/schema",
+    "short": "schema",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": null,
+    "nextVersion": "0.1.0",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 3,
+      "run": 3,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/schema",
+    "openGaps": [
+      "file-changelog",
+      "file-agents-md",
+      "readme-h2-order",
+      "pkg-engines"
+    ]
+  },
+  {
+    "name": "@arki/string",
+    "short": "string",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.2.0",
+    "nextVersion": "0.3.0",
+    "candidate": {
+      "wave": "foundation",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:17:38.846Z"
+    },
+    "versions": [
+      {
+        "version": "0.2.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.0",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.3.0",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 14,
+      "run": 4,
+      "skipped": 0
+    },
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/string",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/theme",
+    "short": "theme",
+    "tier": 1,
+    "wave": "frontend",
+    "status": "next",
+    "npmVersion": "0.2.1",
+    "nextVersion": "0.2.2",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.2.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.2.2",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 4,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.2.1"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/theme",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/ts",
+    "short": "ts",
+    "tier": 2,
+    "wave": "foundation",
+    "status": "next",
+    "npmVersion": "0.0.3",
+    "nextVersion": "0.0.4",
+    "candidate": {
+      "wave": "dot-kernel",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:18:35.314Z"
+    },
+    "versions": [
+      {
+        "version": "0.0.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.2",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.1",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.4",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 4,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.0.3"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/ts",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  },
+  {
+    "name": "@arki/ui",
+    "short": "ui",
+    "tier": 1,
+    "wave": "frontend",
+    "status": "next",
+    "npmVersion": "0.1.5",
+    "nextVersion": "0.1.6",
+    "candidate": {
+      "wave": "frontend",
+      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+      "createdAt": "2026-10-21T06:20:08.169Z"
+    },
+    "versions": [
+      {
+        "version": "0.1.5",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.4",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.3",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.0.0-stage",
+        "channel": "published",
+        "archive": true
+      },
+      {
+        "version": "0.1.6",
+        "channel": "next",
+        "archive": false
+      }
+    ],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": true,
+    "examples": {
+      "compiled": 5,
+      "run": 1,
+      "skipped": 0
+    },
+    "demos": [
+      {
+        "name": "drop-studio",
+        "pin": "0.1.4"
+      }
+    ],
+    "mirror": "https://github.com/arki-labs/ui",
+    "openGaps": [
+      "file-llms-txt",
+      "file-agents-md",
+      "file-agent-guide",
+      "readme-h2-order",
+      "pkg-engines",
+      "files-ship-dist-docs"
+    ]
+  }
+]

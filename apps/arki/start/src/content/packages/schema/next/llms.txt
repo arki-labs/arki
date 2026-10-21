@@ -1,0 +1,27 @@
+# @arki/schema
+
+> Standard Schema helpers for every validator: the spec types, `parse`/`parseAsync` with typed returned failures, issue paths, and a JSON Schema bridge. It is not a validator; bring Zod, Valibot, ArkType or your own.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/schema`: Standard Schema for every validator: the spec types, `parse` and `parseAsync`, issue helpers, and a JSON Schema bridge. `SCHEMA_ERROR_CODES`, `SchemaRunError`, `formatIssues`, `hasJsonSchema`, `isStandardSchema`, `parse`, `parseAsync`, `pathOf`, `withJsonSchema`; types `SchemaInput`, `SchemaOutput`, `SchemaRunErrorCode`; and 3 more.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Parse a value](docs/agent-guide.md#parse-a-value)
+- [Parse with an async schema](docs/agent-guide.md#parse-with-an-async-schema)
+- [Report bad data](docs/agent-guide.md#report-bad-data)
+- [Accept any schema at runtime](docs/agent-guide.md#accept-any-schema-at-runtime)
+- [Give a schema a JSON Schema](docs/agent-guide.md#give-a-schema-a-json-schema)
+
+## Rules that bite
+- Sync `parse` returns `AsyncSchema` on an async schema. Use `parseAsync`.
+- `InvalidInput` means bad data. `ValidatorDefect` means a schema defect; never map it to HTTP 400. Canonical definitions live in `@arki/failure`.
+- `withJsonSchema` answers only the `draft-2020-12` target.
+- Import the spec types from `@arki/schema`, never from `@standard-schema/spec`. A lint rule enforces it.

@@ -1,0 +1,114 @@
+{
+  "package": "@arki/schema",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "formatIssues",
+      "kind": "function",
+      "signature": "export declare function formatIssues(issues: readonly StandardSchemaV1.Issue[]): string;",
+      "jsdocSummary": "One line for people: `\"a.0.b: message; message\"`. A root issue has no path prefix."
+    },
+    {
+      "subpath": ".",
+      "name": "hasJsonSchema",
+      "kind": "function",
+      "signature": "export declare function hasJsonSchema<Input, Output>(schema: StandardSchemaV1<Input, Output>): schema is SchemaWithJson<Input, Output>;",
+      "jsdocSummary": "True when the schema can also describe itself as JSON Schema (`~standard.jsonSchema`)."
+    },
+    {
+      "subpath": ".",
+      "name": "isStandardSchema",
+      "kind": "function",
+      "signature": "export declare function isStandardSchema(value: unknown): value is StandardSchemaV1;",
+      "jsdocSummary": "True when `value` is a Standard Schema v1: it has `~standard` with `version` 1, a string `vendor` and a `validate` function. Functions count, because ArkType types are callable."
+    },
+    {
+      "subpath": ".",
+      "name": "parse",
+      "kind": "function",
+      "signature": "export declare function parse<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown): Output | import(\"./failure.js\").Failure<\"schema.async_required\", undefined> | import(\"./failure.js\").Failure<\"schema.invalid_input\", { issues: readonly StandardSchemaV1.Issue[]; }> | import(\"./failure.js\").Failure<\"schema.validator_defect\", undefined>;",
+      "jsdocSummary": "The schema's output, or an invalid-input, async-schema or validator-defect failure."
+    },
+    {
+      "subpath": ".",
+      "name": "parseAsync",
+      "kind": "function",
+      "signature": "export declare function parseAsync<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown): Promise<Output | import(\"./failure.js\").Failure<\"schema.invalid_input\", { issues: readonly StandardSchemaV1.Issue[]; }> | import(\"./failure.js\").Failure<\"schema.validator_defect\", undefined>>;",
+      "jsdocSummary": "The schema's output, or an invalid-input or validator-defect failure."
+    },
+    {
+      "subpath": ".",
+      "name": "pathOf",
+      "kind": "function",
+      "signature": "export declare function pathOf(issue: StandardSchemaV1.Issue): readonly PropertyKey[];",
+      "jsdocSummary": "The path of an issue as plain keys: `{ key }` segments (Valibot writes these) are unwrapped. Empty when the issue is about the whole value."
+    },
+    {
+      "subpath": ".",
+      "name": "SCHEMA_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const SCHEMA_ERROR_CODES: { /** * A `withJsonSchema` converter was asked for a target other than draft-2020-12. * * @fix Ask for the `draft-2020-12` target. * @verify bun run test -- src/vendors.test.ts */ readonly unsupportedTarget: 'ARKI_SCHEMA_E003'; };",
+      "jsdocSummary": "Stable error codes of `@arki/schema`."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaInput",
+      "kind": "type",
+      "signature": "export type SchemaInput<Schema extends StandardSchemaV1> = StandardSchemaV1.InferInput<Schema>;",
+      "jsdocSummary": "The type a schema accepts."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaOutput",
+      "kind": "type",
+      "signature": "export type SchemaOutput<Schema extends StandardSchemaV1> = StandardSchemaV1.InferOutput<Schema>;",
+      "jsdocSummary": "The type a schema returns after validation."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaRunError",
+      "kind": "class",
+      "signature": "export declare class SchemaRunError extends Error { readonly code: SchemaRunErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: SchemaRunErrorCode, message: string, remediation: string, options?: ErrorOptions); }",
+      "jsdocSummary": "A JSON Schema converter was asked for an unsupported target."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaRunErrorCode",
+      "kind": "type",
+      "signature": "export type SchemaRunErrorCode = (typeof SCHEMA_ERROR_CODES)[keyof typeof SCHEMA_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link SchemaRunError}."
+    },
+    {
+      "subpath": ".",
+      "name": "SchemaWithJson",
+      "kind": "type",
+      "signature": "export type SchemaWithJson<Input = unknown, Output = Input> = StandardSchemaV1<Input, Output> & StandardJSONSchemaV1<Input, Output>;",
+      "jsdocSummary": "A Standard Schema that can also describe itself as JSON Schema."
+    },
+    {
+      "subpath": ".",
+      "name": "StandardJSONSchemaV1",
+      "kind": "interface",
+      "signature": "interface StandardJSONSchemaV1<Input = unknown, Output = Input> { /** The Standard JSON Schema properties. */ readonly \"~standard\": StandardJSONSchemaV1.Props<Input, Output>; } ; declare namespace StandardJSONSchemaV1 { /** The Standard JSON Schema properties interface. */ interface Props<Input = unknown, Output = Input> extends StandardTypedV1.Props<Input, Output> { /** Methods for generating the input/output JSON Schema. */ readonly jsonSchema: StandardJSONSchemaV1.Converter; } /** The Standard JSON Schema converter interface. */ interface Converter { /** Converts the input type to JSON Schema. May throw if conversion is not supported. */ readonly input: (options: StandardJSONSchemaV1.Options) => Record<string, unknown>; /** Converts the output type to JSON Schema. May throw if conversion is not supported. */ readonly output: (options: StandardJSONSchemaV1.Options) => Record<string, unknown>; } /** * The target version of the generated JSON Schema. * * It is *strongly recommended* that implementers support `\"draft-2020-12\"` and `\"draft-07\"`, as they are both in wide use. All other targets can be implemented on a best-effort basis. Libraries should throw if they don't support a specified target. * * The `\"openapi-3.0\"` target is intended as a standardized specifier for OpenAPI 3.0 which is a superset of JSON Schema `\"draft-04\"`. */ type Target = \"draft-2020-12\" | \"draft-07\" | \"openapi-3.0\" | ({} & string); /** The options for the input/output methods. */ interface Options { /** Specifies the target version of the generated JSON Schema. Support for all versions is on a best-effort basis. If a given version is not supported, the library should throw. */ readonly target: Target; /** Explicit support for additional vendor-specific parameters, if needed. */ readonly libraryOptions?: Record<string, unknown> | undefined; } /** The Standard types interface. */ interface Types<Input = unknown, Output = Input> extends StandardTypedV1.Types<Input, Output> { } /** Infers the input type of a Standard. */ type InferInput<Schema extends StandardTypedV1> = StandardTypedV1.InferInput<Schema>; /** Infers the output type of a Standard. */ type InferOutput<Schema extends StandardTypedV1> = StandardTypedV1.InferOutput<Schema>; }",
+      "jsdocSummary": "The Standard JSON Schema interface."
+    },
+    {
+      "subpath": ".",
+      "name": "StandardSchemaV1",
+      "kind": "interface",
+      "signature": "interface StandardSchemaV1<Input = unknown, Output = Input> { /** The Standard Schema properties. */ readonly \"~standard\": StandardSchemaV1.Props<Input, Output>; } ; declare namespace StandardSchemaV1 { /** The Standard Schema properties interface. */ interface Props<Input = unknown, Output = Input> extends StandardTypedV1.Props<Input, Output> { /** Validates unknown input values. */ readonly validate: (value: unknown, options?: StandardSchemaV1.Options | undefined) => Result<Output> | Promise<Result<Output>>; } /** The result interface of the validate function. */ type Result<Output> = SuccessResult<Output> | FailureResult; /** The result interface if validation succeeds. */ interface SuccessResult<Output> { /** The typed output value. */ readonly value: Output; /** A falsy value for `issues` indicates success. */ readonly issues?: undefined; } interface Options { /** Explicit support for additional vendor-specific parameters, if needed. */ readonly libraryOptions?: Record<string, unknown> | undefined; } /** The result interface if validation fails. */ interface FailureResult { /** The issues of failed validation. */ readonly issues: ReadonlyArray<Issue>; } /** The issue interface of the failure output. */ interface Issue { /** The error message of the issue. */ readonly message: string; /** The path of the issue, if any. */ readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined; } /** The path segment interface of the issue. */ interface PathSegment { /** The key representing a path segment. */ readonly key: PropertyKey; } /** The Standard types interface. */ interface Types<Input = unknown, Output = Input> extends StandardTypedV1.Types<Input, Output> { } /** Infers the input type of a Standard. */ type InferInput<Schema extends StandardTypedV1> = StandardTypedV1.InferInput<Schema>; /** Infers the output type of a Standard. */ type InferOutput<Schema extends StandardTypedV1> = StandardTypedV1.InferOutput<Schema>; }",
+      "jsdocSummary": "The Standard Schema interface."
+    },
+    {
+      "subpath": ".",
+      "name": "withJsonSchema",
+      "kind": "function",
+      "signature": "export declare function withJsonSchema<Input, Output>(schema: StandardSchemaV1<Input, Output>, input: Record<string, unknown>, output?: Record<string, unknown>): SchemaWithJson<Input, Output>;",
+      "jsdocSummary": "A new schema that validates like `schema` and describes itself with the given JSON Schema (`output` defaults to `input`). Use it for a validator that cannot produce JSON Schema on its own. It answers only the `draft-2020-12` target; any other throws `ARKI_SCHEMA_E003`."
+    }
+  ],
+  "errorCodes": [
+    "ARKI_SCHEMA_E003"
+  ]
+}

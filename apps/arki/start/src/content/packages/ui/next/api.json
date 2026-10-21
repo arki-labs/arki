@@ -1,0 +1,2408 @@
+{
+  "package": "@arki/ui",
+  "version": "0.1.6",
+  "entries": [
+    {
+      "subpath": "./accordion",
+      "name": "Accordion",
+      "kind": "function",
+      "signature": "declare function Accordion({ type, collapsible: _collapsible, value, defaultValue, onValueChange, ...props }: AccordionCompatProps): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./accordion",
+      "name": "AccordionContent",
+      "kind": "function",
+      "signature": "declare function AccordionContent({ className, children, ...props }: AccordionPrimitive.Panel.Props): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./accordion",
+      "name": "AccordionItem",
+      "kind": "function",
+      "signature": "declare function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./accordion",
+      "name": "AccordionTrigger",
+      "kind": "function",
+      "signature": "declare function AccordionTrigger({ className, children, ...props }: AccordionPrimitive.Trigger.Props): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert",
+      "name": "Alert",
+      "kind": "function",
+      "signature": "declare function Alert({ className, variant, ...props }: React.ComponentProps<'div'> & VariantProps<typeof alertVariants>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert",
+      "name": "AlertDescription",
+      "kind": "function",
+      "signature": "declare function AlertDescription({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert",
+      "name": "AlertTitle",
+      "kind": "function",
+      "signature": "declare function AlertTitle({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialog",
+      "kind": "function",
+      "signature": "declare function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogAction",
+      "kind": "function",
+      "signature": "declare function AlertDialogAction({ className, ...props }: React.ComponentProps<'button'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogCancel",
+      "kind": "function",
+      "signature": "declare function AlertDialogCancel({ className, ...props }: AlertDialogPrimitive.Close.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogContent",
+      "kind": "function",
+      "signature": "declare function AlertDialogContent({ className, ...props }: AlertDialogPrimitive.Popup.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogDescription",
+      "kind": "function",
+      "signature": "declare function AlertDialogDescription({ className, ...props }: AlertDialogPrimitive.Description.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogFooter",
+      "kind": "function",
+      "signature": "declare function AlertDialogFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogHeader",
+      "kind": "function",
+      "signature": "declare function AlertDialogHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogOverlay",
+      "kind": "function",
+      "signature": "declare function AlertDialogOverlay({ className, ...props }: AlertDialogPrimitive.Backdrop.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogPortal",
+      "kind": "function",
+      "signature": "declare function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogTitle",
+      "kind": "function",
+      "signature": "declare function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./alert-dialog",
+      "name": "AlertDialogTrigger",
+      "kind": "function",
+      "signature": "declare function AlertDialogTrigger({ asChild, children, ...props }: AlertDialogPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./as-child",
+      "name": "AsChildProp",
+      "kind": "type",
+      "signature": "export type AsChildProp = { /** * When true and `children` is a single ReactElement, renders the trigger as * that element (Base UI `render` prop) rather than wrapping in a default * button. Mimics Radix's `asChild` API. */ asChild?: boolean; };",
+      "jsdocSummary": "Backwards-compat shim for the Radix-style `asChild` pattern."
+    },
+    {
+      "subpath": "./as-child",
+      "name": "withAsChild",
+      "kind": "function",
+      "signature": "export declare function withAsChild({ asChild, children, }: { asChild?: boolean; children?: React.ReactNode; }): CompatProps;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./aspect-ratio",
+      "name": "AspectRatio",
+      "kind": "function",
+      "signature": "declare function AspectRatio({ ratio, style, ...props }: AspectRatioProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./avatar",
+      "name": "Avatar",
+      "kind": "function",
+      "signature": "declare function Avatar({ className, ...props }: AvatarPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./avatar",
+      "name": "AvatarFallback",
+      "kind": "function",
+      "signature": "declare function AvatarFallback({ className, ...props }: AvatarPrimitive.Fallback.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./avatar",
+      "name": "AvatarImage",
+      "kind": "function",
+      "signature": "declare function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./badge",
+      "name": "Badge",
+      "kind": "function",
+      "signature": "declare function Badge({ className, variant, asChild, ...props }: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./badge",
+      "name": "badgeVariants",
+      "kind": "variable",
+      "signature": "declare const badgeVariants: (props?: ({ variant?: \"default\" | \"destructive\" | \"outline\" | \"secondary\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "Breadcrumb",
+      "kind": "function",
+      "signature": "declare function Breadcrumb({ ...props }: React.ComponentProps<'nav'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbEllipsis",
+      "kind": "function",
+      "signature": "declare function BreadcrumbEllipsis({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbItem",
+      "kind": "function",
+      "signature": "declare function BreadcrumbItem({ className, ...props }: React.ComponentProps<'li'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbLink",
+      "kind": "function",
+      "signature": "declare function BreadcrumbLink({ asChild, className, children, ...props }: React.ComponentProps<'a'> & { asChild?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbList",
+      "kind": "function",
+      "signature": "declare function BreadcrumbList({ className, ...props }: React.ComponentProps<'ol'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbPage",
+      "kind": "function",
+      "signature": "declare function BreadcrumbPage({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./breadcrumb",
+      "name": "BreadcrumbSeparator",
+      "kind": "function",
+      "signature": "declare function BreadcrumbSeparator({ children, className, ...props }: React.ComponentProps<'li'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./button",
+      "name": "Button",
+      "kind": "function",
+      "signature": "declare function Button({ className, variant, size, asChild, ...props }: ButtonProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./button",
+      "name": "ButtonProps",
+      "kind": "type",
+      "signature": "type ButtonProps = React.ComponentProps<'button'> & VariantProps<typeof buttonVariants> & { asChild?: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./button",
+      "name": "buttonVariants",
+      "kind": "variable",
+      "signature": "declare const buttonVariants: (props?: ({ variant?: \"default\" | \"destructive\" | \"ghost\" | \"link\" | \"outline\" | \"primary\" | \"secondary\" | \"tertiary\" | \"text\" | null | undefined; size?: \"default\" | \"icon\" | \"icon2xl\" | \"iconLg\" | \"iconMd\" | \"iconSm\" | \"iconXl\" | \"lg\" | \"md\" | \"sm\" | \"xs\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./calendar",
+      "name": "Calendar",
+      "kind": "function",
+      "signature": "declare function Calendar({ className, classNames, showOutsideDays, fullWidth, size, ...props }: CalendarProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./callout",
+      "name": "Callout",
+      "kind": "function",
+      "signature": "export declare function Callout({ variant, children, className, ...props }: CalloutProps): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./callout",
+      "name": "CalloutProps",
+      "kind": "type",
+      "signature": "export type CalloutProps = {} & React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof calloutVariants>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "Card",
+      "kind": "function",
+      "signature": "declare function Card({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "CardContent",
+      "kind": "function",
+      "signature": "declare function CardContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "CardDescription",
+      "kind": "function",
+      "signature": "declare function CardDescription({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "CardFooter",
+      "kind": "function",
+      "signature": "declare function CardFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "CardHeader",
+      "kind": "function",
+      "signature": "declare function CardHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./card",
+      "name": "CardTitle",
+      "kind": "function",
+      "signature": "declare function CardTitle({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "Carousel",
+      "kind": "function",
+      "signature": "declare function Carousel({ orientation, opts, setApi, plugins, className, children, ...props }: React.ComponentProps<'div'> & CarouselProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "CarouselApi",
+      "kind": "type",
+      "signature": "type CarouselApi = UseEmblaCarouselType[1];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "CarouselContent",
+      "kind": "function",
+      "signature": "declare function CarouselContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "CarouselItem",
+      "kind": "function",
+      "signature": "declare function CarouselItem({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "CarouselNext",
+      "kind": "function",
+      "signature": "declare function CarouselNext({ className, variant, size, ...props }: React.ComponentProps<typeof Button>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./carousel",
+      "name": "CarouselPrevious",
+      "kind": "function",
+      "signature": "declare function CarouselPrevious({ className, variant, size, ...props }: React.ComponentProps<typeof Button>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartConfig",
+      "kind": "type",
+      "signature": "export type ChartConfig = Record<string, { label?: React.ReactNode; icon?: React.ComponentType; } & ({ color?: string; theme?: never; } | { color?: never; theme: Record<keyof typeof THEMES, string>; })>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartContainer",
+      "kind": "function",
+      "signature": "declare function ChartContainer({ id, className, children, config, ref, ...props }: React.ComponentProps<'div'> & { config: ChartConfig; children: React.ComponentProps<typeof RechartsPrimitive.ResponsiveContainer>['children']; ref?: React.Ref<HTMLDivElement>; }): React.JSX.Element; ; declare namespace ChartContainer { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartLegend",
+      "kind": "variable",
+      "signature": "declare const ChartLegend: React.MemoExoticComponent<(outsideProps: RechartsPrimitive.LegendProps) => React.ReactPortal | null>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartLegendContent",
+      "kind": "function",
+      "signature": "declare function ChartLegendContent({ className, hideIcon, payload, verticalAlign, nameKey, ref, }: React.ComponentProps<'div'> & { payload?: { value?: string; dataKey?: string; color?: string; }[]; verticalAlign?: 'top' | 'bottom'; hideIcon?: boolean; nameKey?: string; ref?: React.Ref<HTMLDivElement>; }): React.JSX.Element | null; ; declare namespace ChartLegendContent { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartStyle",
+      "kind": "variable",
+      "signature": "declare const ChartStyle: ({ id, config }: { id: string; config: ChartConfig; }) => React.JSX.Element | null;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartTooltip",
+      "kind": "variable",
+      "signature": "declare const ChartTooltip: typeof RechartsPrimitive.Tooltip;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./chart",
+      "name": "ChartTooltipContent",
+      "kind": "function",
+      "signature": "declare function ChartTooltipContent({ active, payload, className, indicator, hideLabel, hideIndicator, label, labelFormatter, labelClassName, formatter, color, nameKey, labelKey, ref, }: React.ComponentProps<'div'> & { active?: boolean; payload?: { name?: string; dataKey?: string; value?: number | string; color?: string; payload?: Record<string, unknown>; }[]; label?: string | number; labelFormatter?: (value: unknown, payload: unknown[]) => React.ReactNode; formatter?: (value: unknown, name: unknown, item: unknown, index: number, payload: unknown) => React.ReactNode; color?: string; hideLabel?: boolean; hideIndicator?: boolean; indicator?: 'line' | 'dot' | 'dashed'; nameKey?: string; labelKey?: string; labelClassName?: string; ref?: React.Ref<HTMLDivElement>; }): React.JSX.Element | null; ; declare namespace ChartTooltipContent { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./checkbox",
+      "name": "Checkbox",
+      "kind": "function",
+      "signature": "declare function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./cn",
+      "name": "cn",
+      "kind": "function",
+      "signature": "export declare function cn(...inputs: ClassValue[]): string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./collapsible",
+      "name": "Collapsible",
+      "kind": "function",
+      "signature": "declare function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./collapsible",
+      "name": "CollapsibleContent",
+      "kind": "function",
+      "signature": "declare function CollapsibleContent({ ...props }: CollapsiblePrimitive.Panel.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./collapsible",
+      "name": "CollapsibleTrigger",
+      "kind": "function",
+      "signature": "declare function CollapsibleTrigger({ asChild, children, ...props }: CollapsiblePrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./color-picker",
+      "name": "ColorPicker",
+      "kind": "function",
+      "signature": "declare function ColorPicker({ disabled, value, onChange, onBlur, name, className, ref, presetColors, ...props }: Omit<ButtonProps, 'value' | 'onChange' | 'onBlur'> & ColorPickerProps & { ref?: React.Ref<HTMLInputElement>; }): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "Command",
+      "kind": "function",
+      "signature": "declare function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandDialog",
+      "kind": "function",
+      "signature": "declare function CommandDialog({ title, description, children, ...props }: Omit<React.ComponentProps<typeof Dialog>, 'children'> & { title?: string; description?: string; children?: React.ReactNode; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandEmpty",
+      "kind": "function",
+      "signature": "declare function CommandEmpty({ ...props }: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandGroup",
+      "kind": "function",
+      "signature": "declare function CommandGroup({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Group>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandInput",
+      "kind": "function",
+      "signature": "declare function CommandInput({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Input>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandItem",
+      "kind": "function",
+      "signature": "declare function CommandItem({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Item>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandList",
+      "kind": "function",
+      "signature": "declare function CommandList({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.List>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandSeparator",
+      "kind": "function",
+      "signature": "declare function CommandSeparator({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Separator>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./command",
+      "name": "CommandShortcut",
+      "kind": "function",
+      "signature": "declare function CommandShortcut({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./complex-input",
+      "name": "ComplexInput",
+      "kind": "function",
+      "signature": "export declare function ComplexInput({ real, imag, onRealChange, onImagChange, disabled, className, allowInfinity, allowFractions, }: ComplexInputProps): import(\"react\").JSX.Element;",
+      "jsdocSummary": "Two MathInput sub-components rendered as `a + bi`, representing the real and imaginary parts of a complex number. Each part independently supports constants, fractions, and (optionally) infinity."
+    },
+    {
+      "subpath": "./complex-input",
+      "name": "ComplexInputProps",
+      "kind": "type",
+      "signature": "export type ComplexInputProps = { real: number | null; imag: number | null; onRealChange: (v: number | null) => void; onImagChange: (v: number | null) => void; disabled?: boolean; className?: string; /** Show ±∞ in the pickers. Defaults to false — infinite complex parts are rarely meaningful. */ allowInfinity?: boolean; /** Show fraction picker. Default: true */ allowFractions?: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenu",
+      "kind": "function",
+      "signature": "declare function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuCheckboxItem",
+      "kind": "function",
+      "signature": "declare function ContextMenuCheckboxItem({ className, children, checked, ...props }: ContextMenuPrimitive.CheckboxItem.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuContent",
+      "kind": "function",
+      "signature": "declare function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Popup.Props & Pick<ContextMenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuGroup",
+      "kind": "function",
+      "signature": "declare function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuItem",
+      "kind": "function",
+      "signature": "declare function ContextMenuItem({ className, inset, variant, ...props }: ContextMenuPrimitive.Item.Props & { inset?: boolean; variant?: 'default' | 'destructive'; render?: React.ReactElement; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuLabel",
+      "kind": "function",
+      "signature": "declare function ContextMenuLabel({ className, inset, ...props }: ContextMenuPrimitive.GroupLabel.Props & { inset?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuPortal",
+      "kind": "function",
+      "signature": "declare function ContextMenuPortal({ ...props }: ContextMenuPrimitive.Portal.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuRadioGroup",
+      "kind": "function",
+      "signature": "declare function ContextMenuRadioGroup({ ...props }: ContextMenuPrimitive.RadioGroup.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuRadioItem",
+      "kind": "function",
+      "signature": "declare function ContextMenuRadioItem({ className, children, ...props }: ContextMenuPrimitive.RadioItem.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuSeparator",
+      "kind": "function",
+      "signature": "declare function ContextMenuSeparator({ className, ...props }: ContextMenuPrimitive.Separator.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuShortcut",
+      "kind": "function",
+      "signature": "declare function ContextMenuShortcut({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuSub",
+      "kind": "function",
+      "signature": "declare function ContextMenuSub({ ...props }: ContextMenuPrimitive.SubmenuRoot.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuSubContent",
+      "kind": "function",
+      "signature": "declare function ContextMenuSubContent({ className, sideOffset, alignOffset, ...props }: ContextMenuPrimitive.Popup.Props & Pick<ContextMenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuSubTrigger",
+      "kind": "function",
+      "signature": "declare function ContextMenuSubTrigger({ className, inset, children, ...props }: ContextMenuPrimitive.SubmenuTrigger.Props & { inset?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./context-menu",
+      "name": "ContextMenuTrigger",
+      "kind": "function",
+      "signature": "declare function ContextMenuTrigger({ ...props }: ContextMenuPrimitive.Trigger.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./control-group",
+      "name": "ControlGroup",
+      "kind": "variable",
+      "signature": "export declare const ControlGroup: React.ForwardRefExoticComponent<{ orientation?: 'horizontal' | 'vertical'; } & Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./control-group",
+      "name": "ControlGroupItem",
+      "kind": "variable",
+      "signature": "export declare const ControlGroupItem: React.ForwardRefExoticComponent<React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode; } & React.RefAttributes<HTMLElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./control-group",
+      "name": "ControlGroupProps",
+      "kind": "type",
+      "signature": "export type ControlGroupProps = { orientation?: 'horizontal' | 'vertical'; } & React.ComponentPropsWithoutRef<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./date-picker",
+      "name": "DatePicker",
+      "kind": "function",
+      "signature": "export declare function DatePicker({ date, setDate, ...props }: DatePickerProps): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./design-system",
+      "name": "defaultUiDesignSystemId",
+      "kind": "variable",
+      "signature": "export declare const defaultUiDesignSystemId: DesignSystemId;",
+      "jsdocSummary": "Default design system id used by `@arki/ui` when a consumer does not provide one."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "DESIGN_SYSTEM_IDS",
+      "kind": "variable",
+      "signature": "export declare const DESIGN_SYSTEM_IDS: readonly DesignSystemId[];",
+      "jsdocSummary": "Ordered list of available design system identifiers."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "DESIGN_SYSTEMS",
+      "kind": "variable",
+      "signature": "export declare const DESIGN_SYSTEMS: readonly DesignSystemMetadata[];",
+      "jsdocSummary": "Ordered list of available design systems."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "DesignSystemId",
+      "kind": "type",
+      "signature": "export type DesignSystemId = z.infer<typeof designSystemIdSchema>;",
+      "jsdocSummary": "Union type of supported design system identifiers."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "designSystemIdSchema",
+      "kind": "variable",
+      "signature": "export declare const designSystemIdSchema: z.ZodEnum<{ arena: \"arena\"; atelier: \"atelier\"; tribunal: \"tribunal\"; workbench: \"workbench\"; }>;",
+      "jsdocSummary": "Canonical identifier for a supported design system."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "DesignSystemMetadata",
+      "kind": "type",
+      "signature": "export type DesignSystemMetadata = z.infer<typeof designSystemMetadataSchema>;",
+      "jsdocSummary": "Metadata describing a named design system."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "getDesignSystemById",
+      "kind": "function",
+      "signature": "export declare function getDesignSystemById(id: DesignSystemId): DesignSystemMetadata;",
+      "jsdocSummary": "Returns metadata for the requested design system id."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "getDesignSystemByIdSafe",
+      "kind": "function",
+      "signature": "export declare function getDesignSystemByIdSafe(value: unknown): DesignSystemMetadata | null;",
+      "jsdocSummary": "Safely resolves metadata from arbitrary input."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "isDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function isDesignSystemId(value: unknown): value is DesignSystemId;",
+      "jsdocSummary": "Returns true when the provided value is a valid {@link DesignSystemId}."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "parseDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function parseDesignSystemId(value: unknown): DesignSystemId;",
+      "jsdocSummary": "Parses a value into a {@link DesignSystemId}."
+    },
+    {
+      "subpath": "./design-system",
+      "name": "resolveUiDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function resolveUiDesignSystemId(value: unknown): DesignSystemId;",
+      "jsdocSummary": "Resolves arbitrary external input into a supported `@arki/ui` design system id."
+    },
+    {
+      "subpath": "./dialog",
+      "name": "Dialog",
+      "kind": "function",
+      "signature": "declare function Dialog({ ...props }: DialogPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogClose",
+      "kind": "function",
+      "signature": "declare function DialogClose({ asChild, children, ...props }: DialogPrimitive.Close.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogContent",
+      "kind": "function",
+      "signature": "declare function DialogContent({ className, children, ...props }: DialogPrimitive.Popup.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogDescription",
+      "kind": "function",
+      "signature": "declare function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogFooter",
+      "kind": "function",
+      "signature": "declare function DialogFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogHeader",
+      "kind": "function",
+      "signature": "declare function DialogHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogOverlay",
+      "kind": "function",
+      "signature": "declare function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogPortal",
+      "kind": "function",
+      "signature": "declare function DialogPortal({ ...props }: DialogPrimitive.Portal.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogTitle",
+      "kind": "function",
+      "signature": "declare function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dialog",
+      "name": "DialogTrigger",
+      "kind": "function",
+      "signature": "declare function DialogTrigger({ asChild, children, ...props }: DialogPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "Drawer",
+      "kind": "function",
+      "signature": "declare function Drawer({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerClose",
+      "kind": "function",
+      "signature": "declare function DrawerClose({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Close>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerContent",
+      "kind": "function",
+      "signature": "declare function DrawerContent({ className, children, ...props }: React.ComponentProps<typeof DrawerPrimitive.Content>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerDescription",
+      "kind": "function",
+      "signature": "declare function DrawerDescription({ className, ...props }: React.ComponentProps<typeof DrawerPrimitive.Description>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerFooter",
+      "kind": "function",
+      "signature": "declare function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerHeader",
+      "kind": "function",
+      "signature": "declare function DrawerHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerOverlay",
+      "kind": "function",
+      "signature": "declare function DrawerOverlay({ className, ...props }: React.ComponentProps<typeof DrawerPrimitive.Overlay>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerPortal",
+      "kind": "function",
+      "signature": "declare function DrawerPortal({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Portal>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerTitle",
+      "kind": "function",
+      "signature": "declare function DrawerTitle({ className, ...props }: React.ComponentProps<typeof DrawerPrimitive.Title>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drawer",
+      "name": "DrawerTrigger",
+      "kind": "function",
+      "signature": "declare function DrawerTrigger({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Trigger>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenu",
+      "kind": "function",
+      "signature": "declare function DropdownMenu({ ...props }: MenuPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuCheckboxItem",
+      "kind": "function",
+      "signature": "declare function DropdownMenuCheckboxItem({ className, children, checked, ...props }: MenuPrimitive.CheckboxItem.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuContent",
+      "kind": "function",
+      "signature": "declare function DropdownMenuContent({ className, sideOffset, align, side, alignOffset, ...props }: MenuPrimitive.Popup.Props & Pick<MenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuGroup",
+      "kind": "function",
+      "signature": "declare function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuGroupLabel",
+      "kind": "function",
+      "signature": "declare function DropdownMenuGroupLabel({ className, inset, ...props }: MenuPrimitive.GroupLabel.Props & { inset?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": "Heading for a `DropdownMenuGroup` with proper ARIA group-label association. MUST be rendered as a child of `DropdownMenuGroup` — BaseUI's `Menu.GroupLabel` asserts the Group context at render time."
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuItem",
+      "kind": "function",
+      "signature": "declare function DropdownMenuItem({ className, inset, variant, ...props }: MenuPrimitive.Item.Props & { inset?: boolean; variant?: 'default' | 'destructive'; render?: React.ReactElement; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuLabel",
+      "kind": "function",
+      "signature": "declare function DropdownMenuLabel({ className, inset, ...props }: React.ComponentProps<'div'> & { inset?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": "Visual heading inside a dropdown menu. Stands alone — does NOT require a `DropdownMenuGroup` ancestor. Renders a plain styled `<div>` (no ARIA group-label association)."
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuPortal",
+      "kind": "function",
+      "signature": "declare function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuRadioGroup",
+      "kind": "function",
+      "signature": "declare function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuRadioItem",
+      "kind": "function",
+      "signature": "declare function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuSeparator",
+      "kind": "function",
+      "signature": "declare function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuShortcut",
+      "kind": "function",
+      "signature": "declare function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuSub",
+      "kind": "function",
+      "signature": "declare function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuSubContent",
+      "kind": "function",
+      "signature": "declare function DropdownMenuSubContent({ className, ...props }: React.ComponentProps<typeof DropdownMenuContent>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuSubTrigger",
+      "kind": "function",
+      "signature": "declare function DropdownMenuSubTrigger({ className, inset, children, ...props }: MenuPrimitive.SubmenuTrigger.Props & { inset?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./dropdown-menu",
+      "name": "DropdownMenuTrigger",
+      "kind": "function",
+      "signature": "declare function DropdownMenuTrigger({ asChild, children, ...props }: MenuPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "Form",
+      "kind": "variable",
+      "signature": "declare const Form: <TFieldValues extends FieldValues, TContext = any, TTransformedValues = TFieldValues>({ children, watch, getValues, getErrors, getFieldState, setError, clearErrors, setValue, setValues, trigger, formState, resetField, reset, resetDefaultValues, handleSubmit, unregister, control, register, setFocus, subscribe, }: import(\"react-hook-form\").FormProviderProps<TFieldValues, TContext, TTransformedValues>) => React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormControl",
+      "kind": "function",
+      "signature": "declare function FormControl({ children }: FormControlProps): React.ReactElement<unknown, string | React.JSXElementConstructor<any>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormDescription",
+      "kind": "function",
+      "signature": "declare function FormDescription({ className, ...props }: React.ComponentProps<'p'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormField",
+      "kind": "variable",
+      "signature": "declare const FormField: <TFieldValues extends FieldValues = FieldValues, TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>>({ ...props }: ControllerProps<TFieldValues, TName>) => React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormHints",
+      "kind": "function",
+      "signature": "declare function FormHints<T extends string | number | Date>({ className, hints, onHintClick, renderHint, ...props }: Omit<ComponentProps<'div'>, 'children'> & { hints: HintItem<T>[]; onHintClick?: (value: T) => void; renderHint?: (value: T) => React.ReactNode; }): React.JSX.Element;",
+      "jsdocSummary": "Inline ghost-token hints displayed as subtle clickable text separated by `·`. Clicking a hint sets the parent form field to that value."
+    },
+    {
+      "subpath": "./form",
+      "name": "FormItem",
+      "kind": "function",
+      "signature": "declare function FormItem({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormLabel",
+      "kind": "function",
+      "signature": "declare function FormLabel({ className, ...props }: React.ComponentProps<'label'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "FormMessage",
+      "kind": "function",
+      "signature": "declare function FormMessage({ className, ...props }: React.ComponentProps<'p'>): React.JSX.Element | null;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "HintItem",
+      "kind": "type",
+      "signature": "type HintItem<T> = T | { value: T; label: React.ReactNode; };",
+      "jsdocSummary": "A hint item can be a plain value or an object with a custom display label."
+    },
+    {
+      "subpath": "./form",
+      "name": "useForm",
+      "kind": "function",
+      "signature": "export declare function useForm<TFieldValues extends FieldValues = FieldValues, TContext = any, TTransformedValues = TFieldValues>(props?: UseFormProps<TFieldValues, TContext, TTransformedValues>): UseFormReturn<TFieldValues, TContext, TTransformedValues>;",
+      "jsdocSummary": "Core hook for managing a form. Returns all methods and state for registration, validation, and submission."
+    },
+    {
+      "subpath": "./form",
+      "name": "useFormField",
+      "kind": "variable",
+      "signature": "declare const useFormField: () => { invalid: boolean; isDirty: boolean; isTouched: boolean; isValidating: boolean; error?: import(\"react-hook-form\").FieldError | undefined; id: string; name: string; formItemId: string; formDescriptionId: string; formMessageId: string; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./form",
+      "name": "useWatch",
+      "kind": "function",
+      "signature": "export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TTransformedValues = TFieldValues>(props: { name?: undefined; defaultValue?: DeepPartialSkipArrayKey<TFieldValues>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute?: undefined; }): DeepPartialSkipArrayKey<TFieldValues>; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TFieldName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>, TTransformedValues = TFieldValues>(props: { name: TFieldName; defaultValue?: FieldPathValue<TFieldValues, TFieldName>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute?: undefined; }): FieldPathValue<TFieldValues, TFieldName>; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TTransformedValues = TFieldValues, TComputeValue = unknown>(props: { name?: undefined; defaultValue?: DeepPartialSkipArrayKey<TFieldValues>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute: (formValues: TFieldValues) => TComputeValue; }): TComputeValue; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TFieldName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>, TTransformedValues = TFieldValues, TComputeValue = unknown>(props: { name: TFieldName; defaultValue?: FieldPathValue<TFieldValues, TFieldName>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute: (fieldValue: FieldPathValue<TFieldValues, TFieldName>) => TComputeValue; }): TComputeValue; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TFieldNames extends readonly FieldPath<TFieldValues>[] = readonly FieldPath<TFieldValues>[], TTransformedValues = TFieldValues>(props: { name: readonly [...TFieldNames]; defaultValue?: DeepPartialSkipArrayKey<TFieldValues>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute?: undefined; }): FieldPathValues<TFieldValues, TFieldNames>; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues, TFieldNames extends readonly FieldPath<TFieldValues>[] = readonly FieldPath<TFieldValues>[], TTransformedValues = TFieldValues, TComputeValue = unknown>(props: { name: readonly [...TFieldNames]; defaultValue?: DeepPartialSkipArrayKey<TFieldValues>; control?: Control<TFieldValues, any, TTransformedValues>; disabled?: boolean; exact?: boolean; compute: (fieldValue: FieldPathValues<TFieldValues, TFieldNames>) => TComputeValue; }): TComputeValue; ; export declare function useWatch<TFieldValues extends FieldValues = FieldValues>(): DeepPartialSkipArrayKey<TFieldValues>;",
+      "jsdocSummary": "Watches the entire form; re-renders when any value changes. Watches a single field by name. Watches the entire form and derives a value via `compute`. Watches a single field and derives a value via `compute`. Watches multiple fields by name array. Watches multiple fields and derives a value via `compute`. Watches the entire form; reads `control` from `FormProvider` context."
+    },
+    {
+      "subpath": "./form",
+      "name": "zodResolver",
+      "kind": "function",
+      "signature": "export declare function zodResolver<Input extends FieldValues, Context, Output>(schema: Zod3Type<Output, Input>, schemaOptions?: Zod3ParseParams, resolverOptions?: NonRawResolverOptions): Resolver<Input, Context, Output>; ; export declare function zodResolver<Input extends FieldValues, Context, Output>(schema: Zod3Type<Output, Input>, schemaOptions: Zod3ParseParams | undefined, resolverOptions: RawResolverOptions): Resolver<Input, Context, Input>; ; export declare function zodResolver<Input extends FieldValues, Context, Output, T extends Zod4Type<Output, Input> = Zod4Type<Output, Input>>(schema: T, schemaOptions?: Zod4ParseParams, // already partial resolverOptions?: NonRawResolverOptions): Resolver<z4.input<T>, Context, z4.output<T>>; ; export declare function zodResolver<Input extends FieldValues, Context, Output, T extends Zod4Type<Output, Input> = Zod4Type<Output, Input>>(schema: Zod4Type<Output, Input>, schemaOptions: Zod4ParseParams | undefined, // already partial resolverOptions: RawResolverOptions): Resolver<z4.input<T>, Context, z4.input<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "GlassCard",
+      "kind": "function",
+      "signature": "declare function GlassCard({ className, tone, interactive, asChild, ...props }: GlassCardProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "GlassCardIcon",
+      "kind": "function",
+      "signature": "declare function GlassCardIcon({ className, tone, size, surface, asChild, ...props }: GlassCardIconProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "glassCardIconVariants",
+      "kind": "variable",
+      "signature": "declare const glassCardIconVariants: (props?: ({ tone?: \"amber\" | \"blue\" | \"cyan\" | \"default\" | \"emerald\" | \"fuchsia\" | \"gray\" | \"green\" | \"indigo\" | \"lime\" | \"orange\" | \"pink\" | \"purple\" | \"red\" | \"rose\" | \"sky\" | \"slate\" | \"stone\" | \"teal\" | \"violet\" | \"yellow\" | \"zinc\" | null | undefined; surface?: \"plain\" | \"tile\" | null | undefined; size?: \"lg\" | \"md\" | \"sm\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "glassCardVariants",
+      "kind": "variable",
+      "signature": "declare const glassCardVariants: (props?: ({ tone?: \"amber\" | \"blue\" | \"cyan\" | \"default\" | \"emerald\" | \"fuchsia\" | \"gray\" | \"green\" | \"indigo\" | \"lime\" | \"orange\" | \"pink\" | \"purple\" | \"red\" | \"rose\" | \"sky\" | \"slate\" | \"stone\" | \"teal\" | \"violet\" | \"yellow\" | \"zinc\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "GlassTone",
+      "kind": "type",
+      "signature": "export type GlassTone = (typeof glassTones)[number];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./glass-card",
+      "name": "glassTones",
+      "kind": "variable",
+      "signature": "export declare const glassTones: readonly ['default', 'slate', 'gray', 'zinc', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./hover-card",
+      "name": "HoverCard",
+      "kind": "function",
+      "signature": "declare function HoverCard({ openDelay: _openDelay, closeDelay: _closeDelay, ...props }: PreviewCardPrimitive.Root.Props & { openDelay?: number; closeDelay?: number; }): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./hover-card",
+      "name": "HoverCardContent",
+      "kind": "function",
+      "signature": "declare function HoverCardContent({ className, align, alignOffset, side, sideOffset, ...props }: PreviewCardPrimitive.Popup.Props & Pick<PreviewCardPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./hover-card",
+      "name": "HoverCardTrigger",
+      "kind": "function",
+      "signature": "declare function HoverCardTrigger({ asChild, children, ...props }: PreviewCardPrimitive.Trigger.Props & AsChildProp): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input",
+      "name": "Input",
+      "kind": "function",
+      "signature": "declare function Input({ className, type, ...props }: React.ComponentProps<'input'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBase",
+      "kind": "variable",
+      "signature": "export declare const InputBase: React.ForwardRefExoticComponent<{ autoFocus?: boolean; disabled?: boolean; } & Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseAdornment",
+      "kind": "variable",
+      "signature": "export declare const InputBaseAdornment: React.ForwardRefExoticComponent<{ asChild?: boolean; disablePointerEvents?: boolean; } & Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseAdornmentButton",
+      "kind": "variable",
+      "signature": "export declare const InputBaseAdornmentButton: React.ForwardRefExoticComponent<Omit<React.ClassAttributes<HTMLButtonElement> & React.ButtonHTMLAttributes<HTMLButtonElement> & import(\"class-variance-authority\").VariantProps<(props?: ({ variant?: \"default\" | \"destructive\" | \"ghost\" | \"link\" | \"outline\" | \"primary\" | \"secondary\" | \"tertiary\" | \"text\" | null | undefined; size?: \"default\" | \"icon\" | \"icon2xl\" | \"iconLg\" | \"iconMd\" | \"iconSm\" | \"iconXl\" | \"lg\" | \"md\" | \"sm\" | \"xs\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string> & { asChild?: boolean; }, \"ref\"> & React.RefAttributes<HTMLButtonElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseAdornmentProps",
+      "kind": "type",
+      "signature": "export type InputBaseAdornmentProps = { asChild?: boolean; disablePointerEvents?: boolean; } & React.ComponentPropsWithoutRef<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseContextProps",
+      "kind": "type",
+      "signature": "export type InputBaseContextProps = Pick<InputBaseProps, 'autoFocus' | 'disabled'> & { controlRef: React.RefObject<HTMLElement | null>; onFocusedChange: (focused: boolean) => void; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseControl",
+      "kind": "variable",
+      "signature": "export declare const InputBaseControl: React.ForwardRefExoticComponent<React.HTMLAttributes<HTMLElement> & { disabled?: boolean; children?: React.ReactNode; } & React.RefAttributes<HTMLElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseControlProps",
+      "kind": "type",
+      "signature": "export type InputBaseControlProps = React.HTMLAttributes<HTMLElement> & { disabled?: boolean; children?: React.ReactNode; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseFlexWrapper",
+      "kind": "variable",
+      "signature": "export declare const InputBaseFlexWrapper: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseInput",
+      "kind": "variable",
+      "signature": "export declare const InputBaseInput: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>, \"ref\"> & React.RefAttributes<HTMLInputElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-base",
+      "name": "InputBaseProps",
+      "kind": "type",
+      "signature": "export type InputBaseProps = { autoFocus?: boolean; disabled?: boolean; } & React.ComponentPropsWithoutRef<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-otp",
+      "name": "InputOTP",
+      "kind": "function",
+      "signature": "declare function InputOTP({ className, containerClassName, ...props }: React.ComponentProps<typeof OTPInput> & { containerClassName?: string; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-otp",
+      "name": "InputOTPGroup",
+      "kind": "function",
+      "signature": "declare function InputOTPGroup({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-otp",
+      "name": "InputOTPSeparator",
+      "kind": "function",
+      "signature": "declare function InputOTPSeparator({ ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./input-otp",
+      "name": "InputOTPSlot",
+      "kind": "function",
+      "signature": "declare function InputOTPSlot({ index, className, ...props }: React.ComponentProps<'div'> & { index: number; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./katex",
+      "name": "BlockMath",
+      "kind": "variable",
+      "signature": "export declare const BlockMath: ComponentType<MathComponentProps>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./katex",
+      "name": "InlineMath",
+      "kind": "variable",
+      "signature": "export declare const InlineMath: ComponentType<MathComponentProps>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./katex",
+      "name": "MathComponentProps",
+      "kind": "type",
+      "signature": "export type MathComponentProps = { /** LaTeX expression as a string. Either `math` or `children` must be provided. */ math?: string; /** LaTeX expression as React children. Either `math` or `children` must be provided. */ children?: ReactNode; /** Color used by KaTeX when rendering a parse error inline (instead of throwing). */ errorColor?: string; /** Custom render function for parse errors. When provided, KaTeX will throw and this handles the result. */ renderError?: ErrorRenderer; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./label",
+      "name": "Label",
+      "kind": "function",
+      "signature": "declare function Label({ className, ...props }: React.ComponentProps<'label'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./math-input",
+      "name": "MathInput",
+      "kind": "function",
+      "signature": "export declare function MathInput({ value, onChange, placeholder, disabled, className, allowInfinity, allowFractions, min, max, }: MathInputProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./math-input",
+      "name": "MathInputProps",
+      "kind": "type",
+      "signature": "export type MathInputProps = { value: number | null; onChange: (value: number | null) => void; placeholder?: string; disabled?: boolean; className?: string; /** Show +∞ / −∞ picker tab. Default: true */ allowInfinity?: boolean; /** Show fraction picker tab. Default: true */ allowFractions?: boolean; min?: number; max?: number; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./math-input/complex-input",
+      "name": "ComplexInput",
+      "kind": "function",
+      "signature": "export declare function ComplexInput({ real, imag, onRealChange, onImagChange, disabled, className, allowInfinity, allowFractions, }: ComplexInputProps): import(\"react\").JSX.Element;",
+      "jsdocSummary": "Two MathInput sub-components rendered as `a + bi`, representing the real and imaginary parts of a complex number. Each part independently supports constants, fractions, and (optionally) infinity."
+    },
+    {
+      "subpath": "./math-input/complex-input",
+      "name": "ComplexInputProps",
+      "kind": "type",
+      "signature": "export type ComplexInputProps = { real: number | null; imag: number | null; onRealChange: (v: number | null) => void; onImagChange: (v: number | null) => void; disabled?: boolean; className?: string; /** Show ±∞ in the pickers. Defaults to false — infinite complex parts are rarely meaningful. */ allowInfinity?: boolean; /** Show fraction picker. Default: true */ allowFractions?: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./math-input/index",
+      "name": "MathInput",
+      "kind": "function",
+      "signature": "export declare function MathInput({ value, onChange, placeholder, disabled, className, allowInfinity, allowFractions, min, max, }: MathInputProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./math-input/index",
+      "name": "MathInputProps",
+      "kind": "type",
+      "signature": "export type MathInputProps = { value: number | null; onChange: (value: number | null) => void; placeholder?: string; disabled?: boolean; className?: string; /** Show +∞ / −∞ picker tab. Default: true */ allowInfinity?: boolean; /** Show fraction picker tab. Default: true */ allowFractions?: boolean; min?: number; max?: number; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "Menubar",
+      "kind": "function",
+      "signature": "declare function Menubar({ className, ...props }: MenubarPrimitive.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarCheckboxItem",
+      "kind": "function",
+      "signature": "declare function MenubarCheckboxItem({ className, children, checked, ...props }: React.ComponentProps<typeof DropdownMenuCheckboxItem>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarContent",
+      "kind": "function",
+      "signature": "declare function MenubarContent({ className, align, alignOffset, sideOffset, ...props }: React.ComponentProps<typeof DropdownMenuContent>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarGroup",
+      "kind": "function",
+      "signature": "declare function MenubarGroup({ ...props }: React.ComponentProps<typeof DropdownMenuGroup>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarItem",
+      "kind": "function",
+      "signature": "declare function MenubarItem({ className, inset, variant, ...props }: React.ComponentProps<typeof DropdownMenuItem>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarLabel",
+      "kind": "function",
+      "signature": "declare function MenubarLabel({ className, inset, ...props }: React.ComponentProps<typeof DropdownMenuLabel>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarMenu",
+      "kind": "function",
+      "signature": "declare function MenubarMenu({ ...props }: React.ComponentProps<typeof DropdownMenu>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarPortal",
+      "kind": "function",
+      "signature": "declare function MenubarPortal({ ...props }: React.ComponentProps<typeof DropdownMenuPortal>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarRadioGroup",
+      "kind": "function",
+      "signature": "declare function MenubarRadioGroup({ ...props }: React.ComponentProps<typeof DropdownMenuRadioGroup>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarRadioItem",
+      "kind": "function",
+      "signature": "declare function MenubarRadioItem({ className, children, ...props }: React.ComponentProps<typeof DropdownMenuRadioItem>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarSeparator",
+      "kind": "function",
+      "signature": "declare function MenubarSeparator({ className, ...props }: React.ComponentProps<typeof DropdownMenuSeparator>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarShortcut",
+      "kind": "function",
+      "signature": "declare function MenubarShortcut({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarSub",
+      "kind": "function",
+      "signature": "declare function MenubarSub({ ...props }: React.ComponentProps<typeof DropdownMenuSub>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarSubContent",
+      "kind": "function",
+      "signature": "declare function MenubarSubContent({ className, ...props }: React.ComponentProps<typeof DropdownMenuSubContent>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarSubTrigger",
+      "kind": "function",
+      "signature": "declare function MenubarSubTrigger({ className, inset, children, ...props }: React.ComponentProps<typeof DropdownMenuSubTrigger>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./menubar",
+      "name": "MenubarTrigger",
+      "kind": "function",
+      "signature": "declare function MenubarTrigger({ className, ...props }: React.ComponentProps<typeof DropdownMenuTrigger>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenu",
+      "kind": "function",
+      "signature": "declare function NavigationMenu({ className, children, viewport, ...props }: NavigationMenuPrimitive.Root.Props & { viewport?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuContent",
+      "kind": "function",
+      "signature": "declare function NavigationMenuContent({ className, ...props }: NavigationMenuPrimitive.Content.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuIndicator",
+      "kind": "function",
+      "signature": "declare function NavigationMenuIndicator({ className, ...props }: NavigationMenuPrimitive.Icon.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuItem",
+      "kind": "function",
+      "signature": "declare function NavigationMenuItem({ className, ...props }: NavigationMenuPrimitive.Item.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuLink",
+      "kind": "function",
+      "signature": "declare function NavigationMenuLink({ className, ...props }: NavigationMenuPrimitive.Link.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuList",
+      "kind": "function",
+      "signature": "declare function NavigationMenuList({ className, ...props }: NavigationMenuPrimitive.List.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuTrigger",
+      "kind": "function",
+      "signature": "declare function NavigationMenuTrigger({ className, children, ...props }: NavigationMenuPrimitive.Trigger.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "navigationMenuTriggerStyle",
+      "kind": "variable",
+      "signature": "declare const navigationMenuTriggerStyle: (props?: import(\"class-variance-authority/types\").ClassProp | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./navigation-menu",
+      "name": "NavigationMenuViewport",
+      "kind": "function",
+      "signature": "declare function NavigationMenuViewport({ className, ...props }: NavigationMenuPrimitive.Viewport.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "Pagination",
+      "kind": "function",
+      "signature": "declare function Pagination({ className, ...props }: React.ComponentProps<'nav'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationContent",
+      "kind": "function",
+      "signature": "declare function PaginationContent({ className, ...props }: React.ComponentProps<'ul'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationEllipsis",
+      "kind": "function",
+      "signature": "declare function PaginationEllipsis({ className, ...props }: React.ComponentProps<'span'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationItem",
+      "kind": "function",
+      "signature": "declare function PaginationItem({ ...props }: React.ComponentProps<'li'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationLink",
+      "kind": "function",
+      "signature": "declare function PaginationLink({ className, isActive, size, ...props }: PaginationLinkProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationNext",
+      "kind": "function",
+      "signature": "declare function PaginationNext({ className, ...props }: React.ComponentProps<typeof PaginationLink>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "PaginationPrevious",
+      "kind": "function",
+      "signature": "declare function PaginationPrevious({ className, ...props }: React.ComponentProps<typeof PaginationLink>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "Panel",
+      "kind": "function",
+      "signature": "export declare function Panel({ asChild, className, children, spacing, noShadow, ...rest }: PanelProps): import(\"react\").JSX.Element; ; export declare namespace Panel { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelDivider",
+      "kind": "function",
+      "signature": "export declare function PanelDivider({ asChild, className, children, ...rest }: PanelDividerProps): import(\"react\").JSX.Element; ; export declare namespace PanelDivider { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelDividerProps",
+      "kind": "type",
+      "signature": "export type PanelDividerProps = { asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelFooter",
+      "kind": "function",
+      "signature": "export declare function PanelFooter({ asChild, className, children, ...rest }: PanelFooterProps): import(\"react\").JSX.Element; ; export declare namespace PanelFooter { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelFooterProps",
+      "kind": "type",
+      "signature": "export type PanelFooterProps = { asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelHeader",
+      "kind": "function",
+      "signature": "export declare function PanelHeader({ asChild, className, children, ...rest }: PanelHeaderProps): import(\"react\").JSX.Element; ; export declare namespace PanelHeader { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelHeaderProps",
+      "kind": "type",
+      "signature": "export type PanelHeaderProps = { asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelHeadline",
+      "kind": "function",
+      "signature": "export declare function PanelHeadline({ asChild, className, children, ...rest }: PanelHeadlineProps): import(\"react\").JSX.Element; ; export declare namespace PanelHeadline { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelHeadlineProps",
+      "kind": "type",
+      "signature": "export type PanelHeadlineProps = { asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelProps",
+      "kind": "type",
+      "signature": "export type PanelProps = { spacing?: 'medium' | 'small'; noShadow?: boolean; asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelSection",
+      "kind": "function",
+      "signature": "export declare function PanelSection({ asChild, className, children, ...rest }: PanelSectionProps): import(\"react\").JSX.Element; ; export declare namespace PanelSection { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./panel",
+      "name": "PanelSectionProps",
+      "kind": "type",
+      "signature": "export type PanelSectionProps = { asChild?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./popover",
+      "name": "Popover",
+      "kind": "function",
+      "signature": "declare function Popover({ ...props }: PopoverPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./popover",
+      "name": "PopoverClose",
+      "kind": "function",
+      "signature": "declare function PopoverClose({ ...props }: PopoverPrimitive.Close.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./popover",
+      "name": "PopoverContent",
+      "kind": "function",
+      "signature": "declare function PopoverContent({ className, align, alignOffset, side, sideOffset, ...props }: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./popover",
+      "name": "PopoverTrigger",
+      "kind": "function",
+      "signature": "declare function PopoverTrigger({ asChild, children, ...props }: PopoverPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./progress",
+      "name": "Progress",
+      "kind": "function",
+      "signature": "declare function Progress({ className, value, indicatorClassName, ...props }: ProgressProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./radio-group",
+      "name": "RadioGroup",
+      "kind": "function",
+      "signature": "declare function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./radio-group",
+      "name": "RadioGroupItem",
+      "kind": "function",
+      "signature": "declare function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./resizable",
+      "name": "ResizableHandle",
+      "kind": "function",
+      "signature": "declare function ResizableHandle({ withHandle, className, ...props }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & { withHandle?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./resizable",
+      "name": "ResizablePanel",
+      "kind": "function",
+      "signature": "declare function ResizablePanel({ ...props }: React.ComponentProps<typeof ResizablePrimitive.Panel>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./resizable",
+      "name": "ResizablePanelGroup",
+      "kind": "function",
+      "signature": "declare function ResizablePanelGroup({ className, ...props }: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./scroll-area",
+      "name": "ScrollArea",
+      "kind": "function",
+      "signature": "declare function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./scroll-area",
+      "name": "ScrollBar",
+      "kind": "function",
+      "signature": "declare function ScrollBar({ className, orientation, ...props }: ScrollAreaPrimitive.Scrollbar.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./scroll-to-top",
+      "name": "ScrollToTop",
+      "kind": "variable",
+      "signature": "export declare const ScrollToTop: () => import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "Select",
+      "kind": "function",
+      "signature": "declare function Select<Value extends string = string>({ onValueChange, ...props }: SelectProps<Value>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectContent",
+      "kind": "function",
+      "signature": "declare function SelectContent({ className, children, sideOffset, ...props }: React.ComponentProps<typeof SelectPrimitive.Positioner> & { className?: string; children?: React.ReactNode; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectGroup",
+      "kind": "function",
+      "signature": "declare function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectItem",
+      "kind": "function",
+      "signature": "declare function SelectItem({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Item>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectLabel",
+      "kind": "function",
+      "signature": "declare function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.GroupLabel>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectScrollDownButton",
+      "kind": "function",
+      "signature": "declare function SelectScrollDownButton({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.ScrollDownArrow>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectScrollUpButton",
+      "kind": "function",
+      "signature": "declare function SelectScrollUpButton({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.ScrollUpArrow>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectSeparator",
+      "kind": "function",
+      "signature": "declare function SelectSeparator({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Separator>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectTrigger",
+      "kind": "function",
+      "signature": "declare function SelectTrigger({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./select",
+      "name": "SelectValue",
+      "kind": "function",
+      "signature": "declare function SelectValue({ ...props }: React.ComponentProps<typeof SelectPrimitive.Value>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./separator",
+      "name": "Separator",
+      "kind": "function",
+      "signature": "declare function Separator({ className, orientation, ...props }: SeparatorPrimitive.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "Sheet",
+      "kind": "function",
+      "signature": "declare function Sheet({ ...props }: SheetPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetClose",
+      "kind": "function",
+      "signature": "declare function SheetClose({ ...props }: SheetPrimitive.Close.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetContent",
+      "kind": "function",
+      "signature": "declare function SheetContent({ className, children, side, ...props }: SheetPrimitive.Popup.Props & { side?: 'top' | 'right' | 'bottom' | 'left'; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetDescription",
+      "kind": "function",
+      "signature": "declare function SheetDescription({ className, ...props }: SheetPrimitive.Description.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetFooter",
+      "kind": "function",
+      "signature": "declare function SheetFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetHeader",
+      "kind": "function",
+      "signature": "declare function SheetHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetTitle",
+      "kind": "function",
+      "signature": "declare function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sheet",
+      "name": "SheetTrigger",
+      "kind": "function",
+      "signature": "declare function SheetTrigger({ asChild, children, ...props }: SheetPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "Sidebar",
+      "kind": "function",
+      "signature": "declare function Sidebar({ side, variant, collapsible, className, children, ...props }: React.ComponentProps<'div'> & { side?: 'left' | 'right'; variant?: 'sidebar' | 'floating' | 'inset'; collapsible?: 'offcanvas' | 'icon' | 'none'; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarContent",
+      "kind": "function",
+      "signature": "declare function SidebarContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarFooter",
+      "kind": "function",
+      "signature": "declare function SidebarFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarGroup",
+      "kind": "function",
+      "signature": "declare function SidebarGroup({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarGroupAction",
+      "kind": "function",
+      "signature": "declare function SidebarGroupAction({ className, asChild, ...props }: React.ComponentProps<'button'> & { asChild?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarGroupContent",
+      "kind": "function",
+      "signature": "declare function SidebarGroupContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarGroupLabel",
+      "kind": "function",
+      "signature": "declare function SidebarGroupLabel({ className, asChild, ...props }: React.ComponentProps<'div'> & { asChild?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarHeader",
+      "kind": "function",
+      "signature": "declare function SidebarHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarInput",
+      "kind": "function",
+      "signature": "declare function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarInset",
+      "kind": "function",
+      "signature": "declare function SidebarInset({ className, ...props }: React.ComponentProps<'main'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenu",
+      "kind": "function",
+      "signature": "declare function SidebarMenu({ className, ...props }: React.ComponentProps<'ul'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuAction",
+      "kind": "function",
+      "signature": "declare function SidebarMenuAction({ className, asChild, showOnHover, ...props }: React.ComponentProps<'button'> & { asChild?: boolean; showOnHover?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuBadge",
+      "kind": "function",
+      "signature": "declare function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuButton",
+      "kind": "function",
+      "signature": "declare function SidebarMenuButton({ asChild, isActive, variant, size, tooltip, className, ...props }: React.ComponentProps<'button'> & { asChild?: boolean; isActive?: boolean; tooltip?: string | React.ComponentProps<typeof TooltipContent>; } & VariantProps<typeof sidebarMenuButtonVariants>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuItem",
+      "kind": "function",
+      "signature": "declare function SidebarMenuItem({ className, ...props }: React.ComponentProps<'li'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuSkeleton",
+      "kind": "function",
+      "signature": "declare function SidebarMenuSkeleton({ className, showIcon, ...props }: React.ComponentProps<'div'> & { showIcon?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuSub",
+      "kind": "function",
+      "signature": "declare function SidebarMenuSub({ className, ...props }: React.ComponentProps<'ul'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuSubButton",
+      "kind": "function",
+      "signature": "declare function SidebarMenuSubButton({ asChild, size, isActive, className, ...props }: React.ComponentProps<'a'> & { asChild?: boolean; size?: 'sm' | 'md'; isActive?: boolean; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarMenuSubItem",
+      "kind": "function",
+      "signature": "declare function SidebarMenuSubItem({ className, ...props }: React.ComponentProps<'li'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarProvider",
+      "kind": "variable",
+      "signature": "declare const SidebarProvider: React.ForwardRefExoticComponent<Omit<React.ClassAttributes<HTMLDivElement> & React.HTMLAttributes<HTMLDivElement> & { defaultOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void; }, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarRail",
+      "kind": "function",
+      "signature": "declare function SidebarRail({ className, ...props }: React.ComponentProps<'button'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarSeparator",
+      "kind": "function",
+      "signature": "declare function SidebarSeparator({ className, ...props }: React.ComponentProps<typeof Separator>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "SidebarTrigger",
+      "kind": "function",
+      "signature": "declare function SidebarTrigger({ className, onClick, iconClassName, ...props }: React.ComponentProps<typeof Button> & { iconClassName?: string; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sidebar",
+      "name": "useSidebar",
+      "kind": "function",
+      "signature": "declare function useSidebar(): SidebarContext;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./skeleton",
+      "name": "Skeleton",
+      "kind": "function",
+      "signature": "declare function Skeleton({ className, ...props }: React.ComponentProps<'div'>): import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./slider",
+      "name": "Slider",
+      "kind": "function",
+      "signature": "declare function Slider({ className, defaultValue, value, min, max, onValueChange, onValueCommitted, onValueCommit, 'aria-label': ariaLabel, ...props }: SliderProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./slot",
+      "name": "Slot",
+      "kind": "function",
+      "signature": "export declare function Slot({ children, ref: slotRef, className: slotClassName, ...slotProps }: SlotProps): React.JSX.Element;",
+      "jsdocSummary": "Merges the slot's props into its single child element. Replacement for Radix UI's `Slot` / `asChild` pattern."
+    },
+    {
+      "subpath": "./sonner",
+      "name": "toast",
+      "kind": "variable",
+      "signature": "declare const toast: ((message: titleT, data?: ExternalToast) => string | number) & { success: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; info: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; warning: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; error: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; custom: (jsx: (id: number | string) => React.ReactElement, data?: ExternalToast) => string | number; message: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; promise: <ToastData>(promise: PromiseT<ToastData>, data?: PromiseData<ToastData>) => (string & { unwrap: () => Promise<ToastData>; }) | (number & { unwrap: () => Promise<ToastData>; }) | { unwrap: () => Promise<ToastData>; }; dismiss: (id?: number | string) => string | number; loading: (message: titleT | React.ReactNode, data?: ExternalToast) => string | number; } & { getHistory: () => (ToastT | ToastToDismiss)[]; getToasts: () => (ToastT | ToastToDismiss)[]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./sonner",
+      "name": "Toaster",
+      "kind": "variable",
+      "signature": "declare const Toaster: ({ ...props }: ToasterProps) => import(\"react\").JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./spinners",
+      "name": "PulseLoader",
+      "kind": "function",
+      "signature": "declare function PulseLoader({ loading, color, speedMultiplier, cssOverride, size, margin, ...additionalprops }: LoaderSizeMarginProps): React.JSX.Element | null;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./spinners",
+      "name": "Spinner",
+      "kind": "function",
+      "signature": "export declare function Spinner({ className, ...rest }: ComponentProps<'div'>): import(\"react\").JSX.Element; ; export declare namespace Spinner { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./surface",
+      "name": "Surface",
+      "kind": "function",
+      "signature": "export declare function Surface({ children, className, withShadow, withBorder, ...props }: SurfaceProps): import(\"react\").JSX.Element; ; export declare namespace Surface { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./surface",
+      "name": "SurfaceProps",
+      "kind": "type",
+      "signature": "export type SurfaceProps = ComponentProps<'div'> & { withShadow?: boolean; withBorder?: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./switch",
+      "name": "Switch",
+      "kind": "function",
+      "signature": "declare function Switch({ className, ...props }: SwitchPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "Table",
+      "kind": "function",
+      "signature": "declare function Table({ className, ...props }: React.ComponentProps<'table'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableBody",
+      "kind": "function",
+      "signature": "declare function TableBody({ className, ...props }: React.ComponentProps<'tbody'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableCaption",
+      "kind": "function",
+      "signature": "declare function TableCaption({ className, ...props }: React.ComponentProps<'caption'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableCell",
+      "kind": "function",
+      "signature": "declare function TableCell({ className, ...props }: React.ComponentProps<'td'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableFooter",
+      "kind": "function",
+      "signature": "declare function TableFooter({ className, ...props }: React.ComponentProps<'tfoot'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableHead",
+      "kind": "function",
+      "signature": "declare function TableHead({ className, ...props }: React.ComponentProps<'th'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableHeader",
+      "kind": "function",
+      "signature": "declare function TableHeader({ className, ...props }: React.ComponentProps<'thead'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./table",
+      "name": "TableRow",
+      "kind": "function",
+      "signature": "declare function TableRow({ className, ...props }: React.ComponentProps<'tr'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tabs",
+      "name": "Tabs",
+      "kind": "function",
+      "signature": "declare function Tabs({ className, ...props }: TabsPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tabs",
+      "name": "TabsContent",
+      "kind": "function",
+      "signature": "declare function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tabs",
+      "name": "TabsList",
+      "kind": "function",
+      "signature": "declare function TabsList({ className, ...props }: TabsPrimitive.List.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tabs",
+      "name": "TabsTrigger",
+      "kind": "function",
+      "signature": "declare function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./textarea",
+      "name": "Textarea",
+      "kind": "function",
+      "signature": "declare function Textarea({ className, ...props }: React.ComponentProps<'textarea'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./textarea-with-autosize",
+      "name": "TextareaWithAutoSize",
+      "kind": "function",
+      "signature": "declare function TextareaWithAutoSize({ className, ...props }: ComponentProps<typeof TextareaAutosize>): import(\"react\").JSX.Element; ; declare namespace TextareaWithAutoSize { var displayName: string; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./textarea-with-autosize",
+      "name": "TextareaWithAutosizeProps",
+      "kind": "type",
+      "signature": "export type TextareaWithAutosizeProps = TextareaAutosizeProps;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "Timeline",
+      "kind": "variable",
+      "signature": "export declare const Timeline: React.ForwardRefExoticComponent<{ orientation?: 'horizontal' | 'vertical'; } & Omit<React.DetailedHTMLProps<React.OlHTMLAttributes<HTMLOListElement>, HTMLOListElement>, \"ref\"> & React.RefAttributes<HTMLOListElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineConnector",
+      "kind": "variable",
+      "signature": "export declare const TimelineConnector: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineContent",
+      "kind": "variable",
+      "signature": "export declare const TimelineContent: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineDescription",
+      "kind": "variable",
+      "signature": "export declare const TimelineDescription: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineDot",
+      "kind": "variable",
+      "signature": "export declare const TimelineDot: React.ForwardRefExoticComponent<{ variant?: 'default' | 'outline'; } & Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineDotProps",
+      "kind": "type",
+      "signature": "export type TimelineDotProps = { variant?: 'default' | 'outline'; } & React.ComponentPropsWithoutRef<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineItem",
+      "kind": "variable",
+      "signature": "export declare const TimelineItem: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.LiHTMLAttributes<HTMLLIElement>, HTMLLIElement>, \"ref\"> & React.RefAttributes<HTMLLIElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineProps",
+      "kind": "type",
+      "signature": "export type TimelineProps = { orientation?: 'horizontal' | 'vertical'; } & React.ComponentPropsWithoutRef<'ol'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineSeparator",
+      "kind": "variable",
+      "signature": "export declare const TimelineSeparator: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeline",
+      "name": "TimelineTitle",
+      "kind": "variable",
+      "signature": "export declare const TimelineTitle: React.ForwardRefExoticComponent<Omit<React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\"> & React.RefAttributes<HTMLDivElement>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toggle",
+      "name": "Toggle",
+      "kind": "function",
+      "signature": "declare function Toggle({ className, variant, size, ...props }: TogglePrimitive.Props & VariantProps<typeof toggleVariants>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toggle",
+      "name": "toggleVariants",
+      "kind": "variable",
+      "signature": "declare const toggleVariants: (props?: ({ variant?: \"default\" | \"outline\" | null | undefined; size?: \"default\" | \"lg\" | \"sm\" | null | undefined; } & import(\"class-variance-authority/types\").ClassProp) | undefined) => string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toggle-group",
+      "name": "ToggleGroup",
+      "kind": "function",
+      "signature": "declare function ToggleGroup({ className, variant, size, children, type, value, defaultValue, onValueChange, ...props }: ToggleGroupCompatProps): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toggle-group",
+      "name": "ToggleGroupItem",
+      "kind": "function",
+      "signature": "declare function ToggleGroupItem({ className, children, variant, size, ...props }: TogglePrimitive.Props & VariantProps<typeof toggleVariants>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "PanelExpandButton",
+      "kind": "function",
+      "signature": "declare function PanelExpandButton({ panelId }: { panelId: string; }): React.JSX.Element | null;",
+      "jsdocSummary": "Small maximize/restore button for panel headers. Renders nothing when another panel in the group is already maximized."
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "PanelSkeleton",
+      "kind": "function",
+      "signature": "declare function PanelSkeleton(): React.JSX.Element;",
+      "jsdocSummary": "Animated placeholder rendered inside panels while the workbench is restoring persisted state on mount, to avoid a layout flash."
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "ToolPanel",
+      "kind": "function",
+      "signature": "declare function ToolPanel({ id, defaultSize, minSize, className, children, }: { id: string; defaultSize: number; minSize?: number; className?: string; children: React.ReactNode; }): React.JSX.Element;",
+      "jsdocSummary": "A resizable panel that auto-registers itself with the parent `ToolPanelGroup` context to enable maximize/restore behaviour."
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "ToolPanelGroup",
+      "kind": "function",
+      "signature": "declare function ToolPanelGroup({ id, direction, className, children, storagePrefix, }: { id: string; direction: 'horizontal' | 'vertical'; className?: string; children: React.ReactNode; /** Prefix for the localStorage persistence key. Pass the app name to avoid collisions. */ storagePrefix?: string; }): React.JSX.Element;",
+      "jsdocSummary": "A context-providing wrapper around `react-resizable-panels` `PanelGroup`."
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "ToolPanelHandle",
+      "kind": "function",
+      "signature": "declare function ToolPanelHandle({ className }: { className?: string; }): React.JSX.Element;",
+      "jsdocSummary": "A styled resize handle with a grip icon, placed between two `ToolPanel` instances inside a `ToolPanelGroup`."
+    },
+    {
+      "subpath": "./tool-panels",
+      "name": "useToolPanelGroup",
+      "kind": "function",
+      "signature": "declare function useToolPanelGroup(): ToolPanelGroupCtx;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toolbar",
+      "name": "Toolbar",
+      "kind": "variable",
+      "signature": "export declare const Toolbar: { Wrapper: typeof ToolbarWrapper; Divider: typeof ToolbarDivider; Button: typeof ToolbarButton; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toolbar",
+      "name": "ToolbarButtonProps",
+      "kind": "type",
+      "signature": "export type ToolbarButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; tooltip?: string; tooltipShortcut?: string[]; buttonSize?: ButtonProps['size']; variant?: ButtonProps['variant']; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toolbar",
+      "name": "ToolbarDividerProps",
+      "kind": "type",
+      "signature": "export type ToolbarDividerProps = { horizontal?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toolbar",
+      "name": "ToolbarWrapperProps",
+      "kind": "type",
+      "signature": "export type ToolbarWrapperProps = { shouldShowContent?: boolean; isVertical?: boolean; } & ComponentProps<'div'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tooltip",
+      "name": "Tooltip",
+      "kind": "function",
+      "signature": "declare function Tooltip({ ...props }: TooltipPrimitive.Root.Props): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tooltip",
+      "name": "TooltipContent",
+      "kind": "function",
+      "signature": "declare function TooltipContent({ className, sideOffset, side, align, alignOffset, children, ...props }: TooltipPrimitive.Popup.Props & Pick<TooltipPrimitive.Positioner.Props, 'side' | 'sideOffset' | 'align' | 'alignOffset'>): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tooltip",
+      "name": "TooltipProvider",
+      "kind": "function",
+      "signature": "declare function TooltipProvider({ delay, delayDuration, ...props }: TooltipPrimitive.Provider.Props & { delayDuration?: number; }): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tooltip",
+      "name": "TooltipTrigger",
+      "kind": "function",
+      "signature": "declare function TooltipTrigger({ asChild, children, ...props }: TooltipPrimitive.Trigger.Props & AsChildProp): React.JSX.Element;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./tooltip",
+      "name": "WithTooltip",
+      "kind": "variable",
+      "signature": "declare const WithTooltip: FC<WithTooltipProps>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "cn",
+      "kind": "function",
+      "signature": "export declare function cn(...inputs: ClassValue[]): string;",
+      "jsdocSummary": ""
+    }
+  ],
+  "errorCodes": []
+}

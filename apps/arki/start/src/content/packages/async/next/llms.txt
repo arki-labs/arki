@@ -1,0 +1,31 @@
+# @arki/async
+
+> Abortable `sleep`, lodash-compatible `debounce` and `throttle`, and structured concurrency on plain Promises and `AbortSignal`. It is not a mutex or a retry library.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/async`: Abortable sleep, debounce and throttle, and structured concurrency (scoped, all, mapConcurrent, race, timeout) on plain Promises and AbortSignal. `ASYNC_ERROR_CODES`, `AsyncError`, `Cancelled`, `Deadline`, `MAX_WAIT_MS`, `SUPERVISOR_FAILURES`, `ScopeFailed`, `all`, `child`, `cleanup`, `createLifetime`, `debounce`; and 32 more.
+- `@arki/async/errors`: `ASYNC_ERROR_CODES`, `AsyncError`, `Cancelled`, `Deadline`, `MAX_WAIT_MS`, `SUPERVISOR_FAILURES`, `ScopeFailed`, `abortedError`, `assertWait`, `cleanupFailed`, `invalidConcurrency`, `invalidWait`; and 7 more.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Load many things with a limit and a deadline](docs/agent-guide.md#load-many-things-with-a-limit-and-a-deadline)
+- [Wait in a test without waiting](docs/agent-guide.md#wait-in-a-test-without-waiting)
+- [Stop a wait on user cancel](docs/agent-guide.md#stop-a-wait-on-user-cancel)
+- [Debounce a save](docs/agent-guide.md#debounce-a-save)
+
+## Rules that bite
+
+- Cancellation is cooperative. Pass each task's `signal` on to `fetch` and `sleep`.
+- `race` is `Promise.any`: the first task to fulfill wins.
+- `timeout` rejects at the deadline, but a task that ignores its signal keeps running.
+- Waits above `MAX_WAIT_MS` (about 24.8 days) reject with `ARKI_ASYNC_E001`.
+- Use `MockClock` from `@arki/clock` in tests, not fake timers.

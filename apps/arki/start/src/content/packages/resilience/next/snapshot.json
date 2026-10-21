@@ -1,0 +1,30 @@
+{
+  "name": "@arki/resilience",
+  "channel": "next",
+  "version": "0.2.0",
+  "archive": false,
+  "sha512": "00617484cef812ea8b0c0c1c273d4ebe33c1726ac6ea891623994b4b5542c3dbdf89fbd10c3ea5e453bed7b3b168d04842fa6955af5759349cdd25294ec61d73",
+  "files": [
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 16,
+    "modules": 16,
+    "compiled": 16,
+    "ran": 1,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

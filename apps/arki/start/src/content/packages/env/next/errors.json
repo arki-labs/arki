@@ -1,0 +1,11 @@
+[
+  {
+    "code": "ARKI_ENV_PLUGIN_E001",
+    "package": "@arki/env",
+    "kind": "thrown",
+    "what": "The env failed its schema at boot. The message lists every bad key.",
+    "fix": "Set the listed variables, or fix their values, before booting the app.",
+    "verify": "dot doctor --json | jq '.data'",
+    "source": "src/dot.ts:50"
+  }
+]

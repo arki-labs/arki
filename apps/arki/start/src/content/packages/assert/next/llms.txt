@@ -1,0 +1,29 @@
+# @arki/assert
+
+> Two typed string checks, `isURL` and `isBase64`, one subpath each. They return a boolean and do not parse or decode.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/assert/base64`: Check that a string is standard base64 with correct `=` padding. `isBase64`.
+- `@arki/assert/url`: Check that a string is an http or https URL with a host and a top-level domain. `isURL`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Check a URL a user typed](docs/agent-guide.md#check-a-url-a-user-typed)
+- [Check a base64 secret before you decode it](docs/agent-guide.md#check-a-base64-secret-before-you-decode-it)
+- [Validate a whole settings form](docs/agent-guide.md#validate-a-whole-settings-form)
+
+## Rules that bite
+
+- There is no root import. Use `@arki/assert/url` or `@arki/assert/base64`.
+- `isBase64('')` is `true`. Check for an empty value yourself.
+- `isURL` needs a protocol and a top-level domain. `localhost` fails.
+- A non-string throws `TypeError` from `isBase64`. A bad string returns `false`.

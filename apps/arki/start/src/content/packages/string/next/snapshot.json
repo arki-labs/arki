@@ -1,0 +1,31 @@
+{
+  "name": "@arki/string",
+  "channel": "next",
+  "version": "0.3.0",
+  "archive": false,
+  "sha512": "9f9f446ecea34cf2333156dd4994b90f59b8dc6ca4b7f31a748d3ff496cffb3e3e9df62c2d1159cda6f6cea99c7c2419a3c481785cce22fd826b4aecfaabc8f0",
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "foundation",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:17:38.846Z"
+  },
+  "examples": {
+    "examples": 15,
+    "modules": 14,
+    "compiled": 14,
+    "ran": 4,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

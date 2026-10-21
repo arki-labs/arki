@@ -61,6 +61,7 @@
     "superjson": "catalog:utilities"
   },
   "devDependencies": {
+    "@arki/arki-release": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/playwright-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",

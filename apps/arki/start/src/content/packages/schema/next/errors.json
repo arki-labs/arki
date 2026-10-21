@@ -1,0 +1,11 @@
+[
+  {
+    "code": "ARKI_SCHEMA_E003",
+    "package": "@arki/schema",
+    "kind": "thrown",
+    "what": "A `withJsonSchema` converter was asked for a target other than draft-2020-12.",
+    "fix": "Ask for the `draft-2020-12` target.",
+    "verify": "bun run test -- src/vendors.test.ts",
+    "source": "src/errors.ts:10"
+  }
+]

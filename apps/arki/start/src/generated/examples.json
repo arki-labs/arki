@@ -1,0 +1,640 @@
+[
+  {
+    "name": "@arki/assert",
+    "version": "0.1.0",
+    "report": {
+      "examples": 4,
+      "modules": 3,
+      "compiled": 3,
+      "ran": 3,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/async",
+    "version": "0.1.0",
+    "report": {
+      "examples": 11,
+      "modules": 10,
+      "compiled": 10,
+      "ran": 7,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/cli",
+    "version": "0.1.0",
+    "report": {
+      "examples": 8,
+      "modules": 7,
+      "compiled": 7,
+      "ran": 2,
+      "skipped": 1,
+      "skippedBlocks": [
+        {
+          "file": "README.md",
+          "line": 120,
+          "reason": "a bin entry: it calls process.exit"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/clock",
+    "version": "0.1.0",
+    "report": {
+      "examples": 6,
+      "modules": 5,
+      "compiled": 5,
+      "ran": 5,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/contracts",
+    "version": "0.2.0",
+    "report": {
+      "examples": 16,
+      "modules": 14,
+      "compiled": 14,
+      "ran": 11,
+      "skipped": 2,
+      "skippedBlocks": [
+        {
+          "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+          "line": 51,
+          "reason": "before-state sketch of the 0.1.0 code"
+        },
+        {
+          "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+          "line": 62,
+          "reason": "fragment: keyset and input come from your own contract"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/date",
+    "version": "0.3.0",
+    "report": {
+      "examples": 15,
+      "modules": 12,
+      "compiled": 12,
+      "ran": 5,
+      "skipped": 2,
+      "skippedBlocks": [
+        {
+          "file": "README.md",
+          "line": 403,
+          "reason": "needs @orpc/server and an app router, which this package does not depend on"
+        },
+        {
+          "file": "README.md",
+          "line": 417,
+          "reason": "needs @tanstack/react-start, which this package does not depend on"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/design-systems",
+    "version": "0.1.3",
+    "report": {
+      "examples": 3,
+      "modules": 3,
+      "compiled": 3,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/dot",
+    "version": "0.7.0",
+    "report": {
+      "examples": 95,
+      "modules": 61,
+      "compiled": 61,
+      "ran": 22,
+      "skipped": 8,
+      "skippedBlocks": [
+        {
+          "file": "docs/complex-setup.md",
+          "line": 218,
+          "reason": "adapter packages depend on @arki/dot, so dot cannot import them"
+        },
+        {
+          "file": "docs/di.md",
+          "line": 46,
+          "reason": "uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
+        },
+        {
+          "file": "docs/di.md",
+          "line": 119,
+          "reason": "shows wiring that must not compile"
+        },
+        {
+          "file": "docs/di.md",
+          "line": 147,
+          "reason": "the app wiring uses log(config), schedule() and a gateway from other @arki packages; the oRPC example below compiles the same chain"
+        },
+        {
+          "file": "docs/di.md",
+          "line": 388,
+          "reason": "uses jobs() from @arki/queue, which depends on @arki/dot"
+        },
+        {
+          "file": "docs/di.md",
+          "line": 402,
+          "reason": "mounts adapters from @arki/db, @arki/queue and @arki/http, which depend on @arki/dot"
+        },
+        {
+          "file": "docs/observability.md",
+          "line": 47,
+          "reason": "needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
+        },
+        {
+          "file": "docs/observability.md",
+          "line": 188,
+          "reason": "needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
+        }
+      ],
+      "failures": [
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 57,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 57,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 58,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 58,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 67,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 67,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 68,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 68,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 69,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2339 Property 'manifest' does not exist on type 'never'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 70,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2339 Property 'boot' does not exist on type 'never'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 71,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 71,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 72,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2339 Property 'dispose' does not exist on type 'never'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 73,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 73,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 83,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'plugin'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 85,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'openDb'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 92,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'plugin'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 94,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'openDb'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 105,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'plugin'. Did you mean 'Plugin'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 105,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'openDb'. Did you mean 'open'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 111,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'plugin'. Did you mean 'Plugin'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 111,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'openDb'. Did you mean 'open'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 125,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'error'. Did you mean 'Error'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 131,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'error'. Did you mean 'Error'?"
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 139,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'testApp'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 139,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'Db'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 139,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'database'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 145,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'testApp'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 145,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'database'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 158,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS1128 Declaration or statement expected."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 158,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'usecases'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 158,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'createUsecases'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 159,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'rpc'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 159,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'waitlistRpcContract'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 159,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'procedures'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 159,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'os'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 165,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS1128 Declaration or statement expected."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 165,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'usecases'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 165,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'signup'. Either declare one or provide an initializer."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 165,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'markInvited'. Either declare one or provide an initializer."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 166,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'rpc'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 166,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'waitlistRpcContract'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 166,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'rpcImplementer'."
+        },
+        {
+          "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+          "line": 166,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'waitlistProcedures'."
+        }
+      ]
+    }
+  },
+  {
+    "name": "@arki/env",
+    "version": "0.1.0",
+    "report": {
+      "examples": 9,
+      "modules": 6,
+      "compiled": 6,
+      "ran": 4,
+      "skipped": 3,
+      "skippedBlocks": [
+        {
+          "file": "docs/agent-guide.md",
+          "line": 52,
+          "reason": "needs a Dot app; see the plugin tests in src/dot.test.ts"
+        },
+        {
+          "file": "docs/upgrades/0.0.11-to-0.1.0.md",
+          "line": 39,
+          "reason": "before and after fragment of a migration"
+        },
+        {
+          "file": "docs/upgrades/0.0.11-to-0.1.0.md",
+          "line": 48,
+          "reason": "before and after fragment of a migration"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/failure",
+    "version": "0.1.0",
+    "report": {
+      "examples": 23,
+      "modules": 14,
+      "compiled": 14,
+      "ran": 10,
+      "skipped": 1,
+      "skippedBlocks": [
+        {
+          "file": "README.md",
+          "line": 346,
+          "reason": "needs an app's eslint config and typescript-eslint"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/icons",
+    "version": "0.1.2",
+    "report": {
+      "examples": 6,
+      "modules": 6,
+      "compiled": 6,
+      "ran": 0,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/log",
+    "version": "0.2.0",
+    "report": {
+      "examples": 10,
+      "modules": 6,
+      "compiled": 6,
+      "ran": 0,
+      "skipped": 3,
+      "skippedBlocks": [
+        {
+          "file": "README.md",
+          "line": 225,
+          "reason": "@arki/dot is not a dependency of @arki/log"
+        },
+        {
+          "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+          "line": 19,
+          "reason": "before and after fragment of a migration"
+        },
+        {
+          "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+          "line": 29,
+          "reason": "before and after fragment of a migration"
+        }
+      ],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/math",
+    "version": "0.1.0",
+    "report": {
+      "examples": 30,
+      "modules": 29,
+      "compiled": 29,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/react-hooks",
+    "version": "0.1.2",
+    "report": {
+      "examples": 5,
+      "modules": 5,
+      "compiled": 5,
+      "ran": 0,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/resilience",
+    "version": "0.2.0",
+    "report": {
+      "examples": 16,
+      "modules": 16,
+      "compiled": 16,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/schema",
+    "version": "0.1.0",
+    "report": {
+      "examples": 4,
+      "modules": 3,
+      "compiled": 3,
+      "ran": 3,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/string",
+    "version": "0.3.0",
+    "report": {
+      "examples": 15,
+      "modules": 14,
+      "compiled": 14,
+      "ran": 4,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/theme",
+    "version": "0.2.2",
+    "report": {
+      "examples": 4,
+      "modules": 4,
+      "compiled": 4,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/ts",
+    "version": "0.0.4",
+    "report": {
+      "examples": 4,
+      "modules": 4,
+      "compiled": 4,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  },
+  {
+    "name": "@arki/ui",
+    "version": "0.1.6",
+    "report": {
+      "examples": 5,
+      "modules": 5,
+      "compiled": 5,
+      "ran": 1,
+      "skipped": 0,
+      "skippedBlocks": [],
+      "failures": []
+    }
+  }
+]

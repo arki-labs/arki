@@ -1,0 +1,217 @@
+{
+  "package": "@arki/react-hooks",
+  "version": "0.1.2",
+  "entries": [
+    {
+      "subpath": "./async-memo",
+      "name": "useAsyncMemo",
+      "kind": "function",
+      "signature": "export declare function useAsyncMemo<T>(factory: () => Promise<T> | undefined | null, deps: DependencyList): T | undefined; ; export declare function useAsyncMemo<T>(factory: () => Promise<T> | undefined | null, deps: DependencyList, initial: T): T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./copy-to-clipboard",
+      "name": "useCopyToClipboard",
+      "kind": "function",
+      "signature": "declare function useCopyToClipboard(): [CopiedValue, CopyFn];",
+      "jsdocSummary": "Custom hook that copies text to the clipboard using the [`Clipboard API`](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API)."
+    },
+    {
+      "subpath": "./debounce",
+      "name": "useDebouncedCallback",
+      "kind": "function",
+      "signature": "export declare function useDebouncedCallback<T extends (...args: any[]) => any>(callback: T, options: number | UseDebouncedCallbackOptions): ((...args: Parameters<T>) => void) & { flush: () => void; cancel: () => void; isPending: () => boolean; _isFirstCall: boolean; _hasPendingCallback: boolean; }; ; export declare namespace useDebouncedCallback { type Options = UseDebouncedCallbackOptions; type ReturnValue<T extends (...args: any[]) => any> = UseDebouncedCallbackReturnValue<T>; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./debounce",
+      "name": "useDebouncedState",
+      "kind": "function",
+      "signature": "export declare function useDebouncedState<T = any>(defaultValue: T, wait: number, options?: UseDebouncedStateOptions): UseDebouncedStateReturnValue<T>; ; export declare namespace useDebouncedState { type Options = UseDebouncedStateOptions; type ReturnValue<T> = UseDebouncedStateReturnValue<T>; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./debounce",
+      "name": "useDebouncedValue",
+      "kind": "function",
+      "signature": "export declare function useDebouncedValue<T = any>(value: T, wait: number, options?: UseDebouncedValueOptions): UseDebouncedValueReturnValue<T>; ; export declare namespace useDebouncedValue { type Handlers = UseDebouncedValueHandlers; type Options = UseDebouncedValueOptions; type ReturnValue<T> = UseDebouncedValueReturnValue<T>; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./hotkeys",
+      "name": "useHotkeys",
+      "kind": "function",
+      "signature": "export declare function useHotkeys<T extends HTMLElement>(keys: Keys, callback: HotkeyCallback, options?: OptionsOrDependencyArray, dependencies?: OptionsOrDependencyArray): RefCallback<T | null>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./is-client",
+      "name": "useIsClient",
+      "kind": "function",
+      "signature": "export declare function useIsClient(): boolean;",
+      "jsdocSummary": "Hook to detect if we're on the client side after hydration. Returns false during SSR and initial hydration, true after first effect runs."
+    },
+    {
+      "subpath": "./local-storage",
+      "name": "deleteFromStorage",
+      "kind": "function",
+      "signature": "export declare function deleteFromStorage(key: string): void;",
+      "jsdocSummary": "Use this function to delete a value from localStorage."
+    },
+    {
+      "subpath": "./local-storage",
+      "name": "useLocalStorage",
+      "kind": "function",
+      "signature": "export declare function useLocalStorage<TValue = string>(key: string): LocalStorageNullableReturnValue<TValue>; ; export declare function useLocalStorage<TValue = string>(key: string, defaultValue: TValue): LocalStorageReturnValue<TValue>;",
+      "jsdocSummary": "React hook to enable updates to state via localStorage. This updates when the {writeStorage} function is used, when the returned function is called, or when the \"storage\" event is fired from another tab in the browser. This function takes an optional default value to start off with."
+    },
+    {
+      "subpath": "./local-storage",
+      "name": "writeStorage",
+      "kind": "function",
+      "signature": "export declare function writeStorage<TValue>(key: string, value: TValue): void;",
+      "jsdocSummary": "Use this instead of directly using localStorage.setItem in order to correctly send events within the same window."
+    },
+    {
+      "subpath": "./long-press",
+      "name": "useLongPress",
+      "kind": "function",
+      "signature": "export declare function useLongPress({ onLongPress, onSinglePress, delay }: UseLongPressOptions): { onMouseDown: (e: React.MouseEvent | React.TouchEvent) => void; onMouseUp: () => void; onMouseLeave: () => void; onTouchStart: (e: React.MouseEvent | React.TouchEvent) => void; onTouchEnd: () => void; onClick: (e: React.MouseEvent) => void; onContextMenu: (_e: React.MouseEvent) => void; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useIsDesktop",
+      "kind": "function",
+      "signature": "export declare function useIsDesktop(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useIsMobile",
+      "kind": "function",
+      "signature": "export declare function useIsMobile(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useIsTablet",
+      "kind": "function",
+      "signature": "export declare function useIsTablet(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useIsTabletOrDesktop",
+      "kind": "function",
+      "signature": "export declare function useIsTabletOrDesktop(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useIsTouchDevice",
+      "kind": "function",
+      "signature": "export declare function useIsTouchDevice(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./media-query",
+      "name": "useMediaQuery",
+      "kind": "function",
+      "signature": "export declare function useMediaQuery(query: string, initialValue?: boolean, { getInitialValueInEffect }?: UseMediaQueryOptions): boolean; ; export declare namespace useMediaQuery { type Options = UseMediaQueryOptions; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./pagination",
+      "name": "usePagination",
+      "kind": "function",
+      "signature": "export declare function usePagination({ total, siblings, boundaries, page, initialPage, onChange, startValue, }: UsePaginationOptions): UsePaginationReturnValue; ; export declare namespace usePagination { type Options = UsePaginationOptions; type ReturnValue = UsePaginationReturnValue; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./timeout",
+      "name": "useTimeout",
+      "kind": "function",
+      "signature": "declare function useTimeout(callback: () => void, delay: number | null): void;",
+      "jsdocSummary": "Custom hook that handles timeouts in React components using the [`setTimeout API`](https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/setTimeout)."
+    },
+    {
+      "subpath": "./toggle",
+      "name": "useToggle",
+      "kind": "function",
+      "signature": "export declare function useToggle<T = boolean>(options?: readonly T[]): UseToggleReturnValue<T>; ; export declare namespace useToggle { type ReturnValue<T> = UseToggleReturnValue<T>; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./toggle",
+      "name": "useToggleState",
+      "kind": "function",
+      "signature": "export declare function useToggle<T = boolean>(options?: readonly T[]): UseToggleReturnValue<T>; ; export declare namespace useToggle { type ReturnValue<T> = UseToggleReturnValue<T>; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./touch",
+      "name": "useIsTouchDevice",
+      "kind": "function",
+      "signature": "export declare function useIsTouchDevice(): boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./use-swipe-gesture",
+      "name": "SwipeDirection",
+      "kind": "type",
+      "signature": "export type SwipeDirection = 'up' | 'down' | 'left' | 'right' | 'tap';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./use-swipe-gesture",
+      "name": "useNumberSwipeGesture",
+      "kind": "function",
+      "signature": "export declare function useNumberSwipeGesture(onNumberSelect: (num: number) => void): { handleSwipeOnElement: (element: HTMLElement, startX: number, startY: number, direction: SwipeDirection) => void; getZoneFromPosition: (x: number, y: number, bounds: DOMRect) => number; };",
+      "jsdocSummary": "Hook for number pad swipe input Maps swipe patterns to numbers 1-9"
+    },
+    {
+      "subpath": "./use-swipe-gesture",
+      "name": "useSwipeGesture",
+      "kind": "function",
+      "signature": "export declare function useSwipeGesture(options?: SwipeGestureOptions): { handlers: { onTouchStart: (e: React.TouchEvent) => void; onTouchMove: (e: React.TouchEvent) => void; onTouchEnd: (_e: React.TouchEvent) => void; }; isSwipping: boolean; };",
+      "jsdocSummary": "Hook for detecting swipe gestures on touch devices Useful for quick number entry and navigation"
+    },
+    {
+      "subpath": "./use-touch-feedback",
+      "name": "HapticFeedbackType",
+      "kind": "type",
+      "signature": "export type HapticFeedbackType = 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error' | 'selection';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./use-touch-feedback",
+      "name": "useTouchFeedback",
+      "kind": "function",
+      "signature": "export declare function useTouchFeedback(): { trigger: (options?: TouchFeedbackOptions) => boolean; triggerHaptic: (type?: HapticFeedbackType) => void; triggerAudio: (frequency?: number, duration?: number) => void; createTouchHandlers: (onPress: () => void, options?: TouchFeedbackOptions) => { onTouchStart: ((e: React.TouchEvent) => void) | undefined; onTouchEnd: ((e: React.TouchEvent) => void) | undefined; onClick: (() => void) | undefined; }; isTouch: boolean; };",
+      "jsdocSummary": "Hook for providing touch feedback on mobile devices Combines haptic, visual, and audio feedback for better user experience"
+    },
+    {
+      "subpath": "./use-viewport",
+      "name": "useViewport",
+      "kind": "function",
+      "signature": "export declare function useViewport(): ViewportInfo;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./use-viewport",
+      "name": "ViewportInfo",
+      "kind": "type",
+      "signature": "export type ViewportInfo = { type: ViewportType; isMobile: boolean; isTablet: boolean; isDesktop: boolean; width: number; height: number; isTouch: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./use-viewport",
+      "name": "ViewportType",
+      "kind": "type",
+      "signature": "export type ViewportType = 'mobile' | 'tablet' | 'desktop';",
+      "jsdocSummary": ""
+    }
+  ],
+  "errorCodes": []
+}

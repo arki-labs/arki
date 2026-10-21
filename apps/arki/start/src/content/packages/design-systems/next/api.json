@@ -1,0 +1,469 @@
+{
+  "package": "@arki/design-systems",
+  "version": "0.1.3",
+  "entries": [
+    {
+      "subpath": "./arena",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Scores, timers, code — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./arena",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text and UI — Inter Variable"
+    },
+    {
+      "subpath": "./arena",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Serif — system fallback only; reserved for occasional game titles"
+    },
+    {
+      "subpath": "./arena/fonts",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Scores, timers, code — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./arena/fonts",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text and UI — Inter Variable"
+    },
+    {
+      "subpath": "./arena/fonts",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Serif — system fallback only; reserved for occasional game titles"
+    },
+    {
+      "subpath": "./arena/palette-labels",
+      "name": "arenaPaletteLabels",
+      "kind": "variable",
+      "signature": "export declare const arenaPaletteLabels: PaletteLabels;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./arena/typography",
+      "name": "arenaTypography",
+      "kind": "variable",
+      "signature": "export declare const arenaTypography: TypographyRoster;",
+      "jsdocSummary": "Arena is game-first. Roster surfaces bold/expressive display faces. Narrower than Atelier/Workbench because most arena UI is iconography + numeric, not prose — variant choice has less surface to express."
+    },
+    {
+      "subpath": "./atelier",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Code and data — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./atelier",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text — Plus Jakarta Sans Variable"
+    },
+    {
+      "subpath": "./atelier",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Headlines — Fraunces Variable"
+    },
+    {
+      "subpath": "./atelier/fonts",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Code and data — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./atelier/fonts",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text — Plus Jakarta Sans Variable"
+    },
+    {
+      "subpath": "./atelier/fonts",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Headlines — Fraunces Variable"
+    },
+    {
+      "subpath": "./atelier/palette-labels",
+      "name": "atelierPaletteLabels",
+      "kind": "variable",
+      "signature": "export declare const atelierPaletteLabels: PaletteLabels;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./atelier/typography",
+      "name": "atelierTypography",
+      "kind": "variable",
+      "signature": "export declare const atelierTypography: TypographyRoster;",
+      "jsdocSummary": "Atelier is editorial/warm. Roster surfaces display-serif and serif options; no sans-serif heading variants on offer (those belong to Workbench)."
+    },
+    {
+      "subpath": "./fonts",
+      "name": "cabin",
+      "kind": "variable",
+      "signature": "export declare const cabin: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Cabin — humanist sans-serif with a warm, modern feel."
+    },
+    {
+      "subpath": "./fonts",
+      "name": "gentiumPlus",
+      "kind": "variable",
+      "signature": "export declare const gentiumPlus: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Gentium Plus — elegant serif for academic and multilingual typography."
+    },
+    {
+      "subpath": "./fonts",
+      "name": "raleway",
+      "kind": "variable",
+      "signature": "export declare const raleway: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Raleway — geometric sans-serif with refined, elegant letterforms."
+    },
+    {
+      "subpath": "./fonts",
+      "name": "sentient",
+      "kind": "variable",
+      "signature": "export declare const sentient: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Sentient — contemporary serif with subtle calligraphic warmth."
+    },
+    {
+      "subpath": "./fonts/cabin",
+      "name": "cabin",
+      "kind": "variable",
+      "signature": "export declare const cabin: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Cabin — humanist sans-serif with a warm, modern feel."
+    },
+    {
+      "subpath": "./fonts/gentium-plus",
+      "name": "gentiumPlus",
+      "kind": "variable",
+      "signature": "export declare const gentiumPlus: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Gentium Plus — elegant serif for academic and multilingual typography."
+    },
+    {
+      "subpath": "./fonts/raleway",
+      "name": "raleway",
+      "kind": "variable",
+      "signature": "export declare const raleway: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Raleway — geometric sans-serif with refined, elegant letterforms."
+    },
+    {
+      "subpath": "./fonts/sentient",
+      "name": "sentient",
+      "kind": "variable",
+      "signature": "export declare const sentient: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Sentient — contemporary serif with subtle calligraphic warmth."
+    },
+    {
+      "subpath": "./gallery",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Figures / technical — IBM Plex Mono"
+    },
+    {
+      "subpath": "./gallery",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body / UI text — Hanken Grotesk"
+    },
+    {
+      "subpath": "./gallery",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Display + curatorial voice — Newsreader"
+    },
+    {
+      "subpath": "./gallery/fonts",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Figures / technical — IBM Plex Mono"
+    },
+    {
+      "subpath": "./gallery/fonts",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body / UI text — Hanken Grotesk"
+    },
+    {
+      "subpath": "./gallery/fonts",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Display + curatorial voice — Newsreader"
+    },
+    {
+      "subpath": "./palette-labels",
+      "name": "PaletteLabels",
+      "kind": "type",
+      "signature": "export type PaletteLabels = z.infer<typeof paletteLabelsSchema>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./palette-labels",
+      "name": "paletteLabelsSchema",
+      "kind": "variable",
+      "signature": "export declare const paletteLabelsSchema: z.ZodObject<{ light: z.ZodString; system: z.ZodString; dark: z.ZodString; }, z.core.$strip>;",
+      "jsdocSummary": "Per-system display labels for the three"
+    },
+    {
+      "subpath": "./registry",
+      "name": "DESIGN_SYSTEM_IDS",
+      "kind": "variable",
+      "signature": "export declare const DESIGN_SYSTEM_IDS: readonly DesignSystemId[];",
+      "jsdocSummary": "Ordered list of available design system identifiers."
+    },
+    {
+      "subpath": "./registry",
+      "name": "DESIGN_SYSTEMS",
+      "kind": "variable",
+      "signature": "export declare const DESIGN_SYSTEMS: readonly DesignSystemMetadata[];",
+      "jsdocSummary": "Ordered list of available design systems."
+    },
+    {
+      "subpath": "./registry",
+      "name": "DesignSystemId",
+      "kind": "type",
+      "signature": "export type DesignSystemId = z.infer<typeof designSystemIdSchema>;",
+      "jsdocSummary": "Union type of supported design system identifiers."
+    },
+    {
+      "subpath": "./registry",
+      "name": "designSystemIdSchema",
+      "kind": "variable",
+      "signature": "export declare const designSystemIdSchema: z.ZodEnum<{ arena: \"arena\"; atelier: \"atelier\"; tribunal: \"tribunal\"; workbench: \"workbench\"; }>;",
+      "jsdocSummary": "Canonical identifier for a supported design system."
+    },
+    {
+      "subpath": "./registry",
+      "name": "DesignSystemMetadata",
+      "kind": "type",
+      "signature": "export type DesignSystemMetadata = z.infer<typeof designSystemMetadataSchema>;",
+      "jsdocSummary": "Metadata describing a named design system."
+    },
+    {
+      "subpath": "./registry",
+      "name": "designSystemMetadataSchema",
+      "kind": "variable",
+      "signature": "export declare const designSystemMetadataSchema: z.ZodObject<{ id: z.ZodEnum<{ arena: \"arena\"; atelier: \"atelier\"; tribunal: \"tribunal\"; workbench: \"workbench\"; }>; name: z.ZodString; packagePath: z.ZodString; description: z.ZodString; typography: z.ZodObject<{ default: z.ZodString; variants: z.ZodArray<z.ZodObject<{ id: z.ZodString; label: z.ZodString; fontFamily: z.ZodString; sample: z.ZodOptional<z.ZodString>; }, z.core.$strip>>; }, z.core.$strip>; paletteLabels: z.ZodObject<{ light: z.ZodString; system: z.ZodString; dark: z.ZodString; }, z.core.$strip>; }, z.core.$strip>;",
+      "jsdocSummary": "Metadata schema for a single design system. Exported so a private registry (product-named systems) can extend it with its own ids."
+    },
+    {
+      "subpath": "./registry",
+      "name": "getDesignSystemById",
+      "kind": "function",
+      "signature": "export declare function getDesignSystemById(id: DesignSystemId): DesignSystemMetadata;",
+      "jsdocSummary": "Returns metadata for the requested design system id."
+    },
+    {
+      "subpath": "./registry",
+      "name": "getDesignSystemByIdSafe",
+      "kind": "function",
+      "signature": "export declare function getDesignSystemByIdSafe(value: unknown): DesignSystemMetadata | null;",
+      "jsdocSummary": "Safely resolves metadata from arbitrary input."
+    },
+    {
+      "subpath": "./registry",
+      "name": "isDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function isDesignSystemId(value: unknown): value is DesignSystemId;",
+      "jsdocSummary": "Returns true when the provided value is a valid {@link DesignSystemId}."
+    },
+    {
+      "subpath": "./registry",
+      "name": "parseDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function parseDesignSystemId(value: unknown): DesignSystemId;",
+      "jsdocSummary": "Parses a value into a {@link DesignSystemId}."
+    },
+    {
+      "subpath": "./registry",
+      "name": "resolveDesignSystemId",
+      "kind": "function",
+      "signature": "export declare function resolveDesignSystemId(value: unknown, fallback?: DesignSystemId): DesignSystemId;",
+      "jsdocSummary": "Resolves a design system id from arbitrary input with a safe fallback."
+    },
+    {
+      "subpath": "./tribunal",
+      "name": "display",
+      "kind": "variable",
+      "signature": "export declare const display: { readonly variable: '--font-display'; readonly className: ''; };",
+      "jsdocSummary": "Headlines and the verdict number — Spectral"
+    },
+    {
+      "subpath": "./tribunal",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Scores and tabular data — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./tribunal",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "UI chrome — Geist Variable"
+    },
+    {
+      "subpath": "./tribunal",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Conversational rail, prose, evidence copy — Newsreader Variable"
+    },
+    {
+      "subpath": "./tribunal/fonts",
+      "name": "display",
+      "kind": "variable",
+      "signature": "export declare const display: { readonly variable: '--font-display'; readonly className: ''; };",
+      "jsdocSummary": "Headlines and the verdict number — Spectral"
+    },
+    {
+      "subpath": "./tribunal/fonts",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Scores and tabular data — JetBrains Mono Variable"
+    },
+    {
+      "subpath": "./tribunal/fonts",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "UI chrome — Geist Variable"
+    },
+    {
+      "subpath": "./tribunal/fonts",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Conversational rail, prose, evidence copy — Newsreader Variable"
+    },
+    {
+      "subpath": "./tribunal/palette-labels",
+      "name": "tribunalPaletteLabels",
+      "kind": "variable",
+      "signature": "export declare const tribunalPaletteLabels: PaletteLabels;",
+      "jsdocSummary": "Tribunal names its modes after paper stock — the case-file idiom. cream (light) · paper (system / near-white) · ink (dark)."
+    },
+    {
+      "subpath": "./tribunal/typography",
+      "name": "tribunalTypography",
+      "kind": "variable",
+      "signature": "export declare const tribunalTypography: TypographyRoster;",
+      "jsdocSummary": "Tribunal is editorial-evidence. The roster surfaces display-face choices for headlines and the verdict number; body prose always uses Newsreader and chrome always uses Geist regardless of choice."
+    },
+    {
+      "subpath": "./typography",
+      "name": "parseTypographyRoster",
+      "kind": "function",
+      "signature": "export declare function parseTypographyRoster(value: unknown): TypographyRoster;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./typography",
+      "name": "TypographyRoster",
+      "kind": "type",
+      "signature": "export type TypographyRoster = z.infer<typeof typographyRosterSchema>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./typography",
+      "name": "typographyRosterSchema",
+      "kind": "variable",
+      "signature": "export declare const typographyRosterSchema: z.ZodObject<{ default: z.ZodString; variants: z.ZodArray<z.ZodObject<{ id: z.ZodString; label: z.ZodString; fontFamily: z.ZodString; sample: z.ZodOptional<z.ZodString>; }, z.core.$strip>>; }, z.core.$strip>;",
+      "jsdocSummary": "Ordered list of typography variants a design system exposes to users, with a default selection used when no user choice exists."
+    },
+    {
+      "subpath": "./typography",
+      "name": "TypographyVariant",
+      "kind": "type",
+      "signature": "export type TypographyVariant = z.infer<typeof typographyVariantSchema>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./typography",
+      "name": "typographyVariantSchema",
+      "kind": "variable",
+      "signature": "export declare const typographyVariantSchema: z.ZodObject<{ id: z.ZodString; label: z.ZodString; fontFamily: z.ZodString; sample: z.ZodOptional<z.ZodString>; }, z.core.$strip>;",
+      "jsdocSummary": "A single user-selectable heading-font choice within a design system's roster."
+    },
+    {
+      "subpath": "./workbench",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Code and metrics — IBM Plex Mono"
+    },
+    {
+      "subpath": "./workbench",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text — Work Sans Variable"
+    },
+    {
+      "subpath": "./workbench",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Display and hero type — Instrument Serif"
+    },
+    {
+      "subpath": "./workbench/fonts",
+      "name": "mono",
+      "kind": "variable",
+      "signature": "export declare const mono: { readonly variable: '--font-mono'; readonly className: ''; };",
+      "jsdocSummary": "Code and metrics — IBM Plex Mono"
+    },
+    {
+      "subpath": "./workbench/fonts",
+      "name": "sans",
+      "kind": "variable",
+      "signature": "export declare const sans: { readonly variable: '--font-sans'; readonly className: ''; };",
+      "jsdocSummary": "Body text — Work Sans Variable"
+    },
+    {
+      "subpath": "./workbench/fonts",
+      "name": "serif",
+      "kind": "variable",
+      "signature": "export declare const serif: { readonly variable: '--font-serif'; readonly className: ''; };",
+      "jsdocSummary": "Display and hero type — Instrument Serif"
+    },
+    {
+      "subpath": "./workbench/palette-labels",
+      "name": "workbenchPaletteLabels",
+      "kind": "variable",
+      "signature": "export declare const workbenchPaletteLabels: PaletteLabels;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./workbench/typography",
+      "name": "workbenchTypography",
+      "kind": "variable",
+      "signature": "export declare const workbenchTypography: TypographyRoster;",
+      "jsdocSummary": "Workbench is utility-first. Roster surfaces sans-serif and one mono; no display serifs (those belong to Atelier)."
+    }
+  ],
+  "errorCodes": []
+}

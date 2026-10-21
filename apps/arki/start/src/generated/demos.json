@@ -1,0 +1,61 @@
+[
+  {
+    "name": "drop-studio",
+    "repo": "arki-labs/drop-studio",
+    "present": true,
+    "pins": [
+      {
+        "name": "@arki/assert",
+        "pinned": "0.0.3"
+      },
+      {
+        "name": "@arki/contracts",
+        "pinned": "0.0.4"
+      },
+      {
+        "name": "@arki/db",
+        "pinned": "0.1.9"
+      },
+      {
+        "name": "@arki/design-systems",
+        "pinned": "0.1.1"
+      },
+      {
+        "name": "@arki/dot",
+        "pinned": "0.4.1"
+      },
+      {
+        "name": "@arki/env",
+        "pinned": "0.0.8"
+      },
+      {
+        "name": "@arki/feature",
+        "pinned": "0.0.2"
+      },
+      {
+        "name": "@arki/icons",
+        "pinned": "0.1.1"
+      },
+      {
+        "name": "@arki/log",
+        "pinned": "0.0.3"
+      },
+      {
+        "name": "@arki/react-hooks",
+        "pinned": "0.1.1"
+      },
+      {
+        "name": "@arki/theme",
+        "pinned": "0.2.1"
+      },
+      {
+        "name": "@arki/ts",
+        "pinned": "0.0.3"
+      },
+      {
+        "name": "@arki/ui",
+        "pinned": "0.1.4"
+      }
+    ]
+  }
+]

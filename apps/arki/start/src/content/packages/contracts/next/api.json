@@ -1,0 +1,2499 @@
+{
+  "package": "@arki/contracts",
+  "version": "0.2.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "_default",
+      "kind": "function",
+      "signature": "export declare function _default<T extends core.SomeType>(innerType: T, defaultValue: util.NoUndefined<core.output<T>> | (() => util.NoUndefined<core.output<T>>)): ZodDefault<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_function",
+      "kind": "function",
+      "signature": "export declare function _function(): ZodFunction; ; export declare function _function<const In extends ReadonlyArray<core.$ZodType>>(params: { input: In; }): ZodFunction<ZodTuple<In, null>, core.$ZodFunctionOut>; ; export declare function _function<const In extends ReadonlyArray<core.$ZodType>, const Out extends core.$ZodFunctionOut = core.$ZodFunctionOut>(params: { input: In; output: Out; }): ZodFunction<ZodTuple<In, null>, Out>; ; export declare function _function<const In extends core.$ZodFunctionIn = core.$ZodFunctionIn>(params: { input: In; }): ZodFunction<In, core.$ZodFunctionOut>; ; export declare function _function<const Out extends core.$ZodFunctionOut = core.$ZodFunctionOut>(params: { output: Out; }): ZodFunction<core.$ZodFunctionIn, Out>; ; export declare function _function<In extends core.$ZodFunctionIn = core.$ZodFunctionIn, Out extends core.$ZodType = core.$ZodType>(params?: { input: In; output: Out; }): ZodFunction<In, Out>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodBigInt",
+      "kind": "interface",
+      "signature": "export interface _ZodBigInt<T extends core.$ZodBigIntInternals = core.$ZodBigIntInternals> extends _ZodType<T> { gte(value: bigint, params?: string | core.$ZodCheckGreaterThanParams): this; /** Alias of `.gte()` */ min(value: bigint, params?: string | core.$ZodCheckGreaterThanParams): this; gt(value: bigint, params?: string | core.$ZodCheckGreaterThanParams): this; /** Alias of `.lte()` */ lte(value: bigint, params?: string | core.$ZodCheckLessThanParams): this; max(value: bigint, params?: string | core.$ZodCheckLessThanParams): this; lt(value: bigint, params?: string | core.$ZodCheckLessThanParams): this; positive(params?: string | core.$ZodCheckGreaterThanParams): this; negative(params?: string | core.$ZodCheckLessThanParams): this; nonpositive(params?: string | core.$ZodCheckLessThanParams): this; nonnegative(params?: string | core.$ZodCheckGreaterThanParams): this; multipleOf(value: bigint, params?: string | core.$ZodCheckMultipleOfParams): this; minValue: bigint | null; maxValue: bigint | null; format: string | null; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodBoolean",
+      "kind": "interface",
+      "signature": "export interface _ZodBoolean<T extends core.$ZodBooleanInternals = core.$ZodBooleanInternals> extends _ZodType<T> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodDate",
+      "kind": "interface",
+      "signature": "export interface _ZodDate<T extends core.$ZodDateInternals = core.$ZodDateInternals> extends _ZodType<T> { min(value: number | Date, params?: string | core.$ZodCheckGreaterThanParams): this; max(value: number | Date, params?: string | core.$ZodCheckLessThanParams): this; /** @deprecated Not recommended. */ minDate: Date | null; /** @deprecated Not recommended. */ maxDate: Date | null; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodNumber",
+      "kind": "interface",
+      "signature": "export interface _ZodNumber<Internals extends core.$ZodNumberInternals = core.$ZodNumberInternals> extends _ZodType<Internals> { gt(value: number, params?: string | core.$ZodCheckGreaterThanParams): this; /** Identical to .min() */ gte(value: number, params?: string | core.$ZodCheckGreaterThanParams): this; min(value: number, params?: string | core.$ZodCheckGreaterThanParams): this; lt(value: number, params?: string | core.$ZodCheckLessThanParams): this; /** Identical to .max() */ lte(value: number, params?: string | core.$ZodCheckLessThanParams): this; max(value: number, params?: string | core.$ZodCheckLessThanParams): this; /** Consider `z.int()` instead. This API is considered *legacy*; it will never be removed but a better alternative exists. */ int(params?: string | core.$ZodCheckNumberFormatParams): this; /** @deprecated This is now identical to `.int()`. Only numbers in the safe integer range are accepted. */ safe(params?: string | core.$ZodCheckNumberFormatParams): this; positive(params?: string | core.$ZodCheckGreaterThanParams): this; nonnegative(params?: string | core.$ZodCheckGreaterThanParams): this; negative(params?: string | core.$ZodCheckLessThanParams): this; nonpositive(params?: string | core.$ZodCheckLessThanParams): this; multipleOf(value: number, params?: string | core.$ZodCheckMultipleOfParams): this; /** @deprecated Use `.multipleOf()` instead. */ step(value: number, params?: string | core.$ZodCheckMultipleOfParams): this; /** @deprecated In v4 and later, z.number() does not allow infinite values by default. This is a no-op. */ finite(params?: unknown): this; minValue: number | null; maxValue: number | null; /** @deprecated Check the `format` property instead. */ isInt: boolean; /** @deprecated Number schemas no longer accept infinite values, so this always returns `true`. */ isFinite: boolean; format: string | null; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodString",
+      "kind": "interface",
+      "signature": "export interface _ZodString<T extends core.$ZodStringInternals<unknown> = core.$ZodStringInternals<unknown>> extends _ZodType<T> { format: string | null; minLength: number | null; maxLength: number | null; regex(regex: RegExp, params?: string | core.$ZodCheckRegexParams): this; includes(value: string, params?: string | core.$ZodCheckIncludesParams): this; startsWith(value: string, params?: string | core.$ZodCheckStartsWithParams): this; endsWith(value: string, params?: string | core.$ZodCheckEndsWithParams): this; min(minLength: number, params?: string | core.$ZodCheckMinLengthParams): this; max(maxLength: number, params?: string | core.$ZodCheckMaxLengthParams): this; length(len: number, params?: string | core.$ZodCheckLengthEqualsParams): this; nonempty(params?: string | core.$ZodCheckMinLengthParams): this; lowercase(params?: string | core.$ZodCheckLowerCaseParams): this; uppercase(params?: string | core.$ZodCheckUpperCaseParams): this; trim(): this; normalize(form?: \"NFC\" | \"NFD\" | \"NFKC\" | \"NFKD\" | (string & {})): this; toLowerCase(): this; toUpperCase(): this; slugify(): this; } ; export declare const _ZodString: core.$constructor<_ZodString>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "_ZodType",
+      "kind": "interface",
+      "signature": "export interface _ZodType<out Internals extends core.$ZodTypeInternals = core.$ZodTypeInternals> extends ZodType<any, any, Internals> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "$brand",
+      "kind": "variable",
+      "signature": "export declare const $brand: unique symbol; ; export type $brand<T extends string | number | symbol = string | number | symbol> = { [$brand]: { [k in T]: true; }; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "$input",
+      "kind": "variable",
+      "signature": "export declare const $input: unique symbol; ; export type $input = typeof $input;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "$output",
+      "kind": "variable",
+      "signature": "export declare const $output: unique symbol; ; export type $output = typeof $output;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "any",
+      "kind": "function",
+      "signature": "export declare function any(): ZodAny;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "array",
+      "kind": "function",
+      "signature": "export declare function array<T extends core.SomeType>(element: T, params?: string | core.$ZodArrayParams): ZodArray<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "assertUniqueIdPrefixes",
+      "kind": "function",
+      "signature": "export declare function assertUniqueIdPrefixes<const T extends readonly IdDeclaration<string>[]>(...ids: T & UniquePrefixGuard<T>): void;",
+      "jsdocSummary": "Check that no two id kinds of one app can be mistaken for each other. Call it once with every declaration of the app — usually in a test."
+    },
+    {
+      "subpath": ".",
+      "name": "base64",
+      "kind": "function",
+      "signature": "export declare function base64(params?: string | core.$ZodBase64Params): ZodBase64;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "base64url",
+      "kind": "function",
+      "signature": "export declare function base64url(params?: string | core.$ZodBase64URLParams): ZodBase64URL;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "bigint",
+      "kind": "function",
+      "signature": "export declare function bigint(params?: string | core.$ZodBigIntParams): ZodBigInt;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "boolean",
+      "kind": "function",
+      "signature": "export declare function boolean(params?: string | core.$ZodBooleanParams): ZodBoolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "BRAND",
+      "kind": "type",
+      "signature": "export type BRAND<T extends string | number | symbol = string | number | symbol> = { [core.$brand]: { [k in T]: true; }; };",
+      "jsdocSummary": "Use `z.$brand` instead"
+    },
+    {
+      "subpath": ".",
+      "name": "catch",
+      "kind": "function",
+      "signature": "declare function _catch<T extends core.SomeType>(innerType: T, catchValue: core.output<T> | ((ctx: core.$ZodCatchCtx) => core.output<T>)): ZodCatch<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "check",
+      "kind": "function",
+      "signature": "export declare function check<O = unknown>(fn: core.CheckFn<O>): core.$ZodCheck<O>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "cidrv4",
+      "kind": "function",
+      "signature": "export declare function cidrv4(params?: string | core.$ZodCIDRv4Params): ZodCIDRv4;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "cidrv6",
+      "kind": "function",
+      "signature": "export declare function cidrv6(params?: string | core.$ZodCIDRv6Params): ZodCIDRv6;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "clone",
+      "kind": "function",
+      "signature": "export declare function clone<T extends schemas.$ZodType>(inst: T, def?: T[\"_zod\"][\"def\"], params?: { parent: boolean; }): T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "codec",
+      "kind": "function",
+      "signature": "export declare function codec<const A extends core.SomeType, B extends core.SomeType = core.$ZodType>(in_: A, out: B, params: { decode: (value: core.output<A>, payload: core.ParsePayload<core.output<A>>) => core.util.MaybeAsync<core.input<B>>; encode: (value: core.input<B>, payload: core.ParsePayload<core.input<B>>) => core.util.MaybeAsync<core.output<A>>; }): ZodCodec<A, B>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "coerce",
+      "kind": "unknown",
+      "signature": "import * as core from \"../core/index.cjs\"; import * as schemas from \"./schemas.cjs\"; export interface ZodCoercedString<T = unknown> extends schemas._ZodString<core.$ZodStringInternals<T>> { } export declare function string<T = unknown>(params?: string | core.$ZodStringParams): ZodCoercedString<T>; export interface ZodCoercedNumber<T = unknown> extends schemas._ZodNumber<core.$ZodNumberInternals<T>> { } export declare function number<T = unknown>(params?: string | core.$ZodNumberParams): ZodCoercedNumber<T>; export interface ZodCoercedBoolean<T = unknown> extends schemas._ZodBoolean<core.$ZodBooleanInternals<T>> { } export declare function boolean<T = unknown>(params?: string | core.$ZodBooleanParams): ZodCoercedBoolean<T>; export interface ZodCoercedBigInt<T = unknown> extends schemas._ZodBigInt<core.$ZodBigIntInternals<T>> { } export declare function bigint<T = unknown>(params?: string | core.$ZodBigIntParams): ZodCoercedBigInt<T>; export interface ZodCoercedDate<T = unknown> extends schemas._ZodDate<core.$ZodDateInternals<T>> { } export declare function date<T = unknown>(params?: string | core.$ZodDateParams): ZodCoercedDate<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "compile",
+      "kind": "function",
+      "signature": "export declare function compile<T extends SomeType>(schema: T, options?: CompileOptions): T;",
+      "jsdocSummary": "AOT-compile a Zod schema. Returns a clone whose `_zod.run` calls a generated fast path first and falls back to the original runtime parser on failure."
+    },
+    {
+      "subpath": ".",
+      "name": "CompileOptions",
+      "kind": "interface",
+      "signature": "export interface CompileOptions { /** Throw the refusal instead of returning the schema uncompiled. */ strict?: boolean | undefined; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "config",
+      "kind": "function",
+      "signature": "export declare function config(newConfig?: Partial<$ZodConfig>): $ZodConfig;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "CONTRACTS_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const CONTRACTS_ERROR_CODES: { /** * `defineId` got a non-string prefix. * * @fix Supply the exact stored prefix as a string; use `''` for unprefixed IDs. * @verify bun run test -- src/ids.test.ts */ readonly invalidIdPrefix: 'ARKI_CONTRACTS_E001'; /** * `assertUniqueIdPrefixes` found two prefixes that are equal or start one another. * * @fix Give each id kind a prefix that does not start another one. * @verify bun run test -- src/ids.test.ts */ readonly overlappingIdPrefixes: 'ARKI_CONTRACTS_E002'; /** * Reserved legacy exception code; ID generation now returns RandomSourceUnavailable. * * @fix Provide Web Crypto getRandomValues; application-owned secure providers must fail closed in every supported mode. * @verify bun run test:runtimes */ readonly noRandomSource: 'ARKI_CONTRACTS_E003'; /** * `keyset` got no keys. * * @fix Declare at least one key. Order by NOT NULL columns and end on a unique one. * @verify bun run test -- src/pagination.test.ts */ readonly invalidKeyset: 'ARKI_CONTRACTS_E004'; /** * Reserved legacy exception code; cursor decoding now returns InvalidCursor. * * @fix Send back a cursor exactly as the same keyset returned it, or start from the first page. * @verify bun run test -- src/pagination.test.ts */ readonly invalidCursor: 'ARKI_CONTRACTS_E005'; /** * A contract key contains `.` or uses a reserved name. * * @fix Rename the contract key: no `.`, and not a name the query utils reserve. * @verify bun run test -- src/orpc.test.ts */ readonly invalidContractKey: 'ARKI_CONTRACTS_E006'; /** * `operationOf` got a value that carries no operation. * * @fix Pass a leaf of `createOrpcUtils`, or an object built by `operations()`. * @verify bun run test -- src/orpc.test.ts */ readonly notAnOperation: 'ARKI_CONTRACTS_E007'; /** * The Drizzle column builder has no runtime config for its schema metadata. * * @fix Use a supported Drizzle column builder and matching Drizzle version. * @verify bun run test -- src/drizzle.test.ts */ readonly invalidColumnMetadata: 'ARKI_CONTRACTS_E008'; /** * `defineId` received a missing, empty or non-string domain kind. * * @fix Supply a non-empty literal domain name, such as `billing.refund`. * @verify bun run test -- src/ids.test.ts */ readonly invalidIdKind: 'ARKI_CONTRACTS_E009'; /** * `defineId` received an unsupported generation format. * * @fix Use 'uuid', omit format, or supply 2–256 distinct non-surrogate UTF-16 alphabet characters and an integer length of 1–256. * @verify bun run test -- src/ids.test.ts */ readonly invalidIdFormat: 'ARKI_CONTRACTS_E010'; };",
+      "jsdocSummary": "Stable error codes of `@arki/contracts`."
+    },
+    {
+      "subpath": ".",
+      "name": "ContractsError",
+      "kind": "class",
+      "signature": "export declare class ContractsError extends TypeError { readonly code: ContractsErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: ContractsErrorCode, message: string, options?: ErrorOptions); }",
+      "jsdocSummary": "A coded failure of an `@arki/contracts` function."
+    },
+    {
+      "subpath": ".",
+      "name": "ContractsErrorCode",
+      "kind": "type",
+      "signature": "export type ContractsErrorCode = (typeof CONTRACTS_ERROR_CODES)[keyof typeof CONTRACTS_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link ContractsError}."
+    },
+    {
+      "subpath": ".",
+      "name": "core",
+      "kind": "unknown",
+      "signature": "export * from \"./core.cjs\"; export * from \"./parse.cjs\"; export * from \"./errors.cjs\"; export * from \"./schemas.cjs\"; export * from \"./memoizer.cjs\"; export * from \"./checks.cjs\"; export * from \"./versions.cjs\"; export * as util from \"./util.cjs\"; export { toZod } from \"./util.cjs\"; export * as regexes from \"./regexes.cjs\"; export * as locales from \"../locales/index.cjs\"; export * from \"./registries.cjs\"; export * from \"./doc.cjs\"; export * from \"./compile.cjs\"; export * from \"./api.cjs\"; export * from \"./to-json-schema.cjs\"; export { toJSONSchema } from \"./json-schema-processors.cjs\"; export { JSONSchemaGenerator } from \"./json-schema-generator.cjs\"; export * as JSONSchema from \"./json-schema.cjs\";",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "createIdBody",
+      "kind": "function",
+      "signature": "export declare function createIdBody(): string | IdGenerationFailure;",
+      "jsdocSummary": "Generate the unprefixed body shared by modern declarations and legacy DB IDs. This is an entropy primitive, not a domain identity declaration: use `defineId` to associate a body with its schema and ID kind."
+    },
+    {
+      "subpath": ".",
+      "name": "creditCard",
+      "kind": "function",
+      "signature": "export declare function creditCard(params?: string | core.$ZodCreditCardParams): ZodCreditCard;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "cuid",
+      "kind": "function",
+      "signature": "export declare function cuid(params?: string | core.$ZodCUIDParams): ZodCUID;",
+      "jsdocSummary": "Validates a CUID v1 string."
+    },
+    {
+      "subpath": ".",
+      "name": "cuid2",
+      "kind": "function",
+      "signature": "export declare function cuid2(params?: string | core.$ZodCUID2Params): ZodCUID2;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "currencyCode",
+      "kind": "function",
+      "signature": "export declare function currencyCode(_params?: string | core.$ZodStringFormatParams): ZodCustomStringFormat<\"currency_code\">;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "CURSOR_DECODE_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const CURSOR_DECODE_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor\", undefined>, import(\"@arki/failure\").FailureDefinition<\"schema.validator_defect\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical failures returned by cursor decoding."
+    },
+    {
+      "subpath": ".",
+      "name": "CURSOR_ENCODE_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const CURSOR_ENCODE_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor_value\", undefined>, import(\"@arki/failure\").FailureDefinition<\"schema.validator_defect\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical failures returned by cursor encoding."
+    },
+    {
+      "subpath": ".",
+      "name": "CURSOR_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const CURSOR_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor\", undefined>, import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor_value\", undefined>, import(\"@arki/failure\").FailureDefinition<\"schema.validator_defect\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical cursor failures for adapters that expose both operations."
+    },
+    {
+      "subpath": ".",
+      "name": "CursorValue",
+      "kind": "type",
+      "signature": "export type CursorValue = z.output<typeof cursorValue>;",
+      "jsdocSummary": "What a cursor can hold for one key of a NOT NULL column."
+    },
+    {
+      "subpath": ".",
+      "name": "CursorValues",
+      "kind": "type",
+      "signature": "export type CursorValues<O extends KeysetOrder> = { readonly [K in keyof O]: CursorValue; };",
+      "jsdocSummary": "The decoded cursor: one value per key of the order."
+    },
+    {
+      "subpath": ".",
+      "name": "custom",
+      "kind": "function",
+      "signature": "export declare function custom<O>(fn?: (data: unknown) => unknown, _params?: string | core.$ZodCustomParams | undefined): ZodCustom<O, O>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "date",
+      "kind": "function",
+      "signature": "export declare function date(params?: string | core.$ZodDateParams): ZodDate;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "decode",
+      "kind": "variable",
+      "signature": "export declare const decode: <T extends core.$ZodType>(schema: T, value: core.input<T>, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => core.output<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "decodeAsync",
+      "kind": "variable",
+      "signature": "export declare const decodeAsync: <T extends core.$ZodType>(schema: T, value: core.input<T>, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => Promise<core.output<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "deepPartial",
+      "kind": "function",
+      "signature": "export declare function deepPartial<T extends core.SomeType>(schema: T): DeepPartial<T>;",
+      "jsdocSummary": "Returns a copy of the schema with every nested object's properties made optional."
+    },
+    {
+      "subpath": ".",
+      "name": "defineId",
+      "kind": "function",
+      "signature": "export declare function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>; ; export declare function defineId<const P extends string, const Kind extends string>(prefix: P, options: { readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>); readonly format?: IdFormat; }): ReturnType<typeof brandedId<P, Kind>>;",
+      "jsdocSummary": "Declare a prefixed id. The prefix is kept exactly as given, so a table that already stores `hlgt_…` ids keeps working: switching a feature to `defineId('hlgt_')` changes no stored value. Give same-format IDs distinct domain types without changing their stored values. `format: 'uuid'` generates UUID v4; `{ alphabet, length }` uniformly samples 1–256 characters from 2–256 distinct, non-surrogate UTF-16 characters. The format is copied and frozen at definition time. Omitting it keeps the default 24-character body. Schemas still validate only the stored prefix."
+    },
+    {
+      "subpath": ".",
+      "name": "describe",
+      "kind": "variable",
+      "signature": "export declare const describe: typeof core.describe;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "discriminatedUnion",
+      "kind": "function",
+      "signature": "export declare function discriminatedUnion<Types extends readonly [core.$ZodTypeDiscriminable, ...core.$ZodTypeDiscriminable[]], Disc extends string>(discriminator: Disc, options: Types, params?: string | core.$ZodDiscriminatedUnionParams): ZodDiscriminatedUnion<Types, Disc>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "e164",
+      "kind": "function",
+      "signature": "export declare function e164(params?: string | core.$ZodE164Params): ZodE164;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "email",
+      "kind": "function",
+      "signature": "export declare function email(params?: string | core.$ZodEmailParams): ZodEmail;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "emoji",
+      "kind": "function",
+      "signature": "export declare function emoji(params?: string | core.$ZodEmojiParams): ZodEmoji;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "encode",
+      "kind": "variable",
+      "signature": "export declare const encode: <T extends core.$ZodType>(schema: T, value: core.output<T>, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => core.input<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "encodeAsync",
+      "kind": "variable",
+      "signature": "export declare const encodeAsync: <T extends core.$ZodType>(schema: T, value: core.output<T>, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => Promise<core.input<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "endsWith",
+      "kind": "function",
+      "signature": "export declare function _endsWith(suffix: string, params?: string | $ZodCheckEndsWithParams): checks.$ZodCheckEndsWith;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "enum",
+      "kind": "function",
+      "signature": "declare function _enum<const T extends readonly string[]>(values: T, params?: string | core.$ZodEnumParams): ZodEnum<util.ToEnum<T[number]>>; ; declare function _enum<const T extends util.EnumLike>(entries: T, params?: string | core.$ZodEnumParams): ZodEnum<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "exactOptional",
+      "kind": "function",
+      "signature": "export declare function exactOptional<T extends core.SomeType>(innerType: T): ZodExactOptional<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "file",
+      "kind": "function",
+      "signature": "export declare function file(params?: string | core.$ZodFileParams): ZodFile;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "flattenError",
+      "kind": "function",
+      "signature": "export declare function flattenError<T>(error: $ZodError<T>): _FlattenedError<T>; ; export declare function flattenError<T, U>(error: $ZodError<T>, mapper?: (issue: $ZodIssue) => U): _FlattenedError<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "float32",
+      "kind": "function",
+      "signature": "export declare function float32(params?: string | core.$ZodCheckNumberFormatParams): ZodFloat32;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "float64",
+      "kind": "function",
+      "signature": "export declare function float64(params?: string | core.$ZodCheckNumberFormatParams): ZodFloat64;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "formatError",
+      "kind": "function",
+      "signature": "export declare function formatError<T>(error: $ZodError<T>): $ZodFormattedError<T>; ; export declare function formatError<T, U>(error: $ZodError<T>, mapper?: (issue: $ZodIssue) => U): $ZodFormattedError<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "formData",
+      "kind": "unknown",
+      "signature": "import * as z from 'zod/v4'; import { ZodString, ZodNumber, ZodArray, ZodType, ZodPipe, ZodTransform, ZodObject } from 'zod/v4'; type InputType<DefaultType extends ZodType> = { (): ZodPipe<DefaultType, DefaultType>; <ProvidedType extends ZodType>(schema: ProvidedType): ZodPipe<ProvidedType, ProvidedType>; }; /** * Transforms any empty strings to `undefined` before validating. * This makes it so empty strings will fail required checks, * allowing you to use `optional` for optional fields instead of `nonempty` for required fields. * If you call `zfd.text` with no arguments, it will assume the field is a required string by default. * If you want to customize the schema, you can pass that as an argument. */ declare const text: InputType<ZodString>; /** * Coerces numerical strings to numbers transforms empty strings to `undefined` before validating. * If you call `zfd.number` with no arguments, * it will assume the field is a required number by default. * If you want to customize the schema, you can pass that as an argument. */ declare const numeric: InputType<ZodNumber>; type CheckboxOpts = { trueValue?: string; }; /** * Turns the value from a checkbox field into a boolean, * but does not require the checkbox to be checked. * For checkboxes with a `value` attribute, you can pass that as the `trueValue` option. * * @example * ```ts * const schema = zfd.formData({ * defaultCheckbox: zfd.checkbox(), * checkboxWithValue: zfd.checkbox({ trueValue: \"true\" }), * mustBeTrue: zfd * .checkbox() * .refine((val) => val, \"Please check this box\"), * }); * }); * ``` */ declare const checkbox: ({ trueValue }?: CheckboxOpts) => z.ZodPipe<z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodLiteral<string>, z.ZodTransform<boolean, string>>, z.ZodPipe<z.ZodLiteral<undefined>, z.ZodTransform<boolean, undefined>>, z.ZodBoolean]>>, z.ZodTransform<boolean, boolean | undefined>>; declare const file: InputType<z.ZodType<File>>; /** * Preprocesses a field where you expect multiple values could be present for the same field name * and transforms the value of that field to always be an array. * If you don't provide a schema, it will assume the field is an array of zfd.text fields * and will not require any values to be present. */ declare const repeatable: InputType<ZodArray<any>>; /** * A convenience wrapper for repeatable. * Instead of passing the schema for an entire array, you pass in the schema for the item type. */ declare const repeatableOfType: <T extends ZodType>(schema: T) => ZodPipe<ZodArray<T>, ZodArray<T>>; type FormDataLikeInput = { [Symbol.iterator](): IterableIterator<[string, FormDataEntryValue]>; entries(): IterableIterator<[string, FormDataEntryValue]>; }; type FormDataType = { <T extends z.core.$ZodShape>(shape: T): ZodPipe<ZodTransform<ZodObject<T>, FormData | FormDataLikeInput | z.input<ZodObject<T>>>, ZodObject<T>>; <T extends ZodType>(shape: T): ZodPipe<ZodTransform<T, FormData | FormDataLikeInput | z.input<T>>, T>; }; declare const json: <T extends ZodType>(schema: T) => z.ZodPreprocess<T>; declare const preprocessFormData: (formData: unknown) => Record<string, unknown>; /** * This helper takes the place of the `z.object` at the root of your schema. * It wraps your schema in a `z.preprocess` that extracts all the data out of a `FormData` * and transforms it into a regular object. * If the `FormData` contains multiple entries with the same field name, * it will automatically turn that field into an array. */ declare const formData: FormDataType; declare const helpers_checkbox: typeof checkbox; declare const helpers_file: typeof file; declare const helpers_formData: typeof formData; declare const helpers_json: typeof json; declare const helpers_numeric: typeof numeric; declare const helpers_preprocessFormData: typeof preprocessFormData; declare const helpers_repeatable: typeof repeatable; declare const helpers_repeatableOfType: typeof repeatableOfType; declare const helpers_text: typeof text; declare namespace helpers { export { helpers_checkbox as checkbox, helpers_file as file, helpers_formData as formData, helpers_json as json, helpers_numeric as numeric, helpers_preprocessFormData as preprocessFormData, helpers_repeatable as repeatable, helpers_repeatableOfType as repeatableOfType, helpers_text as text, }; } export { checkbox, file, formData, json, numeric, preprocessFormData, repeatable, repeatableOfType, text, helpers as zfd };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "fromJSONSchema",
+      "kind": "function",
+      "signature": "export declare function fromJSONSchema(schema: JSONSchema.JSONSchema | boolean, params?: FromJSONSchemaParams): ZodType;",
+      "jsdocSummary": "Converts a JSON Schema to a Zod schema. This function should be considered semi-experimental. It's behavior is liable to change."
+    },
+    {
+      "subpath": ".",
+      "name": "function",
+      "kind": "function",
+      "signature": "export declare function _function(): ZodFunction; ; export declare function _function<const In extends ReadonlyArray<core.$ZodType>>(params: { input: In; }): ZodFunction<ZodTuple<In, null>, core.$ZodFunctionOut>; ; export declare function _function<const In extends ReadonlyArray<core.$ZodType>, const Out extends core.$ZodFunctionOut = core.$ZodFunctionOut>(params: { input: In; output: Out; }): ZodFunction<ZodTuple<In, null>, Out>; ; export declare function _function<const In extends core.$ZodFunctionIn = core.$ZodFunctionIn>(params: { input: In; }): ZodFunction<In, core.$ZodFunctionOut>; ; export declare function _function<const Out extends core.$ZodFunctionOut = core.$ZodFunctionOut>(params: { output: Out; }): ZodFunction<core.$ZodFunctionIn, Out>; ; export declare function _function<In extends core.$ZodFunctionIn = core.$ZodFunctionIn, Out extends core.$ZodType = core.$ZodType>(params?: { input: In; output: Out; }): ZodFunction<In, Out>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "getDiscriminatedOption",
+      "kind": "function",
+      "signature": "export declare function getDiscriminatedOption<Options extends readonly SomeType[], Disc extends string, const V extends $DiscriminatorValue<Options, Disc>>(union: $ZodDiscriminatedUnion<Options, Disc>, value: V): $DiscriminatedOption<Options, Disc, V>;",
+      "jsdocSummary": "Returns the option whose discriminator claims `value`, or throws if ambiguous."
+    },
+    {
+      "subpath": ".",
+      "name": "getErrorMap",
+      "kind": "function",
+      "signature": "export declare function getErrorMap(): core.$ZodErrorMap<core.$ZodIssue> | undefined;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "GlobalMeta",
+      "kind": "interface",
+      "signature": "export interface GlobalMeta extends JSONSchemaMeta { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "globalRegistry",
+      "kind": "variable",
+      "signature": "export declare const globalRegistry: $ZodRegistry<GlobalMeta>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "gt",
+      "kind": "function",
+      "signature": "export declare function _gt(value: util.Numeric, params?: string | $ZodCheckGreaterThanParams): checks.$ZodCheckGreaterThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "gte",
+      "kind": "function",
+      "signature": "export declare function _gte(value: util.Numeric, params?: string | $ZodCheckGreaterThanParams): checks.$ZodCheckGreaterThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "guid",
+      "kind": "function",
+      "signature": "export declare function guid(params?: string | core.$ZodGUIDParams): ZodGUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "hash",
+      "kind": "function",
+      "signature": "export declare function hash<Alg extends util.HashAlgorithm, Enc extends util.HashEncoding = \"hex\">(alg: Alg, params?: { enc?: Enc; } & core.$ZodStringFormatParams): ZodCustomStringFormat<`${Alg}_${Enc}`>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "hex",
+      "kind": "function",
+      "signature": "export declare function hex(_params?: string | core.$ZodStringFormatParams): ZodCustomStringFormat<\"hex\">;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "hostname",
+      "kind": "function",
+      "signature": "export declare function hostname(_params?: string | core.$ZodStringFormatParams): ZodCustomStringFormat<\"hostname\">;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "httpUrl",
+      "kind": "function",
+      "signature": "export declare function httpUrl(params?: string | Omit<core.$ZodURLParams, \"protocol\" | \"hostname\">): ZodURL;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "iban",
+      "kind": "function",
+      "signature": "export declare function iban(params?: string | core.$ZodIBANParams): ZodIBAN;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ID_GENERATION_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const ID_GENERATION_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"contracts.random_source_unavailable\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical failures returned by ID generation, including unexpected provider faults."
+    },
+    {
+      "subpath": ".",
+      "name": "IdDeclaration",
+      "kind": "type",
+      "signature": "export type IdDeclaration<P extends string> = ReturnType<typeof prefixedId<P>>;",
+      "jsdocSummary": "One prefixed id kind, declared once: `export const storyId = defineId('sty_')`. The prefix is the single source. The type, the zod schema and the generator all come from it, so nobody writes `sty_` twice."
+    },
+    {
+      "subpath": ".",
+      "name": "IdGenerationFailure",
+      "kind": "type",
+      "signature": "export type IdGenerationFailure = FailureOf<(typeof ID_GENERATION_FAILURES)[number]>;",
+      "jsdocSummary": "The exact failure union derived from the canonical generation definitions."
+    },
+    {
+      "subpath": ".",
+      "name": "IdOf",
+      "kind": "type",
+      "signature": "export type IdOf<D extends { readonly schema: z.ZodType; }> = z.output<D['schema']>;",
+      "jsdocSummary": "The successful ID inferred from its canonical schema, including any domain brand."
+    },
+    {
+      "subpath": ".",
+      "name": "includes",
+      "kind": "function",
+      "signature": "export declare function _includes(includes: string, params?: string | $ZodCheckIncludesParams): checks.$ZodCheckIncludes;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "infer",
+      "kind": "type",
+      "signature": "export type output<T> = T extends { _zod: { output: any; }; } ? T[\"_zod\"][\"output\"] : unknown;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Infer",
+      "kind": "type",
+      "signature": "export type Infer<T> = core.output<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "inferFlattenedErrors",
+      "kind": "type",
+      "signature": "export type inferFlattenedErrors<T extends core.$ZodType, U = string> = core.$ZodFlattenedError<core.output<T>, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "inferFormattedError",
+      "kind": "type",
+      "signature": "export type inferFormattedError<T extends core.$ZodType<any, any>, U = string> = core.$ZodFormattedError<core.output<T>, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "input",
+      "kind": "function",
+      "signature": "export declare function input<T extends core.$ZodType>(schema: T): schemas.ZodType<core.input<T>, core.input<T>>; ; export type input<T> = core.input<T>;",
+      "jsdocSummary": "Returns a copy of the schema with every pipe replaced by its input side. A codec's checks are dropped: they constrain the decoded value the input side never produces."
+    },
+    {
+      "subpath": ".",
+      "name": "instanceof",
+      "kind": "function",
+      "signature": "declare function _instanceof<T extends typeof util.Class>(cls: T, params?: ZodInstanceOfParams): ZodInstanceOf<InstanceType<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "int",
+      "kind": "function",
+      "signature": "export declare function int(params?: string | core.$ZodCheckNumberFormatParams): ZodInt;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "int32",
+      "kind": "function",
+      "signature": "export declare function int32(params?: string | core.$ZodCheckNumberFormatParams): ZodInt32;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "int64",
+      "kind": "function",
+      "signature": "export declare function int64(params?: string | core.$ZodBigIntFormatParams): ZodInt64;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "intersection",
+      "kind": "function",
+      "signature": "export declare function intersection<T extends core.SomeType, U extends core.SomeType>(left: T, right: U): ZodIntersection<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "INVALID",
+      "kind": "variable",
+      "signature": "export declare const INVALID: unique symbol; ; export type INVALID = typeof INVALID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidCursor",
+      "kind": "variable",
+      "signature": "export declare const InvalidCursor: import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor\", undefined>;",
+      "jsdocSummary": "A cursor cannot be decoded for this keyset."
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidCursorValue",
+      "kind": "variable",
+      "signature": "export declare const InvalidCursorValue: import(\"@arki/failure\").FailureDefinition<\"contracts.invalid_cursor_value\", undefined>;",
+      "jsdocSummary": "A row has a missing or unrepresentable cursor key."
+    },
+    {
+      "subpath": ".",
+      "name": "invertCodec",
+      "kind": "function",
+      "signature": "export declare function invertCodec<A extends core.SomeType, B extends core.SomeType>(codec: ZodCodec<A, B>): ZodCodec<B, A>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ipv4",
+      "kind": "function",
+      "signature": "export declare function ipv4(params?: string | core.$ZodIPv4Params): ZodIPv4;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ipv6",
+      "kind": "function",
+      "signature": "export declare function ipv6(params?: string | core.$ZodIPv6Params): ZodIPv6;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "iso",
+      "kind": "unknown",
+      "signature": "import * as core from \"../core/index.cjs\"; import { ZodISODate, ZodISODateTime, ZodISODuration, ZodISOTime } from \"./schemas.cjs\"; export { ZodISODate, ZodISODateTime, ZodISODuration, ZodISOTime } from \"./schemas.cjs\"; export declare function datetime(params?: string | core.$ZodISODateTimeParams): ZodISODateTime; export declare function date(params?: string | core.$ZodISODateParams): ZodISODate; export declare function time(params?: string | core.$ZodISOTimeParams): ZodISOTime; export declare function duration(params?: string | core.$ZodISODurationParams): ZodISODuration;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "IssueData",
+      "kind": "type",
+      "signature": "export type IssueData = core.$ZodRawIssue;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "json",
+      "kind": "function",
+      "signature": "export declare function json(params?: string | core.$ZodCustomParams): ZodJSONSchema;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "JSONType",
+      "kind": "type",
+      "signature": "export type JSONType = string | number | boolean | null | JSONType[] | { [key: string]: JSONType; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "jwt",
+      "kind": "function",
+      "signature": "export declare function jwt(params?: string | core.$ZodJWTParams): ZodJWT;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "keyof",
+      "kind": "function",
+      "signature": "export declare function keyof<T extends ZodObject>(schema: T): ZodEnum<util.KeysEnum<T[\"_zod\"][\"output\"]>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "keyset",
+      "kind": "function",
+      "signature": "export declare function keyset<const O extends KeysetOrder>(order: O): { readonly order: O; readonly keys: readonly (keyof O & string)[]; readonly encode: (row: CursorValues<O>) => string | import(\"@arki/failure\").Failure<\"contracts.invalid_cursor_value\", undefined> | import(\"@arki/failure\").Failure<\"failure.unexpected_defect\", undefined> | import(\"@arki/failure\").Failure<\"schema.validator_defect\", undefined>; readonly decode: (cursor: string) => CursorValues<O> | import(\"@arki/failure\").Failure<\"contracts.invalid_cursor\", undefined> | import(\"@arki/failure\").Failure<\"failure.unexpected_defect\", undefined> | import(\"@arki/failure\").Failure<\"schema.validator_defect\", undefined>; readonly cursor: z.ZodString; };",
+      "jsdocSummary": "Declare how a list is ordered. Write it once in `model/` and use it in the contract (`pageInput(storyOrder)`) and in the repository (`keysetQuery(storyOrder, stories)` from `@arki/db/pagination`)."
+    },
+    {
+      "subpath": ".",
+      "name": "Keyset",
+      "kind": "type",
+      "signature": "export type Keyset<O extends KeysetOrder> = ReturnType<typeof keyset<O>>;",
+      "jsdocSummary": "A keyset declaration, including its inferred codec failures."
+    },
+    {
+      "subpath": ".",
+      "name": "KeysetOrder",
+      "kind": "type",
+      "signature": "export type KeysetOrder = Readonly<Record<string, SortDirection>>;",
+      "jsdocSummary": "The sort order: row field → direction, most significant first. `{ createdAt: 'desc', id: 'desc' }`."
+    },
+    {
+      "subpath": ".",
+      "name": "ksuid",
+      "kind": "function",
+      "signature": "export declare function ksuid(params?: string | core.$ZodKSUIDParams): ZodKSUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "lazy",
+      "kind": "function",
+      "signature": "export declare function lazy<T extends core.SomeType>(getter: () => T): ZodLazy<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "length",
+      "kind": "function",
+      "signature": "export declare function _length(length: number, params?: string | $ZodCheckLengthEqualsParams): checks.$ZodCheckLengthEquals<util.HasLength>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "literal",
+      "kind": "function",
+      "signature": "export declare function literal<const T extends ReadonlyArray<util.Literal>>(value: T, params?: string | core.$ZodLiteralParams): ZodLiteral<T[number]>; ; export declare function literal<const T extends util.Literal>(value: T, params?: string | core.$ZodLiteralParams): ZodLiteral<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "locales",
+      "kind": "unknown",
+      "signature": "export { default as ar } from \"./ar.cjs\"; export { default as az } from \"./az.cjs\"; export { default as be } from \"./be.cjs\"; export { default as bg } from \"./bg.cjs\"; export { default as bn } from \"./bn.cjs\"; export { default as ca } from \"./ca.cjs\"; export { default as ckb } from \"./ckb.cjs\"; export { default as cs } from \"./cs.cjs\"; export { default as da } from \"./da.cjs\"; export { default as de } from \"./de.cjs\"; export { default as el } from \"./el.cjs\"; export { default as en } from \"./en.cjs\"; export { default as eo } from \"./eo.cjs\"; export { default as es } from \"./es.cjs\"; export { default as fa } from \"./fa.cjs\"; export { default as fi } from \"./fi.cjs\"; export { default as fr } from \"./fr.cjs\"; export { default as frCA } from \"./fr-CA.cjs\"; export { default as gu } from \"./gu.cjs\"; export { default as he } from \"./he.cjs\"; export { default as hi } from \"./hi.cjs\"; export { default as hr } from \"./hr.cjs\"; export { default as hu } from \"./hu.cjs\"; export { default as hy } from \"./hy.cjs\"; export { default as id } from \"./id.cjs\"; export { default as is } from \"./is.cjs\"; export { default as it } from \"./it.cjs\"; export { default as ja } from \"./ja.cjs\"; export { default as ka } from \"./ka.cjs\"; export { default as kh } from \"./kh.cjs\"; export { default as km } from \"./km.cjs\"; export { default as kn } from \"./kn.cjs\"; export { default as ko } from \"./ko.cjs\"; export { default as lt } from \"./lt.cjs\"; export { default as mk } from \"./mk.cjs\"; export { default as ms } from \"./ms.cjs\"; export { default as ne } from \"./ne.cjs\"; export { default as nl } from \"./nl.cjs\"; export { default as nn } from \"./nn.cjs\"; export { default as no } from \"./no.cjs\"; export { default as ota } from \"./ota.cjs\"; export { default as ps } from \"./ps.cjs\"; export { default as pl } from \"./pl.cjs\"; export { default as pt } from \"./pt.cjs\"; export { default as ptBR } from \"./pt-BR.cjs\"; export { default as ro } from \"./ro.cjs\"; export { default as ru } from \"./ru.cjs\"; export { default as sk } from \"./sk.cjs\"; export { default as sl } from \"./sl.cjs\"; export { default as sv } from \"./sv.cjs\"; export { default as ta } from \"./ta.cjs\"; export { default as tg } from \"./tg.cjs\"; export { default as th } from \"./th.cjs\"; export { default as tk } from \"./tk.cjs\"; export { default as tr } from \"./tr.cjs\"; export { default as ua } from \"./ua.cjs\"; export { default as uk } from \"./uk.cjs\"; export { default as ur } from \"./ur.cjs\"; export { default as uz } from \"./uz.cjs\"; export { default as vi } from \"./vi.cjs\"; export { default as zhCN } from \"./zh-CN.cjs\"; export { default as zhTW } from \"./zh-TW.cjs\"; export { default as yo } from \"./yo.cjs\";",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "looseObject",
+      "kind": "function",
+      "signature": "export declare function looseObject<T extends core.$ZodLooseShape>(shape: T, params?: string | core.$ZodObjectParams): ZodObject<util.Writeable<T>, core.$loose>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "looseRecord",
+      "kind": "function",
+      "signature": "export declare function looseRecord<Key extends core.$ZodRecordKey, Value extends core.SomeType>(keyType: Key, valueType: Value, params?: string | core.$ZodRecordParams): ZodRecord<Key, Value>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "lowercase",
+      "kind": "function",
+      "signature": "export declare function _lowercase(params?: string | $ZodCheckLowerCaseParams): checks.$ZodCheckLowerCase;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "lt",
+      "kind": "function",
+      "signature": "export declare function _lt(value: util.Numeric, params?: string | $ZodCheckLessThanParams): checks.$ZodCheckLessThan<util.Numeric>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "lte",
+      "kind": "function",
+      "signature": "export declare function _lte(value: util.Numeric, params?: string | $ZodCheckLessThanParams): checks.$ZodCheckLessThan<util.Numeric>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "mac",
+      "kind": "function",
+      "signature": "export declare function mac(params?: string | core.$ZodMACParams): ZodMAC;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "map",
+      "kind": "function",
+      "signature": "export declare function map<Key extends core.SomeType, Value extends core.SomeType>(keyType: Key, valueType: Value, params?: string | core.$ZodMapParams): ZodMap<Key, Value>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "maxLength",
+      "kind": "function",
+      "signature": "export declare function _maxLength(maximum: number, params?: string | $ZodCheckMaxLengthParams): checks.$ZodCheckMaxLength<util.HasLength>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "maxSize",
+      "kind": "function",
+      "signature": "export declare function _maxSize(maximum: number, params?: string | $ZodCheckMaxSizeParams): checks.$ZodCheckMaxSize<util.HasSize>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "memoizer",
+      "kind": "function",
+      "signature": "export declare function memoizer(): $ZodMemoizer;",
+      "jsdocSummary": "The memoizer that gives containers cycle support. `zod` installs it by default; `zod/mini` opts in with `config({ memoizer: memoizer() })`."
+    },
+    {
+      "subpath": ".",
+      "name": "meta",
+      "kind": "variable",
+      "signature": "export declare const meta: typeof core.meta;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "mime",
+      "kind": "function",
+      "signature": "export declare function _mime(types: util.MimeTypes[], params?: string | $ZodCheckMimeTypeParams): checks.$ZodCheckMimeType;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "minLength",
+      "kind": "function",
+      "signature": "export declare function _minLength(minimum: number, params?: string | $ZodCheckMinLengthParams): checks.$ZodCheckMinLength<util.HasLength>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "minSize",
+      "kind": "function",
+      "signature": "export declare function _minSize(minimum: number, params?: string | $ZodCheckMinSizeParams): checks.$ZodCheckMinSize<util.HasSize>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "multipleOf",
+      "kind": "function",
+      "signature": "export declare function _multipleOf(value: number | bigint, params?: string | $ZodCheckMultipleOfParams): checks.$ZodCheckMultipleOf;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nan",
+      "kind": "function",
+      "signature": "export declare function nan(params?: string | core.$ZodNaNParams): ZodNaN;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nanoid",
+      "kind": "function",
+      "signature": "export declare function nanoid(params?: string | core.$ZodNanoIDParams): ZodNanoID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nativeEnum",
+      "kind": "function",
+      "signature": "export declare function nativeEnum<T extends util.EnumLike>(entries: T, params?: string | core.$ZodEnumParams): ZodEnum<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "negative",
+      "kind": "function",
+      "signature": "export declare function _negative(params?: string | $ZodCheckLessThanParams): checks.$ZodCheckLessThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "never",
+      "kind": "function",
+      "signature": "export declare function never(params?: string | core.$ZodNeverParams): ZodNever;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "NEVER",
+      "kind": "variable",
+      "signature": "export declare const NEVER: never;",
+      "jsdocSummary": "A special constant with type `never`"
+    },
+    {
+      "subpath": ".",
+      "name": "nonnegative",
+      "kind": "function",
+      "signature": "export declare function _nonnegative(params?: string | $ZodCheckGreaterThanParams): checks.$ZodCheckGreaterThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nonoptional",
+      "kind": "function",
+      "signature": "export declare function nonoptional<T extends core.SomeType>(innerType: T, params?: string | core.$ZodNonOptionalParams): ZodNonOptional<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nonpositive",
+      "kind": "function",
+      "signature": "export declare function _nonpositive(params?: string | $ZodCheckLessThanParams): checks.$ZodCheckLessThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "normalize",
+      "kind": "function",
+      "signature": "export declare function _normalize(form?: \"NFC\" | \"NFD\" | \"NFKC\" | \"NFKD\" | (string & {})): checks.$ZodCheckOverwrite<string>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "null",
+      "kind": "function",
+      "signature": "declare function _null(params?: string | core.$ZodNullParams): ZodNull;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nullable",
+      "kind": "function",
+      "signature": "export declare function nullable<T extends core.SomeType>(innerType: T): ZodNullable<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "nullish",
+      "kind": "function",
+      "signature": "export declare function nullish<T extends core.SomeType>(innerType: T): ZodOptional<ZodNullable<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "number",
+      "kind": "function",
+      "signature": "export declare function number(params?: string | core.$ZodNumberParams): ZodNumber;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "object",
+      "kind": "function",
+      "signature": "export declare function object<T extends core.$ZodLooseShape = Partial<Record<never, core.SomeType>>>(shape?: T, params?: string | core.$ZodObjectParams): ZodObject<util.Writeable<T>, core.$strip>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "optional",
+      "kind": "function",
+      "signature": "export declare function optional<T extends core.SomeType>(innerType: T): ZodOptional<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "output",
+      "kind": "function",
+      "signature": "export declare function output<T extends core.$ZodType>(schema: T): schemas.ZodType<core.output<T>, core.output<T>>; ; export type output<T> = core.output<T>;",
+      "jsdocSummary": "Returns a copy of the schema with every pipe replaced by its output side, carrying over the pipe's own checks."
+    },
+    {
+      "subpath": ".",
+      "name": "overwrite",
+      "kind": "function",
+      "signature": "export declare function _overwrite<T>(tx: (input: T) => T): checks.$ZodCheckOverwrite<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "page",
+      "kind": "function",
+      "signature": "export declare function page<T extends z.ZodType>(item: T): z.ZodObject<{ items: z.ZodArray<T>; nextCursor: z.ZodNullable<z.ZodString>; }, z.core.$strip>;",
+      "jsdocSummary": "The output schema of a paged list: the items and the cursor of the next page, `null` on the last page — so \"is there more?\" is never a guess from a full-looking page."
+    },
+    {
+      "subpath": ".",
+      "name": "Page",
+      "kind": "type",
+      "signature": "export type Page<T> = { readonly items: T[]; readonly nextCursor: string | null; };",
+      "jsdocSummary": "One page of `T`, as {@link page} describes it."
+    },
+    {
+      "subpath": ".",
+      "name": "pageInput",
+      "kind": "function",
+      "signature": "export declare function pageInput<O extends KeysetOrder>(order: Keyset<O>, options?: PageInputOptions): z.ZodObject<{ cursor: z.ZodOptional<z.ZodString>; limit: z.ZodDefault<z.ZodInt>; }, z.core.$strip>;",
+      "jsdocSummary": "The input schema of a paged list: `{ cursor?, limit }`. No cursor means the first page. Extend it with the list's own filters: `pageInput(storyOrder).extend({ status: storyStatus })`."
+    },
+    {
+      "subpath": ".",
+      "name": "PageInputOptions",
+      "kind": "type",
+      "signature": "export type PageInputOptions = { /** Page size when the client sends none. Default 20. */ readonly defaultLimit?: number; /** The largest page a client may ask for. Default 100. */ readonly maxLimit?: number; };",
+      "jsdocSummary": "Limits for {@link pageInput}."
+    },
+    {
+      "subpath": ".",
+      "name": "parse",
+      "kind": "variable",
+      "signature": "export declare const parse: <T extends core.$ZodType>(schema: T, value: unknown, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => core.output<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "parseAsync",
+      "kind": "variable",
+      "signature": "export declare const parseAsync: <T extends core.$ZodType>(schema: T, value: unknown, _ctx?: core.ParseContext<core.$ZodIssue>, _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass; }) => Promise<core.output<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "partialRecord",
+      "kind": "function",
+      "signature": "export declare function partialRecord<Key extends core.$ZodRecordKey, Value extends core.SomeType>(keyType: Key, valueType: Value, params?: string | core.$ZodRecordParams): ZodRecord<Key & core.$partial, Value>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "pipe",
+      "kind": "function",
+      "signature": "export declare function pipe<const A extends core.SomeType, B extends core.$ZodType<unknown, core.output<A>> = core.$ZodType<unknown, core.output<A>>>(in_: A, out: B | core.$ZodType<unknown, core.output<A>>): ZodPipe<A, B>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "positive",
+      "kind": "function",
+      "signature": "export declare function _positive(params?: string | $ZodCheckGreaterThanParams): checks.$ZodCheckGreaterThan;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "prefault",
+      "kind": "function",
+      "signature": "export declare function prefault<T extends core.SomeType>(innerType: T, defaultValue: core.input<T> | (() => core.input<T>)): ZodPrefault<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "preprocess",
+      "kind": "function",
+      "signature": "export declare function preprocess<A, U extends core.SomeType, B = unknown>(fn: (arg: B, ctx: core.$RefinementCtx) => A, schema: U): ZodPreprocess<U, B>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "prettifyError",
+      "kind": "function",
+      "signature": "export declare function prettifyError(error: StandardSchemaV1.FailureResult): string;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "promise",
+      "kind": "function",
+      "signature": "export declare function promise<T extends core.SomeType>(innerType: T): ZodPromise<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "properties",
+      "kind": "function",
+      "signature": "export declare function _properties<Shape extends schemas.$ZodShape>(shape: Shape, params?: string | $ZodCheckPropertiesParams): checks.$ZodCheckProperties<Shape>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "property",
+      "kind": "function",
+      "signature": "export declare function _property<K extends string, T extends schemas.$ZodType>(property: K, schema: T, params?: string | $ZodCheckPropertyParams): checks.$ZodCheckProperty<{ [k in K]: util.Widen<core.input<T>>; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "RandomSourceUnavailable",
+      "kind": "variable",
+      "signature": "export declare const RandomSourceUnavailable: import(\"@arki/failure\").FailureDefinition<\"contracts.random_source_unavailable\", undefined>;",
+      "jsdocSummary": "Secure ID generation has no usable Web Crypto provider."
+    },
+    {
+      "subpath": ".",
+      "name": "readonly",
+      "kind": "function",
+      "signature": "export declare function readonly<T extends core.SomeType>(innerType: T): ZodReadonly<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "record",
+      "kind": "function",
+      "signature": "export declare function record<Key extends core.$ZodRecordKey, Value extends core.SomeType>(keyType: Key, valueType: Value, params?: string | core.$ZodRecordParams): ZodRecord<Key, Value>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "refine",
+      "kind": "function",
+      "signature": "export declare function refine<T>(fn: (arg: NoInfer<T>) => util.MaybeAsync<unknown>, _params?: string | core.$ZodCustomParams): core.$ZodCheck<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "RefinementCtx",
+      "kind": "interface",
+      "signature": "export interface $RefinementCtx<T = unknown> extends schemas.ParsePayload<T> { addIssue(arg: string | $ZodSuperRefineIssue): void; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "regex",
+      "kind": "function",
+      "signature": "export declare function _regex(pattern: RegExp, params?: string | $ZodCheckRegexParams): checks.$ZodCheckRegex;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "regexes",
+      "kind": "unknown",
+      "signature": "export declare const cuid: RegExp; export declare const cuid2: RegExp; export declare const ulid: RegExp; export declare const xid: RegExp; export declare const ksuid: RegExp; export declare const nanoid: RegExp; export declare function nanoidOfLength(length: number): RegExp; /** ISO 8601-1 duration regex. Does not support the 8601-2 extensions like negative durations or fractional/negative components. */ export declare const duration: RegExp; /** Implements ISO 8601-2 extensions like explicit +- prefixes, mixing weeks with other units, and fractional/negative components. */ export declare const extendedDuration: RegExp; /** A regex for any UUID-like identifier: 8-4-4-4-12 hex pattern */ export declare const guid: RegExp; /** Returns a regex for validating an RFC 9562/4122 UUID. * * @param version Optionally specify a version 1-8. If no version is specified, all versions are supported. */ export declare const uuid: (version?: number | undefined) => RegExp; export declare const uuid4: RegExp; export declare const uuid6: RegExp; export declare const uuid7: RegExp; /** Practical email validation */ export declare const email: RegExp; /** Equivalent to the HTML5 input[type=email] validation implemented by browsers. Source: https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/email */ export declare const html5Email: RegExp; /** The classic emailregex.com regex for RFC 5322-compliant emails */ export declare const rfc5322Email: RegExp; /** A loose regex that allows Unicode characters, enforces length limits, and that's about it. */ export declare const unicodeEmail: RegExp; export declare const idnEmail: RegExp; export declare const browserEmail: RegExp; export declare function emoji(): RegExp; export declare const ipv4: RegExp; export declare const ipv6: RegExp; export declare const mac: (delimiter?: string) => RegExp; export declare const cidrv4: RegExp; export declare const cidrv6: RegExp; export declare const base64: RegExp; export declare const base64url: RegExp; export declare const hostname: RegExp; export declare const domain: RegExp; export declare const httpProtocol: RegExp; export declare const e164: RegExp; export declare const creditCard: RegExp; export declare const currencyCode: RegExp; export declare const iban: RegExp; export declare const date: RegExp; export declare function time(args: { precision?: number | null; }): RegExp; export declare function datetime(args: { precision?: number | null; offset?: boolean; local?: boolean; }): RegExp; export declare const anyString: RegExp; export declare const string: (params?: { minimum?: number | undefined; maximum?: number | undefined; }) => RegExp; export declare const bigint: RegExp; export declare const integer: RegExp; export declare const number: RegExp; export declare const boolean: RegExp; declare const _null: RegExp; export { _null as null }; declare const _undefined: RegExp; export { _undefined as undefined }; export declare const lowercase: RegExp; export declare const uppercase: RegExp; export declare const hex: RegExp; export declare const md5_hex: RegExp; export declare const md5_base64: RegExp; export declare const md5_base64url: RegExp; export declare const sha1_hex: RegExp; export declare const sha1_base64: RegExp; export declare const sha1_base64url: RegExp; export declare const sha256_hex: RegExp; export declare const sha256_base64: RegExp; export declare const sha256_base64url: RegExp; export declare const sha384_hex: RegExp; export declare const sha384_base64: RegExp; export declare const sha384_base64url: RegExp; export declare const sha512_hex: RegExp; export declare const sha512_base64: RegExp; export declare const sha512_base64url: RegExp;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "registry",
+      "kind": "function",
+      "signature": "export declare function registry<T extends MetadataType = MetadataType, S extends $ZodType = $ZodType>(): $ZodRegistry<T, S>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeDecode",
+      "kind": "variable",
+      "signature": "export declare const safeDecode: <T extends core.$ZodType>(schema: T, value: core.input<T>, _ctx?: core.ParseContext<core.$ZodIssue>) => ZodSafeParseResult<core.output<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeDecodeAsync",
+      "kind": "variable",
+      "signature": "export declare const safeDecodeAsync: <T extends core.$ZodType>(schema: T, value: core.input<T>, _ctx?: core.ParseContext<core.$ZodIssue>) => Promise<ZodSafeParseResult<core.output<T>>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeEncode",
+      "kind": "variable",
+      "signature": "export declare const safeEncode: <T extends core.$ZodType>(schema: T, value: core.output<T>, _ctx?: core.ParseContext<core.$ZodIssue>) => ZodSafeParseResult<core.input<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeEncodeAsync",
+      "kind": "variable",
+      "signature": "export declare const safeEncodeAsync: <T extends core.$ZodType>(schema: T, value: core.output<T>, _ctx?: core.ParseContext<core.$ZodIssue>) => Promise<ZodSafeParseResult<core.input<T>>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "SafeExtendShape",
+      "kind": "type",
+      "signature": "export type SafeExtendShape<Base extends core.$ZodShape, Ext extends core.$ZodLooseShape> = { [K in keyof Ext]: K extends keyof Base ? core.output<Ext[K]> extends core.output<Base[K]> ? core.input<Ext[K]> extends core.input<Base[K]> ? Ext[K] : never : never : Ext[K]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeParse",
+      "kind": "variable",
+      "signature": "export declare const safeParse: <T extends core.$ZodType>(schema: T, value: unknown, _ctx?: core.ParseContext<core.$ZodIssue>) => ZodSafeParseResult<core.output<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "safeParseAsync",
+      "kind": "variable",
+      "signature": "export declare const safeParseAsync: <T extends core.$ZodType>(schema: T, value: unknown, _ctx?: core.ParseContext<core.$ZodIssue>) => Promise<ZodSafeParseResult<core.output<T>>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Schema",
+      "kind": "type",
+      "signature": "export type Schema<Output = unknown, Input = unknown, Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> = ZodType<Output, Input, Internals>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "set",
+      "kind": "function",
+      "signature": "export declare function set<Value extends core.SomeType>(valueType: Value, params?: string | core.$ZodSetParams): ZodSet<Value>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "setErrorMap",
+      "kind": "function",
+      "signature": "export declare function setErrorMap(map: core.$ZodErrorMap): void;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "size",
+      "kind": "function",
+      "signature": "export declare function _size(size: number, params?: string | $ZodCheckSizeEqualsParams): checks.$ZodCheckSizeEquals<util.HasSize>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "slugify",
+      "kind": "function",
+      "signature": "export declare function _slugify(): checks.$ZodCheckOverwrite<string>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "SortDirection",
+      "kind": "type",
+      "signature": "export type SortDirection = 'asc' | 'desc';",
+      "jsdocSummary": "Sort direction of one key."
+    },
+    {
+      "subpath": ".",
+      "name": "startsWith",
+      "kind": "function",
+      "signature": "export declare function _startsWith(prefix: string, params?: string | $ZodCheckStartsWithParams): checks.$ZodCheckStartsWith;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "strictObject",
+      "kind": "function",
+      "signature": "export declare function strictObject<T extends core.$ZodLooseShape>(shape: T, params?: string | core.$ZodObjectParams): ZodObject<util.Writeable<T>, core.$strict>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "string",
+      "kind": "function",
+      "signature": "export declare function string(params?: string | core.$ZodStringParams): ZodString; ; export declare function string<T extends string>(params?: string | core.$ZodStringParams): core.$ZodType<T, T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "stringbool",
+      "kind": "variable",
+      "signature": "export declare const stringbool: (_params?: string | core.$ZodStringBoolParams) => ZodCodec<ZodString, ZodBoolean>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "stringFormat",
+      "kind": "function",
+      "signature": "export declare function stringFormat<Format extends string>(format: Format, fnOrRegex: ((arg: string) => util.MaybeAsync<unknown>) | RegExp, _params?: string | core.$ZodStringFormatParams): ZodCustomStringFormat<Format>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "success",
+      "kind": "function",
+      "signature": "export declare function success<T extends core.SomeType>(innerType: T): ZodSuccess<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "superRefine",
+      "kind": "function",
+      "signature": "export declare function superRefine<T>(fn: (arg: T, payload: core.$RefinementCtx<T>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): core.$ZodCheck<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "symbol",
+      "kind": "function",
+      "signature": "export declare function symbol(params?: string | core.$ZodSymbolParams): ZodSymbol;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "templateLiteral",
+      "kind": "function",
+      "signature": "export declare function templateLiteral<const Parts extends core.$ZodTemplateLiteralPart[]>(parts: Parts, params?: string | core.$ZodTemplateLiteralParams): ZodTemplateLiteral<core.$PartsToTemplateLiteral<Parts>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "TimePrecision",
+      "kind": "variable",
+      "signature": "export declare const TimePrecision: { readonly Any: null; readonly Minute: -1; readonly Second: 0; readonly Millisecond: 3; readonly Microsecond: 6; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "toJSONSchema",
+      "kind": "function",
+      "signature": "export declare function toJSONSchema<T extends schemas.$ZodType>(schema: T, params?: ToJSONSchemaParams): ZodStandardJSONSchemaPayload<T>; ; export declare function toJSONSchema(registry: $ZodRegistry<{ id?: string | undefined; }>, params?: RegistryToJSONSchemaParams): { schemas: Record<string, ZodStandardJSONSchemaPayload<schemas.$ZodType>>; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "toLowerCase",
+      "kind": "function",
+      "signature": "export declare function _toLowerCase(): checks.$ZodCheckOverwrite<string>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "toUpperCase",
+      "kind": "function",
+      "signature": "export declare function _toUpperCase(): checks.$ZodCheckOverwrite<string>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "toZod",
+      "kind": "function",
+      "signature": "export declare function toZod<T>(): <S extends schemas.$ZodType>(schema: ToZodEqual<S[\"_zod\"][\"output\"], T> extends true ? S : ToZodTarget<S, T>) => S;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "transform",
+      "kind": "function",
+      "signature": "export declare function transform<I = unknown, O = I>(fn: (input: I, ctx: core.$RefinementCtx) => O): ZodTransform<Awaited<O>, I>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "treeifyError",
+      "kind": "function",
+      "signature": "export declare function treeifyError<T>(error: $ZodError<T>): $ZodErrorTree<T>; ; export declare function treeifyError<T, U>(error: $ZodError<T>, mapper?: (issue: $ZodIssue) => U): $ZodErrorTree<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "trim",
+      "kind": "function",
+      "signature": "export declare function _trim(): checks.$ZodCheckOverwrite<string>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "tuple",
+      "kind": "function",
+      "signature": "export declare function tuple<T extends readonly [core.SomeType, ...core.SomeType[]]>(items: T, params?: string | core.$ZodTupleParams): ZodTuple<T, null>; ; export declare function tuple<T extends readonly [core.SomeType, ...core.SomeType[]], Rest extends core.SomeType>(items: T, rest: Rest, params?: string | core.$ZodTupleParams): ZodTuple<T, Rest>; ; export declare function tuple(items: [], params?: string | core.$ZodTupleParams): ZodTuple<[], null>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "TypeOf",
+      "kind": "type",
+      "signature": "export type TypeOf<T> = core.output<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uint32",
+      "kind": "function",
+      "signature": "export declare function uint32(params?: string | core.$ZodCheckNumberFormatParams): ZodUInt32;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uint64",
+      "kind": "function",
+      "signature": "export declare function uint64(params?: string | core.$ZodBigIntFormatParams): ZodUInt64;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ulid",
+      "kind": "function",
+      "signature": "export declare function ulid(params?: string | core.$ZodULIDParams): ZodULID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "undefined",
+      "kind": "function",
+      "signature": "declare function _undefined(params?: string | core.$ZodUndefinedParams): ZodUndefined;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "union",
+      "kind": "function",
+      "signature": "export declare function union<const T extends readonly core.SomeType[]>(options: T, params?: string | core.$ZodUnionParams): ZodUnion<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "unknown",
+      "kind": "function",
+      "signature": "export declare function unknown(): ZodUnknown;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uppercase",
+      "kind": "function",
+      "signature": "export declare function _uppercase(params?: string | $ZodCheckUpperCaseParams): checks.$ZodCheckUpperCase;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "url",
+      "kind": "function",
+      "signature": "export declare function url(params?: string | core.$ZodURLParams): ZodURL;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "UserId",
+      "kind": "type",
+      "signature": "export type UserId = `usr_${string}`;",
+      "jsdocSummary": "The id of a user: `usr_` followed by an id. Every package that refers to a user, whether or not it owns the user table, uses this one type, so ids pass between packages without a dependency between them."
+    },
+    {
+      "subpath": ".",
+      "name": "userIdSchema",
+      "kind": "variable",
+      "signature": "export declare const userIdSchema: z.ZodCustom<`usr_${string}`, `usr_${string}`>;",
+      "jsdocSummary": "Validates a user id: a string that starts with `usr_`."
+    },
+    {
+      "subpath": ".",
+      "name": "util",
+      "kind": "unknown",
+      "signature": "import type * as checks from \"./checks.cjs\"; import type { $ZodConfig } from \"./core.cjs\"; import type * as errors from \"./errors.cjs\"; import type * as schemas from \"./schemas.cjs\"; export type JSONType = string | number | boolean | null | JSONType[] | { [key: string]: JSONType; }; export type JWTAlgorithm = \"HS256\" | \"HS384\" | \"HS512\" | \"RS256\" | \"RS384\" | \"RS512\" | \"ES256\" | \"ES384\" | \"ES512\" | \"PS256\" | \"PS384\" | \"PS512\" | \"EdDSA\" | (string & {}); export type HashAlgorithm = \"md5\" | \"sha1\" | \"sha256\" | \"sha384\" | \"sha512\"; export type HashEncoding = \"hex\" | \"base64\" | \"base64url\"; export type HashFormat = `${HashAlgorithm}_${HashEncoding}`; export type IPVersion = \"v4\" | \"v6\"; export type MimeTypes = \"application/json\" | \"application/xml\" | \"application/x-www-form-urlencoded\" | \"application/javascript\" | \"application/pdf\" | \"application/zip\" | \"application/vnd.ms-excel\" | \"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\" | \"application/msword\" | \"application/vnd.openxmlformats-officedocument.wordprocessingml.document\" | \"application/vnd.ms-powerpoint\" | \"application/vnd.openxmlformats-officedocument.presentationml.presentation\" | \"application/octet-stream\" | \"application/graphql\" | \"text/html\" | \"text/plain\" | \"text/css\" | \"text/javascript\" | \"text/csv\" | \"image/png\" | \"image/jpeg\" | \"image/gif\" | \"image/svg+xml\" | \"image/webp\" | \"audio/mpeg\" | \"audio/ogg\" | \"audio/wav\" | \"audio/webm\" | \"video/mp4\" | \"video/webm\" | \"video/ogg\" | \"font/woff\" | \"font/woff2\" | \"font/ttf\" | \"font/otf\" | \"multipart/form-data\" | (string & {}); export type ParsedTypes = \"string\" | \"number\" | \"bigint\" | \"boolean\" | \"symbol\" | \"undefined\" | \"object\" | \"function\" | \"file\" | \"date\" | \"array\" | \"map\" | \"set\" | \"nan\" | \"null\" | \"promise\"; export type AssertEqual<T, U> = (<V>() => V extends T ? 1 : 2) extends <V>() => V extends U ? 1 : 2 ? true : false; export type AssertNotEqual<T, U> = (<V>() => V extends T ? 1 : 2) extends <V>() => V extends U ? 1 : 2 ? false : true; export type AssertExtends<T, U> = T extends U ? T : never; type ToZodMismatch<T, S extends schemas.$ZodType> = { \"types do not match\": { expected: T; received: S[\"_zod\"][\"output\"]; }; }; type ToZodKeyMismatch<Expected, Received> = schemas.$ZodType & { \"types do not match\": { expected: Expected; received: Received; }; }; declare const toZodDummy: unique symbol; type ToZodNormalize<T> = [T] extends [(...args: any[]) => any] ? T : [T] extends [object] ? { [K in keyof T]: ToZodNormalize<T[K]>; } : T | typeof toZodDummy; type ToZodEqual<Output, T> = AssertEqual<Output, T> extends true ? true : IsAny<Output> extends true ? false : IsAny<T> extends true ? false : AssertEqual<ToZodNormalize<Output>, ToZodNormalize<T>>; type ToZodShape<Shape, T> = { [K in keyof Shape]: Shape[K] extends schemas.$ZodType ? K extends keyof T ? ToZodEqual<Shape[K][\"_zod\"][\"output\"], T[K]> extends true ? Shape[K] : ToZodKeyMismatch<T[K], Shape[K][\"_zod\"][\"output\"]> : ToZodKeyMismatch<never, Shape[K][\"_zod\"][\"output\"]> : Shape[K]; } & { [K in Exclude<keyof T, keyof Shape>]: ToZodKeyMismatch<T[K], never>; }; type ToZodExpand<X> = { [K in keyof X]: X[K]; } & {}; type ToZodTarget<S extends schemas.$ZodType, T> = S extends schemas.$ZodObject<infer Shape, infer Config> ? T extends object ? AssertEqual<ToZodExpand<ToZodShape<Shape, T>>, ToZodExpand<Shape>> extends true ? S & ToZodMismatch<T, S> : schemas.$ZodObject<ToZodExpand<ToZodShape<Shape, T>>, Config> : S & ToZodMismatch<T, S> : S & ToZodMismatch<T, S>; export type IsAny<T> = 0 extends 1 & T ? true : false; export type Omit<T, K extends keyof T> = Pick<T, Exclude<keyof T, K>>; export type OmitKeys<T, K extends string> = Pick<T, Exclude<keyof T, K>>; export type MakePartial<T, K extends keyof T> = Omit<T, K> & InexactPartial<Pick<T, K>>; export type MakeRequired<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>; export type Exactly<T, X> = T & Record<Exclude<keyof X, keyof T>, never>; export type NoUndefined<T> = T extends undefined ? never : T; export type Whatever = {} | undefined | null; export type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T extends bigint ? bigint : T; export type LoosePartial<T extends object> = InexactPartial<T> & { [k: string]: unknown; }; export type Mask<Keys extends PropertyKey> = { [K in Keys]?: true; }; export type Writeable<T> = { -readonly [P in keyof T]: T[P]; } & {}; export type InexactPartial<T> = { [P in keyof T]?: T[P] | undefined; }; export type EmptyObject = Record<string, never>; export type BuiltIn = (((...args: any[]) => any) | (new (...args: any[]) => any)) | { readonly [Symbol.toStringTag]: string; } | Date | Error | Generator | Promise<unknown> | RegExp; export type MakeReadonly<T> = T extends Map<infer K, infer V> ? ReadonlyMap<K, V> : T extends Set<infer V> ? ReadonlySet<V> : T extends [infer Head, ...infer Tail] ? readonly [Head, ...Tail] : T extends Array<infer V> ? ReadonlyArray<V> : T extends BuiltIn ? T : Readonly<T>; export type SomeObject = Record<PropertyKey, any>; export type Identity<T> = T; export type Flatten<T> = Identity<{ [k in keyof T]: T[k]; }>; export type Mapped<T> = { [k in keyof T]: T[k]; }; export type Prettify<T> = { [K in keyof T]: T[K]; } & {}; export type NoNeverKeys<T> = { [k in keyof T]: [T[k]] extends [never] ? never : k; }[keyof T]; export type NoNever<T> = Identity<{ [k in NoNeverKeys<T>]: k extends keyof T ? T[k] : never; }>; export type Extend<A extends SomeObject, B extends SomeObject> = Flatten<keyof A & keyof B extends never ? A & B : { [K in keyof A as K extends keyof B ? never : K]: A[K]; } & { [K in keyof B]: B[K]; }>; export type TupleItems = ReadonlyArray<schemas.SomeType>; export type AnyFunc = (...args: any[]) => any; export type IsProp<T, K extends keyof T> = T[K] extends AnyFunc ? never : K; export type MaybeAsync<T> = T | Promise<T>; export type KeyOf<T> = keyof OmitIndexSignature<T>; export type OmitIndexSignature<T> = { [K in keyof T as string extends K ? never : K extends string ? K : never]: T[K]; }; export type ExtractIndexSignature<T> = { [K in keyof T as string extends K ? K : K extends string ? never : K]: T[K]; }; export type Keys<T extends object> = keyof OmitIndexSignature<T>; export type SchemaClass<T extends schemas.SomeType> = { new (def: T[\"_zod\"][\"def\"]): T; }; export type EnumValue = string | number; export type EnumLike = Readonly<Record<string, EnumValue>>; export type ToEnum<T extends EnumValue> = Flatten<{ [k in T]: k; }>; export type KeysEnum<T extends object> = ToEnum<Exclude<keyof T, symbol>>; export type KeysArray<T extends object> = Flatten<(keyof T & string)[]>; export type Literal = string | number | bigint | boolean | null | undefined; export type LiteralArray = Array<Literal>; export type Primitive = string | number | symbol | bigint | boolean | null | undefined; export type PrimitiveArray = Array<Primitive>; export type HasSize = { size: number; }; export type HasLength = { length: number; }; export type Numeric = number | bigint | Date; export type SafeParseResult<T> = SafeParseSuccess<T> | SafeParseError<T>; export type SafeParseSuccess<T> = { success: true; data: T; error?: never; }; export type SafeParseError<T> = { success: false; data?: never; error: errors.$ZodError<T>; }; export type PropValues = Record<string, Set<Primitive>>; export type PrimitiveSet = Set<Primitive>; export declare function assertEqual<A, B>(val: AssertEqual<A, B>): AssertEqual<A, B>; export declare function assertNotEqual<A, B>(val: AssertNotEqual<A, B>): AssertNotEqual<A, B>; export declare function toZod<T>(): <S extends schemas.$ZodType>(schema: ToZodEqual<S[\"_zod\"][\"output\"], T> extends true ? S : ToZodTarget<S, T>) => S; export declare function assertIs<T>(_arg: T): void; export declare function assertNever(_x: never): never; export declare function assert<T>(_: any): asserts _ is T; export declare function getEnumValues(entries: EnumLike): EnumValue[]; export declare function joinValues<T extends Primitive[]>(array: T, separator?: string): string; export declare function jsonStringifyReplacer(_: string, value: any): any; export declare function cached<T>(getter: () => T): { value: T; }; export declare function nullish(input: any): boolean; export declare function cleanRegex(source: string): string; export declare function floatSafeRemainder(val: number, step: number): number; export declare function defineLazy<T, K extends keyof T>(object: T, key: K, getter: () => T[K]): void; export declare function objectClone(obj: object): any; export declare function assignProp<T extends object, K extends PropertyKey>(target: T, prop: K, value: K extends keyof T ? T[K] : any): void; /** A def's `shape` accessor, carrying whichever object it currently answers from. */ export interface ShapeGetter { (): Record<PropertyKey, any>; raw: Record<PropertyKey, any>; } /** * Whichever object a def's `shape` currently answers from: the one the caller passed until the first read, the frozen copy after it. * * Its keys and descriptors read without invoking anything, which is what lets a discriminated union check its discriminator, and the cycle walk read a shape, without resolving a getter that references the schema being constructed. A def that answers `shape` from an accessor of its own has none. */ export declare function rawShape(def: any): Record<PropertyKey, any> | undefined; export declare function mergeDefs(...defs: Record<string, any>[]): any; export declare function cloneDef(schema: schemas.$ZodType): any; export declare function getElementAtPath(obj: any, path: (string | number)[] | null | undefined): any; export declare function promiseAllObject<T extends object>(promisesObj: T): Promise<{ [k in keyof T]: Awaited<T[k]>; }>; export declare function randomString(length?: number): string; export declare function esc(str: string): string; export declare function slugify(input: string): string; export declare const captureStackTrace: (targetObject: object, constructorOpt?: Function) => void; export declare function isObject(data: any): data is Record<PropertyKey, unknown>; export declare const allowsEval: { value: boolean; }; export declare function isPlainObject(o: any): o is Record<PropertyKey, unknown>; export declare function shallowClone(o: any): any; export declare function numKeys(data: any): number; export declare const getParsedType: (data: any) => ParsedTypes; export declare const propertyKeyTypes: Set<string>; export declare const primitiveTypes: Set<string>; export declare function escapeRegex(str: string): string; export declare function clone<T extends schemas.$ZodType>(inst: T, def?: T[\"_zod\"][\"def\"], params?: { parent: boolean; }): T; export type EmptyToNever<T> = keyof T extends never ? never : T; export type Normalize<T> = T extends undefined ? never : T extends Record<any, any> ? Flatten<{ [k in keyof Omit<T, \"error\" | \"message\">]: T[k]; } & (\"error\" extends keyof T ? { error?: Exclude<T[\"error\"], string>; } : unknown)> : never; export declare function normalizeParams<T>(_params: T): Normalize<T>; export declare function createTransparentProxy<T extends object>(getter: () => T): T; export declare function stringifyPrimitive(value: any): string; export declare function optionalKeys(shape: schemas.$ZodShape): string[]; export type CleanKey<T extends PropertyKey> = T extends `?${infer K}` ? K : T extends `${infer K}?` ? K : T; export type ToCleanMap<T extends schemas.$ZodLooseShape> = { [k in keyof T]: k extends `?${infer K}` ? K : k extends `${infer K}?` ? K : k; }; export type FromCleanMap<T extends schemas.$ZodLooseShape> = { [k in keyof T as k extends `?${infer K}` ? K : k extends `${infer K}?` ? K : k]: k; }; export declare const NUMBER_FORMAT_RANGES: Record<checks.$ZodNumberFormats, [number, number]>; export declare const BIGINT_FORMAT_RANGES: Record<checks.$ZodBigIntFormats, [bigint, bigint]>; export declare function pick(schema: schemas.$ZodObject, mask: Record<string, unknown>): any; export declare function omit(schema: schemas.$ZodObject, mask: object): any; export declare function extend(schema: schemas.$ZodObject, shape: schemas.$ZodShape): any; export declare function safeExtend(schema: schemas.$ZodObject, shape: schemas.$ZodShape): any; export declare function merge(a: schemas.$ZodObject, b: schemas.$ZodObject): any; export declare function partial(Class: SchemaClass<schemas.$ZodOptional> | null, schema: schemas.$ZodObject, mask: object | undefined, name?: string): any; export declare function required(Class: SchemaClass<schemas.$ZodNonOptional>, schema: schemas.$ZodObject, mask: object | undefined): any; export type Constructor<T, Def extends any[] = any[]> = new (...args: Def) => T; export declare function aborted(x: schemas.ParsePayload, startIndex?: number): boolean; export declare function explicitlyAborted(x: schemas.ParsePayload, startIndex?: number): boolean; export declare function prefixIssues(path: PropertyKey, issues: errors.$ZodRawIssue[]): errors.$ZodRawIssue[]; export declare function unwrapMessage(message: string | { message: string; } | undefined | null): string | undefined; export declare function attachSchema(issues: errors.$ZodRawIssue[], start: number, inst: schemas.$ZodType): void; export declare function finalizeIssue(iss: errors.$ZodRawIssue, ctx: schemas.ParseContextInternal | undefined, config: $ZodConfig): errors.$ZodIssue; export declare function getSizableOrigin(input: any): \"set\" | \"map\" | \"file\" | \"unknown\"; export declare function codePointLength(str: string): number; export declare function getLengthableOrigin(input: any): \"array\" | \"string\" | \"unknown\"; export declare function parsedType(data: unknown): errors.$ZodInvalidTypeExpected; export declare function issue(_iss: string, input: any, inst: any): errors.$ZodRawIssue; export declare function issue(_iss: errors.$ZodRawIssue): errors.$ZodRawIssue; export declare function cleanEnum(obj: Record<string, EnumValue>): EnumValue[]; export declare function base64ToUint8Array(base64: string): InstanceType<typeof Uint8Array>; export declare function uint8ArrayToBase64(bytes: Uint8Array): string; export declare function base64urlToUint8Array(base64url: string): InstanceType<typeof Uint8Array>; export declare function uint8ArrayToBase64url(bytes: Uint8Array): string; export declare function hexToUint8Array(hex: string): InstanceType<typeof Uint8Array>; export declare function uint8ArrayToHex(bytes: Uint8Array): string; export declare abstract class Class { constructor(..._args: any[]); } /** * Installs a trait's members on its prototype. Each value builds that member for the instance on first read; the built value shadows the accessor as an own property, so a detached `const { parse } = schema` keeps working. * * Call this from a `proto` initializer, which runs once per prototype — never per instance. */ export declare function members(proto: object, table: object): void; /** Shadows a prototype member with an own value, so a getter that builds from the instance runs once. */ export declare function own<T>(inst: object, key: PropertyKey, value: T, enumerable?: boolean): T; /** Like {@link own}, for a member that was never an own data property and has to stay out of `Object.keys`. */ export declare function hide<T>(inst: object, key: PropertyKey, value: T): T; /** Adds members a table derives from the instance: each builds on first read and shadows as own data, and assignment shadows the same way, as when these were own properties. */ export declare function derived<T>(computes: { [K in keyof T]?: (inst: T) => T[K]; }, table: ProtoOf<T>): ProtoOf<T>; /** A trait's prototype members: a partial view of its own interface, with `this` typed as the instance. */ export type ProtoOf<T> = { [K in keyof T]?: (T[K] extends (...args: infer A) => infer R ? (...args: A) => R : T[K]) | undefined; } & ThisType<T>; /** * Installs a lazily-derived internal on the `_zod` prototype of `inst`'s * constructor, computed from the internals object itself and cached there on * first read. One accessor per constructor rather than one per instance. */ export declare function defineLazyInternal<T extends { _zod: any; }>(inst: T, key: string, compute: (zod: T[\"_zod\"]) => unknown): void; /** * Installs `key` on `inst`'s prototype, computed by `make` on first read and cached there as an own * data property. One accessor per constructor rather than one per instance, because an own accessor * puts every instance after the first into v8 dictionary mode. The key doubles as the sentinel. */ export declare function installLazyProp(inst: object, key: string, make: (self: any) => unknown, enumerable: boolean): void; /** Marks the thunk `_catch` synthesises for a constant catch value. `Function.length` cannot tell that thunk from a user callback — rest and defaulted parameters both report arity 0 — and a user callback reads `ctx.error`, whose issues only finalize correctly against the caller's per-parse error map. Provenance can say what arity cannot. A plain string key rather than `Symbol.for`, whose call at module scope no bundler can prove pure — the same shape that anchored `urlCanParse` into every build. */ export declare const CONSTANT_CATCH = \"~constantCatch\"; /** Wraps a constant catch value in a thunk tagged with {@link CONSTANT_CATCH}. */ export declare function constantCatch<T>(value: T): () => T; export {};",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uuid",
+      "kind": "function",
+      "signature": "export declare function uuid(params?: string | core.$ZodUUIDParams): ZodUUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uuidv4",
+      "kind": "function",
+      "signature": "export declare function uuidv4(params?: string | core.$ZodUUIDv4Params): ZodUUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uuidv6",
+      "kind": "function",
+      "signature": "export declare function uuidv6(params?: string | core.$ZodUUIDv6Params): ZodUUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "uuidv7",
+      "kind": "function",
+      "signature": "export declare function uuidv7(params?: string | core.$ZodUUIDv7Params): ZodUUID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "validate",
+      "kind": "variable",
+      "signature": "export declare const validate: $Validate;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "validateAsync",
+      "kind": "variable",
+      "signature": "export declare const validateAsync: $ValidateAsync;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "void",
+      "kind": "function",
+      "signature": "declare function _void(params?: string | core.$ZodVoidParams): ZodVoid;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "withParser",
+      "kind": "function",
+      "signature": "export declare function withParser<T extends SomeType>(schema: T, parser: (input: unknown) => core.output<T> | INVALID): T;",
+      "jsdocSummary": "Install an already-generated parser as a schema's fast path. Returns a clone; the original is unchanged."
+    },
+    {
+      "subpath": ".",
+      "name": "xid",
+      "kind": "function",
+      "signature": "export declare function xid(params?: string | core.$ZodXIDParams): ZodXID;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "xor",
+      "kind": "function",
+      "signature": "export declare function xor<const T extends readonly core.SomeType[]>(options: T, params?: string | core.$ZodXorParams): ZodXor<T>;",
+      "jsdocSummary": "Creates an exclusive union (XOR) where exactly one option must match. Unlike regular unions that succeed when any option matches, xor fails if zero or more than one option matches the input."
+    },
+    {
+      "subpath": ".",
+      "name": "z",
+      "kind": "unknown",
+      "signature": "export * as core from \"../core/index.cjs\"; export * from \"./schemas.cjs\"; export * from \"./checks.cjs\"; export * from \"./errors.cjs\"; export * from \"./parse.cjs\"; export * from \"./compat.cjs\"; export type { infer } from \"../core/index.cjs\"; export type { JSONType } from \"../core/util.cjs\"; export type { CompileOptions } from \"../core/index.cjs\"; export { globalRegistry, type GlobalMeta, registry, config, memoizer, $output, $input, $brand, clone, regexes, treeifyError, prettifyError, formatError, flattenError, TimePrecision, util, NEVER, INVALID, toZod, compile, withParser, ZodCompileAsyncError, ZodCompileUnsupportedError, getDiscriminatedOption, } from \"../core/index.cjs\"; export { toJSONSchema } from \"../core/json-schema-processors.cjs\"; export { fromJSONSchema } from \"./from-json-schema.cjs\"; export { deepPartial } from \"./deep-partial.cjs\"; export { input, output } from \"./in-out.cjs\"; export * as locales from \"../locales/index.cjs\"; export { ZodISODateTime, ZodISODate, ZodISOTime, ZodISODuration } from \"./iso.cjs\"; export * as iso from \"./iso.cjs\"; export type { ZodCoercedString, ZodCoercedNumber, ZodCoercedBigInt, ZodCoercedBoolean, ZodCoercedDate, } from \"./coerce.cjs\"; export * as coerce from \"./coerce.cjs\";",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodAny",
+      "kind": "interface",
+      "signature": "export interface ZodAny extends _ZodType<core.$ZodAnyInternals> { } ; export declare const ZodAny: core.$constructor<ZodAny>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodArray",
+      "kind": "interface",
+      "signature": "export interface ZodArray<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodArrayInternals<T>>, core.$ZodArray<T> { element: T; min(minLength: number, params?: string | core.$ZodCheckMinLengthParams): this; nonempty(params?: string | core.$ZodCheckMinLengthParams): this; max(maxLength: number, params?: string | core.$ZodCheckMaxLengthParams): this; length(len: number, params?: string | core.$ZodCheckLengthEqualsParams): this; unwrap(): T; \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodArray: core.$constructor<ZodArray>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodBase64",
+      "kind": "interface",
+      "signature": "export interface ZodBase64 extends ZodStringFormat<\"base64\"> { _zod: core.$ZodBase64Internals; } ; export declare const ZodBase64: core.$constructor<ZodBase64>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodBase64URL",
+      "kind": "interface",
+      "signature": "export interface ZodBase64URL extends ZodStringFormat<\"base64url\"> { _zod: core.$ZodBase64URLInternals; } ; export declare const ZodBase64URL: core.$constructor<ZodBase64URL>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodBigInt",
+      "kind": "interface",
+      "signature": "export interface ZodBigInt extends _ZodBigInt<core.$ZodBigIntInternals<bigint>> { } ; export declare const ZodBigInt: core.$constructor<ZodBigInt>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodBigIntFormat",
+      "kind": "interface",
+      "signature": "export interface ZodBigIntFormat<Format extends $ZodBigIntFormats = $ZodBigIntFormats> extends ZodBigInt { _zod: core.$ZodBigIntFormatInternals<Format>; } ; export declare const ZodBigIntFormat: core.$constructor<ZodBigIntFormat>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodBoolean",
+      "kind": "interface",
+      "signature": "export interface ZodBoolean extends _ZodBoolean<core.$ZodBooleanInternals<boolean>> { } ; export declare const ZodBoolean: core.$constructor<ZodBoolean>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCatch",
+      "kind": "interface",
+      "signature": "export interface ZodCatch<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodCatchInternals<T>>, core.$ZodCatch<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; /** @deprecated Use `.unwrap()` instead. */ removeCatch(): T; } ; export declare const ZodCatch: core.$constructor<ZodCatch>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCIDRv4",
+      "kind": "interface",
+      "signature": "export interface ZodCIDRv4 extends ZodStringFormat<\"cidrv4\"> { _zod: core.$ZodCIDRv4Internals; } ; export declare const ZodCIDRv4: core.$constructor<ZodCIDRv4>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCIDRv6",
+      "kind": "interface",
+      "signature": "export interface ZodCIDRv6 extends ZodStringFormat<\"cidrv6\"> { _zod: core.$ZodCIDRv6Internals; } ; export declare const ZodCIDRv6: core.$constructor<ZodCIDRv6>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCodec",
+      "kind": "interface",
+      "signature": "export interface ZodCodec<A extends core.SomeType = core.$ZodType, B extends core.SomeType = core.$ZodType> extends ZodPipe<A, B>, core.$ZodCodec<A, B> { \"~standard\": ZodStandardSchemaWithJSON<this>; _zod: core.$ZodCodecInternals<A, B>; def: core.$ZodCodecDef<A, B>; } ; export declare const ZodCodec: core.$constructor<ZodCodec>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCoercedBigInt",
+      "kind": "interface",
+      "signature": "export interface ZodCoercedBigInt<T = unknown> extends schemas._ZodBigInt<core.$ZodBigIntInternals<T>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCoercedBoolean",
+      "kind": "interface",
+      "signature": "export interface ZodCoercedBoolean<T = unknown> extends schemas._ZodBoolean<core.$ZodBooleanInternals<T>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCoercedDate",
+      "kind": "interface",
+      "signature": "export interface ZodCoercedDate<T = unknown> extends schemas._ZodDate<core.$ZodDateInternals<T>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCoercedNumber",
+      "kind": "interface",
+      "signature": "export interface ZodCoercedNumber<T = unknown> extends schemas._ZodNumber<core.$ZodNumberInternals<T>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCoercedString",
+      "kind": "interface",
+      "signature": "export interface ZodCoercedString<T = unknown> extends schemas._ZodString<core.$ZodStringInternals<T>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCompileAsyncError",
+      "kind": "class",
+      "signature": "export declare class ZodCompileAsyncError extends Error { constructor(message?: string); }",
+      "jsdocSummary": "Raised when the schema contains async refinements or transforms. Surfaces only under `compile(schema, { strict: true })`."
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCompileUnsupportedError",
+      "kind": "class",
+      "signature": "export declare class ZodCompileUnsupportedError extends Error { /** Whether a container may absorb this refusal by running the child through the runtime (see `compileChild`). False when running only that node on the runtime is not equivalent to running the whole parse there — a runtime island gets no parse context, so a node that *consumes* issues rather than propagating them would finalize them against the wrong error map and still succeed. */ readonly islandable: boolean; constructor(feature: string, islandable?: boolean); }",
+      "jsdocSummary": "Raised when the schema contains a feature whose semantics the fast path can't fully model. Both the shim in `zod/compile` and the default `compile()` fall back to the runtime parser for that schema; only `compile(schema, { strict: true })` lets it surface."
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCreditCard",
+      "kind": "interface",
+      "signature": "export interface ZodCreditCard extends ZodStringFormat<\"credit_card\"> { _zod: core.$ZodCreditCardInternals; } ; export declare const ZodCreditCard: core.$constructor<ZodCreditCard>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCUID",
+      "kind": "interface",
+      "signature": "export interface ZodCUID extends ZodStringFormat<\"cuid\"> { _zod: core.$ZodCUIDInternals; } ; export declare const ZodCUID: core.$constructor<ZodCUID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCUID2",
+      "kind": "interface",
+      "signature": "export interface ZodCUID2 extends ZodStringFormat<\"cuid2\"> { _zod: core.$ZodCUID2Internals; } ; export declare const ZodCUID2: core.$constructor<ZodCUID2>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCustom",
+      "kind": "interface",
+      "signature": "export interface ZodCustom<O = unknown, I = unknown> extends _ZodType<core.$ZodCustomInternals<O, I>>, core.$ZodCustom<O, I> { \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodCustom: core.$constructor<ZodCustom>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodCustomStringFormat",
+      "kind": "interface",
+      "signature": "export interface ZodCustomStringFormat<Format extends string = string> extends ZodStringFormat<Format>, core.$ZodCustomStringFormat<Format> { _zod: core.$ZodCustomStringFormatInternals<Format>; \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodCustomStringFormat: core.$constructor<ZodCustomStringFormat>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodDate",
+      "kind": "interface",
+      "signature": "export interface ZodDate extends _ZodDate<core.$ZodDateInternals<Date>> { } ; export declare const ZodDate: core.$constructor<ZodDate>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodDefault",
+      "kind": "interface",
+      "signature": "export interface ZodDefault<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodDefaultInternals<T>>, core.$ZodDefault<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; /** @deprecated Use `.unwrap()` instead. */ removeDefault(): T; } ; export declare const ZodDefault: core.$constructor<ZodDefault>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodDiscriminatedUnion",
+      "kind": "interface",
+      "signature": "export interface ZodDiscriminatedUnion<Options extends readonly core.SomeType[] = readonly core.$ZodType[], Disc extends string = string> extends ZodUnion<Options>, core.$ZodDiscriminatedUnion<Options, Disc> { \"~standard\": ZodStandardSchemaWithJSON<this>; _zod: core.$ZodDiscriminatedUnionInternals<Options, Disc>; def: core.$ZodDiscriminatedUnionDef<Options, Disc>; } ; export declare const ZodDiscriminatedUnion: core.$constructor<ZodDiscriminatedUnion>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodE164",
+      "kind": "interface",
+      "signature": "export interface ZodE164 extends ZodStringFormat<\"e164\"> { _zod: core.$ZodE164Internals; } ; export declare const ZodE164: core.$constructor<ZodE164>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodEmail",
+      "kind": "interface",
+      "signature": "export interface ZodEmail extends ZodStringFormat<\"email\"> { _zod: core.$ZodEmailInternals; } ; export declare const ZodEmail: core.$constructor<ZodEmail>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodEmoji",
+      "kind": "interface",
+      "signature": "export interface ZodEmoji extends ZodStringFormat<\"emoji\"> { _zod: core.$ZodEmojiInternals; } ; export declare const ZodEmoji: core.$constructor<ZodEmoji>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodEnum",
+      "kind": "interface",
+      "signature": "export interface ZodEnum< /** @ts-ignore Cast variance */ out T extends util.EnumLike = util.EnumLike> extends _ZodType<core.$ZodEnumInternals<T>>, core.$ZodEnum<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; enum: T; options: Array<T[keyof T]>; extract<const U extends readonly (keyof T)[]>(values: U, params?: string | core.$ZodEnumParams): ZodEnum<util.Flatten<Pick<T, U[number]>>>; exclude<const U extends readonly (keyof T)[]>(values: U, params?: string | core.$ZodEnumParams): ZodEnum<util.Flatten<Omit<T, U[number]>>>; } ; export declare const ZodEnum: core.$constructor<ZodEnum>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodError",
+      "kind": "interface",
+      "signature": "export interface ZodError<T = unknown> extends $ZodError<T> { /** @deprecated Use the `z.treeifyError(err)` function instead. */ format(): core.$ZodFormattedError<T>; format<U>(mapper: (issue: core.$ZodIssue) => U): core.$ZodFormattedError<T, U>; /** @deprecated Use the `z.treeifyError(err)` function instead. */ flatten(): core.$ZodFlattenedError<T>; flatten<U>(mapper: (issue: core.$ZodIssue) => U): core.$ZodFlattenedError<T, U>; /** @deprecated Push directly to `.issues` instead. */ addIssue(issue: core.$ZodIssue): void; /** @deprecated Push directly to `.issues` instead. */ addIssues(issues: core.$ZodIssue[]): void; /** @deprecated Check `err.issues.length === 0` instead. */ isEmpty: boolean; } ; export declare const ZodError: core.$constructor<ZodError>;",
+      "jsdocSummary": "An Error-like class used to store Zod validation issues."
+    },
+    {
+      "subpath": ".",
+      "name": "ZodErrorMap",
+      "kind": "type",
+      "signature": "export type ZodErrorMap<T extends core.$ZodIssueBase = core.$ZodIssue> = core.$ZodErrorMap<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodExactOptional",
+      "kind": "interface",
+      "signature": "export interface ZodExactOptional<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodExactOptionalInternals<T>>, core.$ZodExactOptional<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodExactOptional: core.$constructor<ZodExactOptional>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFile",
+      "kind": "interface",
+      "signature": "export interface ZodFile extends _ZodType<core.$ZodFileInternals>, core.$ZodFile { \"~standard\": ZodStandardSchemaWithJSON<this>; min(size: number, params?: string | core.$ZodCheckMinSizeParams): this; max(size: number, params?: string | core.$ZodCheckMaxSizeParams): this; mime(types: util.MimeTypes | Array<util.MimeTypes>, params?: string | core.$ZodCheckMimeTypeParams): this; } ; export declare const ZodFile: core.$constructor<ZodFile>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFirstPartySchemaTypes",
+      "kind": "type",
+      "signature": "export type ZodFirstPartySchemaTypes = core.$ZodTypes;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFirstPartyTypeKind",
+      "kind": "enum",
+      "signature": "export declare enum ZodFirstPartyTypeKind { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFlattenedError",
+      "kind": "type",
+      "signature": "export type ZodFlattenedError<T, U = string> = core.$ZodFlattenedError<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFloat32",
+      "kind": "interface",
+      "signature": "export interface ZodFloat32 extends ZodNumberFormat<\"float32\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFloat64",
+      "kind": "interface",
+      "signature": "export interface ZodFloat64 extends ZodNumberFormat<\"float64\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFormattedError",
+      "kind": "type",
+      "signature": "export type ZodFormattedError<T, U = string> = core.$ZodFormattedError<T, U>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodFunction",
+      "kind": "interface",
+      "signature": "export interface ZodFunction<Args extends core.$ZodFunctionIn = core.$ZodFunctionIn, Returns extends core.$ZodFunctionOut = core.$ZodFunctionOut> extends _ZodType<core.$ZodFunctionInternals<Args, Returns>>, core.$ZodFunction<Args, Returns> { \"~standard\": ZodStandardSchemaWithJSON<this>; _def: core.$ZodFunctionDef<Args, Returns>; _input: core.$InferInnerFunctionType<Args, Returns>; _output: core.$InferOuterFunctionType<Args, Returns>; input<const Items extends util.TupleItems, const Rest extends core.$ZodFunctionOut = core.$ZodFunctionOut>(args: Items, rest?: Rest): ZodFunction<core.$ZodTuple<Items, Rest>, Returns>; input<NewArgs extends core.$ZodFunctionIn>(args: NewArgs): ZodFunction<NewArgs, Returns>; input(...args: any[]): ZodFunction<any, Returns>; output<NewReturns extends core.$ZodType>(output: NewReturns): ZodFunction<Args, NewReturns>; } ; export declare const ZodFunction: core.$constructor<ZodFunction>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodGUID",
+      "kind": "interface",
+      "signature": "export interface ZodGUID extends ZodStringFormat<\"guid\"> { _zod: core.$ZodGUIDInternals; } ; export declare const ZodGUID: core.$constructor<ZodGUID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIBAN",
+      "kind": "interface",
+      "signature": "export interface ZodIBAN extends ZodStringFormat<\"iban\"> { _zod: core.$ZodIBANInternals; } ; export declare const ZodIBAN: core.$constructor<ZodIBAN>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodInstanceOf",
+      "kind": "interface",
+      "signature": "export interface ZodInstanceOf<T = unknown> extends ZodCustom<T, T> { properties<Shape extends { [k in keyof T as T[k] extends Function ? never : k]?: core.$ZodType<unknown, T[k]>; }>(shape: Shape, params?: string | core.$ZodCheckPropertiesParams): ZodInstanceOf<T & core.$InferObjectInput<Shape, {}>>; } ; export declare const ZodInstanceOf: core.$constructor<ZodInstanceOf>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodInt",
+      "kind": "interface",
+      "signature": "export interface ZodInt extends ZodNumberFormat<\"safeint\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodInt32",
+      "kind": "interface",
+      "signature": "export interface ZodInt32 extends ZodNumberFormat<\"int32\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodInt64",
+      "kind": "interface",
+      "signature": "export interface ZodInt64 extends ZodBigIntFormat<\"int64\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIntersection",
+      "kind": "interface",
+      "signature": "export interface ZodIntersection<A extends core.SomeType = core.$ZodType, B extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodIntersectionInternals<A, B>>, core.$ZodIntersection<A, B> { \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodIntersection: core.$constructor<ZodIntersection>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIPv4",
+      "kind": "interface",
+      "signature": "export interface ZodIPv4 extends ZodStringFormat<\"ipv4\"> { _zod: core.$ZodIPv4Internals; } ; export declare const ZodIPv4: core.$constructor<ZodIPv4>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIPv6",
+      "kind": "interface",
+      "signature": "export interface ZodIPv6 extends ZodStringFormat<\"ipv6\"> { _zod: core.$ZodIPv6Internals; } ; export declare const ZodIPv6: core.$constructor<ZodIPv6>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodISODate",
+      "kind": "interface",
+      "signature": "export interface ZodISODate extends ZodStringFormat { _zod: core.$ZodISODateInternals; } ; export declare const ZodISODate: core.$constructor<ZodISODate>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodISODateTime",
+      "kind": "interface",
+      "signature": "export interface ZodISODateTime extends ZodStringFormat { _zod: core.$ZodISODateTimeInternals; } ; export declare const ZodISODateTime: core.$constructor<ZodISODateTime>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodISODuration",
+      "kind": "interface",
+      "signature": "export interface ZodISODuration extends ZodStringFormat { _zod: core.$ZodISODurationInternals; } ; export declare const ZodISODuration: core.$constructor<ZodISODuration>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodISOTime",
+      "kind": "interface",
+      "signature": "export interface ZodISOTime extends ZodStringFormat { _zod: core.$ZodISOTimeInternals; } ; export declare const ZodISOTime: core.$constructor<ZodISOTime>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIssue",
+      "kind": "type",
+      "signature": "export type ZodIssue = core.$ZodIssue;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodIssueCode",
+      "kind": "variable",
+      "signature": "export declare const ZodIssueCode: { readonly invalid_type: \"invalid_type\"; readonly too_big: \"too_big\"; readonly too_small: \"too_small\"; readonly invalid_format: \"invalid_format\"; readonly not_multiple_of: \"not_multiple_of\"; readonly unrecognized_keys: \"unrecognized_keys\"; readonly invalid_union: \"invalid_union\"; readonly invalid_key: \"invalid_key\"; readonly invalid_element: \"invalid_element\"; readonly invalid_value: \"invalid_value\"; readonly custom: \"custom\"; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodJSONSchema",
+      "kind": "interface",
+      "signature": "export interface ZodJSONSchema extends _ZodJSONSchema { _zod: ZodJSONSchemaInternals; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodJSONSchemaInternals",
+      "kind": "interface",
+      "signature": "export interface ZodJSONSchemaInternals extends _ZodJSONSchemaInternals { output: util.JSONType; input: util.JSONType; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodJWT",
+      "kind": "interface",
+      "signature": "export interface ZodJWT extends ZodStringFormat<\"jwt\"> { _zod: core.$ZodJWTInternals; } ; export declare const ZodJWT: core.$constructor<ZodJWT>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodKSUID",
+      "kind": "interface",
+      "signature": "export interface ZodKSUID extends ZodStringFormat<\"ksuid\"> { _zod: core.$ZodKSUIDInternals; } ; export declare const ZodKSUID: core.$constructor<ZodKSUID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodLazy",
+      "kind": "interface",
+      "signature": "export interface ZodLazy<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodLazyInternals<T>>, core.$ZodLazy<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodLazy: core.$constructor<ZodLazy>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodLiteral",
+      "kind": "interface",
+      "signature": "export interface ZodLiteral<T extends util.Literal = util.Literal> extends _ZodType<core.$ZodLiteralInternals<T>>, core.$ZodLiteral<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; values: Set<T>; /** @legacy Use `.values` instead. Accessing this property will throw an error if the literal accepts multiple values. */ value: T; } ; export declare const ZodLiteral: core.$constructor<ZodLiteral>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodMAC",
+      "kind": "interface",
+      "signature": "export interface ZodMAC extends ZodStringFormat<\"mac\"> { _zod: core.$ZodMACInternals; } ; export declare const ZodMAC: core.$constructor<ZodMAC>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodMap",
+      "kind": "interface",
+      "signature": "export interface ZodMap<Key extends core.SomeType = core.$ZodType, Value extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodMapInternals<Key, Value>>, core.$ZodMap<Key, Value> { \"~standard\": ZodStandardSchemaWithJSON<this>; keyType: Key; valueType: Value; min(minSize: number, params?: string | core.$ZodCheckMinSizeParams): this; nonempty(params?: string | core.$ZodCheckMinSizeParams): this; max(maxSize: number, params?: string | core.$ZodCheckMaxSizeParams): this; size(size: number, params?: string | core.$ZodCheckSizeEqualsParams): this; } ; export declare const ZodMap: core.$constructor<ZodMap>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNaN",
+      "kind": "interface",
+      "signature": "export interface ZodNaN extends _ZodType<core.$ZodNaNInternals>, core.$ZodNaN { \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodNaN: core.$constructor<ZodNaN>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNanoID",
+      "kind": "interface",
+      "signature": "export interface ZodNanoID extends ZodStringFormat<\"nanoid\"> { _zod: core.$ZodNanoIDInternals; } ; export declare const ZodNanoID: core.$constructor<ZodNanoID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNever",
+      "kind": "interface",
+      "signature": "export interface ZodNever extends _ZodType<core.$ZodNeverInternals> { } ; export declare const ZodNever: core.$constructor<ZodNever>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNonOptional",
+      "kind": "interface",
+      "signature": "export interface ZodNonOptional<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodNonOptionalInternals<T>>, core.$ZodNonOptional<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodNonOptional: core.$constructor<ZodNonOptional>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNull",
+      "kind": "interface",
+      "signature": "export interface ZodNull extends _ZodType<core.$ZodNullInternals> { } ; export declare const ZodNull: core.$constructor<ZodNull>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNullable",
+      "kind": "interface",
+      "signature": "export interface ZodNullable<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodNullableInternals<T>>, core.$ZodNullable<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodNullable: core.$constructor<ZodNullable>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNumber",
+      "kind": "interface",
+      "signature": "export interface ZodNumber extends _ZodNumber<core.$ZodNumberInternals<number>> { } ; export declare const ZodNumber: core.$constructor<ZodNumber>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodNumberFormat",
+      "kind": "interface",
+      "signature": "export interface ZodNumberFormat<Format extends $ZodNumberFormats = $ZodNumberFormats> extends ZodNumber { _zod: core.$ZodNumberFormatInternals<Format>; } ; export declare const ZodNumberFormat: core.$constructor<ZodNumberFormat>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodObject",
+      "kind": "interface",
+      "signature": "export interface ZodObject< /** @ts-ignore Cast variance */ out Shape extends core.$ZodShape = core.$ZodLooseShape, out Config extends core.$ZodObjectConfig = core.$strip> extends _ZodType<core.$ZodObjectInternals<Shape, Config>>, core.$ZodObject<Shape, Config> { \"~standard\": ZodStandardSchemaWithJSON<this>; shape: Shape; keyof(): ZodEnum<util.ToEnum<keyof Shape & string>>; /** Define a schema to validate all unrecognized keys. This overrides the existing strict/loose behavior. */ catchall<T extends core.SomeType>(schema: T): ZodObject<Shape, core.$catchall<T>>; /** @deprecated Use `z.looseObject()` or `.loose()` instead. */ passthrough(): ZodObject<Shape, core.$loose>; /** Consider `z.looseObject(A.shape)` instead */ loose(): ZodObject<Shape, core.$loose>; /** Consider `z.strictObject(A.shape)` instead */ strict(): ZodObject<Shape, core.$strict>; /** This is the default behavior. This method call is likely unnecessary. */ strip(): ZodObject<Shape, core.$strip>; extend<U extends core.$ZodLooseShape>(shape: U): ZodObject<util.Extend<Shape, util.Writeable<U>>, Config>; safeExtend<U extends core.$ZodLooseShape>(shape: SafeExtendShape<Shape, U> & Partial<Record<keyof Shape, core.SomeType>>): ZodObject<util.Extend<Shape, util.Writeable<U>>, Config>; /** * @deprecated Use [`A.extend(B.shape)`](https://zod.dev/api?id=extend) instead. */ merge<U extends ZodObject>(other: U): ZodObject<util.Extend<Shape, U[\"shape\"]>, U[\"_zod\"][\"config\"]>; pick<M extends util.Mask<keyof Shape>>(mask: M & Record<Exclude<keyof M, keyof Shape>, never>): ZodObject<util.Flatten<Pick<Shape, Extract<keyof Shape, keyof M>>>, Config>; omit<M extends util.Mask<keyof Shape>>(mask: M & Record<Exclude<keyof M, keyof Shape>, never>): ZodObject<util.Flatten<Omit<Shape, Extract<keyof Shape, keyof M>>>, Config>; partial(): ZodObject<{ -readonly [k in keyof Shape]: ZodOptional<Shape[k]>; }, Config>; partial<M extends util.Mask<keyof Shape>>(mask: M & Record<Exclude<keyof M, keyof Shape>, never>): ZodObject<{ -readonly [k in keyof Shape]: k extends keyof M ? ZodOptional<Shape[k]> : Shape[k]; }, Config>; exactPartial(): ZodObject<{ -readonly [k in keyof Shape]: ZodExactOptional<Shape[k]>; }, Config>; exactPartial<M extends util.Mask<keyof Shape>>(mask: M & Record<Exclude<keyof M, keyof Shape>, never>): ZodObject<{ -readonly [k in keyof Shape]: k extends keyof M ? ZodExactOptional<Shape[k]> : Shape[k]; }, Config>; required(): ZodObject<{ -readonly [k in keyof Shape]: ZodNonOptional<Shape[k]>; }, Config>; required<M extends util.Mask<keyof Shape>>(mask: M & Record<Exclude<keyof M, keyof Shape>, never>): ZodObject<{ -readonly [k in keyof Shape]: k extends keyof M ? ZodNonOptional<Shape[k]> : Shape[k]; }, Config>; } ; export declare const ZodObject: core.$constructor<ZodObject>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodOptional",
+      "kind": "interface",
+      "signature": "export interface ZodOptional<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodOptionalInternals<T>>, core.$ZodOptional<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodOptional: core.$constructor<ZodOptional>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodPipe",
+      "kind": "interface",
+      "signature": "export interface ZodPipe<A extends core.SomeType = core.$ZodType, B extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodPipeInternals<A, B>>, core.$ZodPipe<A, B> { \"~standard\": ZodStandardSchemaWithJSON<this>; in: A; out: B; } ; export declare const ZodPipe: core.$constructor<ZodPipe>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodPrefault",
+      "kind": "interface",
+      "signature": "export interface ZodPrefault<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodPrefaultInternals<T>>, core.$ZodPrefault<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodPrefault: core.$constructor<ZodPrefault>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodPreprocess",
+      "kind": "interface",
+      "signature": "export interface ZodPreprocess<B extends core.SomeType = core.$ZodType, I = unknown> extends ZodPipe<core.$ZodTransform<unknown, I>, B>, core.$ZodPreprocess<B, I> { \"~standard\": ZodStandardSchemaWithJSON<this>; _zod: core.$ZodPreprocessInternals<B, I>; def: core.$ZodPreprocessDef<B, I>; } ; export declare const ZodPreprocess: core.$constructor<ZodPreprocess>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodPromise",
+      "kind": "interface",
+      "signature": "export interface ZodPromise<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodPromiseInternals<T>>, core.$ZodPromise<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodPromise: core.$constructor<ZodPromise>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodRawShape",
+      "kind": "type",
+      "signature": "export type ZodRawShape = core.$ZodShape;",
+      "jsdocSummary": "Included for Zod 3 compatibility"
+    },
+    {
+      "subpath": ".",
+      "name": "ZodReadonly",
+      "kind": "interface",
+      "signature": "export interface ZodReadonly<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodReadonlyInternals<T>>, core.$ZodReadonly<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodReadonly: core.$constructor<ZodReadonly>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodRealError",
+      "kind": "variable",
+      "signature": "export declare const ZodRealError: core.$constructor<ZodError>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodRecord",
+      "kind": "interface",
+      "signature": "export interface ZodRecord<Key extends core.$ZodRecordKey = core.$ZodRecordKey, Value extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodRecordInternals<Key, Value>>, core.$ZodRecord<Key, Value> { \"~standard\": ZodStandardSchemaWithJSON<this>; keyType: Key; valueType: Value; } ; export declare const ZodRecord: core.$constructor<ZodRecord>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSafeParseError",
+      "kind": "type",
+      "signature": "export type ZodSafeParseError<T> = { success: false; data?: never; error: ZodError<T>; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSafeParseResult",
+      "kind": "type",
+      "signature": "export type ZodSafeParseResult<T> = ZodSafeParseSuccess<T> | ZodSafeParseError<T>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSafeParseSuccess",
+      "kind": "type",
+      "signature": "export type ZodSafeParseSuccess<T> = { success: true; data: T; error?: never; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSchema",
+      "kind": "type",
+      "signature": "export type ZodSchema<Output = unknown, Input = unknown, Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> = ZodType<Output, Input, Internals>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSet",
+      "kind": "interface",
+      "signature": "export interface ZodSet<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodSetInternals<T>>, core.$ZodSet<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; min(minSize: number, params?: string | core.$ZodCheckMinSizeParams): this; nonempty(params?: string | core.$ZodCheckMinSizeParams): this; max(maxSize: number, params?: string | core.$ZodCheckMaxSizeParams): this; size(size: number, params?: string | core.$ZodCheckSizeEqualsParams): this; } ; export declare const ZodSet: core.$constructor<ZodSet>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodStandardSchemaWithJSON",
+      "kind": "type",
+      "signature": "export type ZodStandardSchemaWithJSON<T> = StandardSchemaWithJSONProps<core.input<T>, core.output<T>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodString",
+      "kind": "interface",
+      "signature": "export interface ZodString extends _ZodString<core.$ZodStringInternals<string>> { /** @deprecated Use `z.email()` instead. */ email(params?: string | core.$ZodCheckEmailParams): this; /** @deprecated Use `z.url()` instead. */ url(params?: string | core.$ZodCheckURLParams): this; /** @deprecated Use `z.jwt()` instead. */ jwt(params?: string | core.$ZodCheckJWTParams): this; /** @deprecated Use `z.emoji()` instead. */ emoji(params?: string | core.$ZodCheckEmojiParams): this; /** @deprecated Use `z.guid()` instead. */ guid(params?: string | core.$ZodCheckGUIDParams): this; /** @deprecated Use `z.uuid()` instead. */ uuid(params?: string | core.$ZodCheckUUIDParams): this; /** @deprecated Use `z.uuid()` instead. */ uuidv4(params?: string | core.$ZodCheckUUIDParams): this; /** @deprecated Use `z.uuid()` instead. */ uuidv6(params?: string | core.$ZodCheckUUIDParams): this; /** @deprecated Use `z.uuid()` instead. */ uuidv7(params?: string | core.$ZodCheckUUIDParams): this; /** @deprecated Use `z.nanoid()` instead. */ nanoid(params?: string | core.$ZodCheckNanoIDParams): this; /** @deprecated Use `z.guid()` instead. */ guid(params?: string | core.$ZodCheckGUIDParams): this; /** * @deprecated CUID v1 is deprecated by its authors due to information leakage * (timestamps embedded in the id). Use `z.cuid2()` instead. * See https://github.com/paralleldrive/cuid. */ cuid(params?: string | core.$ZodCheckCUIDParams): this; /** @deprecated Use `z.cuid2()` instead. */ cuid2(params?: string | core.$ZodCheckCUID2Params): this; /** @deprecated Use `z.ulid()` instead. */ ulid(params?: string | core.$ZodCheckULIDParams): this; /** @deprecated Use `z.base64()` instead. */ base64(params?: string | core.$ZodCheckBase64Params): this; /** @deprecated Use `z.base64url()` instead. */ base64url(params?: string | core.$ZodCheckBase64URLParams): this; /** @deprecated Use `z.xid()` instead. */ xid(params?: string | core.$ZodCheckXIDParams): this; /** @deprecated Use `z.ksuid()` instead. */ ksuid(params?: string | core.$ZodCheckKSUIDParams): this; /** @deprecated Use `z.ipv4()` instead. */ ipv4(params?: string | core.$ZodCheckIPv4Params): this; /** @deprecated Use `z.ipv6()` instead. */ ipv6(params?: string | core.$ZodCheckIPv6Params): this; /** @deprecated Use `z.cidrv4()` instead. */ cidrv4(params?: string | core.$ZodCheckCIDRv4Params): this; /** @deprecated Use `z.cidrv6()` instead. */ cidrv6(params?: string | core.$ZodCheckCIDRv6Params): this; /** @deprecated Use `z.e164()` instead. */ e164(params?: string | core.$ZodCheckE164Params): this; /** @deprecated Use `z.iso.datetime()` instead. */ datetime(params?: string | core.$ZodCheckISODateTimeParams): this; /** @deprecated Use `z.iso.date()` instead. */ date(params?: string | core.$ZodCheckISODateParams): this; /** @deprecated Use `z.iso.time()` instead. */ time(params?: string | core.$ZodCheckISOTimeParams): this; /** @deprecated Use `z.iso.duration()` instead. */ duration(params?: string | core.$ZodCheckISODurationParams): this; } ; export declare const ZodString: core.$constructor<ZodString>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodStringFormat",
+      "kind": "interface",
+      "signature": "export interface ZodStringFormat<Format extends string = string> extends _ZodString<core.$ZodStringFormatInternals<Format>> { } ; export declare const ZodStringFormat: core.$constructor<ZodStringFormat>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSuccess",
+      "kind": "interface",
+      "signature": "export interface ZodSuccess<T extends core.SomeType = core.$ZodType> extends _ZodType<core.$ZodSuccessInternals<T>>, core.$ZodSuccess<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; unwrap(): T; } ; export declare const ZodSuccess: core.$constructor<ZodSuccess>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodSymbol",
+      "kind": "interface",
+      "signature": "export interface ZodSymbol extends _ZodType<core.$ZodSymbolInternals> { } ; export declare const ZodSymbol: core.$constructor<ZodSymbol>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodTemplateLiteral",
+      "kind": "interface",
+      "signature": "export interface ZodTemplateLiteral<Template extends string = string> extends _ZodType<core.$ZodTemplateLiteralInternals<Template>>, core.$ZodTemplateLiteral<Template> { \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodTemplateLiteral: core.$constructor<ZodTemplateLiteral>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodTransform",
+      "kind": "interface",
+      "signature": "export interface ZodTransform<O = unknown, I = unknown> extends _ZodType<core.$ZodTransformInternals<O, I>>, core.$ZodTransform<O, I> { \"~standard\": ZodStandardSchemaWithJSON<this>; } ; export declare const ZodTransform: core.$constructor<ZodTransform>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodTuple",
+      "kind": "interface",
+      "signature": "export interface ZodTuple<T extends util.TupleItems = readonly core.$ZodType[], Rest extends core.SomeType | null = core.$ZodType | null> extends _ZodType<core.$ZodTupleInternals<T, Rest>>, core.$ZodTuple<T, Rest> { \"~standard\": ZodStandardSchemaWithJSON<this>; rest<Rest extends core.SomeType = core.$ZodType>(rest: Rest): ZodTuple<T, Rest>; partial(): ZodTuple<{ -readonly [k in keyof T]: ZodOptional<T[k]>; }, Rest>; } ; export declare const ZodTuple: core.$constructor<ZodTuple>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodType",
+      "kind": "interface",
+      "signature": "export interface ZodType<out Output = unknown, out Input = unknown, out Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> extends core.$ZodType<Output, Input, Internals> { def: Internals[\"def\"]; type: Internals[\"def\"][\"type\"]; /** @deprecated Use `.def` instead. */ _def: Internals[\"def\"]; /** @deprecated Use `z.output<typeof schema>` instead. */ _output: Internals[\"output\"]; /** @deprecated Use `z.input<typeof schema>` instead. */ _input: Internals[\"input\"]; \"~standard\": ZodStandardSchemaWithJSON<this>; /** Converts this schema to a JSON Schema representation. */ toJSONSchema(params?: core.ToJSONSchemaParams): core.ZodStandardJSONSchemaPayload<this>; check(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; with(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; clone(def?: Internals[\"def\"], params?: { parent: boolean; }): this; register<R extends core.$ZodRegistry>(registry: R, ...meta: this extends R[\"_schema\"] ? undefined extends R[\"_meta\"] ? [core.$replace<R[\"_meta\"], this>?] : [core.$replace<R[\"_meta\"], this>] : [\"Incompatible schema\"]): this; brand<T extends PropertyKey = PropertyKey, Dir extends \"in\" | \"out\" | \"inout\" = \"out\">(value?: T): PropertyKey extends T ? this : core.$ZodBranded<this, T, Dir>; parse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; safeParse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; parseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeParseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; spa: (data: unknown, params?: core.ParseContext<core.$ZodIssue>) => Promise<parse.ZodSafeParseResult<core.output<this>>>; validate(data: unknown, params?: core.ParseContext<core.$ZodIssue>): data is core.input<this>; validateAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<boolean>; encode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): core.input<this>; decode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; encodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.input<this>>; decodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeEncode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.input<this>>; safeDecode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; safeEncodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.input<this>>>; safeDecodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; refine<Ch extends (arg: core.output<this>) => unknown | Promise<unknown>>(check: Ch, params?: string | core.$ZodCustomParams): Ch extends (arg: any) => arg is infer R ? this & ZodType<R, core.input<this>> : this; superRefine(refinement: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): this; overwrite(fn: (x: core.output<this>) => core.output<this>): this; optional(): ZodOptional<this>; exactOptional(): ZodExactOptional<this>; nonoptional(params?: string | core.$ZodNonOptionalParams): ZodNonOptional<this>; nullable(): ZodNullable<this>; nullish(): ZodOptional<ZodNullable<this>>; default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>; default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>; prefault(def: () => core.input<this>): ZodPrefault<this>; prefault(def: core.input<this>): ZodPrefault<this>; array(): ZodArray<this>; or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>; and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>; transform<NewOut>(transform: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => NewOut | Promise<NewOut>): ZodPipe<this, ZodTransform<Awaited<NewOut>, core.output<this>>>; catch(def: core.output<this>): ZodCatch<this>; catch(def: (ctx: core.$ZodCatchCtx) => core.output<this>): ZodCatch<this>; pipe<T extends core.$ZodType<any, core.output<this>>>(target: T | core.$ZodType<any, core.output<this>>): ZodPipe<this, T>; readonly(): ZodReadonly<this>; /** Returns a new instance that has been registered in `z.globalRegistry` with the specified description */ describe(description: string): this; description?: string; /** Returns the metadata associated with this instance in `z.globalRegistry` */ meta(): core.$replace<core.GlobalMeta, this> | undefined; /** Returns a new instance that has been registered in `z.globalRegistry` with the specified metadata */ meta(data: core.$replace<core.GlobalMeta, this>): this; /** @deprecated Try safe-parsing `undefined` (this is what `isOptional` does internally): * * ```ts * const schema = z.string().optional(); * const isOptional = schema.safeParse(undefined).success; // true * ``` */ isOptional(): boolean; /** * @deprecated Try safe-parsing `null` (this is what `isNullable` does internally): * * ```ts * const schema = z.string().nullable(); * const isNullable = schema.safeParse(null).success; // true * ``` */ isNullable(): boolean; apply<T, TArgs extends unknown[] = []>(fn: (schema: this, ...args: TArgs) => T, ...args: TArgs): T; } ; export declare const ZodType: core.$constructor<ZodType>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodTypeAny",
+      "kind": "type",
+      "signature": "export type ZodTypeAny<Output = unknown, Input = unknown, Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> = ZodType<Output, Input, Internals>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUInt32",
+      "kind": "interface",
+      "signature": "export interface ZodUInt32 extends ZodNumberFormat<\"uint32\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUInt64",
+      "kind": "interface",
+      "signature": "export interface ZodUInt64 extends ZodBigIntFormat<\"uint64\"> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodULID",
+      "kind": "interface",
+      "signature": "export interface ZodULID extends ZodStringFormat<\"ulid\"> { _zod: core.$ZodULIDInternals; } ; export declare const ZodULID: core.$constructor<ZodULID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUndefined",
+      "kind": "interface",
+      "signature": "export interface ZodUndefined extends _ZodType<core.$ZodUndefinedInternals> { } ; export declare const ZodUndefined: core.$constructor<ZodUndefined>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUnion",
+      "kind": "interface",
+      "signature": "export interface ZodUnion<T extends readonly core.SomeType[] = readonly core.$ZodType[]> extends _ZodType<core.$ZodUnionInternals<T>>, core.$ZodUnion<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; options: T; } ; export declare const ZodUnion: core.$constructor<ZodUnion>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUnknown",
+      "kind": "interface",
+      "signature": "export interface ZodUnknown extends _ZodType<core.$ZodUnknownInternals> { } ; export declare const ZodUnknown: core.$constructor<ZodUnknown>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodURL",
+      "kind": "interface",
+      "signature": "export interface ZodURL extends ZodStringFormat<\"url\"> { _zod: core.$ZodURLInternals; } ; export declare const ZodURL: core.$constructor<ZodURL>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodUUID",
+      "kind": "interface",
+      "signature": "export interface ZodUUID extends ZodStringFormat<\"uuid\"> { _zod: core.$ZodUUIDInternals; } ; export declare const ZodUUID: core.$constructor<ZodUUID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodVoid",
+      "kind": "interface",
+      "signature": "export interface ZodVoid extends _ZodType<core.$ZodVoidInternals> { } ; export declare const ZodVoid: core.$constructor<ZodVoid>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodXID",
+      "kind": "interface",
+      "signature": "export interface ZodXID extends ZodStringFormat<\"xid\"> { _zod: core.$ZodXIDInternals; } ; export declare const ZodXID: core.$constructor<ZodXID>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ZodXor",
+      "kind": "interface",
+      "signature": "export interface ZodXor<T extends readonly core.SomeType[] = readonly core.$ZodType[]> extends _ZodType<core.$ZodXorInternals<T>>, core.$ZodXor<T> { \"~standard\": ZodStandardSchemaWithJSON<this>; options: T; } ; export declare const ZodXor: core.$constructor<ZodXor>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "bufferSchema",
+      "kind": "variable",
+      "signature": "declare const bufferSchema: z.ZodType<Buffer>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "COLUMN_ZOD_SCHEMA",
+      "kind": "variable",
+      "signature": "export declare const COLUMN_ZOD_SCHEMA: unique symbol;",
+      "jsdocSummary": "Runtime-only column metadata shared with ID factories, including duplicate module copies."
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "createInsertSchema",
+      "kind": "function",
+      "signature": "export declare function createInsertSchema<TTable extends Table>(table: TTable, refine?: undefined): TableSchema<'insert', TTable, Record<never, never>>; ; export declare function createInsertSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>): TableSchema<'insert', TTable, TRefine>; ; export declare function createInsertSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined): TableSchema<'insert', TTable, TRefine> | TableSchema<'insert', TTable, Record<never, never>>;",
+      "jsdocSummary": "Build an insert validator, preserving defaults and callback schema input/output."
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "createSchemaFactory",
+      "kind": "function",
+      "signature": "declare function createSchemaFactory<TCoerce extends CoerceOptions>(options?: CreateSchemaFactoryOptions<TCoerce>): { createSelectSchema: CreateSelectSchema<TCoerce>; createInsertSchema: CreateInsertSchema<TCoerce>; createUpdateSchema: CreateUpdateSchema<TCoerce>; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "createSelectSchema",
+      "kind": "function",
+      "signature": "export declare function createSelectSchema<TTable extends Table>(table: TTable, refine?: undefined): TableSchema<'select', TTable, Record<never, never>>; ; export declare function createSelectSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>): TableSchema<'select', TTable, TRefine>; ; export declare function createSelectSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined): TableSchema<'select', TTable, TRefine> | TableSchema<'select', TTable, Record<never, never>>;",
+      "jsdocSummary": "Build a select validator; only explicit runtime schemas promise refined output types."
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "createUpdateSchema",
+      "kind": "function",
+      "signature": "export declare function createUpdateSchema<TTable extends Table>(table: TTable, refine?: undefined): TableSchema<'update', TTable, Record<never, never>>; ; export declare function createUpdateSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>): TableSchema<'update', TTable, TRefine>; ; export declare function createUpdateSchema<TTable extends Table, TRefine extends Refine<TTable>>(table: TTable, refine: (TRefine & Record<Exclude<keyof TRefine, keyof TTable['_']['columns']>, never>) | undefined): TableSchema<'update', TTable, TRefine> | TableSchema<'update', TTable, Record<never, never>>;",
+      "jsdocSummary": "Build an update validator; callback-refined columns retain nullability and become optional."
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "jsonColumn",
+      "kind": "function",
+      "signature": "export declare function jsonColumn<TSchema extends z.ZodType>(name: string, schema: TSchema & ([z.output<TSchema>] extends [z.core.util.JSONType] ? [z.output<TSchema>] extends [z.input<TSchema>] ? unknown : never : never)): import(\"drizzle-orm/pg-core\").Set$Type<import(\"drizzle-orm/pg-core\").PgJsonbBuilder, z.output<TSchema>>;",
+      "jsdocSummary": "Declare a JSONB column from its runtime schema. The application type is the schema output. Reuse that schema in an explicit refinement for precise validator input/output inference: `{ profile: () => profileSchema }`. Output must be recursively JSON-compatible and accepted as schema input. Parsing stored output must preserve its value; types cannot prove stability. Use a separate wire codec in refinements. Non-finite JSON output is rejected. This does not install a database driver codec or run transforms on queries."
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "jsonSchema",
+      "kind": "variable",
+      "signature": "declare const jsonSchema: z.ZodType<Json>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./drizzle",
+      "name": "literalSchema",
+      "kind": "variable",
+      "signature": "declare const literalSchema: z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull]>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./orpc",
+      "name": "AnyOperation",
+      "kind": "type",
+      "signature": "export type AnyOperation = Operation<unknown, unknown, unknown, Meta>;",
+      "jsdocSummary": "Any operation at all."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "ErrorOf",
+      "kind": "type",
+      "signature": "export type ErrorOf<Op extends AnyOperation> = NonNullable<Op['~types']>['error'];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./orpc",
+      "name": "Identified",
+      "kind": "type",
+      "signature": "export type Identified<Op extends AnyOperation> = { readonly [OPERATION]: Op; };",
+      "jsdocSummary": "A value that carries an operation under {@link OPERATION} — a utils leaf from `createOrpcUtils`."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "InputOf",
+      "kind": "type",
+      "signature": "export type InputOf<Op extends AnyOperation> = NonNullable<Op['~types']>['input'];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./orpc",
+      "name": "MetaOf",
+      "kind": "type",
+      "signature": "export type MetaOf<Op extends AnyOperation> = Op['meta'];",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./orpc",
+      "name": "Operation",
+      "kind": "type",
+      "signature": "export type Operation<TInput, TOutput, TError, TMeta extends Meta> = { /** `['posts', 'create']` */ readonly path: readonly string[]; /** `'posts.create'` — the same string the server stores as `procedure_path`. */ readonly name: string; /** The contract's meta, value and type. */ readonly meta: TMeta; /** Phantom. Never assigned; carries the types only. */ readonly '~types'?: { readonly input: TInput; readonly output: TOutput; readonly error: TError; }; };",
+      "jsdocSummary": "One procedure's identity. The types ride along in a phantom field."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "OPERATION",
+      "kind": "variable",
+      "signature": "export declare const OPERATION = \"~op\";",
+      "jsdocSummary": "Key under which a utils object carries its operation. `~` like oRPC's own `'~orpc'`."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "operationAt",
+      "kind": "function",
+      "signature": "export declare function operationAt(contract: AnyContractRouter, path: readonly string[]): AnyOperation | undefined;",
+      "jsdocSummary": "The operation at a path, or `undefined`. For replay loops and tools."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "operationOf",
+      "kind": "function",
+      "signature": "export declare function operationOf<Op extends AnyOperation>(carrier: Identified<Op>): Op;",
+      "jsdocSummary": "Read the operation a value carries. Throws `TypeError` for a value that has none — a raw oRPC client or utils leaf, or a forged object — so plain JavaScript callers get the same check the compiler gives TypeScript ones."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "OperationOf",
+      "kind": "type",
+      "signature": "export type OperationOf<C> = C extends ContractProcedure<infer I, infer O, infer E, infer M> ? Operation<InferSchemaInput<I>, InferSchemaOutput<O>, ErrorFromErrorMap<E>, M> : never;",
+      "jsdocSummary": "The operation of one contract procedure. Input is the client side of the schema; output the parsed side."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "operations",
+      "kind": "function",
+      "signature": "export declare function operations<const C extends AnyContractRouter>(contract: C): Operations<C>;",
+      "jsdocSummary": "Walk a contract once and return its operation tree. Throws `TypeError`, naming the path, for a key that contains `.` or is reserved (`~op`, `key`, `call`, `queryKey`, `queryOptions`, `infiniteKey`, `infiniteOptions`, `mutationKey`, `mutationOptions`)."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "Operations",
+      "kind": "type",
+      "signature": "export type Operations<C> = C extends ContractProcedure<infer _I, infer _O, infer _E, infer _M> ? OperationOf<C> : { readonly [K in keyof C & string]: Operations<C[K]>; };",
+      "jsdocSummary": "The operation tree of a contract: the same keys, an {@link Operation} at every leaf."
+    },
+    {
+      "subpath": "./orpc",
+      "name": "OutputOf",
+      "kind": "type",
+      "signature": "export type OutputOf<Op extends AnyOperation> = NonNullable<Op['~types']>['output'];",
+      "jsdocSummary": ""
+    }
+  ],
+  "errorCodes": [
+    "ARKI_CONTRACTS_E001",
+    "ARKI_CONTRACTS_E002",
+    "ARKI_CONTRACTS_E003",
+    "ARKI_CONTRACTS_E004",
+    "ARKI_CONTRACTS_E005",
+    "ARKI_CONTRACTS_E006",
+    "ARKI_CONTRACTS_E007",
+    "ARKI_CONTRACTS_E008",
+    "ARKI_CONTRACTS_E009",
+    "ARKI_CONTRACTS_E010",
+    "contracts.invalid_cursor",
+    "contracts.invalid_cursor_value",
+    "contracts.random_source_unavailable"
+  ]
+}

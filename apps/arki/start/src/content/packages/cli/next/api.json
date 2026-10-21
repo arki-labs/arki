@@ -1,0 +1,294 @@
+{
+  "package": "@arki/cli",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "AnyCommand",
+      "kind": "type",
+      "signature": "export type AnyCommand<TServices = unknown> = { readonly describe: string; readonly input?: SchemaWithJson | undefined; readonly output?: SchemaWithJson | undefined; readonly args?: readonly string[]; readonly effects?: Effects; readonly ask?: Readonly<Partial<Record<string, string>>>; readonly confirm?: string; preview?(ctx: AnyRunContext<TServices>): unknown; run(ctx: AnyRunContext<TServices>): unknown; render?(data: unknown, ui: Ui): void; readonly examples?: readonly string[]; readonly aliases?: readonly string[]; readonly hidden?: boolean; readonly mcp?: boolean; };",
+      "jsdocSummary": "Any command whose `run` accepts these services: what a tree holds."
+    },
+    {
+      "subpath": ".",
+      "name": "AnyRunContext",
+      "kind": "type",
+      "signature": "export type AnyRunContext<TServices> = Omit<RunContext<undefined, TServices>, 'input'> & { readonly input: unknown; };",
+      "jsdocSummary": "The context the framework passes to any command: input validated by that command's own schema."
+    },
+    {
+      "subpath": ".",
+      "name": "Cancelled",
+      "kind": "variable",
+      "signature": "export declare const Cancelled: import(\"@arki/failure\").FailureDefinition<\"cli.cancelled\", undefined>;",
+      "jsdocSummary": "The run was interrupted by SIGINT or SIGTERM."
+    },
+    {
+      "subpath": ".",
+      "name": "Cli",
+      "kind": "type",
+      "signature": "export type Cli = { /** The program name, as typed: shown in usage lines. */ readonly name: string; readonly version: string; /** One line under the program name in root help. */ readonly describe?: string; readonly commands: CommandTree; /** * What every command's `ctx.services` is. Resolved once, after parsing and * before `run`; never for help, `--version` or a parse failure. Without it, * commands get an empty object. */ readonly services?: () => unknown; /** Base URL of the error docs: an envelope's `error.docsUrl` is `<docsUrl>#<code with . and _ as ->`. */ readonly docsUrl?: string; };",
+      "jsdocSummary": "A CLI definition. Standalone commands written in their own files have no services (`ctx.services` is `{}`); a command written inline in `commands` sees `ctx.services` as `unknown`. Typed services come from a feature-bound tree (Dot), not from here."
+    },
+    {
+      "subpath": ".",
+      "name": "Command",
+      "kind": "type",
+      "signature": "export type Command<TInput extends SchemaWithJson | undefined, TResult, TServices> = { /** One line: what the command does. Shown in help. */ readonly describe: string; /** An object schema with JSON Schema (Zod 4, Valibot, ArkType): it drives flags, coercion and validation. */ readonly input?: TInput; /** Describes what `run` succeeds with; a mismatch with `run` is a compile error. */ readonly output?: SchemaWithJson<unknown, Success<TResult>>; /** Input keys taken as positionals, in order. An array key may only be last. */ readonly args?: readonly InputKeys<TInput>[]; /** Default `'write'`. */ readonly effects?: Effects; /** Prompt text per input key, asked on a terminal before validation. Accepted now; prompts are not built yet. */ readonly ask?: Readonly<Partial<Record<InputKeys<TInput>, string>>>; /** A confirmation question. Accepted now; prompts are not built yet. */ readonly confirm?: string; /** What `--dry-run` runs instead of `run`: the same input, the same success type, no changes. `NoInfer`: `run` alone decides the type. */ preview?(ctx: RunContext<TInput, TServices>): NoInfer<Success<TResult>> | Failure | Promise<NoInfer<Success<TResult>> | Failure>; run(ctx: RunContext<TInput, TServices>): TResult; /** Text mode only. Without it, an object prints as `key: value` lines and an array of objects as a table. */ render?(data: Success<TResult>, ui: Ui): void; /** Command lines shown under \"Examples\" in help. */ readonly examples?: readonly string[]; /** Other names for this command at its level. */ readonly aliases?: readonly string[]; /** Left out of help listings; still runs. */ readonly hidden?: boolean; /** Offered to MCP clients. Accepted now; the MCP server is not built yet. */ readonly mcp?: boolean; };",
+      "jsdocSummary": "One command. `TResult` is what `run` returns as written (a value, failures, maybe a promise); `OutputOf` is its success value."
+    },
+    {
+      "subpath": ".",
+      "name": "CommandTree",
+      "kind": "type",
+      "signature": "export type CommandTree<TServices = unknown> = Readonly<Record<string, TreeEntry<TServices>>>;",
+      "jsdocSummary": "Named entries at one level of the tree."
+    },
+    {
+      "subpath": ".",
+      "name": "ConfirmationRequired",
+      "kind": "variable",
+      "signature": "export declare const ConfirmationRequired: import(\"@arki/failure\").FailureDefinition<\"cli.confirmation_required\", StandardSchemaV1<ConfirmationRequiredData, ConfirmationRequiredData>>;",
+      "jsdocSummary": "The command asks for confirmation and there is no terminal to ask on."
+    },
+    {
+      "subpath": ".",
+      "name": "defineCli",
+      "kind": "function",
+      "signature": "export declare function defineCli(def: Cli): Program;",
+      "jsdocSummary": "Define a CLI. Checks the definition once (duplicate names or aliases at a level, input keys that collide with global flags) and returns a `Program`."
+    },
+    {
+      "subpath": ".",
+      "name": "defineCommand",
+      "kind": "function",
+      "signature": "export declare function defineCommand<TResult, TServices = NoServices>(def: Command<undefined, TResult, TServices> & { readonly input?: undefined; }): Command<undefined, TResult, TServices>; ; export declare function defineCommand<TInput extends SchemaWithJson, TResult, TServices = NoServices>(def: Command<TInput, TResult, TServices>): Command<TInput, TResult, TServices>;",
+      "jsdocSummary": "Define a command. Returns the definition unchanged; its types are inferred from `input` and `run`, with no type argument."
+    },
+    {
+      "subpath": ".",
+      "name": "Effects",
+      "kind": "type",
+      "signature": "export type Effects = 'read' | 'idempotent' | 'write';",
+      "jsdocSummary": "What a command does to the world: `read` changes nothing, `idempotent` is safe to repeat."
+    },
+    {
+      "subpath": ".",
+      "name": "Envelope",
+      "kind": "type",
+      "signature": "export type Envelope<T> = OkEnvelope<T> | FailureEnvelope;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "EnvelopeError",
+      "kind": "type",
+      "signature": "export type EnvelopeError = { readonly code: string; readonly message: string; readonly remediation: string | null; /** The input problems of `cli.invalid_input`; empty otherwise. */ readonly issues: readonly InputIssue[]; /** The failure's data; null for `cli.invalid_input` (its issues are above) and for a bug. */ readonly data: unknown; /** True for status 429 or 503: trying again later may work. */ readonly retryable: boolean; readonly outcome: Outcome; readonly exitCode: ExitCodeValue; /** `<docsUrl>#<code>` when the CLI has a `docsUrl`, else null. */ readonly docsUrl: string | null; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "EnvelopeMeta",
+      "kind": "type",
+      "signature": "export type EnvelopeMeta = { readonly schema: typeof ENVELOPE_SCHEMA; /** The CLI's version. */ readonly version: string; /** Milliseconds from after parsing to the result. */ readonly durationMs: number; /** True when `--dry-run` ran `preview` instead of `run`. */ readonly dryRun: boolean; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ExitCode",
+      "kind": "variable",
+      "signature": "export declare const ExitCode: { readonly ok: 0; /** A thrown error: a bug in the command or the framework. */ readonly bug: 1; /** The command line was wrong: unknown command, invalid input, `--dry-run` without a preview. */ readonly usage: 2; /** `run` returned a failure. */ readonly failure: 3; /** `run` returned a failure worth retrying (status 429 or 503). */ readonly retry: 4; /** Input or a confirmation was needed and there was no terminal to ask on. */ readonly inputRequired: 5; /** Interrupted by SIGINT or SIGTERM. */ readonly interrupted: 130; };",
+      "jsdocSummary": "Process exit codes. Stable: scripts and agents branch on them."
+    },
+    {
+      "subpath": ".",
+      "name": "ExitCodeValue",
+      "kind": "type",
+      "signature": "export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];",
+      "jsdocSummary": "One of the {@link ExitCode} values."
+    },
+    {
+      "subpath": ".",
+      "name": "FailureEnvelope",
+      "kind": "type",
+      "signature": "export type FailureEnvelope = { readonly ok: false; readonly command: readonly string[]; readonly data: null; readonly error: EnvelopeError; readonly meta: EnvelopeMeta; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "group",
+      "kind": "function",
+      "signature": "export declare function group<TServices = unknown>(describe: string, commands: CommandTree<TServices>): Group<TServices>;",
+      "jsdocSummary": "A group of commands under one name."
+    },
+    {
+      "subpath": ".",
+      "name": "Group",
+      "kind": "type",
+      "signature": "export type Group<TServices = unknown> = { readonly kind: 'group'; readonly describe: string; readonly commands: CommandTree<TServices>; };",
+      "jsdocSummary": "A named level of the tree with its own help line."
+    },
+    {
+      "subpath": ".",
+      "name": "InputIssue",
+      "kind": "type",
+      "signature": "export type InputIssue = { readonly path: readonly string[]; readonly flag: string | undefined; readonly message: string; };",
+      "jsdocSummary": "One input problem: the input key path, the flag the user typed, what is wrong."
+    },
+    {
+      "subpath": ".",
+      "name": "InputKeys",
+      "kind": "type",
+      "signature": "export type InputKeys<TInput extends SchemaWithJson | undefined> = TInput extends SchemaWithJson ? keyof SchemaInput<TInput> & string : never;",
+      "jsdocSummary": "The keys `args` and `ask` may name: the input's keys, or none without an input."
+    },
+    {
+      "subpath": ".",
+      "name": "InputOf",
+      "kind": "type",
+      "signature": "export type InputOf<C> = ContextOf<C> extends { readonly input: infer I; } ? I : never;",
+      "jsdocSummary": "A command's validated input."
+    },
+    {
+      "subpath": ".",
+      "name": "InputRequired",
+      "kind": "variable",
+      "signature": "export declare const InputRequired: import(\"@arki/failure\").FailureDefinition<\"cli.input_required\", StandardSchemaV1<InputRequiredData, InputRequiredData>>;",
+      "jsdocSummary": "A required value is missing and there is no terminal to ask for it."
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidInput",
+      "kind": "variable",
+      "signature": "export declare const InvalidInput: import(\"@arki/failure\").FailureDefinition<\"cli.invalid_input\", StandardSchemaV1<InvalidInputData, InvalidInputData>>;",
+      "jsdocSummary": "The command line does not fit the command's input. `issues` names each key and flag."
+    },
+    {
+      "subpath": ".",
+      "name": "Io",
+      "kind": "type",
+      "signature": "export type Io = { readonly stdout: (text: string) => void; readonly stderr: (text: string) => void; /** Read only for `--input-file -`. */ readonly stdin: AsyncIterable<Uint8Array | string> | null; /** Whether stdout is a terminal: decides `auto` output. */ readonly tty: boolean; readonly env: Readonly<Record<string, string | undefined>>; /** Aborted on SIGINT/SIGTERM by `run`. */ readonly signal: AbortSignal; };",
+      "jsdocSummary": "What `main` reads and writes instead of the process. Tests pass their own."
+    },
+    {
+      "subpath": ".",
+      "name": "Mode",
+      "kind": "type",
+      "signature": "export type Mode = 'text' | 'json' | 'ndjson';",
+      "jsdocSummary": "How a run's result is written: text on a terminal, a JSON envelope, or one JSON line per item."
+    },
+    {
+      "subpath": ".",
+      "name": "NoInput",
+      "kind": "type",
+      "signature": "export type NoInput = Readonly<Record<string, never>>;",
+      "jsdocSummary": "The input of a command without an input schema: an empty object."
+    },
+    {
+      "subpath": ".",
+      "name": "NoServices",
+      "kind": "type",
+      "signature": "export type NoServices = Readonly<Record<string, never>>;",
+      "jsdocSummary": "The services of a command that runs outside a feature: none."
+    },
+    {
+      "subpath": ".",
+      "name": "OkEnvelope",
+      "kind": "type",
+      "signature": "export type OkEnvelope<T> = { readonly ok: true; readonly command: readonly string[]; /** What `run` returned; null when it returned nothing. */ readonly data: T | null; readonly error: null; readonly meta: EnvelopeMeta; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Outcome",
+      "kind": "type",
+      "signature": "export type Outcome = 'unchanged' | 'unknown';",
+      "jsdocSummary": "What a failed command left behind: `unchanged` when it never ran, `unknown` when it may have changed things."
+    },
+    {
+      "subpath": ".",
+      "name": "OutputOf",
+      "kind": "type",
+      "signature": "export type OutputOf<C> = C extends { readonly run: (ctx: never) => infer R; } ? Success<R> : never;",
+      "jsdocSummary": "A command's success value: what `run` returns, awaited, without its failures."
+    },
+    {
+      "subpath": ".",
+      "name": "PreviewUnsupported",
+      "kind": "variable",
+      "signature": "export declare const PreviewUnsupported: import(\"@arki/failure\").FailureDefinition<\"cli.preview_unsupported\", StandardSchemaV1<PreviewUnsupportedData, PreviewUnsupportedData>>;",
+      "jsdocSummary": "`--dry-run` on a command without `preview`."
+    },
+    {
+      "subpath": ".",
+      "name": "Program",
+      "kind": "type",
+      "signature": "export type Program = Cli & { /** Run one command line. Returns the exit code; never calls `process.exit`. A missing `io` field writes nowhere. */ readonly main: (argv: readonly string[], io?: Partial<Io>) => Promise<number>; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "run",
+      "kind": "function",
+      "signature": "export declare function run(program: Program): Promise<never>;",
+      "jsdocSummary": "Run `program` as this process: `process.argv.slice(2)`, stdout and stderr, `tty` from `process.stdout.isTTY`, `process.env`, and an abort signal for SIGINT/SIGTERM (a run that ends after it exits 130). Never returns."
+    },
+    {
+      "subpath": ".",
+      "name": "RunContext",
+      "kind": "type",
+      "signature": "export type RunContext<TInput extends SchemaWithJson | undefined, TServices> = { /** The schema's output: defaults filled, transforms applied. Empty without an input. */ readonly input: TInput extends SchemaWithJson ? SchemaOutput<TInput> : NoInput; /** None for a standalone command; the feature's services under Dot. */ readonly services: TServices; /** Text to the person at the terminal. Silent in json and ndjson mode. */ readonly ui: Ui; readonly mode: Mode; /** Aborted on SIGINT or SIGTERM. A run that ends after the abort is reported as `cli.cancelled`. */ readonly signal: AbortSignal; /** `getLogger('arki:cli:<path>')`. */ readonly log: Logger; };",
+      "jsdocSummary": "What `run` and `preview` receive. `input` is already validated by the command's own schema."
+    },
+    {
+      "subpath": ".",
+      "name": "ServicesOf",
+      "kind": "type",
+      "signature": "export type ServicesOf<C> = ContextOf<C> extends { readonly services: infer S; } ? S : never;",
+      "jsdocSummary": "The services a command's `run` reads."
+    },
+    {
+      "subpath": ".",
+      "name": "Success",
+      "kind": "type",
+      "signature": "export type Success<TResult> = Exclude<Awaited<TResult>, Failure>;",
+      "jsdocSummary": "The success value of a `run` result: awaited, failures removed (`SuccessOf` in `@arki/failure`)."
+    },
+    {
+      "subpath": ".",
+      "name": "TreeEntry",
+      "kind": "type",
+      "signature": "export type TreeEntry<TServices = unknown> = AnyCommand<TServices> | Group<TServices> | (() => Promise<TreeNode<TServices> | { readonly default: TreeNode<TServices>; }>);",
+      "jsdocSummary": "A command or group, or a loader that imports one: `() => import('./commands/seed.js')`."
+    },
+    {
+      "subpath": ".",
+      "name": "TreeNode",
+      "kind": "type",
+      "signature": "export type TreeNode<TServices = unknown> = AnyCommand<TServices> | Group<TServices>;",
+      "jsdocSummary": "What a loaded entry is: a command or a group."
+    },
+    {
+      "subpath": ".",
+      "name": "Ui",
+      "kind": "type",
+      "signature": "export type Ui = { /** A line on stdout, text mode only. */ out(text: string): void; /** A line on stderr. Muted by `-q` and in json/ndjson mode. */ info(text: string): void; /** A `warning:` line on stderr. Muted by `-q` and in json/ndjson mode. */ warn(text: string): void; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "UnknownCommand",
+      "kind": "variable",
+      "signature": "export declare const UnknownCommand: import(\"@arki/failure\").FailureDefinition<\"cli.unknown_command\", StandardSchemaV1<UnknownCommandData, UnknownCommandData>>;",
+      "jsdocSummary": "The command name is not one at this level. `suggestions` holds the close names and aliases."
+    }
+  ],
+  "errorCodes": [
+    "cli.cancelled",
+    "cli.confirmation_required",
+    "cli.input_required",
+    "cli.invalid_input",
+    "cli.preview_unsupported",
+    "cli.unknown_command"
+  ]
+}

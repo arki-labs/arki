@@ -1,0 +1,14 @@
+{
+  "name": "@arki/math",
+  "channel": "published",
+  "version": "0.0.4",
+  "archive": true,
+  "sha512": "0b792ffaf1947e1bed002f8ed88c79090dcab8502451d13aeeeec26c1a15ba79530da1c6cf13d7da7c73cffe89655f24c8ec91aabbc361aad43e68a9584835d0",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

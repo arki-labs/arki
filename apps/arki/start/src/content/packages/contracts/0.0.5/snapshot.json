@@ -1,0 +1,14 @@
+{
+  "name": "@arki/contracts",
+  "channel": "published",
+  "version": "0.0.5",
+  "archive": true,
+  "sha512": "4f7672d909a45007592f8eb4d5e7d0d0477ad5be1ec5762a676cfb7f324d21d62f94e76907c600088b97e706d6ba74f313cfdb9577082d45f65b1cec781599e5",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

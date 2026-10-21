@@ -1,0 +1,370 @@
+{
+  "name": "@arki/dot",
+  "channel": "next",
+  "version": "0.7.0",
+  "archive": false,
+  "sha512": "c7bc0105acf53a6a1cbd230930e7da87e44ba2021094eaa03aebc1507a02d4f5ac1366817074e00c5bbb6a89a92bf50e2993206e43d19b7dc6e40d4f17dc667a",
+  "files": [
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "README.md",
+    "api.json",
+    "docs/README.md",
+    "docs/actions.md",
+    "docs/adapter-authoring.md",
+    "docs/agent-guide.md",
+    "docs/cli.md",
+    "docs/complex-setup.md",
+    "docs/composition-doctrine.md",
+    "docs/di.md",
+    "docs/diagnostics.md",
+    "docs/examples/quickstart-wrong-order.mjs",
+    "docs/examples/quickstart.ts",
+    "docs/lifecycle.md",
+    "docs/observability.md",
+    "docs/operations.md",
+    "docs/ownership.md",
+    "docs/plugin-authoring.md",
+    "docs/principles.md",
+    "docs/quickstart.md",
+    "docs/recipes/deploy.md",
+    "docs/recipes/upgrade.md",
+    "docs/release-policy.md",
+    "docs/testing.md",
+    "docs/upgrade-actions.md",
+    "docs/upgrade-guide.md",
+    "docs/upgrade-ownership.md",
+    "docs/upgrade-phases.md",
+    "docs/upgrades/0.6.1-to-0.7.0.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 95,
+    "modules": 61,
+    "compiled": 61,
+    "ran": 22,
+    "skipped": 8,
+    "skippedBlocks": [
+      {
+        "file": "docs/complex-setup.md",
+        "line": 218,
+        "reason": "adapter packages depend on @arki/dot, so dot cannot import them"
+      },
+      {
+        "file": "docs/di.md",
+        "line": 46,
+        "reason": "uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
+      },
+      {
+        "file": "docs/di.md",
+        "line": 119,
+        "reason": "shows wiring that must not compile"
+      },
+      {
+        "file": "docs/di.md",
+        "line": 147,
+        "reason": "the app wiring uses log(config), schedule() and a gateway from other @arki packages; the oRPC example below compiles the same chain"
+      },
+      {
+        "file": "docs/di.md",
+        "line": 388,
+        "reason": "uses jobs() from @arki/queue, which depends on @arki/dot"
+      },
+      {
+        "file": "docs/di.md",
+        "line": 402,
+        "reason": "mounts adapters from @arki/db, @arki/queue and @arki/http, which depend on @arki/dot"
+      },
+      {
+        "file": "docs/observability.md",
+        "line": 47,
+        "reason": "needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
+      },
+      {
+        "file": "docs/observability.md",
+        "line": 188,
+        "reason": "needs @opentelemetry/sdk-node, the OTLP exporter and the context manager, which this package does not install"
+      }
+    ],
+    "failures": [
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 57,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 57,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 58,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 58,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 67,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'defineApp'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 67,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'catalog'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 68,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 68,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 69,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2339 Property 'manifest' does not exist on type 'never'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 70,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2339 Property 'boot' does not exist on type 'never'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 71,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 71,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 72,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2339 Property 'dispose' does not exist on type 'never'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 73,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2554 Expected 2 arguments, but got 1."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 73,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS1108 A 'return' statement can only be used within a function body."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 83,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'plugin'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 85,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'openDb'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 92,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'plugin'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 94,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'openDb'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 105,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'plugin'. Did you mean 'Plugin'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 105,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'openDb'. Did you mean 'open'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 111,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'plugin'. Did you mean 'Plugin'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 111,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'openDb'. Did you mean 'open'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 125,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'error'. Did you mean 'Error'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 131,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'error'. Did you mean 'Error'?"
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 139,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'testApp'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 139,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'Db'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 139,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'database'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 145,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'testApp'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 145,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'database'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 158,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS1128 Declaration or statement expected."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 158,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'usecases'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 158,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'createUsecases'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 159,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'rpc'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 159,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'waitlistRpcContract'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 159,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'procedures'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 159,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'os'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 165,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS1128 Declaration or statement expected."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 165,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'usecases'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 165,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'signup'. Either declare one or provide an initializer."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 165,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'markInvited'. Either declare one or provide an initializer."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 166,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'rpc'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 166,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'waitlistRpcContract'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 166,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'rpcImplementer'."
+      },
+      {
+        "file": "docs/upgrades/0.6.1-to-0.7.0.md",
+        "line": 166,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'waitlistProcedures'."
+      }
+    ]
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

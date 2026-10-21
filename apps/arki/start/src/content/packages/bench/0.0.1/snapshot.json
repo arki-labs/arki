@@ -1,0 +1,16 @@
+{
+  "name": "@arki/bench",
+  "channel": "published",
+  "version": "0.0.1",
+  "archive": true,
+  "sha512": "62410914b32942e42612fcc8509a5d2d1a03ef847cb3e7917c918fe9ea1af5850803bb305ce80227e7e558b9e8b23ec34cb77e86430c2fdd6830b016cb741506",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {
+    "node": ">=22.10"
+  },
+  "benchStatus": "none"
+}

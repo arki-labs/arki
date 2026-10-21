@@ -1,0 +1,119 @@
+[
+  {
+    "code": "ARKI_CONTRACTS_E001",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`defineId` got a non-string prefix.",
+    "fix": "Supply the exact stored prefix as a string; use `''` for unprefixed IDs.",
+    "verify": "bun run test -- src/ids.test.ts",
+    "source": "src/errors.ts:17"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E002",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`assertUniqueIdPrefixes` found two prefixes that are equal or start one another.",
+    "fix": "Give each id kind a prefix that does not start another one.",
+    "verify": "bun run test -- src/ids.test.ts",
+    "source": "src/errors.ts:24"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E003",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "Reserved legacy exception code; ID generation now returns RandomSourceUnavailable.",
+    "fix": "Provide Web Crypto getRandomValues; application-owned secure providers must fail closed in every supported mode.",
+    "verify": "bun run test:runtimes",
+    "source": "src/errors.ts:31"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E004",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`keyset` got no keys.",
+    "fix": "Declare at least one key. Order by NOT NULL columns and end on a unique one.",
+    "verify": "bun run test -- src/pagination.test.ts",
+    "source": "src/errors.ts:38"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E005",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "Reserved legacy exception code; cursor decoding now returns InvalidCursor.",
+    "fix": "Send back a cursor exactly as the same keyset returned it, or start from the first page.",
+    "verify": "bun run test -- src/pagination.test.ts",
+    "source": "src/errors.ts:45"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E006",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "A contract key contains `.` or uses a reserved name.",
+    "fix": "Rename the contract key: no `.`, and not a name the query utils reserve.",
+    "verify": "bun run test -- src/orpc.test.ts",
+    "source": "src/errors.ts:52"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E007",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`operationOf` got a value that carries no operation.",
+    "fix": "Pass a leaf of `createOrpcUtils`, or an object built by `operations()`.",
+    "verify": "bun run test -- src/orpc.test.ts",
+    "source": "src/errors.ts:59"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E008",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "The Drizzle column builder has no runtime config for its schema metadata.",
+    "fix": "Use a supported Drizzle column builder and matching Drizzle version.",
+    "verify": "bun run test -- src/drizzle.test.ts",
+    "source": "src/errors.ts:66"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E009",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`defineId` received a missing, empty or non-string domain kind.",
+    "fix": "Supply a non-empty literal domain name, such as `billing.refund`.",
+    "verify": "bun run test -- src/ids.test.ts",
+    "source": "src/errors.ts:73"
+  },
+  {
+    "code": "ARKI_CONTRACTS_E010",
+    "package": "@arki/contracts",
+    "kind": "thrown",
+    "what": "`defineId` received an unsupported generation format.",
+    "fix": "Use 'uuid', omit format, or supply 2–256 distinct non-surrogate UTF-16 alphabet characters and an integer length of 1–256.",
+    "verify": "bun run test -- src/ids.test.ts",
+    "source": "src/errors.ts:80"
+  },
+  {
+    "code": "contracts.invalid_cursor",
+    "package": "@arki/contracts",
+    "kind": "failure",
+    "what": "A cursor cannot be decoded for this keyset.",
+    "fix": "Send back the cursor unchanged, or start from the first page.",
+    "verify": "bun run test -- src/pagination.test.ts",
+    "source": "src/errors.ts:119"
+  },
+  {
+    "code": "contracts.invalid_cursor_value",
+    "package": "@arki/contracts",
+    "kind": "failure",
+    "what": "A row has a missing or unrepresentable cursor key.",
+    "fix": "Use non-null strings, finite numbers, booleans or valid Dates and keep the cursor within 1024 characters.",
+    "verify": "bun run test -- src/pagination.test.ts",
+    "source": "src/errors.ts:129"
+  },
+  {
+    "code": "contracts.random_source_unavailable",
+    "package": "@arki/contracts",
+    "kind": "failure",
+    "what": "Secure ID generation has no usable Web Crypto provider.",
+    "fix": "Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; application-owned secure providers must fail closed in every supported mode.",
+    "verify": "bun run test -- src/ids.test.ts",
+    "source": "src/errors.ts:139"
+  }
+]

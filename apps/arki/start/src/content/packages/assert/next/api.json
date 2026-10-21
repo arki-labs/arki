@@ -1,0 +1,21 @@
+{
+  "package": "@arki/assert",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": "./base64",
+      "name": "isBase64",
+      "kind": "variable",
+      "signature": "export declare const isBase64: (value: string) => boolean;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./url",
+      "name": "isURL",
+      "kind": "variable",
+      "signature": "export declare const isURL: (value: string) => boolean;",
+      "jsdocSummary": ""
+    }
+  ],
+  "errorCodes": []
+}

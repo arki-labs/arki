@@ -1,0 +1,14 @@
+{
+  "name": "@arki/payments",
+  "channel": "published",
+  "version": "0.3.2",
+  "archive": true,
+  "sha512": "d1bc12d5357aefe082a7989f0b03121945ae67745c7c1d81d457210841a1e32fd0ac067bc854f345b0a60fd309789b80c522a382c4ecf8f8f15eb75e180f31c2",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

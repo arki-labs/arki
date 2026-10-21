@@ -1,0 +1,39 @@
+# @arki/icons
+
+> Icon sets for React behind one package: Phosphor by default, plus Iconify, Simple Icons brand marks, country flags and design-system defaults providers.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/icons`: The default entry: every Phosphor icon plus the shared `IconSVG` type. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3037 more.
+- `@arki/icons/flags`: `Flag`; types `FlagProps`, `Flags`.
+- `@arki/icons/brands`: Brand marks from Simple Icons, as plain data you render yourself. `si1001tracklists`, `si1and1`, `si1dot1dot1dot1`, `si1panel`, `si1password`, `si2fas`, `si2k`, `si30secondsofcode`, `si365datascience`, `si3m`, `si42`, `si4chan`; and 3453 more.
+- `@arki/icons/phosphor`: Phosphor Icons — primary entry point. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3036 more.
+- `@arki/icons/phosphor/ssr`: Phosphor Icons — SSR / static variant. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3031 more.
+- `@arki/icons/phosphor/defaults`: `ATELIER_PHOSPHOR_DEFAULTS`, `AtelierIconDefaults`, `PhosphorIconDefaults`, `PhosphorIconScope`, `TRIBUNAL_PHOSPHOR_DEFAULTS`, `TribunalIconDefaults`, `WORKBENCH_PHOSPHOR_DEFAULTS`, `WorkbenchIconDefaults`; types `PhosphorDefaults`.
+- `@arki/icons/spinners`: Animated SVG spinners. `getSpinnerUrl`, `spinnerNames`; types `SpinnerName`.
+- `@arki/icons/brands/index`: Brand marks from Simple Icons, as plain data you render yourself. `si1001tracklists`, `si1and1`, `si1dot1dot1dot1`, `si1panel`, `si1password`, `si2fas`, `si2k`, `si30secondsofcode`, `si365datascience`, `si3m`, `si42`, `si4chan`; and 3453 more.
+- `@arki/icons/home`: `HomeIcon` and `HouseIcon`: a Twemoji house, built at compile time by `unplugin-icons`. `HomeIcon`, `HouseIcon`.
+- `@arki/icons/index`: The default entry: every Phosphor icon plus the shared `IconSVG` type. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3037 more.
+- `@arki/icons/phosphor-ssr`: Phosphor Icons — SSR / static variant. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3031 more.
+- `@arki/icons/spinners/index`: Animated SVG spinners. `getSpinnerUrl`, `spinnerNames`; types `SpinnerName`.
+- `@arki/icons/types`: `IconSVG`: the type of an icon component that renders an SVG. types `IconSVG`.
+- `@arki/icons/wc`: Iconify icons by name (`Icon`, `addIcon`), loaded as a web component. `Icon`, `addIcon`; types `IconifyIconProps`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Show a Phosphor icon](docs/agent-guide.md#show-a-phosphor-icon)
+- [Set icon defaults for a design system](docs/agent-guide.md#set-icon-defaults-for-a-design-system)
+- [Change the weight in one region](docs/agent-guide.md#change-the-weight-in-one-region)
+- [Show a country flag](docs/agent-guide.md#show-a-country-flag)
+- [Add a new icon set](docs/agent-guide.md#add-a-new-icon-set)
+
+## Rules that bite
+- The root import is Phosphor only. Other sets use subpaths.
+- `Flag` needs your app to serve `/flags/<size>/<code>.svg`.
+- `@arki/icons/home` only builds with `unplugin-icons`.
+- `phosphor/ssr` icons ignore `IconContext` and the defaults providers.

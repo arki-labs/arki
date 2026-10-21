@@ -1,0 +1,30 @@
+{
+  "name": "@arki/theme",
+  "channel": "next",
+  "version": "0.2.2",
+  "archive": false,
+  "sha512": "4f9334bcfe517d1ea40339feb0e12c14ea2bbbb09d693741967bc69c28b3ee90b05ecacdbd29936fbf60572a8d33a62781ed27b9c7d0440eed133f02177a058b",
+  "files": [
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 4,
+    "modules": 4,
+    "compiled": 4,
+    "ran": 1,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

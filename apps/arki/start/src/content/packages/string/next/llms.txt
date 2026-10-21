@@ -1,0 +1,50 @@
+# @arki/string
+
+> Grapheme-aware string functions with canonical encoding failures from @arki/failure: case, format, search, edit, escape, slugs, base64, readability, distance and an immutable `str()` wrapper. It is not an HTML sanitizer or a validator.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/string`: Every function of @arki/string in one entry: case, format, search, edit, escape, slugs, base64, readability, distance and the fluent `str` wrapper. `InvalidBase64`, `InvalidUtf8`, `STOP_WORDS`, `STRING_ERROR_CODES`, `StringError`, `StringValue`, `TextAnalysis`, `after`, `analyze`, `at`, `automatedReadabilityIndex`, `base64ToBytes`; and 132 more.
+- `@arki/string/unicode`: Grapheme-aware positional operations. `at`, `chunk`, `fold`, `graphemeBoundaries`, `graphemes`, `length`, `reverse`, `slice`, `splice`, `take`; types `FoldOptions`.
+- `@arki/string/case`: Case conversion built on one tokenizer (`caseWords`), so every case style splits identifiers the same way. `camelCase`, `capitalize`, `caseWords`, `constantCase`, `dotCase`, `kebabCase`, `pascalCase`, `pathCase`, `sentenceCase`, `snakeCase`, `titleCase`, `uncapitalize`; and 1 more.
+- `@arki/string/format`: Whitespace cleanup and display formatting: initials, truncation, excerpts, wrapping. `collapseWhitespace`, `dedent`, `excerpt`, `initials`, `squish`, `truncate`, `wrapText`; types `ExcerptOptions`, `InitialsOptions`, `TruncateOptions`, `WrapTextOptions`.
+- `@arki/string/segment`: Splitting prose into lines, words, sentences, and paragraphs. `lines`, `paragraphCount`, `paragraphs`, `sentenceCount`, `sentences`, `wordCount`, `words`.
+- `@arki/string/search`: Extraction and lookup. `after`, `before`, `between`, `containsAny`, `indexOf`; types `Occurrence`.
+- `@arki/string/edit`: Literal editing, affixes, and grapheme-aware padding. `deduplicate`, `ensureEnd`, `ensureStart`, `mask`, `padBoth`, `padEnd`, `padStart`, `replaceAll`, `replaceEnd`, `replaceFirst`, `replaceLast`, `replaceStart`; and 6 more.
+- `@arki/string/errors`: Static misuse outside UTF-8/base64 raises a {@link StringError} with a stable `code`. `STRING_ERROR_CODES`, `StringError`; types `StringErrorCode`.
+- `@arki/string/escape`: Escaping for embedding text in other syntaxes. `escapeHtml`, `escapeRegExp`.
+- `@arki/string/interpolate`: `interpolate`; types `InterpolateOptions`, `TemplateValues`.
+- `@arki/string/base64`: `InvalidBase64`, `InvalidUtf8`, `base64ToBytes`, `byteLength`, `bytesToBase64`, `fromBase64`, `toBase64`, `tryFromBase64`, `utf8Decode`, `utf8Encode`; types `Base64Options`.
+- `@arki/string/slug`: URL-safe slugs with multi-script transliteration, and no dependencies. `rulesets`, `slugify`, `transliterate`; types `Replacements`, `SlugifyOptions`, `TransliterateOptions`.
+- `@arki/string/slug-cjk`: Chinese (pinyin) and Korean (romanization) rule sets. `chinese`, `korean`.
+- `@arki/string/readability`: How hard and how long a text is to read: syllable heuristics, the classic readability formulas, and time estimates. `automatedReadabilityIndex`, `colemanLiauIndex`, `fernandezHuerta`, `fleschAmstad`, `fleschKincaidGrade`, `fleschReadingEase`, `fleschReadingEaseLevel`, `gunningFog`, `lix`, `readability`, `readingTime`, `smogIndex`; and 13 more.
+- `@arki/string/keywords`: Keyword and key-phrase frequency for SEO-style analysis. `STOP_WORDS`, `keywords`; types `Keyword`, `KeywordLanguage`, `KeywordOptions`.
+- `@arki/string/vocabulary`: Vocabulary statistics: how varied and how long the words of a text are. `lexicalDiversity`, `simpsonsDiversityIndex`, `uniqueWordCount`, `wordFrequencies`, `wordLengthStats`, `yulesK`; types `VocabularyOptions`, `WordFrequency`, `WordLengthStats`.
+- `@arki/string/metrics`: One object with every count, score, and statistic for a text — the "word counter" dashboard. `TextAnalysis`, `analyze`, `textMetrics`; types `TextInput`, `TextMetrics`.
+- `@arki/string/distance`: String similarity measured in graphemes, so `é` and a flag count as one unit whichever way they are encoded. `diceCoefficient`, `jaroWinkler`, `levenshtein`; types `JaroWinklerOptions`.
+- `@arki/string/hash`: Non-negative 32-bit hash of `text` over its UTF-16 code units: the classic `h * 31 + unit` (Java `String.hashCode`) with the sign dropped. `hashCode`.
+- `@arki/string/fluent`: `StringValue`, `str`; types `NormalizationForm`, `Transform`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+
+- [Make a URL slug from a title](docs/agent-guide.md#make-a-url-slug-from-a-title)
+- [Cut text to a budget without breaking it](docs/agent-guide.md#cut-text-to-a-budget-without-breaking-it)
+- [Decode base64 from a user](docs/agent-guide.md#decode-base64-from-a-user)
+- [Fill a template](docs/agent-guide.md#fill-a-template)
+- [Score how hard a text is to read](docs/agent-guide.md#score-how-hard-a-text-is-to-read)
+
+## Rules that bite
+
+- Lengths count graphemes. `length('👨‍👩‍👧‍👦')` is 1, native `.length` is 11.
+- `slugify` uses German rules by default. Pass `locale` for other languages.
+- `escapeHtml` is not a sanitizer. `hashCode` is not cryptographic.
+- Decoding is strict. Narrow returned failures with `isFailure`; `tryFromBase64` aliases `fromBase64` (never null).
+- Chinese and Korean slugs need `@arki/string/slug-cjk`.

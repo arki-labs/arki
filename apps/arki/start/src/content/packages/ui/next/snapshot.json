@@ -1,0 +1,30 @@
+{
+  "name": "@arki/ui",
+  "channel": "next",
+  "version": "0.1.6",
+  "archive": false,
+  "sha512": "d8ef0c73bff5b906f576a0747f71f71e994c5447f2a6174a761c228ab5b47d4b3876546188ae0dea83946c4393ae07ce7cb864dcb9ccf86149ffac61ab66e76e",
+  "files": [
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 5,
+    "modules": 5,
+    "compiled": 5,
+    "ran": 1,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

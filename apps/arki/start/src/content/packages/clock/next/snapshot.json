@@ -1,0 +1,31 @@
+{
+  "name": "@arki/clock",
+  "channel": "next",
+  "version": "0.1.0",
+  "archive": false,
+  "sha512": "86ebb37492ee891fe77d02fd9556694ed2b4ce98aa13399ed2c9044dce60375d599f10816e9dbe8cc864b464edd682ad40a4943f634e589288caf188b4f091a2",
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 6,
+    "modules": 5,
+    "compiled": 5,
+    "ran": 5,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@arki/schema",
+  "channel": "next",
+  "version": "0.1.0",
+  "archive": false,
+  "sha512": "07859b76d90a42305622600f04c197c3e56f727f3cd7f2de6ba3df07c432295a87593188bd45424e6225aaebec3325da7048a032803552edda90dd308c168f18",
+  "files": [
+    "CHANGELOG.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 4,
+    "modules": 3,
+    "compiled": 3,
+    "ran": 3,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

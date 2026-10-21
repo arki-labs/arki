@@ -1,0 +1,40 @@
+# @arki/journal
+
+> A journal for Drizzle entities. Every change is one immutable event row and one normal table row, written in one transaction. Projections run inside that transaction. Effects run after the commit, from a job table.
+
+## Import paths
+- `@arki/journal`: the core. `initJournal`, `need`, `CommandError`, `isCommandError`, `JournalError`, `isJournalError` and the types.
+- `@arki/journal/pg`: `journalTables()`, the two tables (`journal_events`, `journal_jobs`) for the app's schema.
+- `@arki/journal/dot`: optional. The `@arki/dot` plugin `journal(...)` and the feature slice `journalHandlers(...)`.
+- `@arki/journal/orpc`: optional. The oRPC middleware `commandErrors()` and the function `toORPCError(error)`.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): the model, the three objects, the task map, the rules, the error table. Read it first.
+
+## By task
+- [Add an event and react in the same transaction](docs/agent-guide.md#add-an-event-and-react-in-the-same-transaction)
+- [Add an entity with create and delete](docs/agent-guide.md#add-an-entity-with-create-and-delete)
+- [Add an effect that runs after commit](docs/agent-guide.md#add-an-effect-that-runs-after-commit)
+- [Add a command and run it](docs/agent-guide.md#add-a-command-and-run-it)
+- [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), with the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs)
+- [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
+
+## Files
+- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the twelve codes and their messages, and `CommandError`), `src/hooks.ts` (around-hooks on command and effect runs).
+- Definitions: `src/journal.ts` (`initJournal`, `j`, `j.compose`), `src/entity.ts` (entity builder, reducers, key checks), `src/event.ts` (`j.event`), `src/handlers.ts` (`j.projection`, `j.effect`, `need`, and `bindEffect`, which gives an effect its services).
+- Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
+- After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
+- Edges: `src/pg.ts` (the two tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
+
+## Rules that bite
+- The door is `journal.bind(db, meta)`: bind once per request or job, then call `run(command, input)`. You give `meta`; the library never picks an actor.
+- A rule that rejects a request throws `CommandError(code, message)`. It is not a `JournalError`. An oRPC app adds `commandErrors()` once, after its own error middleware.
+- Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.
+- `drain` and `worker` take the root database, never a transaction.
+- An effect that needs a service lists it: `j.effect(name, entity, { mailer: need<Mailer>() }, on)`. The handler reads `mailer` from its context. Do not wrap an effect in a function. A plain app gives the services once, in `j.compose({ services })`. In a Dot app the feature that lists the effect declares them in `needs`.
+- Any running worker can claim any job. Run the worker in the process that holds what its effects talk to (for example an in-memory emitter).
+- A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row. A soft delete is a normal patch.
+- Version 1 means created by the journal. A row that existed before the journal starts at version 2.
+- Pass ids exactly as they are stored. Events are frozen: copy before you change.
+
+> The design spec (`docs/specs/2026-10-09-journal-design.md`) explains intent. `src/api.ts` defines the signatures. When they differ, `src/api.ts` is right.

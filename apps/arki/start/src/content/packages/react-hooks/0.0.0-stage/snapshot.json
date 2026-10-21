@@ -1,0 +1,14 @@
+{
+  "name": "@arki/react-hooks",
+  "channel": "published",
+  "version": "0.0.0-stage",
+  "archive": true,
+  "sha512": "97efccf8a970dbcb5c5ce683bc502a298df72ae4f5cbd3d76a20dac7cf3bd27971cfa97be7abff8e673367b3376c46f22a1dff0b46a583f6925eef425e5ffa91",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

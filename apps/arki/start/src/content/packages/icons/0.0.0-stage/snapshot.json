@@ -1,0 +1,14 @@
+{
+  "name": "@arki/icons",
+  "channel": "published",
+  "version": "0.0.0-stage",
+  "archive": true,
+  "sha512": "457058ccbfe4a3b2cb1f4d45f0e7923e75b78ff1b60d3016a120862604c26e6610a3f74a029cab30ef6e28d00831360a00f9e9611f5b71ca2f2c36b73e321423",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

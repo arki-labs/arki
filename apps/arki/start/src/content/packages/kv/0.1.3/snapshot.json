@@ -1,0 +1,14 @@
+{
+  "name": "@arki/kv",
+  "channel": "published",
+  "version": "0.1.3",
+  "archive": true,
+  "sha512": "b7a770e997d8f7e0aadbca05c2e7827b406010336e7dc1fba2e41cc779fdd948bb86d7d1a61f5d1642e76c5fa47b8de8e4fde79b36af7729f8987dd75ae69d20",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

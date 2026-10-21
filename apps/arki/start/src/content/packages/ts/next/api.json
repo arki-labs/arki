@@ -1,0 +1,231 @@
+{
+  "package": "@arki/ts",
+  "version": "0.0.4",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "Autocomplete",
+      "kind": "type",
+      "signature": "export type Autocomplete<U extends T, T = string> = U | (T & Record<never, never>);",
+      "jsdocSummary": "Enables autocompletion for a union type, while keeping the ability to use any string or type of `T`"
+    },
+    {
+      "subpath": ".",
+      "name": "CamelToSnake",
+      "kind": "type",
+      "signature": "export type CamelToSnake<T> = T extends `${infer C0}${infer R}` ? `${C0 extends Uppercase<C0> ? '_' : ''}${Lowercase<C0>}${CamelToSnake<R>}` : T extends object ? { [K in keyof T as CamelToSnake<Extract<K, string>>]: T[K]; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "DeepCamelToSnake",
+      "kind": "type",
+      "signature": "export type DeepCamelToSnake<T> = T extends `${infer C0}${infer R}` ? `${C0 extends Uppercase<C0> ? '_' : ''}${Lowercase<C0>}${DeepCamelToSnake<R>}` : T extends object ? { [K in keyof T as DeepCamelToSnake<Extract<K, string>>]: DeepCamelToSnake<T[K]>; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "DeepPartial",
+      "kind": "type",
+      "signature": "export type DeepPartial<T> = { [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "DeepRequired",
+      "kind": "type",
+      "signature": "export type DeepRequired<T> = Required<{ [P in keyof T]: T[P] extends object | undefined ? DeepRequired<Required<T[P]>> : T[P]; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "DeepSnakeToCamel",
+      "kind": "type",
+      "signature": "export type DeepSnakeToCamel<T> = T extends `${infer A}_${infer B}` ? `${Uncapitalize<A>}${Capitalize<DeepSnakeToCamel<B>>}` : T extends object ? { [K in keyof T as DeepSnakeToCamel<K>]: DeepSnakeToCamel<T[K]>; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Lazy",
+      "kind": "type",
+      "signature": "export type Lazy<T> = T | (() => T);",
+      "jsdocSummary": "A value or a zero-arg thunk producing it — the deferred-config shape DOT adapters accept so a declaration can reference env without observing it at module load: `kv(() => ({ url: env.REDIS_URL }))`. The adapter calls {@link resolveLazy} at boot, which is where the observation belongs."
+    },
+    {
+      "subpath": ".",
+      "name": "lazyObject",
+      "kind": "function",
+      "signature": "export declare function lazyObject<T extends object>(build: () => T): T;",
+      "jsdocSummary": "Defer an object's construction to its FIRST property access, memoized."
+    },
+    {
+      "subpath": ".",
+      "name": "Nullable",
+      "kind": "type",
+      "signature": "export type Nullable<T, K extends keyof T> = { [P in keyof T]: P extends K ? T[P] | null : T[P]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "once",
+      "kind": "function",
+      "signature": "export declare function once<T>(compute: () => T): () => T;",
+      "jsdocSummary": "Memoize a zero-argument computation: `compute` runs on the FIRST call, every later call returns the same result — including `undefined` (the guard is a flag, not the value). Works for async computations too, since memoizing a promise-returning function memoizes the promise itself."
+    },
+    {
+      "subpath": ".",
+      "name": "PathValue",
+      "kind": "type",
+      "signature": "export type PathValue<T, P extends PathCheck<T, P>> = P extends `${infer Key}.${infer Rest}` ? Key extends keyof T ? IsNestedPath<T[Key], Rest> extends true ? ValueAt<T[Key], Rest> : Rest extends RecordToPath<T[Key]> ? PathValue<T[Key], Rest> : never : never : P extends keyof T ? T[P] : never;",
+      "jsdocSummary": "Used to read the value of a string path inside an object defined as const const obj = { a: { b: 'hello' }} as const; type Value = PathValue<typeof obj, 'a.b'> Value is now a union set containing a single type: 'hello'"
+    },
+    {
+      "subpath": ".",
+      "name": "Prettify",
+      "kind": "type",
+      "signature": "export type Prettify<T> = { [K in keyof T]: T[K]; } & {};",
+      "jsdocSummary": "`Prettify`: flatten an intersection so the IDE shows one resolved object type."
+    },
+    {
+      "subpath": ".",
+      "name": "RecordToPath",
+      "kind": "type",
+      "signature": "export type RecordToPath<T> = PathImpl<T, keyof T> | keyof T;",
+      "jsdocSummary": "Used to construct a type union containing all the keys (even if nested) of an object defined as const const obj = { a: { b: '' }, c: '' } as const; type Paths = RecordToPath<typeof obj> Paths contains: 'a' | 'a.b' | 'c'"
+    },
+    {
+      "subpath": ".",
+      "name": "resolveLazy",
+      "kind": "function",
+      "signature": "export declare function resolveLazy<T>(value: Lazy<T>): T;",
+      "jsdocSummary": "Resolve a {@link Lazy}: call it if it is a thunk, return it otherwise."
+    },
+    {
+      "subpath": ".",
+      "name": "Serializable",
+      "kind": "type",
+      "signature": "export type Serializable<T> = { [K in keyof T as IsSerializable<T[K]> extends true ? K : never]: T[K]; };",
+      "jsdocSummary": "Excludes any non-serializable prop from an object"
+    },
+    {
+      "subpath": ".",
+      "name": "SnakeToCamel",
+      "kind": "type",
+      "signature": "export type SnakeToCamel<T> = T extends `${infer A}_${infer B}` ? `${Uncapitalize<A>}${Capitalize<SnakeToCamel<B>>}` : T extends object ? { [K in keyof T as SnakeToCamel<K>]: T[K]; } : T;",
+      "jsdocSummary": "Helper types for casing (`SnakeToCamel`, `CamelToSnake`), paths (`RecordToPath`, `PathValue`) and object shapes (`DeepPartial`, `Nullable`, `Without`)."
+    },
+    {
+      "subpath": ".",
+      "name": "Without",
+      "kind": "type",
+      "signature": "export type Without<T, W> = { [P in keyof T as Exclude<P, W>]: T[P]; };",
+      "jsdocSummary": "Omit without union flattening"
+    },
+    {
+      "subpath": "./prettify",
+      "name": "Prettify",
+      "kind": "type",
+      "signature": "export type Prettify<T> = { [K in keyof T]: T[K]; } & {};",
+      "jsdocSummary": "`Prettify`: flatten an intersection so the IDE shows one resolved object type."
+    },
+    {
+      "subpath": "./testing",
+      "name": "expectImportPure",
+      "kind": "function",
+      "signature": "export declare function expectImportPure(entryPaths: readonly string[], options?: ImportPurityOptions): void;",
+      "jsdocSummary": "Assert the composition doctrine's import-purity contract: importing the given modules must succeed from a bare checkout with a scrubbed environment (only `PATH`/`HOME` for the runtime itself)."
+    },
+    {
+      "subpath": "./testing",
+      "name": "ImportPurityOptions",
+      "kind": "type",
+      "signature": "export type ImportPurityOptions = { /** Subprocess runtime binary (default `'bun'`). */ readonly runtime?: string; /** Kill the subprocess after this long (default 60s). */ readonly timeoutMs?: number; /** * Extra environment variables for the subprocess, merged over the scrubbed * base. Use sparingly — every var added here is a purity exemption. */ readonly env?: Readonly<Record<string, string>>; };",
+      "jsdocSummary": "Options for {@link expectImportPure}."
+    },
+    {
+      "subpath": "./utils",
+      "name": "Autocomplete",
+      "kind": "type",
+      "signature": "export type Autocomplete<U extends T, T = string> = U | (T & Record<never, never>);",
+      "jsdocSummary": "Enables autocompletion for a union type, while keeping the ability to use any string or type of `T`"
+    },
+    {
+      "subpath": "./utils",
+      "name": "CamelToSnake",
+      "kind": "type",
+      "signature": "export type CamelToSnake<T> = T extends `${infer C0}${infer R}` ? `${C0 extends Uppercase<C0> ? '_' : ''}${Lowercase<C0>}${CamelToSnake<R>}` : T extends object ? { [K in keyof T as CamelToSnake<Extract<K, string>>]: T[K]; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "DeepCamelToSnake",
+      "kind": "type",
+      "signature": "export type DeepCamelToSnake<T> = T extends `${infer C0}${infer R}` ? `${C0 extends Uppercase<C0> ? '_' : ''}${Lowercase<C0>}${DeepCamelToSnake<R>}` : T extends object ? { [K in keyof T as DeepCamelToSnake<Extract<K, string>>]: DeepCamelToSnake<T[K]>; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "DeepPartial",
+      "kind": "type",
+      "signature": "export type DeepPartial<T> = { [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "DeepRequired",
+      "kind": "type",
+      "signature": "export type DeepRequired<T> = Required<{ [P in keyof T]: T[P] extends object | undefined ? DeepRequired<Required<T[P]>> : T[P]; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "DeepSnakeToCamel",
+      "kind": "type",
+      "signature": "export type DeepSnakeToCamel<T> = T extends `${infer A}_${infer B}` ? `${Uncapitalize<A>}${Capitalize<DeepSnakeToCamel<B>>}` : T extends object ? { [K in keyof T as DeepSnakeToCamel<K>]: DeepSnakeToCamel<T[K]>; } : T;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "Nullable",
+      "kind": "type",
+      "signature": "export type Nullable<T, K extends keyof T> = { [P in keyof T]: P extends K ? T[P] | null : T[P]; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./utils",
+      "name": "PathValue",
+      "kind": "type",
+      "signature": "export type PathValue<T, P extends PathCheck<T, P>> = P extends `${infer Key}.${infer Rest}` ? Key extends keyof T ? IsNestedPath<T[Key], Rest> extends true ? ValueAt<T[Key], Rest> : Rest extends RecordToPath<T[Key]> ? PathValue<T[Key], Rest> : never : never : P extends keyof T ? T[P] : never;",
+      "jsdocSummary": "Used to read the value of a string path inside an object defined as const const obj = { a: { b: 'hello' }} as const; type Value = PathValue<typeof obj, 'a.b'> Value is now a union set containing a single type: 'hello'"
+    },
+    {
+      "subpath": "./utils",
+      "name": "RecordToPath",
+      "kind": "type",
+      "signature": "export type RecordToPath<T> = PathImpl<T, keyof T> | keyof T;",
+      "jsdocSummary": "Used to construct a type union containing all the keys (even if nested) of an object defined as const const obj = { a: { b: '' }, c: '' } as const; type Paths = RecordToPath<typeof obj> Paths contains: 'a' | 'a.b' | 'c'"
+    },
+    {
+      "subpath": "./utils",
+      "name": "Serializable",
+      "kind": "type",
+      "signature": "export type Serializable<T> = { [K in keyof T as IsSerializable<T[K]> extends true ? K : never]: T[K]; };",
+      "jsdocSummary": "Excludes any non-serializable prop from an object"
+    },
+    {
+      "subpath": "./utils",
+      "name": "SnakeToCamel",
+      "kind": "type",
+      "signature": "export type SnakeToCamel<T> = T extends `${infer A}_${infer B}` ? `${Uncapitalize<A>}${Capitalize<SnakeToCamel<B>>}` : T extends object ? { [K in keyof T as SnakeToCamel<K>]: T[K]; } : T;",
+      "jsdocSummary": "Helper types for casing (`SnakeToCamel`, `CamelToSnake`), paths (`RecordToPath`, `PathValue`) and object shapes (`DeepPartial`, `Nullable`, `Without`)."
+    },
+    {
+      "subpath": "./utils",
+      "name": "Without",
+      "kind": "type",
+      "signature": "export type Without<T, W> = { [P in keyof T as Exclude<P, W>]: T[P]; };",
+      "jsdocSummary": "Omit without union flattening"
+    }
+  ],
+  "errorCodes": []
+}

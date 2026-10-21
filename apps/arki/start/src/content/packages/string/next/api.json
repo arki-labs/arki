@@ -1,0 +1,2045 @@
+{
+  "package": "@arki/string",
+  "version": "0.3.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "after",
+      "kind": "function",
+      "signature": "export declare function after(text: string, delimiter: string, occurrence?: Occurrence): string;",
+      "jsdocSummary": "Everything after the first (or last) `delimiter`."
+    },
+    {
+      "subpath": ".",
+      "name": "analyze",
+      "kind": "function",
+      "signature": "export declare function analyze(text: string, locale?: string): TextAnalysis;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "at",
+      "kind": "function",
+      "signature": "export declare function at(text: string, index: number): string | undefined;",
+      "jsdocSummary": "Grapheme at `index` (negative counts from the end), or `undefined` when out of range."
+    },
+    {
+      "subpath": ".",
+      "name": "automatedReadabilityIndex",
+      "kind": "function",
+      "signature": "export declare function automatedReadabilityIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Base64Options",
+      "kind": "type",
+      "signature": "export type Base64Options = Readonly<{ /** `standard` uses `+` and `/`; `url` uses `-` and `_` (RFC 4648 §5). Defaults to `standard`. */ alphabet?: 'standard' | 'url'; /** Whether `=` padding must be present or absent. Defaults to `required` for `standard`, `forbidden` for `url`. */ padding?: 'required' | 'forbidden'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "base64ToBytes",
+      "kind": "function",
+      "signature": "export declare function base64ToBytes(encoded: string, options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | Uint8Array<ArrayBuffer>;",
+      "jsdocSummary": "Decodes base64 to bytes. Rejects whitespace, characters outside the selected alphabet, misplaced or missing padding, impossible lengths, and nonzero unused bits, returning `InvalidBase64`."
+    },
+    {
+      "subpath": ".",
+      "name": "before",
+      "kind": "function",
+      "signature": "export declare function before(text: string, delimiter: string, occurrence?: Occurrence): string;",
+      "jsdocSummary": "Everything before the first (or last) `delimiter`."
+    },
+    {
+      "subpath": ".",
+      "name": "between",
+      "kind": "function",
+      "signature": "export declare function between(text: string, opening: string, closing: string): string;",
+      "jsdocSummary": "Text between the first `opening` and the first `closing` after it. No nesting."
+    },
+    {
+      "subpath": ".",
+      "name": "byteLength",
+      "kind": "function",
+      "signature": "export declare function byteLength(text: string): number | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "UTF-8 byte length of `text`. Returns `InvalidUtf8` on an unpaired surrogate."
+    },
+    {
+      "subpath": ".",
+      "name": "bytesToBase64",
+      "kind": "function",
+      "signature": "export declare function bytesToBase64(bytes: Uint8Array, options?: Base64Options): string;",
+      "jsdocSummary": "Encodes bytes as base64."
+    },
+    {
+      "subpath": ".",
+      "name": "camelCase",
+      "kind": "function",
+      "signature": "export declare function camelCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`fooBarBaz`"
+    },
+    {
+      "subpath": ".",
+      "name": "capitalize",
+      "kind": "function",
+      "signature": "export declare function capitalize(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "Uppercases the first grapheme and leaves the rest untouched."
+    },
+    {
+      "subpath": ".",
+      "name": "CaseOptions",
+      "kind": "type",
+      "signature": "export type CaseOptions = Readonly<{ locale?: string; }>;",
+      "jsdocSummary": "Case conversion built on one tokenizer (`caseWords`), so every case style splits identifiers the same way. Tokens are letters, numbers, and attached marks; everything else is a boundary. Casing is locale-independent unless a `locale` is passed explicitly."
+    },
+    {
+      "subpath": ".",
+      "name": "caseWords",
+      "kind": "function",
+      "signature": "export declare function caseWords(text: string): string[];",
+      "jsdocSummary": "Splits `text` into the tokens every case function works on."
+    },
+    {
+      "subpath": ".",
+      "name": "chunk",
+      "kind": "function",
+      "signature": "export declare function chunk(text: string, size: number): string[];",
+      "jsdocSummary": "Splits `text` into chunks of `size` graphemes; the last chunk may be shorter."
+    },
+    {
+      "subpath": ".",
+      "name": "colemanLiauIndex",
+      "kind": "function",
+      "signature": "export declare function colemanLiauIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "collapseWhitespace",
+      "kind": "function",
+      "signature": "export declare function collapseWhitespace(text: string): string;",
+      "jsdocSummary": "Collapses every whitespace run to one space. Leading/trailing runs become one space each."
+    },
+    {
+      "subpath": ".",
+      "name": "constantCase",
+      "kind": "function",
+      "signature": "export declare function constantCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`FOO_BAR_BAZ`"
+    },
+    {
+      "subpath": ".",
+      "name": "containsAny",
+      "kind": "function",
+      "signature": "export declare function containsAny(text: string, needles: readonly string[]): boolean;",
+      "jsdocSummary": "Whether any of `needles` occurs in `text`. An empty list is `false`."
+    },
+    {
+      "subpath": ".",
+      "name": "dedent",
+      "kind": "function",
+      "signature": "export declare function dedent(text: string): string; ; export declare function dedent(strings: TemplateStringsArray, ...values: readonly unknown[]): string;",
+      "jsdocSummary": "Removes the indentation shared by every non-blank line, and one leading and one trailing blank line, so an indented template literal reads as written. Works as a plain function or a tag: `dedent(text)` or ``dedent`...` ``. Line endings are kept."
+    },
+    {
+      "subpath": ".",
+      "name": "deduplicate",
+      "kind": "function",
+      "signature": "export declare function deduplicate(text: string, token?: string): string;",
+      "jsdocSummary": "Collapses adjacent repeats of `token` (default: a space) into one."
+    },
+    {
+      "subpath": ".",
+      "name": "diceCoefficient",
+      "kind": "function",
+      "signature": "export declare function diceCoefficient(a: string, b: string): number;",
+      "jsdocSummary": "Sørensen–Dice coefficient over grapheme bigrams, 0–1. Identical strings score 1; strings shorter than two graphemes score 1 only when equal."
+    },
+    {
+      "subpath": ".",
+      "name": "dotCase",
+      "kind": "function",
+      "signature": "export declare function dotCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo.bar.baz`"
+    },
+    {
+      "subpath": ".",
+      "name": "ensureEnd",
+      "kind": "function",
+      "signature": "export declare function ensureEnd(text: string, suffix: string): string;",
+      "jsdocSummary": "Adds `suffix` unless `text` already ends with it."
+    },
+    {
+      "subpath": ".",
+      "name": "ensureStart",
+      "kind": "function",
+      "signature": "export declare function ensureStart(text: string, prefix: string): string;",
+      "jsdocSummary": "Adds `prefix` unless `text` already starts with it."
+    },
+    {
+      "subpath": ".",
+      "name": "escapeHtml",
+      "kind": "function",
+      "signature": "export declare function escapeHtml(text: string): string;",
+      "jsdocSummary": "Escapes `& < > \" '` for HTML text and quoted attribute values. Existing entities are escaped again."
+    },
+    {
+      "subpath": ".",
+      "name": "escapeRegExp",
+      "kind": "function",
+      "signature": "export declare function escapeRegExp(text: string): string;",
+      "jsdocSummary": "Escapes `text` so it matches literally inside a `RegExp` source, with the semantics of `RegExp.escape`: a leading ASCII letter or digit is hex-escaped so the result can never merge with a preceding token."
+    },
+    {
+      "subpath": ".",
+      "name": "excerpt",
+      "kind": "function",
+      "signature": "export declare function excerpt(text: string, needle: string, options?: ExcerptOptions): string | undefined;",
+      "jsdocSummary": "Context around the first match of `needle`, or `undefined` when absent."
+    },
+    {
+      "subpath": ".",
+      "name": "ExcerptOptions",
+      "kind": "type",
+      "signature": "export type ExcerptOptions = Readonly<{ /** Graphemes kept on each side of the match. Defaults to 40. */ radius?: number; ellipsis?: string; /** * `grapheme` cuts exactly at the radius; `word` and `sentence` pull each edge inward to the * nearest word or sentence boundary, never past the match, so the radius stays a hard maximum. */ boundary?: 'grapheme' | 'word' | 'sentence'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "fernandezHuerta",
+      "kind": "function",
+      "signature": "export declare function fernandezHuerta(text: TextInput): number;",
+      "jsdocSummary": "Spanish Flesch adaptation (Fernández Huerta), 0–100; higher is easier."
+    },
+    {
+      "subpath": ".",
+      "name": "fleschAmstad",
+      "kind": "function",
+      "signature": "export declare function fleschAmstad(text: TextInput): number;",
+      "jsdocSummary": "German Flesch adaptation (Amstad), 0–100; higher is easier."
+    },
+    {
+      "subpath": ".",
+      "name": "fleschKincaidGrade",
+      "kind": "function",
+      "signature": "export declare function fleschKincaidGrade(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "fleschReadingEase",
+      "kind": "function",
+      "signature": "export declare function fleschReadingEase(text: TextInput): number;",
+      "jsdocSummary": "Flesch Reading Ease, 0–100 (clamped). Text without words scores 100."
+    },
+    {
+      "subpath": ".",
+      "name": "fleschReadingEaseLevel",
+      "kind": "function",
+      "signature": "export declare function fleschReadingEaseLevel(fleschScore: number): ReadabilityLevel;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "fold",
+      "kind": "function",
+      "signature": "export declare function fold(text: string, options?: FoldOptions): string;",
+      "jsdocSummary": "Search-key form of `text`: lowercased, accents and other combining marks removed, and the few Latin letters without a decomposition (`ß`, `ø`, `ł`, …) spelled out. `fold('Émile Zola')` is `'emile zola'`. Lighter than `transliterate` (no script conversion) and meant for matching, not display."
+    },
+    {
+      "subpath": ".",
+      "name": "FoldOptions",
+      "kind": "type",
+      "signature": "export type FoldOptions = Readonly<{ /** BCP 47 tag for lowercasing (`'tr'` keeps dotless i). Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "fromBase64",
+      "kind": "function",
+      "signature": "export declare function fromBase64(encoded: string, options?: Base64Options): string | import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Decodes base64 to text. Returns `InvalidBase64` for malformed base64 and `InvalidUtf8` for invalid UTF-8."
+    },
+    {
+      "subpath": ".",
+      "name": "GermanReadabilityScores",
+      "kind": "type",
+      "signature": "export type GermanReadabilityScores = Readonly<{ fleschAmstad: number; wienerSachtextformel: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "graphemeBoundaries",
+      "kind": "function",
+      "signature": "export declare function graphemeBoundaries(text: string): number[];",
+      "jsdocSummary": "Every boundary offset of `text`, always starting with `0` and ending with `text.length`."
+    },
+    {
+      "subpath": ".",
+      "name": "graphemes",
+      "kind": "function",
+      "signature": "export declare function graphemes(text: string): IterableIterator<string>;",
+      "jsdocSummary": "Iterates the grapheme clusters of `text`."
+    },
+    {
+      "subpath": ".",
+      "name": "gunningFog",
+      "kind": "function",
+      "signature": "export declare function gunningFog(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "hashCode",
+      "kind": "function",
+      "signature": "export declare function hashCode(text: string): number;",
+      "jsdocSummary": "Non-negative 32-bit hash of `text` over its UTF-16 code units: the classic `h * 31 + unit` (Java `String.hashCode`) with the sign dropped. Stable across runtimes and releases, so it is safe for picking a deterministic variant (`hashCode(id) % variants.length`) or a cache key. Not cryptographic and not collision-resistant."
+    },
+    {
+      "subpath": ".",
+      "name": "indexOf",
+      "kind": "function",
+      "signature": "export declare function indexOf(text: string, needle: string, from?: number): number;",
+      "jsdocSummary": "Grapheme index of the first occurrence of `needle` at or after grapheme `from`, or -1."
+    },
+    {
+      "subpath": ".",
+      "name": "initials",
+      "kind": "function",
+      "signature": "export declare function initials(text: string, options?: InitialsOptions): string;",
+      "jsdocSummary": "Uppercase first graphemes of the name components in `text`. Empty input gives `''`."
+    },
+    {
+      "subpath": ".",
+      "name": "InitialsOptions",
+      "kind": "type",
+      "signature": "export type InitialsOptions = Readonly<{ /** Maximum number of initials. Defaults to 2. */ max?: number; /** With more components than `max`, keep the first ones or the first and last. Defaults to `first-last`. */ pick?: 'first' | 'first-last'; /** Leading graphemes to take when the name is a single word (`'Alex'` → `'AL'` with 2). Defaults to 1. */ singleWord?: number; locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "interpolate",
+      "kind": "function",
+      "signature": "export declare function interpolate(template: string, values: TemplateValues, options?: InterpolateOptions): string;",
+      "jsdocSummary": "Replaces `{{ name }}` placeholders with `values[name]`. `null` renders as `''`; `undefined` counts as missing. `\\{{` emits a literal `{{` and `\\\\` a literal backslash. Malformed placeholders throw `StringError` (`ARKI_STRING_E004`)."
+    },
+    {
+      "subpath": ".",
+      "name": "InterpolateOptions",
+      "kind": "type",
+      "signature": "export type InterpolateOptions = Readonly<{ /** What to do for a placeholder without a value: `throw` (default), `keep` the placeholder, or render `empty`. */ missing?: 'throw' | 'keep' | 'empty'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidBase64",
+      "kind": "variable",
+      "signature": "export declare const InvalidBase64: import(\"@arki/failure\").FailureDefinition<\"string.invalid_base64\", undefined>;",
+      "jsdocSummary": "Noncanonical base64. No submitted input is exposed."
+    },
+    {
+      "subpath": ".",
+      "name": "InvalidUtf8",
+      "kind": "variable",
+      "signature": "export declare const InvalidUtf8: import(\"@arki/failure\").FailureDefinition<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Invalid UTF-8. No submitted text or bytes are exposed."
+    },
+    {
+      "subpath": ".",
+      "name": "jaroWinkler",
+      "kind": "function",
+      "signature": "export declare function jaroWinkler(a: string, b: string, options?: JaroWinklerOptions): number;",
+      "jsdocSummary": "Jaro–Winkler similarity, 0–1: Jaro similarity boosted for a shared prefix. Suited to short strings such as names. Both empty gives 1; one empty gives 0."
+    },
+    {
+      "subpath": ".",
+      "name": "JaroWinklerOptions",
+      "kind": "type",
+      "signature": "export type JaroWinklerOptions = Readonly<{ /** Weight of the common prefix (at most 4 graphemes). Default 0.1; must stay at or below 0.25. */ prefixScale?: number; }>;",
+      "jsdocSummary": "String similarity measured in graphemes, so `é` and a flag count as one unit whichever way they are encoded. Compare case-insensitively or accent-insensitively by folding both inputs first (`fold` in `./unicode`). All three are O(n·m) in the grapheme counts."
+    },
+    {
+      "subpath": ".",
+      "name": "kebabCase",
+      "kind": "function",
+      "signature": "export declare function kebabCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo-bar-baz`"
+    },
+    {
+      "subpath": ".",
+      "name": "Keyword",
+      "kind": "type",
+      "signature": "export type Keyword = Readonly<{ /** Lowercased word or phrase. */ keyword: string; occurrences: number; /** Share of all candidate phrases of the same length, 0–100. */ percentage: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "KeywordLanguage",
+      "kind": "type",
+      "signature": "export type KeywordLanguage = 'en' | 'es' | 'de' | 'fr' | 'ro';",
+      "jsdocSummary": "Function words per language, lowercased, for `keywords()`."
+    },
+    {
+      "subpath": ".",
+      "name": "KeywordOptions",
+      "kind": "type",
+      "signature": "export type KeywordOptions = Readonly<{ /** Words per phrase. Default `1`. */ length?: number; /** Maximum entries returned. Default: all. */ limit?: number; /** Words shorter than this (in graphemes) never form keywords. Default `3`. */ minWordLength?: number; /** Phrases seen fewer times than this are dropped. Default `1`. */ minOccurrences?: number; /** Which built-in stop-word list to use. Default `'en'`. */ language?: KeywordLanguage; /** Lowercased words that never form keywords. Default: the `language` list; pass `null` to disable. */ stopWords?: Iterable<string> | null; /** BCP 47 tag for lowercasing. Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "keywords",
+      "kind": "function",
+      "signature": "export declare function keywords(text: string, options?: KeywordOptions): Keyword[];",
+      "jsdocSummary": "Most frequent words or phrases (`length` words each), lowercased, most frequent first; ties sort alphabetically. `percentage` is the share among all candidate phrases of that length."
+    },
+    {
+      "subpath": ".",
+      "name": "length",
+      "kind": "function",
+      "signature": "export declare function length(text: string): number;",
+      "jsdocSummary": "Number of grapheme clusters in `text`."
+    },
+    {
+      "subpath": ".",
+      "name": "levenshtein",
+      "kind": "function",
+      "signature": "export declare function levenshtein(a: string, b: string): number;",
+      "jsdocSummary": "Minimum number of grapheme insertions, deletions, and substitutions turning `a` into `b`."
+    },
+    {
+      "subpath": ".",
+      "name": "lexicalDiversity",
+      "kind": "function",
+      "signature": "export declare function lexicalDiversity(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Type–token ratio: distinct words divided by all words, 0–1. `0` for empty text."
+    },
+    {
+      "subpath": ".",
+      "name": "lines",
+      "kind": "function",
+      "signature": "export declare function lines(text: string): string[];",
+      "jsdocSummary": "Splits on CRLF, LF, CR, NEL, LS, and PS. `lines('')` is `['']`; trailing empty lines are kept."
+    },
+    {
+      "subpath": ".",
+      "name": "lix",
+      "kind": "function",
+      "signature": "export declare function lix(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "mask",
+      "kind": "function",
+      "signature": "export declare function mask(text: string, options?: MaskOptions): string;",
+      "jsdocSummary": "Replaces every grapheme in the `[start, end)` range with `glyph`, so the masked length stays visible. `glyph` may not start with a combining mark (it would attach to the previous grapheme)."
+    },
+    {
+      "subpath": ".",
+      "name": "MaskOptions",
+      "kind": "type",
+      "signature": "export type MaskOptions = Readonly<{ /** Grapheme index to start masking from; negative counts from the end. Defaults to 0. */ start?: number; /** Grapheme index to stop before; negative counts from the end. Defaults to the end. */ end?: number; /** Replacement for each masked grapheme. Defaults to `*`. */ glyph?: string; }>;",
+      "jsdocSummary": "Literal editing, affixes, and grapheme-aware padding. Search strings are literal and only match on grapheme boundaries; replacement strings are literal too, so `$&` stays `$&`."
+    },
+    {
+      "subpath": ".",
+      "name": "NormalizationForm",
+      "kind": "type",
+      "signature": "export type NormalizationForm = 'NFC' | 'NFD' | 'NFKC' | 'NFKD';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Occurrence",
+      "kind": "type",
+      "signature": "export type Occurrence = 'first' | 'last';",
+      "jsdocSummary": "Extraction and lookup. Literal matches are case- and normalization-sensitive and always align with grapheme boundaries. `before`, `after`, and `between` return the input unchanged when a delimiter is absent."
+    },
+    {
+      "subpath": ".",
+      "name": "padBoth",
+      "kind": "function",
+      "signature": "export declare function padBoth(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads both sides to centre `text`; an odd extra grapheme goes on the right."
+    },
+    {
+      "subpath": ".",
+      "name": "padEnd",
+      "kind": "function",
+      "signature": "export declare function padEnd(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads the end until `text` has `targetLength` graphemes. Never shortens."
+    },
+    {
+      "subpath": ".",
+      "name": "padStart",
+      "kind": "function",
+      "signature": "export declare function padStart(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads the start until `text` has `targetLength` graphemes. Never shortens."
+    },
+    {
+      "subpath": ".",
+      "name": "paragraphCount",
+      "kind": "function",
+      "signature": "export declare function paragraphCount(text: string): number;",
+      "jsdocSummary": "Number of paragraphs, using exactly `paragraphs()`."
+    },
+    {
+      "subpath": ".",
+      "name": "paragraphs",
+      "kind": "function",
+      "signature": "export declare function paragraphs(text: string): string[];",
+      "jsdocSummary": "Paragraphs: non-blank lines, trimmed. Blank-line-separated and single-newline-separated text give the same result unless a paragraph is hard-wrapped, which is rare in web inputs."
+    },
+    {
+      "subpath": ".",
+      "name": "pascalCase",
+      "kind": "function",
+      "signature": "export declare function pascalCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`FooBarBaz`"
+    },
+    {
+      "subpath": ".",
+      "name": "pathCase",
+      "kind": "function",
+      "signature": "export declare function pathCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo/bar/baz`"
+    },
+    {
+      "subpath": ".",
+      "name": "readability",
+      "kind": "function",
+      "signature": "export declare function readability(text: TextInput): ReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language?: 'en'; }>): ReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language: 'es'; }>): SpanishReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language: 'de'; }>): GermanReadabilityScores; ; export declare function readability(text: TextInput, options: ReadabilityOptions): ReadabilityScores | SpanishReadabilityScores | GermanReadabilityScores;",
+      "jsdocSummary": "Every score for the language from one analysis of the text. English unless `language` says otherwise."
+    },
+    {
+      "subpath": ".",
+      "name": "ReadabilityLevel",
+      "kind": "type",
+      "signature": "export type ReadabilityLevel = 'Very Easy' | 'Easy' | 'Fairly Easy' | 'Standard' | 'Fairly Difficult' | 'Difficult' | 'Very Confusing';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ReadabilityOptions",
+      "kind": "type",
+      "signature": "export type ReadabilityOptions = Readonly<{ /** Which language's formulas to compute. Default `'en'`. */ language?: SyllableLanguage; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ReadabilityScores",
+      "kind": "type",
+      "signature": "export type ReadabilityScores = Readonly<{ /** 0–100; higher is easier. Clamped. */ fleschReadingEase: number; /** US school grade. */ fleschKincaidGrade: number; /** Years of formal education. */ gunningFog: number; /** Years of education; the formula is specified for 30+ sentences and is approximate below that. */ smogIndex: number; /** US school grade, from letters and sentences per 100 words. */ colemanLiauIndex: number; /** US school grade, from characters per word and words per sentence. */ automatedReadabilityIndex: number; /** Läsbarhetsindex: words per sentence plus the percentage of words over six letters. */ lix: number; /** Label for `fleschReadingEase`. */ fleschReadingEaseLevel: ReadabilityLevel; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "readingTime",
+      "kind": "function",
+      "signature": "export declare function readingTime(text: TextInput, options?: TimeOptions): ReadingTime;",
+      "jsdocSummary": "Time to read `text` silently. Default 238 words per minute (adult average, Brysbaert 2019)."
+    },
+    {
+      "subpath": ".",
+      "name": "ReadingTime",
+      "kind": "type",
+      "signature": "export type ReadingTime = Readonly<{ words: number; seconds: number; minutes: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "replaceAll",
+      "kind": "function",
+      "signature": "export declare function replaceAll(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces every literal occurrence of `search`, left to right without overlap."
+    },
+    {
+      "subpath": ".",
+      "name": "replaceEnd",
+      "kind": "function",
+      "signature": "export declare function replaceEnd(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces `search` only when `text` ends with it."
+    },
+    {
+      "subpath": ".",
+      "name": "replaceFirst",
+      "kind": "function",
+      "signature": "export declare function replaceFirst(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces the first literal occurrence of `search`."
+    },
+    {
+      "subpath": ".",
+      "name": "replaceLast",
+      "kind": "function",
+      "signature": "export declare function replaceLast(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces the last literal occurrence of `search`."
+    },
+    {
+      "subpath": ".",
+      "name": "Replacements",
+      "kind": "type",
+      "signature": "export type Replacements = readonly (readonly [string, string])[];",
+      "jsdocSummary": "Ordered `[from, to]` literal replacement pairs."
+    },
+    {
+      "subpath": ".",
+      "name": "replaceStart",
+      "kind": "function",
+      "signature": "export declare function replaceStart(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces `search` only when `text` starts with it."
+    },
+    {
+      "subpath": ".",
+      "name": "reverse",
+      "kind": "function",
+      "signature": "export declare function reverse(text: string): string;",
+      "jsdocSummary": "Reverses the grapheme sequence, keeping each grapheme intact."
+    },
+    {
+      "subpath": ".",
+      "name": "rulesets",
+      "kind": "variable",
+      "signature": "export declare const rulesets: { readonly arabic: Replacements; readonly armenian: Replacements; readonly austrian: Replacements; readonly azerbaijani: Replacements; readonly bulgarian: Replacements; readonly burmese: Replacements; readonly croatian: Replacements; readonly customFonts: Replacements; readonly czech: Replacements; readonly danish: Replacements; readonly common: Replacements; readonly esperanto: Replacements; readonly estonian: Replacements; readonly finnish: Replacements; readonly french: Replacements; readonly georgian: Replacements; readonly german: Replacements; readonly greek: Replacements; readonly gujarati: Replacements; readonly hindi: Replacements; readonly hungarian: Replacements; readonly italian: Replacements; readonly latvian: Replacements; readonly lithuanian: Replacements; readonly macedonian: Replacements; readonly norwegian: Replacements; readonly persian: Replacements; readonly polish: Replacements; readonly portugueseBrazil: Replacements; readonly romanian: Replacements; readonly russian: Replacements; readonly serbian: Replacements; readonly slovak: Replacements; readonly swedish: Replacements; readonly turkish: Replacements; readonly turkmen: Replacements; readonly ukrainian: Replacements; readonly vietnamese: Replacements; readonly yiddish: Replacements; };",
+      "jsdocSummary": "Every rule set in this module, keyed by language name."
+    },
+    {
+      "subpath": ".",
+      "name": "sentenceCase",
+      "kind": "function",
+      "signature": "export declare function sentenceCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`Foo bar baz` — tokens lowercased and joined by spaces, first grapheme capitalized."
+    },
+    {
+      "subpath": ".",
+      "name": "sentenceCount",
+      "kind": "function",
+      "signature": "export declare function sentenceCount(text: string): number;",
+      "jsdocSummary": "Number of sentences, using exactly `sentences()`."
+    },
+    {
+      "subpath": ".",
+      "name": "sentences",
+      "kind": "function",
+      "signature": "export declare function sentences(text: string): string[];",
+      "jsdocSummary": "Sentences: text up to and including `.`, `!`, `?`, or `…` followed by whitespace or the end. A trailing fragment without terminal punctuation is a sentence if it contains a letter or digit. Abbreviations such as `Mr.` are not special-cased; `3.14` stays together."
+    },
+    {
+      "subpath": ".",
+      "name": "simpsonsDiversityIndex",
+      "kind": "function",
+      "signature": "export declare function simpsonsDiversityIndex(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Simpson's diversity index for vocabulary, 0–1; `1` when every word is distinct."
+    },
+    {
+      "subpath": ".",
+      "name": "slice",
+      "kind": "function",
+      "signature": "export declare function slice(text: string, start?: number, end?: number): string;",
+      "jsdocSummary": "Grapheme-indexed slice with the same `start`/`end` semantics as `Array.prototype.slice`."
+    },
+    {
+      "subpath": ".",
+      "name": "slugify",
+      "kind": "function",
+      "signature": "export declare function slugify(text: string, options?: SlugifyOptions): string;",
+      "jsdocSummary": "Produces a URL-safe slug: transliterated, lowercased, separator-joined."
+    },
+    {
+      "subpath": ".",
+      "name": "SlugifyOptions",
+      "kind": "type",
+      "signature": "export type SlugifyOptions = TransliterateOptions & Readonly<{ /** Defaults to `-`. */ separator?: string; /** Defaults to `true`. */ lowercase?: boolean; /** Split camelCase words (`fooBar` → `foo-bar`). Defaults to `true`. */ decamelize?: boolean; /** Characters to keep verbatim instead of replacing with the separator. */ preserveCharacters?: readonly string[]; /** Keep one leading `_` from the input. */ preserveLeadingUnderscore?: boolean; /** Keep one trailing `-` from the input. */ preserveTrailingDash?: boolean; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "smogIndex",
+      "kind": "function",
+      "signature": "export declare function smogIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "snakeCase",
+      "kind": "function",
+      "signature": "export declare function snakeCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo_bar_baz`"
+    },
+    {
+      "subpath": ".",
+      "name": "SpanishReadabilityScores",
+      "kind": "type",
+      "signature": "export type SpanishReadabilityScores = Readonly<{ fernandezHuerta: number; szigrisztPazos: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "speakingTime",
+      "kind": "function",
+      "signature": "export declare function speakingTime(text: TextInput, options?: TimeOptions): ReadingTime;",
+      "jsdocSummary": "Time to read `text` aloud. Default 150 words per minute."
+    },
+    {
+      "subpath": ".",
+      "name": "splice",
+      "kind": "function",
+      "signature": "export declare function splice(text: string, start: number, deleteCount: number, insert?: string): string;",
+      "jsdocSummary": "Immutable grapheme-indexed splice: removes `deleteCount` graphemes at `start` and inserts `insert`."
+    },
+    {
+      "subpath": ".",
+      "name": "squish",
+      "kind": "function",
+      "signature": "export declare function squish(text: string): string;",
+      "jsdocSummary": "Collapses whitespace and trims both ends."
+    },
+    {
+      "subpath": ".",
+      "name": "STOP_WORDS",
+      "kind": "variable",
+      "signature": "export declare const STOP_WORDS: Readonly<Record<KeywordLanguage, readonly string[]>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "str",
+      "kind": "function",
+      "signature": "export declare function str(text: string | StringValue): StringValue;",
+      "jsdocSummary": "Wraps `text` in an immutable fluent `StringValue`."
+    },
+    {
+      "subpath": ".",
+      "name": "STRING_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const STRING_ERROR_CODES: { /** * An argument is outside what the function accepts (empty needle, negative length, bad glyph). * * @fix Check the argument against the range in the function reference: a non-empty needle, a whole number of at least 0 for lengths. * @verify bun run test */ readonly invalidArgument: 'ARKI_STRING_E001'; /** * Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte. * * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Encoding APIs return canonical failures; narrow with `isFailure`. * @verify bun run test */ readonly invalidUtf8: 'ARKI_STRING_E002'; /** * An input is not valid strict base64: whitespace, a mixed alphabet, bad padding or an impossible length. * * @fix Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures; narrow with `isFailure`. * @verify bun run test */ readonly invalidBase64: 'ARKI_STRING_E003'; /** * An `interpolate` template has a malformed placeholder. * * @fix Write placeholders as `{{ name }}` with an identifier inside, and close every `{{` with `}}`. * @verify bun run test */ readonly invalidTemplate: 'ARKI_STRING_E004'; /** * An `interpolate` placeholder has no value and `missing` is `'throw'`. * * @fix Pass a value for the placeholder, or set `missing` to `'keep'` or `'empty'`. * @verify bun run test */ readonly missingValue: 'ARKI_STRING_E005'; };",
+      "jsdocSummary": "Stable error codes of `@arki/string`."
+    },
+    {
+      "subpath": ".",
+      "name": "StringError",
+      "kind": "class",
+      "signature": "export declare class StringError extends Error { readonly code: StringErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: StringErrorCode, message: string, options?: ErrorOptions); }",
+      "jsdocSummary": "Legacy diagnostic for static misuse; encoding APIs return canonical failures."
+    },
+    {
+      "subpath": ".",
+      "name": "StringErrorCode",
+      "kind": "type",
+      "signature": "export type StringErrorCode = (typeof STRING_ERROR_CODES)[keyof typeof STRING_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link StringError}."
+    },
+    {
+      "subpath": ".",
+      "name": "StringValue",
+      "kind": "class",
+      "signature": "export declare class StringValue { #private; constructor(value: string); value(): string; toString(): string; valueOf(): string; toJSON(): string; [Symbol.toPrimitive](): string; /** Iterates graphemes, unlike native string iteration (code points). */ [Symbol.iterator](): IterableIterator<string>; /** Grapheme count. */ get length(): number; at(index: number): string | undefined; slice(start?: number, end?: number): StringValue; take(count: number): StringValue; reverse(): StringValue; splice(start: number, deleteCount: number, insert?: string): StringValue; /** Search-key form: lowercased, marks stripped, `ß`/`ø`/`ł`… spelled out. */ fold(options?: FoldOptions): StringValue; chunk(size: number): string[]; trim(): StringValue; trimStart(): StringValue; trimEnd(): StringValue; upper(locale?: string): StringValue; lower(locale?: string): StringValue; normalize(form?: NormalizationForm): StringValue; append(suffix: string): StringValue; prepend(prefix: string): StringValue; repeat(count: number): StringValue; /** Literal and grapheme-aligned, unlike the native method; `$&` stays `$&`. */ replaceAll(search: string, replacement: string): StringValue; split(separator: string | RegExp, limit?: number): string[]; /** Literal and grapheme-aligned: `str('é').includes('e')` is false in decomposed form. */ includes(needle: string): boolean; startsWith(prefix: string): boolean; endsWith(suffix: string): boolean; isEmpty(): boolean; isBlank(): boolean; equals(other: string | StringValue): boolean; /** Tests `pattern` without touching the caller's `lastIndex`. */ test(pattern: RegExp): boolean; /** Iterates every match of `pattern` using a cloned global expression. */ scan(pattern: RegExp): IterableIterator<RegExpMatchArray>; map(fn: (text: string) => string): StringValue; pipe<T>(fn: (value: StringValue) => T): T; tap(fn: (value: StringValue) => void): StringValue; when(condition: boolean | ((value: StringValue) => boolean), then: Transform, otherwise?: Transform): StringValue; whenEmpty(fn: Transform): StringValue; caseWords(): string[]; camelCase(options?: CaseOptions): StringValue; pascalCase(options?: CaseOptions): StringValue; snakeCase(options?: CaseOptions): StringValue; kebabCase(options?: CaseOptions): StringValue; constantCase(options?: CaseOptions): StringValue; dotCase(options?: CaseOptions): StringValue; pathCase(options?: CaseOptions): StringValue; titleCase(options?: CaseOptions): StringValue; sentenceCase(options?: CaseOptions): StringValue; capitalize(options?: CaseOptions): StringValue; uncapitalize(options?: CaseOptions): StringValue; collapseWhitespace(): StringValue; squish(): StringValue; lines(): string[]; words(): string[]; wordCount(): number; sentences(): string[]; paragraphs(): string[]; initials(options?: InitialsOptions): StringValue; truncate(maxLength: number, options?: TruncateOptions): StringValue; excerpt(needle: string, options?: ExcerptOptions): string | undefined; wrapText(width: number, options?: WrapTextOptions): StringValue; dedent(): StringValue; before(delimiter: string, occurrence?: Occurrence): StringValue; after(delimiter: string, occurrence?: Occurrence): StringValue; between(opening: string, closing: string): StringValue; ensureStart(prefix: string): StringValue; ensureEnd(suffix: string): StringValue; trimPrefix(prefix: string): StringValue; trimSuffix(suffix: string): StringValue; containsAny(needles: readonly string[]): boolean; indexOf(needle: string, from?: number): number; replaceFirst(search: string, replacement: string): StringValue; replaceLast(search: string, replacement: string): StringValue; replaceStart(search: string, replacement: string): StringValue; replaceEnd(search: string, replacement: string): StringValue; swap(replacements: Readonly<Record<string, string>>): StringValue; deduplicate(token?: string): StringValue; wrap(opening: string, closing?: string): StringValue; unwrap(opening: string, closing?: string): StringValue; mask(options?: MaskOptions): StringValue; padStart(targetLength: number, fill?: string): StringValue; padEnd(targetLength: number, fill?: string): StringValue; padBoth(targetLength: number, fill?: string): StringValue; slugify(options?: SlugifyOptions): StringValue; transliterate(options?: TransliterateOptions): StringValue; escapeHtml(): StringValue; escapeRegExp(): StringValue; /** Treats the value as a `{{ name }}` template. */ interpolate(values: TemplateValues, options?: InterpolateOptions): StringValue; toBase64(options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | StringValue; fromBase64(options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | StringValue; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "swap",
+      "kind": "function",
+      "signature": "export declare function swap(text: string, replacements: Readonly<Record<string, string>>): string;",
+      "jsdocSummary": "Simultaneous literal substitutions in one pass over `text`. At each position the longest matching key wins, and inserted values are never re-scanned."
+    },
+    {
+      "subpath": ".",
+      "name": "syllableCount",
+      "kind": "function",
+      "signature": "export declare function syllableCount(text: TextInput, options?: SyllableOptions): number;",
+      "jsdocSummary": "Approximate syllables in every word of `text`, summed. English by default (diacritics folded, non-Latin letters ignored, a word without Latin letters counts `0`); `language: 'es' | 'de'` switches rules. Meant for readability grades, not for hyphenation or verse."
+    },
+    {
+      "subpath": ".",
+      "name": "SyllableLanguage",
+      "kind": "type",
+      "signature": "export type SyllableLanguage = 'en' | 'es' | 'de';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "SyllableOptions",
+      "kind": "type",
+      "signature": "export type SyllableOptions = Readonly<{ /** Counting rules to apply. Default `'en'`. */ language?: SyllableLanguage; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "szigrisztPazos",
+      "kind": "function",
+      "signature": "export declare function szigrisztPazos(text: TextInput): number;",
+      "jsdocSummary": "Spanish INFLESZ scale (Szigriszt Pazos), 0–100; higher is easier."
+    },
+    {
+      "subpath": ".",
+      "name": "take",
+      "kind": "function",
+      "signature": "export declare function take(text: string, count: number): string;",
+      "jsdocSummary": "The first `count` graphemes; a negative `count` takes from the end."
+    },
+    {
+      "subpath": ".",
+      "name": "TemplateValues",
+      "kind": "type",
+      "signature": "export type TemplateValues = Readonly<Record<string, string | number | boolean | null | undefined>>;",
+      "jsdocSummary": "Minimal `{{ name }}` templating for flat values. No expressions, no dotted paths, no recursion. Output is plain text; escape separately when needed."
+    },
+    {
+      "subpath": ".",
+      "name": "TextAnalysis",
+      "kind": "class",
+      "signature": "export declare class TextAnalysis { #private; readonly text: string; readonly locale: string | undefined; constructor(text: string, locale?: string); /** Prose words, original case. */ get words(): string[]; /** Prose words lowercased (locale-sensitive only when a locale was given). */ get lowerWords(): string[]; /** Count per lowercased word. */ get frequencies(): Map<string, number>; get sentences(): string[]; /** Raw syllable count per word (`0` for words without Latin letters). */ get syllables(): number[]; get letters(): number; get lettersAndDigits(): number; }",
+      "jsdocSummary": "One lazily computed analysis record per text. Readability, vocabulary, and metrics functions all read from it, so a composite such as `textMetrics` tokenizes, lowercases, and syllabifies the text once instead of once per statistic. Every field is computed on first access."
+    },
+    {
+      "subpath": ".",
+      "name": "TextInput",
+      "kind": "type",
+      "signature": "export type TextInput = string | TextAnalysis;",
+      "jsdocSummary": "A text to analyze, or an analysis already made so several functions share one tokenization."
+    },
+    {
+      "subpath": ".",
+      "name": "textMetrics",
+      "kind": "function",
+      "signature": "export declare function textMetrics(text: TextInput, options?: VocabularyOptions): TextMetrics;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "TextMetrics",
+      "kind": "type",
+      "signature": "export type TextMetrics = Readonly<{ /** Graphemes, line breaks included. */ characters: number; /** Graphemes that are not whitespace. */ charactersWithoutSpaces: number; words: number; uniqueWords: number; sentences: number; paragraphs: number; /** English heuristic; see `syllableCount`. */ syllables: number; averageSentenceLength: number; averageSyllablesPerWord: number; longestSentenceWords: number; shortestSentenceWords: number; readingTimeSeconds: number; speakingTimeSeconds: number; readability: ReadabilityScores; /** Top 10 single words. */ keywords: readonly Keyword[]; /** Top 10 two-word phrases seen at least twice. */ keyPhrases: readonly Keyword[]; lexicalDiversity: number; yulesK: number; simpsonsDiversityIndex: number; wordLength: WordLengthStats; /** Top 10 words by raw frequency, stop words included. */ mostCommonWords: readonly string[]; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "TimeOptions",
+      "kind": "type",
+      "signature": "export type TimeOptions = Readonly<{ wordsPerMinute?: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "titleCase",
+      "kind": "function",
+      "signature": "export declare function titleCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`Foo Bar Baz` — every token capitalized, joined by spaces. Punctuation is discarded."
+    },
+    {
+      "subpath": ".",
+      "name": "toBase64",
+      "kind": "function",
+      "signature": "export declare function toBase64(text: string, options?: Base64Options): string | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Encodes `text` (UTF-8) as base64."
+    },
+    {
+      "subpath": ".",
+      "name": "Transform",
+      "kind": "type",
+      "signature": "export type Transform = (value: StringValue) => StringValue;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "transliterate",
+      "kind": "function",
+      "signature": "export declare function transliterate(text: string, options?: TransliterateOptions): string;",
+      "jsdocSummary": "Converts `text` to ASCII-friendly Latin letters. Characters without a rule are kept."
+    },
+    {
+      "subpath": ".",
+      "name": "TransliterateOptions",
+      "kind": "type",
+      "signature": "export type TransliterateOptions = Readonly<{ /** Extra `[from, to]` pairs applied before every built-in rule. */ replacements?: Replacements; /** BCP-47 tag selecting language-specific overrides (`de`, `sv`, `da`, `nb`, `tr`, `hu`, `sr`). */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "trimPrefix",
+      "kind": "function",
+      "signature": "export declare function trimPrefix(text: string, prefix: string): string;",
+      "jsdocSummary": "Removes one leading `prefix` when present."
+    },
+    {
+      "subpath": ".",
+      "name": "trimSuffix",
+      "kind": "function",
+      "signature": "export declare function trimSuffix(text: string, suffix: string): string;",
+      "jsdocSummary": "Removes one trailing `suffix` when present."
+    },
+    {
+      "subpath": ".",
+      "name": "truncate",
+      "kind": "function",
+      "signature": "export declare function truncate(text: string, maxLength: number, options?: TruncateOptions): string;",
+      "jsdocSummary": "Cuts `text` to at most `maxLength` graphemes including the ellipsis. Returns the original when it fits. Whitespace before the ellipsis is always dropped, so `'foo …'` never appears."
+    },
+    {
+      "subpath": ".",
+      "name": "TruncateOptions",
+      "kind": "type",
+      "signature": "export type TruncateOptions = Readonly<{ /** Marker appended when text is cut. Defaults to `…`. Counts toward `maxLength`. */ ellipsis?: string; /** * `grapheme` cuts anywhere; `word-before` backs up to the previous word boundary; `sentence` * backs up to the last sentence end that fits, or to a word when no sentence end fits. */ boundary?: 'grapheme' | 'word-before' | 'sentence'; }>;",
+      "jsdocSummary": "Whitespace cleanup and display formatting: initials, truncation, excerpts, wrapping."
+    },
+    {
+      "subpath": ".",
+      "name": "tryFromBase64",
+      "kind": "variable",
+      "signature": "export declare const tryFromBase64: typeof fromBase64;",
+      "jsdocSummary": "Alias of `fromBase64`. Breaking: returns the same failures, never null."
+    },
+    {
+      "subpath": ".",
+      "name": "uncapitalize",
+      "kind": "function",
+      "signature": "export declare function uncapitalize(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "Lowercases the first grapheme and leaves the rest untouched."
+    },
+    {
+      "subpath": ".",
+      "name": "uniqueWordCount",
+      "kind": "function",
+      "signature": "export declare function uniqueWordCount(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Distinct words, case-insensitively."
+    },
+    {
+      "subpath": ".",
+      "name": "unwrap",
+      "kind": "function",
+      "signature": "export declare function unwrap(text: string, opening: string, closing?: string): string;",
+      "jsdocSummary": "Removes one complete `opening`/`closing` pair; returns `text` unchanged when the pair is incomplete."
+    },
+    {
+      "subpath": ".",
+      "name": "utf8Decode",
+      "kind": "function",
+      "signature": "export declare function utf8Decode(bytes: Uint8Array): string | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Decodes strict UTF-8. Overlong forms, surrogates, and truncated sequences return `InvalidUtf8`. A leading BOM is kept."
+    },
+    {
+      "subpath": ".",
+      "name": "utf8Encode",
+      "kind": "function",
+      "signature": "export declare function utf8Encode(text: string): import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | Uint8Array<ArrayBuffer>;",
+      "jsdocSummary": "Encodes `text` as UTF-8. Returns `InvalidUtf8` on an unpaired surrogate."
+    },
+    {
+      "subpath": ".",
+      "name": "VocabularyOptions",
+      "kind": "type",
+      "signature": "export type VocabularyOptions = Readonly<{ /** BCP 47 tag for lowercasing. Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "wienerSachtextformel",
+      "kind": "function",
+      "signature": "export declare function wienerSachtextformel(text: TextInput): number;",
+      "jsdocSummary": "First Wiener Sachtextformel: German school grade (4–15)."
+    },
+    {
+      "subpath": ".",
+      "name": "wordCount",
+      "kind": "function",
+      "signature": "export declare function wordCount(text: string): number;",
+      "jsdocSummary": "Number of prose words, using exactly `words()`."
+    },
+    {
+      "subpath": ".",
+      "name": "wordFrequencies",
+      "kind": "function",
+      "signature": "export declare function wordFrequencies(text: TextInput, options?: VocabularyOptions): WordFrequency[];",
+      "jsdocSummary": "Every distinct word with its count and share, most frequent first; ties alphabetically."
+    },
+    {
+      "subpath": ".",
+      "name": "WordFrequency",
+      "kind": "type",
+      "signature": "export type WordFrequency = Readonly<{ word: string; count: number; /** Share of all words, 0–100. */ percentage: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "wordLengthStats",
+      "kind": "function",
+      "signature": "export declare function wordLengthStats(text: TextInput): WordLengthStats;",
+      "jsdocSummary": "Word lengths in graphemes. All zeros for text without words."
+    },
+    {
+      "subpath": ".",
+      "name": "WordLengthStats",
+      "kind": "type",
+      "signature": "export type WordLengthStats = Readonly<{ average: number; median: number; mode: number; shortest: number; longest: number; standardDeviation: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "words",
+      "kind": "function",
+      "signature": "export declare function words(text: string): string[];",
+      "jsdocSummary": "Prose words: runs of letters, numbers, and marks. `don't`, `re-enter`, and `3.14` are each one word. Scripts without word spacing yield one word per run."
+    },
+    {
+      "subpath": ".",
+      "name": "wrap",
+      "kind": "function",
+      "signature": "export declare function wrap(text: string, opening: string, closing?: string): string;",
+      "jsdocSummary": "Surrounds `text` with `opening` and `closing` (defaults to `opening`)."
+    },
+    {
+      "subpath": ".",
+      "name": "wrapText",
+      "kind": "function",
+      "signature": "export declare function wrapText(text: string, width: number, options?: WrapTextOptions): string;",
+      "jsdocSummary": "Greedy word wrap measured in graphemes. Existing line breaks are preserved."
+    },
+    {
+      "subpath": ".",
+      "name": "WrapTextOptions",
+      "kind": "type",
+      "signature": "export type WrapTextOptions = Readonly<{ /** Cut words longer than `width` instead of overflowing. Defaults to false. */ breakWords?: boolean; /** Line separator for the output. Defaults to `\\n`. */ newline?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "yulesK",
+      "kind": "function",
+      "signature": "export declare function yulesK(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Yule's K: repetitiveness of the vocabulary; `0` when every word is distinct or the text is empty."
+    },
+    {
+      "subpath": "./base64",
+      "name": "Base64Options",
+      "kind": "type",
+      "signature": "export type Base64Options = Readonly<{ /** `standard` uses `+` and `/`; `url` uses `-` and `_` (RFC 4648 §5). Defaults to `standard`. */ alphabet?: 'standard' | 'url'; /** Whether `=` padding must be present or absent. Defaults to `required` for `standard`, `forbidden` for `url`. */ padding?: 'required' | 'forbidden'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./base64",
+      "name": "base64ToBytes",
+      "kind": "function",
+      "signature": "export declare function base64ToBytes(encoded: string, options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | Uint8Array<ArrayBuffer>;",
+      "jsdocSummary": "Decodes base64 to bytes. Rejects whitespace, characters outside the selected alphabet, misplaced or missing padding, impossible lengths, and nonzero unused bits, returning `InvalidBase64`."
+    },
+    {
+      "subpath": "./base64",
+      "name": "byteLength",
+      "kind": "function",
+      "signature": "export declare function byteLength(text: string): number | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "UTF-8 byte length of `text`. Returns `InvalidUtf8` on an unpaired surrogate."
+    },
+    {
+      "subpath": "./base64",
+      "name": "bytesToBase64",
+      "kind": "function",
+      "signature": "export declare function bytesToBase64(bytes: Uint8Array, options?: Base64Options): string;",
+      "jsdocSummary": "Encodes bytes as base64."
+    },
+    {
+      "subpath": "./base64",
+      "name": "fromBase64",
+      "kind": "function",
+      "signature": "export declare function fromBase64(encoded: string, options?: Base64Options): string | import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Decodes base64 to text. Returns `InvalidBase64` for malformed base64 and `InvalidUtf8` for invalid UTF-8."
+    },
+    {
+      "subpath": "./base64",
+      "name": "InvalidBase64",
+      "kind": "variable",
+      "signature": "export declare const InvalidBase64: import(\"@arki/failure\").FailureDefinition<\"string.invalid_base64\", undefined>;",
+      "jsdocSummary": "Noncanonical base64. No submitted input is exposed."
+    },
+    {
+      "subpath": "./base64",
+      "name": "InvalidUtf8",
+      "kind": "variable",
+      "signature": "export declare const InvalidUtf8: import(\"@arki/failure\").FailureDefinition<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Invalid UTF-8. No submitted text or bytes are exposed."
+    },
+    {
+      "subpath": "./base64",
+      "name": "toBase64",
+      "kind": "function",
+      "signature": "export declare function toBase64(text: string, options?: Base64Options): string | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Encodes `text` (UTF-8) as base64."
+    },
+    {
+      "subpath": "./base64",
+      "name": "tryFromBase64",
+      "kind": "variable",
+      "signature": "export declare const tryFromBase64: typeof fromBase64;",
+      "jsdocSummary": "Alias of `fromBase64`. Breaking: returns the same failures, never null."
+    },
+    {
+      "subpath": "./base64",
+      "name": "utf8Decode",
+      "kind": "function",
+      "signature": "export declare function utf8Decode(bytes: Uint8Array): string | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined>;",
+      "jsdocSummary": "Decodes strict UTF-8. Overlong forms, surrogates, and truncated sequences return `InvalidUtf8`. A leading BOM is kept."
+    },
+    {
+      "subpath": "./base64",
+      "name": "utf8Encode",
+      "kind": "function",
+      "signature": "export declare function utf8Encode(text: string): import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | Uint8Array<ArrayBuffer>;",
+      "jsdocSummary": "Encodes `text` as UTF-8. Returns `InvalidUtf8` on an unpaired surrogate."
+    },
+    {
+      "subpath": "./case",
+      "name": "camelCase",
+      "kind": "function",
+      "signature": "export declare function camelCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`fooBarBaz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "capitalize",
+      "kind": "function",
+      "signature": "export declare function capitalize(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "Uppercases the first grapheme and leaves the rest untouched."
+    },
+    {
+      "subpath": "./case",
+      "name": "CaseOptions",
+      "kind": "type",
+      "signature": "export type CaseOptions = Readonly<{ locale?: string; }>;",
+      "jsdocSummary": "Case conversion built on one tokenizer (`caseWords`), so every case style splits identifiers the same way. Tokens are letters, numbers, and attached marks; everything else is a boundary. Casing is locale-independent unless a `locale` is passed explicitly."
+    },
+    {
+      "subpath": "./case",
+      "name": "caseWords",
+      "kind": "function",
+      "signature": "export declare function caseWords(text: string): string[];",
+      "jsdocSummary": "Splits `text` into the tokens every case function works on."
+    },
+    {
+      "subpath": "./case",
+      "name": "constantCase",
+      "kind": "function",
+      "signature": "export declare function constantCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`FOO_BAR_BAZ`"
+    },
+    {
+      "subpath": "./case",
+      "name": "dotCase",
+      "kind": "function",
+      "signature": "export declare function dotCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo.bar.baz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "kebabCase",
+      "kind": "function",
+      "signature": "export declare function kebabCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo-bar-baz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "pascalCase",
+      "kind": "function",
+      "signature": "export declare function pascalCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`FooBarBaz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "pathCase",
+      "kind": "function",
+      "signature": "export declare function pathCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo/bar/baz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "sentenceCase",
+      "kind": "function",
+      "signature": "export declare function sentenceCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`Foo bar baz` — tokens lowercased and joined by spaces, first grapheme capitalized."
+    },
+    {
+      "subpath": "./case",
+      "name": "snakeCase",
+      "kind": "function",
+      "signature": "export declare function snakeCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`foo_bar_baz`"
+    },
+    {
+      "subpath": "./case",
+      "name": "titleCase",
+      "kind": "function",
+      "signature": "export declare function titleCase(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "`Foo Bar Baz` — every token capitalized, joined by spaces. Punctuation is discarded."
+    },
+    {
+      "subpath": "./case",
+      "name": "uncapitalize",
+      "kind": "function",
+      "signature": "export declare function uncapitalize(text: string, options?: CaseOptions): string;",
+      "jsdocSummary": "Lowercases the first grapheme and leaves the rest untouched."
+    },
+    {
+      "subpath": "./distance",
+      "name": "diceCoefficient",
+      "kind": "function",
+      "signature": "export declare function diceCoefficient(a: string, b: string): number;",
+      "jsdocSummary": "Sørensen–Dice coefficient over grapheme bigrams, 0–1. Identical strings score 1; strings shorter than two graphemes score 1 only when equal."
+    },
+    {
+      "subpath": "./distance",
+      "name": "jaroWinkler",
+      "kind": "function",
+      "signature": "export declare function jaroWinkler(a: string, b: string, options?: JaroWinklerOptions): number;",
+      "jsdocSummary": "Jaro–Winkler similarity, 0–1: Jaro similarity boosted for a shared prefix. Suited to short strings such as names. Both empty gives 1; one empty gives 0."
+    },
+    {
+      "subpath": "./distance",
+      "name": "JaroWinklerOptions",
+      "kind": "type",
+      "signature": "export type JaroWinklerOptions = Readonly<{ /** Weight of the common prefix (at most 4 graphemes). Default 0.1; must stay at or below 0.25. */ prefixScale?: number; }>;",
+      "jsdocSummary": "String similarity measured in graphemes, so `é` and a flag count as one unit whichever way they are encoded. Compare case-insensitively or accent-insensitively by folding both inputs first (`fold` in `./unicode`). All three are O(n·m) in the grapheme counts."
+    },
+    {
+      "subpath": "./distance",
+      "name": "levenshtein",
+      "kind": "function",
+      "signature": "export declare function levenshtein(a: string, b: string): number;",
+      "jsdocSummary": "Minimum number of grapheme insertions, deletions, and substitutions turning `a` into `b`."
+    },
+    {
+      "subpath": "./edit",
+      "name": "deduplicate",
+      "kind": "function",
+      "signature": "export declare function deduplicate(text: string, token?: string): string;",
+      "jsdocSummary": "Collapses adjacent repeats of `token` (default: a space) into one."
+    },
+    {
+      "subpath": "./edit",
+      "name": "ensureEnd",
+      "kind": "function",
+      "signature": "export declare function ensureEnd(text: string, suffix: string): string;",
+      "jsdocSummary": "Adds `suffix` unless `text` already ends with it."
+    },
+    {
+      "subpath": "./edit",
+      "name": "ensureStart",
+      "kind": "function",
+      "signature": "export declare function ensureStart(text: string, prefix: string): string;",
+      "jsdocSummary": "Adds `prefix` unless `text` already starts with it."
+    },
+    {
+      "subpath": "./edit",
+      "name": "mask",
+      "kind": "function",
+      "signature": "export declare function mask(text: string, options?: MaskOptions): string;",
+      "jsdocSummary": "Replaces every grapheme in the `[start, end)` range with `glyph`, so the masked length stays visible. `glyph` may not start with a combining mark (it would attach to the previous grapheme)."
+    },
+    {
+      "subpath": "./edit",
+      "name": "MaskOptions",
+      "kind": "type",
+      "signature": "export type MaskOptions = Readonly<{ /** Grapheme index to start masking from; negative counts from the end. Defaults to 0. */ start?: number; /** Grapheme index to stop before; negative counts from the end. Defaults to the end. */ end?: number; /** Replacement for each masked grapheme. Defaults to `*`. */ glyph?: string; }>;",
+      "jsdocSummary": "Literal editing, affixes, and grapheme-aware padding. Search strings are literal and only match on grapheme boundaries; replacement strings are literal too, so `$&` stays `$&`."
+    },
+    {
+      "subpath": "./edit",
+      "name": "padBoth",
+      "kind": "function",
+      "signature": "export declare function padBoth(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads both sides to centre `text`; an odd extra grapheme goes on the right."
+    },
+    {
+      "subpath": "./edit",
+      "name": "padEnd",
+      "kind": "function",
+      "signature": "export declare function padEnd(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads the end until `text` has `targetLength` graphemes. Never shortens."
+    },
+    {
+      "subpath": "./edit",
+      "name": "padStart",
+      "kind": "function",
+      "signature": "export declare function padStart(text: string, targetLength: number, fill?: string): string;",
+      "jsdocSummary": "Pads the start until `text` has `targetLength` graphemes. Never shortens."
+    },
+    {
+      "subpath": "./edit",
+      "name": "replaceAll",
+      "kind": "function",
+      "signature": "export declare function replaceAll(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces every literal occurrence of `search`, left to right without overlap."
+    },
+    {
+      "subpath": "./edit",
+      "name": "replaceEnd",
+      "kind": "function",
+      "signature": "export declare function replaceEnd(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces `search` only when `text` ends with it."
+    },
+    {
+      "subpath": "./edit",
+      "name": "replaceFirst",
+      "kind": "function",
+      "signature": "export declare function replaceFirst(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces the first literal occurrence of `search`."
+    },
+    {
+      "subpath": "./edit",
+      "name": "replaceLast",
+      "kind": "function",
+      "signature": "export declare function replaceLast(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces the last literal occurrence of `search`."
+    },
+    {
+      "subpath": "./edit",
+      "name": "replaceStart",
+      "kind": "function",
+      "signature": "export declare function replaceStart(text: string, search: string, replacement: string): string;",
+      "jsdocSummary": "Replaces `search` only when `text` starts with it."
+    },
+    {
+      "subpath": "./edit",
+      "name": "swap",
+      "kind": "function",
+      "signature": "export declare function swap(text: string, replacements: Readonly<Record<string, string>>): string;",
+      "jsdocSummary": "Simultaneous literal substitutions in one pass over `text`. At each position the longest matching key wins, and inserted values are never re-scanned."
+    },
+    {
+      "subpath": "./edit",
+      "name": "trimPrefix",
+      "kind": "function",
+      "signature": "export declare function trimPrefix(text: string, prefix: string): string;",
+      "jsdocSummary": "Removes one leading `prefix` when present."
+    },
+    {
+      "subpath": "./edit",
+      "name": "trimSuffix",
+      "kind": "function",
+      "signature": "export declare function trimSuffix(text: string, suffix: string): string;",
+      "jsdocSummary": "Removes one trailing `suffix` when present."
+    },
+    {
+      "subpath": "./edit",
+      "name": "unwrap",
+      "kind": "function",
+      "signature": "export declare function unwrap(text: string, opening: string, closing?: string): string;",
+      "jsdocSummary": "Removes one complete `opening`/`closing` pair; returns `text` unchanged when the pair is incomplete."
+    },
+    {
+      "subpath": "./edit",
+      "name": "wrap",
+      "kind": "function",
+      "signature": "export declare function wrap(text: string, opening: string, closing?: string): string;",
+      "jsdocSummary": "Surrounds `text` with `opening` and `closing` (defaults to `opening`)."
+    },
+    {
+      "subpath": "./errors",
+      "name": "STRING_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const STRING_ERROR_CODES: { /** * An argument is outside what the function accepts (empty needle, negative length, bad glyph). * * @fix Check the argument against the range in the function reference: a non-empty needle, a whole number of at least 0 for lengths. * @verify bun run test */ readonly invalidArgument: 'ARKI_STRING_E001'; /** * Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte. * * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Encoding APIs return canonical failures; narrow with `isFailure`. * @verify bun run test */ readonly invalidUtf8: 'ARKI_STRING_E002'; /** * An input is not valid strict base64: whitespace, a mixed alphabet, bad padding or an impossible length. * * @fix Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures; narrow with `isFailure`. * @verify bun run test */ readonly invalidBase64: 'ARKI_STRING_E003'; /** * An `interpolate` template has a malformed placeholder. * * @fix Write placeholders as `{{ name }}` with an identifier inside, and close every `{{` with `}}`. * @verify bun run test */ readonly invalidTemplate: 'ARKI_STRING_E004'; /** * An `interpolate` placeholder has no value and `missing` is `'throw'`. * * @fix Pass a value for the placeholder, or set `missing` to `'keep'` or `'empty'`. * @verify bun run test */ readonly missingValue: 'ARKI_STRING_E005'; };",
+      "jsdocSummary": "Stable error codes of `@arki/string`."
+    },
+    {
+      "subpath": "./errors",
+      "name": "StringError",
+      "kind": "class",
+      "signature": "export declare class StringError extends Error { readonly code: StringErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: StringErrorCode, message: string, options?: ErrorOptions); }",
+      "jsdocSummary": "Legacy diagnostic for static misuse; encoding APIs return canonical failures."
+    },
+    {
+      "subpath": "./errors",
+      "name": "StringErrorCode",
+      "kind": "type",
+      "signature": "export type StringErrorCode = (typeof STRING_ERROR_CODES)[keyof typeof STRING_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link StringError}."
+    },
+    {
+      "subpath": "./escape",
+      "name": "escapeHtml",
+      "kind": "function",
+      "signature": "export declare function escapeHtml(text: string): string;",
+      "jsdocSummary": "Escapes `& < > \" '` for HTML text and quoted attribute values. Existing entities are escaped again."
+    },
+    {
+      "subpath": "./escape",
+      "name": "escapeRegExp",
+      "kind": "function",
+      "signature": "export declare function escapeRegExp(text: string): string;",
+      "jsdocSummary": "Escapes `text` so it matches literally inside a `RegExp` source, with the semantics of `RegExp.escape`: a leading ASCII letter or digit is hex-escaped so the result can never merge with a preceding token."
+    },
+    {
+      "subpath": "./fluent",
+      "name": "NormalizationForm",
+      "kind": "type",
+      "signature": "export type NormalizationForm = 'NFC' | 'NFD' | 'NFKC' | 'NFKD';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./fluent",
+      "name": "str",
+      "kind": "function",
+      "signature": "export declare function str(text: string | StringValue): StringValue;",
+      "jsdocSummary": "Wraps `text` in an immutable fluent `StringValue`."
+    },
+    {
+      "subpath": "./fluent",
+      "name": "StringValue",
+      "kind": "class",
+      "signature": "export declare class StringValue { #private; constructor(value: string); value(): string; toString(): string; valueOf(): string; toJSON(): string; [Symbol.toPrimitive](): string; /** Iterates graphemes, unlike native string iteration (code points). */ [Symbol.iterator](): IterableIterator<string>; /** Grapheme count. */ get length(): number; at(index: number): string | undefined; slice(start?: number, end?: number): StringValue; take(count: number): StringValue; reverse(): StringValue; splice(start: number, deleteCount: number, insert?: string): StringValue; /** Search-key form: lowercased, marks stripped, `ß`/`ø`/`ł`… spelled out. */ fold(options?: FoldOptions): StringValue; chunk(size: number): string[]; trim(): StringValue; trimStart(): StringValue; trimEnd(): StringValue; upper(locale?: string): StringValue; lower(locale?: string): StringValue; normalize(form?: NormalizationForm): StringValue; append(suffix: string): StringValue; prepend(prefix: string): StringValue; repeat(count: number): StringValue; /** Literal and grapheme-aligned, unlike the native method; `$&` stays `$&`. */ replaceAll(search: string, replacement: string): StringValue; split(separator: string | RegExp, limit?: number): string[]; /** Literal and grapheme-aligned: `str('é').includes('e')` is false in decomposed form. */ includes(needle: string): boolean; startsWith(prefix: string): boolean; endsWith(suffix: string): boolean; isEmpty(): boolean; isBlank(): boolean; equals(other: string | StringValue): boolean; /** Tests `pattern` without touching the caller's `lastIndex`. */ test(pattern: RegExp): boolean; /** Iterates every match of `pattern` using a cloned global expression. */ scan(pattern: RegExp): IterableIterator<RegExpMatchArray>; map(fn: (text: string) => string): StringValue; pipe<T>(fn: (value: StringValue) => T): T; tap(fn: (value: StringValue) => void): StringValue; when(condition: boolean | ((value: StringValue) => boolean), then: Transform, otherwise?: Transform): StringValue; whenEmpty(fn: Transform): StringValue; caseWords(): string[]; camelCase(options?: CaseOptions): StringValue; pascalCase(options?: CaseOptions): StringValue; snakeCase(options?: CaseOptions): StringValue; kebabCase(options?: CaseOptions): StringValue; constantCase(options?: CaseOptions): StringValue; dotCase(options?: CaseOptions): StringValue; pathCase(options?: CaseOptions): StringValue; titleCase(options?: CaseOptions): StringValue; sentenceCase(options?: CaseOptions): StringValue; capitalize(options?: CaseOptions): StringValue; uncapitalize(options?: CaseOptions): StringValue; collapseWhitespace(): StringValue; squish(): StringValue; lines(): string[]; words(): string[]; wordCount(): number; sentences(): string[]; paragraphs(): string[]; initials(options?: InitialsOptions): StringValue; truncate(maxLength: number, options?: TruncateOptions): StringValue; excerpt(needle: string, options?: ExcerptOptions): string | undefined; wrapText(width: number, options?: WrapTextOptions): StringValue; dedent(): StringValue; before(delimiter: string, occurrence?: Occurrence): StringValue; after(delimiter: string, occurrence?: Occurrence): StringValue; between(opening: string, closing: string): StringValue; ensureStart(prefix: string): StringValue; ensureEnd(suffix: string): StringValue; trimPrefix(prefix: string): StringValue; trimSuffix(suffix: string): StringValue; containsAny(needles: readonly string[]): boolean; indexOf(needle: string, from?: number): number; replaceFirst(search: string, replacement: string): StringValue; replaceLast(search: string, replacement: string): StringValue; replaceStart(search: string, replacement: string): StringValue; replaceEnd(search: string, replacement: string): StringValue; swap(replacements: Readonly<Record<string, string>>): StringValue; deduplicate(token?: string): StringValue; wrap(opening: string, closing?: string): StringValue; unwrap(opening: string, closing?: string): StringValue; mask(options?: MaskOptions): StringValue; padStart(targetLength: number, fill?: string): StringValue; padEnd(targetLength: number, fill?: string): StringValue; padBoth(targetLength: number, fill?: string): StringValue; slugify(options?: SlugifyOptions): StringValue; transliterate(options?: TransliterateOptions): StringValue; escapeHtml(): StringValue; escapeRegExp(): StringValue; /** Treats the value as a `{{ name }}` template. */ interpolate(values: TemplateValues, options?: InterpolateOptions): StringValue; toBase64(options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | StringValue; fromBase64(options?: Base64Options): import(\"@arki/failure\").Failure<\"string.invalid_base64\", undefined> | import(\"@arki/failure\").Failure<\"string.invalid_utf8\", undefined> | StringValue; }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./fluent",
+      "name": "Transform",
+      "kind": "type",
+      "signature": "export type Transform = (value: StringValue) => StringValue;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./format",
+      "name": "collapseWhitespace",
+      "kind": "function",
+      "signature": "export declare function collapseWhitespace(text: string): string;",
+      "jsdocSummary": "Collapses every whitespace run to one space. Leading/trailing runs become one space each."
+    },
+    {
+      "subpath": "./format",
+      "name": "dedent",
+      "kind": "function",
+      "signature": "export declare function dedent(text: string): string; ; export declare function dedent(strings: TemplateStringsArray, ...values: readonly unknown[]): string;",
+      "jsdocSummary": "Removes the indentation shared by every non-blank line, and one leading and one trailing blank line, so an indented template literal reads as written. Works as a plain function or a tag: `dedent(text)` or ``dedent`...` ``. Line endings are kept."
+    },
+    {
+      "subpath": "./format",
+      "name": "excerpt",
+      "kind": "function",
+      "signature": "export declare function excerpt(text: string, needle: string, options?: ExcerptOptions): string | undefined;",
+      "jsdocSummary": "Context around the first match of `needle`, or `undefined` when absent."
+    },
+    {
+      "subpath": "./format",
+      "name": "ExcerptOptions",
+      "kind": "type",
+      "signature": "export type ExcerptOptions = Readonly<{ /** Graphemes kept on each side of the match. Defaults to 40. */ radius?: number; ellipsis?: string; /** * `grapheme` cuts exactly at the radius; `word` and `sentence` pull each edge inward to the * nearest word or sentence boundary, never past the match, so the radius stays a hard maximum. */ boundary?: 'grapheme' | 'word' | 'sentence'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./format",
+      "name": "initials",
+      "kind": "function",
+      "signature": "export declare function initials(text: string, options?: InitialsOptions): string;",
+      "jsdocSummary": "Uppercase first graphemes of the name components in `text`. Empty input gives `''`."
+    },
+    {
+      "subpath": "./format",
+      "name": "InitialsOptions",
+      "kind": "type",
+      "signature": "export type InitialsOptions = Readonly<{ /** Maximum number of initials. Defaults to 2. */ max?: number; /** With more components than `max`, keep the first ones or the first and last. Defaults to `first-last`. */ pick?: 'first' | 'first-last'; /** Leading graphemes to take when the name is a single word (`'Alex'` → `'AL'` with 2). Defaults to 1. */ singleWord?: number; locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./format",
+      "name": "squish",
+      "kind": "function",
+      "signature": "export declare function squish(text: string): string;",
+      "jsdocSummary": "Collapses whitespace and trims both ends."
+    },
+    {
+      "subpath": "./format",
+      "name": "truncate",
+      "kind": "function",
+      "signature": "export declare function truncate(text: string, maxLength: number, options?: TruncateOptions): string;",
+      "jsdocSummary": "Cuts `text` to at most `maxLength` graphemes including the ellipsis. Returns the original when it fits. Whitespace before the ellipsis is always dropped, so `'foo …'` never appears."
+    },
+    {
+      "subpath": "./format",
+      "name": "TruncateOptions",
+      "kind": "type",
+      "signature": "export type TruncateOptions = Readonly<{ /** Marker appended when text is cut. Defaults to `…`. Counts toward `maxLength`. */ ellipsis?: string; /** * `grapheme` cuts anywhere; `word-before` backs up to the previous word boundary; `sentence` * backs up to the last sentence end that fits, or to a word when no sentence end fits. */ boundary?: 'grapheme' | 'word-before' | 'sentence'; }>;",
+      "jsdocSummary": "Whitespace cleanup and display formatting: initials, truncation, excerpts, wrapping."
+    },
+    {
+      "subpath": "./format",
+      "name": "wrapText",
+      "kind": "function",
+      "signature": "export declare function wrapText(text: string, width: number, options?: WrapTextOptions): string;",
+      "jsdocSummary": "Greedy word wrap measured in graphemes. Existing line breaks are preserved."
+    },
+    {
+      "subpath": "./format",
+      "name": "WrapTextOptions",
+      "kind": "type",
+      "signature": "export type WrapTextOptions = Readonly<{ /** Cut words longer than `width` instead of overflowing. Defaults to false. */ breakWords?: boolean; /** Line separator for the output. Defaults to `\\n`. */ newline?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./hash",
+      "name": "hashCode",
+      "kind": "function",
+      "signature": "export declare function hashCode(text: string): number;",
+      "jsdocSummary": "Non-negative 32-bit hash of `text` over its UTF-16 code units: the classic `h * 31 + unit` (Java `String.hashCode`) with the sign dropped. Stable across runtimes and releases, so it is safe for picking a deterministic variant (`hashCode(id) % variants.length`) or a cache key. Not cryptographic and not collision-resistant."
+    },
+    {
+      "subpath": "./interpolate",
+      "name": "interpolate",
+      "kind": "function",
+      "signature": "export declare function interpolate(template: string, values: TemplateValues, options?: InterpolateOptions): string;",
+      "jsdocSummary": "Replaces `{{ name }}` placeholders with `values[name]`. `null` renders as `''`; `undefined` counts as missing. `\\{{` emits a literal `{{` and `\\\\` a literal backslash. Malformed placeholders throw `StringError` (`ARKI_STRING_E004`)."
+    },
+    {
+      "subpath": "./interpolate",
+      "name": "InterpolateOptions",
+      "kind": "type",
+      "signature": "export type InterpolateOptions = Readonly<{ /** What to do for a placeholder without a value: `throw` (default), `keep` the placeholder, or render `empty`. */ missing?: 'throw' | 'keep' | 'empty'; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./interpolate",
+      "name": "TemplateValues",
+      "kind": "type",
+      "signature": "export type TemplateValues = Readonly<Record<string, string | number | boolean | null | undefined>>;",
+      "jsdocSummary": "Minimal `{{ name }}` templating for flat values. No expressions, no dotted paths, no recursion. Output is plain text; escape separately when needed."
+    },
+    {
+      "subpath": "./keywords",
+      "name": "Keyword",
+      "kind": "type",
+      "signature": "export type Keyword = Readonly<{ /** Lowercased word or phrase. */ keyword: string; occurrences: number; /** Share of all candidate phrases of the same length, 0–100. */ percentage: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./keywords",
+      "name": "KeywordLanguage",
+      "kind": "type",
+      "signature": "export type KeywordLanguage = 'en' | 'es' | 'de' | 'fr' | 'ro';",
+      "jsdocSummary": "Function words per language, lowercased, for `keywords()`."
+    },
+    {
+      "subpath": "./keywords",
+      "name": "KeywordOptions",
+      "kind": "type",
+      "signature": "export type KeywordOptions = Readonly<{ /** Words per phrase. Default `1`. */ length?: number; /** Maximum entries returned. Default: all. */ limit?: number; /** Words shorter than this (in graphemes) never form keywords. Default `3`. */ minWordLength?: number; /** Phrases seen fewer times than this are dropped. Default `1`. */ minOccurrences?: number; /** Which built-in stop-word list to use. Default `'en'`. */ language?: KeywordLanguage; /** Lowercased words that never form keywords. Default: the `language` list; pass `null` to disable. */ stopWords?: Iterable<string> | null; /** BCP 47 tag for lowercasing. Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./keywords",
+      "name": "keywords",
+      "kind": "function",
+      "signature": "export declare function keywords(text: string, options?: KeywordOptions): Keyword[];",
+      "jsdocSummary": "Most frequent words or phrases (`length` words each), lowercased, most frequent first; ties sort alphabetically. `percentage` is the share among all candidate phrases of that length."
+    },
+    {
+      "subpath": "./keywords",
+      "name": "STOP_WORDS",
+      "kind": "variable",
+      "signature": "export declare const STOP_WORDS: Readonly<Record<KeywordLanguage, readonly string[]>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./metrics",
+      "name": "analyze",
+      "kind": "function",
+      "signature": "export declare function analyze(text: string, locale?: string): TextAnalysis;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./metrics",
+      "name": "TextAnalysis",
+      "kind": "class",
+      "signature": "export declare class TextAnalysis { #private; readonly text: string; readonly locale: string | undefined; constructor(text: string, locale?: string); /** Prose words, original case. */ get words(): string[]; /** Prose words lowercased (locale-sensitive only when a locale was given). */ get lowerWords(): string[]; /** Count per lowercased word. */ get frequencies(): Map<string, number>; get sentences(): string[]; /** Raw syllable count per word (`0` for words without Latin letters). */ get syllables(): number[]; get letters(): number; get lettersAndDigits(): number; }",
+      "jsdocSummary": "One lazily computed analysis record per text. Readability, vocabulary, and metrics functions all read from it, so a composite such as `textMetrics` tokenizes, lowercases, and syllabifies the text once instead of once per statistic. Every field is computed on first access."
+    },
+    {
+      "subpath": "./metrics",
+      "name": "TextInput",
+      "kind": "type",
+      "signature": "export type TextInput = string | TextAnalysis;",
+      "jsdocSummary": "A text to analyze, or an analysis already made so several functions share one tokenization."
+    },
+    {
+      "subpath": "./metrics",
+      "name": "textMetrics",
+      "kind": "function",
+      "signature": "export declare function textMetrics(text: TextInput, options?: VocabularyOptions): TextMetrics;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./metrics",
+      "name": "TextMetrics",
+      "kind": "type",
+      "signature": "export type TextMetrics = Readonly<{ /** Graphemes, line breaks included. */ characters: number; /** Graphemes that are not whitespace. */ charactersWithoutSpaces: number; words: number; uniqueWords: number; sentences: number; paragraphs: number; /** English heuristic; see `syllableCount`. */ syllables: number; averageSentenceLength: number; averageSyllablesPerWord: number; longestSentenceWords: number; shortestSentenceWords: number; readingTimeSeconds: number; speakingTimeSeconds: number; readability: ReadabilityScores; /** Top 10 single words. */ keywords: readonly Keyword[]; /** Top 10 two-word phrases seen at least twice. */ keyPhrases: readonly Keyword[]; lexicalDiversity: number; yulesK: number; simpsonsDiversityIndex: number; wordLength: WordLengthStats; /** Top 10 words by raw frequency, stop words included. */ mostCommonWords: readonly string[]; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "automatedReadabilityIndex",
+      "kind": "function",
+      "signature": "export declare function automatedReadabilityIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "colemanLiauIndex",
+      "kind": "function",
+      "signature": "export declare function colemanLiauIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "fernandezHuerta",
+      "kind": "function",
+      "signature": "export declare function fernandezHuerta(text: TextInput): number;",
+      "jsdocSummary": "Spanish Flesch adaptation (Fernández Huerta), 0–100; higher is easier."
+    },
+    {
+      "subpath": "./readability",
+      "name": "fleschAmstad",
+      "kind": "function",
+      "signature": "export declare function fleschAmstad(text: TextInput): number;",
+      "jsdocSummary": "German Flesch adaptation (Amstad), 0–100; higher is easier."
+    },
+    {
+      "subpath": "./readability",
+      "name": "fleschKincaidGrade",
+      "kind": "function",
+      "signature": "export declare function fleschKincaidGrade(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "fleschReadingEase",
+      "kind": "function",
+      "signature": "export declare function fleschReadingEase(text: TextInput): number;",
+      "jsdocSummary": "Flesch Reading Ease, 0–100 (clamped). Text without words scores 100."
+    },
+    {
+      "subpath": "./readability",
+      "name": "fleschReadingEaseLevel",
+      "kind": "function",
+      "signature": "export declare function fleschReadingEaseLevel(fleschScore: number): ReadabilityLevel;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "GermanReadabilityScores",
+      "kind": "type",
+      "signature": "export type GermanReadabilityScores = Readonly<{ fleschAmstad: number; wienerSachtextformel: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "gunningFog",
+      "kind": "function",
+      "signature": "export declare function gunningFog(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "lix",
+      "kind": "function",
+      "signature": "export declare function lix(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "readability",
+      "kind": "function",
+      "signature": "export declare function readability(text: TextInput): ReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language?: 'en'; }>): ReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language: 'es'; }>): SpanishReadabilityScores; ; export declare function readability(text: TextInput, options: Readonly<{ language: 'de'; }>): GermanReadabilityScores; ; export declare function readability(text: TextInput, options: ReadabilityOptions): ReadabilityScores | SpanishReadabilityScores | GermanReadabilityScores;",
+      "jsdocSummary": "Every score for the language from one analysis of the text. English unless `language` says otherwise."
+    },
+    {
+      "subpath": "./readability",
+      "name": "ReadabilityLevel",
+      "kind": "type",
+      "signature": "export type ReadabilityLevel = 'Very Easy' | 'Easy' | 'Fairly Easy' | 'Standard' | 'Fairly Difficult' | 'Difficult' | 'Very Confusing';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "ReadabilityOptions",
+      "kind": "type",
+      "signature": "export type ReadabilityOptions = Readonly<{ /** Which language's formulas to compute. Default `'en'`. */ language?: SyllableLanguage; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "ReadabilityScores",
+      "kind": "type",
+      "signature": "export type ReadabilityScores = Readonly<{ /** 0–100; higher is easier. Clamped. */ fleschReadingEase: number; /** US school grade. */ fleschKincaidGrade: number; /** Years of formal education. */ gunningFog: number; /** Years of education; the formula is specified for 30+ sentences and is approximate below that. */ smogIndex: number; /** US school grade, from letters and sentences per 100 words. */ colemanLiauIndex: number; /** US school grade, from characters per word and words per sentence. */ automatedReadabilityIndex: number; /** Läsbarhetsindex: words per sentence plus the percentage of words over six letters. */ lix: number; /** Label for `fleschReadingEase`. */ fleschReadingEaseLevel: ReadabilityLevel; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "readingTime",
+      "kind": "function",
+      "signature": "export declare function readingTime(text: TextInput, options?: TimeOptions): ReadingTime;",
+      "jsdocSummary": "Time to read `text` silently. Default 238 words per minute (adult average, Brysbaert 2019)."
+    },
+    {
+      "subpath": "./readability",
+      "name": "ReadingTime",
+      "kind": "type",
+      "signature": "export type ReadingTime = Readonly<{ words: number; seconds: number; minutes: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "smogIndex",
+      "kind": "function",
+      "signature": "export declare function smogIndex(text: TextInput): number;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "SpanishReadabilityScores",
+      "kind": "type",
+      "signature": "export type SpanishReadabilityScores = Readonly<{ fernandezHuerta: number; szigrisztPazos: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "speakingTime",
+      "kind": "function",
+      "signature": "export declare function speakingTime(text: TextInput, options?: TimeOptions): ReadingTime;",
+      "jsdocSummary": "Time to read `text` aloud. Default 150 words per minute."
+    },
+    {
+      "subpath": "./readability",
+      "name": "syllableCount",
+      "kind": "function",
+      "signature": "export declare function syllableCount(text: TextInput, options?: SyllableOptions): number;",
+      "jsdocSummary": "Approximate syllables in every word of `text`, summed. English by default (diacritics folded, non-Latin letters ignored, a word without Latin letters counts `0`); `language: 'es' | 'de'` switches rules. Meant for readability grades, not for hyphenation or verse."
+    },
+    {
+      "subpath": "./readability",
+      "name": "SyllableLanguage",
+      "kind": "type",
+      "signature": "export type SyllableLanguage = 'en' | 'es' | 'de';",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "SyllableOptions",
+      "kind": "type",
+      "signature": "export type SyllableOptions = Readonly<{ /** Counting rules to apply. Default `'en'`. */ language?: SyllableLanguage; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "szigrisztPazos",
+      "kind": "function",
+      "signature": "export declare function szigrisztPazos(text: TextInput): number;",
+      "jsdocSummary": "Spanish INFLESZ scale (Szigriszt Pazos), 0–100; higher is easier."
+    },
+    {
+      "subpath": "./readability",
+      "name": "TimeOptions",
+      "kind": "type",
+      "signature": "export type TimeOptions = Readonly<{ wordsPerMinute?: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./readability",
+      "name": "wienerSachtextformel",
+      "kind": "function",
+      "signature": "export declare function wienerSachtextformel(text: TextInput): number;",
+      "jsdocSummary": "First Wiener Sachtextformel: German school grade (4–15)."
+    },
+    {
+      "subpath": "./search",
+      "name": "after",
+      "kind": "function",
+      "signature": "export declare function after(text: string, delimiter: string, occurrence?: Occurrence): string;",
+      "jsdocSummary": "Everything after the first (or last) `delimiter`."
+    },
+    {
+      "subpath": "./search",
+      "name": "before",
+      "kind": "function",
+      "signature": "export declare function before(text: string, delimiter: string, occurrence?: Occurrence): string;",
+      "jsdocSummary": "Everything before the first (or last) `delimiter`."
+    },
+    {
+      "subpath": "./search",
+      "name": "between",
+      "kind": "function",
+      "signature": "export declare function between(text: string, opening: string, closing: string): string;",
+      "jsdocSummary": "Text between the first `opening` and the first `closing` after it. No nesting."
+    },
+    {
+      "subpath": "./search",
+      "name": "containsAny",
+      "kind": "function",
+      "signature": "export declare function containsAny(text: string, needles: readonly string[]): boolean;",
+      "jsdocSummary": "Whether any of `needles` occurs in `text`. An empty list is `false`."
+    },
+    {
+      "subpath": "./search",
+      "name": "indexOf",
+      "kind": "function",
+      "signature": "export declare function indexOf(text: string, needle: string, from?: number): number;",
+      "jsdocSummary": "Grapheme index of the first occurrence of `needle` at or after grapheme `from`, or -1."
+    },
+    {
+      "subpath": "./search",
+      "name": "Occurrence",
+      "kind": "type",
+      "signature": "export type Occurrence = 'first' | 'last';",
+      "jsdocSummary": "Extraction and lookup. Literal matches are case- and normalization-sensitive and always align with grapheme boundaries. `before`, `after`, and `between` return the input unchanged when a delimiter is absent."
+    },
+    {
+      "subpath": "./segment",
+      "name": "lines",
+      "kind": "function",
+      "signature": "export declare function lines(text: string): string[];",
+      "jsdocSummary": "Splits on CRLF, LF, CR, NEL, LS, and PS. `lines('')` is `['']`; trailing empty lines are kept."
+    },
+    {
+      "subpath": "./segment",
+      "name": "paragraphCount",
+      "kind": "function",
+      "signature": "export declare function paragraphCount(text: string): number;",
+      "jsdocSummary": "Number of paragraphs, using exactly `paragraphs()`."
+    },
+    {
+      "subpath": "./segment",
+      "name": "paragraphs",
+      "kind": "function",
+      "signature": "export declare function paragraphs(text: string): string[];",
+      "jsdocSummary": "Paragraphs: non-blank lines, trimmed. Blank-line-separated and single-newline-separated text give the same result unless a paragraph is hard-wrapped, which is rare in web inputs."
+    },
+    {
+      "subpath": "./segment",
+      "name": "sentenceCount",
+      "kind": "function",
+      "signature": "export declare function sentenceCount(text: string): number;",
+      "jsdocSummary": "Number of sentences, using exactly `sentences()`."
+    },
+    {
+      "subpath": "./segment",
+      "name": "sentences",
+      "kind": "function",
+      "signature": "export declare function sentences(text: string): string[];",
+      "jsdocSummary": "Sentences: text up to and including `.`, `!`, `?`, or `…` followed by whitespace or the end. A trailing fragment without terminal punctuation is a sentence if it contains a letter or digit. Abbreviations such as `Mr.` are not special-cased; `3.14` stays together."
+    },
+    {
+      "subpath": "./segment",
+      "name": "wordCount",
+      "kind": "function",
+      "signature": "export declare function wordCount(text: string): number;",
+      "jsdocSummary": "Number of prose words, using exactly `words()`."
+    },
+    {
+      "subpath": "./segment",
+      "name": "words",
+      "kind": "function",
+      "signature": "export declare function words(text: string): string[];",
+      "jsdocSummary": "Prose words: runs of letters, numbers, and marks. `don't`, `re-enter`, and `3.14` are each one word. Scripts without word spacing yield one word per run."
+    },
+    {
+      "subpath": "./slug",
+      "name": "Replacements",
+      "kind": "type",
+      "signature": "export type Replacements = readonly (readonly [string, string])[];",
+      "jsdocSummary": "Ordered `[from, to]` literal replacement pairs."
+    },
+    {
+      "subpath": "./slug",
+      "name": "rulesets",
+      "kind": "variable",
+      "signature": "export declare const rulesets: { readonly arabic: Replacements; readonly armenian: Replacements; readonly austrian: Replacements; readonly azerbaijani: Replacements; readonly bulgarian: Replacements; readonly burmese: Replacements; readonly croatian: Replacements; readonly customFonts: Replacements; readonly czech: Replacements; readonly danish: Replacements; readonly common: Replacements; readonly esperanto: Replacements; readonly estonian: Replacements; readonly finnish: Replacements; readonly french: Replacements; readonly georgian: Replacements; readonly german: Replacements; readonly greek: Replacements; readonly gujarati: Replacements; readonly hindi: Replacements; readonly hungarian: Replacements; readonly italian: Replacements; readonly latvian: Replacements; readonly lithuanian: Replacements; readonly macedonian: Replacements; readonly norwegian: Replacements; readonly persian: Replacements; readonly polish: Replacements; readonly portugueseBrazil: Replacements; readonly romanian: Replacements; readonly russian: Replacements; readonly serbian: Replacements; readonly slovak: Replacements; readonly swedish: Replacements; readonly turkish: Replacements; readonly turkmen: Replacements; readonly ukrainian: Replacements; readonly vietnamese: Replacements; readonly yiddish: Replacements; };",
+      "jsdocSummary": "Every rule set in this module, keyed by language name."
+    },
+    {
+      "subpath": "./slug",
+      "name": "slugify",
+      "kind": "function",
+      "signature": "export declare function slugify(text: string, options?: SlugifyOptions): string;",
+      "jsdocSummary": "Produces a URL-safe slug: transliterated, lowercased, separator-joined."
+    },
+    {
+      "subpath": "./slug",
+      "name": "SlugifyOptions",
+      "kind": "type",
+      "signature": "export type SlugifyOptions = TransliterateOptions & Readonly<{ /** Defaults to `-`. */ separator?: string; /** Defaults to `true`. */ lowercase?: boolean; /** Split camelCase words (`fooBar` → `foo-bar`). Defaults to `true`. */ decamelize?: boolean; /** Characters to keep verbatim instead of replacing with the separator. */ preserveCharacters?: readonly string[]; /** Keep one leading `_` from the input. */ preserveLeadingUnderscore?: boolean; /** Keep one trailing `-` from the input. */ preserveTrailingDash?: boolean; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./slug",
+      "name": "transliterate",
+      "kind": "function",
+      "signature": "export declare function transliterate(text: string, options?: TransliterateOptions): string;",
+      "jsdocSummary": "Converts `text` to ASCII-friendly Latin letters. Characters without a rule are kept."
+    },
+    {
+      "subpath": "./slug",
+      "name": "TransliterateOptions",
+      "kind": "type",
+      "signature": "export type TransliterateOptions = Readonly<{ /** Extra `[from, to]` pairs applied before every built-in rule. */ replacements?: Replacements; /** BCP-47 tag selecting language-specific overrides (`de`, `sv`, `da`, `nb`, `tr`, `hu`, `sr`). */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./slug-cjk",
+      "name": "chinese",
+      "kind": "variable",
+      "signature": "export declare const chinese: Replacements;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./slug-cjk",
+      "name": "korean",
+      "kind": "variable",
+      "signature": "export declare const korean: Replacements;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./unicode",
+      "name": "at",
+      "kind": "function",
+      "signature": "export declare function at(text: string, index: number): string | undefined;",
+      "jsdocSummary": "Grapheme at `index` (negative counts from the end), or `undefined` when out of range."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "chunk",
+      "kind": "function",
+      "signature": "export declare function chunk(text: string, size: number): string[];",
+      "jsdocSummary": "Splits `text` into chunks of `size` graphemes; the last chunk may be shorter."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "fold",
+      "kind": "function",
+      "signature": "export declare function fold(text: string, options?: FoldOptions): string;",
+      "jsdocSummary": "Search-key form of `text`: lowercased, accents and other combining marks removed, and the few Latin letters without a decomposition (`ß`, `ø`, `ł`, …) spelled out. `fold('Émile Zola')` is `'emile zola'`. Lighter than `transliterate` (no script conversion) and meant for matching, not display."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "FoldOptions",
+      "kind": "type",
+      "signature": "export type FoldOptions = Readonly<{ /** BCP 47 tag for lowercasing (`'tr'` keeps dotless i). Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./unicode",
+      "name": "graphemeBoundaries",
+      "kind": "function",
+      "signature": "export declare function graphemeBoundaries(text: string): number[];",
+      "jsdocSummary": "Every boundary offset of `text`, always starting with `0` and ending with `text.length`."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "graphemes",
+      "kind": "function",
+      "signature": "export declare function graphemes(text: string): IterableIterator<string>;",
+      "jsdocSummary": "Iterates the grapheme clusters of `text`."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "length",
+      "kind": "function",
+      "signature": "export declare function length(text: string): number;",
+      "jsdocSummary": "Number of grapheme clusters in `text`."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "reverse",
+      "kind": "function",
+      "signature": "export declare function reverse(text: string): string;",
+      "jsdocSummary": "Reverses the grapheme sequence, keeping each grapheme intact."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "slice",
+      "kind": "function",
+      "signature": "export declare function slice(text: string, start?: number, end?: number): string;",
+      "jsdocSummary": "Grapheme-indexed slice with the same `start`/`end` semantics as `Array.prototype.slice`."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "splice",
+      "kind": "function",
+      "signature": "export declare function splice(text: string, start: number, deleteCount: number, insert?: string): string;",
+      "jsdocSummary": "Immutable grapheme-indexed splice: removes `deleteCount` graphemes at `start` and inserts `insert`."
+    },
+    {
+      "subpath": "./unicode",
+      "name": "take",
+      "kind": "function",
+      "signature": "export declare function take(text: string, count: number): string;",
+      "jsdocSummary": "The first `count` graphemes; a negative `count` takes from the end."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "lexicalDiversity",
+      "kind": "function",
+      "signature": "export declare function lexicalDiversity(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Type–token ratio: distinct words divided by all words, 0–1. `0` for empty text."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "simpsonsDiversityIndex",
+      "kind": "function",
+      "signature": "export declare function simpsonsDiversityIndex(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Simpson's diversity index for vocabulary, 0–1; `1` when every word is distinct."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "uniqueWordCount",
+      "kind": "function",
+      "signature": "export declare function uniqueWordCount(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Distinct words, case-insensitively."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "VocabularyOptions",
+      "kind": "type",
+      "signature": "export type VocabularyOptions = Readonly<{ /** BCP 47 tag for lowercasing. Default: locale-independent. */ locale?: string; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "wordFrequencies",
+      "kind": "function",
+      "signature": "export declare function wordFrequencies(text: TextInput, options?: VocabularyOptions): WordFrequency[];",
+      "jsdocSummary": "Every distinct word with its count and share, most frequent first; ties alphabetically."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "WordFrequency",
+      "kind": "type",
+      "signature": "export type WordFrequency = Readonly<{ word: string; count: number; /** Share of all words, 0–100. */ percentage: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "wordLengthStats",
+      "kind": "function",
+      "signature": "export declare function wordLengthStats(text: TextInput): WordLengthStats;",
+      "jsdocSummary": "Word lengths in graphemes. All zeros for text without words."
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "WordLengthStats",
+      "kind": "type",
+      "signature": "export type WordLengthStats = Readonly<{ average: number; median: number; mode: number; shortest: number; longest: number; standardDeviation: number; }>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./vocabulary",
+      "name": "yulesK",
+      "kind": "function",
+      "signature": "export declare function yulesK(text: TextInput, options?: VocabularyOptions): number;",
+      "jsdocSummary": "Yule's K: repetitiveness of the vocabulary; `0` when every word is distinct or the text is empty."
+    }
+  ],
+  "errorCodes": [
+    "ARKI_STRING_E001",
+    "ARKI_STRING_E002",
+    "ARKI_STRING_E003",
+    "ARKI_STRING_E004",
+    "ARKI_STRING_E005",
+    "string.invalid_base64",
+    "string.invalid_utf8"
+  ]
+}

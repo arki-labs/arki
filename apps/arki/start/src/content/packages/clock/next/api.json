@@ -1,0 +1,82 @@
+{
+  "package": "@arki/clock",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "Clock",
+      "kind": "type",
+      "signature": "export type Clock = { now(): Date; /** * Calls `callback` once, `ms` milliseconds from now. Returns a function that * cancels the timer; calling it after the timer fired does nothing. Throws * `ClockError` (`ARKI_CLOCK_E002`) when `ms` is negative, not finite, or above * {@link MAX_TIMER_MS}. */ setTimer(callback: () => void, ms: number): () => void; /** * Resolves `ms` milliseconds from now. Aborting `signal` clears the timer and * returns `SleepCancelled` whose private `cause` is `signal.reason`; * an already-aborted signal returns it at once. An invalid `ms` rejects with * `ClockError` (`ARKI_CLOCK_E002`). */ sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure>; };",
+      "jsdocSummary": "Time-source abstraction — the single boundary where \"what time is it?\" and \"wake me later\" are answered."
+    },
+    {
+      "subpath": ".",
+      "name": "CLOCK_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const CLOCK_ERROR_CODES: { /** * `MockClock.advance` or `advanceAsync` got a negative or non-finite number of milliseconds. * * @fix Pass a step that is zero or more. Use `setNow` to move the mock clock back. * @verify bun run test */ readonly invalidAdvance: 'ARKI_CLOCK_E001'; /** * `setTimer` or `sleep` got a delay that is negative, not finite, or longer than a timer can hold. * * @fix Pass a finite delay from 0 up to `MAX_TIMER_MS` (about 24.8 days). Split a longer wait into steps. * @verify bun run test */ readonly invalidDelay: 'ARKI_CLOCK_E002'; /** * Legacy abort exception code; sleep now returns SleepCancelled. * @deprecated Match SleepCancelled instead. * * @fix Handle SleepCancelled returned from sleep. * @verify bun run test */ readonly aborted: 'ARKI_CLOCK_E003'; };",
+      "jsdocSummary": "Stable error codes of `@arki/clock`."
+    },
+    {
+      "subpath": ".",
+      "name": "ClockError",
+      "kind": "class",
+      "signature": "export declare class ClockError extends Error { readonly code: ClockErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: ClockErrorCode, message: string, remediation: string, options?: ErrorOptions); }",
+      "jsdocSummary": "A coded failure of a clock."
+    },
+    {
+      "subpath": ".",
+      "name": "ClockErrorCode",
+      "kind": "type",
+      "signature": "export type ClockErrorCode = (typeof CLOCK_ERROR_CODES)[keyof typeof CLOCK_ERROR_CODES];",
+      "jsdocSummary": "The code of a {@link ClockError}."
+    },
+    {
+      "subpath": ".",
+      "name": "MAX_TIMER_MS",
+      "kind": "variable",
+      "signature": "export declare const MAX_TIMER_MS = 2147483647;",
+      "jsdocSummary": "The longest delay every runtime's `setTimeout` honors (2^31 - 1 ms, about 24.8 days)."
+    },
+    {
+      "subpath": ".",
+      "name": "MockClock",
+      "kind": "class",
+      "signature": "export declare class MockClock implements Clock { #private; constructor(initialNow?: Date); now(): Date; setTimer(callback: () => void, ms: number): () => void; sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure>; /** * Moves time forward by `ms` and fires, in time order, every timer due by * then, each at its own due time. A timer that a firing callback sets is * fired too when it comes due within the step. Synchronous: code that resumes * after an `await` runs only after `advance` returns, so use * {@link MockClock.advanceAsync} for timers that async code sets. */ advance(ms: number): void; /** * Like {@link MockClock.advance}, but lets state.pending promise callbacks run * before the first timer and after each fired timer. So a timer that async * code sets after an `await` (a retry loop's next `sleep`, say) also fires * when it comes due within the step. To let them run it waits for one real * macrotask (`setTimeout(0)`) each time, so do not combine it with fake timers * that replace `setTimeout`. */ advanceAsync(ms: number): Promise<void>; setNow(date: Date): void; }",
+      "jsdocSummary": "Controllable `Clock` for tests."
+    },
+    {
+      "subpath": ".",
+      "name": "SLEEP_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const SLEEP_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"clock.sleep_cancelled\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Exact canonical failure definitions returned by Clock.sleep."
+    },
+    {
+      "subpath": ".",
+      "name": "SleepCancelled",
+      "kind": "variable",
+      "signature": "export declare const SleepCancelled: import(\"@arki/failure\").FailureDefinition<\"clock.sleep_cancelled\", undefined>;",
+      "jsdocSummary": "A sleep ended before its timer because its owner cancelled it."
+    },
+    {
+      "subpath": ".",
+      "name": "SleepFailure",
+      "kind": "type",
+      "signature": "export type SleepFailure = ReturnType<(typeof SLEEP_FAILURES)[number]>;",
+      "jsdocSummary": "Every operational outcome of Clock.sleep, inferred from its definitions."
+    },
+    {
+      "subpath": ".",
+      "name": "SystemClock",
+      "kind": "class",
+      "signature": "export declare class SystemClock implements Clock { now(): Date; setTimer(callback: () => void, ms: number): () => void; sleep(ms: number, signal?: AbortSignal): Promise<void | SleepFailure>; }",
+      "jsdocSummary": "Default production `Clock`, backed by the runtime `Date` and `setTimeout`."
+    }
+  ],
+  "errorCodes": [
+    "ARKI_CLOCK_E001",
+    "ARKI_CLOCK_E002",
+    "ARKI_CLOCK_E003",
+    "clock.sleep_cancelled"
+  ]
+}

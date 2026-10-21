@@ -1,0 +1,32 @@
+# @arki/failure
+
+> Typed failures for TypeScript with no wrapper. A function returns `Value | Failure<...>`, the compiler infers the union, and every caller must check. Owned boundaries return typed defects with private causes.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/failure`: typed failures returned as plain values, with no wrapper. `AsyncSchema`, `FAILURE_ERROR_CODES`, `FailureError`, `InvalidEnvelope`, `InvalidInput`, `REVIVAL_FAILURES`, `SCHEMA_FAILURES`, `UnexpectedDefect`, `UnexpectedFailure`, `ValidatorDefect`, `assertNever`, `attempt`; and 31 more.
+- `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules. `default`, `mustUse`, `noBlindAccept`.
+- `@arki/failure/orpc`: failures at an oRPC boundary. `RPC_FAILURE_DEFINITION`, `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcFailureDefinitions`; types `DeclaredErrors`, `ErrorMapOf`.
+- `@arki/failure/schema`: Minimal Standard Schema execution shared by schema parsing and failure revival. `SCHEMA_FAILURES`, `isAsyncSchemaFailure`, `isSchemaFailure`, `parse`, `parseAsync`; types `AsyncSchemaFailure`, `SchemaFailure`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Define and return a failure](docs/agent-guide.md#define-and-return-a-failure)
+- [Check a result](docs/agent-guide.md#check-a-result)
+- [Handle every code](docs/agent-guide.md#handle-every-code)
+- [Handle some codes](docs/agent-guide.md#handle-some-codes)
+- [Cross an oRPC boundary](docs/agent-guide.md#cross-an-orpc-boundary)
+- [Turn a throwing call into a failure](docs/agent-guide.md#turn-a-throwing-call-into-a-failure)
+- [Lint discarded failures](docs/agent-guide.md#lint-discarded-failures)
+
+## Rules that bite
+- A discarded call drops its failure. Turn on `failure/must-use`.
+- Check with `isFailure` or `Def.is`. Truthiness does not narrow.
+- Misuse throws `FailureError`. Do not catch it; fix the call.
+- Wire schemas must synchronously accept their lossless JSON output unchanged.
+- A returned failure does not roll back a transaction.

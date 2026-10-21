@@ -1,0 +1,38 @@
+[
+  {
+    "code": "ARKI_CLOCK_E001",
+    "package": "@arki/clock",
+    "kind": "thrown",
+    "what": "`MockClock.advance` or `advanceAsync` got a negative or non-finite number of milliseconds.",
+    "fix": "Pass a step that is zero or more. Use `setNow` to move the mock clock back.",
+    "verify": "bun run test",
+    "source": "src/errors.ts:16"
+  },
+  {
+    "code": "ARKI_CLOCK_E002",
+    "package": "@arki/clock",
+    "kind": "thrown",
+    "what": "`setTimer` or `sleep` got a delay that is negative, not finite, or longer than a timer can hold.",
+    "fix": "Pass a finite delay from 0 up to `MAX_TIMER_MS` (about 24.8 days). Split a longer wait into steps.",
+    "verify": "bun run test",
+    "source": "src/errors.ts:23"
+  },
+  {
+    "code": "ARKI_CLOCK_E003",
+    "package": "@arki/clock",
+    "kind": "thrown",
+    "what": "Legacy abort exception code; sleep now returns SleepCancelled.",
+    "fix": "Handle SleepCancelled returned from sleep.",
+    "verify": "bun run test",
+    "source": "src/errors.ts:31"
+  },
+  {
+    "code": "clock.sleep_cancelled",
+    "package": "@arki/clock",
+    "kind": "failure",
+    "what": "A sleep ended before its timer because its owner cancelled it.",
+    "fix": "Handle cancellation at the owning operation boundary.",
+    "verify": "bun run test",
+    "source": "src/errors.ts:55"
+  }
+]

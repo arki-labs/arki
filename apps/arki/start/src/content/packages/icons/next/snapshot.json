@@ -1,0 +1,30 @@
+{
+  "name": "@arki/icons",
+  "channel": "next",
+  "version": "0.1.2",
+  "archive": false,
+  "sha512": "5ac1f502bd0583e44805dafa5e645129c0bef633f16891529b399fdd57ebd17efd28a19b8b1e861a4f8e90507b5bc2e27c632f5e79dd05fc9b8be1242dee5dc4",
+  "files": [
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "frontend",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:20:08.169Z"
+  },
+  "examples": {
+    "examples": 6,
+    "modules": 6,
+    "compiled": 6,
+    "ran": 0,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

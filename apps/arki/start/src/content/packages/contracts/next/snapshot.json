@@ -1,0 +1,44 @@
+{
+  "name": "@arki/contracts",
+  "channel": "next",
+  "version": "0.2.0",
+  "archive": false,
+  "sha512": "8187666c2462370c26534a22b66e503eb7b743a9b39bfcdccd936679ff7f225119e20ca9ef80abf6e991180d802b448ccc04e793cd61a2e88ff5802b04e385ec",
+  "files": [
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "docs/upgrades/0.1.0-to-0.2.0.md",
+    "docs/upgrades/domain-ids.md",
+    "docs/upgrades/typed-ids.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 16,
+    "modules": 14,
+    "compiled": 14,
+    "ran": 11,
+    "skipped": 2,
+    "skippedBlocks": [
+      {
+        "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+        "line": 51,
+        "reason": "before-state sketch of the 0.1.0 code"
+      },
+      {
+        "file": "docs/upgrades/0.1.0-to-0.2.0.md",
+        "line": 62,
+        "reason": "fragment: keyset and input come from your own contract"
+      }
+    ],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

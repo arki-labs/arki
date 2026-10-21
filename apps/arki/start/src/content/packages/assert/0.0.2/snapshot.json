@@ -1,0 +1,14 @@
+{
+  "name": "@arki/assert",
+  "channel": "published",
+  "version": "0.0.2",
+  "archive": true,
+  "sha512": "7116cc88b49032d386402dec16c5310214e1138b7183fe8183a463ddd5202909f142375f2dca02ff702660516ee6a5a0176e64d1e49a793f7c8b43527182e94e",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@arki/async",
+  "channel": "next",
+  "version": "0.1.0",
+  "archive": false,
+  "sha512": "bf91b69c9d2a8333ee5acba235b0b1b81800e3e1068de6b97f49385f8a1bd5a04a88f03a480379898fca5470187ab3124c770e2f09a2e2b82e9633b4f74acd4a",
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "api.json",
+    "docs/agent-guide.md",
+    "docs/upgrades/0.0.0-scope-telemetry.md",
+    "errors.json",
+    "llms.txt"
+  ],
+  "candidate": {
+    "wave": "dot-kernel",
+    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
+    "createdAt": "2026-10-21T06:18:35.314Z"
+  },
+  "examples": {
+    "examples": 11,
+    "modules": 10,
+    "compiled": 10,
+    "ran": 7,
+    "skipped": 0,
+    "skippedBlocks": [],
+    "failures": []
+  },
+  "engines": {},
+  "benchStatus": "none"
+}

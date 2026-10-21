@@ -1,0 +1,110 @@
+[
+  {
+    "code": "ARKI_FAILURE_E001",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "`defineFailure` got an empty code, or the reserved code `ok`.",
+    "fix": "Give the failure a non-empty dotted code such as `post.not_found`, and not `ok`.",
+    "verify": "bun run test -- src/failure.test.ts",
+    "source": "src/errors.ts:17"
+  },
+  {
+    "code": "ARKI_FAILURE_E002",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "`defineFailure` got a status that is not an integer from 400 to 599.",
+    "fix": "Pass an integer status from 400 to 599, or leave `status` out for the default 400.",
+    "verify": "bun run test -- src/failure.test.ts",
+    "source": "src/errors.ts:24"
+  },
+  {
+    "code": "ARKI_FAILURE_E003",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "`match` met a failure code it has no handler for. The types stop this, so it happens only when they were bypassed.",
+    "fix": "Add a handler for the code to `match`, or fix the cast that hid it from the compiler.",
+    "verify": "bun run test -- src/handle.test.ts",
+    "source": "src/errors.ts:31"
+  },
+  {
+    "code": "ARKI_FAILURE_E004",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "`assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside).",
+    "fix": "Handle the new case in the `switch`, or validate the data at the boundary.",
+    "verify": "bun run test -- src/handle.test.ts",
+    "source": "src/errors.ts:38"
+  },
+  {
+    "code": "ARKI_FAILURE_E005",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "Two definitions with the same code were given where codes must be unique.",
+    "fix": "Give each definition its own code, or pass the definition only once.",
+    "verify": "bun run test -- src/orpc.test.ts",
+    "source": "src/errors.ts:45"
+  },
+  {
+    "code": "ARKI_FAILURE_E006",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "",
+    "fix": "Check the stored data against the schema. A schema that transforms its input cannot read its own output.",
+    "verify": "bun run test -- src/revive.test.ts",
+    "source": "src/errors.ts:52"
+  },
+  {
+    "code": "ARKI_FAILURE_E007",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "",
+    "fix": "Use a schema that validates synchronously for failure data.",
+    "verify": "bun run test -- src/revive.test.ts",
+    "source": "src/errors.ts:59"
+  },
+  {
+    "code": "failure.invalid_envelope",
+    "package": "@arki/failure",
+    "kind": "failure",
+    "what": "An external envelope cannot be trusted as a known failure.",
+    "fix": "Send a supported failure envelope with validated JSON data.",
+    "verify": "bun run test -- src/revive.test.ts",
+    "source": "src/foundations.ts:115"
+  },
+  {
+    "code": "failure.unexpected_defect",
+    "package": "@arki/failure",
+    "kind": "failure",
+    "what": "A caught operation defect, distinct from the UnexpectedFailure exception bridge.",
+    "fix": "Inspect the private cause and fix the operation.",
+    "verify": "bun run test -- src/schema.test.ts",
+    "source": "src/foundations.ts:126"
+  },
+  {
+    "code": "schema.async_required",
+    "package": "@arki/failure",
+    "kind": "failure",
+    "what": "A synchronous operation received an asynchronous validator result.",
+    "fix": "Use parseAsync() and await the result.",
+    "verify": "bun run test -- src/schema.test.ts",
+    "source": "src/foundations.ts:67"
+  },
+  {
+    "code": "schema.invalid_input",
+    "package": "@arki/failure",
+    "kind": "failure",
+    "what": "Input failed the schema's checks. Only intentional public issue fields are retained.",
+    "fix": "Correct the reported input issues.",
+    "verify": "bun run test -- src/schema.test.ts",
+    "source": "src/foundations.ts:56"
+  },
+  {
+    "code": "schema.validator_defect",
+    "package": "@arki/failure",
+    "kind": "failure",
+    "what": "A validator threw, rejected, or violated the Standard Schema result contract.",
+    "fix": "Fix the validator; inspect the private cause for details.",
+    "verify": "bun run test -- src/schema.test.ts",
+    "source": "src/foundations.ts:77"
+  }
+]

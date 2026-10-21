@@ -1,0 +1,16 @@
+{
+  "name": "@arki/journal",
+  "channel": "published",
+  "version": "0.1.1",
+  "archive": false,
+  "sha512": "41ea91971e5ff7803725cff353fd5f52cb5adbb93ab263bf743184dfe25c14fed688b06f3bf560faeeca732af260f54a35004deddd48bfd70c1cd5a663796833",
+  "files": [
+    "README.md",
+    "docs/agent-guide.md",
+    "llms.txt"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

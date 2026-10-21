@@ -1,0 +1,401 @@
+{
+  "package": "@arki/async",
+  "version": "0.1.0",
+  "entries": [
+    {
+      "subpath": ".",
+      "name": "all",
+      "kind": "function",
+      "signature": "export declare function all<const T extends readonly ((signal: AbortSignal) => Promise<unknown>)[]>(tasks: T, options?: ConcurrencyOptions): Promise<{ -readonly [K in keyof T]: Awaited<ReturnType<T[K]>>; }>;",
+      "jsdocSummary": "`Promise.all` for tasks that take an `AbortSignal`, typed per position like `Promise.all`. Same contract as {@link mapConcurrent}: at most `concurrency` in flight, the first rejection aborts the siblings, nothing new starts, and in-flight tasks are awaited before the promise rejects with that error."
+    },
+    {
+      "subpath": ".",
+      "name": "ASYNC_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const ASYNC_ERROR_CODES: { /** * A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}. * * @fix Pass a finite wait from 0 up to `MAX_WAIT_MS` (about 24.8 days). For a longer wait, sleep again when the timer fires. * @verify bun run test */ readonly invalidWait: 'ARKI_ASYNC_E001'; /** * Work was cut short by its `AbortSignal` before it finished: a `sleep`, a * `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call. * `cause` is `signal.reason`. * * @fix Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work. * @verify bun run test */ readonly aborted: 'ARKI_ASYNC_E002'; /** * One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any. * * @fix Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice. * @verify bun run test */ readonly cleanupFailed: 'ARKI_ASYNC_E003'; /** * A `timeout` deadline passed before the task finished. * * @fix Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline. * @verify bun run test */ readonly timedOut: 'ARKI_ASYNC_E004'; /** * A `concurrency` limit is not a positive integer or `Infinity`. * * @fix Pass a whole number of at least 1, or leave `concurrency` out for no limit. * @verify bun run test */ readonly invalidConcurrency: 'ARKI_ASYNC_E005'; };",
+      "jsdocSummary": "Stable error codes of `@arki/async`."
+    },
+    {
+      "subpath": ".",
+      "name": "AsyncError",
+      "kind": "class",
+      "signature": "export declare class AsyncError extends Error { readonly code: AsyncErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; /** The finalizer errors of an `ARKI_ASYNC_E003`, in the order the finalizers ran. Empty for every other code. */ readonly errors: readonly unknown[]; constructor(code: AsyncErrorCode, message: string, remediation: string, options?: { readonly cause?: unknown; readonly errors?: readonly unknown[]; }); }",
+      "jsdocSummary": "A coded failure of any `@arki/async` helper."
+    },
+    {
+      "subpath": ".",
+      "name": "AsyncErrorCode",
+      "kind": "type",
+      "signature": "export type AsyncErrorCode = (typeof ASYNC_ERROR_CODES)[keyof typeof ASYNC_ERROR_CODES];",
+      "jsdocSummary": "The code of an {@link AsyncError}."
+    },
+    {
+      "subpath": ".",
+      "name": "Cancelled",
+      "kind": "variable",
+      "signature": "export declare const Cancelled: import(\"@arki/failure\").FailureDefinition<\"async.cancelled\", undefined>;",
+      "jsdocSummary": "Owned execution was cancelled; the external reason stays private."
+    },
+    {
+      "subpath": ".",
+      "name": "CheckedPlan",
+      "kind": "type",
+      "signature": "export type CheckedPlan<P extends Plan> = { [Key in keyof P]: unknown extends CallbackOutput<P[Key]> ? never : P[Key]; };",
+      "jsdocSummary": "Require inferred callback outcomes before an owner accepts a descriptor plan."
+    },
+    {
+      "subpath": ".",
+      "name": "child",
+      "kind": "function",
+      "signature": "export declare function child<Ran>(run: SignalTask<Ran>): Child<Ran>;",
+      "jsdocSummary": "Define child work whose settlement is joined before resource finalization."
+    },
+    {
+      "subpath": ".",
+      "name": "Child",
+      "kind": "interface",
+      "signature": "export interface Child<Ran> extends ReturnType<typeof createChild<Ran>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ChildFailure",
+      "kind": "type",
+      "signature": "export type ChildFailure<P extends Plan> = CallbackFailure<P, 'run'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "cleanup",
+      "kind": "function",
+      "signature": "export declare function cleanup<Closed>(close: CleanupTask<Closed>): Cleanup<Closed>;",
+      "jsdocSummary": "Define a finalizer whose failure contract participates in scope closure."
+    },
+    {
+      "subpath": ".",
+      "name": "Cleanup",
+      "kind": "interface",
+      "signature": "export interface Cleanup<Closed> extends ReturnType<typeof createCleanup<Closed>> { }",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "CleanupFailure",
+      "kind": "type",
+      "signature": "export type CleanupFailure<P extends Plan> = CallbackFailure<P, 'close'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ConcurrencyOptions",
+      "kind": "type",
+      "signature": "export type ConcurrencyOptions = SignalOptions & { /** Most tasks in flight at once: a positive integer, or `Infinity` (the default) for no limit. Else `ARKI_ASYNC_E005`. */ readonly concurrency?: number; };",
+      "jsdocSummary": "Options of {@link all} and {@link mapConcurrent}."
+    },
+    {
+      "subpath": ".",
+      "name": "createLifetime",
+      "kind": "function",
+      "signature": "export declare function createLifetime<Primary extends Failure = never, Cleanup extends Failure = never>(options: ScopeOptions): { readonly signal: AbortSignal; readonly values: Record<string, unknown>; acquire<Run extends Prepare>(prepare: Run & CoveredCallback<Run, Primary | SupervisorFailure> & CoveredCallback<PreparedClose<Run>, Cleanup | SupervisorFailure>): Promise<PreparedValue<Run> | FailureOf<Run> | SupervisorFailure>; defer<Run extends () => unknown>(run: Run & CoveredCallback<Run, Cleanup | SupervisorFailure>): void | SupervisorFailure; fork<Ran>(this: void, run: (signal: AbortSignal) => Ran, ...coverage: CoveredCallback<() => Ran, Primary | SupervisorFailure> extends never ? [invalid: never] : []): void | SupervisorFailure; fail(failure: Primary | SupervisorFailure): void; hasFailure(): boolean; defect(error: unknown): FailureOf<typeof UnexpectedDefect> | undefined; quiesce(this: void): Promise<Outcome<void, Primary | SupervisorFailure, never>>; close(this: void): Promise<Outcome<void, Primary | SupervisorFailure, Cleanup | SupervisorFailure>>; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "Deadline",
+      "kind": "variable",
+      "signature": "export declare const Deadline: import(\"@arki/failure\").FailureDefinition<\"async.deadline\", undefined>;",
+      "jsdocSummary": "An owned deadline elapsed; work still needs cooperative settlement."
+    },
+    {
+      "subpath": ".",
+      "name": "debounce",
+      "kind": "function",
+      "signature": "export declare function debounce<A extends readonly unknown[]>(fn: (...args: A) => void, wait: number, options?: DebounceOptions): Scheduled<A>;",
+      "jsdocSummary": "Delays `fn` until `wait` ms have passed without a new call. The latest arguments win. Defaults: `leading: false`, `trailing: true`. Throws `ARKI_ASYNC_E001` for an invalid `wait` or `maxWait`."
+    },
+    {
+      "subpath": ".",
+      "name": "DebounceOptions",
+      "kind": "type",
+      "signature": "export type DebounceOptions = { /** Call on the first call of a burst. Default `false`. */ readonly leading?: boolean; /** Call after the burst ends. Default `true`. */ readonly trailing?: boolean; /** Longest time a burst may delay the call. Raised to `wait` when smaller. */ readonly maxWait?: number; /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */ readonly clock?: Clock; };",
+      "jsdocSummary": "Options of {@link debounce}."
+    },
+    {
+      "subpath": ".",
+      "name": "dynamicScope",
+      "kind": "function",
+      "signature": "export declare function dynamicScope<const Definitions extends readonly Definition[]>(definitions: Definitions): { run<Body extends (scope: { readonly signal: AbortSignal; acquire<Open extends (signal: AbortSignal) => unknown, Close extends (value: Exclude<Awaited<ReturnType<Open>>, Failure>) => unknown>(open: Open & ((signal: AbortSignal) => Covered<ReturnType<Open>, NoInfer<Defined<Definitions>>>), close: Close & ((value: Exclude<Awaited<ReturnType<Open>>, Failure>) => Covered<ReturnType<Close>, NoInfer<Defined<Definitions>>>)): Promise<Awaited<ReturnType<Open>> | SupervisorFailure>; defer<Close extends () => unknown>(this: void, close: Close & (() => Covered<ReturnType<Close>, NoInfer<Defined<Definitions>>>)): void | SupervisorFailure; fork<Run extends (signal: AbortSignal) => unknown>(run: Run & ((signal: AbortSignal) => Covered<ReturnType<Run>, NoInfer<Defined<Definitions>>>)): void | SupervisorFailure; }) => unknown>(body: Body, options?: ScopeOptions): Promise<Outcome<Exclude<Awaited<ReturnType<Body>>, Failure>, Defined<Definitions> | FailureOf<Body> | SupervisorFailure, Defined<Definitions> | SupervisorFailure>>; };",
+      "jsdocSummary": "Fix canonical failure definitions before imperative registrations start."
+    },
+    {
+      "subpath": ".",
+      "name": "isResource",
+      "kind": "function",
+      "signature": "export declare function isResource(value: unknown): value is ReturnType<typeof resource>;",
+      "jsdocSummary": "Recognize an inert resource without acquiring it."
+    },
+    {
+      "subpath": ".",
+      "name": "isScopeEntry",
+      "kind": "function",
+      "signature": "export declare function isScopeEntry(value: unknown): value is Entry;",
+      "jsdocSummary": "Recognize a descriptor constructed by this module."
+    },
+    {
+      "subpath": ".",
+      "name": "mapConcurrent",
+      "kind": "function",
+      "signature": "export declare function mapConcurrent<I, O>(items: Iterable<I>, fn: (item: I, signal: AbortSignal, index: number) => Promise<O>, options?: ConcurrencyOptions): Promise<O[]>;",
+      "jsdocSummary": "Maps `items` through `fn` with at most `concurrency` calls in flight, and resolves with the results in input order."
+    },
+    {
+      "subpath": ".",
+      "name": "MAX_WAIT_MS",
+      "kind": "variable",
+      "signature": "export declare const MAX_WAIT_MS = 2147483647;",
+      "jsdocSummary": "Longest wait a timer can hold: 2^31 - 1 ms (about 24.8 days). Larger values fire at once in most runtimes."
+    },
+    {
+      "subpath": ".",
+      "name": "OpenFailure",
+      "kind": "type",
+      "signature": "export type OpenFailure<P extends Plan> = CallbackFailure<P, 'open'>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "openScope",
+      "kind": "function",
+      "signature": "export declare function openScope<const P extends Plan>(plan: P & CheckedPlan<NoInfer<P>>, options?: ScopeOptions): Promise<{ readonly values: Values<P>; readonly signal: AbortSignal; close(this: void): Promise<Outcome<void, ChildFailure<P> | SupervisorFailure, Closing<P>>>; } | Primary<P> | CleanupFailure<P> | ScopeAggregate<Primary<P>, Closing<P>>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "race",
+      "kind": "function",
+      "signature": "export declare function race<T>(tasks: readonly ((signal: AbortSignal) => Promise<T>)[], options?: SignalOptions): Promise<T>;",
+      "jsdocSummary": "The first task to FULFILL wins, like `Promise.any`, and unlike `Promise.race`, where the first task to settle (even by rejecting) decides."
+    },
+    {
+      "subpath": ".",
+      "name": "resource",
+      "kind": "function",
+      "signature": "export declare function resource<Opened, Closed>(open: SignalTask<Opened>, close: ResourceClose<Opened, Closed>): Resource<Opened, Closed>;",
+      "jsdocSummary": "Define an acquisition and its correlated finalizer without starting either."
+    },
+    {
+      "subpath": ".",
+      "name": "Resource",
+      "kind": "interface",
+      "signature": "export interface Resource<Opened, Closed> extends ReturnType<typeof createResource<Opened, Closed>> { }",
+      "jsdocSummary": "Named inferred descriptor types keep consumer declarations independent of private brands."
+    },
+    {
+      "subpath": ".",
+      "name": "Scheduled",
+      "kind": "type",
+      "signature": "export type Scheduled<A extends readonly unknown[]> = { (...args: A): void; /** Drops the pending call and resets the timers. */ cancel(): void; /** Runs the pending trailing call now, if there is one. */ flush(): void; /** True while a timer is running and a call may still fire. */ readonly pending: boolean; };",
+      "jsdocSummary": "A debounced or throttled function."
+    },
+    {
+      "subpath": ".",
+      "name": "scopeAggregate",
+      "kind": "function",
+      "signature": "export declare function scopeAggregate<Primary extends Failure, Cleanup extends Failure>(primary: readonly Primary[], cleanup: readonly Cleanup[]): ScopeAggregate<Primary, Cleanup>;",
+      "jsdocSummary": "Keep exact original members in the existing private cause."
+    },
+    {
+      "subpath": ".",
+      "name": "ScopeAggregate",
+      "kind": "type",
+      "signature": "export type ScopeAggregate<Primary extends Failure, Cleanup extends Failure> = FailureOf<typeof ScopeFailed> & { readonly cause: ReturnType<typeof scopeCause<Primary, Cleanup>>; };",
+      "jsdocSummary": "Exact local members; revived ScopeFailed values retain only public counts."
+    },
+    {
+      "subpath": ".",
+      "name": "scoped",
+      "kind": "function",
+      "signature": "export declare function scoped<const P extends Plan, Result>(plan: P & CheckedPlan<NoInfer<P>>, body: (values: Values<P>, signal: AbortSignal) => Result, options?: ScopeOptions): Promise<Outcome<Exclude<Awaited<Result>, Failure>, Primary<P> | Extract<Awaited<Result>, Failure>, Closing<P>>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ScopeFailed",
+      "kind": "variable",
+      "signature": "export declare const ScopeFailed: import(\"@arki/failure\").FailureDefinition<\"async.scope_failed\", StandardSchemaV1<unknown, { primaryCount: number; cleanupCount: number; }>>;",
+      "jsdocSummary": "Multiple owned failures; public counts serialize while original members stay private."
+    },
+    {
+      "subpath": ".",
+      "name": "ScopeOptions",
+      "kind": "type",
+      "signature": "export type ScopeOptions = { readonly signal?: AbortSignal; readonly deadline?: AbortSignal; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "ScopePlan",
+      "kind": "type",
+      "signature": "export type ScopePlan = Readonly<Record<string, Entry>>;",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": ".",
+      "name": "SignalOptions",
+      "kind": "type",
+      "signature": "export type SignalOptions = { /** Aborting it aborts the tasks' signals and rejects with `ARKI_ASYNC_E002`; `cause` is `signal.reason`. */ readonly signal?: AbortSignal; };",
+      "jsdocSummary": "Options of {@link race}; {@link timeout} takes them too."
+    },
+    {
+      "subpath": ".",
+      "name": "sleep",
+      "kind": "function",
+      "signature": "export declare function sleep(ms: number, options?: SleepOptions): Promise<void>;",
+      "jsdocSummary": "Resolves after `ms` milliseconds. `0` still waits for the next macrotask."
+    },
+    {
+      "subpath": ".",
+      "name": "SleepOptions",
+      "kind": "type",
+      "signature": "export type SleepOptions = { /** Cuts the wait short. The promise rejects with `ARKI_ASYNC_E002`, and `cause` is `signal.reason`. */ readonly signal?: AbortSignal; /** Whose timer to wait on. Default: the system clock. Pass a `MockClock` to make tests instant. */ readonly clock?: Clock; };",
+      "jsdocSummary": "Options of {@link sleep}."
+    },
+    {
+      "subpath": ".",
+      "name": "SUPERVISOR_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const SUPERVISOR_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"async.cancelled\", undefined>, import(\"@arki/failure\").FailureDefinition<\"async.deadline\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical failures normalized by every scope."
+    },
+    {
+      "subpath": ".",
+      "name": "SupervisorFailure",
+      "kind": "type",
+      "signature": "export type SupervisorFailure = ReturnType<(typeof SUPERVISOR_FAILURES)[number]>;",
+      "jsdocSummary": "The exact canonical supervisor union."
+    },
+    {
+      "subpath": ".",
+      "name": "throttle",
+      "kind": "function",
+      "signature": "export declare function throttle<A extends readonly unknown[]>(fn: (...args: A) => void, wait: number, options?: ThrottleOptions): Scheduled<A>;",
+      "jsdocSummary": "Calls `fn` at most once per `wait` ms. It is a debounce with `maxWait = wait`. Defaults: `leading: true`, `trailing: true`. Throws `ARKI_ASYNC_E001` for an invalid `wait`."
+    },
+    {
+      "subpath": ".",
+      "name": "ThrottleOptions",
+      "kind": "type",
+      "signature": "export type ThrottleOptions = { /** Call on the first call of a window. Default `true`. */ readonly leading?: boolean; /** Call at the end of the window with the latest arguments. Default `true`. */ readonly trailing?: boolean; /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */ readonly clock?: Clock; };",
+      "jsdocSummary": "Options of {@link throttle}."
+    },
+    {
+      "subpath": ".",
+      "name": "timeout",
+      "kind": "function",
+      "signature": "export declare function timeout<T>(task: (signal: AbortSignal) => Promise<T>, ms: number, options?: TimeoutOptions): Promise<T>;",
+      "jsdocSummary": "Runs `task` with a deadline. At `ms` milliseconds the task's signal aborts (its reason is the error) and the promise rejects at once with `ARKI_ASYNC_E004`."
+    },
+    {
+      "subpath": ".",
+      "name": "TimeoutOptions",
+      "kind": "type",
+      "signature": "export type TimeoutOptions = SignalOptions & { /** Whose timer measures the deadline. Default: the system clock. Pass a `MockClock` to make tests instant. */ readonly clock?: Clock; };",
+      "jsdocSummary": "Options of {@link timeout}."
+    },
+    {
+      "subpath": ".",
+      "name": "Values",
+      "kind": "type",
+      "signature": "export type Values<P extends Plan> = { readonly [Name in keyof P as P[Name] extends { kind: ReturnType<typeof resource>['kind']; } ? Name : never]: P[Name] extends { open: (...args: never[]) => infer Opened; } ? Exclude<Awaited<Opened>, Failure> : never; };",
+      "jsdocSummary": ""
+    },
+    {
+      "subpath": "./errors",
+      "name": "ASYNC_ERROR_CODES",
+      "kind": "variable",
+      "signature": "export declare const ASYNC_ERROR_CODES: { /** * A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}. * * @fix Pass a finite wait from 0 up to `MAX_WAIT_MS` (about 24.8 days). For a longer wait, sleep again when the timer fires. * @verify bun run test */ readonly invalidWait: 'ARKI_ASYNC_E001'; /** * Work was cut short by its `AbortSignal` before it finished: a `sleep`, a * `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call. * `cause` is `signal.reason`. * * @fix Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work. * @verify bun run test */ readonly aborted: 'ARKI_ASYNC_E002'; /** * One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any. * * @fix Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice. * @verify bun run test */ readonly cleanupFailed: 'ARKI_ASYNC_E003'; /** * A `timeout` deadline passed before the task finished. * * @fix Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline. * @verify bun run test */ readonly timedOut: 'ARKI_ASYNC_E004'; /** * A `concurrency` limit is not a positive integer or `Infinity`. * * @fix Pass a whole number of at least 1, or leave `concurrency` out for no limit. * @verify bun run test */ readonly invalidConcurrency: 'ARKI_ASYNC_E005'; };",
+      "jsdocSummary": "Stable error codes of `@arki/async`."
+    },
+    {
+      "subpath": "./errors",
+      "name": "AsyncError",
+      "kind": "class",
+      "signature": "export declare class AsyncError extends Error { readonly code: AsyncErrorCode; /** What to do about it, in one sentence. */ readonly remediation: string; /** The finalizer errors of an `ARKI_ASYNC_E003`, in the order the finalizers ran. Empty for every other code. */ readonly errors: readonly unknown[]; constructor(code: AsyncErrorCode, message: string, remediation: string, options?: { readonly cause?: unknown; readonly errors?: readonly unknown[]; }); }",
+      "jsdocSummary": "A coded failure of any `@arki/async` helper."
+    },
+    {
+      "subpath": "./errors",
+      "name": "AsyncErrorCode",
+      "kind": "type",
+      "signature": "export type AsyncErrorCode = (typeof ASYNC_ERROR_CODES)[keyof typeof ASYNC_ERROR_CODES];",
+      "jsdocSummary": "The code of an {@link AsyncError}."
+    },
+    {
+      "subpath": "./errors",
+      "name": "Cancelled",
+      "kind": "variable",
+      "signature": "export declare const Cancelled: import(\"@arki/failure\").FailureDefinition<\"async.cancelled\", undefined>;",
+      "jsdocSummary": "Owned execution was cancelled; the external reason stays private."
+    },
+    {
+      "subpath": "./errors",
+      "name": "Deadline",
+      "kind": "variable",
+      "signature": "export declare const Deadline: import(\"@arki/failure\").FailureDefinition<\"async.deadline\", undefined>;",
+      "jsdocSummary": "An owned deadline elapsed; work still needs cooperative settlement."
+    },
+    {
+      "subpath": "./errors",
+      "name": "MAX_WAIT_MS",
+      "kind": "variable",
+      "signature": "export declare const MAX_WAIT_MS = 2147483647;",
+      "jsdocSummary": "Longest wait a timer can hold: 2^31 - 1 ms (about 24.8 days). Larger values fire at once in most runtimes."
+    },
+    {
+      "subpath": "./errors",
+      "name": "scopeAggregate",
+      "kind": "function",
+      "signature": "export declare function scopeAggregate<Primary extends Failure, Cleanup extends Failure>(primary: readonly Primary[], cleanup: readonly Cleanup[]): ScopeAggregate<Primary, Cleanup>;",
+      "jsdocSummary": "Keep exact original members in the existing private cause."
+    },
+    {
+      "subpath": "./errors",
+      "name": "ScopeAggregate",
+      "kind": "type",
+      "signature": "export type ScopeAggregate<Primary extends Failure, Cleanup extends Failure> = FailureOf<typeof ScopeFailed> & { readonly cause: ReturnType<typeof scopeCause<Primary, Cleanup>>; };",
+      "jsdocSummary": "Exact local members; revived ScopeFailed values retain only public counts."
+    },
+    {
+      "subpath": "./errors",
+      "name": "ScopeFailed",
+      "kind": "variable",
+      "signature": "export declare const ScopeFailed: import(\"@arki/failure\").FailureDefinition<\"async.scope_failed\", StandardSchemaV1<unknown, { primaryCount: number; cleanupCount: number; }>>;",
+      "jsdocSummary": "Multiple owned failures; public counts serialize while original members stay private."
+    },
+    {
+      "subpath": "./errors",
+      "name": "SUPERVISOR_FAILURES",
+      "kind": "variable",
+      "signature": "export declare const SUPERVISOR_FAILURES: readonly [import(\"@arki/failure\").FailureDefinition<\"async.cancelled\", undefined>, import(\"@arki/failure\").FailureDefinition<\"async.deadline\", undefined>, import(\"@arki/failure\").FailureDefinition<\"failure.unexpected_defect\", undefined>];",
+      "jsdocSummary": "Canonical failures normalized by every scope."
+    },
+    {
+      "subpath": "./errors",
+      "name": "SupervisorFailure",
+      "kind": "type",
+      "signature": "export type SupervisorFailure = ReturnType<(typeof SUPERVISOR_FAILURES)[number]>;",
+      "jsdocSummary": "The exact canonical supervisor union."
+    }
+  ],
+  "errorCodes": [
+    "ARKI_ASYNC_E001",
+    "ARKI_ASYNC_E002",
+    "ARKI_ASYNC_E003",
+    "ARKI_ASYNC_E004",
+    "ARKI_ASYNC_E005",
+    "async.cancelled",
+    "async.deadline",
+    "async.scope_failed"
+  ]
+}

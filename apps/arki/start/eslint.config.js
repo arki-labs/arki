@@ -4,7 +4,8 @@ import reactConfig from '@arki/eslint-config/react';
 /** @type {import('typescript-eslint').Config} */
 export default [
   {
-    ignores: ['dist/**', 'src/paraglide/**', 'routeTree.gen.ts'],
+    // `src/content/packages` holds docs copied from npm tarballs by `release:arki site`, not app code.
+    ignores: ['dist/**', 'src/paraglide/**', 'routeTree.gen.ts', 'src/content/packages/**'],
   },
   ...baseConfig,
   ...reactConfig,

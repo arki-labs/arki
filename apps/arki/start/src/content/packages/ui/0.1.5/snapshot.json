@@ -1,0 +1,14 @@
+{
+  "name": "@arki/ui",
+  "channel": "published",
+  "version": "0.1.5",
+  "archive": true,
+  "sha512": "332f6ca12308481b7628c267416c2db8c67322a2cea58994b06c5829c858aa0a2be18f316938ec58aad5637b1e37151432e00f0009831c8395d9f8e6f932bde6",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}

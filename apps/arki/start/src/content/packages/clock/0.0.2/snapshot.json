@@ -1,0 +1,14 @@
+{
+  "name": "@arki/clock",
+  "channel": "published",
+  "version": "0.0.2",
+  "archive": true,
+  "sha512": "8364a2c6be5a347005997eed4b0cf35fce6ac1dc4ea141d392ef46f98d6419decdbe0f7c9818f9997a484115fcaccf617183c85d07937d47339d8c791ea6b5f4",
+  "files": [
+    "README.md"
+  ],
+  "candidate": null,
+  "examples": null,
+  "engines": {},
+  "benchStatus": "none"
+}
