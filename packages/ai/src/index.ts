@@ -35,7 +35,7 @@ export {
 } from './errors';
 
 // Expected failures, returned (not thrown)
-export { BudgetExceeded, RateLimited } from './failures';
+export { BudgetExceeded, PROVIDER_PROBLEMS, ProviderUnavailable, RateLimited } from './failures';
 
 // Input validation
 export {
@@ -166,9 +166,20 @@ export {
   // Provider-agnostic factory and interface
   createLLMProvider,
   DEFAULT_ANTHROPIC_MODEL,
+  LLM_PROVIDERS,
   resolveLlmModel,
+  resolveLlmProvider,
+  type Generation,
+  type GenerationUsage,
   type LLMProviderConfig,
+  type LLMProviderName,
+  type LLMProviderWithUsage,
   type StructuredLLMProvider,
+  // Provider check
+  DEFAULT_PROBE_TIMEOUT_MS,
+  probeLLMProvider,
+  type ProbeOptions,
+  type ReadyProvider,
 } from './ai-service';
 
 // Environment configuration
@@ -235,6 +246,9 @@ export {
   type CostCircuitConfig,
   type CostEstimate,
   type ModelPricing,
+  type Price,
+  type PriceBasis,
+  type PricedCall,
   type KVStore,
   type SpendMetadata,
   type SpendRecord,
@@ -264,6 +278,10 @@ export {
   getModelPricing,
   hasKnownPricing,
   calculateLLMCost,
+  priceOf,
+  isLocalProvider,
+  LOCAL_PROVIDERS,
+  PRICE_BASES,
   estimateTokens,
   estimateTokensFromWords,
   getSupportedModels,

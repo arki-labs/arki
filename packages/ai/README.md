@@ -55,22 +55,53 @@ Next: [Set up AI](docs/recipes/set-up-ai.md) takes you from nothing to a first m
 
 ## Runtime support
 
-Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
+Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
 
 ## Public imports
 
 | Import | What it is |
 | --- | --- |
-| `@arki/ai` | Providers and services (`OllamaService`, `OpenAIService`, `AnthropicService` and more), `createLLMProvider`, embeddings, vector index, semantic search, the tool-loop runtime, `createFlow`, failures and errors. |
-| `@arki/ai/cost` | Budgets, a circuit breaker and cost estimates. |
+| `@arki/ai` | Providers and services (`OllamaService`, `OpenAIService`, `AnthropicService` and more), `createLLMProvider` (its `...Result` methods return token usage), `probeLLMProvider`, embeddings, vector index, semantic search, the tool-loop runtime, `createFlow`, failures and errors. |
+| `@arki/ai/cost` | Budgets, a circuit breaker and cost estimates. `priceOf` prices one call and says how (`local`, `list-price` or `default-rate`). |
 | `@arki/ai/safety` | Prompt-injection checks, PII redaction, output filtering. |
-| `@arki/ai/dot` | `vectorIndex` plugin for a Dot app. |
+| `@arki/ai/dot` | `vectorIndex` and `llm` plugins for a Dot app. `llm` checks the provider at boot. |
+| `@arki/ai/testing` | `createFakeLLMProvider`: scripted answers and usage, no HTTP. For tests. |
 | `@arki/ai/drizzle` | The erasure tombstone table and outbox. |
 | `@arki/ai/react` | Chat, streaming text and search components and hooks. |
 
 `llms.txt` lists every export. The package also exposes a `./*` subpath pattern for files under `src/`; treat those as unstable.
 
 ## Use it
+
+Check the provider, call it, and read what the call used. In a test, the fake provider stands in for the model:
+
+```ts run expect
+import { z } from 'zod';
+
+import { calculateLLMCost } from '@arki/ai';
+import { createFakeLLMProvider } from '@arki/ai/testing';
+
+const llm = createFakeLLMProvider({ answers: [{ planet: 'Mars' }], usage: { inputTokens: 12, outputTokens: 4 } });
+const answer = await llm.generateStructuredResult('Name one planet.', z.object({ planet: z.string() }));
+const { inputTokens = 0, outputTokens = 0 } = answer.usage;
+const usd = calculateLLMCost('gemma4:latest', inputTokens, outputTokens, { provider: 'ollama' });
+
+console.log(JSON.stringify({ value: answer.value, usage: answer.usage, usd }));
+```
+
+```text
+{"value":{"planet":"Mars"},"usage":{"inputTokens":12,"outputTokens":4},"usd":0}
+```
+
+In the app, ask before the first call. `probeLLMProvider()` never throws:
+
+```ts skip="needs a running Ollama"
+import { createLLMProvider, probeLLMProvider, ProviderUnavailable } from '@arki/ai';
+
+const ready = await probeLLMProvider();
+if (ProviderUnavailable.is(ready)) console.log(`not ready: ${ready.data.problem}`);
+else console.log(await createLLMProvider(ready).generateText('Say hi.'));
+```
 
 The long guides are in [the reference](docs/reference.md): [text and structured generation](docs/reference.md#generate-text-and-structured-data), [embeddings and the vector index](docs/reference.md#embeddings-and-the-vector-index), [the tool loop](docs/reference.md#the-tool-loop), [flows](docs/reference.md#flows) and [React](docs/reference.md#react).
 
@@ -108,6 +139,7 @@ const draftStory = createFlow<StoryState, StoryContext>({
 | --- | --- | --- |
 | `RateLimited` (returned, code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) | The local limiter has no free slot. | Wait `retryAfterMs`, then retry. |
 | `BudgetExceeded` (returned, code `ai.budget_exceeded`, status 402) | The estimated cost passes the budget of one period. | Wait for the period to reset, or raise the limit. |
+| `ProviderUnavailable` (returned by `probeLLMProvider`, code `ai.provider_unavailable`, status 503, data `{ provider, model, problem }`) | `problem` is `unreachable` (Ollama or the `baseURL` server does not answer), `model_missing` (Ollama runs without the model) or `missing_key`. The `llm` Dot plugin fails boot with it. | Start Ollama and `ollama pull` the model, or set the provider's key. |
 | `ConfigurationError` (thrown) | A key, model or variable is missing or wrong. | Set what the message names. |
 | `GenerationError`, `EmbeddingError`, `VectorSearchError` (thrown) | The provider or the store is down or refused. | Read `cause`. Retry later. |
 | `ToolOutputError` (thrown, code `TOOL_OUTPUT_ERROR`) | A tool result did not match its `output` schema. The run emits `tool:error`. | Fix the tool's `execute`. |
@@ -123,6 +155,10 @@ Check a returned value with `isFailure` from `@arki/failure`, or a definition's 
 - **Rate-limit check comes first.** `streamText` takes a limiter slot before it returns the stream. Check for `RateLimited` before you iterate: a `RateLimited` value is not a stream.
 - **Reconciliation is capped per run.** `runVectorReconciliation` handles at most `ROW_CAP_PER_RUN` (50) rows and `TOMBSTONE_CAP_PER_RUN` (200) tombstones per call. With 10 000 pending tombstones you need 50 calls (cron runs) to clear them.
 - **Only a durable index acknowledges erasure.** With no `QDRANT_URL` the index is in memory (`durable: false`), and tombstones stay pending.
+- **Spans record prompts.** Generation calls report `gen_ai` spans, prompts and completions included, whenever an OpenTelemetry tracer provider is registered. `AI_TELEMETRY=off` turns them off.
+- **The probe does not test a key.** `probeLLMProvider` checks that a cloud key is set, not that the provider accepts it. A wrong key still fails at the first call.
+- **Usage can be missing.** `usage.inputTokens` and `usage.outputTokens` are `undefined` when the provider does not report them. Do not read that as zero.
+- **The fake is not a model.** `createFakeLLMProvider` answers from a script. A test of what a model would reason passes or fails for the wrong reason.
 - **Small local models fail more often on structured output.** Ollama's constrained decoding keeps output on the schema; a model that is too small still gives weak content.
 - **`@mastra/core` is pinned** to `1.37.1` as an optional peer. Other versions are untested.
 

@@ -17,7 +17,7 @@
  *   LLM_PROVIDER=mistral      LLM_MODEL=mistral-small-latest
  */
 
-import type { LanguageModel } from 'ai';
+import type { LanguageModel, LanguageModelUsage } from 'ai';
 import { anthropic } from '../anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
@@ -28,7 +28,8 @@ import { createOllama } from 'ai-sdk-ollama';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { GenerateOptions, Message, StreamOptions, StructuredLLMProvider } from './types';
+import type { LLMProviderName } from './provider-names';
+import type { GenerateOptions, Generation, LLMProviderWithUsage, Message, StreamOptions } from './types';
 import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env';
 import { GenerationError, getErrorMessage } from '../errors';
 import { modelSchema } from './model-schema';
@@ -39,7 +40,7 @@ import { aiTelemetry } from './telemetry';
 /** Default Claude model when `LLM_PROVIDER=anthropic` and no `LLM_MODEL` is set. */
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5';
 
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+const PROVIDER_DEFAULT_MODELS: Record<LLMProviderName, string> = {
   ollama: 'qwen3.6:latest',
   openai: 'gpt-4o-mini',
   anthropic: DEFAULT_ANTHROPIC_MODEL,
@@ -52,7 +53,7 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
 
 export type LLMProviderConfig = {
   /** Explicit provider override for a capability. */
-  provider?: 'ollama' | 'openai' | 'anthropic' | 'groq' | 'google' | 'mistral';
+  provider?: LLMProviderName;
   /** Endpoint override: native Ollama or OpenAI-compatible chat completions. */
   baseURL?: string;
   /** Credential for the endpoint override; otherwise uses OPENAI_API_KEY. */
@@ -79,18 +80,28 @@ export type LLMProviderConfig = {
  * produced an output.
  */
 export function resolveLlmModel(config: Pick<LLMProviderConfig, 'provider' | 'model'> = {}): string {
-  const providerName = config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
-  return config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[providerName] ?? 'gpt-4o-mini';
+  return config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[resolveLlmProvider(config)];
+}
+
+/** The provider `createLLMProvider` uses for this config: the explicit `provider`, else `LLM_PROVIDER`, else Ollama. */
+export function resolveLlmProvider(config: Pick<LLMProviderConfig, 'provider'> = {}): LLMProviderName {
+  return config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
+}
+
+/** The native Ollama address for this config: `baseURL`, else `OLLAMA_BASE_URL`, without a trailing `/v1`. */
+export function resolveOllamaBaseUrl(config: Pick<LLMProviderConfig, 'baseURL'> = {}): string {
+  return (config.baseURL ?? env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/v1\/?$/u, '');
 }
 
 /**
- * Create a provider-agnostic `StructuredLLMProvider` from environment config.
+ * Create a provider-agnostic `LLMProviderWithUsage` (a `StructuredLLMProvider` that also reports
+ * token usage) from environment config.
  *
  * Reads `LLM_PROVIDER` (default "ollama", local first) and `LLM_MODEL` (optional) from the
  * environment, then accepts per-call overrides via `config`.
  */
-export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLMProvider {
-  const providerName = config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
+export function createLLMProvider(config: LLMProviderConfig = {}): LLMProviderWithUsage {
+  const providerName = resolveLlmProvider(config);
   const model = resolveLlmModel(config);
 
   if (config.baseURL && !['openai', 'ollama'].includes(providerName))
@@ -103,7 +114,7 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
       // A model per call binds cancellation without mutating a shared client.
       languageModel = signal =>
         createOllama({
-          baseURL: (config.baseURL ?? env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/v1\/?$/u, ''),
+          baseURL: resolveOllamaBaseUrl(config),
           fetch: (input, init) => fetch(input, { ...init, signal }),
         })(model);
       break;
@@ -131,14 +142,34 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
     }
   }
 
-  return new LanguageModelAdapter(
-    languageModel,
-    providerName,
+  return adaptLanguageModel(languageModel, {
+    provider: providerName,
     model,
-    config.temperature ?? 0.7,
-    config.maxRetries ?? 2,
-    config.deterministicSeed ?? env.AI_DETERMINISTIC_SEED,
-  );
+    temperature: config.temperature ?? 0.7,
+    maxRetries: config.maxRetries ?? 2,
+    deterministicSeed: config.deterministicSeed ?? env.AI_DETERMINISTIC_SEED,
+  });
+}
+
+/** What the adapter needs besides the model: names for results and spans, and call defaults. */
+type AdapterSettings = {
+  readonly provider: string;
+  readonly model: string;
+  readonly temperature: number;
+  readonly maxRetries: number;
+  readonly deterministicSeed: number | undefined;
+};
+
+/**
+ * Wrap any AI SDK `LanguageModel` as an `LLMProviderWithUsage`. `createLLMProvider` uses it for
+ * real providers and `@arki/ai/testing` for its fake, so both run the same schema check.
+ * Internal: not exported from the package root.
+ */
+export function adaptLanguageModel(
+  languageModel: LanguageModel | ((signal?: AbortSignal) => LanguageModel),
+  settings: AdapterSettings,
+): LLMProviderWithUsage {
+  return new LanguageModelAdapter(languageModel, settings);
 }
 
 // ── Adapter ───────────────────────────────────────────────────
@@ -151,20 +182,73 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
  * backend. The deprecated `generateObject` / `streamObject` paths are
  * NOT used.
  */
-class LanguageModelAdapter implements StructuredLLMProvider {
+class LanguageModelAdapter implements LLMProviderWithUsage {
+  readonly provider: string;
+  readonly model: string;
+
   constructor(
     private readonly languageModel: LanguageModel | ((signal?: AbortSignal) => LanguageModel),
-    private readonly providerName: string,
-    private readonly modelName: string,
-    private readonly defaultTemperature: number,
-    private readonly defaultMaxRetries: number,
-    private readonly deterministicSeed: number | undefined,
-  ) {}
+    private readonly settings: AdapterSettings,
+  ) {
+    this.provider = settings.provider;
+    this.model = settings.model;
+  }
+
+  /** The model for one call; Ollama's is built per call so it carries the call's abort signal. */
+  private modelFor(signal: AbortSignal | undefined): LanguageModel {
+    return typeof this.languageModel === 'function' ? this.languageModel(signal) : this.languageModel;
+  }
 
   /** The sampling settings of one call: the asked temperature, or temperature 0 + the seed in deterministic mode. */
   private sampling(options: { readonly temperature?: number }): { temperature: number; seed?: number } {
-    if (this.deterministicSeed === undefined) return { temperature: options.temperature ?? this.defaultTemperature };
-    return { temperature: 0, seed: this.deterministicSeed };
+    const { deterministicSeed, temperature } = this.settings;
+    if (deterministicSeed === undefined) return { temperature: options.temperature ?? temperature };
+    return { temperature: 0, seed: deterministicSeed };
+  }
+
+  /** The options every call shares. */
+  private callOptions(options: GenerateOptions, operation: string) {
+    return {
+      model: this.modelFor(options.signal),
+      system: options.systemPrompt,
+      ...this.sampling(options),
+      maxRetries: options.maxRetries ?? this.settings.maxRetries,
+      abortSignal: options.signal,
+      maxOutputTokens: options.maxTokens,
+      ...aiTelemetry(`${this.provider}.${operation}`),
+    };
+  }
+
+  /** The value with the call's total usage (all steps) and this provider's names. */
+  private generation<T>(value: T, usage: LanguageModelUsage): Generation<T> {
+    return {
+      value,
+      usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
+      provider: this.provider,
+      model: this.model,
+    };
+  }
+
+  private failure(what: string, error: unknown): GenerationError {
+    return new GenerationError(`[${this.provider}/${this.model}] ${what} failed: ${getErrorMessage(error)}`, error);
+  }
+
+  async generateStructuredResult<S extends StandardSchemaV1>(
+    prompt: string,
+    schema: S,
+    options: GenerateOptions = {},
+  ): Promise<Generation<SchemaOutput<S>>> {
+    try {
+      const result = await generateText({
+        ...this.callOptions(options, 'generateStructuredData'),
+        prompt,
+        output: Output.object({ schema: modelSchema(schema, `${this.provider} structured generation`) }),
+      });
+      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
+      return this.generation(result.output, result.totalUsage);
+    } catch (error) {
+      throw this.failure('Structured generation', error);
+    }
   }
 
   async generateStructuredData<S extends StandardSchemaV1>(
@@ -172,26 +256,8 @@ class LanguageModelAdapter implements StructuredLLMProvider {
     schema: S,
     options: GenerateOptions = {},
   ): Promise<SchemaOutput<S>> {
-    try {
-      const result = await generateText({
-        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
-        system: options.systemPrompt,
-        prompt,
-        output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
-        ...this.sampling(options),
-        maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-        abortSignal: options.signal,
-        maxOutputTokens: options.maxTokens,
-        ...aiTelemetry(`${this.providerName}.generateStructuredData`),
-      });
-      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
-      return result.output;
-    } catch (error) {
-      throw new GenerationError(
-        `[${this.providerName}/${this.modelName}] Structured generation failed: ${getErrorMessage(error)}`,
-        error,
-      );
-    }
+    const result = await this.generateStructuredResult(prompt, schema, options);
+    return result.value;
   }
 
   async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
@@ -201,58 +267,36 @@ class LanguageModelAdapter implements StructuredLLMProvider {
   ): Promise<SchemaOutput<S>> {
     try {
       const result = await generateText({
-        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
-        system: options.systemPrompt,
+        ...this.callOptions(options, 'generateStructuredDataFromMessages'),
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        output: Output.object({ schema: modelSchema(schema, `${this.providerName} structured generation`) }),
-        ...this.sampling(options),
-        maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-        abortSignal: options.signal,
-        maxOutputTokens: options.maxTokens,
-        ...aiTelemetry(`${this.providerName}.generateStructuredDataFromMessages`),
+        output: Output.object({ schema: modelSchema(schema, `${this.provider} structured generation`) }),
       });
       if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
       return result.output;
     } catch (error) {
-      throw new GenerationError(
-        `[${this.providerName}/${this.modelName}] Structured generation from messages failed: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw this.failure('Structured generation from messages', error);
+    }
+  }
+
+  async generateTextResult(prompt: string, options: GenerateOptions = {}): Promise<Generation<string>> {
+    try {
+      const result = await generateText({ ...this.callOptions(options, 'generateText'), prompt });
+      return this.generation(result.text, result.totalUsage);
+    } catch (error) {
+      throw this.failure('Text generation', error);
     }
   }
 
   async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
-    try {
-      const result = await generateText({
-        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
-        system: options.systemPrompt,
-        prompt,
-        ...this.sampling(options),
-        maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-        abortSignal: options.signal,
-        maxOutputTokens: options.maxTokens,
-        ...aiTelemetry(`${this.providerName}.generateText`),
-      });
-      return result.text;
-    } catch (error) {
-      throw new GenerationError(
-        `[${this.providerName}/${this.modelName}] Text generation failed: ${getErrorMessage(error)}`,
-        error,
-      );
-    }
+    const result = await this.generateTextResult(prompt, options);
+    return result.value;
   }
 
   async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     try {
       const stream = streamText({
-        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
-        system: options.systemPrompt,
+        ...this.callOptions(options, 'streamConversation'),
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        ...this.sampling(options),
-        maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-        abortSignal: options.signal,
-        maxOutputTokens: options.maxTokens,
-        ...aiTelemetry(`${this.providerName}.streamConversation`),
       });
 
       for await (const chunk of (await stream).textStream) {
@@ -261,10 +305,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
       }
     } catch (error) {
       options.onError?.(error as Error);
-      throw new GenerationError(
-        `[${this.providerName}/${this.modelName}] Stream conversation failed: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw this.failure('Stream conversation', error);
     }
   }
 }

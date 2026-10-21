@@ -19,6 +19,9 @@ const summary = await llm.generateStructuredData('Summarise: ...', z.object({ ti
 - A schema that cannot emit JSON Schema throws a `ConfigurationError` that names `withJsonSchema` from `@arki/schema`.
 - `OpenAIService` checks a local rate limiter first. With no free slot it returns `RateLimited` instead of calling the model. Provider faults throw `GenerationError`.
 - `OllamaService` uses Ollama's native `format` parameter for constrained decoding, so output matches the schema at the token level.
+- `generateStructuredResult` and `generateTextResult` make the same calls and return `{ value, usage, provider, model }`. `usage` has the AI SDK's `inputTokens` and `outputTokens` (summed over all steps; `undefined` when the provider does not report them). Price them with `priceOf` from `@arki/ai/cost`.
+- `probeLLMProvider()` checks the same provider and model before a call: Ollama answers and has the model, an OpenAI-compatible `baseURL` answers, or a cloud key is set. It returns `ProviderUnavailable` instead of throwing.
+- Spans: every call reports `gen_ai` spans (with the prompt and completion) to the registered OpenTelemetry tracer provider. With none registered nothing is recorded. `AI_TELEMETRY=off` turns them off.
 - `StructuredGenerator` (import it from `@arki/ai/ai-service/structured-generation`) wraps a provider with `generateSummary`, `answerQuestion`, `classifyText`, `extractEntities` and `analyzeSentiment`.
 
 ## Embeddings and the vector index

@@ -18,7 +18,17 @@ export * from './openrouter-service';
 export * from './provider-router';
 
 // LLM provider factory (provider-agnostic, driven by LLM_PROVIDER env var)
-export { createLLMProvider, DEFAULT_ANTHROPIC_MODEL, resolveLlmModel, type LLMProviderConfig } from './factory';
+export {
+  createLLMProvider,
+  DEFAULT_ANTHROPIC_MODEL,
+  resolveLlmModel,
+  resolveLlmProvider,
+  type LLMProviderConfig,
+} from './factory';
+export { LLM_PROVIDERS, type LLMProviderName } from './provider-names';
+
+// "Is this provider usable?" before the first call
+export { DEFAULT_PROBE_TIMEOUT_MS, probeLLMProvider, type ProbeOptions, type ReadyProvider } from './probe';
 
 // Utilities
 export * from './structured-generation';

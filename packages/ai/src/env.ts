@@ -6,6 +6,8 @@
 import { z } from '@arki/contracts';
 import { defineEnv } from '@arki/env/core';
 
+import { LLM_PROVIDERS } from './ai-service/provider-names';
+
 /**
  * Defaults that must also hold when validation is skipped (`SKIP_ENV_VALIDATION=1`).
  * A skipped schema applies no zod defaults, so callers fall back to these
@@ -93,9 +95,7 @@ export const env = defineEnv({
     TRANSFORMERS_JS_MODEL: z.string().default('nomic-ai/nomic-embed-text-v1.5'),
 
     // LLM provider selection for createLLMProvider() factory
-    LLM_PROVIDER: z
-      .enum(['ollama', 'openai', 'anthropic', 'groq', 'google', 'mistral'])
-      .default(DEFAULT_LLM_PROVIDER),
+    LLM_PROVIDER: z.enum(LLM_PROVIDERS).default(DEFAULT_LLM_PROVIDER),
     // Default model for the selected LLM provider
     LLM_MODEL: z.string().optional(),
     // Tests only: when set, every createLLMProvider() call runs at temperature 0 with this seed,

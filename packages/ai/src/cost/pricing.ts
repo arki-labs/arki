@@ -20,6 +20,7 @@
  * ```
  */
 
+import type { LLMProviderName } from '../ai-service/provider-names';
 import type { ModelPricing } from './types';
 
 // ============================================
@@ -230,18 +231,83 @@ export function hasKnownPricing(model: string): boolean {
 }
 
 /**
- * Calculate LLM cost from token counts.
+ * Providers whose models run on your own machine: a call costs nothing per token.
+ */
+export const LOCAL_PROVIDERS = ['ollama'] as const satisfies readonly LLMProviderName[];
+
+/**
+ * How a price was worked out: `local` (the model runs on your machine, so 0), `list-price` (the
+ * model is in `LLM_PRICING`) or `default-rate` (an unknown hosted model, priced at
+ * `DEFAULT_PRICING` so it is never undercharged).
+ */
+export const PRICE_BASES = ['local', 'list-price', 'default-rate'] as const;
+export type PriceBasis = (typeof PRICE_BASES)[number];
+
+/** The cost of one call in USD, and how it was worked out. */
+export type Price = { readonly usd: number; readonly basis: PriceBasis };
+
+/** The tokens of one call, and the provider and model that served it. */
+export type PricedCall = {
+  /**
+   * The provider: `ollama`, `openai`, ... An AI SDK provider id such as `ollama.chat` counts as
+   * its first segment. Omit it and a model is priced as hosted.
+   */
+  readonly provider?: string;
+  readonly model: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+};
+
+/** Does `provider` run its models locally? `ollama` and AI SDK ids such as `ollama.chat` do. */
+export function isLocalProvider(provider: string): boolean {
+  return localProviderNames.has(provider.split('.', 1)[0] ?? provider);
+}
+
+const localProviderNames: ReadonlySet<string> = new Set(LOCAL_PROVIDERS);
+
+/**
+ * Price one call and say how the price was worked out. A local provider costs 0 (`local`). A
+ * hosted model uses its list price (`list-price`), or `DEFAULT_PRICING` when it is unknown
+ * (`default-rate`), so a dashboard can tell a real price from a guess.
+ *
+ * @example
+ * ```ts
+ * priceOf({ provider: 'ollama', model: 'gemma4:latest', inputTokens: 100, outputTokens: 100 });
+ * // { usd: 0, basis: 'local' }
+ * priceOf({ model: 'gpt-4o', inputTokens: 1000, outputTokens: 500 });
+ * // { usd: 0.0075, basis: 'list-price' }
+ * ```
+ */
+export function priceOf(call: PricedCall): Price {
+  if (call.provider !== undefined && isLocalProvider(call.provider)) return { usd: 0, basis: 'local' };
+  const pricing = getModelPricing(call.model);
+  const usd = (call.inputTokens / 1000) * pricing.inputPer1k + (call.outputTokens / 1000) * pricing.outputPer1k;
+  return { usd, basis: hasKnownPricing(call.model) ? 'list-price' : 'default-rate' };
+}
+
+/**
+ * Calculate LLM cost from token counts. Pass the provider to price a local model at 0;
+ * `priceOf` also says how the price was worked out.
  *
  * @param model - Model identifier
  * @param inputTokens - Number of input tokens
  * @param outputTokens - Number of output tokens
+ * @param options - `provider`: the provider that served the call (`ollama` costs 0)
  * @returns Cost in USD
+ *
+ * @example
+ * ```ts
+ * calculateLLMCost('gpt-4o', 1000, 500); // 0.0075
+ * calculateLLMCost('gemma4:latest', 100, 100, { provider: 'ollama' }); // 0
+ * ```
  */
-export function calculateLLMCost(model: string, inputTokens: number, outputTokens: number): number {
-  const pricing = getModelPricing(model);
-  const inputCost = (inputTokens / 1000) * pricing.inputPer1k;
-  const outputCost = (outputTokens / 1000) * pricing.outputPer1k;
-  return inputCost + outputCost;
+export function calculateLLMCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  options: { readonly provider?: string } = {},
+): number {
+  return priceOf({ ...options, model, inputTokens, outputTokens }).usd;
 }
 
 /**

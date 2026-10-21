@@ -36,9 +36,10 @@ describe('aiTelemetry', () => {
     trace.disable();
   });
 
-  it('is a no-op when no OTel backend is configured', async () => {
-    // WHY: apps without an OTLP endpoint must not pay for, or leak into, tracing.
-    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
+  it('is a no-op when AI_TELEMETRY=off', async () => {
+    // WHY: an app that must not put prompts into its traces needs one switch that turns the
+    // spans off, even though a tracer provider is registered.
+    vi.stubEnv('AI_TELEMETRY', 'off');
 
     expect(aiTelemetry('test.generateText')).toEqual({});
     await generateText({ model: model(), prompt: 'ping', ...aiTelemetry('test.generateText') });
@@ -46,12 +47,21 @@ describe('aiTelemetry', () => {
     expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
 
-  it('records the prompt, completion and function id on gen_ai spans when a backend is configured', async () => {
+  it('records spans with only an in-process tracer provider, no OTLP endpoint (A-36)', async () => {
+    // WHY: an app that registers its own tracer provider (an X-ray panel, a test exporter) and no
+    // OTLP exporter must still see AI spans. Gating on OTEL_EXPORTER_OTLP_ENDPOINT hid them.
+    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
+
+    await generateText({ model: model(), prompt: 'ping', ...aiTelemetry('test.inProcess') });
+
+    const root = exporter.getFinishedSpans().find(span => span.attributes['gen_ai.agent.name'] === 'test.inProcess');
+    expect(root?.attributes['gen_ai.usage.input_tokens']).toBe(3);
+  });
+
+  it('records the prompt, completion and function id on gen_ai spans', async () => {
     // WHY: AI SDK 7 stopped emitting spans from `ai` itself. Without the
     // `@ai-sdk/otel` integration this helper passes, traces silently go empty
     // and a mid-chain generation failure is invisible again.
-    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318');
-
     await generateText({ model: model(), prompt: 'ping', ...aiTelemetry('test.generateText') });
 
     const root = exporter.getFinishedSpans().find(span => span.attributes['gen_ai.agent.name'] === 'test.generateText');
@@ -65,7 +75,6 @@ describe('aiTelemetry', () => {
     // WHY: tracing records prompts and completions. It must stay opt-in per
     // call site; a global `registerTelemetry()` would capture every AI SDK call
     // in the process (e.g. user chat routes).
-    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318');
     await generateText({ model: model(), prompt: 'traced', ...aiTelemetry('test.traced') });
     exporter.reset();
 

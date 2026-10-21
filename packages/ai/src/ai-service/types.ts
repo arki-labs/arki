@@ -5,6 +5,8 @@
  * (OpenAI, Anthropic, Groq, Google, Mistral, OpenRouter) through the Vercel AI SDK.
  */
 
+import type { LanguageModelUsage } from 'ai';
+
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { RateLimited } from '../failures.ts';
@@ -209,4 +211,46 @@ export type StructuredLLMProvider = {
    * Used for real-time copilot streaming endpoints.
    */
   streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown>;
+};
+
+/**
+ * The tokens one call used, under the AI SDK's names. A count is `undefined` when the provider
+ * did not report it; never read it as zero.
+ */
+export type GenerationUsage = Pick<LanguageModelUsage, 'inputTokens' | 'outputTokens'>;
+
+/** What one call produced, with the provider and model that produced it and the tokens it used. */
+export type Generation<T> = {
+  readonly value: T;
+  readonly usage: GenerationUsage;
+  readonly provider: string;
+  readonly model: string;
+};
+
+/**
+ * What `createLLMProvider` returns: a `StructuredLLMProvider` that also names its provider and
+ * model, and has `...Result` methods that hand back token usage with the value. Code that only
+ * needs the value keeps typing against `StructuredLLMProvider`.
+ *
+ * @example
+ * ```ts
+ * const llm = createLLMProvider();
+ * const answer = await llm.generateStructuredResult('Name one planet.', z.object({ planet: z.string() }));
+ * answer.value.planet; // 'Mars'
+ * answer.usage.outputTokens; // 12
+ * ```
+ */
+export type LLMProviderWithUsage = StructuredLLMProvider & {
+  /** The provider name, e.g. `ollama`. */
+  readonly provider: string;
+  /** The model id every call uses. */
+  readonly model: string;
+  /** `generateStructuredData`, with the token usage of the call next to the value. Throws as it does. */
+  generateStructuredResult<S extends StandardSchemaV1>(
+    prompt: string,
+    schema: S,
+    options?: GenerateOptions,
+  ): Promise<Generation<SchemaOutput<S>>>;
+  /** `generateText`, with the token usage of the call next to the text. Throws as it does. */
+  generateTextResult(prompt: string, options?: GenerateOptions): Promise<Generation<string>>;
 };

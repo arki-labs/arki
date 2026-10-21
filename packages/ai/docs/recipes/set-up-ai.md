@@ -40,16 +40,29 @@ Embedding selection is separate: `EMBEDDING_PROVIDER` if set, else Ollama (when 
 
 ## Check it worked
 
-Print the model your app resolves. Run it in your app, in the folder that has `@arki/ai` installed.
+Ask the provider whether it can be called. Run it in your app, in the folder that has `@arki/ai` installed.
 
 ```sh
-bun -e "import { resolveLlmModel } from '@arki/ai'; console.log(resolveLlmModel())"
+bun -e "import { probeLLMProvider } from '@arki/ai'; console.log(await probeLLMProvider())"
 ```
 
-Expected output with `LLM_PROVIDER` unset:
+Expected output with `LLM_PROVIDER` unset and Ollama running with the model pulled:
 
 ```text
-qwen3.6:latest
+{
+  provider: "ollama",
+  model: "qwen3.6:latest",
+}
 ```
 
-With `LLM_PROVIDER=openai` in front of the command, it prints `gpt-4o-mini`. If you see a model you did not expect, a `LLM_PROVIDER` or `LLM_MODEL` in your shell or `.env` is overriding the default.
+Otherwise it prints the `ai.provider_unavailable` failure. Its `data.problem` says what to fix:
+
+| `problem`       | Fix                                                      |
+| --------------- | -------------------------------------------------------- |
+| `unreachable`   | Start Ollama (`ollama serve`), or fix `OLLAMA_BASE_URL`. |
+| `model_missing` | `ollama pull` the model it names.                        |
+| `missing_key`   | Set the provider's key variable (step 3).                |
+
+With `LLM_PROVIDER=openai` and `OPENAI_API_KEY` set, it prints `provider: "openai"` and `model: "gpt-4o-mini"`. If you see a provider or model you did not expect, a `LLM_PROVIDER` or `LLM_MODEL` in your shell or `.env` is overriding the default.
+
+In a Dot app, `llm()` from `@arki/ai/dot` runs the same check at boot, and `dot doctor` shows a failed `llm` plugin when the check fails.

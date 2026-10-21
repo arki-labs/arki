@@ -14,11 +14,12 @@
  * in the process record its prompt and completion; per-call keeps tracing
  * opt-in, limited to the call sites that spread this helper.
  *
- * Gated on `OTEL_EXPORTER_OTLP_ENDPOINT`: with no OTel backend configured it
- * returns an empty object, so the SDK call is untouched and nothing is
- * recorded — same no-op discipline as `@fleet/meter/otel` and the DOT kernel.
- * The recorded inputs/outputs are exactly what makes a silent mid-chain
- * generation failure visible in the trace instead of a guessing game.
+ * On by default. The integration reports to the global OpenTelemetry tracer provider, so spans
+ * appear exactly when the app has registered one (an in-process tracer counts; no OTLP endpoint is
+ * needed) and cost nothing more than no-op calls when it has not. `AI_TELEMETRY=off` turns it off:
+ * the helper then returns an empty object and the SDK call is untouched. The recorded
+ * inputs/outputs are exactly what makes a silent mid-chain generation failure visible in the
+ * trace instead of a guessing game.
  */
 
 import type { TelemetryOptions } from 'ai';
@@ -26,9 +27,13 @@ import { OpenTelemetry } from '@ai-sdk/otel';
 
 let integration: OpenTelemetry | undefined;
 
+/** `AI_TELEMETRY=off` in the environment. Browsers and Hermes have no `process`, so it is on there. */
+function telemetryOff(): boolean {
+  return typeof process !== 'undefined' && process.env['AI_TELEMETRY'] === 'off';
+}
+
 /**
- * Build the `telemetry` fragment for an AI SDK call, or `{}` when telemetry is
- * disabled. Spread the result into the call options:
+ * Build the `telemetry` fragment for an AI SDK call, or `{}` when `AI_TELEMETRY=off`. Spread the result into the call options:
  *
  * ```ts
  * await generateText({ model, prompt, ...aiTelemetry('ollama.generateText') });
@@ -38,8 +43,7 @@ let integration: OpenTelemetry | undefined;
  *   backends can group runs (e.g. `ollama.generateStructuredData`).
  */
 export function aiTelemetry(functionId?: string): { telemetry: TelemetryOptions } | Record<string, never> {
-  // Browsers and Hermes have no `process`: no endpoint, so no telemetry.
-  if (typeof process === 'undefined' || !process.env['OTEL_EXPORTER_OTLP_ENDPOINT']) return {};
+  if (telemetryOff()) return {};
   integration ??= new OpenTelemetry();
   return {
     telemetry: {

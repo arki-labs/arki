@@ -16,9 +16,9 @@ import { abortReason, runAgentTool } from './tool';
  * this adapter; the caller supplies a resolved AI-SDK `LanguageModel`.
  *
  * Tracing uses the AI SDK's own telemetry (`aiTelemetry`, the same helper the AI services
- * use): when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `@ai-sdk/otel` emits one `step N` span per
- * model step and one `execute_tool <name>` span per tool call. With no endpoint, or no
- * OpenTelemetry SDK registered, nothing is recorded.
+ * use): when an OpenTelemetry tracer provider is registered, `@ai-sdk/otel` emits one `step N`
+ * span per model step and one `execute_tool <name>` span per tool call. With no tracer provider,
+ * or with `AI_TELEMETRY=off`, nothing is recorded.
  */
 export interface AiSdkRuntimeOptions {
   /** A resolved AI-SDK language model (e.g. `ollama('qwen3.6')` under LAW-1). */

@@ -1,4 +1,7 @@
 /**
+ * Dot plugins: `vectorIndex(...)` (the app's embedder and vector index) and `llm(...)` (the app's
+ * text-generation provider, checked at boot).
+ *
  * `vectorIndex(...)` — the app's embedder and vector index as a Dot plugin.
  *
  * Resolved ONCE at boot from the env thunk (no module-level cache): the
@@ -12,11 +15,17 @@
  */
 import type { EmbeddingProviderName, EmbeddingSpace } from '@arki/embeddings';
 import { plugin } from '@arki/dot/plugin';
+import { isFailure } from '@arki/failure';
 
+import type { LLMProviderConfig } from '../ai-service/factory';
+import type { ProbeOptions } from '../ai-service/probe';
+import type { LLMProviderWithUsage } from '../ai-service/types';
 import type { EmbeddingProviderType } from '../embeddings/factory';
 import type { EmbeddingRuntime, EnvSource } from '../embeddings/runtime';
 import type { VectorSearchProvider } from '../types';
 import type { VectorIndex } from '../vector-search/vector-index';
+import { createLLMProvider } from '../ai-service/factory';
+import { probeLLMProvider } from '../ai-service/probe';
 import { createEmbedder, createEmbeddingRuntime } from '../embeddings/runtime';
 import { createVectorIndex } from '../vector-search/vector-index';
 
@@ -106,6 +115,54 @@ export function vectorIndex<P extends Record<string, unknown>>(options: VectorIn
         if (!runtime) return { provider: null, durable: false };
         if (provider) return { provider, durable };
         return createVectorIndex<P>(runtimeSpace(runtime), { collection, payloadIndexes, env: source });
+      },
+    },
+  });
+}
+
+export type LlmPluginOptions = LLMProviderConfig & {
+  /**
+   * Run `probeLLMProvider` at boot (default `true`). An unusable provider then fails boot with
+   * the returned `ProviderUnavailable` failure, which `dot doctor --json` reports. Pass `false`
+   * for an app that must boot without a model (it can call `probeLLMProvider` itself later).
+   */
+  readonly probe?: boolean;
+  /** How long the boot probe waits for a server, in milliseconds. Default 2000. */
+  readonly probeTimeoutMs?: number;
+  /** The HTTP client the probe uses. Tests pass a stub. */
+  readonly fetch?: ProbeOptions['fetch'];
+  /** Publish this provider instead of building one, unprobed. Tests pass `createFakeLLMProvider(...)`. */
+  readonly instance?: LLMProviderWithUsage;
+};
+
+/**
+ * Publish `llm`: the app's model provider, built once at boot by `createLLMProvider`. `dot
+ * explain` lists it; with `probe` (the default) boot checks the provider first, so `dot doctor`
+ * reports a stopped Ollama, a missing model or a missing key as `ai.provider_unavailable`.
+ *
+ * Pass a function to read config at boot instead of at module load.
+ *
+ * @example
+ * ```ts
+ * defineApp('studio').use(llm(() => ({ provider: env.LLM_PROVIDER, model: env.LLM_MODEL })));
+ * // in a feature: services.llm.generateStructuredResult(prompt, schema)
+ * ```
+ */
+export function llm(options: LlmPluginOptions | (() => LlmPluginOptions) = {}) {
+  return plugin({
+    name: 'llm',
+    provides: {
+      llm: async () => {
+        const config = typeof options === 'function' ? options() : options;
+        if (config.instance) return config.instance;
+        if (config.probe ?? true) {
+          const ready = await probeLLMProvider({
+            ...config,
+            ...(config.probeTimeoutMs === undefined ? {} : { timeoutMs: config.probeTimeoutMs }),
+          });
+          if (isFailure(ready)) return ready;
+        }
+        return createLLMProvider(config);
       },
     },
   });

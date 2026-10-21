@@ -79,11 +79,16 @@ export {
   getModelPricing,
   hasKnownPricing,
   calculateLLMCost,
+  priceOf,
+  isLocalProvider,
+  LOCAL_PROVIDERS,
+  PRICE_BASES,
   estimateTokens,
   estimateTokensFromWords,
   getSupportedModels,
   getModelsByProvider,
 } from './pricing';
+export type { Price, PriceBasis, PricedCall } from './pricing';
 
 // ============================================
 // Cost Estimator

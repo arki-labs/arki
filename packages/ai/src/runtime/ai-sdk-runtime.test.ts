@@ -347,7 +347,6 @@ describe('createAiSdkRuntime spans', () => {
 
   it('records one span per model step and one per tool call when tracing is on', async () => {
     // WHY: a slow or failing agent run must show which step or tool cost the time.
-    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318');
     await collect(
       createAiSdkRuntime({ model: toolCallingModel('weather') }).runToolLoop({ prompt: 'x', tools: [weather] }),
     );
@@ -357,9 +356,9 @@ describe('createAiSdkRuntime spans', () => {
     expect(names.filter(name => name === 'execute_tool weather')).toHaveLength(1);
   });
 
-  it('records nothing when no OTel backend is configured', async () => {
-    // WHY: apps without tracing must not pay for it or leak prompts into it.
-    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '');
+  it('records nothing when AI_TELEMETRY=off', async () => {
+    // WHY: an app must be able to keep prompts out of its traces while it still traces the rest.
+    vi.stubEnv('AI_TELEMETRY', 'off');
     await collect(
       createAiSdkRuntime({ model: toolCallingModel('weather') }).runToolLoop({ prompt: 'x', tools: [weather] }),
     );
