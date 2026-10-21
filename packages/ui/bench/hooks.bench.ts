@@ -1,4 +1,4 @@
-// Bundle size of the same hooks from @arki/react-hooks and from other hook libraries.
+// Bundle size of the same hooks from @arki/ui/hooks and from other hook libraries.
 // Run: `bun run bench`.
 
 import { defineSuite, size } from '@arki/bench';
@@ -6,13 +6,13 @@ import { defineSuite, size } from '@arki/bench';
 const WRAPPED = 'closest equivalent: other options, return shape or behaviour';
 
 export default defineSuite({
-  id: '@arki/react-hooks',
+  id: '@arki/ui/hooks',
   intro:
-    'Bundle size of the same hooks from @arki/react-hooks and from the main hook libraries: usehooks-ts, @mantine/hooks, react-use and ahooks. @arki/react-hooks re-exports hooks from @rehooks/local-storage, @mantine/hooks and usehooks-ts, so those libraries are measured directly to show the wrapper cost.',
+    'Bundle size of the same hooks from @arki/ui/hooks and from the main hook libraries: usehooks-ts, @mantine/hooks, react-use and ahooks. @arki/ui/hooks re-exports hooks from @rehooks/local-storage, @mantine/hooks and usehooks-ts, so those libraries are measured directly to show the wrapper cost.',
   notes: [
     'Only the wrapped library is the same feature as the @arki hook. Every other library offers the closest equivalent with other options, return values or behaviour, so it is measured but never ranked (`differs`).',
     'react-use `useDebounce` debounces a callback inside an effect, not a value. ahooks has `useDebounce` for values but no `useMediaQuery`; `useResponsive` is the nearest.',
-    '@arki/react-hooks `useLocalStorage` is @rehooks/local-storage (synchronised across tabs and components); `useDebouncedValue`, `useMediaQuery` and `useToggle` are @mantine/hooks; `useTimeout` is usehooks-ts.',
+    '@arki/ui/hooks `useLocalStorage` is @rehooks/local-storage (synchronised across tabs and components); `useDebouncedValue`, `useMediaQuery` and `useToggle` are @mantine/hooks; `useTimeout` is usehooks-ts.',
     'Sizes are minified, tree-shaken, with react left out, for the browser.',
   ],
   groups: [
@@ -23,10 +23,10 @@ export default defineSuite({
       baseline: 'arki',
       cases: {
         arki: {
-          label: '@arki/react-hooks',
-          package: '@arki/react-hooks',
+          label: '@arki/ui/hooks',
+          package: '@arki/ui',
           limit: '2 kB',
-          source: `export { useLocalStorage } from '@arki/react-hooks/local-storage';`,
+          source: `export { useLocalStorage } from '@arki/ui/hooks/local-storage';`,
         },
         rehooks: {
           label: '@rehooks/local-storage (direct)',
@@ -66,10 +66,10 @@ export default defineSuite({
       baseline: 'arki',
       cases: {
         arki: {
-          label: '@arki/react-hooks',
-          package: '@arki/react-hooks',
+          label: '@arki/ui/hooks',
+          package: '@arki/ui',
           limit: '0.5 kB',
-          source: `export { useDebouncedValue } from '@arki/react-hooks/debounce';`,
+          source: `export { useDebouncedValue } from '@arki/ui/hooks/debounce';`,
         },
         mantine: {
           label: '@mantine/hooks (direct)',
@@ -103,10 +103,10 @@ export default defineSuite({
       baseline: 'arki',
       cases: {
         arki: {
-          label: '@arki/react-hooks',
-          package: '@arki/react-hooks',
+          label: '@arki/ui/hooks',
+          package: '@arki/ui',
           limit: '0.5 kB',
-          source: `export { useMediaQuery } from '@arki/react-hooks/media-query';`,
+          source: `export { useMediaQuery } from '@arki/ui/hooks/media-query';`,
         },
         mantine: {
           label: '@mantine/hooks (direct)',
@@ -141,14 +141,14 @@ export default defineSuite({
       baseline: 'arki',
       cases: {
         arki: {
-          label: '@arki/react-hooks',
-          package: '@arki/react-hooks',
+          label: '@arki/ui/hooks',
+          package: '@arki/ui',
           limit: '4 kB',
-          source: `export { useDebouncedValue } from '@arki/react-hooks/debounce';
-export { useMediaQuery } from '@arki/react-hooks/media-query';
-export { useLocalStorage } from '@arki/react-hooks/local-storage';
-export { useToggle } from '@arki/react-hooks/toggle';
-export { useTimeout } from '@arki/react-hooks/timeout';`,
+          source: `export { useDebouncedValue } from '@arki/ui/hooks/debounce';
+export { useMediaQuery } from '@arki/ui/hooks/media-query';
+export { useLocalStorage } from '@arki/ui/hooks/local-storage';
+export { useToggle } from '@arki/ui/hooks/toggle';
+export { useTimeout } from '@arki/ui/hooks/timeout';`,
         },
         wrapped: {
           label: 'wrapped libraries (direct)',

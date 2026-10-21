@@ -80,12 +80,13 @@ export const config: ReleaseConfig = {
       id: 'frontend',
       label: 'Wave 3 — Frontend',
       // Promoted 2026-10-09 for the Drop Studio demo (external consumer of
-      // the storefront stack). Leaves first: theme / icons / react-hooks /
-      // design-systems have no @arki deps; `@arki/ui` depends on all four
-      // plus `@arki/date` (Wave 1). Ships before infrastructure-adapters since
-      // 2026-10-21: `@arki/auth` peers on `@arki/ui` and `@arki/icons`, and
-      // nothing here depends on that wave.
-      packages: ['@arki/theme', '@arki/icons', '@arki/react-hooks', '@arki/design-systems', '@arki/ui'],
+      // the storefront stack). Leaves first: theme / icons / design-systems
+      // have no @arki deps; `@arki/ui` depends on all three plus
+      // `@arki/date` (Wave 1). `@arki/react-hooks` merged into
+      // `@arki/ui/hooks/*` on 2026-10-21. Ships before infrastructure-adapters
+      // since 2026-10-21: `@arki/auth` peers on `@arki/ui` and `@arki/icons`,
+      // and nothing here depends on that wave.
+      packages: ['@arki/theme', '@arki/icons', '@arki/design-systems', '@arki/ui'],
       // Source-first: these ship TypeScript source as the runtime entry plus
       // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
       // READMEs say so. Compiled dist output is a later, separate decision.
@@ -116,9 +117,8 @@ export const config: ReleaseConfig = {
       id: 'specialized',
       label: 'Wave 5 — Specialized',
       // `@arki/money` joined 2026-10-13 (exact money on `@arki/math`, so not
-      // Foundation). Other candidates (`@arki/rich-text`,
-      // `@arki/images`, `@arki/diff`) are still `private: true`; they
-      // join once their internals stabilise. `@arki/bench` joined 2026-10-13
+      // Foundation). Another candidate, `@arki/images`, is still
+      // `private: true`; it joins once its internals stabilise. `@arki/bench` joined 2026-10-13
       // (benchmark toolkit on mitata; no @arki deps, dev-time tool).
       // `@arki/payments` joined 2026-10-13 (Stripe provider, plans, subscriptions,
       // refunds, dunning and tax on `@arki/journal` + `@arki/money`; user ids
@@ -149,7 +149,7 @@ export const config: ReleaseConfig = {
     ],
     libraries: [
       '@arki/math', '@arki/money', '@arki/date', '@arki/string', '@arki/clock', '@arki/resilience',
-      '@arki/ts', '@arki/bench', '@arki/react-hooks', '@arki/icons', '@arki/async',
+      '@arki/ts', '@arki/bench', '@arki/icons', '@arki/async',
       '@arki/schema', '@arki/expr', '@arki/cas',
     ],
   },

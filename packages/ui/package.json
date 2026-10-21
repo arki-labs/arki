@@ -376,6 +376,81 @@
       "import": "./src/slot.tsx",
       "browser": "./src/slot.tsx"
     },
+    "./hooks/async-memo": {
+      "types": "./dist/src/hooks/async-memo.d.ts",
+      "import": "./src/hooks/async-memo.tsx",
+      "browser": "./src/hooks/async-memo.tsx"
+    },
+    "./hooks/copy-to-clipboard": {
+      "types": "./dist/src/hooks/copy-to-clipboard.d.ts",
+      "import": "./src/hooks/copy-to-clipboard.tsx",
+      "browser": "./src/hooks/copy-to-clipboard.tsx"
+    },
+    "./hooks/debounce": {
+      "types": "./dist/src/hooks/debounce.d.ts",
+      "import": "./src/hooks/debounce.tsx",
+      "browser": "./src/hooks/debounce.tsx"
+    },
+    "./hooks/hotkeys": {
+      "types": "./dist/src/hooks/hotkeys.d.ts",
+      "import": "./src/hooks/hotkeys.tsx",
+      "browser": "./src/hooks/hotkeys.tsx"
+    },
+    "./hooks/is-client": {
+      "types": "./dist/src/hooks/is-client.d.ts",
+      "import": "./src/hooks/is-client.tsx",
+      "browser": "./src/hooks/is-client.tsx"
+    },
+    "./hooks/local-storage": {
+      "types": "./dist/src/hooks/local-storage.d.ts",
+      "import": "./src/hooks/local-storage.tsx",
+      "browser": "./src/hooks/local-storage.tsx"
+    },
+    "./hooks/long-press": {
+      "types": "./dist/src/hooks/long-press.d.ts",
+      "import": "./src/hooks/long-press.tsx",
+      "browser": "./src/hooks/long-press.tsx"
+    },
+    "./hooks/media-query": {
+      "types": "./dist/src/hooks/media-query.d.ts",
+      "import": "./src/hooks/media-query.tsx",
+      "browser": "./src/hooks/media-query.tsx"
+    },
+    "./hooks/pagination": {
+      "types": "./dist/src/hooks/pagination.d.ts",
+      "import": "./src/hooks/pagination.tsx",
+      "browser": "./src/hooks/pagination.tsx"
+    },
+    "./hooks/timeout": {
+      "types": "./dist/src/hooks/timeout.d.ts",
+      "import": "./src/hooks/timeout.tsx",
+      "browser": "./src/hooks/timeout.tsx"
+    },
+    "./hooks/toggle": {
+      "types": "./dist/src/hooks/toggle.d.ts",
+      "import": "./src/hooks/toggle.tsx",
+      "browser": "./src/hooks/toggle.tsx"
+    },
+    "./hooks/touch": {
+      "types": "./dist/src/hooks/touch.d.ts",
+      "import": "./src/hooks/touch.tsx",
+      "browser": "./src/hooks/touch.tsx"
+    },
+    "./hooks/use-swipe-gesture": {
+      "types": "./dist/src/hooks/use-swipe-gesture.d.ts",
+      "import": "./src/hooks/use-swipe-gesture.tsx",
+      "browser": "./src/hooks/use-swipe-gesture.tsx"
+    },
+    "./hooks/use-touch-feedback": {
+      "types": "./dist/src/hooks/use-touch-feedback.d.ts",
+      "import": "./src/hooks/use-touch-feedback.tsx",
+      "browser": "./src/hooks/use-touch-feedback.tsx"
+    },
+    "./hooks/use-viewport": {
+      "types": "./dist/src/hooks/use-viewport.d.ts",
+      "import": "./src/hooks/use-viewport.tsx",
+      "browser": "./src/hooks/use-viewport.tsx"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -623,10 +698,12 @@
     "@arki/date": "workspace:*",
     "@arki/design-systems": "workspace:*",
     "@arki/icons": "workspace:*",
-    "@arki/react-hooks": "workspace:*",
     "@arki/theme": "workspace:*",
     "@base-ui/react": "catalog:",
     "@hookform/resolvers": "catalog:validation",
+    "@mantine/hooks": "catalog:",
+    "@reecelucas/react-use-hotkeys": "catalog:",
+    "@rehooks/local-storage": "catalog:",
     "class-variance-authority": "catalog:styling",
     "clsx": "catalog:styling",
     "cmdk": "catalog:",
@@ -638,6 +715,7 @@
     "react-colorful": "catalog:",
     "react-day-picker": "catalog:",
     "react-hook-form": "catalog:validation",
+    "react-hotkeys-hook": "catalog:",
     "react-resizable-panels": "catalog:",
     "react-spinners": "catalog:",
     "react-spring": "catalog:",
@@ -646,6 +724,7 @@
     "recharts": "catalog:",
     "sonner": "catalog:",
     "tailwind-merge": "catalog:styling",
+    "usehooks-ts": "catalog:",
     "vaul": "catalog:"
   },
   "devDependencies": {

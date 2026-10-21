@@ -3,8 +3,8 @@ import { DevTools } from 'jotai-devtools';
 import { NuqsAdapter } from 'nuqs/adapters/tanstack-router';
 
 import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
-import { FullscreenProvider } from '@arki/react-fullscreen';
-import { useIsClient } from '@arki/react-hooks/is-client';
+import { FullscreenProvider } from '@fleet/react-fullscreen';
+import { useIsClient } from '@arki/ui/hooks/is-client';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
 import { clearCachesOnUserChange } from '@arki/tanstack-start/pwa/client';
 import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';

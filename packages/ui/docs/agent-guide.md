@@ -90,6 +90,19 @@ console.log(cn('px-2 py-1', 'px-4'));
 py-1 px-4
 ```
 
+### Use a hook
+
+Hooks live under `hooks/*`, one subpath each. Most re-export `@mantine/hooks`, `usehooks-ts`, `react-hotkeys-hook` or `@rehooks/local-storage`; every one is safe to render on the server.
+
+```tsx
+import { useDebouncedValue } from '@arki/ui/hooks/debounce';
+
+export function useSearchTerm(raw: string): string {
+  const [term] = useDebouncedValue(raw, 250);
+  return term;
+}
+```
+
 ### Add a component
 
 Create `src/<name>.tsx` with a one-line summary comment first. Wrap a Base UI primitive, use `cva` for variants, `cn` for classes and semantic tokens for colour. Add the `exports` row, regenerate `llms.txt`, add it to the README table. Check it in atelier, workbench and arena.

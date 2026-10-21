@@ -5,7 +5,7 @@ import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
 
-import { useAsyncMemo } from '@arki/react-hooks/async-memo';
+import { useAsyncMemo } from '@arki/ui/hooks/async-memo';
 
 export function useProcessor(text: string) {
   const content = useAsyncMemo(async () => {

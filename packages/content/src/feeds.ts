@@ -1,5 +1,5 @@
-import type { Feed, FeedItem } from '@arki/rss';
-import { generateRss } from '@arki/rss/generate';
+import type { Feed, FeedItem } from './rss/index';
+import { generateRss } from './rss/generate';
 
 export type FeedSiteOptions = {
   appTitle: string;

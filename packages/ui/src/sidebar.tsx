@@ -7,8 +7,8 @@ import { cva } from 'class-variance-authority';
 import createDebug from 'debug';
 
 import { SidebarIcon, SidebarSimpleIcon } from '@arki/icons/phosphor';
-import { useIsClient } from '@arki/react-hooks/is-client';
-import { useIsMobile, useIsTablet } from '@arki/react-hooks/media-query';
+import { useIsClient } from './hooks/is-client';
+import { useIsMobile, useIsTablet } from './hooks/media-query';
 
 import { Button } from './button';
 import { cn } from './cn';

@@ -1,5 +1,5 @@
 // Cross-runtime smoke test, run by `arki-runtimes` on every engine. The package ships TypeScript source for
-// bundlers, and `@arki/rss` does too, so `test:runtimes` first bundles `src/index.ts` (with its dependencies)
+// bundlers, so `test:runtimes` first bundles `src/index.ts` (with its dependencies)
 // to `.cache/runtimes-dist/index.js`. Each engine then builds a feed, parses it back, searches an index
 // after a JSON round trip, and sorts content with contentQueries, so a runtime gap fails loudly.
 

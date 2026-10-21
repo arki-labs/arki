@@ -70,6 +70,7 @@ There is no root import. Every component is its own subpath: `@arki/ui/button`, 
 | Layout and surfaces | `card`, `glass-card`, `panel`, `surface`, `separator`, `scroll-area`, `resizable`, `tool-panels`, `aspect-ratio`, `accordion`, `collapsible` |
 | Data display | `table`, `chart`, `badge`, `avatar`, `alert`, `callout`, `progress`, `skeleton`, `spinners`, `timeline`, `carousel`, `calendar`, `katex` |
 | Helpers | `cn`, `design-system`, `slot`, `as-child`, `scroll-to-top` |
+| Hooks | `hooks/debounce`, `hooks/local-storage`, `hooks/media-query`, `hooks/hotkeys`, `hooks/copy-to-clipboard`, `hooks/timeout`, `hooks/toggle`, `hooks/pagination`, `hooks/async-memo`, `hooks/is-client`, `hooks/long-press`, `hooks/touch`, `hooks/use-viewport`, `hooks/use-swipe-gesture`, `hooks/use-touch-feedback` |
 
 ## Failure behaviour
 
@@ -78,6 +79,7 @@ Components do not return failure values. Mistakes in how you compose them show u
 - Some compound parts need their parent. These hooks throw a plain `Error` when the parent is missing: `useFormField` (inside `FormField`), `useSidebar` (inside `SidebarProvider`), and the hooks for `Chart`, `Carousel`, `ControlGroup` and `Timeline`. Fix the tree; do not catch the error.
 - A missing token gives a wrong colour, not an error. If a page looks unstyled, check the `@source` line and the token imports first.
 - `Toaster` reads the theme from `@arki/theme`. Without a `ThemeProvider` it uses `system`.
+- Hooks under `hooks/*` do not throw for bad input. `useAsyncMemo` returns `undefined` (or your `initial`) until the promise resolves; a rejected promise is not caught, so catch inside the factory. On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop.
 
 ## Limits
 
@@ -86,6 +88,8 @@ Components do not return failure values. Mistakes in how you compose them show u
 - `katex` does not load KaTeX's stylesheet. Import `katex/dist/katex.min.css` yourself, or maths renders unstyled.
 - Imports must name a subpath. `import { Button } from '@arki/ui'` fails: the package has no root entry.
 - Some components rely on browser APIs (`matchMedia`, `ResizeObserver`). Render them on the client; in tests use a DOM environment.
+- `useViewport` calls anything under 640px mobile and under 1024px tablet. `useIsMobile` calls anything under 768px mobile. Boundary: at 700px, `useViewport().isMobile` is `false` and `useIsMobile()` is `true`. Pick one family per component.
+- `useAsyncMemo` drops a result when its dependencies change before it resolves. It does not cancel the request.
 
 ## Design-system rules
 
@@ -180,7 +184,6 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 - `@arki/design-systems`: tokens, Tailwind bridge and fonts for `atelier`, `workbench`, `arena`.
 - `@arki/theme`: light, dark and system provider and the no-flash script.
 - `@arki/icons`: icon sets behind one React entry point.
-- `@arki/react-hooks`: the hooks the components use, reusable on their own.
 
 ## Documentation
 

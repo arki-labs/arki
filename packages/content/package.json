@@ -10,6 +10,16 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./rss": {
+      "types": "./dist/src/rss/index.d.ts",
+      "import": "./src/rss/index.ts",
+      "default": "./src/rss/index.ts"
+    },
+    "./rss/generate": {
+      "types": "./dist/src/rss/generate.d.ts",
+      "import": "./src/rss/generate.ts",
+      "default": "./src/rss/generate.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -24,7 +34,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/rss": "workspace:*",
+    "fast-xml-parser": "catalog:",
     "minisearch": "catalog:"
   },
   "devDependencies": {

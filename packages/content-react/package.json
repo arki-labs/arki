@@ -27,7 +27,6 @@
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
     "@arki/math": "workspace:*",
-    "@arki/react-hooks": "workspace:*",
     "@arki/ui": "workspace:*",
     "@content-collections/mdx": "catalog:next",
     "nuqs": "catalog:",

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { PostOverview } from '@arki/content';
-import { useDebouncedValue } from '@arki/react-hooks/debounce';
+import { useDebouncedValue } from '@arki/ui/hooks/debounce';
 
 /**
  * Searches posts through the app's `/posts/search?query=` route as the reader types (debounced 300ms).

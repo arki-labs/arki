@@ -12,7 +12,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 6. A compound part that needs its parent throws a plain `Error` that names the parent. Do not return a silent default.
 7. Hooks and components with state start with `'use client'`.
 8. Never delete an exported component. This package is a general-purpose product.
-9. Use `@arki/theme` for theme state, `@arki/icons` for icons, `@arki/react-hooks` for hooks. Do not copy them in.
+9. Use `@arki/theme` for theme state, `@arki/icons` for icons, `@arki/ui/hooks/*` (this package) for hooks. Do not copy them in.
 10. No `console.log`. Debug output goes through `debug`.
 
 ## Changing this package

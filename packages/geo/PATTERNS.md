@@ -169,7 +169,7 @@ export function MobileOptimizedMap() {
 ### Responsive Marker Sizes
 
 ```typescript
-import { useMediaQuery } from '@arki/react-hooks';
+import { useMediaQuery } from '@arki/ui/hooks/media-query';
 import { GoogleMap, Marker } from '@arki/geo/react/google-maps';
 
 export function ResponsiveMarkers() {

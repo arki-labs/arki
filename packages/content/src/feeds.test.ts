@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseFeed } from '@arki/rss';
+import { parseFeed } from './rss/index';
 
 import type { FeedChangelogEntry, FeedPost } from './index';
 import { buildChangelogFeed, buildPostFeed } from './index';
