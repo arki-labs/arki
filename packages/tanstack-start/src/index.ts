@@ -8,7 +8,6 @@
 
 export { createAppConfig, type AppConfig } from './app.config';
 export { createRouter, type RouterConfig } from './router';
-export { createServerHandler, type ServerConfig } from './server';
 export { AnalyticsScript, type AnalyticsConfig } from './scripts';
 export { RootErrorComponent } from './error';
 export { DevTools, type DevToolsProps } from './devtools';

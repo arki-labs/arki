@@ -45,9 +45,14 @@
       "default": "./dist/src/vite.js"
     },
     "./server": {
-      "types": "./dist/src/server.d.ts",
-      "import": "./src/server.ts",
-      "node": "./src/server.ts"
+      "types": "./dist/src/start-server.d.ts",
+      "import": "./src/start-server.ts",
+      "node": "./src/start-server.ts"
+    },
+    "./dot": {
+      "types": "./dist/src/dot.d.ts",
+      "import": "./src/dot.ts",
+      "node": "./src/dot.ts"
     },
     "./router": {
       "types": "./dist/src/router.d.ts",
@@ -133,7 +138,10 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/icons": "workspace:*",
+    "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@arki/ui": "workspace:*",
     "@orpc/client": "catalog:backend",
     "@orpc/contract": "catalog:backend",
@@ -155,13 +163,17 @@
     "vite-plugin-pwa": "catalog:tanstack/start",
     "workbox-precaching": "catalog:tanstack/start",
     "workbox-routing": "catalog:tanstack/start",
-    "workbox-strategies": "catalog:tanstack/start"
+    "workbox-strategies": "catalog:tanstack/start",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/schedule": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/openapi": "catalog:backend",
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@sentry/tanstackstart-react": "catalog:",
@@ -176,6 +188,9 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/schedule": "workspace:*",
+    "@orpc/openapi": "catalog:backend",
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@sentry/tanstackstart-react": "catalog:",
@@ -183,6 +198,15 @@
     "react-dom": "catalog:react"
   },
   "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    },
+    "@arki/schedule": {
+      "optional": true
+    },
+    "@orpc/openapi": {
+      "optional": true
+    },
     "@sentry/node": {
       "optional": true
     },
