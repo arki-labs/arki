@@ -1,3 +1,5 @@
+import type { RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@arki/ui/cn';
 
 import { BUILD_STEPS } from './build-steps';
@@ -28,10 +30,83 @@ function floorTop(index: number): number {
   return DRAWING.firstFloorY + (BUILD_STEPS.length - 1 - index) * DRAWING.floorHeight;
 }
 
-/** How far the crane lowers the bubble: to the middle of the lit floor, or a short hang above the roof at rest. */
-function bubbleDrop(active: number): number {
-  if (active < 0) return DRAWING.restDrop;
-  return floorTop(active) + DRAWING.floorHeight / 2 - jibBottom - DRAWING.bubbleSize / 2;
+/** How far the crane lowers the bubble to the middle of a floor. A fractional floor lies between two floors. */
+function floorDrop(floor: number): number {
+  return floorTop(floor) + DRAWING.floorHeight / 2 - jibBottom - DRAWING.bubbleSize / 2;
+}
+
+/**
+ * How far the crane lowers the bubble once `progress` (0–1) of floor `floor`'s section is read, or a short hang above
+ * the roof before the first floor (-1). The bubble is on a floor's middle halfway through its section and on the line
+ * between two floors as the next section starts, so it moves with every scroll, however long a floor is.
+ */
+function craneDrop(floor: number, progress: number): number {
+  if (floor < 0) return DRAWING.restDrop;
+  return floorDrop(Math.min(Math.max(floor + progress - 0.5, 0), BUILD_STEPS.length - 1));
+}
+
+/** The nearest ancestor that scrolls. On this site the page scrolls inside `.marketing`, not in the window. */
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
+  }
+  return null;
+}
+
+/** Where, as a share of the view, a floor counts as the one being read. */
+const READING_LINE = 0.4;
+
+/**
+ * The floor whose section has reached the reading line (-1 until the first one does), and the crane lowered to the
+ * reading position. It is worked out from the scroll position of the element that really scrolls, not from an
+ * IntersectionObserver: that one's `rootMargin` is ignored inside a cross-origin frame and depends on which element is
+ * the root, and a lit floor must not hinge on it. The cable and the bubble are moved on the drawing itself every frame,
+ * so a scroll re-renders nothing; React state changes only when another floor lights.
+ */
+function useCrane(
+  stage: RefObject<HTMLElement | null>,
+  cable: RefObject<SVGRectElement | null>,
+  load: RefObject<SVGGElement | null>,
+): number {
+  const [active, setActive] = useState(-1);
+  useEffect(() => {
+    const home = stage.current;
+    if (home === null) return;
+    const scroller = scrollParent(home);
+    const target: HTMLElement | Window = scroller ?? window;
+    const sections = [...home.querySelectorAll<HTMLElement>('[data-floor]')];
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const top = scroller?.getBoundingClientRect().top ?? 0;
+      const height = scroller?.clientHeight ?? window.innerHeight;
+      const line = top + height * READING_LINE;
+      let floor = -1;
+      let progress = 0;
+      for (const [index, section] of sections.entries()) {
+        const box = section.getBoundingClientRect();
+        if (box.top > line) continue;
+        floor = index;
+        progress = box.height > 0 ? Math.min((line - box.top) / box.height, 1) : 1;
+      }
+      setActive(floor);
+      const drop = craneDrop(floor, progress);
+      cable.current?.style.setProperty('transform', `scaleY(${drop})`);
+      load.current?.style.setProperty('transform', `translateY(${drop}px)`);
+    };
+    const schedule = () => {
+      if (frame === 0) frame = requestAnimationFrame(update);
+    };
+    update();
+    target.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      target.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [stage, cable, load]);
+  return active;
 }
 
 function archPath(centerX: number, baseY: number): string {
@@ -41,12 +116,17 @@ function archPath(centerX: number, baseY: number): string {
 }
 
 type ElevationProps = {
-  /** Index of the floor being read, or -1 before the first floor is reached. */
-  active: number;
+  /** The page root holding the `[data-floor]` sections the floors stand for. */
+  stage: RefObject<HTMLElement | null>;
 };
 
-export function Elevation({ active }: Readonly<ElevationProps>) {
-  const drop = bubbleDrop(active);
+/** The crane at rest. `useCrane` moves it every frame; React renders this once, as the value never changes. */
+const REST_DROP = craneDrop(-1, 0);
+
+export function Elevation({ stage }: Readonly<ElevationProps>) {
+  const cable = useRef<SVGRectElement>(null);
+  const load = useRef<SVGGElement>(null);
+  const active = useCrane(stage, cable, load);
   const label = `Side elevation of a building with ${BUILD_STEPS.length} floors, one for each build step below. Floors with a full sheet carry its sheet number. The floor you are reading is lit and a crane lowers the bubble to it.`;
 
   return (
@@ -142,14 +222,15 @@ export function Elevation({ active }: Readonly<ElevationProps>) {
             y2={groundY}
           />
           <rect
+            ref={cable}
             className="home-cable"
             x={DRAWING.hookX}
             y={jibBottom}
             width="1"
             height="1"
-            style={{ transform: `scaleY(${drop})` }}
+            style={{ transform: `scaleY(${REST_DROP})` }}
           />
-          <g className="home-load" style={{ transform: `translateY(${drop}px)` }}>
+          <g ref={load} className="home-load" style={{ transform: `translateY(${REST_DROP}px)` }}>
             <image
               className="home-load-bubble"
               href="/assets/elevation/bubble.webp"

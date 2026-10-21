@@ -1,5 +1,4 @@
-import type { RefObject } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { getDefaultMeta } from '~/shared-metadata';
@@ -27,60 +26,8 @@ export const Route = createFileRoute('/_marketing/')({
   component: HomePage,
 });
 
-/** The nearest ancestor that scrolls. On this site the page scrolls inside `.marketing`, not in the window. */
-function scrollParent(element: HTMLElement): HTMLElement | null {
-  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
-    if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
-  }
-  return null;
-}
-
-/** Where, as a share of the view, a floor counts as the one being read. */
-const READING_LINE = 0.4;
-
-/**
- * The floor whose section has reached the reading line, or -1 until the first one does. It is worked out from the
- * scroll position of the element that really scrolls, not from an IntersectionObserver: that one's `rootMargin` is
- * ignored inside a cross-origin frame and depends on which element is the root, and a lit floor must not hinge on it.
- */
-function useActiveFloor(stage: RefObject<HTMLElement | null>): number {
-  const [active, setActive] = useState(-1);
-  useEffect(() => {
-    const home = stage.current;
-    if (home === null) return;
-    const scroller = scrollParent(home);
-    const target: HTMLElement | Window = scroller ?? window;
-    const sections = [...home.querySelectorAll<HTMLElement>('[data-floor]')];
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const top = scroller?.getBoundingClientRect().top ?? 0;
-      const height = scroller?.clientHeight ?? window.innerHeight;
-      const line = top + height * READING_LINE;
-      let floor = -1;
-      for (const [index, section] of sections.entries()) {
-        if (section.getBoundingClientRect().top <= line) floor = index;
-      }
-      setActive(floor);
-    };
-    const schedule = () => {
-      if (frame === 0) frame = requestAnimationFrame(update);
-    };
-    update();
-    target.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    return () => {
-      cancelAnimationFrame(frame);
-      target.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
-  }, [stage]);
-  return active;
-}
-
 function HomePage() {
   const stage = useRef<HTMLDivElement>(null);
-  const active = useActiveFloor(stage);
 
   return (
     <GlossaryProvider>
@@ -108,7 +55,7 @@ function HomePage() {
           </div>
           <div className="home-grid">
             <BuildPath />
-            <Elevation active={active} />
+            <Elevation stage={stage} />
           </div>
           <BuiltWith />
           <Materials />

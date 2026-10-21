@@ -239,6 +239,34 @@ test.describe('/ build path', () => {
     expect(Math.abs((end?.y ?? 0) - (start?.y ?? 0))).toBeGreaterThan(20);
   });
 
+  // WHY: the journal floor is several screens tall. A bubble that moves only when another floor lights sat still
+  // for all of it, and readers saw a crane that ignores their scroll. Every scroll must move it, even inside one floor.
+  test('the bubble moves with the scroll inside one long floor', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await page.mouse.move(600, 400);
+    // The crane's drop, not the bubble's box: the bubble image also drifts on its own, forever.
+    const load = page.locator('.home-load');
+    const journalFloor = page.locator('.home-floor').nth(3);
+    await page.locator('section[data-floor="3"]').evaluate(floor => floor.scrollIntoView({ block: 'start' }));
+    await expect(journalFloor).toHaveClass(/is-now/);
+    const settledY = async () => {
+      let last = Number.NaN;
+      await expect(async () => {
+        const y = await load.evaluate(group => new DOMMatrix(getComputedStyle(group).transform).f);
+        const settled = y === last;
+        last = y;
+        expect(settled).toBe(true);
+      }).toPass({ intervals: [300] });
+      return last;
+    };
+    const before = await settledY();
+    await page.mouse.wheel(0, 900);
+    await expect(journalFloor).toHaveClass(/is-now/);
+    const after = await settledY();
+    expect(Math.abs(after - before)).toBeGreaterThan(4);
+  });
+
   // WHY: on a phone the strip is the map: it must mark the floor in view and jump to a floor when tapped.
   test('on a 390px phone the strip marks the floor in view and jumps to a floor', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
