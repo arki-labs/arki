@@ -1,23 +1,15 @@
 /* ────────────────────────────────────────────────────────────────
    marketing.css — chrome and brand-token scope for the arki.dev
    marketing surface. Loaded by `_marketing.tsx` layout route.
-   The scoped zinc and amber palette uses the self-hosted Workbench
-   font contract inherited from the application.
+   Colours come from the arki design system (mineral in light,
+   signal in dark); fonts are its inherited workbench fonts.
    ──────────────────────────────────────────────────────────────── */
 
 .marketing {
-  /* arki brand palette — light mode ("paper-printed man page").
-     Theme system (@arki/theme) toggles dark mode by adding `.dark`
-     class on <html>; the overrides below kick in then. */
-  --background: hsl(240 5% 96%);
-  --foreground: hsl(240 10% 4%);
-  --card: hsl(240 6% 94%);
-  --card-foreground: hsl(240 10% 4%);
-  --border: hsl(240 5% 84%);
-  --muted: hsl(240 6% 90%);
-  --muted-foreground: hsl(240 4% 40%);
-  --accent: hsl(43 96% 56%);
-  --accent-foreground: hsl(240 10% 4%);
+  /* The marketing pages use one strong accent (CTA, active marks, links). It is the brand dot colour:
+     the arki system's primary (cobalt in light, orange in dark), which @arki/theme switches with `.dark`. */
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   background: var(--background);
@@ -33,17 +25,6 @@
   overflow-x: hidden;
   display: grid;
   grid-template-rows: 1fr auto;
-}
-
-:is(.dark) .marketing {
-  /* Dark zinc surface. The amber accent + font tokens above are mode-neutral. */
-  --background: hsl(240 10% 4%);
-  --foreground: hsl(240 6% 90%);
-  --card: hsl(240 8% 7%);
-  --card-foreground: hsl(240 6% 90%);
-  --border: hsl(240 6% 18%);
-  --muted: hsl(240 6% 14%);
-  --muted-foreground: hsl(240 5% 60%);
 }
 
 .marketing * { box-sizing: border-box; }

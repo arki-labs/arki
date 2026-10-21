@@ -11,9 +11,12 @@
    — or (games/scored surfaces) —
    @import '@arki/design-systems/arena/tokens.css';
    @import '@arki/design-systems/arena/theme-bridge.css';
+   — or (the arki brand: arki.dev) —
+   @import '@arki/design-systems/arki/tokens.css';
+   @import '@arki/design-systems/arki/theme-bridge.css';
 */
-@import '@arki/design-systems/workbench/tokens.css';
-@import '@arki/design-systems/workbench/theme-bridge.css';
+@import '@arki/design-systems/arki/tokens.css';
+@import '@arki/design-systems/arki/theme-bridge.css';
 
 /* Tailwind plugins */
 @plugin "tailwindcss-animate";

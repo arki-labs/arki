@@ -18,7 +18,6 @@ import { Route as DocsRouteRouteImport } from './routes/docs/route';
 import { Route as ErrorsRouteRouteImport } from './routes/errors/route';
 import { Route as LlmsFullDottxtRouteImport } from './routes/llms-full[.]txt';
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt';
-import { Route as ManifestDotwebmanifestRouteImport } from './routes/manifest[.]webmanifest';
 import { Route as PackagesRouteRouteImport } from './routes/packages/route';
 import { Route as PostsRouteRouteImport } from './routes/posts/route';
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt';
@@ -103,11 +102,6 @@ const LlmsFullDottxtRoute = LlmsFullDottxtRouteImport.update({
 const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
   id: '/llms.txt',
   path: '/llms.txt',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const ManifestDotwebmanifestRoute = ManifestDotwebmanifestRouteImport.update({
-  id: '/manifest.webmanifest',
-  path: '/manifest.webmanifest',
   getParentRoute: () => rootRouteImport,
 } as any);
 const PackagesRouteRoute = PackagesRouteRouteImport.update({
@@ -338,7 +332,6 @@ export interface FileRoutesByFullPath {
   '/': typeof MarketingIndexRoute;
   '/llms-full.txt': typeof LlmsFullDottxtRoute;
   '/llms.txt': typeof LlmsDottxtRoute;
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
@@ -383,7 +376,6 @@ export interface FileRoutesByTo {
   '/': typeof MarketingIndexRoute;
   '/llms-full.txt': typeof LlmsFullDottxtRoute;
   '/llms.txt': typeof LlmsDottxtRoute;
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
@@ -436,7 +428,6 @@ export interface FileRoutesById {
   '/_marketing': typeof MarketingRouteWithChildren;
   '/llms-full.txt': typeof LlmsFullDottxtRoute;
   '/llms.txt': typeof LlmsDottxtRoute;
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
@@ -491,7 +482,6 @@ export interface FileRouteTypes {
     | '/'
     | '/llms-full.txt'
     | '/llms.txt'
-    | '/manifest.webmanifest'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
@@ -536,7 +526,6 @@ export interface FileRouteTypes {
     | '/'
     | '/llms-full.txt'
     | '/llms.txt'
-    | '/manifest.webmanifest'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
@@ -588,7 +577,6 @@ export interface FileRouteTypes {
     | '/_marketing'
     | '/llms-full.txt'
     | '/llms.txt'
-    | '/manifest.webmanifest'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
@@ -643,7 +631,6 @@ export interface RootRouteChildren {
   MarketingRoute: typeof MarketingRouteWithChildren;
   LlmsFullDottxtRoute: typeof LlmsFullDottxtRoute;
   LlmsDottxtRoute: typeof LlmsDottxtRoute;
-  ManifestDotwebmanifestRoute: typeof ManifestDotwebmanifestRoute;
   RobotsDottxtRoute: typeof RobotsDottxtRoute;
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute;
   DotwellKnownSecurityDottxtRoute: typeof DotwellKnownSecurityDottxtRoute;
@@ -721,13 +708,6 @@ declare module '@tanstack/react-router' {
       path: '/llms.txt';
       fullPath: '/llms.txt';
       preLoaderRoute: typeof LlmsDottxtRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/manifest.webmanifest': {
-      id: '/manifest.webmanifest';
-      path: '/manifest.webmanifest';
-      fullPath: '/manifest.webmanifest';
-      preLoaderRoute: typeof ManifestDotwebmanifestRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/packages': {
@@ -1194,7 +1174,6 @@ const rootRouteChildren: RootRouteChildren = {
   MarketingRoute: MarketingRouteWithChildren,
   LlmsFullDottxtRoute: LlmsFullDottxtRoute,
   LlmsDottxtRoute: LlmsDottxtRoute,
-  ManifestDotwebmanifestRoute: ManifestDotwebmanifestRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   DotwellKnownSecurityDottxtRoute: DotwellKnownSecurityDottxtRoute,

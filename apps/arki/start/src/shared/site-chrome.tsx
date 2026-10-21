@@ -44,7 +44,20 @@ export function SiteHeader() {
     <header className="site-head">
       <div className="bar">
         <Link to="/" className="wordmark">
-          arki
+          <img
+            className="brand-wordmark brand-wordmark-light"
+            src="/brand/arki-mineral.svg"
+            alt="arki"
+            width={120}
+            height={65}
+          />
+          <img
+            className="brand-wordmark brand-wordmark-dark"
+            src="/brand/arki-signal.svg"
+            alt=""
+            width={120}
+            height={65}
+          />
         </Link>
         <nav aria-label="Main" className="top-links">
           <MainLinks />

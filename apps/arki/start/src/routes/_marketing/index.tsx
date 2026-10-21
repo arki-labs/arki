@@ -74,6 +74,22 @@ function Wordmark() {
   );
 }
 
+/** Brand-kit wordmark: Mineral on light, Signal on dark (`.dark` on <html>, see `.brand-wordmark` in home.css). */
+function BrandWordmark() {
+  return (
+    <>
+      <img
+        className="brand-wordmark brand-wordmark-light"
+        src="/brand/arki-mineral.svg"
+        alt="arki"
+        width={120}
+        height={65}
+      />
+      <img className="brand-wordmark brand-wordmark-dark" src="/brand/arki-signal.svg" alt="" width={120} height={65} />
+    </>
+  );
+}
+
 function InstallCommand() {
   const [manager, setManager] = useState<(typeof INSTALLS)[number]>(INSTALLS[0]);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -138,8 +154,8 @@ function HomePage() {
         Skip to content
       </a>
       <header className="home-header home-container">
-        <a className="home-brand" href="#top" aria-label="arki home">
-          <Wordmark />
+        <a className="home-brand" href="/">
+          <BrandWordmark />
         </a>
         <nav className="home-nav" aria-label="Main navigation">
           <a href="#framework">Framework</a>

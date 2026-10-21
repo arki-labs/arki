@@ -12,11 +12,11 @@ interface RootProviderProps {
  * every docs page. What only signed-in pages need (auth, oRPC, toasts, tooltips) lives in `SignedInProviders`;
  * translations live in `LocaleProvider`, mounted only by the pages that read them.
  */
-// designSystemId: set to 'atelier', 'workbench', or 'arena' based on the app's design system
+// designSystemId: the app's design system; arki.dev uses the arki brand system (must match styles/global.css)
 export function RootProvider({ children }: RootProviderProps) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableColorScheme enableSystem>
-      <AppProvider appContext={config} designSystemId="atelier">
+      <AppProvider appContext={config} designSystemId="arki">
         {children}
       </AppProvider>
     </ThemeProvider>

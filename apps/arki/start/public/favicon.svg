@@ -1,4 +1,2 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
-  <text x="16" y="22" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="18" font-weight="700" text-anchor="middle" fill="#fafafa">A</text>
-</svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title"><title id="title">Arki source-dot mineral avatar</title><path fill="#F2F0E9" d="M0 0H512V512H0Z"/><g transform="translate(256 256) scale(4.7261538462) translate(-421.5 -187)"><path fill="#234DEB" d="M454 187A32.5 32.5 0 1 1 389 187A32.5 32.5 0 1 1 454 187Z"/></g></svg>

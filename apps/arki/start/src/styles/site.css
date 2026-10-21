@@ -1,14 +1,16 @@
 /* ────────────────────────────────────────────────────────────────
    site.css — chrome and shared pieces of the docs, packages, errors,
    agents and compare pages. Everything lives under `.site` (the root
-   of `SiteSectionLayout`). Colours are workbench semantic tokens, so
+   of `SiteSectionLayout`). Colours are arki semantic tokens, so
    light/dark follows the app theme (`.dark` on <html>). Fonts come
-   from workbench `--font-sans` / `--font-mono`. Loaded by the five
+   from arki (workbench's) `--font-sans` / `--font-mono`. Loaded by the five
    section `route.tsx` files through `site-chrome.tsx`.
    ──────────────────────────────────────────────────────────────── */
 
-/* Root: the body is h-dvh overflow-hidden, so the site scrolls itself. Canvas var names map to tokens. */
+/* Root: the body is h-dvh overflow-hidden, so the site scrolls itself. Canvas var names map to tokens.
+   `--site-head-h` is the header bar height: tall enough for the 65px wordmark, and where "below the header" starts. */
 .site {
+  --site-head-h: 72px;
   --band: color-mix(in srgb, var(--muted-foreground) 60%, transparent);
   --pulse: var(--foreground);
   height: 100dvh;
@@ -56,7 +58,7 @@
   border-radius: 4px;
 }
 
-/* Header: 56px bar, wordmark, main links, llms.txt on the right. */
+/* Header: `--site-head-h` bar, wordmark, main links, llms.txt on the right. */
 .site .bar {
   max-width: 1440px;
   width: 100%;
@@ -71,7 +73,7 @@
   border-bottom: 1px solid var(--border);
 }
 .site-head .bar {
-  height: 56px;
+  height: var(--site-head-h);
 }
 .site .wordmark {
   color: var(--foreground);
@@ -193,7 +195,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: 56px;
+  top: var(--site-head-h);
   background: var(--background);
   border-bottom: 1px solid var(--border);
   padding: 8px 16px 16px;
@@ -2568,5 +2570,30 @@
   .site .doc-body pre {
     font-size: 13px;
     padding: 12px;
+  }
+}
+
+/* Brand-kit wordmark: Mineral on light, Signal on dark. The theme provider puts `.dark` on <html>; without it
+   (no JS) the system preference decides. */
+.brand-wordmark {
+  display: block;
+  width: 120px;
+  height: auto;
+}
+.brand-wordmark-dark {
+  display: none;
+}
+.dark .brand-wordmark-light {
+  display: none;
+}
+.dark .brand-wordmark-dark {
+  display: block;
+}
+@media (prefers-color-scheme: dark) {
+  html:not(.light):not(.dark) .brand-wordmark-light {
+    display: none;
+  }
+  html:not(.light):not(.dark) .brand-wordmark-dark {
+    display: block;
   }
 }

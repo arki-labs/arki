@@ -799,3 +799,28 @@
     animation: none;
   }
 }
+
+/* Brand-kit wordmark: Mineral on light, Signal on dark. The theme provider puts `.dark` on <html>; without it
+   (no JS) the system preference decides. */
+.brand-wordmark {
+  display: block;
+  width: 120px;
+  height: auto;
+}
+.brand-wordmark-dark {
+  display: none;
+}
+.dark .brand-wordmark-light {
+  display: none;
+}
+.dark .brand-wordmark-dark {
+  display: block;
+}
+@media (prefers-color-scheme: dark) {
+  html:not(.light):not(.dark) .brand-wordmark-light {
+    display: none;
+  }
+  html:not(.light):not(.dark) .brand-wordmark-dark {
+    display: block;
+  }
+}
