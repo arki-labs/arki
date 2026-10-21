@@ -1,38 +1,36 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 
-import { cn } from '@arki/ui/cn';
-
-import type { CodeKind } from '~/shared/marketing/floors';
 import { getDefaultMeta } from '~/shared-metadata';
+import { BuildPath } from '~/shared/marketing/build-path';
+import { BUILD_STEPS } from '~/shared/marketing/build-steps';
 import { Elevation } from '~/shared/marketing/elevation';
-import { FLOORS } from '~/shared/marketing/floors';
+import { GlossaryProvider } from '~/shared/marketing/glossary-term';
+import { BuiltWith, Materials, StartHere } from '~/shared/marketing/home-bands';
 import { ModeSwitch } from '~/shared/marketing/mode-switch';
 import { HeroMark, Wordmark } from '~/shared/marketing/wordmark';
 import homeCss from '~/styles/home.css?url';
 
 const REPO = 'https://github.com/arki-labs/arki';
 
+/** The header leads to the two places most readers want; the footer keeps the rest within reach. */
 const SITE_LINKS = [
   { label: 'Docs', href: '/docs' },
   { label: 'Packages', href: '/packages' },
+] as const;
+
+const MORE_LINKS = [
   { label: 'Errors', href: '/errors' },
   { label: 'Compare', href: '/compare' },
 ] as const;
-
-const CODE_CLASS = {
-  plain: undefined,
-  keyword: 'home-k',
-  fn: 'home-f',
-  comment: 'home-c',
-} as const satisfies Record<CodeKind, string | undefined>;
 
 export const Route = createFileRoute('/_marketing/')({
   head: () => {
     const base = getDefaultMeta({
       title: 'arki — Build from the foundation up.',
       description:
-        'A TypeScript application framework in six floors: validation first, then the Dot kernel, infrastructure, a React interface, money and local-first AI. Stop at any floor.',
+        'Typed TypeScript packages that compose into one app. The compiler checks the wiring, Postgres keeps the history. Six build steps, each with the real code behind it.',
     });
     return {
       ...base,
@@ -42,145 +40,132 @@ export const Route = createFileRoute('/_marketing/')({
   component: HomePage,
 });
 
-/** The floor whose section sits at the reading line, or -1 until the first one is reached. */
-function useActiveFloor(): number {
+/** The nearest ancestor that scrolls. On this site the page scrolls inside `.marketing`, not in the window. */
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
+  }
+  return null;
+}
+
+/** Where, as a share of the view, a floor counts as the one being read. */
+const READING_LINE = 0.4;
+
+/**
+ * The floor whose section has reached the reading line, or -1 until the first one does. It is worked out from the
+ * scroll position of the element that really scrolls, not from an IntersectionObserver: that one's `rootMargin` is
+ * ignored inside a cross-origin frame and depends on which element is the root, and a lit floor must not hinge on it.
+ */
+function useActiveFloor(stage: RefObject<HTMLElement | null>): number {
   const [active, setActive] = useState(-1);
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting || !(entry.target instanceof HTMLElement)) continue;
-          const floor = Number(entry.target.dataset.floor);
-          if (Number.isInteger(floor)) setActive(floor);
-        }
-      },
-      { rootMargin: '-38% 0px -52% 0px' },
-    );
-    for (const section of document.querySelectorAll('[data-floor]')) observer.observe(section);
-    return () => observer.disconnect();
-  }, []);
+    const home = stage.current;
+    if (home === null) return;
+    const scroller = scrollParent(home);
+    const target: HTMLElement | Window = scroller ?? window;
+    const sections = [...home.querySelectorAll<HTMLElement>('[data-floor]')];
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const top = scroller?.getBoundingClientRect().top ?? 0;
+      const height = scroller?.clientHeight ?? window.innerHeight;
+      const line = top + height * READING_LINE;
+      let floor = -1;
+      for (const [index, section] of sections.entries()) {
+        if (section.getBoundingClientRect().top <= line) floor = index;
+      }
+      setActive(floor);
+    };
+    const schedule = () => {
+      if (frame === 0) frame = requestAnimationFrame(update);
+    };
+    update();
+    target.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      target.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [stage]);
   return active;
 }
 
-const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
-
-function subscribeReducedMotion(onChange: () => void) {
-  const query = window.matchMedia(REDUCED_MOTION);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-/** Motion is on until the reader pauses it, or asks the system for less motion. */
-function useMotion() {
-  const [userPaused, setUserPaused] = useState(false);
-  const reduced = useSyncExternalStore(
-    subscribeReducedMotion,
-    () => window.matchMedia(REDUCED_MOTION).matches,
-    () => false,
-  );
-  return { paused: userPaused || reduced, toggle: () => setUserPaused(previous => !previous) };
-}
-
 function HomePage() {
-  const active = useActiveFloor();
-  const motion = useMotion();
   const stage = useRef<HTMLDivElement>(null);
+  const active = useActiveFloor(stage);
 
   return (
-    <div className="home" ref={stage} data-motion={motion.paused ? 'paused' : 'on'}>
-      <div className="home-wrap">
-        <header className="home-bar">
-          <a className="home-brand" href="/" aria-label="arki home">
-            <Wordmark />
-          </a>
-          <nav className="home-nav" aria-label="Main navigation">
-            {SITE_LINKS.map(link => (
-              <a key={link.href} href={link.href}>
-                {link.label}
+    <GlossaryProvider>
+      <div className="home" ref={stage}>
+        <div className="home-wrap">
+          <header className="home-bar">
+            <a className="home-brand" href="/" aria-label="arki home">
+              <Wordmark />
+            </a>
+            <nav className="home-nav" aria-label="Main navigation">
+              {SITE_LINKS.map(link => (
+                <a key={link.href} href={link.href}>
+                  {link.label}
+                </a>
+              ))}
+              <a href={REPO} target="_blank" rel="noreferrer">
+                GitHub
               </a>
-            ))}
-          </nav>
-          <div className="home-tools">
-            <ModeSwitch stage={stage} animate={!motion.paused} />
-            <button className="home-btn" type="button" aria-pressed={motion.paused} onClick={motion.toggle}>
-              {motion.paused ? 'Resume motion' : 'Pause motion'}
-            </button>
-          </div>
-        </header>
-        <div className="home-hero">
-          <HeroMark />
-          <div>
-            <p className="home-kicker">Construction sequence · {FLOORS.length} floors</p>
-            <h1>Build from the foundation up.</h1>
-            <p>
-              Start with validation and typed failures. Add Dot when you need an app. Every floor depends only on the
-              floors below it, so you can stop at any floor.
-            </p>
-            <code className="home-install">bun add @arki/dot</code>
-            <div className="home-links">
-              <a href="/docs">Read the docs</a>
-              <a href="/packages">All packages</a>
-              <a href="/compare">Compare</a>
+            </nav>
+          </header>
+          <div className="home-hero">
+            <HeroMark />
+            <div>
+              <p className="home-kicker">
+                Construction sequence · {BUILD_STEPS.length} floors ·{' '}
+                {BUILD_STEPS.filter(step => step.sheet !== undefined).length} full sheets
+              </p>
+              <h1>Build from the foundation up.</h1>
+              <p>
+                Typed TypeScript packages that compose into one app. The compiler checks the wiring. Postgres keeps the
+                history. Each floor is one step; the two that matter most come with their own drawing sheet.
+              </p>
+              <code className="home-install">bun add @arki/dot</code>
+              <div className="home-links">
+                <a href="/docs">Read the docs</a>
+                <a href="/packages">All packages</a>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="home-grid">
-          <div className="home-steps">
-            {FLOORS.map((floor, index) => (
-              <section
-                key={floor.name}
-                className={cn('home-step', index === active && 'is-now')}
-                data-floor={index}
-                aria-labelledby={`floor-${index + 1}`}
-              >
-                <p className="home-kicker">
-                  <b>{`W${index + 1}`}</b> · {floor.name} · {floor.packages.length} packages
-                </p>
-                <h2 id={`floor-${index + 1}`}>{floor.title}</h2>
-                <p className="home-step-text">{floor.text}</p>
-                <figure className="home-code">
-                  <figcaption>{floor.readme} · Quick start</figcaption>
-                  <pre>
-                    <code>
-                      {floor.code.map((line, row) => (
-                        <span className="home-code-line" key={row}>
-                          {line.map(([kind, text], column) => (
-                            <span key={column} className={CODE_CLASS[kind]}>
-                              {text}
-                            </span>
-                          ))}
-                        </span>
-                      ))}
-                    </code>
-                  </pre>
-                </figure>
-                <ul className="home-packages" aria-label={`${floor.name} packages`}>
-                  {floor.packages.map(name => (
-                    <li key={name}>@arki/{name}</li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+          <div className="home-grid">
+            <BuildPath />
+            <Elevation active={active} />
           </div>
-          <Elevation active={active} />
-        </div>
-        <footer className="home-foot">
-          <a className="home-brand" href="/" aria-label="arki home">
-            <Wordmark />
-          </a>
-          <span>Each code line is copied from the named README.</span>
-          <nav aria-label="Footer navigation">
-            {SITE_LINKS.map(link => (
-              <a key={link.href} href={link.href}>
-                {link.label}
-              </a>
-            ))}
-            <a href={REPO} target="_blank" rel="noreferrer">
-              GitHub
+          <BuiltWith />
+          <Materials />
+          <StartHere />
+          <footer className="home-foot">
+            <a className="home-brand" href="/" aria-label="arki home">
+              <Wordmark />
             </a>
-          </nav>
-        </footer>
+            <span>Each code line is copied from the named file.</span>
+            <nav aria-label="Footer navigation">
+              {SITE_LINKS.map(link => (
+                <a key={link.href} href={link.href}>
+                  {link.label}
+                </a>
+              ))}
+              <a href={REPO} target="_blank" rel="noreferrer">
+                GitHub
+              </a>
+            </nav>
+            <ModeSwitch stage={stage} />
+            <nav className="home-more" aria-label="More pages">
+              {MORE_LINKS.map(link => (
+                <a key={link.href} href={link.href}>
+                  {link.label}
+                </a>
+              ))}
+            </nav>
+          </footer>
+        </div>
       </div>
-    </div>
+    </GlossaryProvider>
   );
 }

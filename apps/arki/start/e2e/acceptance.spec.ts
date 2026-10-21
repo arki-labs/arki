@@ -62,8 +62,15 @@ async function unreachedByTab(page: Page, limit = 60): Promise<string[]> {
 
 test.describe('site acceptance', () => {
   // WHY: a reader who cannot use a mouse must still reach every place the header offers, including the site nav
-  // (Docs, Packages, Errors, Compare) at the top of every reference page.
-  for (const path of ['/', '/docs', '/errors', '/packages/dot', '/packages/dot/next/docs/quickstart', '/docs/glossary']) {
+  // (Docs and Packages) at the top of every reference page.
+  for (const path of [
+    '/',
+    '/docs',
+    '/errors',
+    '/packages/dot',
+    '/packages/dot/next/docs/quickstart',
+    '/docs/glossary',
+  ]) {
     test(`keyboard alone reaches every top-nav item on ${path}`, async ({ page }) => {
       await page.goto(path);
       expect(await topNavLinks(page).count(), 'the page has a top nav').toBeGreaterThan(0);
@@ -71,19 +78,22 @@ test.describe('site acceptance', () => {
     });
   }
 
-  // WHY: the homepage is where most readers arrive; its header must lead straight to the reference sections, and a
-  // keyboard user must be able to reach each of them.
-  test('the homepage nav offers Docs, Packages, Errors and Compare to the keyboard', async ({ page }) => {
+  // WHY: the homepage is where most readers arrive; its header leads to Docs and Packages and nothing else of low
+  // importance, and Errors and Compare stay reachable from the footer. A keyboard user must reach all of them.
+  test('the homepage header offers Docs and Packages; Errors and Compare sit in the footer', async ({ page }) => {
     await page.goto('/');
     const mainNav = page.getByRole('navigation', { name: 'Main navigation' });
     for (const [name, href] of [
       ['Docs', '/docs'],
       ['Packages', '/packages'],
-      ['Errors', '/errors'],
-      ['Compare', '/compare'],
     ] as const) {
       await expect(mainNav.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
     }
+    await expect(mainNav.getByRole('link', { name: 'Errors' })).toHaveCount(0);
+    await expect(mainNav.getByRole('link', { name: 'Compare' })).toHaveCount(0);
+    const more = page.getByRole('navigation', { name: 'More pages' });
+    await expect(more.getByRole('link', { name: 'Errors' })).toHaveAttribute('href', '/errors');
+    await expect(more.getByRole('link', { name: 'Compare' })).toHaveAttribute('href', '/compare');
     expect(await unreachedByTab(page)).toEqual([]);
   });
 
@@ -137,7 +147,9 @@ test.describe('site acceptance', () => {
       await page.goto(path);
       await page.locator('header summary').click();
       for (const href of ['/docs', '/packages']) {
-        const link = topNavLinks(page).and(page.locator(`a[href="${href}"]`)).first();
+        const link = topNavLinks(page)
+          .and(page.locator(`a[href="${href}"]`))
+          .first();
         await expect(link, `a visible header link to ${href} (in the menu)`).toBeVisible();
         const box = await link.boundingBox();
         expect((box?.x ?? 0) + (box?.width ?? 0), `the ${href} link is on screen`).toBeLessThanOrEqual(375);

@@ -1,6 +1,6 @@
 import { cn } from '@arki/ui/cn';
 
-import { FLOORS } from './floors';
+import { BUILD_STEPS } from './build-steps';
 
 /** The side elevation, drawn in SVG units: a tower crane beside a six-floor building, foundation at the bottom. */
 const DRAWING = {
@@ -19,13 +19,13 @@ const DRAWING = {
   archHeight: 26,
 } as const;
 
-const groundY = DRAWING.firstFloorY + FLOORS.length * DRAWING.floorHeight;
+const groundY = DRAWING.firstFloorY + BUILD_STEPS.length * DRAWING.floorHeight;
 const drawingHeight = groundY + 22;
 const jibBottom = DRAWING.jibY + DRAWING.jibHeight;
 
 /** Top edge of a floor. Floor 0 (the foundation) is the lowest one. */
 function floorTop(index: number): number {
-  return DRAWING.firstFloorY + (FLOORS.length - 1 - index) * DRAWING.floorHeight;
+  return DRAWING.firstFloorY + (BUILD_STEPS.length - 1 - index) * DRAWING.floorHeight;
 }
 
 /** How far the crane lowers the bubble: to the middle of the lit floor, or a short hang above the roof at rest. */
@@ -47,7 +47,7 @@ type ElevationProps = {
 
 export function Elevation({ active }: Readonly<ElevationProps>) {
   const drop = bubbleDrop(active);
-  const label = `Side elevation of a building with ${FLOORS.length} floors, one for each section below. The floor you are reading is lit and a crane lowers the bubble to it.`;
+  const label = `Side elevation of a building with ${BUILD_STEPS.length} floors, one for each build step below. Floors with a full sheet carry its sheet number. The floor you are reading is lit and a crane lowers the bubble to it.`;
 
   return (
     <aside className="home-side" aria-label="Side elevation">
@@ -88,13 +88,13 @@ export function Elevation({ active }: Readonly<ElevationProps>) {
             y1={DRAWING.roofY}
             y2={DRAWING.roofY}
           />
-          {FLOORS.map((floor, index) => {
+          {BUILD_STEPS.map((step, index) => {
             const top = floorTop(index);
             const bottom = top + DRAWING.floorHeight;
-            const slot = DRAWING.boxWidth / floor.packages.length;
+            const slot = DRAWING.boxWidth / step.excerpts.length;
             return (
               <g
-                key={floor.name}
+                key={step.id}
                 className={cn('home-floor', index <= active && 'is-built', index === active && 'is-now')}
               >
                 <rect
@@ -105,13 +105,23 @@ export function Elevation({ active }: Readonly<ElevationProps>) {
                   height={DRAWING.floorHeight}
                 />
                 <text className="home-floor-number" x={DRAWING.boxX - 8} y={bottom - 20} textAnchor="end">
-                  {`W${index + 1}`}
+                  {step.number}
                 </text>
                 <text className="home-floor-name" x={DRAWING.boxX - 8} y={bottom - 7} textAnchor="end">
-                  {floor.name.split(' ')[0]}
+                  {step.verb}
                 </text>
-                {floor.packages.map((name, arch) => (
-                  <path key={name} className="home-arch" d={archPath(DRAWING.boxX + slot * (arch + 0.5), bottom)} />
+                {step.sheet === undefined ? null : (
+                  <text
+                    className="home-floor-tag"
+                    x={DRAWING.boxX + DRAWING.boxWidth - 4}
+                    y={top + 10}
+                    textAnchor="end"
+                  >
+                    {step.sheet}
+                  </text>
+                )}
+                {step.excerpts.map((_, arch) => (
+                  <path key={arch} className="home-arch" d={archPath(DRAWING.boxX + slot * (arch + 0.5), bottom)} />
                 ))}
               </g>
             );
@@ -150,18 +160,20 @@ export function Elevation({ active }: Readonly<ElevationProps>) {
             />
           </g>
         </svg>
-        <div className="home-strip" aria-hidden="true">
-          {FLOORS.map((floor, index) => (
-            <span
-              key={floor.name}
+        <nav className="home-strip" aria-label="Build steps">
+          {BUILD_STEPS.map((step, index) => (
+            <a
+              key={step.id}
+              href={`#step-${step.id}`}
               className={cn('home-strip-cell', index <= active && 'is-built', index === active && 'is-now')}
+              aria-current={index === active ? 'step' : undefined}
+              aria-label={`${step.number} ${step.verb}`}
             >
-              <b>{`W${index + 1}`}</b>
-              <i />
-            </span>
+              {step.number}
+            </a>
           ))}
-        </div>
-        <p className="home-caption">1 arch = 1 package</p>
+        </nav>
+        <p className="home-caption">1 arch = 1 code excerpt · A-xxx and J-xxx = a full sheet on that floor</p>
       </div>
     </aside>
   );

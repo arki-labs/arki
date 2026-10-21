@@ -17,9 +17,7 @@ export const siteHead = () => ({ links: [{ rel: 'stylesheet', href: siteCss }] }
 const MAIN_LINKS = [
   { to: '/docs', label: 'Docs' },
   { to: '/packages', label: 'Packages' },
-  { to: '/errors', label: 'Errors' },
   { to: '/agents', label: 'Agents' },
-  { to: '/compare', label: 'Compare' },
 ] as const;
 
 function MainLinks() {

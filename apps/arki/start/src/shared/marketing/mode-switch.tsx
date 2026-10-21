@@ -1,18 +1,19 @@
-import type { ArkiTheme } from '~/styles/arki/themes';
 import type { RefObject } from 'react';
 import { useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 
 import { useTheme } from '@arki/ui/theme';
 
+import type { ArkiTheme } from '~/styles/arki/themes';
+
 type ModeTheme = Exclude<ArkiTheme, 'system'>;
 
 const MODES = [
-  { theme: 'light', label: 'Light' },
-  { theme: 'candle-light', label: 'Candle light' },
-  { theme: 'candle-dark', label: 'Candle dark' },
-  { theme: 'dark', label: 'Dark' },
-] as const satisfies readonly { theme: ModeTheme; label: string }[];
+  { theme: 'light', label: 'Light', palette: 'Mineral' },
+  { theme: 'candle-light', label: 'Candle light', palette: 'Parchment' },
+  { theme: 'candle-dark', label: 'Candle dark', palette: 'Drafting table' },
+  { theme: 'dark', label: 'Dark', palette: 'Signal' },
+] as const satisfies readonly { theme: ModeTheme; label: string; palette: string }[];
 
 /** How each mode enters, as the `data-vt` value the stylesheet keys on. */
 const REVEAL = {
@@ -97,13 +98,17 @@ function subscribeNever() {
 type ModeSwitchProps = {
   /** The element whose pixels the reveal plays over. */
   stage: RefObject<HTMLElement | null>;
-  /** False when motion is paused: the theme then switches at once. */
-  animate: boolean;
 };
 
-export function ModeSwitch({ stage, animate }: Readonly<ModeSwitchProps>) {
-  const { resolvedTheme, setTheme } = useTheme();
-  // The stored theme is only known in the browser, so the pressed state waits for hydration.
+/**
+ * The theme picker: four swatch cards in a radio group, so the arrow keys move between them. Each card previews its
+ * own palette. The checked card also shows a ring and a check mark, not only a colour.
+ */
+export function ModeSwitch({ stage }: Readonly<ModeSwitchProps>) {
+  const { theme: storedTheme, resolvedTheme, setTheme } = useTheme();
+  // The chosen theme, or the mode the system resolved to while nothing is chosen.
+  const selected = storedTheme === undefined || storedTheme === 'system' ? resolvedTheme : storedTheme;
+  // The stored theme is only known in the browser, so the checked card waits for hydration.
   const hydrated = useSyncExternalStore(
     subscribeNever,
     () => true,
@@ -111,9 +116,9 @@ export function ModeSwitch({ stage, animate }: Readonly<ModeSwitchProps>) {
   );
 
   function choose(theme: ModeTheme) {
-    if (theme === resolvedTheme) return;
+    if (theme === selected) return;
     const stageElement = stage.current;
-    if (!animate || !stageElement) {
+    if (!stageElement) {
       setTheme(theme);
       return;
     }
@@ -121,17 +126,28 @@ export function ModeSwitch({ stage, animate }: Readonly<ModeSwitchProps>) {
   }
 
   return (
-    <div className="home-seg" role="group" aria-label="Colour mode">
-      {MODES.map(({ theme, label }) => (
-        <button
-          key={theme}
-          type="button"
-          aria-pressed={hydrated && resolvedTheme === theme}
-          onClick={() => choose(theme)}
-        >
-          {label}
-        </button>
+    <fieldset className="home-themes">
+      <legend>Theme</legend>
+      {MODES.map(({ theme, label, palette }) => (
+        <label key={theme} className="home-swatch" data-mode={theme}>
+          <input
+            type="radio"
+            name="home-theme"
+            value={theme}
+            checked={hydrated && selected === theme}
+            onChange={() => choose(theme)}
+          />
+          <span className="home-swatch-preview" aria-hidden="true">
+            <i className="home-swatch-ink" />
+            <i className="home-swatch-dot" />
+          </span>
+          <svg className="home-swatch-check" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3.5 8.5l3 3 6-7" />
+          </svg>
+          <span className="home-swatch-label">{label}</span>
+          <span className="home-swatch-palette">{palette}</span>
+        </label>
       ))}
-    </div>
+    </fieldset>
   );
 }
