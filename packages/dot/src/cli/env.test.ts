@@ -132,6 +132,16 @@ describe('dot env encrypt --from', () => {
   });
 });
 
+describe('dot env encrypt --from --all', () => {
+  it('encrypts every imported value, so an oddly named secret cannot land in git as plaintext', async () => {
+    await dot('env', 'init');
+    writeFileSync(path.join(app, '.env'), 'ODD_NAME=hunter2-really-secret\nPORT=3000\n');
+    const result = await dot('env', 'encrypt', '--from', '.env', '--all');
+    expect(result.json.data).toMatchObject({ encrypted: ['ODD_NAME', 'PORT'], plain: [] });
+    expect(readFileSync(path.join(app, '.env.development'), 'utf8')).not.toContain('hunter2');
+  });
+});
+
 describe('dot env run', () => {
   beforeEach(async () => {
     await dot('env', 'init');

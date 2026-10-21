@@ -22,11 +22,12 @@ export default defineCommand({
   input: z.object({
     key: z.array(z.string()).optional().describe('Only these keys (repeat --key)'),
     from: z.string().optional().describe('Plaintext file to import: secret-looking keys are encrypted, the rest stay plain'),
+    all: z.boolean().default(false).describe('With --from: encrypt every value, not only secret-looking ones'),
     schema: z.string().optional().describe('Env module to read secret() keys from (default: src/env.ts)'),
     ...envTargetInput,
   }),
   effects: 'write',
-  examples: ['dot env encrypt', 'dot env encrypt --key STRIPE_SECRET_KEY', 'dot env encrypt --from .env --env development'],
+  examples: ['dot env encrypt', 'dot env encrypt --key STRIPE_SECRET_KEY', 'dot env encrypt --from .env --all'],
   async run({ input }) {
     const target = resolveTarget(input);
     const file = relative(target.root, target.file);
@@ -44,7 +45,7 @@ export default defineCommand({
     const plain: string[] = [];
     for (const [key, entry] of envValues(parseEnv(readFileSync(source, 'utf8')))) {
       if (isKeyName(key) || (input.key !== undefined && !input.key.includes(key))) continue;
-      const secret = secretKeys.has(key) || SECRET_NAME.test(key);
+      const secret = input.all || secretKeys.has(key) || SECRET_NAME.test(key);
       setEnvFileValue(target.file, key, entry.value, { plain: !secret });
       (secret ? encrypted : plain).push(key);
     }
