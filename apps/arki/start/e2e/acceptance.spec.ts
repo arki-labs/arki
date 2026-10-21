@@ -62,9 +62,10 @@ async function unreachedByTab(page: Page, limit = 60): Promise<string[]> {
 
 test.describe('site acceptance', () => {
   // WHY: a reader who cannot use a mouse must still reach every place the header offers, including the site nav
-  // (Docs and Packages) at the top of every reference page.
+  // (Docs, Packages and What's inside) at the top of every reference page.
   for (const path of [
     '/',
+    '/inside',
     '/docs',
     '/errors',
     '/packages/dot',
@@ -78,14 +79,17 @@ test.describe('site acceptance', () => {
     });
   }
 
-  // WHY: the homepage is where most readers arrive; its header leads to Docs and Packages and nothing else of low
-  // importance, and Errors and Compare stay reachable from the footer. A keyboard user must reach all of them.
-  test('the homepage header offers Docs and Packages; Errors and Compare sit in the footer', async ({ page }) => {
+  // WHY: the homepage is where most readers arrive; its header leads to Docs, Packages and What's inside and nothing
+  // else of low importance, and Errors and Compare stay reachable from the footer. A keyboard user must reach all of them.
+  test("the homepage header offers Docs, Packages and What's inside; Errors and Compare sit in the footer", async ({
+    page,
+  }) => {
     await page.goto('/');
     const mainNav = page.getByRole('navigation', { name: 'Main navigation' });
     for (const [name, href] of [
       ['Docs', '/docs'],
       ['Packages', '/packages'],
+      ["What's inside", '/inside'],
     ] as const) {
       await expect(mainNav.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
     }

@@ -8,22 +8,9 @@ import { BUILD_STEPS } from '~/shared/marketing/build-steps';
 import { Elevation } from '~/shared/marketing/elevation';
 import { GlossaryProvider } from '~/shared/marketing/glossary-term';
 import { BuiltWith, Materials, StartHere } from '~/shared/marketing/home-bands';
-import { ModeSwitch } from '~/shared/marketing/mode-switch';
-import { HeroMark, Wordmark } from '~/shared/marketing/wordmark';
+import { HomeFooter, HomeHeader } from '~/shared/marketing/home-chrome';
+import { HeroMark } from '~/shared/marketing/wordmark';
 import homeCss from '~/styles/home.css?url';
-
-const REPO = 'https://github.com/arki-labs/arki';
-
-/** The header leads to the two places most readers want; the footer keeps the rest within reach. */
-const SITE_LINKS = [
-  { label: 'Docs', href: '/docs' },
-  { label: 'Packages', href: '/packages' },
-] as const;
-
-const MORE_LINKS = [
-  { label: 'Errors', href: '/errors' },
-  { label: 'Compare', href: '/compare' },
-] as const;
 
 export const Route = createFileRoute('/_marketing/')({
   head: () => {
@@ -99,21 +86,7 @@ function HomePage() {
     <GlossaryProvider>
       <div className="home" ref={stage}>
         <div className="home-wrap">
-          <header className="home-bar">
-            <a className="home-brand" href="/" aria-label="arki home">
-              <Wordmark />
-            </a>
-            <nav className="home-nav" aria-label="Main navigation">
-              {SITE_LINKS.map(link => (
-                <a key={link.href} href={link.href}>
-                  {link.label}
-                </a>
-              ))}
-              <a href={REPO} target="_blank" rel="noreferrer">
-                GitHub
-              </a>
-            </nav>
-          </header>
+          <HomeHeader />
           <div className="home-hero">
             <HeroMark />
             <div>
@@ -140,30 +113,7 @@ function HomePage() {
           <BuiltWith />
           <Materials />
           <StartHere />
-          <footer className="home-foot">
-            <a className="home-brand" href="/" aria-label="arki home">
-              <Wordmark />
-            </a>
-            <span>Each code line is copied from the named file.</span>
-            <nav aria-label="Footer navigation">
-              {SITE_LINKS.map(link => (
-                <a key={link.href} href={link.href}>
-                  {link.label}
-                </a>
-              ))}
-              <a href={REPO} target="_blank" rel="noreferrer">
-                GitHub
-              </a>
-            </nav>
-            <ModeSwitch stage={stage} />
-            <nav className="home-more" aria-label="More pages">
-              {MORE_LINKS.map(link => (
-                <a key={link.href} href={link.href}>
-                  {link.label}
-                </a>
-              ))}
-            </nav>
-          </footer>
+          <HomeFooter stage={stage} />
         </div>
       </div>
     </GlossaryProvider>

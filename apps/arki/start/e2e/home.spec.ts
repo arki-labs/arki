@@ -280,13 +280,13 @@ test.describe('/ build path', () => {
   }
 
   // WHY: the header must stay one compact row on a phone with all its links reachable from the keyboard.
-  test('the header is one compact row at 360px and its three links are reachable', async ({ page }) => {
+  test('the header is one compact row at 360px and its four links are reachable', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
     await page.goto('/');
     const header = await page.locator('header.home-bar').boundingBox();
     expect(header?.height ?? 999).toBeLessThan(70);
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
-    await expect(nav.getByRole('link')).toHaveText(['Docs', 'Packages', 'GitHub']);
+    await expect(nav.getByRole('link')).toHaveText(['Docs', 'Packages', "What's inside", 'GitHub']);
     await nav.getByRole('link', { name: 'GitHub' }).focus();
     await expect(nav.getByRole('link', { name: 'GitHub' })).toBeFocused();
   });

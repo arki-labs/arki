@@ -24,6 +24,7 @@ import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt';
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml';
 import { Route as DotwellKnownSecurityDottxtRouteImport } from './routes/[.]well-known/security[.]txt';
 import { Route as MarketingIndexRouteImport } from './routes/_marketing/index';
+import { Route as MarketingInsideRouteImport } from './routes/_marketing/inside';
 import { Route as AboutIndexRouteImport } from './routes/about/index';
 import { Route as AgentsIndexRouteImport } from './routes/agents/index';
 import { Route as ApiFleetRouteImport } from './routes/api/fleet';
@@ -133,6 +134,11 @@ const DotwellKnownSecurityDottxtRoute =
 const MarketingIndexRoute = MarketingIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => MarketingRoute,
+} as any);
+const MarketingInsideRoute = MarketingInsideRouteImport.update({
+  id: '/inside',
+  path: '/inside',
   getParentRoute: () => MarketingRoute,
 } as any);
 const AboutIndexRoute = AboutIndexRouteImport.update({
@@ -335,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
+  '/inside': typeof MarketingInsideRoute;
   '/api/fleet': typeof ApiFleetRoute;
   '/api/health': typeof ApiHealthRoute;
   '/auth/$pathname': typeof AuthPathnameRoute;
@@ -379,6 +386,7 @@ export interface FileRoutesByTo {
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
+  '/inside': typeof MarketingInsideRoute;
   '/api/fleet': typeof ApiFleetRoute;
   '/api/health': typeof ApiHealthRoute;
   '/auth/$pathname': typeof AuthPathnameRoute;
@@ -431,6 +439,7 @@ export interface FileRoutesById {
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
   '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute;
+  '/_marketing/inside': typeof MarketingInsideRoute;
   '/api/fleet': typeof ApiFleetRoute;
   '/api/health': typeof ApiHealthRoute;
   '/auth/$pathname': typeof AuthPathnameRoute;
@@ -485,6 +494,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
+    | '/inside'
     | '/api/fleet'
     | '/api/health'
     | '/auth/$pathname'
@@ -529,6 +539,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
+    | '/inside'
     | '/api/fleet'
     | '/api/health'
     | '/auth/$pathname'
@@ -580,6 +591,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/security.txt'
+    | '/_marketing/inside'
     | '/api/fleet'
     | '/api/health'
     | '/auth/$pathname'
@@ -750,6 +762,13 @@ declare module '@tanstack/react-router' {
       path: '/';
       fullPath: '/';
       preLoaderRoute: typeof MarketingIndexRouteImport;
+      parentRoute: typeof MarketingRoute;
+    };
+    '/_marketing/inside': {
+      id: '/_marketing/inside';
+      path: '/inside';
+      fullPath: '/inside';
+      preLoaderRoute: typeof MarketingInsideRouteImport;
       parentRoute: typeof MarketingRoute;
     };
     '/about/': {
@@ -1134,10 +1153,12 @@ const AppRouteChildren: AppRouteChildren = {
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren);
 
 interface MarketingRouteChildren {
+  MarketingInsideRoute: typeof MarketingInsideRoute;
   MarketingIndexRoute: typeof MarketingIndexRoute;
 }
 
 const MarketingRouteChildren: MarketingRouteChildren = {
+  MarketingInsideRoute: MarketingInsideRoute,
   MarketingIndexRoute: MarketingIndexRoute,
 };
 

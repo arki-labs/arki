@@ -11,7 +11,7 @@ import { GlossaryTerm } from './glossary-term';
 import { tokenizeLines } from './highlight';
 
 /** One line of tokens. Words in the glossary are buttons that explain themselves; the rest are plain spans. */
-function Tokens({ tokens }: Readonly<{ tokens: readonly Token[] }>) {
+export function Tokens({ tokens }: Readonly<{ tokens: readonly Token[] }>) {
   return tokens.map((token, index) => {
     const className = cn(`tk-${token.kind}`, token.depth !== undefined && `tk-b${token.depth % 4}`);
     const entry = glossaryEntry(token.text, token.kind);
