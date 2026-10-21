@@ -34,6 +34,7 @@ import { renderReadinessTable } from './readiness';
 import { defaultGitRunner, defaultNpmRunner } from './runners';
 import { renderScorecardText, runScorecard } from './scorecard';
 import { runShip, type ShipMode } from './ship';
+import { runSite } from './site';
 import { runSmoke } from './smoke';
 import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
 import { runUpgradeGuide } from './upgrade-guide';
@@ -140,6 +141,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'ship',
     task: 'T1.6',
     description: 'Wave to founder packet: --wave <id> [--dry-run] | --wave <id> --resume | --finish --candidate <dir> (founder only).',
+  },
+  {
+    name: 'site',
+    task: 'T3.1',
+    description: 'Docs + data for apps/arki/start: --channel published | --channel next [--candidate <dir>].',
   },
 ];
 
@@ -372,6 +378,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
 
   if (args.command === 'ship') {
     return runShipHandler(args);
+  }
+
+  if (args.command === 'site') {
+    return runSiteHandler(args);
   }
 
   const envelope = buildStubEnvelope(args.command);
@@ -712,6 +722,22 @@ async function runShipHandler(args: ParsedCliArgs): Promise<number> {
  * Extract `--package <name>` / `--path <abs>` style flags from
  * `args.rest`. Minimal — we only need a handful of options for now.
  */
+/**
+ * `site --channel published`: npm versions not yet on disk become immutable snapshots.
+ * `site --channel next [--candidate <dir>]`: the newest candidate per wave (or `<dir>`) into `<name>/next/`.
+ */
+async function runSiteHandler(args: ParsedCliArgs): Promise<number> {
+  const channel = extractOption(args.rest, 'channel');
+  const candidateDir = extractOption(args.rest, 'candidate');
+  if (channel !== 'published' && channel !== 'next') return usageError('site', 'site needs `--channel published` or `--channel next`.', args.json);
+  if (channel === 'published' && candidateDir !== null) return usageError('site', '`--candidate` belongs to `--channel next`.', args.json);
+  return withConfig('site', args.json, async config => {
+    const envelope = await runSite({ cwd: process.cwd(), config, channel, ...(candidateDir === null ? {} : { candidateDir }) });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  });
+}
+
 function extractOption(rest: readonly string[], name: string): string | null {
   const idx = rest.indexOf(`--${name}`);
   if (idx === -1) return null;

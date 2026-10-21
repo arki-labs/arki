@@ -24,6 +24,7 @@ import type { ReadinessResult } from './readiness';
  *   - smoke              (T1.2): install a candidate's tarballs into a clean consumer and import every export
  *   - impact             (T1.4): docs-impact and demo-impact for the packages a wave releases
  *   - ship               (T1.6): one command from a wave to a founder packet, then `--finish`
+ *   - site               (T3.1): package docs + data files for apps/arki/start, from npm or the candidate
  */
 export type ReleaseCommand =
   | 'inventory'
@@ -39,7 +40,8 @@ export type ReleaseCommand =
   | 'smoke'
   | 'impact'
   | 'upgrade-guide'
-  | 'ship';
+  | 'ship'
+  | 'site';
 
 /**
  * Lifecycle status of a release command run.

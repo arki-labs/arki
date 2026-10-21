@@ -1,0 +1,136 @@
+/**
+ * Shapes of what `site` writes for `apps/arki/start`.
+ *
+ * Each generated file is declared here once, as a Zod schema. `site` parses
+ * every file through its schema before it writes it, and the start app infers
+ * its types from these schemas with `import type` (types only, so no node code
+ * reaches the browser bundle).
+ *
+ *   src/content/packages/<short>/<version|next>/snapshot.json  -> snapshotMetaSchema
+ *   src/generated/packages.json                                -> packagesFileSchema
+ *   src/generated/errors.json                                  -> errorsFileSchema
+ *   src/generated/examples.json                                -> examplesFileSchema
+ *   src/generated/demos.json                                   -> demosFileSchema
+ *   src/generated/dot-new.json                                 -> dotNewFileSchema
+ */
+
+import { z } from 'zod';
+
+import { errorEntrySchema } from '@arki/library-tooling/src/error-index';
+
+import { docExamplesReportSchema } from './docs-fresh';
+
+/** `published`: an npm version, immutable once written. `next`: the newest candidate, rewritten each run. */
+export const SITE_CHANNELS = ['published', 'next'] as const;
+export type SiteChannel = (typeof SITE_CHANNELS)[number];
+
+/**
+ * Where a package's "latest" page comes from: the newest npm version when its
+ * snapshot has docs, else the candidate (`next`), else the newest npm version's
+ * README-only snapshot (`archive`), else nothing (`none`).
+ */
+export const LATEST_SOURCES = ['published', 'next', 'archive', 'none'] as const;
+
+/** `measured`: the README holds a bench block with provenance. */
+export const BENCH_STATUSES = ['measured', 'none'] as const;
+
+/** The candidate a `next` snapshot was copied from: what the "unreleased" banner shows. */
+export const candidateRefSchema = z.object({
+  wave: z.string(),
+  sourceCommit: z.string(),
+  createdAt: z.string(),
+});
+
+/** `snapshot.json` in every `<short>/<version|next>/` folder. */
+export const snapshotMetaSchema = z.object({
+  name: z.string(),
+  channel: z.enum(SITE_CHANNELS),
+  version: z.string(),
+  /** True when the tarball had no `docs/` and no `llms.txt`: only README (and CHANGELOG) were kept. */
+  archive: z.boolean(),
+  /** Hex sha512 of the tarball the files came from. */
+  sha512: z.string(),
+  /** Snapshot-relative paths of the copied files, sorted. */
+  files: z.array(z.string()),
+  /** Set for `next` snapshots only. */
+  candidate: candidateRefSchema.nullable(),
+  /** `arki-doc-examples --json` result recorded in the candidate; null when none was recorded. */
+  examples: docExamplesReportSchema.nullable(),
+  /** The tarball manifest's `engines`. */
+  engines: z.record(z.string(), z.string()),
+  benchStatus: z.enum(BENCH_STATUSES),
+});
+
+export const packageEntrySchema = z.object({
+  name: z.string(),
+  /** Folder under `src/content/packages/`. */
+  short: z.string(),
+  /** 1 = stack, 2 = standalone library, null = untiered. */
+  tier: z.union([z.literal(1), z.literal(2)]).nullable(),
+  wave: z.string(),
+  status: z.enum(LATEST_SOURCES),
+  /** Newest npm version with a snapshot on disk; null when never published. */
+  npmVersion: z.string().nullable(),
+  /** Version in the newest candidate; null when no candidate holds the package. */
+  nextVersion: z.string().nullable(),
+  /** Banner data when `status` is `next`. */
+  candidate: candidateRefSchema.nullable(),
+  /** Every snapshot folder, newest first; `next` last. */
+  versions: z.array(z.object({ version: z.string(), channel: z.enum(SITE_CHANNELS), archive: z.boolean() })),
+  runtimes: z.record(z.string(), z.string()),
+  benchStatus: z.enum(BENCH_STATUSES),
+  hasLlms: z.boolean(),
+  examples: z.object({ compiled: z.number(), run: z.number(), skipped: z.number() }).nullable(),
+  demos: z.array(z.object({ name: z.string(), pin: z.string().nullable() })),
+  /** `https://github.com/arki-labs/<short>`, the read-only mirror `sync` maintains. */
+  mirror: z.string(),
+  /** Readiness items still listed in `readiness-baseline.json`. */
+  openGaps: z.array(z.string()),
+});
+export const packagesFileSchema = z.array(packageEntrySchema);
+
+/** Error codes of each package's latest snapshot (`errors.json` in the tarball). */
+export const errorsFileSchema = z.array(
+  errorEntrySchema.extend({ version: z.string(), channel: z.enum(SITE_CHANNELS) }),
+);
+
+export const examplesFileSchema = z.array(
+  z.object({ name: z.string(), version: z.string(), report: docExamplesReportSchema }),
+);
+
+export const demosFileSchema = z.array(
+  z.object({
+    name: z.string(),
+    repo: z.string(),
+    /** False when the demo folder is not checked out. */
+    present: z.boolean(),
+    pins: z.array(z.object({ name: z.string(), pinned: z.string() })),
+  }),
+);
+
+/** One file `dot new --dry-run --json` plans (the CLI's printed contract). */
+const dotNewOperationSchema = z.object({
+  path: z.string(),
+  action: z.string(),
+  contentHash: z.string(),
+  contentBytes: z.number(),
+  reason: z.string(),
+});
+
+/** The `data` of `dot new --dry-run --json`, as printed by the candidate's CLI. */
+export const dotNewResultSchema = z.object({
+  app: z.object({ name: z.string(), target: z.string() }),
+  operations: z.array(dotNewOperationSchema),
+  nextSteps: z.array(z.string()),
+});
+
+export const dotNewFileSchema = z.object({
+  /** Version of the `@arki/dot` tarball the plan came from. */
+  version: z.string(),
+  candidate: candidateRefSchema,
+  templates: z.array(z.object({ template: z.string(), result: dotNewResultSchema })),
+});
+
+export type SnapshotMeta = z.output<typeof snapshotMetaSchema>;
+export type PackageEntry = z.output<typeof packageEntrySchema>;
+export type DotNewFile = z.output<typeof dotNewFileSchema>;

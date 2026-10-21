@@ -15,6 +15,9 @@
     },
     "./types": {
       "default": "./src/types.ts"
+    },
+    "./site-schema": {
+      "default": "./src/site-schema.ts"
     }
   },
   "bin": {

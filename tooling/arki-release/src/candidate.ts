@@ -577,6 +577,11 @@ export async function readTarball(file: string): Promise<TarballContents> {
   return { files, manifest, packedSize: packed.length };
 }
 
+/** Every regular file of a `.tgz` with its bytes (paths without `package/`). `site` copies docs from these. */
+export async function readTarballEntries(file: string): Promise<ReadonlyArray<{ readonly path: string; readonly body: Buffer }>> {
+  return [...tarFiles(gunzipSync(await readFile(file)))].map(entry => ({ path: entry.path, body: entry.body }));
+}
+
 /** The text of one file in a `.tgz` (path without `package/`), or null when it is not there. */
 export async function readTarballText(file: string, relative: string): Promise<string | null> {
   for (const entry of tarFiles(gunzipSync(await readFile(file)))) {
