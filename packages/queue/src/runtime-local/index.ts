@@ -1,5 +1,5 @@
 /**
- * @arki/queue/runtime-local
+ * The queue on pg-boss and PGlite, with no Redis.
  *
  * A pg-boss-on-PGlite implementation of the @arki/queue DSL.
  * Same `initQueue.context<TContext>().create()` entry point; same job, schedule,

@@ -1,5 +1,5 @@
 /**
- * @arki/queue/foreman
+ * The Foreman admin module for queues.
  *
  * The Foreman control-plane module for queues: a paged `failedJobs` read and a `retryJob` action.
  * Requires the optional peer `@arki/admin`. The normal `@arki/queue` entry never imports it.

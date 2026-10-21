@@ -129,7 +129,7 @@ function createJobBuilderChain<
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.missingName,
           message: 'Job name is required. Call .name() first.',
-          remediation: 'Start the job with q.job.name("feature:action") before .handler().',
+          remediation: 'Start the job with q.job.name("feature.action") before .handler().',
         });
       }
 

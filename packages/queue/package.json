@@ -1,6 +1,20 @@
 {
   "name": "@arki/queue",
   "version": "0.1.0",
+  "description": "Typed background jobs for TypeScript: BullMQ on Redis, pg-boss on PGlite, or a database row that commits with your transaction.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/queue"
+  },
+  "license": "MIT",
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -24,29 +38,45 @@
       "types": "./dist/src/dot.d.ts",
       "import": "./src/dot.ts",
       "node": "./src/dot.ts",
-      "default": "./dist/src/dot.js"
+      "default": "./src/dot.ts"
     },
     "./outbox": {
       "types": "./dist/src/outbox/index.d.ts",
       "import": "./src/outbox/index.ts",
       "node": "./src/outbox/index.ts",
-      "default": "./dist/src/outbox/index.js"
+      "default": "./src/outbox/index.ts"
     },
     "./projection": {
       "types": "./dist/src/projection.d.ts",
       "import": "./src/projection.ts",
       "node": "./src/projection.ts",
-      "default": "./dist/src/projection.js"
+      "default": "./src/projection.ts"
     },
     "./foreman": {
       "types": "./dist/src/foreman/index.d.ts",
       "import": "./src/foreman/index.ts",
       "node": "./src/foreman/index.ts",
-      "default": "./dist/src/foreman/index.js"
+      "default": "./src/foreman/index.ts"
     },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/*.fixture.*",
+    "CHANGELOG.md",
+    "README.md",
+    "llms.txt",
+    "docs/agent-guide.md",
+    "docs/recipes/**",
+    "docs/reference/**",
+    "docs/upgrades/**",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
@@ -55,6 +85,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:docs": "arki-doc-examples",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
@@ -106,5 +137,8 @@
     "@arki/dot": {
       "optional": true
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

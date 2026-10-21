@@ -1,25 +1,30 @@
 # @arki/queue
 
-> A type-safe background job library, inspired by tRPC. Jobs, schedules and flows run on BullMQ and Redis. A second lane, `@arki/queue/outbox`, writes a job as a database row in your transaction and runs it from the `@arki/journal` worker.
+> Typed background jobs for TypeScript, inspired by tRPC. Jobs, schedules and flows run on BullMQ and Redis. A second lane, `@arki/queue/outbox`, writes a job as a database row in your transaction and runs it from the `@arki/journal` worker.
 
 ## Import paths
-- `@arki/queue`: the core. `initQueue`, the middleware helpers, `QUEUE_PRIORITIES`, `backoff`, `CronPatterns`, `createDurableScheduler`, and the types.
-- `@arki/queue/types`: the types only, such as `JobDefinition`, `JobContext`, `JobLike` and `QueuePriority`.
-- `@arki/queue/runtime-local`: the same builders on pg-boss and PGlite, with no Redis. `initQueue`, `createRuntimeLocalQueueInstance`.
-- `@arki/queue/dot`: the `@arki/dot` adapters. `queue(...)`, `queueWorker(...)`, `jobs(...)`, `durableScheduler(...)`, `outboxPlugin(...)` and `outboxJobs(...)`.
-- `@arki/queue/projection`: `project(manifest)`, which builds a queue topology document from an app manifest.
-- `@arki/queue/foreman`: the Foreman admin module `queueForemanModule(...)` (failed jobs and retry). Its errors are `ModuleError`s from `@arki/admin/module` (409 for a stale approval or a job no longer failed, 404 for an unknown queue; `QueueForemanError` is removed). It re-exports `redactSecrets`, which `@arki/admin/module` owns. Needs the optional peer `@arki/admin`.
-- `@arki/queue/outbox`: transactional scheduling. `outbox`, `outboxRunner`, `isOutboxError`, `OUTBOX_ERROR_CODES`. A job's `.options({ retention })` sets how long the journal keeps its finished and dead rows (outbox lane only). No BullMQ, Redis or pg-boss at runtime.
+
+<!-- llms:start -->
+- `@arki/queue`: Typed background jobs, schedules and flows on BullMQ and Redis. `BullMQAdapter`, `ConsoleLogger`, `CronPatterns`, `FLOW_ENQUEUE_FAILURES`, `HonoAdapter`, `JOB_SYSTEM_FAILURES`, `JOB_TRIGGER_FAILURES`, `JobError`, `JobValidationError`, `PerformanceTracker`, `QUEUE_DEFINITION_ERROR_CODES`, `QUEUE_INPUT_ERROR_CODES`; and 60 more.
+- `@arki/queue/types`: The types of the queue core, without the runtime. `QUEUE_PRIORITIES`; types `BullMQQueueInstance`, `ComputeFinalContext`, `DataTransformer`, `ErrorFormatter`, `FlowBuilderFactory`, `FlowBuilderNeedsStep`, `FlowBuilderStart`, `FlowBuilderWithInput`, `FlowDefinition`, `FlowEnqueueResult`, `FlowStepOptions`; and 29 more.
+- `@arki/queue/runtime-local`: The queue on pg-boss and PGlite, with no Redis. `createRuntimeLocalQueueInstance`, `initQueue`; types `RuntimeLocalQueueInstanceOptions`.
+- `@arki/queue/dot`: @arki/queue in a Dot app: the queue client, the worker, and the job slices. `DURABLE_SCHEDULES_KEY`, `QUEUE_ACTION_META_SCHEMA`, `QUEUE_PLUGIN_ERROR_CODES`, `durableScheduler`, `jobProducers`, `jobs`, `outboxJobs`, `outboxPlugin`, `outboxProducers`, `queue`, `queueActions`, `queueConsumerActions`; and 18 more.
+- `@arki/queue/outbox`: transactional scheduling. `OUTBOX_ERROR_CODES`, `isOutboxError`, `outbox`, `outboxRunner`; types `Outbox`, `OutboxError`, `OutboxErrorCode`, `OutboxOptions`, `OutboxRunnerOptions`, `OutboxTx`, `QueueRegistry`, `ScheduleOptions`; and 1 more.
+- `@arki/queue/projection`: `project`; types `QueueTopologyDocument`.
+- `@arki/queue/foreman`: The Foreman admin module for queues. `QUEUE_FOREMAN_ERROR_CODES`, `bullmqFailedJobSource`, `failedJobSchema`, `pgBossFailedJobSource`, `queueForemanModule`, `redactSecrets`; types `BullMQFailedJobSourceOptions`, `FailedJobRecord`, `FailedJobSource`, `PgBossFailedJobSourceOptions`, `QueueForemanErrorCode`, `QueueForemanOptions`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): the model, the task map, the rules. Read it first.
-- [README](README.md): the long overview and the API reference.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the overview, the limits and the failure table.
 
 ## By task
 - [Define a job](docs/agent-guide.md#define-a-job)
 - [Start a job with its own transaction](docs/agent-guide.md#schedule-a-job-in-the-same-transaction), with `@arki/queue/outbox`
+- [Recover jobs after a worker dies](docs/recipes/recover-jobs.md)
 - [Wire queues in a Dot app](docs/agent-guide.md#dot)
-- [Find out why an outbox call failed](docs/agent-guide.md#outbox-errors)
+- [Find out why an outbox call failed](docs/agent-guide.md#outbox-errors-thrown)
 
 ## Files
 - Definitions: `src/init.ts` (`initQueue`), `src/middleware.ts` (the middleware chain), `src/types/job.ts` (`JobDefinition`, `JobContext`, `JobLike`, `QUEUE_PRIORITIES`).
@@ -27,8 +32,9 @@
 - Edges: `src/dot.ts` (Dot adapters), `src/runtime-local/` (pg-boss), `src/foreman/` (admin module), `src/projection.ts`.
 
 ## Rules that bite
-- `@arki/queue` is private. The typed outbox API is private. Public `@arki/journal` users get only the `JobRunner` port.
-- `runAfter(tx, job, args)` takes a transaction, never the root database.
 - A job can run more than once. Pass `ctx.job.id` to external systems as the idempotency key.
+- A job name is its queue name. Use dots, never a colon (BullMQ refuses `:`).
+- Version job names (`mail.welcome.v1`). A worker only claims names its registry knows.
+- `trigger()` and `enqueue()` return an id or a failure. After `QueueAcceptanceUnknown`, look the job up by its key before you send it again.
+- `runAfter(tx, job, args)` takes a transaction, never the root database.
 - Outbox args are stored as plain JSON.
-- A worker only claims job names its registry knows. Version job names (`mail.welcome.v1`) so a rename is deliberate.

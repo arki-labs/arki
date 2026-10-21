@@ -1,5 +1,5 @@
 /**
- * DOT adapters for `@arki/queue`, split along the hexagon:
+ * `@arki/queue` in a Dot app: the queue client, the worker, and the job slices. They split along the hexagon:
  *
  *   defineApp('shop')
  *     .use(queue({ connection }))          // driven: the client features enqueue with

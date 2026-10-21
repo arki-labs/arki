@@ -1,8 +1,7 @@
 /**
- * @arki/queue v2.0 - Background job processing library
+ * Typed background jobs, schedules and flows on BullMQ and Redis.
  *
- * A tRPC-inspired API for defining and managing jobs, schedules, and flows
- * built on top of BullMQ and Redis.
+ * A tRPC-inspired builder API for defining and managing them.
  *
  * @example
  * ```typescript
@@ -29,7 +28,7 @@
  *
  * // 4. Define jobs
  * const sendEmail = authJob
- *   .name('notifications:send-email')
+ *   .name('notifications.send-email')
  *   .input(z.object({ to: z.email(), subject: z.string(), body: z.string() }))
  *   .handler(async (data, ctx) => {
  *     // ctx has: db, repo, kv, user (from middleware)
@@ -39,7 +38,7 @@
  *
  * // 5. Create flows
  * const orderFlow = q.flow
- *   .name('orders:process')
+ *   .name('orders.process')
  *   .input(z.object({ orderId: z.string() }))
  *   .step('validate', {
  *     job: validateJob,

@@ -15,7 +15,7 @@ Read this file first. [`llms.txt`](../llms.txt) is the index. The [README](../RE
 
 ### Define a job
 
-```ts
+```ts skip="excerpt: it uses names this page does not define"
 const q = initQueue.context<{ db: AppDb }>().create();
 
 export const welcome = q.job
@@ -30,7 +30,7 @@ export const jobs = q.registry({ welcome });
 
 ### Schedule a job in the same transaction
 
-```ts
+```ts skip="excerpt: it uses names this page does not define"
 import { outbox, outboxRunner } from '@arki/queue/outbox';
 
 export const schedule = outbox({ tables }); // tables from journalTables()
@@ -58,9 +58,13 @@ Rules:
 - Version the job name. A renamed job leaves stranded rows (`journal.strandedJobs(db, { jobs })`).
 - The app needs the journal migration (`drizzle-kit generate`). Roll out: migrate, workers, producers.
 
+### Recover jobs after a worker dies
+
+Follow [Recover jobs](recipes/recover-jobs.md). It names the setting that decides how long a dead worker's claim lasts on each lane.
+
 ### Dot
 
-```ts
+```ts skip="excerpt: it uses names this page does not define"
 import { jobs, outboxJobs, outboxPlugin } from '@arki/queue/dot';
 
 // Process that schedules: mount the plugin, which provides the `schedule` service.
@@ -75,7 +79,23 @@ defineApp('signup-worker')
 
 Here `scheduling` is `outboxPlugin({ tables })`. A feature lists its jobs with `jobs(q.registry({ welcome }))` in `.entrypoints(...)`. The worker manifest lists `<job>.consume` under the plugin `journal-worker`. For the Redis lane use `queue(...)` and `queueWorker(...)` from the same entry.
 
-## Outbox errors
+## Rules that bite
+
+- A job can run more than once. Pass `ctx.job.id` to every external system as its idempotency key.
+- Return expected refusals as `@arki/failure` values. A throw is a defect and stops by default. Retry only what `.options({ retry: ... .while(Definition) })` selects.
+- `trigger()` and `enqueue()` return an id or a `JobTriggerFailure`. Check the result before you use the id.
+- `QueueAcceptanceUnknown` means the acknowledgement was lost. Look for the job by its key before you send it again.
+- A job name is its queue name. Use dots, never a colon: BullMQ refuses `:` and pg-boss accepts only letters, digits, `_`, `-`, `.` and `/`.
+- Version job names (`mail.welcome.v1`). A worker claims only the names its registry knows.
+- `runAfter(tx, ...)` takes a transaction, never the root database (`OUTBOX_E001`).
+- Outbox args are stored as plain JSON.
+- A flow is a tree. A step can be the dependency of at most one other step (`ARKI_QUEUE_E017`).
+- Middleware calls `next()` once and returns refusals directly.
+- A worker that dies mid-job is recovered by the lane it ran on. See [Recover jobs](recipes/recover-jobs.md).
+
+## Errors
+
+### Outbox errors (thrown)
 
 Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 
@@ -89,7 +109,7 @@ Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 | `OUTBOX_E006` | `unknownJob`       | A job name is not in the registry.                                       |
 | `OUTBOX_E007` | `duplicateName`    | Two jobs in the registry share a name.                                   |
 
-## Returned outcomes and migration
+### Returned outcomes
 
 `executeJob` preserves the exact handler return union plus canonical input/cancel/deadline/defect failures. BullMQ and pg-boss both persist refusals as failed deliveries. Default retry never repeats a returned refusal or defect; use `.options({ retry: backoff.constant(100).upTo(2).while(TransientFailure) })` for selected definitions. Outbox passes returned outcomes directly to Journal before acknowledgement.
 
@@ -99,6 +119,15 @@ Use `timeoutMs` and honor `ctx.signal`. Deadline/cancellation waits for settleme
 
 A middleware can return a defined failure directly: `q.middleware(async () => AccessRefused())`. `.use()` adds that exact failure to the job output union; returning it stops before the handler. `next()` retains its `{ ctx, output }` protocol and may be called once. A malformed middleware result becomes `UnexpectedDefect`. Retry keys `attempts`/`backoff` belong to the shared `retry` option and cannot be overridden through native BullMQ options. Flow data mappers declare job input only; mapper defects/refusals fail submission before opening Redis.
 
-## Queue client diagnostic
+### Queue client diagnostic
 
 A worker without its queue client raises `ARKI_QUEUE_E019` (`QUEUE_PLUGIN_ERROR_CODES.clientMissing`). Mount `queue({ connection })` before features and worker startup. `ARKI_QUEUE_E006` remains the missing-name builder diagnostic; older releases used it for both conditions.
+
+## Verify
+
+```sh
+turbo run build typecheck lint test --filter=@arki/queue
+cd packages/queue && bun run test:docs
+dot explain --json | jq .data.services   # in an app using @arki/queue/dot: lists the queue and schedule services
+dot doctor --json | jq .data             # in that app: no missing queue service (ARKI_QUEUE_E019 if a worker has no client)
+```

@@ -1,5 +1,5 @@
 /**
- * Type exports for @arki/queue
+ * The types of the queue core, without the runtime.
  */
 
 // Builder types
