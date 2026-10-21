@@ -9,6 +9,7 @@
  *   - `dot dev`        run the app in development: db, preflight, runner, watch
  *   - `dot _serve`     (hidden) start the app until stopped: the runner of `dot dev`
  *   - `dot _preflight` (hidden) one preflight boot in a fresh process, reported as JSON to `dot dev`
+ *   - `dot env ...`    encrypted env files: init, set, get, ls, check, run, rotate, keys
  *
  * Output is text on a terminal and the `arki.cli/1` JSON envelope when piped
  * or with `--json`. Exit codes: 0 ok, 1 bug, 2 usage (unknown command,
@@ -33,6 +34,7 @@ export const program = defineCli({
     dev: () => import('./commands/dev.js'),
     _serve: () => import('./commands/serve.js'),
     _preflight: () => import('./commands/preflight.js'),
+    env: () => import('./commands/env/index.js'),
   },
 });
 
@@ -70,6 +72,20 @@ export {
   WriteFailed,
 } from './failures.js';
 export type { DoctorReport, DoctorStatus } from './failures.js';
+export {
+  EnvCheckFailed,
+  EnvCommandFailed,
+  EnvDecryptTracked,
+  EnvKeyNotFound,
+  EnvLoadFailed,
+  EnvNoChange,
+  EnvNoHeader,
+  EnvPlainSecret,
+  EnvRevealRefused,
+  EnvValueMissing,
+  EnvVaultFailed,
+} from './env-failures.js';
+export type { EnvFinding } from './env-failures.js';
 export type { DotNewOperation, DotNewResult } from './json.js';
 export { runNew } from './new.js';
 export type { RunNewOptions } from './new.js';

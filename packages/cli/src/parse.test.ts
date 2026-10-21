@@ -208,3 +208,12 @@ describe('global flags', () => {
     expect(() => flagsOf(z.object({ dryRun: z.boolean() }))).toThrow(/--dry-run/);
   });
 });
+
+describe('variadic positionals', () => {
+  const exec = flagsOf(z.object({ command: z.array(z.string()) }), ['command']);
+
+  it('keeps each argument whole, commas included', () => {
+    // WHY: the shell already split them; `node -e "f(a, b)"` and `"Smith, John"` are one argument each.
+    expect(value(parse(exec, ['--', 'node', '-e', 'f(a, b)']))).toEqual({ command: ['node', '-e', 'f(a, b)'] });
+  });
+});

@@ -24,7 +24,7 @@ const NEGATIVE_NUMBER = /^-(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 const INTEGER = /^-?\d+$/;
 const NUMBER = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 
-type Occurrence = { readonly spec: FlagSpec; readonly raw: string; readonly label: string };
+type Occurrence = { readonly spec: FlagSpec; readonly raw: string; readonly label: string; readonly positional?: boolean };
 
 function coerce(spec: FlagSpec, raw: string, label: string): { value: unknown } | { issue: ParseIssue } {
   if (spec.kind === 'integer' && !INTEGER.test(raw)) {
@@ -42,9 +42,12 @@ function coerce(spec: FlagSpec, raw: string, label: string): { value: unknown } 
   return { value: raw };
 }
 
-/** The comma pieces of an array flag's value; `a,,b` drops the empty piece. */
-function pieces(spec: FlagSpec, raw: string): readonly string[] {
-  return spec.array ? raw.split(',').filter(piece => piece !== '') : [raw];
+/**
+ * The comma pieces of an array flag's value; `a,,b` drops the empty piece. A positional is never
+ * split: the shell already made it one argument (`"Smith, John"`, `node -e "f(a, b)"`).
+ */
+function pieces(spec: FlagSpec, raw: string, positional: boolean): readonly string[] {
+  return spec.array && !positional ? raw.split(',').filter(piece => piece !== '') : [raw];
 }
 
 /**
@@ -139,19 +142,19 @@ export function parse(specs: readonly FlagSpec[], argv: readonly string[]): Pars
       issues.push({ key: undefined, flag: raw, message: `Unexpected argument "${raw}"` });
       continue;
     }
-    occurrences.push({ spec, raw, label: `<${spec.flag}>` });
+    occurrences.push({ spec, raw, label: `<${spec.flag}>`, positional: true });
   }
 
   const value: Record<string, unknown> = {};
   const counts = new Map<string, number>();
-  for (const { spec, raw, label } of occurrences) {
+  for (const { spec, raw, label, positional } of occurrences) {
     const count = (counts.get(spec.key) ?? 0) + 1;
     counts.set(spec.key, count);
     if (!spec.array && count > 1) {
       issues.push({ key: spec.key, flag: label, message: `${label} given more than once` });
       continue;
     }
-    for (const piece of pieces(spec, raw)) {
+    for (const piece of pieces(spec, raw, positional === true)) {
       const result = coerce(spec, piece, label);
       if ('issue' in result) {
         issues.push(result.issue);
