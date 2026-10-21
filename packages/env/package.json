@@ -89,7 +89,6 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/schema": "workspace:*",
-    "@arki/ts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "eciesjs": "catalog:env",
     "zod": "catalog:"

@@ -1,6 +1,6 @@
 # @arki/ts
 
-TypeScript helper types for object shapes, key casing and dotted paths, plus three tiny runtime helpers (`once`, `lazyObject`, `resolveLazy`) and an import-purity test helper. The types cost the compiler little to resolve (see Benchmarks).
+TypeScript helper types for object shapes, key casing and dotted paths, plus two tiny runtime helpers (`once`, `lazyObject`) and an import-purity test helper. The types cost the compiler little to resolve (see Benchmarks).
 
 ## Install
 
@@ -42,7 +42,7 @@ type Overrides = DeepPartial<typeof defaults>; // every level optional: { readon
 
 ## Runtime support
 
-The main entry (`@arki/ts`) and the type-only subpaths (`/prettify`, `/utils`) are portable. The only runtime code is `once`, `resolveLazy` and `lazyObject`, which use `Proxy` and no `node:*` imports, so they run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/ts/testing` is the one Node-only entry: it spawns a subprocess to check import purity. `bun run test:runtimes` runs a smoke test of the portable entries on each runtime. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+The main entry (`@arki/ts`) and the type-only subpaths (`/prettify`, `/utils`) are portable. The only runtime code is `once` and `lazyObject`, which use `Proxy` and no `node:*` imports, so they run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/ts/testing` is the one Node-only entry: it spawns a subprocess to check import purity. `bun run test:runtimes` runs a smoke test of the portable entries on each runtime. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
 
 <!-- runtimes:start -->
 
@@ -92,7 +92,6 @@ The main entry (`@arki/ts`) and the type-only subpaths (`/prettify`, `/utils`) a
 
 - `once(compute)`: run `compute` on the first call and return the same result after that.
 - `lazyObject(build)`: an object whose construction waits for its first property access.
-- `Lazy<T>` and `resolveLazy(value)`: a value or a function that returns it, and the call that resolves either.
 
 ```ts run
 import { lazyObject } from '@arki/ts';
@@ -127,7 +126,6 @@ The runtime helpers throw only what your code throws:
 - The casing helpers work on string keys. The snake-to-camel helpers keep number and symbol keys. The camel-to-snake helpers drop them: `CamelToSnake<{ userName: 1; 0: 2 }>` is `{ user_name: 1 }`.
 - Deep helpers have the compiler's recursion limit. A type with hundreds of nested levels reports TS2589.
 - `lazyObject` is for objects. Do not compare its result by identity with the built instance. Reflected property descriptors are configurable views of the instance; writes and deletes still obey the real descriptors. Enumeration and spreads also work with frozen instances. Defining properties or freezing the proxy itself is unsupported.
-- `Lazy<T>` cannot hold a function type `T`, because a thunk cannot be told from the value.
 
 ## Documentation
 

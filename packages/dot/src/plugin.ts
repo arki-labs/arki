@@ -28,6 +28,8 @@ export {
   DotPluginError,
 } from './plugin-contract.js';
 export { LazyClosed } from './lazy.js';
+export { resolveDeferred } from './deferred.js';
+export type { Deferred } from './deferred.js';
 export type {
   AnyHandle,
   AnyPlugin,

@@ -104,7 +104,6 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
-    "@arki/ts": "workspace:*",
     "@hono/node-server": "catalog:",
     "@opentelemetry/api": "catalog:opentelemetry",
     "hono": "catalog:backend",

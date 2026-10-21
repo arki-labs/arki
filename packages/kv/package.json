@@ -92,7 +92,6 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
-    "@arki/ts": "workspace:*",
     "@keyv/redis": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
     "ioredis": "catalog:",

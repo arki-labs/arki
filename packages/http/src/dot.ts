@@ -42,11 +42,9 @@
  */
 
 import type { AnyFeatureCore, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
-import type { DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
-import type { Lazy } from '@arki/ts';
+import type { Deferred, DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
 import { driver, instanceOf, sliceOf } from '@arki/dot/feature';
-import { DotPluginError, plugin } from '@arki/dot/plugin';
-import { resolveLazy } from '@arki/ts';
+import { DotPluginError, plugin, resolveDeferred } from '@arki/dot/plugin';
 
 import type { RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
@@ -88,7 +86,7 @@ export type HttpOptions<TBundles extends readonly BundleToken[] = readonly []> =
    * `bundles` is declaration-time wiring (it shapes the adapter's needs),
    * so only runtime settings like `port` defer.
    */
-  readonly port: Lazy<number>;
+  readonly port: Deferred<number>;
   readonly hostname?: string;
   /**
    * Bundle tokens to serve, in route-table order, ahead of the features'
@@ -406,7 +404,7 @@ function bindHttp(
         });
       }
       state.handle = await listen(served, {
-        port: resolveLazy(options.port),
+        port: resolveDeferred(options.port),
         ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
       });
     },

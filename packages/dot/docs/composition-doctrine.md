@@ -47,7 +47,7 @@ actions, building a handler from a static router); _observation_ is not.
   Where an adapter's options carry declaration-time wiring that cannot
   defer (`http`'s `bundles`/`features` tokens shape the plugin's needs),
   only the runtime fields thunk: `http({ port: () => env.PORT, ... })`.
-  The vocabulary for this is `Lazy<T>`/`resolveLazy` from `@arki/ts`.
+  The vocabulary for this is `Deferred<T>`/`resolveDeferred` from `@arki/dot/plugin`.
 - Client-facing declarations (contracts, enums, branded-id schemas) live in
   modules that never import server code, published as universal exports;
   server-only modules get `{ "types", "node" }`-conditioned exports so a

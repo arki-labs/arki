@@ -24,22 +24,6 @@ export function once<T>(compute: () => T): () => T {
 }
 
 /**
- * A value or a zero-arg thunk producing it — the deferred-config shape DOT
- * adapters accept so a declaration can reference env without observing it
- * at module load: `kv(() => ({ url: env.REDIS_URL }))`. The adapter calls
- * {@link resolveLazy} at boot, which is where the observation belongs.
- *
- * Not for function-typed `T` — a thunk would be indistinguishable from the
- * value itself.
- */
-export type Lazy<T> = T | (() => T);
-
-/** Resolve a {@link Lazy}: call it if it is a thunk, return it otherwise. */
-export function resolveLazy<T>(value: Lazy<T>): T {
-  return typeof value === 'function' ? (value as () => T)() : value;
-}
-
-/**
  * Defer an object's construction to its FIRST property access, memoized.
  *
  * The import-purity primitive: a module can export a shared instance

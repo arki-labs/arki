@@ -1,11 +1,11 @@
 # @arki/ts
 
-> Helper types for object shapes, key casing and dotted paths, plus `once`, `lazyObject` and `resolveLazy`. It is not a validation or schema library.
+> Helper types for object shapes, key casing and dotted paths, plus `once` and `lazyObject`. It is not a validation or schema library.
 
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/ts`: Helper types for object shapes, key casing and dotted paths, plus `once`, `lazyObject` and `resolveLazy`. `lazyObject`, `once`, `resolveLazy`; types `Autocomplete`, `CamelToSnake`, `DeepCamelToSnake`, `DeepPartial`, `DeepRequired`, `DeepSnakeToCamel`, `Lazy`, `Nullable`, `PathValue`; and 5 more.
+- `@arki/ts`: Helper types for object shapes, key casing and dotted paths, plus `once` and `lazyObject`. `lazyObject`, `once`; types `Autocomplete`, `CamelToSnake`, `DeepCamelToSnake`, `DeepPartial`, `DeepRequired`, `DeepSnakeToCamel`, `Nullable`, `PathValue`, `Prettify`, `RecordToPath`; and 3 more.
 - `@arki/ts/testing`: `expectImportPure`: assert that importing modules from a bare environment observes nothing. `expectImportPure`; types `ImportPurityOptions`.
 - `@arki/ts/prettify`: `Prettify`: flatten an intersection so the IDE shows one resolved object type. types `Prettify`.
 - `@arki/ts/utils`: Helper types for casing (`SnakeToCamel`, `CamelToSnake`), paths (`RecordToPath`, `PathValue`) and object shapes (`DeepPartial`, `Nullable`, `Without`). types `Autocomplete`, `CamelToSnake`, `DeepCamelToSnake`, `DeepPartial`, `DeepRequired`, `DeepSnakeToCamel`, `Nullable`, `PathValue`, `RecordToPath`, `Serializable`, `SnakeToCamel`, `Without`.
@@ -22,7 +22,6 @@
 - [Type a lookup by dotted path](docs/agent-guide.md#type-a-lookup-by-dotted-path)
 - [Convert API keys between snake_case and camelCase](docs/agent-guide.md#convert-api-keys-between-snake_case-and-camelcase)
 - [Build a shared object at import time without side effects](docs/agent-guide.md#build-a-shared-object-at-import-time-without-side-effects)
-- [Make a config field take a value or a function](docs/agent-guide.md#make-a-config-field-take-a-value-or-a-function)
 
 ## Rules that bite
 

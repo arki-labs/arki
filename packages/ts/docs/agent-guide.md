@@ -49,11 +49,6 @@ expectTypeOf<DeepSnakeToCamel<ApiUser>>().toEqualTypeOf<{ userName: string; home
 2. Export the result. Reading a property builds it, once.
 3. Prove it with `expectImportPure` from `@arki/ts/testing`.
 
-### Make a config field take a value or a function
-
-1. Type it `Lazy<T>`.
-2. Call `resolveLazy(field)` where the value is needed.
-
 ## Rules that bite
 
 - `RecordToPath` stops at arrays. There is no `'list.0'`.

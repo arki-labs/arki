@@ -39,9 +39,8 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import type { Lazy } from '@arki/ts';
-import { DotPluginError, plugin } from '@arki/dot/plugin';
-import { resolveLazy } from '@arki/ts';
+import type { Deferred } from '@arki/dot/plugin';
+import { DotPluginError, plugin, resolveDeferred } from '@arki/dot/plugin';
 
 import { KV } from './index.js';
 
@@ -156,7 +155,7 @@ function open(url: string, config: KvDotOptions): KV | Promise<KV> {
  *   `kv(() => ({ url: env.REDIS_URL, namespace: 'my-app' }))`.
  * @returns A plugin that publishes `services.kv`.
  */
-export function kv(options: Lazy<KvDotOptions> = {}) {
+export function kv(options: Deferred<KvDotOptions> = {}) {
   return plugin({
     name: 'kv',
     configure(ctx) {
@@ -164,7 +163,7 @@ export function kv(options: Lazy<KvDotOptions> = {}) {
     },
     provides: {
       kv: () => {
-        const config = resolveLazy(options);
+        const config = resolveDeferred(options);
         const url = resolveUrl(config);
         if (url === undefined) {
           throw new DotPluginError({
@@ -195,7 +194,7 @@ export function kv(options: Lazy<KvDotOptions> = {}) {
  * export type Kv = Provided<typeof cache.provides.kv>; // KV | null
  * ```
  */
-kv.optional = function optional(options: Lazy<KvDotOptions> = {}) {
+kv.optional = function optional(options: Deferred<KvDotOptions> = {}) {
   return plugin({
     name: 'kv',
     configure(ctx) {
@@ -203,7 +202,7 @@ kv.optional = function optional(options: Lazy<KvDotOptions> = {}) {
     },
     provides: {
       kv: (): KV | null | Promise<KV> => {
-        const config = resolveLazy(options);
+        const config = resolveDeferred(options);
         const url = resolveUrl(config);
         return url === undefined ? null : open(url, config);
       },

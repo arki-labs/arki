@@ -7,7 +7,6 @@ import type {
   DeepPartial,
   DeepRequired,
   DeepSnakeToCamel,
-  Lazy,
   Nullable,
   PathValue,
   Prettify,
@@ -16,7 +15,7 @@ import type {
   SnakeToCamel,
   Without,
 } from './index.js';
-import { lazyObject, once, resolveLazy } from './index.js';
+import { lazyObject, once } from './index.js';
 
 // Each assertion below states a promise from the README. They compile or the build fails.
 
@@ -74,10 +73,6 @@ type Size = Autocomplete<'small' | 'large'>;
 expectTypeOf<'small'>().toExtend<Size>();
 expectTypeOf<'extra-large'>().toExtend<Size>();
 expectTypeOf<number>().not.toExtend<Size>();
-
-// Lazy: a value or a function that makes it. resolveLazy gives back the value.
-expectTypeOf<Lazy<number>>().toEqualTypeOf<number | (() => number)>();
-expectTypeOf(resolveLazy<number>(() => 1)).toEqualTypeOf<number>();
 
 // once and lazyObject keep the type of what they wrap.
 expectTypeOf(once(() => ({ ready: true }))).toEqualTypeOf<() => { ready: boolean }>();
