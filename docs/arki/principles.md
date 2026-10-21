@@ -79,6 +79,12 @@ not copy schemas locally, because local copies would recreate the duplicates. Se
 Verification rejects hand-written type guards, validator helpers and ad-hoc
 `isX(value: unknown)` functions on unknown values. Existing copies are migration work.
 
+Secrets follow the same rule. The schema says which keys are secret, with
+`secret()`; nothing else keeps a list. Tracked env files hold those values
+encrypted, and `dot env check` reads the schema to refuse a plaintext one.
+Values are decrypted before the schema parses them, and the schema refuses
+anything still encrypted.
+
 ## Own failures and execution
 
 Every fallible public operation exposes typed outcomes. Owned boundaries supervise

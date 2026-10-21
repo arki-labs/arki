@@ -136,6 +136,40 @@ overwrites pre-existing files in the target directory.
 Templates live in [`templates/`](../templates) and ship with the published
 tarball. Generated apps depend only on published `@arki/*` packages.
 
+## `dot env`
+
+Encrypted env files (dotenvx 2.x format) through `@arki/env/node`. Commit
+`.env.<environment>`; keep `.env.keys`, `.env.local` and bare `.env` untracked.
+No subcommand prints a value unless you ask for it in a terminal.
+
+| Command | What it does |
+| --- | --- |
+| `dot env init [--env <e>]` | Adds the public key header and writes the private key to `.env.keys`. Adds `.env.keys*` to `.gitignore` and denies agents reading it. |
+| `dot env set <KEY> --stdin` | Stores the value encrypted. `--plain` stores it as text, refused for a `secret()` key. |
+| `dot env get <KEY>` | Prints the shape (`url`, `hex`, …). `--reveal` prints the value, in a terminal only. |
+| `dot env ls` | Keys, kinds and which ones the schema declares, never values. |
+| `dot env explain <KEY>` | The file, line and key source that a value comes from. |
+| `dot env encrypt` | Encrypts plain values in place. `--from .env --all` imports an old file. |
+| `dot env decrypt` | Writes plaintext back; refused for a tracked file. |
+| `dot env rotate` | New keypair; every value encrypted again. |
+| `dot env run -- <cmd>` | Runs a command with the files loaded. Strips private keys from the child. Redacts secrets in its output when stdout is not a terminal. Passes the exit code through, with no envelope. |
+| `dot env check` | The CI gate: load errors, refused keys, a tracked `.env.keys`, a plaintext `secret()` value in a tracked file. |
+| `dot env keys push --vault <v>` / `keys pull` | Backs up or restores private keys in 1Password. |
+
+`check`, `ls`, `set` and `encrypt` import the app's `src/env.ts` to read its
+`secret()` keys, with validation skipped. Node cannot import TypeScript, so
+under Node they report `dot.env.schema_unavailable`. Run them under Bun
+(`bun --bun dot env check`). `check` fails closed when that happens and a
+tracked file has a plain value.
+
+`dot dev` opens encrypted values in the app's env files with the same keys
+before its database check.
+
+Failure codes: `dot.env_load_failed`, `dot.env_check_failed`,
+`dot.env_no_change`, `dot.env_no_header`, `dot.env_plain_secret`,
+`dot.env_key_not_found`, `dot.env_reveal_refused`, `dot.env_decrypt_tracked`,
+`dot.env_value_missing`, `dot.env_command_failed`, `dot.env_vault_failed`.
+
 ## Other `dot.*` failures and helpers
 
 Every failure below is exported from `@arki/dot/cli` and comes back in the

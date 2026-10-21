@@ -45,11 +45,15 @@ Leave out `runtimeEnv` in a server app. `defineEnv` then reads `globalThis.proce
 
 `@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. The Dot adapter lives in `@arki/dot/env`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
 
+`@arki/env/node` (encrypted env files) runs on Node, Bun and Deno only. It reads files and starts provider CLIs.
+
 ## Public imports
 
-- `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`.
+- `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`, `describeEnv`, `isSecretSchema`, `formatIssues`.
 - `@arki/env/contracts`: `contracts` and the per-category namespaces `commonContracts`, `urlContracts`, `parseContracts`.
 - `@arki/env`: re-exports `contracts`.
+- `@arki/env/node`: `loadEnvFiles`, `secretValues`, `formatEnvFilesErrors`, `ENV_FILES_ERROR_CODES`, the codec (`encryptValue`, `decryptValue`, `generateKeypair`, `parseEnv`, …), the file edits behind `dot env`, `findPrivateKey` and `DEFAULT_RESOLVERS`.
+- `@arki/env/node/register`: a side-effect import that loads the env files into `process.env`.
 
 ## Secrets
 
@@ -75,6 +79,46 @@ sk_live_123
 ```
 
 `reveal` also accepts the raw string, because schemas do not run when validation is skipped.
+
+## Encrypted env files
+
+Commit `.env.<environment>` files with their secrets encrypted. The format is dotenvx 2.x, so the `dotenvx` CLI reads the same files. Each file holds a public key, so anyone can add a value. Only a holder of the private key can read one. The private key lives in `DOTENV_PRIVATE_KEY_<ENV>` (for `.env.production`: `DOTENV_PRIVATE_KEY_PRODUCTION`) or in the gitignored `.env.keys` file.
+
+Edit the files with `dot env` from `@arki/dot`:
+
+```sh
+dot env init                     # public key header + private key for .env.development
+dot env set STRIPE_KEY --stdin   # stored encrypted; the value never appears in argv
+dot env set PORT 3000 --plain    # refused when the schema declares PORT secret()
+dot env run -- bun run dev       # load, decrypt, run; secrets redacted when output is piped
+dot env check                    # CI gate: no tracked key file, no plaintext secret()
+```
+
+Load the files once, at the top of a process. Use `dot env run -- <command>` (the app templates' `with-env` script does), or make `import '@arki/env/node/register'` the first import of an entry. Both write into `process.env`, because package envs such as `@arki/db/env` read it.
+
+- The real environment wins. A file never replaces a value that is already set; a different value is reported as shadowed.
+- The environment is `NODE_ENV`, else `development`. Files load from the repository root down to the working directory. A deeper folder wins, and `.env.local` wins over `.env.<environment>`. Under `test`, `.env.local` is skipped.
+- A value can be a reference: `op://vault/item/field`, `infisical://…` or `doppler://…`. The provider's CLI resolves it at load. A public key (`VITE_`, `NEXT_PUBLIC_`, `PUBLIC_`, `EXPO_PUBLIC_`) is never filled from a reference.
+- Keys that change how a process runs (`PATH`, `NODE_OPTIONS`, `LD_*`, TLS settings and more) are never loaded from a file.
+- A private key is needed only when a value needs it. A key already set in the environment needs no decryption.
+- `defineEnv` refuses a value that is still `encrypted:`, so ciphertext never passes as a string.
+
+Mask loaded secrets in logs, wherever they appear:
+
+```ts skip="needs encrypted env files on disk"
+import { configure, maskSecrets } from '@arki/log';
+import { secretValues } from '@arki/env/node';
+
+configure({ processors: [maskSecrets(secretValues)] });
+```
+
+| Code                  | Meaning                                                  |
+| --------------------- | -------------------------------------------------------- |
+| `ARKI_ENV_FILES_E001` | A file has encrypted values and no private key was found. |
+| `ARKI_ENV_FILES_E002` | A value did not decrypt with the key that was found.     |
+| `ARKI_ENV_FILES_E003` | A reference could not be resolved by its provider CLI.   |
+
+Messages name the file and the key, never a value.
 
 ## Contracts
 
