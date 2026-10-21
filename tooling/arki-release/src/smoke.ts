@@ -284,6 +284,9 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
     const installed = await readInstalled(consumer);
     await cp(path.join(smokeDir, 'consumer-smoke.mjs'), path.join(consumer, 'consumer-smoke.mjs'));
     const peerSkips = new Map<string, Set<string>>();
+    // Source-distributed packages ship .ts/.css for a bundler; bare runtimes
+    // cannot load them, so the Vite build below is their import check.
+    const sourcePackages = new Set(config.waves.filter(w => w.buildOutput === 'source').flatMap(w => w.packages));
     for (const runtime of ['node', 'bun'] as const) {
       const result = await run(runtime, ['consumer-smoke.mjs'], { cwd: consumer });
       const lines = parseSmokeOutput(result.stdout);
@@ -291,7 +294,9 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
         const mine = lines.filter(l => packageOfSpec(l.spec) === pkg.name);
         const bad = mine.filter(l => l.verdict === 'FAIL');
         const id = `import:${runtime}`;
-        if (bad.length > 0) {
+        if (sourcePackages.has(pkg.name)) {
+          add(pkg.name, check(id, 'skip', 'source-distributed: the Vite build checks its imports'));
+        } else if (bad.length > 0) {
           add(pkg.name, check(id, 'fail', bad.map(l => `${l.spec}${l.rest}`).join('; ')));
           fail(
             SMOKE_ERROR_CODES.importFailed,

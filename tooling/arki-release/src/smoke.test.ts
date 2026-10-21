@@ -219,6 +219,17 @@ describe('runSmoke', () => {
     expect(envelope.items[0]?.checks.find(c => c.id === 'vite-build')?.status).toBe('pass');
   });
 
+  it('does not fail a source-distributed package that bare node cannot import', async () => {
+    // Why: @arki/ui and friends ship .ts and .css for a bundler; node's
+    // "Unknown file extension" is expected there, and blocked every frontend candidate.
+    const cssJournal: Fixture = { manifest: journal.manifest, files: { 'index.js': "import './tokens.css';\n", 'tokens.css': ':root{}\n' } };
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner } = fakeRunner({ packed: { journal: journal.manifest }, installed: { '@arki/journal': cssJournal, '@arki/log': logNew } });
+    const envelope = await runSmoke({ ...base(dir, runner), config: config('source') });
+    expect(envelope.errors.filter(e => e.code === 'SMOKE_E002')).toEqual([]);
+    expect(envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'import:node')?.status).toBe('skip');
+  });
+
   it('fails with SMOKE_E008 when candidate.json is missing', async () => {
     // Why: smoke must never guess a wave; a missing candidate means the freeze step was skipped.
     const dir = mkdtempSync(path.join(tmpdir(), 'smoke-empty-'));
