@@ -470,6 +470,10 @@ failure or an ownership plan. Service values belong in `provides`.
 
 ### Capabilities in the request context
 
+This is the object-form pattern: each procedure names its handles with
+`needs(...)`. New code uses `bind(featureLogic)` once per feature instead
+(see [oRPC, contract first](#orpc-contract-first-arkidotorpc)).
+
 A request context cannot name the merged service type — the routers that read
 the context are part of it, so the type loops. The context carries an opaque
 `ServicesBag` instead, and each procedure narrows it with its feature's own
