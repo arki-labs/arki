@@ -351,6 +351,8 @@ export function journalTables(schema?: PgSchema) {
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;
+/** The node manifest a run stores in `workflow_runs.shape`, the type of that column. */
+export type { WorkflowShape };
 
 /** The names of journal tables that no top-level export of `Module` holds. */
 type MissingJournalTables<Module> = {

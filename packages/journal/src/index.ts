@@ -124,6 +124,7 @@ export type {
   WorkflowReads,
   WorkflowVerbs,
 } from './workflow/read.js';
+export type { WorkflowShape } from './workflow/shape.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';
