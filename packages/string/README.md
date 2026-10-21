@@ -47,7 +47,7 @@ export function describePost(title: string, body: string): { slug: string; summa
 ## When not to use this
 
 - You need to check that a string is a URL or base64. Use a schema, such as Zod's `z.url()` or `z.base64()`, with `is` or `assert` from `@arki/schema`. This package encodes and decodes base64 and does not validate URLs.
-- You need to parse, strip or sanitize HTML. Use `@arki/formats`. `escapeHtml` here only escapes text. It does not sanitize.
+- You need to parse, strip or sanitize HTML. Use a dedicated HTML parser or sanitizer. `escapeHtml` here only escapes text. It does not sanitize.
 - You need dates, durations or relative time. Use `@arki/date`.
 - You need hyphenation, dictionaries or embeddings. Use the `@arki/text-*` packages.
 - You need English pluralization or number and byte formatting. They are out of scope on purpose.

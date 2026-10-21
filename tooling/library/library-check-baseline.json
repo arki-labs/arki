@@ -156,12 +156,12 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/domains",
+      "package": "@fleet/domains",
       "error": "TYPES_E001 export \"./availability\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/domains",
+      "package": "@fleet/domains",
       "error": "TYPES_E001 export \"./namecheap\" exposes Zod types: ZodAny, ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -683,11 +683,6 @@
     {
       "package": "@fleet/scraping",
       "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/text",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodURL",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {

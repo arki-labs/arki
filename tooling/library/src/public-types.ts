@@ -41,7 +41,6 @@ const ZOD_LAYER_PACKAGES = new Set(['@arki/contracts']);
 const ZOD_LAYER_ENTRIES: Readonly<Record<string, ReadonlySet<string>>> = {
   '@arki/db': new Set(['./id', './id-factory']),
   '@arki/env': new Set(['./contracts']),
-  '@arki/text': new Set(['./validation']),
   '@arki/content-build': new Set(['./presets']),
 };
 
