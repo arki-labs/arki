@@ -1,3 +1,4 @@
+import { init as initCuid } from '@paralleldrive/cuid2';
 import { z } from 'zod';
 
 import type { FailureOf } from '@arki/failure';
@@ -175,24 +176,73 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
 
 /* ---- the generator: Web Crypto, so it runs in Node, Bun, Deno and browsers ---- */
 
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-const ALPHABET = `${LETTERS}0123456789`;
 const BODY_LENGTH = 24;
 
 // Each batch samples twice the target length; 32 batches bound broken providers.
 const MAX_RANDOM_BATCHES = 32;
 
 /**
+ * Draws 32 random bits from the provider `createIdBody` resolved for the
+ * current generation. Set for the span of one generation, read by cuid2's
+ * `random` callback; cleared after, so a draw outside a generation fails.
+ */
+let activeDraw: ((bytes: Uint32Array) => unknown) | undefined;
+
+/** cuid2's `random`: a float in [0, 1) from the active Web Crypto provider, or a thrown protocol violation. */
+function secureRandom(): number {
+  const draw = activeDraw;
+  if (draw === undefined) throw new TypeError('Random draw outside of an id generation.');
+  const bytes = new Uint32Array(1);
+  const result: unknown = draw(bytes);
+  if (result !== bytes) {
+    // A broken synchronous provider may still return rejected asynchronous work.
+    // Observe it without delaying this protocol failure or exposing its private cause.
+    void Promise.resolve(result).catch(() => {
+      // The synchronous protocol failure below already owns this outcome.
+    });
+    throw new TypeError('Random provider returned a different buffer.');
+  }
+  const value = bytes[0];
+  if (value === undefined) throw new TypeError('Random provider detached its buffer.');
+  return value / 4_294_967_296;
+}
+
+/** The cuid2 generator, seeded (counter, host fingerprint) on the first successful generation. */
+let cuid: (() => string) | undefined;
+
+/**
  * Generate the unprefixed body shared by modern declarations and legacy DB IDs.
  * This is an entropy primitive, not a domain identity declaration: use `defineId`
  * to associate a body with its schema and ID kind.
  *
- * 24 characters shaped like a cuid2: a letter first, then letters and digits.
- * Rejection sampling keeps each character equally likely. Only our fixed-size
- * buffer is read, by index, so provider-owned iterators cannot control the loop.
+ * The body is a cuid2 (`@paralleldrive/cuid2`): 24 characters, a letter
+ * first, then letters and digits; a SHA3 of time, a counter, a host
+ * fingerprint and random salt. Every random bit comes from Web Crypto's
+ * `getRandomValues`, resolved per generation: an unusable provider answers
+ * `RandomSourceUnavailable`, a provider that breaks the protocol answers
+ * `UnexpectedDefect`, and no provider-owned value is ever iterated.
+ *
+ * A cuid2 costs about 100 µs on Bun and Node (the hash and the base-36
+ * conversion), so it is for entity identities, not per-request ids;
+ * `format: 'uuid'` stays at well under a microsecond.
  */
 export function createIdBody(): string | IdGenerationFailure {
-  return createRandomBody(BODY_LENGTH, LETTERS, ALPHABET);
+  try {
+    const source: unknown = Reflect.get(globalThis, 'crypto');
+    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
+    if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+    // Web Crypto requires its receiver.
+    activeDraw = bytes => Reflect.apply(getRandomValues, source, [bytes]);
+    try {
+      cuid ??= initCuid({ random: secureRandom, length: BODY_LENGTH });
+      return cuid();
+    } finally {
+      activeDraw = undefined;
+    }
+  } catch (error) {
+    return UnexpectedDefect({ cause: error });
+  }
 }
 
 function createRandomBody(length: number, firstAlphabet: string, alphabet: string): string | IdGenerationFailure {

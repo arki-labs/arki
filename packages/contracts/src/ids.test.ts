@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
+
+import { isCuid } from '@paralleldrive/cuid2';
 import { z } from 'zod';
 
 import { isFailure, orThrow, revive, serialize, UnexpectedDefect } from '@arki/failure';
@@ -144,31 +147,30 @@ describe('ID generation failures', () => {
     },
   );
 
-  it('keeps the crypto receiver, reads the method once, and rejects biased byte ranges', () => {
-    const getRandomValues = vi.fn(function (this: unknown, bytes: Uint8Array) {
+  it('is a cuid2 drawn only from the current Web Crypto provider, as that provider', () => {
+    orThrow(storyId.create()); // the first generation seeds cuid2's counter and host fingerprint
+    const getRandomValues = vi.fn(function (this: unknown, bytes: Uint32Array<ArrayBuffer>) {
       expect(this).toBe(provider);
-      bytes.fill(0);
-      bytes.set([255, 234, 233, 252, 251, 25, 26]);
-      return bytes;
+      return webcrypto.getRandomValues(bytes);
     });
     const readMethod = vi.fn(() => getRandomValues);
     const provider = Object.defineProperty({}, 'getRandomValues', { get: readMethod });
     vi.stubGlobal('crypto', provider);
-    expect(orThrow(storyId.create())).toBe(`sty_z9z0${'a'.repeat(20)}`);
+    const id = orThrow(storyId.create());
+    expect(id).toMatch(/^sty_[a-z][a-z0-9]{23}$/);
+    expect(isCuid(id.slice('sty_'.length))).toBe(true);
     expect(readMethod).toHaveBeenCalledTimes(1);
-    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(getRandomValues).toHaveBeenCalled();
+    for (const [bytes] of getRandomValues.mock.calls) expect(bytes).toBeInstanceOf(Uint32Array);
   });
 
-  it('can refill rejected batches without returning a partial ID', () => {
-    let calls = 0;
-    vi.stubGlobal('crypto', {
-      getRandomValues(bytes: Uint8Array) {
-        bytes.fill(calls++ === 0 ? 255 : 0);
-        return bytes;
-      },
-    });
-    expect(storyId.create()).toBe(`sty_${'a'.repeat(24)}`);
-    expect(calls).toBe(2);
+  it('never draws outside a generation', () => {
+    const getRandomValues = vi.fn((bytes: Uint32Array<ArrayBuffer>) => webcrypto.getRandomValues(bytes));
+    vi.stubGlobal('crypto', { getRandomValues });
+    orThrow(storyId.create());
+    const drawsForOneId = getRandomValues.mock.calls.length;
+    orThrow(storyId.create());
+    expect(getRandomValues.mock.calls.length).toBe(drawsForOneId * 2);
   });
 
   it.each(['global getter', 'method getter', 'provider'])('keeps thrown %s defects private', location => {
@@ -231,16 +233,9 @@ describe('ID generation failures', () => {
     expect(readThen).toHaveBeenCalledTimes(1);
   });
 
-  it('bounds rejection sampling when a provider never supplies an acceptable byte', () => {
-    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(255));
-    vi.stubGlobal('crypto', { getRandomValues });
-    expect(UnexpectedDefect.is(storyId.create())).toBe(true);
-    expect(getRandomValues.mock.calls.length).toBeLessThanOrEqual(100);
-  });
-
   it('reads only its fixed buffer indices even if the provider installs a hostile iterator', () => {
     vi.stubGlobal('crypto', {
-      getRandomValues(bytes: Uint8Array) {
+      getRandomValues(bytes: Uint32Array) {
         bytes.fill(0);
         Object.defineProperty(bytes, Symbol.iterator, {
           value: () => {
@@ -251,7 +246,8 @@ describe('ID generation failures', () => {
         return bytes;
       },
     });
-    expect(storyId.create()).toBe(`sty_${'a'.repeat(24)}`);
+    // Zero entropy still yields a well-formed cuid2: the hash of time, counter and fingerprint fills it.
+    expect(orThrow(storyId.create())).toMatch(/^sty_a[a-z0-9]{23}$/);
   });
 
   it('refuses detached buffers rather than publishing a partial ID', () => {
