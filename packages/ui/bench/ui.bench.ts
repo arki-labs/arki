@@ -8,7 +8,8 @@ import { Scanner } from '@tailwindcss/oxide';
 import { defineSuite, size } from '@arki/bench';
 
 const SOURCE = new URL('../src/', import.meta.url);
-const TOKENS = new URL('../../design-systems/src/workbench/tokens.css', import.meta.url);
+// A copy of the workbench theme (tokens + Tailwind bridge), so the bench needs no theme package.
+const TOKENS = new URL('theme/tokens.css', import.meta.url);
 
 /**
  * The CSS an app's Tailwind v4 build would emit for the classes found in these @arki/ui files:
@@ -27,7 +28,7 @@ async function tailwindCssFor(name: string, files: readonly string[]): Promise<s
   const compiler = await compile(
     `@import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/preflight.css' layer(base);
-@import '@arki/design-systems/workbench/theme-bridge.css';
+@import './bench/theme/theme-bridge.css';
 @import 'tw-animate-css';
 @tailwind utilities;
 ${tokens}`,

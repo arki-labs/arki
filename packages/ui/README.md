@@ -5,21 +5,47 @@ React component library for ARKI apps: Base UI primitives styled with Tailwind v
 ## Install
 
 ```sh
-bun add @arki/ui @arki/design-systems react react-dom
+bun add @arki/ui react react-dom
 ```
 
-`react` and `react-dom` 19 are peer dependencies. `@arki/design-systems` supplies the tokens the components read, and `@arki/ui/theme` sets light and dark mode.
+`react` and `react-dom` 19 are peer dependencies. `@arki/ui/theme` sets light and dark mode.
 
 ## Quick start
 
-Pick one design system and let Tailwind scan the component sources.
+The components read the standard shadcn token names (`background`, `foreground`, `card`, `popover`, `primary`, `secondary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, `chart-1` to `chart-5`, `sidebar-*`, `radius`). Any shadcn-compatible theme works. `Callout` also reads three status colours (`success`, `warning`, `info`) and four tints (`success-surface`, `warning-surface`, `info-surface`, `destructive-surface`).
+
+Define the tokens, map them onto Tailwind, and let Tailwind scan the component sources.
 
 ```css
 /* src/styles/global.css */
 @import 'tailwindcss';
-@import '@arki/design-systems/atelier/fonts.css';
-@import '@arki/design-systems/atelier/tokens.css';
-@import '@arki/design-systems/atelier/theme-bridge.css';
+
+/* Your theme: paste one from ui.shadcn.com/themes, or write your own. */
+:root {
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(240 10% 4%);
+  --primary: hsl(240 6% 10%);
+  --primary-foreground: hsl(0 0% 98%);
+  /* … the rest of the names above … */
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: hsl(240 10% 4%);
+  --foreground: hsl(0 0% 98%);
+  /* … */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  /* … one --color-* line per colour token … */
+  --radius-lg: var(--radius);
+}
+
+@custom-variant dark (&:is(.dark *));
 
 /* Adjust the path to where @arki/ui is installed. */
 @source '../node_modules/@arki/ui/src';
@@ -50,7 +76,7 @@ export function Example() {
 
 - Your app does not use Tailwind v4. The components are styled with Tailwind classes and have no stylesheet of their own.
 - You need a headless library to style yourself. Use `@base-ui/react` directly. This package is the styled layer on top of it.
-- You mix design systems in one app. These components read one set of tokens (see `@arki/design-systems`).
+- You mix two themes in one app. These components read one set of tokens.
 - You build for React Native. Use `@arki/native-ui`.
 
 ## Runtime support
@@ -69,7 +95,8 @@ There is no root import. Every component is its own subpath: `@arki/ui/button`, 
 | Menus and navigation | `dropdown-menu`, `context-menu`, `menubar`, `navigation-menu`, `breadcrumb`, `pagination`, `tabs`, `sidebar` |
 | Layout and surfaces | `card`, `glass-card`, `panel`, `surface`, `separator`, `scroll-area`, `resizable`, `tool-panels`, `aspect-ratio`, `accordion`, `collapsible` |
 | Data display | `table`, `chart`, `badge`, `avatar`, `alert`, `callout`, `progress`, `skeleton`, `spinners`, `timeline`, `carousel`, `calendar`, `katex` |
-| Helpers | `cn`, `design-system`, `slot`, `as-child`, `scroll-to-top` |
+| Helpers | `cn`, `slot`, `as-child`, `scroll-to-top` |
+| Styles | `styles/animations.css`, `styles/nav.css` (the page navigation crossfade) |
 | Theme | `theme` (`ThemeProvider`, `useTheme`), `theme/script` (`themeScript`, `themeDetectionFn`, `THEME_STORAGE_KEY`) |
 | Hooks | `hooks/debounce`, `hooks/local-storage`, `hooks/media-query`, `hooks/hotkeys`, `hooks/copy-to-clipboard`, `hooks/timeout`, `hooks/toggle`, `hooks/pagination`, `hooks/async-memo`, `hooks/is-client`, `hooks/long-press`, `hooks/touch`, `hooks/use-viewport`, `hooks/use-swipe-gesture`, `hooks/use-touch-feedback` |
 
@@ -86,7 +113,7 @@ Components do not return failure values. Mistakes in how you compose them show u
 ## Limits
 
 - Tailwind only sees classes it can scan. If `@source` does not point at the installed `@arki/ui/src`, components render with no styling and no error.
-- Pick one design system per app. Boundary: loading `atelier` tokens and `workbench` tokens in one stylesheet makes the later file win for every shared name, so components mix two palettes.
+- Load one theme per app. Boundary: loading two token files in one stylesheet makes the later file win for every shared name, so components mix two palettes.
 - `katex` does not load KaTeX's stylesheet. Import `katex/dist/katex.min.css` yourself, or maths renders unstyled.
 - Imports must name a subpath. `import { Button } from '@arki/ui'` fails: the package has no root entry.
 - Some components rely on browser APIs (`matchMedia`, `ResizeObserver`). Render them on the client; in tests use a DOM environment.
@@ -110,9 +137,9 @@ true true
 ## Design-system rules
 
 1. Style with semantic classes: `bg-background`, `bg-card`, `text-muted-foreground`, `border-border`.
-2. One design system per app: `atelier`, `workbench` or `arena`. Never mix them.
+2. One theme per app. Never mix two token sets.
 3. App-specific colours get new token names. Do not redefine a shared name.
-4. If a component needs a token the contract does not have, propose the smallest extension and get confirmation before you change `@arki/design-systems`.
+4. If a component needs a token outside the names above, propose the smallest extension and get confirmation first: every app theme must then define it.
 
 <!-- bench:start -->
 ## Benchmarks
@@ -197,7 +224,6 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 
 ## Related packages
 
-- `@arki/design-systems`: tokens, Tailwind bridge and fonts for `atelier`, `workbench`, `arena`.
 - `@arki/icons`: icon sets behind one React entry point.
 
 ## Documentation

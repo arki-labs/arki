@@ -6,7 +6,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 1. One component, one file, one subpath. A new component gets `src/<name>.tsx` and an `exports` row in `package.json`. There is no root import.
 2. Style only with semantic tokens (`bg-background`, `text-muted-foreground`, `border-border`). Never write a raw colour, a Tailwind palette colour (`blue-500`) or a design-system-specific name.
-3. Never mix `atelier`, `workbench` and `arena` in one app. Components must look right in every shared system without changes.
+3. Never mix two themes in one app. Components must look right with any shadcn-compatible theme without changes.
 4. Do not extend the token contract without founder confirmation. A component that needs a new token stops and asks.
 5. Build on `@base-ui/react` primitives. Variants use `class-variance-authority`. Merge classes with `cn` from `src/cn.ts`.
 6. A compound part that needs its parent throws a plain `Error` that names the parent. Do not return a silent default.

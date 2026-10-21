@@ -35,11 +35,6 @@
       "import": "./src/cn.ts",
       "browser": "./src/cn.ts"
     },
-    "./design-system": {
-      "types": "./dist/src/design-system.d.ts",
-      "import": "./src/design-system.ts",
-      "browser": "./src/design-system.ts"
-    },
     "./accordion": {
       "types": "./dist/src/accordion.d.ts",
       "import": "./src/accordion.tsx",
@@ -471,9 +466,6 @@
       "cn": [
         "src/cn.ts"
       ],
-      "design-system": [
-        "src/design-system.ts"
-      ],
       "accordion": [
         "src/accordion.tsx"
       ],
@@ -707,7 +699,6 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/date": "workspace:*",
-    "@arki/design-systems": "workspace:*",
     "@arki/icons": "workspace:*",
     "@base-ui/react": "catalog:",
     "@hookform/resolvers": "catalog:validation",

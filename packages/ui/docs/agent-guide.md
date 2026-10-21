@@ -5,12 +5,12 @@ Read this before adding or changing a component. The [README](../README.md) is t
 ## The model
 
 - A component is a styled wrapper over a Base UI primitive. It takes the primitive's props and adds classes.
-- Colours come from semantic tokens that `@arki/design-systems` defines. The same component works in `atelier`, `workbench` and `arena`.
+- Colours come from the standard shadcn token names (plus the status colours and `-surface` tints). The same component works with any theme that defines them.
 - Tailwind generates the CSS in the app, not in this package. The app must scan `@arki/ui/src` with `@source`.
 - Every component is its own subpath. There is no root import.
 
 ```text
-@arki/design-systems tokens  ->  Tailwind classes  ->  @arki/ui component  ->  app
+app theme tokens  ->  Tailwind classes  ->  @arki/ui component  ->  app
 ```
 
 ## Task map
