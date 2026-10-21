@@ -1,10 +1,10 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import type { Failure } from './failure.js';
-import { FAILURE_ERROR_CODES } from './errors.js';
+import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
 import { defineFailure } from './failure.js';
-import { assertNever, match, recover } from './handle.js';
+import { invariant, match, recover, unreachable } from './handle.js';
 
 const PostNotFound = defineFailure('post.not_found', { status: 404, data: z.object({ id: z.string() }) });
 const PostLocked = defineFailure('post.locked', { status: 409 });
@@ -98,7 +98,7 @@ describe('recover', () => {
   });
 });
 
-describe('assertNever', () => {
+describe('unreachable', () => {
   type Shape = { kind: 'circle'; r: number } | { kind: 'square'; side: number };
   const area = (shape: Shape): number => {
     switch (shape.kind) {
@@ -109,7 +109,7 @@ describe('assertNever', () => {
         return shape.side ** 2;
       }
       default: {
-        return assertNever(shape);
+        return unreachable(shape);
       }
     }
   };
@@ -120,3 +120,47 @@ describe('assertNever', () => {
     expect(() => area(smuggled)).toThrow(expect.objectContaining({ code: FAILURE_ERROR_CODES.unreachable }));
   });
 });
+
+describe('unreachable message', () => {
+  it('never contains the value, because the value may be a secret that reached a switch from outside', () => {
+    const secret = 'sk-live-do-not-print';
+    const error = catchError(() => unreachable(JSON.parse(`"${secret}"`) as never));
+    expect(error).toBeInstanceOf(FailureError);
+    expect(String(error instanceof Error ? error.message : error)).not.toContain(secret);
+  });
+
+  it('uses the caller message when given', () => {
+    expect(() => unreachable(undefined as never, 'unknown plan')).toThrow('unknown plan');
+  });
+});
+
+describe('invariant', () => {
+  it('passes a truthy condition and throws a coded FailureError on a falsy one, because a broken invariant is a bug, not an expected failure', () => {
+    expect(() => {
+      invariant(1 + 1 === 2);
+    }).not.toThrow();
+    expect(() => {
+      invariant(null, 'user must be loaded');
+    }).toThrow(expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }));
+  });
+
+  it('builds a lazy message only on failure', () => {
+    const build = vi.fn(() => 'expensive');
+    invariant(true, build);
+    expect(build).not.toHaveBeenCalled();
+    expect(() => {
+      invariant(false, build);
+    }).toThrow('expensive');
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** The error a callback throws, or undefined. */
+function catchError(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}

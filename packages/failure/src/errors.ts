@@ -30,7 +30,7 @@ export const FAILURE_ERROR_CODES = {
    */
   unhandledFailure: 'ARKI_FAILURE_E003',
   /**
-   * `assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside).
+   * `unreachable` was reached, so a value the types said could not happen did happen (often bad data from outside).
    *
    * @fix Handle the new case in the `switch`, or validate the data at the boundary.
    * @verify bun run test -- src/handle.test.ts
@@ -57,6 +57,13 @@ export const FAILURE_ERROR_CODES = {
    * @verify bun run test -- src/revive.test.ts
    */
   asyncSchema: 'ARKI_FAILURE_E007',
+  /**
+   * An `invariant` condition was falsy, so code relied on something that is not true.
+   *
+   * @fix Find the caller that broke the assumption and fix it; do not catch this error.
+   * @verify bun run test -- src/handle.test.ts
+   */
+  invariant: 'ARKI_FAILURE_E008',
 } as const;
 
 /** The code of a {@link FailureError}. */

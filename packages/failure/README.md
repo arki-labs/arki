@@ -60,7 +60,7 @@ Node, Bun, Deno, browsers and React Native (Hermes). The core uses no runtime bu
 
 ## Public imports
 
-- `@arki/failure`: `defineFailure`, `isFailure`, `match`, `recover`, `orThrow`, `attempt`, `revive`, `findCause`, `partition`, `collect`, `stoppable`, `assertNever`, `FailureError` and the types.
+- `@arki/failure`: `defineFailure`, `isFailure`, `match`, `recover`, `orThrow`, `attempt`, `revive`, `findCause`, `partition`, `collect`, `stoppable`, `unreachable`, `invariant`, `FailureError` and the types.
 - `@arki/failure/orpc`: `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcFailureDefinitions`, `RPC_FAILURE_DEFINITION`.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules, and `configs.recommended`.
 
@@ -146,7 +146,8 @@ export async function titleOf(id: string) {
 A function with no success value returns `undefined` or a failure. Callers check with `isFailure`.
 
 ```ts run
-import { isFailure, type Failure } from '@arki/failure';
+import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 
 import { PostId, PostNotFound, repo } from './fixture.ts';
 
@@ -172,7 +173,8 @@ When some work succeeded before an expected failure, return the success value wi
 ```ts run
 import { isFailure, stoppable } from '@arki/failure';
 
-import { items, save, send, type Item } from './fixture.ts';
+import type { Item } from './fixture.ts';
+import { items, save, send } from './fixture.ts';
 
 async function exportAll(items: Item[]) {
   const delivered: Item[] = [];
@@ -230,9 +232,22 @@ export async function titleOrDraft(id: string) {
 
 The success value, or throw the failure as an `UnexpectedFailure` (with `failure`, `code`, `status`, `remediation` and the failure's `cause`). Use it where a failure would be a bug: a seed script, a test, an id you created a moment ago. It takes a promise too, so `orThrow(find(id))` cannot forget the `await`.
 
-### `assertNever(value, message?)`
+### `unreachable(value, message?)`
 
-Put it in the `default` of a `switch` over a union. When the union gains a member, the call stops compiling. If it is reached anyway (bad data at runtime), it throws `ARKI_FAILURE_E004`.
+Put it in the `default` of a `switch` over a union. When the union gains a member, the call stops compiling. If it is reached anyway (bad data at runtime), it throws `ARKI_FAILURE_E004`. The default message never contains the value, because it may be a secret. (This was `assertNever`; the rename is a breaking change with no alias.)
+
+### `invariant(condition, message?)`
+
+A check for something the code relies on. A falsy condition throws `ARKI_FAILURE_E008`; afterwards the compiler treats the condition as true. The message may be a function, built only on failure. It is a bug check, not a way to return an expected failure.
+
+```ts run
+import { invariant } from '@arki/failure';
+
+const users = new Map([['u1', { name: 'Ada' }]]);
+const user = users.get('u1');
+invariant(user !== undefined, () => 'user u1 must be loaded');
+if (user.name !== 'Ada') throw new Error('unexpected user');
+```
 
 ## Boundaries
 
@@ -263,6 +278,7 @@ A failure that went through JSON is a plain object again. `revive` validates the
 `serialize(failure, definitions)` produces a version 1 envelope with only `version`, `code` and optional validated `data`. `revive` also reads legacy versionless `{code, data}` records. Remote status, message, brand and cause are ignored. `reviveJson(text, definitions)` additionally handles malformed JSON as `InvalidEnvelope`.
 
 Wire data must be lossless JSON and its schema must accept that data unchanged. Dates, bigints, cycles, getters, `toJSON` hooks and transforms that change the output are rejected. Use a separate JSON-safe wire definition for those domain values; no implicit codec or double transformation occurs.
+
 ```ts run
 import { revive } from '@arki/failure';
 
@@ -314,7 +330,7 @@ if (posts.length !== 1 || missing.length !== 1 || !Array.isArray(pair)) throw ne
 A failure is a return value, so the compiler checks it only when the value is used. A call whose result is thrown away drops its failure silently:
 
 ```ts
-import { id, a, b, remove } from './fixture.ts';
+import { a, b, id, remove } from './fixture.ts';
 
 await remove(id); // ✗ failure/must-use: this call can return a failure ("post.not_found") and its result is thrown away
 void (await remove(id)); // ✗ `void` hides the failure too
@@ -372,11 +388,15 @@ import { z } from 'zod';
 
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
-import { PostId, PostNotFound, PostSchema, type AppContext } from './fixture.ts';
+import type { AppContext } from './fixture.ts';
+import { PostId, PostNotFound, PostSchema } from './fixture.ts';
 
 // entrypoints/rpc.ts
 export const rpc = {
-  byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
+  byId: oc
+    .errors(errorMap(PostNotFound))
+    .input(z.object({ id: PostId }))
+    .output(PostSchema),
 };
 
 // entrypoints/procedures.ts
@@ -430,15 +450,16 @@ The package returns typed domain, validation and protocol failures. Owned bounda
 
 A `FailureError` has a stable `code` and a one-sentence `remediation`. Each code has a page at `https://arki.dev/errors/<code>`.
 
-| Code                | When                                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------------------ |
-| `ARKI_FAILURE_E001` | `defineFailure` got an empty code, or the reserved code `ok`.                                    |
-| `ARKI_FAILURE_E002` | `defineFailure` got a status that is not an integer from 400 to 599.                             |
-| `ARKI_FAILURE_E003` | `match` met a failure code it has no handler for (types were bypassed).                          |
-| `ARKI_FAILURE_E004` | `assertNever` was reached.                                                                       |
-| `ARKI_FAILURE_E005` | `errorMap` got two definitions with the same code.                                               |
+| Code                | When                                                                       |
+| ------------------- | -------------------------------------------------------------------------- |
+| `ARKI_FAILURE_E001` | `defineFailure` got an empty code, or the reserved code `ok`.              |
+| `ARKI_FAILURE_E002` | `defineFailure` got a status that is not an integer from 400 to 599.       |
+| `ARKI_FAILURE_E003` | `match` met a failure code it has no handler for (types were bypassed).    |
+| `ARKI_FAILURE_E004` | `unreachable` was reached.                                                 |
+| `ARKI_FAILURE_E005` | `errorMap` got two definitions with the same code.                         |
 | `ARKI_FAILURE_E006` | Retired: revival now returns `InvalidEnvelope` with reason `invalid_data`. |
-| `ARKI_FAILURE_E007` | Retired: revival now returns `AsyncSchema`.        |
+| `ARKI_FAILURE_E007` | Retired: revival now returns `AsyncSchema`.                                |
+| `ARKI_FAILURE_E008` | An `invariant` condition was falsy.                                        |
 
 ## Limits
 

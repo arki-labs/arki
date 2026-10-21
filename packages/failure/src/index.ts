@@ -18,7 +18,7 @@ export type {
   Stoppable,
   SuccessOf,
 } from './failure.js';
-export { assertNever, match, recover } from './handle.js';
+export { invariant, match, recover, unreachable } from './handle.js';
 export type { MatchHandlers, RecoverHandlers } from './handle.js';
 export { revive, reviveJson, serialize, REVIVAL_FAILURES } from './revive.js';
 export { InvalidInput, AsyncSchema, ValidatorDefect, InvalidEnvelope, UnexpectedDefect } from './foundations.js';

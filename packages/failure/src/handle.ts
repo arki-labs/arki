@@ -1,6 +1,6 @@
 /**
  * Handling a value that may be a failure: all of it (`match`), part of it
- * (`recover`), or proving a branch cannot happen (`assertNever`).
+ * (`recover`), or proving a branch cannot happen (`unreachable`), or a condition holds (`invariant`).
  */
 import type { Failure } from './failure.js';
 import { FAILURE_ERROR_CODES, FailureError } from './errors.js';
@@ -87,29 +87,36 @@ export function recover(value: unknown, handlers: Readonly<Record<string, (input
 /**
  * Mark a branch that cannot be reached. Put it in the `default` of a switch
  * over a union: when the union gains a member, the call stops compiling.
+ * The default message never contains the value, because it may be a secret.
  *
  * @example
  * switch (shape.kind) {
  *   case 'circle': return area(shape);
  *   case 'square': return side(shape) ** 2;
- *   default: return assertNever(shape);
+ *   default: return unreachable(shape);
  * }
  */
-export function assertNever(value: never, message?: string): never {
+export function unreachable(_value: never, message?: string): never {
   throw new FailureError(
     FAILURE_ERROR_CODES.unreachable,
-    message ?? `assertNever() was reached with ${describe(value)}`,
+    message ?? 'unreachable() was reached',
     'A union gained a member this code does not handle. Add a branch for it.',
   );
 }
 
-/** JSON.stringify as it behaves: it returns undefined for undefined, functions and symbols. */
-const stringify: (value: unknown) => string | undefined = JSON.stringify;
-
-function describe(value: unknown): string {
-  try {
-    return stringify(value) ?? String(value);
-  } catch {
-    return String(value);
-  }
+/**
+ * Prove a condition the surrounding code relies on. A falsy condition is a bug
+ * in the caller, so it throws a {@link FailureError}; afterwards the compiler
+ * treats the condition as true. The message may be a function, built only on failure.
+ *
+ * @example
+ * invariant(user !== undefined, () => `user ${id} must be loaded`);
+ */
+export function invariant(condition: unknown, message?: string | (() => string)): asserts condition {
+  if (condition) return;
+  throw new FailureError(
+    FAILURE_ERROR_CODES.invariant,
+    (typeof message === 'function' ? message() : message) ?? 'invariant() failed',
+    'The code assumed something that is not true. Fix the caller that broke it; do not catch this.',
+  );
 }

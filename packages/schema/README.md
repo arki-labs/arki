@@ -75,6 +75,33 @@ if (handle !== 'ada') throw new Error('unexpected handle');
 
 Definitions are exported from `@arki/failure`. Their `.is` guards work across package copies. `orThrow(result)` explicitly bridges into a foreign throwing API through `UnexpectedFailure`; parsing itself returns failures.
 
+## Throwing channel: `is`, `assert`, `ensure`
+
+`parse` is for expected failure: bad user data is returned. `assert` and `ensure` are for bugs: a value the code already trusted is wrong, so they throw `AssertError` (`ARKI_SCHEMA_E004`). Both report the same issues.
+
+- `is(value, schema)` is a guard. A rejection is `false`.
+- `assert(value, schema, options?)` narrows the variable to the schema's input type. It never transforms.
+- `ensure(value, schema, options?)` returns the schema's output: a throwing `parse`.
+- `options.at` labels the value (`"PORT"`). `options.message` is a string or a function built only on failure.
+
+The error message lists the issues with paths. It never contains the value, because asserted values are often secrets: the offending value is redacted out of each issue message. An async schema throws `ARKI_SCHEMA_E005` at once. `is` throws too, because `false` would silently mean "invalid" for data that may be fine.
+
+```ts run
+import { z } from 'zod';
+
+import { AssertError, ensure } from '@arki/schema';
+
+const port = ensure('8080', z.coerce.number(), { at: 'PORT' });
+if (port !== 8080) throw new Error('unexpected port');
+try {
+  ensure('x', z.coerce.number().int(), { at: 'PORT' });
+} catch (error) {
+  if (!(error instanceof AssertError)) throw error;
+}
+```
+
+Every check of an unknown value is a schema. `recordSchema` accepts a non-null object that is not an array. `plainObjectSchema` also needs an `Object.prototype` or `null` prototype, so class instances and dates are out. Use them as `is(value, recordSchema)` or `assert(value, plainObjectSchema)`; each failure is one fixed issue with no value in it.
+
 ## JSON Schema
 
 `withJsonSchema(schema, input, output?)` wraps a schema with JSON Schema converters. The output description defaults to input. The wrapper preserves validation receiver binding and answers only `draft-2020-12`; another target throws `SchemaRunError` with `ARKI_SCHEMA_E003`. This converter error is separate from validation failures.
@@ -97,6 +124,9 @@ if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
 | `SchemaInput<S>`, `SchemaOutput<S>`                          | Infer input and output                   |
 | `SchemaWithJson<I, O>`                                       | Validation and JSON Schema in one schema |
 | `parse`, `parseAsync`                                        | Output or exact canonical failures       |
+| `is`, `assert`, `ensure`, `AssertOptions`                    | Throwing channel for bugs                |
+| `AssertError`, `AssertErrorCode`                             | Coded error with `issues`; no raw value  |
+| `recordSchema`, `plainObjectSchema`                          | Object-shape checks as schemas           |
 | `pathOf(issue)`                                              | Path as plain keys                       |
 | `formatIssues(issues)`                                       | All issue messages with paths            |
 | `isStandardSchema(value)`                                    | Recognize object and callable schemas    |

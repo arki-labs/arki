@@ -19,6 +19,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 13. Wire data is validated, lossless JSON whose schema accepts its output unchanged. Non-JSON or changing transforms need a separate wire definition.
 14. Validation and revival return their precise canonical failures. No throw-only compatibility shim. Causes stay private.
+15. `unreachable` and `invariant` are the throwing channel for bugs (`FailureError`). Their messages never carry a value, because it may be a secret. Both are `function` declarations so `asserts` narrowing works (no TS2775).
 
 ## Changing this package
 

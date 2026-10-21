@@ -5,13 +5,13 @@
 // `orThrowRpc`, with plain errors standing in for the handler's.
 
 import {
-  assertNever,
   attempt,
   collect,
   defineFailure,
   FailureError,
   findCause,
   InvalidInput,
+  invariant,
   isFailure,
   match,
   orThrow,
@@ -21,6 +21,7 @@ import {
   serialize,
   stoppable,
   UnexpectedFailure,
+  unreachable,
   ValidatorDefect,
 } from '../dist/index.js';
 import { orThrowRpc } from '../dist/orpc.js';
@@ -52,11 +53,11 @@ async function main() {
     () => 'resolved',
     error => (error instanceof UnexpectedFailure ? error.code : error.name),
   );
-  let unreachable = 'not thrown';
+  let unreachableCode = 'not thrown';
   try {
-    assertNever('x');
+    unreachable('x');
   } catch (error) {
-    unreachable = error instanceof FailureError ? error.code : error.name;
+    unreachableCode = error instanceof FailureError ? error.code : error.name;
   }
   // Early return is plain code: each returned failure joins the inferred result.
   const both = (a, b) => {
@@ -117,7 +118,19 @@ async function main() {
     ],
     ['recover narrows', recover(missing, { 'item.not_found': () => 'default' }), 'default'],
     ['orThrow on a promise', thrown, 'item.not_found'],
-    ['assertNever is coded', unreachable, 'ARKI_FAILURE_E004'],
+    [
+      'invariant is coded',
+      (() => {
+        try {
+          invariant(false);
+        } catch (error) {
+          return error instanceof FailureError ? error.code : error.name;
+        }
+        return 'not thrown';
+      })(),
+      'ARKI_FAILURE_E008',
+    ],
+    ['unreachable is coded', unreachableCode, 'ARKI_FAILURE_E004'],
     ['early return gives the first failure', isFailure(stepped) && stepped.data.id, 3],
     ['attempt maps a throw', parsed, 'fallback'],
     ['revive restores the brand', isFailure(revived) && revived.message, 'no item 7'],
