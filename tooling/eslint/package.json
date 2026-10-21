@@ -12,8 +12,8 @@
   },
   "scripts": {
     "clean": "git clean -xdf .cache .cache .turbo node_modules",
-    "test": "node --test feature-layers.test.js",
     "format": "prettier --check . --ignore-path ../../.gitignore",
+    "test": "node --test feature-layers.test.js tanstack-start.test.js",
     "typecheck": "tsc --noEmit --skipLibCheck"
   },
   "prettier": "@arki/prettier-config",

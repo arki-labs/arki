@@ -63,11 +63,19 @@ import nodePath from 'node:path';
 
 /** @typedef {{ group?: string[], regex?: string, message: string }} Pattern */
 
-const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app entrypoints (entrypoints/{middleware,router,gateway,cron}.ts; older layout: core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).' };
-const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts / entrypoints/rpc.ts) only.' };
+const SERVER = {
+  group: ['@orpc/server', '@orpc/server/*'],
+  message:
+    'Only feature.ts and the app entrypoints (entrypoints/{middleware,router,gateway,cron}.ts; older layout: core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).',
+};
+const CONTRACT = {
+  group: ['@orpc/contract', '@orpc/contract/*'],
+  message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts / entrypoints/rpc.ts) only.',
+};
 const DB_RUNTIME = {
   regex: '^(drizzle-orm(/(?!pg-core$).*)?|pg|postgres|@arki/db(/(?!id$|temporal$).*)?)$',
-  message: 'model/ holds no database runtime (only model/tables.ts and model/relations.ts declare tables and relations). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
+  message:
+    'model/ holds no database runtime (only model/tables.ts and model/relations.ts declare tables and relations). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
 };
 
 /** A relative import that walks into one of the given layer folders. */
@@ -76,8 +84,14 @@ const layer = (/** @type {string[]} */ names, /** @type {string} */ message) => 
   message,
 });
 
-const MODEL_INWARD = layer(['usecases', 'infra', 'entrypoints'], 'model/ is the inside layer: it imports no usecases/, infra/ or entrypoints/.');
-const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoints/: a usecase does not know how it is called.');
+const MODEL_INWARD = layer(
+  ['usecases', 'infra', 'entrypoints'],
+  'model/ is the inside layer: it imports no usecases/, infra/ or entrypoints/.',
+);
+const USECASES_INWARD = layer(
+  ['entrypoints'],
+  'usecases/ never imports entrypoints/: a usecase does not know how it is called.',
+);
 
 /**
  * Only the contract's own vocabulary: oRPC contract, zod, the `offlineSafe`
@@ -123,10 +137,11 @@ const kindOf = (/** @type {object} */ node, /** @type {'importKind' | 'exportKin
 /** `import type { a }` or `import { type a, type b }` — erased at build time, so allowed. */
 const isTypeOnly = (/** @type {object} */ node, /** @type {'importKind' | 'exportKind'} */ kind) => {
   if (kindOf(node, kind) === 'type') return true;
-  const specifiers = /** @type {unknown[]} */ ('specifiers' in node && Array.isArray(node.specifiers) ? node.specifiers : []);
+  const specifiers = /** @type {unknown[]} */ (
+    'specifiers' in node && Array.isArray(node.specifiers) ? node.specifiers : []
+  );
   return (
-    specifiers.length > 0 &&
-    specifiers.every((s) => typeof s === 'object' && s !== null && kindOf(s, kind) === 'type')
+    specifiers.length > 0 && specifiers.every(s => typeof s === 'object' && s !== null && kindOf(s, kind) === 'type')
   );
 };
 
@@ -144,7 +159,10 @@ const usecaseRuntimeImports = {
     schema: [
       {
         type: 'object',
-        properties: { patterns: { type: 'array', items: { type: 'string' } }, allow: { type: 'array', items: { type: 'string' } } },
+        properties: {
+          patterns: { type: 'array', items: { type: 'string' } },
+          allow: { type: 'array', items: { type: 'string' } },
+        },
         additionalProperties: false,
       },
     ],
@@ -155,13 +173,14 @@ const usecaseRuntimeImports = {
   },
   create(context) {
     const options = /** @type {{ patterns?: string[], allow?: string[] } | undefined} */ (context.options[0]);
-    const banned = (options?.patterns ?? []).map((source) => new RegExp(source));
+    const banned = (options?.patterns ?? []).map(source => new RegExp(source));
     // `allow` wins over `patterns`: a pure module under an infra path (an email template) is not a plugin.
-    const allowed = (options?.allow ?? []).map((source) => new RegExp(source));
+    const allowed = (options?.allow ?? []).map(source => new RegExp(source));
     const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
       if (typeof source !== 'string') return;
-      if (allowed.some((re) => re.test(source))) return;
-      if (banned.some((re) => re.test(source))) context.report({ node, messageId: 'runtime', data: { source: `"${source}"` } });
+      if (allowed.some(re => re.test(source))) return;
+      if (banned.some(re => re.test(source)))
+        context.report({ node, messageId: 'runtime', data: { source: `"${source}"` } });
     };
     return {
       ImportDeclaration(node) {
@@ -201,15 +220,17 @@ const featureRuntimeImports = {
 /** `{ repos }` (or `{ 'repos': … }`) inside an object pattern. */
 const destructuresRepos = (/** @type {import('estree').Pattern | null | undefined} */ pattern) =>
   pattern?.type === 'ObjectPattern' &&
-  pattern.properties.some((p) => p.type === 'Property' && propertyName(p.key, p.computed) === 'repos');
+  pattern.properties.some(p => p.type === 'Property' && propertyName(p.key, p.computed) === 'repos');
 
 /** The static name of a property key, or undefined when it is computed from a variable. */
-const propertyName = (/** @type {import('estree').Node} */ key, /** @type {boolean} */ computed) => {
+/** A property key's name: `a` and `'a'` are the same key; a computed key is named only when it is a string literal. */
+export const propertyName = (/** @type {import('estree').Node} */ key, /** @type {boolean} */ computed) => {
   if (!computed && key.type === 'Identifier') return key.name;
   return key.type === 'Literal' && typeof key.value === 'string' ? key.value : undefined;
 };
 
-const isContext = (/** @type {import('estree').Node | null | undefined} */ node) =>
+/** True for the bare identifier `context`, the name oRPC and Start give a handler's context. */
+export const isContext = (/** @type {import('estree').Node | null | undefined} */ node) =>
   node?.type === 'Identifier' && node.name === 'context';
 
 /**
@@ -227,15 +248,18 @@ const proceduresCallUsecases = {
     type: 'problem',
     schema: [],
     messages: {
-      repos: 'A procedure calls a usecase (`context.usecases.x(…)`), never `context.repos`. Move the data access into a usecase.',
-      infra: 'A procedure reaches infra through a usecase, never by a runtime import of {{source}}. `import type` is fine.',
+      repos:
+        'A procedure calls a usecase (`context.usecases.x(…)`), never `context.repos`. Move the data access into a usecase.',
+      infra:
+        'A procedure reaches infra through a usecase, never by a runtime import of {{source}}. `import type` is fine.',
     },
   },
   create(context) {
     const infra = new RegExp(USECASE_INFRA);
     const reportRepos = (/** @type {import('estree').Node} */ node) => context.report({ node, messageId: 'repos' });
     const checkSource = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
-      if (typeof source === 'string' && infra.test(source)) context.report({ node, messageId: 'infra', data: { source: `"${source}"` } });
+      if (typeof source === 'string' && infra.test(source))
+        context.report({ node, messageId: 'infra', data: { source: `"${source}"` } });
     };
     return {
       MemberExpression(node) {
@@ -247,7 +271,12 @@ const proceduresCallUsecases = {
       Property(node) {
         // `({ context: { repos } }) => …` — only inside a pattern, not an object literal.
         const inPattern = 'parent' in node && node.parent?.type === 'ObjectPattern';
-        if (inPattern && propertyName(node.key, node.computed) === 'context' && node.value.type === 'ObjectPattern' && destructuresRepos(node.value)) {
+        if (
+          inPattern &&
+          propertyName(node.key, node.computed) === 'context' &&
+          node.value.type === 'ObjectPattern' &&
+          destructuresRepos(node.value)
+        ) {
           reportRepos(node);
         }
       },
@@ -325,7 +354,8 @@ const resolveRelative = (/** @type {string} */ from, /** @type {string} */ sourc
 /** The one string a dynamic import names, or undefined when it is computed. */
 const literalSource = (/** @type {import('estree').Expression} */ source) => {
   if (source.type === 'Literal') return source.value;
-  if (source.type === 'TemplateLiteral' && source.expressions.length === 0) return source.quasis[0]?.value.cooked ?? undefined;
+  if (source.type === 'TemplateLiteral' && source.expressions.length === 0)
+    return source.quasis[0]?.value.cooked ?? undefined;
   return undefined;
 };
 
@@ -345,7 +375,7 @@ const featureBoundaries = {
     schema: [],
     messages: {
       crosses:
-        '{{importer}} reaches into {{target}}: a feature takes another feature\'s services through the graph (.needs()), or imports its contract (entrypoints/rpc), model/ or feature.ts. `import type` is fine.',
+        "{{importer}} reaches into {{target}}: a feature takes another feature's services through the graph (.needs()), or imports its contract (entrypoints/rpc), model/ or feature.ts. `import type` is fine.",
     },
   },
   create(context) {
@@ -353,7 +383,8 @@ const featureBoundaries = {
     const importer = featureRootOf(filename);
     if (importer === undefined) return {};
     const [importerLayer, ...importerBelow] = importer.rest;
-    const importerInLayer = (LAYERS.has(importerLayer ?? '') && importerBelow.length > 0) || importer.rest.join('/') === 'feature.ts';
+    const importerInLayer =
+      (LAYERS.has(importerLayer ?? '') && importerBelow.length > 0) || importer.rest.join('/') === 'feature.ts';
     if (!importerInLayer) return {};
 
     const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
@@ -521,7 +552,12 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
     {
       name: 'arki/feature-layers/model',
       files: [`${features}/model/**/*.ts`],
-      ignores: [...TESTS, `${features}/model/tables.ts`, `${features}/model/tables/**`, `${features}/model/relations.ts`],
+      ignores: [
+        ...TESTS,
+        `${features}/model/tables.ts`,
+        `${features}/model/tables/**`,
+        `${features}/model/relations.ts`,
+      ],
       rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME]),
     },
     {
@@ -537,7 +573,10 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
       plugins: { 'arki-feature-layers': plugin },
       rules: {
         ...rule([SERVER, CONTRACT, USECASES_INWARD]),
-        'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients], allow: pure }],
+        'arki-feature-layers/usecase-runtime-imports': [
+          'error',
+          { patterns: [...USECASE_BANNED, ...clients], allow: pure },
+        ],
       },
     },
     {
