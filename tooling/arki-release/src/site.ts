@@ -174,7 +174,7 @@ function snapshotPathOf(file: string, archive: boolean): string | null {
   return INDEX_TARGETS[normalized] ?? null;
 }
 
-const tarballManifestSchema = z.object({ engines: z.record(z.string(), z.string()).optional() }).loose();
+const tarballManifestSchema = z.object({ engines: z.record(z.string(), z.string()).optional(), license: z.string().optional() }).loose();
 
 export interface SnapshotSource {
   readonly name: string;
@@ -220,6 +220,7 @@ export async function buildSnapshot(
           },
     examples: docs?.kind === 'report' ? docs.report : null,
     engines: manifest.success ? (manifest.data.engines ?? {}) : {},
+    license: manifest.success ? (manifest.data.license ?? null) : null,
     benchStatus: parseBenchProvenance(readme) === null ? 'none' : 'measured',
   });
   return { meta, files };

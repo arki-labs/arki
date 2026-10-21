@@ -27,6 +27,7 @@ import {
   errorsFileSchema,
   examplesFileSchema,
   packagesFileSchema,
+  snapshotMetaSchema,
 } from './site-schema';
 
 const config: ReleaseConfig = {
@@ -56,7 +57,7 @@ const README_ONLY: Files = {
 };
 
 const WITH_DOCS: Files = {
-  'package.json': JSON.stringify({ name: '@arki/a', version: '0.2.0', engines: { node: '>=22' } }),
+  'package.json': JSON.stringify({ name: '@arki/a', version: '0.2.0', license: 'Apache-2.0', engines: { node: '>=22' } }),
   'README.md': '# a\n',
   'CHANGELOG.md': '## 0.2.0\n',
   'llms.txt': '# a\n',
@@ -247,6 +248,11 @@ describe('site --channel next', () => {
       { name: '@arki/a', version: '0.2.1', report: REPORT },
     ]);
     expect(demosFileSchema.parse(generated('demos.json'))).toEqual([]);
+    // The license comes from the package's own package.json in the tarball, not from a constant.
+    expect(snapshotMetaSchema.parse(JSON.parse(readFileSync(content('a', 'next', 'snapshot.json'), 'utf8'))).license).toBe(
+      'Apache-2.0',
+    );
+    expect(snapshotMetaSchema.parse(JSON.parse(readFileSync(content('a', '0.1.0', 'snapshot.json'), 'utf8'))).license).toBeNull();
     // The published archive is still there, untouched by the next run.
     expect(readFileSync(content('a', '0.1.0', 'README.md'), 'utf8')).toBe('# a\n');
   });

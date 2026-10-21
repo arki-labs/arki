@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Link, Outlet, useLocation } from '@tanstack/react-router';
+import { Link, Outlet, useLinkProps, useLocation } from '@tanstack/react-router';
 
 import { DOC_JOBS } from '~/routes/docs/-doc-jobs';
 import siteCss from '~/styles/site.css?url';
+
+import { activeMainLink, MAIN_LINKS } from './main-links';
 
 /**
  * Shared chrome of the reference pages (docs, packages, errors, agents, compare), ported from the approved Claude
@@ -14,28 +16,30 @@ import siteCss from '~/styles/site.css?url';
 /** Route `head` for a section layout: loads `site.css`. */
 export const siteHead = () => ({ links: [{ rel: 'stylesheet', href: siteCss }] });
 
-const MAIN_LINKS = [
-  { to: '/docs', label: 'Docs' },
-  { to: '/packages', label: 'Packages' },
-  { to: '/inside', label: "What's inside" },
-  { to: '/agents', label: 'Agents' },
-] as const;
+/** A `Link` whose active state is ours: TanStack's prefix match would mark Packages on a package's docs. */
+function MainLink({ to, label, active }: { to: (typeof MAIN_LINKS)[number]['to']; label: string; active: boolean }) {
+  const { 'aria-current': _prefixMatch, ...props } = useLinkProps({ to, className: 'nav-link' });
+  return (
+    <a {...props} aria-current={active ? 'page' : undefined}>
+      {label}
+    </a>
+  );
+}
 
 function MainLinks() {
+  const active = activeMainLink(useLocation().pathname);
   return (
     <>
       {MAIN_LINKS.map(link => (
-        <Link key={link.to} to={link.to} className="nav-link">
-          {link.label}
-        </Link>
+        <MainLink key={link.to} to={link.to} label={link.label} active={link.to === active} />
       ))}
     </>
   );
 }
 
 /**
- * Canvas `header` (56px). Wordmark, `nav[aria-label=Main]` (`.top-links`, `.nav-link`; TanStack `Link` sets
- * `aria-current="page"` on the active section by prefix), `llms.txt` (`.top-tools`), and the no-JS `details.mnav` menu
+ * Canvas `header` (56px). Wordmark, `nav[aria-label=Main]` (`.top-links`, `.nav-link`; `aria-current="page"` on the
+ * active section, see `activeMainLink`), `llms.txt` (`.top-tools`), and the no-JS `details.mnav` menu
  * under 768px. There is no search button: the app has no search.
  */
 export function SiteHeader() {

@@ -58,6 +58,8 @@ export const snapshotMetaSchema = z.object({
   examples: docExamplesReportSchema.nullable(),
   /** The tarball manifest's `engines`. */
   engines: z.record(z.string(), z.string()),
+  /** The tarball manifest's `license` (an SPDX id); null when it has none or the snapshot was written before this field existed. */
+  license: z.string().nullable().default(null),
   benchStatus: z.enum(BENCH_STATUSES),
 });
 

@@ -127,7 +127,9 @@ function Header({ detail }: Section) {
           </Pill>
         </div>
         <p className="sub pd-for">
-          {snapshot === null ? tierLabel(entry.tier) : `for ${entry.name}@${snapshot.version} · ${tierLabel(entry.tier)}`}
+          {snapshot === null
+            ? tierLabel(entry.tier)
+            : `for ${entry.name}@${snapshot.version} · ${tierLabel(entry.tier)}${snapshot.license === null ? '' : ` · ${snapshot.license}`}`}
         </p>
         {detail.purpose !== null && <p className="pd-purpose">{detail.purpose}</p>}
       </div>
