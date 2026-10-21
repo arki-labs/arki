@@ -8,6 +8,7 @@ import type { CommandConflict } from '../errors.js';
 import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
+import type { SignalStatus } from './states.js';
 import { j } from '../test-support.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it. The callbacks never execute.
@@ -55,6 +56,12 @@ describe('def.signal, as types', () => {
   it('keeps the outcome type', () => {
     const _granted = approval.signal('approval.granted');
     expectTypeOf<Awaited<ReturnType<typeof _granted.handler>>>().toEqualTypeOf<SignalOutcome | CommandFailure>();
+  });
+
+  it('can report no-run, so a webhook handler must not treat an unknown run as an error', () => {
+    const _granted = approval.signal('approval.granted');
+    type Delivered = Extract<Awaited<ReturnType<typeof _granted.handler>>, { readonly status: SignalStatus }>;
+    expectTypeOf<Delivered['status']>().toEqualTypeOf<'kept' | 'woke' | 'duplicate' | 'finished' | 'no-run'>();
   });
 });
 

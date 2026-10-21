@@ -23,7 +23,7 @@ import { findCause, isFailure, orThrow } from '@arki/failure';
 
 import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
-import { CANCEL_STATES, RUN_STATES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
+import { CANCEL_STATES, RUN_STATES, SIGNAL_STATUSES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
 
 const isIdGenerationFailure = <Value>(value: Value): value is Extract<Value, IdGenerationFailure> =>
@@ -978,7 +978,7 @@ export function journalWorkflowsModule<
         consequence: z.string(),
       })
       .strict(),
-    output: z.object({ runId: z.string(), status: z.enum(['kept', 'woke', 'duplicate', 'finished']) }).strict(),
+    output: z.object({ runId: z.string(), status: z.enum(SIGNAL_STATUSES) }).strict(),
     preview: async ({ runId, name }, _ctx: Record<string, never>) => {
       const detail = await openRun(runId);
       const wait = waitOf(detail, name);

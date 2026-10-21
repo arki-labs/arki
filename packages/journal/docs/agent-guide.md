@@ -374,7 +374,7 @@ A workflow is a list of steps that survives process death. Each node runs as a `
 5. **Throw to retry, return a failure to stop.** A thrown error retries with the step's `retry` backoff. A returned failure kills the step at once, and `onDeadStep` decides: `'wait'` (default) leaves it for an operator, `'compensate'` undoes the run.
 6. **Values are small JSON.** Inputs, results, payloads and the output must come back from JSON unchanged (no `Date`, no class instance) and stay under `limits.payload` (65 536 bytes). Return an id, not the document.
 7. **Give `output` to a step an operator may resolve.** `resolveStep` checks the result with it. A step without `output` can only be retried.
-8. **Signals carry the sender's id.** `deliveryId` is the webhook event id or another id the sender repeats on a resend. A repeat returns `duplicate` and changes nothing. One signal name has one payload schema in a workflow.
+8. **Signals carry the sender's id.** `deliveryId` is the webhook event id or another id the sender repeats on a resend. A repeat returns `duplicate` and changes nothing. `def.signal` returns `kept`, `woke`, `duplicate`, `finished` or `no-run`. `no-run` means no run of that workflow has the id (or it belongs to another workflow): nothing is stored. Webhook trap: do not throw on `no-run` or `finished`. A throw becomes a 500 and the provider resends forever, so answer 200. Only `journal.workflows.signal` (the operator verb) refuses an unknown run. One signal name has one payload schema in a workflow.
 9. **Move a run with the workflow verbs.** `journal.workflows.retryStep`, `resolveStep`, `skipUndo`, `signal`, `cancel`, or the Foreman module. The raw job verbs refuse workflow jobs.
 
 ### Task: add a workflow

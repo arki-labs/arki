@@ -35,7 +35,7 @@ import type {
 } from '../types.js';
 import type { AnyResults, AnySignals, DefExtension, ErasedContext, WorkflowDef, WorkflowNode } from './define.js';
 import type { RunDetail } from './read.js';
-import type { CANCEL_STATES, StepPhase } from './states.js';
+import type { CANCEL_STATES, SignalStatus, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
 import {
@@ -344,9 +344,8 @@ function signalSchemaFor<Payload extends StandardSchemaV1>(): SignalSchema<Paylo
     '~standard': { version: 1, vendor: 'arki', validate: value => signalEnvelope['~standard'].validate(value) },
   };
 }
-/** `kept`: stored, the run is not waiting for it yet. `woke`: stored and the run moved on. `duplicate`: this delivery was seen. `finished`: the run is over, so it is dropped. */
-export type SignalOutcome =
-  { readonly status: 'kept' | 'woke' | 'duplicate' | 'finished' } | CommandNotFound | CommandInvalid | CommandConflict;
+/** The result of a signal. `SIGNAL_STATUSES` says what each status means. */
+export type SignalOutcome = { readonly status: SignalStatus } | CommandNotFound | CommandInvalid | CommandConflict;
 
 type Verdict =
   | { readonly kind: 'park'; readonly waitingFor: string | null; readonly wakeAt: string | null }
@@ -1652,8 +1651,9 @@ export function createWorkflows<
 
   /**
    * Delivers signal `name` to a run: the body of `def.signal(name)` and of the operator verb `journal.workflows.signal`.
-   * `workflowName` is the name of the caller's definition, so a run of another workflow is a conflict; the operator
-   * door passes null. Either way the run's own version checks the payload.
+   * `workflowName` is the name of the caller's definition: for it, a run that does not exist or belongs to another
+   * workflow is `no-run` (a webhook names runs that are gone; a refusal would be resent forever). The operator door
+   * passes null and names a specific run, so an unknown run is a refusal. Either way the run's own version checks the payload.
    */
   async function deliverSignal(
     context: DoorContext,
@@ -1663,13 +1663,14 @@ export function createWorkflows<
     operator: OperationInput | null,
   ): Promise<SignalOutcome | CommandFailure> {
     const { write } = context;
-    const result: { status: 'kept' | 'woke' | 'duplicate' | 'finished' } = { status: 'kept' };
+    const result: { status: SignalStatus } = { status: 'kept' };
     const before = { parked: false };
     const written = await write(run, args.runId, async (row, inside) => {
-      if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
-      if (workflowName !== null && row.name !== workflowName) {
-        return CommandConflict({ detail: `run "${args.runId}" belongs to another workflow` });
+      if (workflowName !== null && (row === null || row.name !== workflowName)) {
+        result.status = 'no-run';
+        return [];
       }
+      if (row === null) return CommandNotFound({ detail: `no workflow run "${args.runId}"` });
       // A signal for a finished run is dropped: a late webhook is not an error the sender should retry.
       if (row.finishedAt !== null) {
         result.status = 'finished';

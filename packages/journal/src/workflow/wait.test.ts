@@ -226,9 +226,24 @@ describe('waitFor and signals', () => {
     expect(await signalsOf(id)).toEqual([]);
   });
 
-  it('a signal for a run that does not exist is a not-found failure, and one for a finished run is dropped', async () => {
-    const missing = await deliver(approval, 'nope_1', 'evt_6');
-    expect(isFailure(missing)).toBe(true);
+  it('a signal to a run that does not exist returns no-run, so a webhook for an unknown run is not retried forever', async () => {
+    expect(await deliver(approval, 'nope_1', 'evt_6')).toEqual({ status: 'no-run' });
+  });
+
+  it('no-run stores no signal row', async () => {
+    expect(await deliver(approval, 'nope_2', 'evt_nr')).toEqual({ status: 'no-run' });
+    const rows = await db.select().from(tables.workflowSignals).where(eq(tables.workflowSignals.deliveryId, 'evt_nr'));
+    expect(rows).toEqual([]);
+  });
+
+  it("a signal naming another workflow's run returns no-run", async () => {
+    const id = await start(lenient, 'other');
+    await settle();
+    expect(await deliver(approval, id, 'evt_other')).toEqual({ status: 'no-run' });
+    expect(await signalsOf(id)).toEqual([]);
+  });
+
+  it('a signal for a finished run is dropped', async () => {
     const id = await start(approval, 'done');
     expectOk(await deliver(approval, id, 'evt_7'));
     await settle();

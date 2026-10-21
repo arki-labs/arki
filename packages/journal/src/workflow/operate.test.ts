@@ -13,6 +13,7 @@ import { TransactionDefect } from '@arki/db/transaction';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
+import { CommandNotFound } from '../errors.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
 
@@ -443,6 +444,15 @@ const startRefunding = async (prefix: string) => {
 };
 
 describe('operator signal and cancel', () => {
+  it('the operator signal still refuses an unknown run with WORKFLOW_NOT_FOUND, because an operator names a specific run', async () => {
+    const missing = await journal.workflows.signal(
+      db,
+      { runId: 'nope_op', name: 'confirm', deliveryId: 'd0', payload: {} },
+      operator,
+    );
+    expect(CommandNotFound.is(missing)).toBe(true);
+  });
+
   it("journal.workflows.signal checks the payload with the run's own version", async () => {
     const id = await startRefunding('op-signal');
     // An operator holds only JSON: the run's own wait refuses what it would not take, and nothing is stored.
