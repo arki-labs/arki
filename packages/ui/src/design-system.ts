@@ -5,12 +5,12 @@ import type { DesignSystemId } from '@arki/design-systems/registry';
 export {
   DESIGN_SYSTEM_IDS,
   DESIGN_SYSTEMS,
-  designSystemIdSchema,
   getDesignSystemById,
   getDesignSystemByIdSafe,
   isDesignSystemId,
   parseDesignSystemId,
 } from '@arki/design-systems/registry';
+export { designSystemIdSchema } from '@arki/design-systems/registry/schema';
 export type { DesignSystemId, DesignSystemMetadata } from '@arki/design-systems/registry';
 
 /**

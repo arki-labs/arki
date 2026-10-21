@@ -112,6 +112,11 @@
     },
     {
       "package": "@arki/design-systems",
+      "error": "TYPES_E001 export \"./registry/schema\" exposes Zod types: ZodArray, ZodEnum, ZodObject, ZodOptional, ZodString",
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
+    },
+    {
+      "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./tribunal/palette-labels\" exposes Zod types: ZodObject, ZodString",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
