@@ -13,22 +13,22 @@ The tiers describe supported product scope and commercial bundles. They do not p
 
 ## Tier 1 — Stack
 
-| Area           | Packages                        | Admission / remaining work                                                                                                               |
-| -------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Kernel         | `dot`, `cli`, `env`             | `cli` admitted by A-32; `feature` is an `@arki/dot` subpath. `dot new` must scaffold a deployable app.                                   |
-| HTTP / API     | `http`, `contracts`             | `@arki/tanstack-start` returned to Tier 1 on 2026-10-21 (A-28: "returns when it exists"); promoted from `fleet/`, see `research/16-tanstack-start/`.                                         |
-| Data           | `db`, `journal`, `kv`           | Supported Stack scope.                                                                                                                   |
-| Auth           | `auth`                          | Supported Stack scope; manifest is not private.                                                                                          |
-| Jobs           | `queue`, `schedule`             | Publication admitted by A-29, conditional on the docs standard and scorecard; Postgres queue option required by A-11.                    |
-| Mail           | `mail`                          | Formerly called `emails` (A-28).                                                                                                         |
-| Billing        | `payments`                      | Security review before selling (strategy § 8).                                                                                           |
-| Observability  | `log`                           | Supported Stack scope.                                                                                                                   |
-| Reliability    | `failure`, `lock`               | Admitted by A-28.                                                                                                                        |
-| Live updates   | `live`                          | Admitted by A-31, superseding A-28's “not yet” clause.                                                                                   |
-| Testing        | `testing`                       | Publication admitted by A-29, conditional on the docs standard and scorecard.                                                            |
-| UI             | `ui`, `design-systems`, `theme` | Stack default is **workbench** (A-10).                                                                                                   |
-| Administration | `admin`                         | Stack by A-20; free shell must drop its `meter` hard dependency. Private status does not undo admission.                                 |
-| AI             | `ai`, `chat-ui`                 | Stack by A-12; publication admitted by A-29, conditional on the docs standard and scorecard. `dot new` includes frontend and backend AI. |
+| Area           | Packages                        | Admission / remaining work                                                                                                                                        |
+| -------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kernel         | `dot`, `cli`, `env`             | `cli` admitted by A-32; `feature` is an `@arki/dot` subpath. `dot new` must scaffold a deployable app.                                                            |
+| HTTP / API     | `http`, `contracts`             | `@arki/tanstack-start` returned to Tier 1 on 2026-10-21 (A-28: "returns when it exists"); promoted from `fleet/`, see `research/16-tanstack-start/`.              |
+| Data           | `db`, `journal`, `kv`           | Supported Stack scope.                                                                                                                                            |
+| Auth           | `auth`                          | Supported Stack scope; manifest is not private.                                                                                                                   |
+| Jobs           | `queue`, `schedule`             | Publication admitted by A-29; B8 docs done and in the infrastructure-adapters wave (A-40, 2026-10-21); Postgres queue option required by A-11.                    |
+| Mail           | `mail`                          | Formerly called `emails` (A-28).                                                                                                                                  |
+| Billing        | `payments`                      | Security review before selling (strategy § 8).                                                                                                                    |
+| Observability  | `log`                           | Supported Stack scope.                                                                                                                                            |
+| Reliability    | `failure`, `lock`               | Admitted by A-28.                                                                                                                                                 |
+| Live updates   | `live`                          | Admitted by A-31, superseding A-28's “not yet” clause.                                                                                                            |
+| Testing        | `testing`                       | Publication admitted by A-29; B8 docs done and in the infrastructure-adapters wave (A-40, 2026-10-21).                                                            |
+| UI             | `ui`, `design-systems`, `theme` | Stack default is **workbench** (A-10).                                                                                                                            |
+| Administration | `admin`                         | Stack by A-20; free shell must drop its `meter` hard dependency. Private status does not undo admission.                                                          |
+| AI             | `ai`, `chat-ui`, `embeddings`   | Stack by A-12; publication admitted by A-29 and A-40 (`embeddings` as ai's dependency); B8 docs done, in the ai wave. `dot new` includes frontend and backend AI. |
 
 At the 2026-10-19 manifest check, admitted Stack packages with `private: true` are `admin`, `ai`, `chat-ui`, `queue`, `schedule` and `testing`. The other packages in this table have `private: false` or omit the flag. These are manifest facts, not verified npm publication or completed release gates.
 
@@ -38,7 +38,7 @@ Phase 2 candidates remain `fs` (storage) and `intl` (localisation), both existin
 
 The final [naming decisions § 6](research/12-ai-split/naming.md#6-founder-decisions-2026-10-17) and [architecture decisions § 10](research/12-ai-split/synthesis.md#10-founder-decisions-2026-10-17) define `@arki/ai`, `@arki/agents`, `@arki/embeddings`, `@arki/search`, `@arki/speech`, `@arki/guardrails` and `@arki/ai-cost`. The flow runner is `@arki/agents/flow`; reranking is `@arki/embeddings/rerank`; local embeddings use `@arki/embeddings/transformers`. `ocr`, `extraction` and `image-generation` are reserved names without implementation commitments. `chat-ui`, `mcp` and `testing/ai` keep their names.
 
-These architecture decisions do not blanket-admit every AI package for publication. Only existing admission decisions apply. Current manifests include private `embeddings` and the old private `text-embeddings`; the approved absorption removes `text-embeddings` rather than keeping both. The other new package names above are planned names, not claims that packages already exist or are published.
+These architecture decisions do not blanket-admit every AI package for publication. Only existing admission decisions apply. A-40 admits `embeddings` as a hard dependency of `ai`. Current manifests include the old private `text-embeddings`; the approved absorption removes `text-embeddings` rather than keeping both. The other new package names above are planned names, not claims that packages already exist or are published.
 
 ## Tier 2 — Libraries
 
@@ -62,7 +62,7 @@ Plus finished workflows that are not packages yet: workspace onboarding, subscri
 
 ## Tier 4 — Outside supported scope
 
-Current private Arki packages outside the admitted Stack and Libraries lists: `code-editor`, `content`, `content-build`, `content-react`, `diff`, `domains`, `embeddings`, `formats`, `fs`, `geo`, `images`, `intl`, `mcp`, `md-to-pdf`, `native-ui`, `offline`, `payments-native`, `react-fullscreen`, `react-sounds`, `rich-text`, `rss`, `scraping`, `seo`, `text`, `text-embeddings`, `waitlist`. AI architecture and commercial candidates above do not independently grant publication admission.
+Current private Arki packages outside the admitted Stack and Libraries lists: `code-editor`, `content`, `content-build`, `content-react`, `diff`, `domains`, `formats`, `fs`, `geo`, `images`, `intl`, `mcp`, `md-to-pdf`, `native-ui`, `offline`, `payments-native`, `react-fullscreen`, `react-sounds`, `rich-text`, `rss`, `scraping`, `seo`, `text`, `text-embeddings`, `waitlist`. AI architecture and commercial candidates above do not independently grant publication admission.
 
 Fleet manifests are `books-import`, `dictionaries`, `dictionary`, `feedback`, `games`, `games-solitaire`, `games-solitaire-ui`, `games-sudoku`, `meter`, `mw-dictionary`, `poetry`, `sitekit`, `text-bible`, `text-hyphen`. All use `@fleet/*` and `private: true`. They serve the founder's apps under the fleet RFC, outside the Arki release inventory.
 

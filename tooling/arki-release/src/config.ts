@@ -20,8 +20,10 @@
 import path from 'node:path';
 
 import debugFactory from 'debug';
+import { z } from 'zod';
 
 import { validateDemoConfig } from './demos';
+import { RELEASE_WAVE_IDS } from './types';
 import type {
   LeakPattern,
   NotYetEntry,
@@ -358,22 +360,11 @@ function validateMetadataDefaults(raw: unknown): PublicMetadataDefaults {
   };
 }
 
-const VALID_WAVE_IDS: ReadonlySet<ReleaseWaveId> = new Set<ReleaseWaveId>([
-  'foundation',
-  'dot-kernel',
-  'infrastructure-adapters',
-  'frontend',
-  'specialized',
-]);
+const releaseWaveIdSchema = z.enum(RELEASE_WAVE_IDS);
 
-/**
- * User-defined type guard that narrows an arbitrary string to the
- * {@link ReleaseWaveId} union. The internal `as ReleaseWaveId` is a
- * contained, intentional cast — it's only used for the membership check
- * against {@link VALID_WAVE_IDS}.
- */
+/** Narrows a string to a {@link ReleaseWaveId}: one of {@link RELEASE_WAVE_IDS}. */
 function isReleaseWaveId(v: string): v is ReleaseWaveId {
-  return VALID_WAVE_IDS.has(v as ReleaseWaveId);
+  return releaseWaveIdSchema.safeParse(v).success;
 }
 
 function validateWaves(raw: unknown): readonly ReleaseWave[] {
@@ -396,7 +387,7 @@ function validateWaves(raw: unknown): readonly ReleaseWave[] {
     if (typeof id !== 'string' || !isReleaseWaveId(id)) {
       throw new ReleaseConfigError(
         CONFIG_ERROR_CODES.invalidShape,
-        `Wave \`id\` must be one of: ${[...VALID_WAVE_IDS].join(', ')}.`,
+        `Wave \`id\` must be one of: ${RELEASE_WAVE_IDS.join(', ')}.`,
       );
     }
     if (typeof label !== 'string' || label.length === 0) {

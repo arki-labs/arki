@@ -154,7 +154,15 @@ export type PackageWave = 'public-candidate' | 'blocked' | 'internal' | 'unclass
  * Stable identifiers for each release wave. Matches the design spec
  * (Wave 1 = foundation, Wave 2 = dot-kernel, etc.).
  */
-export type ReleaseWaveId = 'foundation' | 'dot-kernel' | 'infrastructure-adapters' | 'frontend' | 'specialized';
+export const RELEASE_WAVE_IDS = [
+  'foundation',
+  'dot-kernel',
+  'infrastructure-adapters',
+  'frontend',
+  'specialized',
+  'ai',
+] as const;
+export type ReleaseWaveId = (typeof RELEASE_WAVE_IDS)[number];
 
 /**
  * A single release wave — a labelled allowlist of `@arki/*` package names

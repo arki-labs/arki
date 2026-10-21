@@ -88,9 +88,13 @@ export const config: ReleaseConfig = {
       // `@arki/dot` peer). `@arki/live` joined 2026-10-17 (A-31: live queries;
       // peers `@arki/db`, `@arki/http`, `@arki/dot`). `@arki/lock`,
       // `@arki/mail` and `@arki/auth` joined 2026-10-20 (founder decision).
+      // `@arki/schedule`, `@arki/queue` and `@arki/testing` joined 2026-10-21
+      // (A-40, B8): schedule before queue (queue depends on it); testing last
+      // (it peers on auth and needs db + kv).
       packages: [
         '@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live',
-        '@arki/lock', '@arki/mail', '@arki/auth',
+        '@arki/lock', '@arki/mail', '@arki/auth', '@arki/schedule', '@arki/queue',
+        '@arki/testing',
       ],
     },
     {
@@ -110,7 +114,7 @@ export const config: ReleaseConfig = {
       id: 'specialized',
       label: 'Wave 5 — Specialized',
       // `@arki/money` joined 2026-10-13 (exact money on `@arki/math`, so not
-      // Foundation). Other candidates (`@arki/ai`, `@arki/rich-text`,
+      // Foundation). Other candidates (`@arki/rich-text`,
       // `@arki/images`, `@arki/diff`) are still `private: true`; they
       // join once their internals stabilise. `@arki/bench` joined 2026-10-13
       // (benchmark toolkit on mitata; no @arki deps, dev-time tool).
@@ -120,6 +124,14 @@ export const config: ReleaseConfig = {
       // `@arki/expr` and `@arki/cas` joined 2026-10-15 (formula parsing and
       // evaluation on `@arki/math`, and the bounded CAS on top of expr).
       packages: ['@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
+    },
+    {
+      id: 'ai',
+      label: 'Wave 6 — AI',
+      // Joined 2026-10-21 (A-40, B8): `@arki/ai` is admitted as it is today,
+      // before the AI split. embeddings first (a hard dependency of ai);
+      // chat-ui last (it imports ai's types and builds on the Frontend wave).
+      packages: ['@arki/embeddings', '@arki/ai', '@arki/chat-ui'],
     },
   ],
   // Package tiers, mirroring docs/arki/core-packages.md. Tier 1 is the stack,
@@ -131,7 +143,7 @@ export const config: ReleaseConfig = {
       '@arki/dot', '@arki/cli', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
       '@arki/log', '@arki/mail', '@arki/auth', '@arki/payments', '@arki/ui', '@arki/design-systems',
       '@arki/theme', '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
-      '@arki/ai', '@arki/chat-ui', '@arki/live',
+      '@arki/ai', '@arki/chat-ui', '@arki/live', '@arki/embeddings',
     ],
     libraries: [
       '@arki/math', '@arki/money', '@arki/date', '@arki/string', '@arki/clock', '@arki/resilience',
@@ -141,7 +153,10 @@ export const config: ReleaseConfig = {
   },
   // Nested demo repos. `loadDemos` reads each one's arki.deps.json; a missing
   // folder (CI clones) is a warning, not a crash.
-  demos: [{ name: 'drop-studio', repo: 'arki-labs/drop-studio', path: 'demos/drop-studio' }],
+  demos: [
+    { name: 'drop-studio', repo: 'arki-labs/drop-studio', path: 'demos/drop-studio' },
+    { name: 'faultline', repo: 'arki-labs/faultline', path: 'demos/faultline' },
+  ],
   // Behavioural mappings on top of real imports: { '@arki/x': [{ demo, scenario }] }.
   proofs: {
     // The CLI is not imported by any demo, so name the scenario that runs it.
