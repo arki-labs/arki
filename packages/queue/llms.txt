@@ -26,11 +26,6 @@
 - [Wire queues in a Dot app](docs/agent-guide.md#dot)
 - [Find out why an outbox call failed](docs/agent-guide.md#outbox-errors-thrown)
 
-## Files
-- Definitions: `src/init.ts` (`initQueue`), `src/middleware.ts` (the middleware chain), `src/types/job.ts` (`JobDefinition`, `JobContext`, `JobLike`, `QUEUE_PRIORITIES`).
-- Outbox: `src/outbox/outbox.ts` (`outbox`, `runAfter`, `runAt`, `cancel`), `src/outbox/runner.ts` (`outboxRunner`), `src/outbox/errors.ts` (the seven codes), `src/outbox/registry.ts` (`QueueRegistry`).
-- Edges: `src/dot.ts` (Dot adapters), `src/runtime-local/` (pg-boss), `src/foreman/` (admin module), `src/projection.ts`.
-
 ## Rules that bite
 - A job can run more than once. Pass `ctx.job.id` to external systems as the idempotency key.
 - A job name is its queue name. Use dots, never a colon (BullMQ refuses `:`).
@@ -38,3 +33,8 @@
 - `trigger()` and `enqueue()` return an id or a failure. After `QueueAcceptanceUnknown`, look the job up by its key before you send it again.
 - `runAfter(tx, job, args)` takes a transaction, never the root database.
 - Outbox args are stored as plain JSON.
+
+## Optional
+- Definitions: `src/init.ts` (`initQueue`), `src/middleware.ts` (the middleware chain), `src/types/job.ts` (`JobDefinition`, `JobContext`, `JobLike`, `QUEUE_PRIORITIES`).
+- Outbox: `src/outbox/outbox.ts` (`outbox`, `runAfter`, `runAt`, `cancel`), `src/outbox/runner.ts` (`outboxRunner`), `src/outbox/errors.ts` (the seven codes), `src/outbox/registry.ts` (`QueueRegistry`).
+- Edges: `src/dot.ts` (Dot adapters), `src/runtime-local/` (pg-boss), `src/foreman/` (admin module), `src/projection.ts`.
